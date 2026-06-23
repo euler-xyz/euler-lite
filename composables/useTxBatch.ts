@@ -818,6 +818,7 @@ const hydrateBorrowLiquidity = (
   for (const collateral of enabledCollateralKeys ?? []) addCollateralAddress(collateral, false)
 
   let totalCollateralValueUsd: number | undefined = collateralAddresses.length ? 0 : liquidity.totalCollateralValueUsd
+  let hasMissingCollateralUsd = false
   const totalCollateralValue = collateralAddresses.length
     ? { borrowing: 0n, liquidation: 0n, oracleMid: 0n }
     : cloneLiquidityValue(liquidity.totalCollateralValue)
@@ -847,7 +848,7 @@ const hydrateBorrowLiquidity = (
       totalCollateralValue.oracleMid = (totalCollateralValue.oracleMid ?? 0n) + (value.oracleMid ?? 0n)
     }
     if (valueUsd === undefined) {
-      totalCollateralValueUsd = undefined
+      hasMissingCollateralUsd = true
       continue
     }
     totalCollateralValueUsd = (totalCollateralValueUsd ?? 0) + valueUsd
@@ -855,7 +856,7 @@ const hydrateBorrowLiquidity = (
 
   liquidity.collaterals = nextCollaterals
   if (totalCollateralValue) liquidity.totalCollateralValue = totalCollateralValue
-  liquidity.totalCollateralValueUsd = totalCollateralValueUsd
+  liquidity.totalCollateralValueUsd = hasMissingCollateralUsd ? undefined : totalCollateralValueUsd
 }
 
 const hydrateStitchedPositions = (

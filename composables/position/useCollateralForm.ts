@@ -959,6 +959,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapSelectedProvider,
     swapSelectedQuote,
     swapEffectiveQuote,
+    swapEffectiveQuoteFetchedAt,
     swapProvidersCount,
     isSwapQuoteLoading,
     swapQuoteError,

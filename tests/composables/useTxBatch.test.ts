@@ -289,6 +289,69 @@ describe('stitchAccount', () => {
     expect(portfolio.netAssetValueUsd).toBe(30)
   })
 
+  it('keeps borrow collateral USD total unknown when any included collateral has no USD value', () => {
+    const knownCollateralVault = pricedVault(vault, 'USDC')
+    const borrowVaultEntity = pricedVault(borrowVault, 'DEBT', 1, [
+      { address: targetVault },
+      { address: vault, marketPriceUsd: 1, vault: knownCollateralVault },
+    ])
+    const unknownCollateral = pricedPosition({
+      vaultAddress: targetVault,
+      shares: 10_000_000n,
+      assets: 10_000_000n,
+      borrowed: 0n,
+      isCollateral: true,
+    })
+    const borrow = pricedPosition({
+      vaultAddress: borrowVault,
+      vault: borrowVaultEntity,
+      shares: 0n,
+      assets: 0n,
+      borrowed: 50_000_000n,
+      isController: true,
+      marketPriceUsd: 1,
+      borrowedValueUsd: 50,
+      liquidity: {
+        vaultAddress: borrowVault,
+        vault: borrowVaultEntity,
+        unitOfAccount: borrowVault,
+        daysToLiquidation: 'Infinity',
+        liabilityValue: { borrowing: 50n * WAD, liquidation: 50n * WAD, oracleMid: 50n * WAD },
+        totalCollateralValue: { borrowing: 90n * WAD, liquidation: 90n * WAD, oracleMid: 90n * WAD },
+        collaterals: [
+          {
+            address: targetVault,
+            value: { borrowing: 10n * WAD, liquidation: 10n * WAD, oracleMid: 10n * WAD },
+          },
+          {
+            address: vault,
+            vault: knownCollateralVault,
+            value: { borrowing: 80n * WAD, liquidation: 80n * WAD, oracleMid: 80n * WAD },
+            marketPriceUsd: 1,
+            valueUsd: 100,
+          },
+        ],
+        liabilityValueUsd: 50,
+        totalCollateralValueUsd: 100,
+      },
+    })
+    const base = accountWithPositions([
+      unknownCollateral,
+      collateralPosition(100_000_000n),
+      borrow,
+    ], [targetVault, vault], [borrowVault])
+    const touched = accountWithPositions([
+      collateralPosition(80_000_000n),
+    ], [targetVault, vault], [borrowVault])
+
+    const stitched = stitchAccount(base, touched)
+    const stitchedBorrow = stitched.getPosition(subAccount, borrowVault)
+
+    expect(stitchedBorrow?.liquidity?.collaterals[0]?.valueUsd).toBeUndefined()
+    expect(stitchedBorrow?.liquidity?.collaterals[1]?.valueUsd).toBe(80)
+    expect(stitchedBorrow?.liquidity?.totalCollateralValueUsd).toBeUndefined()
+  })
+
   it('hydrates newly enabled collateral into existing borrow liquidity', () => {
     const { sourceVault, destinationVault, borrow } = riskAwareBorrowPosition()
     const base = accountWithPositions([

@@ -49,6 +49,7 @@ export const useDeployConfig = () => {
     enableMerkl: isEnabled(rc.configEnableMerkl),
     enableIncentra: isEnabled(rc.configEnableIncentra),
     enableFuul: isEnabled(rc.configEnableFuul),
+    enableTurtle: isEnabled(rc.configEnableTurtle),
     enableBatchAnnouncement: isExplicitlyEnabled(rc.configEnableBatchAnnouncement),
 
     // Batch announcement (opt-in: enable flag shows the modal once per browser)

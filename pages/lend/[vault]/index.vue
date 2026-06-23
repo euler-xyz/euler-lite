@@ -79,7 +79,7 @@ const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions
 const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 const lendPluginPrefetch: PluginPrefetchData = { pyth: { entries: [] } }
 const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPluginPrefetch
-const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce } = useVaults()
+const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, address } = useWagmi()
@@ -182,6 +182,14 @@ const needsRefresh = (v: EVault | undefined): boolean => {
   return hasPythOracles(v) || hasPriceFailure(v)
 }
 
+const waitForMarketData = async () => {
+  if (isMarketDataResolved.value) return
+  await Promise.race([
+    until(isMarketDataResolved).toBe(true),
+    new Promise<void>(resolve => setTimeout(resolve, 10_000)),
+  ])
+}
+
 // Non-blocking IIFE to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
   const isSecuritize = await isSecuritizeVault(vaultAddress)
@@ -193,11 +201,16 @@ const needsRefresh = (v: EVault | undefined): boolean => {
     if (!isLabelsReady.value) {
       await until(isLabelsReady).toBe(true)
     }
+    await waitForMarketData()
     securitizeVault.value = await getSecuritizeVault(vaultAddress)
   }
   else {
     try {
       const normalizedAddress = getAddress(vaultAddress)
+
+      // This page reads rewards and intrinsic APY from the SDK instance during
+      // setup, so wait for snapshot enrichment before capturing the object.
+      await waitForMarketData()
 
       // Fast path: vault already in registry
       const registryEntry = registryGet(normalizedAddress)
@@ -536,7 +549,7 @@ const addToBatch = async () => {
         label: `Deposit ${asset.value.symbol}`,
         buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
         subAccount: effectiveAddress.value as Address | undefined,
-        review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN },
+        review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {

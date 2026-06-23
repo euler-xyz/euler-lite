@@ -16,6 +16,7 @@ import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-d
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { getBorrowPairSearchAddresses } from '~/utils/borrow-pair'
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -125,6 +126,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaul
     pair.borrow.asset.symbol,
     pair.borrow.asset.name,
     pair.borrow.shares.name,
+    ...getBorrowPairSearchAddresses(pair),
     product.name,
     product.description,
     ...getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).map(e => e.name),
