@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { Account, type IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
+import { Account, type IHasVaultAddress, type Portfolio, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import {
+  buildRefinanceReplacementBorrowPositionKeys,
   buildScopedEntrySubAccounts,
   buildModifiedPositionKeySets,
   buildRemovedPositionKeySets,
   filterModifiedPositionKeySetsByOwner,
   filterPositionKeysByOwner,
+  getRemovedBorrowPositions,
 } from '~/composables/useTxBatch'
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
@@ -14,6 +16,8 @@ const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
 const otherSubAccount = getAddress('0x7B54C278D117854486db0F6460D901a180Fff516')
 const collateralVault = getAddress('0x797Dd80692C3B2daDAbcE8e30C07fDE5307d48A9')
 const borrowVault = getAddress('0x859160Db5841E5cfB8D3f144C6b3381A85A4b410')
+const targetCollateralVault = getAddress('0x2000000000000000000000000000000000000000')
+const targetBorrowVault = getAddress('0x3000000000000000000000000000000000000000')
 
 const key = (vault: Address, account: Address = subAccount) => `${account.toLowerCase()}:${vault.toLowerCase()}`
 
@@ -48,6 +52,22 @@ const accountWithPositions = (
   },
   populated: { vaults: true, marketPrices: true },
 })
+
+const borrowPortfolioPosition = (
+  account: Address = subAccount,
+  borrow: Address = borrowVault,
+  collaterals: Address[] = [collateralVault],
+): PortfolioBorrowPosition<VaultEntity> => ({
+  subAccount: account,
+  borrow: { vaultAddress: borrow },
+  collateralVaults: collaterals,
+}) as unknown as PortfolioBorrowPosition<VaultEntity>
+
+const borrowPortfolio = (
+  borrows: PortfolioBorrowPosition<VaultEntity>[],
+): Portfolio<VaultEntity> => ({
+  borrows,
+}) as unknown as Portfolio<VaultEntity>
 
 describe('buildModifiedPositionKeySets', () => {
   it('keeps collateral balance changes out of debt keys', () => {
@@ -156,6 +176,55 @@ describe('buildRemovedPositionKeySets', () => {
 
     expect(removed.has(key(collateralVault))).toBe(false)
     expect(removed.has(key(borrowVault))).toBe(false)
+  })
+})
+
+describe('getRemovedBorrowPositions', () => {
+  it('suppresses the old pair when a full refinance replaces it on the same sub-account', () => {
+    const basePosition = borrowPortfolioPosition()
+    const base = borrowPortfolio([basePosition])
+    const current = borrowPortfolio([
+      borrowPortfolioPosition(subAccount, targetBorrowVault, [targetCollateralVault]),
+    ])
+    const removedKeys = new Set([
+      key(borrowVault),
+      key(collateralVault),
+    ])
+    const refinanceReplacementBorrowPositionKeys = buildRefinanceReplacementBorrowPositionKeys([{
+      subAccount,
+      review: {
+        type: 'refinance',
+        collateralChanged: true,
+        debtChanged: true,
+        sourceDebtVault: borrowVault,
+        sourceCollateralVaults: [collateralVault],
+      },
+    }])
+
+    expect(getRemovedBorrowPositions(base, current, removedKeys)).toEqual([basePosition])
+    expect(getRemovedBorrowPositions(base, current, removedKeys, refinanceReplacementBorrowPositionKeys)).toEqual([])
+  })
+
+  it('keeps true removed borrow positions when the refinance replacement is for another pair', () => {
+    const basePosition = borrowPortfolioPosition()
+    const base = borrowPortfolio([basePosition])
+    const current = borrowPortfolio([])
+    const removedKeys = new Set([
+      key(borrowVault),
+      key(collateralVault),
+    ])
+    const refinanceReplacementBorrowPositionKeys = buildRefinanceReplacementBorrowPositionKeys([{
+      subAccount,
+      review: {
+        type: 'refinance',
+        collateralChanged: true,
+        debtChanged: true,
+        sourceDebtVault: targetBorrowVault,
+        sourceCollateralVaults: [targetCollateralVault],
+      },
+    }])
+
+    expect(getRemovedBorrowPositions(base, current, removedKeys, refinanceReplacementBorrowPositionKeys)).toEqual([basePosition])
   })
 })
 

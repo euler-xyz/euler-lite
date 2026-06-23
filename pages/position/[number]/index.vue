@@ -54,6 +54,8 @@ const isPreparing = ref(false)
 const collateralItems = ref<PositionCollateral[]>([])
 const isCollateralsLoading = ref(false)
 const disableCollateralErrorVault = ref<string | null>(null)
+const { activeLayerData, entries: batchEntries, modifiedBalanceKeys, modifiedDebtKeys } = useTxBatch()
+let loadSequence = 0
 
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
@@ -82,6 +84,35 @@ const pairAssets = computed(() => {
   if (!collateralVault.value || !borrowVault.value) return []
   return [collateralVault.value.asset, borrowVault.value.asset]
 })
+const batchPositionKey = (vaultAddress: string) => {
+  if (!position.value) return ''
+  return `${position.value.subAccount.toLowerCase()}:${getAddress(vaultAddress).toLowerCase()}`
+}
+const isSamePositionBatchEntry = (entrySubAccount?: string) => {
+  if (!position.value || !entrySubAccount) return false
+  try {
+    return getAddress(entrySubAccount).toLowerCase() === getAddress(position.value.subAccount).toLowerCase()
+  }
+  catch {
+    return false
+  }
+}
+const isDebtChangingBatchEntry = (entry: { subAccount?: string, multiply?: boolean, review?: Record<string, unknown> }) => {
+  if (!isSamePositionBatchEntry(entry.subAccount)) return false
+  if (entry.multiply === true) return true
+  const type = entry.review?.type
+  if (type === 'borrow' || type === 'repay') return true
+  if (type === 'refinance') return entry.review?.debtChanged === true
+  return false
+}
+const hasDebtChangingBatchEntry = computed(() => batchEntries.value.some(isDebtChangingBatchEntry))
+const isBorrowSimulatedModified = computed(() =>
+  borrowVault.value
+    ? hasDebtChangingBatchEntry.value && modifiedDebtKeys.value.has(batchPositionKey(borrowVault.value.address))
+    : false,
+)
+const isCollateralSimulatedModified = (vault: EVault | SecuritizeCollateralVault) =>
+  modifiedBalanceKeys.value.has(batchPositionKey(vault.address))
 const hasNoBorrow = computed(() => (position.value?.borrowed ?? 0n) === 0n)
 const hasQueryFailure = computed(() => !borrowVault.value || !collateralVault.value)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
@@ -555,7 +586,7 @@ const isDisableCollateralError = (vault: EVault | SecuritizeCollateralVault) => 
   }
 }
 
-const loadCollaterals = async () => {
+const loadCollaterals = async (sequence: number) => {
   if (!position.value) {
     collateralItems.value = []
     return
@@ -576,6 +607,8 @@ const loadCollaterals = async () => {
   const primaryAddress = primaryCollateralAddress.value
   const unique = Array.from(new Set(normalized))
   const orderedAddresses = [primaryAddress, ...unique.filter(address => address !== primaryAddress)]
+  const subAccount = position.value.subAccount as Address
+  const primarySupplied = position.value.supplied
 
   isCollateralsLoading.value = true
 
@@ -604,14 +637,14 @@ const loadCollaterals = async () => {
               address: lensAddress as Address,
               abi: eulerAccountLensABI as Abi,
               functionName: 'getAccountInfo',
-              args: [position.value!.subAccount, address],
+              args: [subAccount, address],
               authorizationList: undefined,
             }) as Record<string, Record<string, unknown>>
             assets = res.vaultAccountInfo.assets as bigint
           }
           catch {
             if (address === primaryAddress) {
-              assets = position.value!.supplied
+              assets = primarySupplied
             }
           }
 
@@ -624,13 +657,17 @@ const loadCollaterals = async () => {
       }),
     )
 
+    if (sequence !== loadSequence) return
     collateralItems.value = items.filter((item): item is PositionCollateral => !!item?.vault)
   }
   catch (e) {
+    if (sequence !== loadSequence) return
     console.warn('[Position] failed to load collaterals', e)
   }
   finally {
-    isCollateralsLoading.value = false
+    if (sequence === loadSequence) {
+      isCollateralsLoading.value = false
+    }
   }
 }
 
@@ -713,6 +750,7 @@ const send = async (collateralAddress: string) => {
   }
 }
 const load = async () => {
+  const sequence = ++loadSequence
   // Redirect to portfolio if not connected and not in spy mode
   if (!isConnected.value && !isSpyMode.value) {
     router.replace('/portfolio')
@@ -721,6 +759,7 @@ const load = async () => {
 
   try {
     await until(isPositionsLoaded).toBe(true)
+    if (sequence !== loadSequence) return
     position.value = getPositionBySubAccountIndex(+positionIndex)
     if (position.value) {
       collateralItems.value = [{
@@ -729,7 +768,7 @@ const load = async () => {
       }]
       // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
       if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
-        await loadCollaterals()
+        await loadCollaterals(sequence)
       }
     }
     else {
@@ -737,6 +776,7 @@ const load = async () => {
     }
   }
   catch (e) {
+    if (sequence !== loadSequence) return
     showError('Unable to load Position')
     console.warn(e)
   }
@@ -788,7 +828,7 @@ const openRampDownModal = () => {
     props: rampCollateralEdge.value,
   })
 }
-watch([isConnected, isSpyMode, address], () => {
+watch([isConnected, isSpyMode, address, activeLayerData], () => {
   load()
 }, { immediate: true })
 </script>
@@ -1029,7 +1069,10 @@ watch([isConnected, isSpyMode, address], () => {
         <div class="mb-12 text-h4 text-neutral-800">
           Borrow
         </div>
-        <div class="rounded-12 bg-card border border-line-default shadow-card">
+        <div
+          class="rounded-12 bg-card border border-line-default shadow-card"
+          :class="{ '!border !border-dashed !border-accent-600': isBorrowSimulatedModified }"
+        >
           <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">
             <VaultLabelsAndAssets
               :vault="borrowVault"
@@ -1249,6 +1292,7 @@ watch([isConnected, isSpyMode, address], () => {
             v-for="collateral in collateralRows"
             :key="collateral.vault.address"
             class="rounded-12 bg-card border border-line-default shadow-card cursor-pointer"
+            :class="{ '!border !border-dashed !border-accent-600': isCollateralSimulatedModified(asPositionCollateralVault(collateral.vault)) }"
             @click="openCollateralInfoModal(asPositionCollateralVault(collateral.vault))"
           >
             <div class="flex justify-between items-center p-16 pb-12 border-b border-line-default">

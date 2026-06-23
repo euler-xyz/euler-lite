@@ -72,6 +72,8 @@ const {
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
 const { runPreparedSimulation, runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -389,21 +391,20 @@ const buildRefinanceStateOverrideOptions = () => buildStateOverrideOptions({ noB
 const currentPlanAccount = () => planAccount.value
 const planContextAccount = (context?: SwapQuotePlanContext) => context?.account ?? planAccount.value
 
-const buildRefinancePlan = async (
-  options: {
-    collateralQuote?: SwapQuote | null
-    debtQuote?: SwapQuote | null
-    includeIncomplete?: boolean
-    context?: SwapQuotePlanContext
-  } = {},
-): Promise<TransactionPlan> => {
+type RefinancePlanOptions = {
+  collateralQuote?: SwapQuote | null
+  debtQuote?: SwapQuote | null
+  includeIncomplete?: boolean
+}
+
+const buildRefinanceInput = (
+  options: RefinancePlanOptions = {},
+): Omit<PlanRefinancePositionInput, 'account'> => {
   if (!position.value || !sourceDebtVault.value || !sourceCollateralVault.value) {
     throw new Error('Position is not loaded')
   }
 
-  const input: PlanRefinancePositionInput = {
-    account: planContextAccount(options.context),
-  }
+  const input: Omit<PlanRefinancePositionInput, 'account'> = {}
 
   if (hasCollateralChange.value) {
     if (!sourceCollateralEVault.value || !targetCollateralVault.value) {
@@ -454,6 +455,22 @@ const buildRefinancePlan = async (
 
   if (!input.collateral && !input.debt) {
     throw new Error('No refinance changes selected')
+  }
+
+  return input
+}
+
+const buildRefinancePlan = async (
+  options: {
+    collateralQuote?: SwapQuote | null
+    debtQuote?: SwapQuote | null
+    includeIncomplete?: boolean
+    context?: SwapQuotePlanContext
+  } = {},
+): Promise<TransactionPlan> => {
+  const input: PlanRefinancePositionInput = {
+    ...buildRefinanceInput(options),
+    account: planContextAccount(options.context),
   }
 
   return planRefinancePosition(input)
@@ -938,7 +955,7 @@ const borrowCapacityError = computed(() => {
   }
   return null
 })
-const refinanceGuardError = computed(() => collateralCowDebtSwapError.value || pairCompatibilityError.value || healthError.value)
+const refinanceGuardError = computed(() => collateralCowDebtSwapError.value || pairCompatibilityError.value)
 
 watch(refinanceGuardError, (error) => {
   if (error) {
@@ -1054,6 +1071,29 @@ const validationError = computed(() => {
   if (healthError.value) return healthError.value
   return null
 })
+// Batch execution validates the final merged account state, so adding a
+// refinance entry does not require intermediate health/LTV/liquidity/cap checks
+// to pass. Later batch entries can change the final account or market state.
+const batchValidationError = computed(() => {
+  if (!hasAnyChange.value) return 'Choose a new collateral vault, debt vault, or both'
+  if (collateralMigrationDisabledReason.value && targetCollateralVault.value) return collateralMigrationDisabledReason.value
+  if (hookWarning.value) return hookWarning.value.message
+  if (collateralCowDebtSwapError.value) return collateralCowDebtSwapError.value
+  if (pairCompatibilityError.value) return pairCompatibilityError.value
+  return null
+})
+const isCowSwapSelectedForBatch = computed(() =>
+  isCowProviderOrQuote(collateralSelectedProvider.value, selectedCollateralQuote.value)
+  || isCowProviderOrQuote(debtSelectedProvider.value, selectedDebtQuote.value),
+)
+const canAddToBatch = computed(() => {
+  if (isGeoBlocked.value || isLoading.value || isSubmitting.value || isPreparing.value) return false
+  if (!position.value || !sourceDebtVault.value || !sourceCollateralVault.value) return false
+  if (batchValidationError.value) return false
+  if (!hasAllRequiredQuotes.value) return false
+  if (isCowSwapSelectedForBatch.value) return false
+  return true
+})
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value) return false
   if (isLoading.value || isSubmitting.value) return true
@@ -1082,11 +1122,17 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 
 const debtDisplayAmount = computed({
-  get: () => formatVaultAmount(nextDebtAmountNano.value ?? currentDebt.value, effectiveDebtVault.value),
+  get: () => formatVaultAmount(
+    debtNeedsSwap.value && !debtQuote.value ? 0n : nextDebtAmountNano.value ?? currentDebt.value,
+    effectiveDebtVault.value,
+  ),
   set: () => {},
 })
 const collateralDisplayAmount = computed({
-  get: () => formatVaultAmount(nextCollateralAmountNano.value ?? currentCollateralAssets.value, effectiveCollateralVault.value),
+  get: () => formatVaultAmount(
+    collateralNeedsSwap.value && !collateralQuote.value ? 0n : nextCollateralAmountNano.value ?? currentCollateralAssets.value,
+    effectiveCollateralVault.value,
+  ),
   set: () => {},
 })
 
@@ -1100,6 +1146,14 @@ const debtSwapSummary = computed(() =>
     ? buildQuoteSummary(debtQuote.value, targetDebtVault.value, sourceDebtVault.value, 'amountIn', 'amountOut')
     : null,
 )
+const refinanceSwapReviewInfo = computed(() => {
+  if (!collateralNeedsSwap.value || debtNeedsSwap.value || !collateralQuote.value || !targetCollateralVault.value) return {}
+  return {
+    swapToAsset: targetCollateralVault.value.asset,
+    swapToAmount: trimTrailingZeros(formatUnits(BigInt(collateralQuote.value.amountOut || 0), Number(targetCollateralVault.value.asset.decimals))),
+    swapMode: SwapperMode.EXACT_IN,
+  }
+})
 const collateralRoutedVia = computed(() => getRoutedVia(collateralSelectedProvider.value, collateralQuote.value))
 const debtRoutedVia = computed(() => getRoutedVia(debtSelectedProvider.value, debtQuote.value))
 const effectiveQuoteFetchedAt = computed(() => {
@@ -1271,7 +1325,9 @@ const submitCowSwapCollateralSwap = async () => {
   const toAsset = toVault.asset
   const fromShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(fromAsset.decimals)))
   const fromAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(fromVault, sellAmount), Number(fromAsset.decimals)))
-  const toAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(toVault, buyAmount), Number(toAsset.decimals)))
+  const quotedBuyAmount = parseCowProviderAmount(selectedCollateralQuote.value.providerData?.buyAmount) ?? buyAmount
+  const toAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(toVault, quotedBuyAmount), Number(toAsset.decimals)))
+  const toAssetMinAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(toVault, buyAmount), Number(toAsset.decimals)))
 
   const signSteps: DisplayStep[] = []
   let signIdx = 1
@@ -1320,7 +1376,7 @@ const submitCowSwapCollateralSwap = async () => {
       index: wrapperIdx++,
       label: 'Verify min received',
       isSeparateTx: false,
-      assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAssetAmount },
+      assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAssetMinAmount },
     },
   ]
 
@@ -1352,6 +1408,48 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
     }, 400)
   }
 })
+
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithPriceImpact(async () => {
+    if (!canAddToBatch.value || !sourceDebtVault.value || !sourceCollateralVault.value) return
+
+    const refinanceInput = buildRefinanceInput({
+      collateralQuote: selectedCollateralQuote.value,
+      debtQuote: selectedDebtQuote.value,
+    })
+    const refinanceAccount = subAccount.value as Address
+    const sourceCollateralSymbol = sourceCollateralVault.value.asset.symbol
+    const sourceDebtSymbol = sourceDebtVault.value.asset.symbol
+    const targetCollateralSymbol = effectiveCollateralVault.value.asset.symbol
+    const targetDebtSymbol = effectiveDebtVault.value.asset.symbol
+    const sourceDebtAsset = sourceDebtVault.value.asset
+    const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
+    const quoteFetchedAt = effectiveQuoteFetchedAt.value
+    const swapReviewInfo = refinanceSwapReviewInfo.value
+    const collateralChanged = hasCollateralChange.value
+    const debtChanged = hasDebtChange.value
+
+    await addBatchEntry({
+      label: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetCollateralSymbol}/${targetDebtSymbol}`,
+      nameOverride: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
+      buildPlan: account => planRefinancePosition({ ...refinanceInput, account }),
+      subAccount: refinanceAccount,
+      review: {
+        type: 'refinance',
+        asset: sourceDebtAsset,
+        amount: debtAmount,
+        quoteFetchedAt,
+        collateralChanged,
+        debtChanged,
+        sourceDebtVault: sourceDebtVault.value.address,
+        sourceCollateralVaults: currentCollateralLegs.value.map(leg => leg.vault.address),
+        ...swapReviewInfo,
+      },
+    })
+    redirectAfterAdd('/portfolio', { subAccount: refinanceAccount })
+  })
+}
 
 const submit = async () => {
   if (isOperationBlocked.value) return
@@ -1391,6 +1489,7 @@ const submit = async () => {
           plan: preparedPlan.value ? undefined : plan.value,
           prepared: preparedPlan.value || undefined,
           quoteFetchedAt: effectiveQuoteFetchedAt.value,
+          ...refinanceSwapReviewInfo.value,
           onConfirm: async () => {
             await send()
           },
@@ -1477,6 +1576,13 @@ function convertVaultSharesToAssets(vault: EVault, sharesAmount: bigint): bigint
   if (sharesAmount <= 0n) return 0n
   if (vault.totalShares <= 0n) return sharesAmount
   return (sharesAmount * vault.totalAssets) / vault.totalShares
+}
+
+function parseCowProviderAmount(value: unknown): bigint | undefined {
+  if (typeof value === 'bigint') return value >= 0n ? value : undefined
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : undefined
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return undefined
+  return BigInt(value)
 }
 
 function buildQuoteSummary(
@@ -1660,6 +1766,8 @@ function getOperationVaultAddresses(): string[] {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewRefinanceLabel }}
               </VaultFormSubmit>

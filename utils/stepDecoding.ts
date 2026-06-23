@@ -526,9 +526,11 @@ export function buildTransactionPlanDisplaySteps(
           inferredSwapInput = undefined
         }
         else if ((label === 'Verify min received' || label === 'Verify max debt') && pendingSwapStep && assetInfo) {
-          pendingSwapStep.toAssetInfo = label === 'Verify max debt'
-            ? { symbol: assetInfo.symbol, address: assetInfo.address }
-            : { ...assetInfo }
+          if (!pendingSwapStep.toAssetInfo?.amount) {
+            pendingSwapStep.toAssetInfo = label === 'Verify max debt'
+              ? { symbol: assetInfo.symbol, address: assetInfo.address }
+              : { ...assetInfo }
+          }
           if (label === 'Verify max debt' && pendingSwapStep.label === 'Swap') {
             pendingSwapStep.label = 'Swap to repay'
           }

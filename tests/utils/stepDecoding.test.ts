@@ -168,6 +168,46 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
     })
   })
 
+  it('keeps quoted swap output separate from the verifier minimum', () => {
+    const steps = buildTransactionPlanDisplaySteps(
+      [{
+        type: 'evcBatch',
+        items: [
+          batchItem(encodeFunctionData({
+            abi: swapperAbi,
+            functionName: 'multicall',
+            args: [[]],
+          }), swapper),
+          batchItem(encodeFunctionData({
+            abi: swapVerifierAbi,
+            functionName: 'verifyAmountMinAndSkim',
+            args: [daiVault, account, 98_765_432n, 123n],
+          })),
+        ],
+      }] satisfies TransactionPlan,
+      ctx,
+      getVault,
+      getLogoUrl,
+    )
+
+    expect(steps[0]).toMatchObject({
+      label: 'Swap',
+      toAssetInfo: {
+        symbol: 'DAI',
+        address: daiAsset,
+        amount: '99',
+      },
+    })
+    expect(steps[1]).toMatchObject({
+      label: 'Verify min received',
+      assetInfo: {
+        symbol: 'DAI',
+        address: daiAsset,
+        amount: '98.765432',
+      },
+    })
+  })
+
   it('infers separate swap assets in a combined collateral and debt refinance batch', () => {
     const steps = buildTransactionPlanDisplaySteps(
       [{

@@ -16,7 +16,7 @@ import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { buildPlanMarketLabel } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
-import { formatSimulationFailure } from '~/utils/tx-errors'
+import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 
@@ -236,6 +236,61 @@ export const buildScopedEntrySubAccounts = (
   return set
 }
 
+const buildBorrowPortfolioPositionKey = (
+  subAccount: string,
+  borrow: string,
+  collaterals: string[],
+): string => {
+  const normalizedSubAccount = getAddress(subAccount).toLowerCase()
+  const normalizedBorrow = getAddress(borrow).toLowerCase()
+  const normalizedCollaterals = collaterals
+    .map(address => getAddress(address).toLowerCase())
+    .sort()
+    .join('|')
+  return `${normalizedSubAccount}:${normalizedBorrow}:${normalizedCollaterals}`
+}
+
+const getReviewAddress = (review: Record<string, unknown>, key: string): string | undefined => {
+  const value = review[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+const getReviewAddressArray = (review: Record<string, unknown>, key: string): string[] => {
+  const value = review[key]
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+    ? value
+    : []
+}
+
+export const buildRefinanceReplacementBorrowPositionKeys = (
+  batchEntries: Pick<BatchEntry, 'subAccount' | 'review'>[],
+): Set<string> => {
+  const keys = new Set<string>()
+
+  for (const entry of batchEntries) {
+    const review = entry.review
+    if (
+      review?.type !== 'refinance'
+      || review.collateralChanged !== true
+      || review.debtChanged !== true
+      || !entry.subAccount
+    ) continue
+
+    const sourceDebtVault = getReviewAddress(review, 'sourceDebtVault')
+    const sourceCollateralVaults = getReviewAddressArray(review, 'sourceCollateralVaults')
+    if (!sourceDebtVault || !sourceCollateralVaults.length) continue
+
+    try {
+      keys.add(buildBorrowPortfolioPositionKey(entry.subAccount, sourceDebtVault, sourceCollateralVaults))
+    }
+    catch {
+      // Optional UI metadata only; malformed addresses should not break overlay.
+    }
+  }
+
+  return keys
+}
+
 const registerReviewAssetMeta = (review?: Record<string, unknown>) => {
   const asset = review?.asset as { address?: string, symbol?: string, decimals?: number } | undefined
   if (!asset?.address) return
@@ -341,9 +396,22 @@ const syncOverlay = () => {
   if (layer) {
     const base = layers.value[0]
     const removedKeys = buildRemovedPositionKeySets(layer.account, base?.account)
+    const refinanceReplacementBorrowPositionKeys = buildRefinanceReplacementBorrowPositionKeys(
+      entries.value.slice(0, activeLayer.value),
+    )
     activeLayerRemovedKeysRef.value = removedKeys
-    activeLayerRemovedBorrowPositionsRef.value = getRemovedBorrowPositions(base?.portfolio, layer.portfolio, removedKeys)
-    activeLayerRemovedBorrowPositionsAllRef.value = getRemovedBorrowPositions(base?.portfolioAll, layer.portfolioAll, removedKeys)
+    activeLayerRemovedBorrowPositionsRef.value = getRemovedBorrowPositions(
+      base?.portfolio,
+      layer.portfolio,
+      removedKeys,
+      refinanceReplacementBorrowPositionKeys,
+    )
+    activeLayerRemovedBorrowPositionsAllRef.value = getRemovedBorrowPositions(
+      base?.portfolioAll,
+      layer.portfolioAll,
+      removedKeys,
+      refinanceReplacementBorrowPositionKeys,
+    )
     activeLayerRemovedDepositPositionsRef.value = getRemovedDepositPositions(base?.portfolio, layer.portfolio, removedKeys)
     activeLayerRemovedDepositPositionsAllRef.value = getRemovedDepositPositions(base?.portfolioAll, layer.portfolioAll, removedKeys)
   }
@@ -377,11 +445,16 @@ const describeFailure = (sim: Parameters<typeof formatSimulationFailure>[0]): st
   }
 }
 
-// Concise message from an execution / gas-estimate error. Viem errors expose a
-// `shortMessage` (e.g. the decoded revert reason); fall back to the raw message.
-const describeExecError = (error: unknown): string => {
-  const e = error as { shortMessage?: string, details?: string, message?: string }
-  return e?.shortMessage || e?.details || e?.message || String(error)
+// Concise message from an execution / gas-estimate error. Gas estimation throws
+// raw viem errors, so run them through the same decoder used by direct tx flows.
+const describeExecError = async (error: unknown): Promise<string> => {
+  try {
+    return await getTxErrorMessage(error)
+  }
+  catch {
+    const e = error as { shortMessage?: string, details?: string, message?: string }
+    return e?.shortMessage || e?.details || e?.message || String(error)
+  }
 }
 
 export const fetchBaseAccountSnapshot = async (
@@ -1025,13 +1098,11 @@ const getBorrowPositionCollateralAddresses = (
 }
 
 const getBorrowPortfolioPositionKey = (position: PortfolioBorrowPosition<VaultEntity>): string => {
-  const subAccount = getAddress(position.subAccount).toLowerCase()
-  const borrow = getBorrowPositionVaultAddress(position).toLowerCase()
-  const collaterals = getBorrowPositionCollateralAddresses(position)
-    .map(address => address.toLowerCase())
-    .sort()
-    .join('|')
-  return `${subAccount}:${borrow}:${collaterals}`
+  return buildBorrowPortfolioPositionKey(
+    position.subAccount,
+    getBorrowPositionVaultAddress(position),
+    getBorrowPositionCollateralAddresses(position),
+  )
 }
 
 const getDepositPortfolioPositionKey = (position: PortfolioSavingsPosition<VaultEntity>): string =>
@@ -1051,15 +1122,17 @@ const isRemovedBorrowPosition = (
     && collateralKeys.every(key => removedKeys.has(key))
 }
 
-const getRemovedBorrowPositions = (
+export const getRemovedBorrowPositions = (
   base: Portfolio<VaultEntity> | undefined,
   current: Portfolio<VaultEntity> | undefined,
   removedKeys: Set<string>,
+  refinanceReplacementBorrowPositionKeys: Set<string> = new Set(),
 ): PortfolioBorrowPosition<VaultEntity>[] => {
   if (!base || !current) return []
   const currentKeys = new Set(current.borrows.map(getBorrowPortfolioPositionKey))
   return base.borrows.filter(position =>
     !currentKeys.has(getBorrowPortfolioPositionKey(position))
+    && !refinanceReplacementBorrowPositionKeys.has(getBorrowPortfolioPositionKey(position))
     && isRemovedBorrowPosition(position, removedKeys),
   )
 }
@@ -1633,7 +1706,7 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      execError.value = describeExecError(error)
+      execError.value = await describeExecError(error)
     }
     finally {
       isExecuting.value = false
