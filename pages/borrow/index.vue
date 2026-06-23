@@ -222,8 +222,12 @@ const fetchBorrowPrices = useDebounceFn(async () => {
       pairs.map(async (pair) => {
         const key = getPairKey(pair)
         const [liquidity, borrowed] = await Promise.all([
-          getAssetUsdValueOrZero(getVaultAvailableLiquidity(pair.borrow), pair.borrow, 'on-chain'),
-          getAssetUsdValueOrZero(pair.borrow.totalBorrowed, pair.borrow, 'on-chain'),
+          Promise.resolve()
+            .then(() => getAssetUsdValueOrZero(getVaultAvailableLiquidity(pair.borrow), pair.borrow, 'on-chain'))
+            .catch(() => 0),
+          Promise.resolve()
+            .then(() => getAssetUsdValueOrZero(pair.borrow.totalBorrowed, pair.borrow, 'on-chain'))
+            .catch(() => 0),
         ])
         liquidityValues.set(key, liquidity)
         borrowedValues.set(key, borrowed)
