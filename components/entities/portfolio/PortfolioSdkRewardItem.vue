@@ -197,11 +197,13 @@ const onClaimClick = async () => {
 
 <template>
   <div
-    class="bg-surface rounded-xl border border-line-subtle shadow-card p-16"
+    class="relative overflow-hidden bg-surface rounded-xl border border-line-subtle shadow-card p-16 transition-all duration-default ease-default"
+    :class="{ '!border !border-dashed !border-accent-600': isInBatch }"
     data-id="portfolio-list-item"
     data-list="sdk-rewards"
     :data-key="rewardKey"
     :data-token-address="reward.token.address.toLowerCase()"
+    :data-batch-queued="isInBatch ? 'true' : undefined"
   >
     <div class="flex flex-col gap-12">
       <div class="flex justify-between items-center mb-12">
