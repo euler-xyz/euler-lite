@@ -37,6 +37,13 @@ export const getPairBorrowLTV = (pair: BorrowPairLike): number | undefined =>
 export const getPairCurrentLiquidationLTV = (pair: BorrowPairLike): number | undefined =>
   isBorrowVaultPair(pair) ? pair.ltv.currentLiquidationLTV : getBorrowPositionEffectiveLiquidationLTV(pair)
 
+export const getBorrowPairSearchAddresses = (pair: AnyBorrowVaultPair): string[] => [
+  pair.collateral.address,
+  pair.collateral.asset.address,
+  pair.borrow.address,
+  pair.borrow.asset.address,
+]
+
 /**
  * Resolve the ramp-bearing collateral edge for a pair.
  *

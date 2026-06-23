@@ -30,11 +30,13 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   group.name,
   group.curator?.name,
   ...group.metrics.assetSymbols,
-  ...group.vaults.flatMap((vault) => {
+  ...[...group.vaults, ...group.externalCollateral].flatMap((vault) => {
     const addr = getVaultAddress(vault)
     if (!addr) return []
     const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
+      addr,
+      getVaultAssetAddress(vault),
       product.name,
       product.description,
       ...getEntitiesByVault(vault).map(e => e.name),
