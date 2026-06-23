@@ -23,7 +23,7 @@ interface REULUnlockInfo {
 }
 
 const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel } = defineProps<{
-  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
+  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
@@ -298,6 +298,7 @@ const btnLabel = computed(() => {
     case 'reward':
     case 'brevis-reward':
     case 'fuul-reward':
+    case 'turtle-reward':
       return 'Claim'
     case 'disableCollateral':
       return 'Disable collateral'
@@ -313,8 +314,11 @@ const reulUnlockDisclaimerText = computed(() => {
 })
 
 const disclaimerText = computed(() => {
-  if (type !== 'reward') return
+  if (type !== 'reward' && type !== 'turtle-reward') return
   const displayAmount = Number(amount) < 0.01 ? '< 0.01' : formatNumber(amount)
+  if (type === 'turtle-reward') {
+    return `You're claiming all ${displayAmount} ${asset.symbol} through Turtle. Part of this amount could have been earned outside of Euler.`
+  }
   return `You're claiming all ${displayAmount} ${asset.symbol} on Merkl. Part of this amount could have been earned outside of Euler.`
 })
 
@@ -467,7 +471,7 @@ const confirmLabel = computed(() => {
       </div>
 
       <UiAlert
-        v-if="type === 'reward'"
+        v-if="disclaimerText"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"

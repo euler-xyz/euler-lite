@@ -7,7 +7,7 @@ type VaultWithRewards = {
 
 export const useRewardsApy = () => {
   const { settings } = useUserSettings()
-  const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
+  const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
   const { getVault, registryVersion } = useVaultRegistry()
   const { address: connectedAddress } = useWagmi()
   const { spyAddress } = useSpyMode()
@@ -41,6 +41,7 @@ export const useRewardsApy = () => {
     if (campaign.source === 'merkl') return enableMerkl
     if (campaign.source === 'brevis') return enableIncentra
     if (campaign.source === 'fuul') return enableFuul
+    if (campaign.source === 'turtle') return enableTurtle
     return false
   }
 

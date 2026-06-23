@@ -11,12 +11,14 @@ const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
   brevis: 'Incentra',
   fuul: 'Fuul',
+  turtle: 'Turtle',
 }
 
-const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-reward' | 'fuul-reward'> = {
+const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward'> = {
   merkl: 'reward',
   brevis: 'brevis-reward',
   fuul: 'fuul-reward',
+  turtle: 'turtle-reward',
 }
 
 const { reward } = defineProps<{ reward: UserReward }>()
@@ -44,7 +46,7 @@ const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed),
 const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
 const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
-const canAddToBatch = computed(() => settings.value.enableAdvancedMode)
+const canAddToBatch = computed(() => settings.value.enableAdvancedMode && reward.provider !== 'turtle')
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -64,6 +66,11 @@ const ensureWalletOnClaimChain = async () => {
 }
 
 const claim = async () => {
+  if (isSpyMode.value) {
+    error('Exit spy mode to claim rewards')
+    return
+  }
+
   try {
     isClaiming.value = true
 
@@ -84,6 +91,7 @@ const claim = async () => {
 }
 
 const onAddToBatchClick = async () => {
+  if (reward.provider === 'turtle') return
   if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value) return
   isAddingToBatch.value = true
   try {
@@ -114,6 +122,11 @@ const onAddToBatchClick = async () => {
 }
 
 const onClaimClick = async () => {
+  if (isSpyMode.value) {
+    error('Exit spy mode to claim rewards')
+    return
+  }
+
   if (isPreparing.value || isAddingToBatch.value) return
   isPreparing.value = true
   try {

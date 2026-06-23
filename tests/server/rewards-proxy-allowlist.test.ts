@@ -3,6 +3,7 @@ import {
   isAllowedFuulProxyRequest,
   isAllowedIncentraProxyRequest,
   isAllowedMerklProxyRequest,
+  isAllowedTurtleProxyRequest,
 } from '~/server/utils/rewards-proxy-allowlist'
 
 const ACCOUNT = '0x0000000000000000000000000000000000000001'
@@ -48,5 +49,16 @@ describe('rewards proxy allowlists', () => {
     expect(isAllowedMerklProxyRequest('GET', 'opportunities/', params('chainId=1&type=EULER&campaigns=true&debug=true'))).toBe(false)
     expect(isAllowedMerklProxyRequest('GET', 'users/not-an-address/rewards', params('chainId=1'))).toBe(false)
     expect(isAllowedMerklProxyRequest('GET', `users/${ACCOUNT}/rewards`, params('chainId=1&type=POINTS'))).toBe(false)
+  })
+
+  it('allows only Turtle stream proof requests used by claim planning', () => {
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1`))).toBe(true)
+    expect(isAllowedTurtleProxyRequest('HEAD', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1,stream-2`))).toBe(true)
+
+    expect(isAllowedTurtleProxyRequest('POST', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams', params(`wallet=${ACCOUNT}&streamIds=stream-1`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=not-an-address&streamIds=stream-1`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1&debug=true`))).toBe(false)
   })
 })

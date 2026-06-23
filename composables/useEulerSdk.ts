@@ -49,16 +49,17 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     for hot reads, longer for catalogue data). Consumed by UI surfaces:
  *     vault lists, portfolio display, prices, rewards.
  *
- *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Always uses on-chain
- *     adapters directly (no fallback wrapping) regardless of the browser
- *     source, so the Account/Vault state used to build a transaction plan
- *     reflects the latest block. Uses `sdkFreshBuildQuery`, which forces a
- *     zero stale time on plan-critical queries (account, vault info, balances,
- *     allowances, pyth update data) while letting catalogue / labels / prices
- *     fall through to the same QueryClient cache that the fast instance fills.
- *     The fresh instance's refetches write back to the shared cache, so a
- *     subsequent fast read sees the just-refreshed value within its own
- *     staleness window. Consumed by `useEulerTx` planners and simulate/execute.
+ *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Account and vault
+ *     adapters are pinned to on-chain/subgraph reads regardless of the browser
+ *     source, so transaction planning reflects the latest block. Rewards use
+ *     fallback so V3 reward rows can be paired with direct claim-proof data.
+ *     Uses `sdkFreshBuildQuery`, which forces a zero stale time on plan-critical
+ *     queries (account, vault info, balances, allowances, pyth update data)
+ *     while letting catalogue / labels / prices fall through to the same
+ *     QueryClient cache that the fast instance fills. The fresh instance's
+ *     refetches write back to the shared cache, so a subsequent fast read sees
+ *     the just-refreshed value within its own staleness window. Consumed by
+ *     `useEulerTx` planners and simulate/execute.
  */
 
 type SdkInstance = { sdk: EulerSDK }
@@ -95,6 +96,7 @@ const buildFuulProxyApiPath = (path = '') =>
   buildAppApiPath(`/api/proxy/fuul${path ? `/${path.replace(/^\/+/, '')}` : ''}`)
 const buildIncentraProxyApiPath = (path: string) =>
   buildAppApiPath(`/api/proxy/incentra/${path.replace(/^\/+/, '')}`)
+const buildTurtleProxyApiPath = () => buildAppApiPath('/api/proxy/turtle')
 // Exported so post-tx subgraph polling (useEulerTx) hits the exact same
 // endpoint the SDK's account/vault-type adapters read through. Polling the
 // upstream Goldsky URL directly would measure a different indexer head than
@@ -126,7 +128,7 @@ const onchainAdapterConfig: Partial<EulerSDKConfig> = {
   eVaultServiceAdapter: 'onchain',
   eulerEarnServiceAdapter: 'onchain',
   vaultTypeAdapter: 'subgraph',
-  rewardsServiceAdapter: 'direct',
+  rewardsServiceAdapter: 'fallback',
 }
 
 // Per-chain subgraph URL map → server proxy. The proxy resolves the real
@@ -152,7 +154,7 @@ const adapterConfigForFastSource = (source: 'fallback' | 'onchain' | 'v3'): Part
 
 const buildSdkStaticConfig = (backend: SdkBackend) => {
   const rc = getPublicRuntimeConfig()
-  const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
+  const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
   const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
   const swapApiUrl = cleanUrl(rc.swapApiUrl)
   const v3ApiUrl = buildV3ProxyApiPath()
@@ -194,6 +196,11 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
           rewardsFuulApiUrl: buildFuulProxyApiPath(),
         }
       : { rewardsEnableFuul: false }),
+    ...(enableTurtle
+      ? {
+          rewardsTurtleApiUrl: buildTurtleProxyApiPath(),
+        }
+      : { rewardsEnableTurtle: false }),
     // Goldsky subgraph: route every chain through `/api/proxy/subgraph/{id}`
     // so the browser never sees the upstream URL or hits api.goldsky.com
     // directly.
@@ -318,9 +325,11 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
   return sdk
 }
 
-/** "Slow"/plan-time instance: always onchain adapters regardless of the
- *  browser source, with zero stale-time on plan-critical queries. Used by
- *  useEulerTx for plan construction, simulate, and execute. */
+/** "Slow"/plan-time instance: account and vault adapters stay onchain/subgraph
+ *  regardless of browser source, with zero stale-time on plan-critical queries.
+ *  Rewards use fallback so claim planning can combine V3 rows with direct
+ *  provider proof data. Used by useEulerTx for plan construction, simulate,
+ *  and execute. */
 export const getEulerSdkFresh = async (): Promise<EulerSDK> => {
   const { sdk } = await lookupInstance('fresh', 'onchain', sdkFreshBuildQuery)
   return sdk
