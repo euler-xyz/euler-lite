@@ -83,6 +83,8 @@ export interface BatchEntry {
 export interface BatchEntryInput extends Omit<BatchEntry, 'id' | 'plan'> {
   /** Builds this entry once, at add-time, against the current batch end-state. */
   buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+  /** Set false for standalone plans that do not need the current simulated account. */
+  requiresPlanningAccount?: boolean
 }
 
 export interface BatchLayer {
@@ -1481,13 +1483,15 @@ export const useTxBatch = () => {
 
     const add = async () => {
       execError.value = undefined
-      const account = await getEntryPlanningAccount()
-      const plan = await entry.buildPlan(account)
+      const account = entry.requiresPlanningAccount === false
+        ? undefined
+        : await getEntryPlanningAccount()
+      const plan = await entry.buildPlan(account as Account<IHasVaultAddress>)
       const cid = chainId.value
       if (cid) {
         await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))
       }
-      const { buildPlan: _buildPlan, ...fixedEntry } = entry
+      const { buildPlan: _buildPlan, requiresPlanningAccount: _requiresPlanningAccount, ...fixedEntry } = entry
       registerReviewAssetMeta(fixedEntry.review)
       entries.value = [...entries.value, { ...fixedEntry, plan, id: `entry-${++idSeq}` }]
     }

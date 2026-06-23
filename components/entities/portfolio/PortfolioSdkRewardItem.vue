@@ -6,6 +6,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -98,6 +99,7 @@ const onAddToBatchClick = async () => {
     await ensureWalletOnClaimChain()
     await addBatchEntry({
       label: `Claim ${reward.token.symbol}`,
+      requiresPlanningAccount: false,
       buildPlan: async () => buildClaimRewardPlan(reward),
       review: {
         type: planKind.value,
@@ -113,7 +115,7 @@ const onAddToBatchClick = async () => {
     })
   }
   catch (e) {
-    error('Failed to add to batch')
+    error('Failed to add to batch', { description: await getTxErrorMessage(e) })
     logWarn('PortfolioSdkRewardItem/onAddToBatchClick', e)
   }
   finally {
