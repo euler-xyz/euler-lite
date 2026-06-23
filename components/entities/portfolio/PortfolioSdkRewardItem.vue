@@ -26,9 +26,18 @@ const { reward } = defineProps<{ reward: UserReward }>()
 const rewardKey = computed(() =>
   `${reward.chainId}:${reward.provider}:${reward.token.address.toLowerCase()}:${reward.unclaimed}`,
 )
+const rewardClaimKey = computed(() => [
+  reward.chainId,
+  reward.provider,
+  reward.claimAddress?.toLowerCase() ?? '',
+  reward.campaignId ?? '',
+  reward.streamId ?? '',
+  reward.token.address.toLowerCase(),
+  reward.unclaimed,
+].join(':'))
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
-const { addEntry: addBatchEntry } = useTxBatch()
+const { addEntry: addBatchEntry, entries: batchEntries } = useTxBatch()
 const { executePlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
@@ -48,6 +57,9 @@ const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
 const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
 const canAddToBatch = computed(() => settings.value.enableAdvancedMode && reward.provider !== 'turtle')
+const isInBatch = computed(() =>
+  batchEntries.value.some(entry => entry.rewardClaimKey === rewardClaimKey.value),
+)
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -93,12 +105,13 @@ const claim = async () => {
 
 const onAddToBatchClick = async () => {
   if (reward.provider === 'turtle') return
-  if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value) return
+  if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value || isInBatch.value) return
   isAddingToBatch.value = true
   try {
     await ensureWalletOnClaimChain()
     await addBatchEntry({
       label: `Claim ${reward.token.symbol}`,
+      rewardClaimKey: rewardClaimKey.value,
       requiresPlanningAccount: false,
       buildPlan: async () => buildClaimRewardPlan(reward),
       review: {
@@ -131,6 +144,7 @@ const onAddToBatchClick = async () => {
 }
 
 const onClaimClick = async () => {
+  if (isInBatch.value) return
   if (isSpyMode.value) {
     error('Exit spy mode to claim rewards')
     return
@@ -248,7 +262,7 @@ const onClaimClick = async () => {
         <UiButton
           rounded
           :loading="isClaiming || isPreparing"
-          :disabled="isSpyMode || isAddingToBatch"
+          :disabled="isSpyMode || isAddingToBatch || isInBatch"
           @click="onClaimClick"
         >
           Claim
@@ -258,10 +272,10 @@ const onClaimClick = async () => {
           rounded
           variant="primary-stroke"
           :loading="isAddingToBatch"
-          :disabled="isSpyMode || isClaiming || isPreparing"
+          :disabled="isSpyMode || isClaiming || isPreparing || isInBatch"
           @click="onAddToBatchClick"
         >
-          Add to batch
+          {{ isInBatch ? 'In batch' : 'Add to batch' }}
         </UiButton>
       </div>
       <UiAlert

@@ -78,6 +78,8 @@ export interface BatchEntry {
    *  Wallet-swap repay also uses this to name the debt asset while the review keeps
    *  the wallet input asset for step decoding. */
   nameOverride?: string
+  /** Stable claim identifier for reward rows already queued in the batch. */
+  rewardClaimKey?: string
 }
 
 type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
