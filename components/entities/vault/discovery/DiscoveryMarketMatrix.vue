@@ -16,7 +16,7 @@ import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/use
 import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import type { Address } from 'viem'
 import type { CSSProperties } from 'vue'
 
@@ -119,6 +119,28 @@ const isCorrelatedCell = (
   )
 }
 
+const getCorrelatedCellTitle = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): string => {
+  const collateral = findVault(props.market, collateralAddr)
+  const liability = findVault(props.market, liabilityAddr)
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [collateral?.asset.address, liability?.asset.address],
+    getTokenCategoryTags,
+  )
+
+  return category ? `Correlated category: ${category}` : 'Correlated pair'
+}
+
+const getCorrelatedCellText = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): string => {
+  const title = getCorrelatedCellTitle(collateralAddr, liabilityAddr)
+  return `${title}. Max ROE is shown for correlated collateral and liability assets.`
+}
+
 const getCellMetricValue = (
   cell: MatrixCell,
   collateralAddr: string,
@@ -166,6 +188,26 @@ const shouldShowSparkles = (
     : false
   return hasSupplyRewardsForCell || hasBorrowRewardsForCell
 }
+
+const hasCorrelatedRoeCells = computed((): boolean => {
+  if (props.dotMetric !== 'roe') return false
+  for (const [rowAddr, cols] of props.matrix.cells) {
+    for (const colAddr of cols.keys()) {
+      if (isCorrelatedCell(rowAddr, colAddr)) return true
+    }
+  }
+  return false
+})
+
+const hasRewardMetricCells = computed((): boolean => {
+  if (props.dotMetric !== 'net-apy' && props.dotMetric !== 'roe') return false
+  for (const [rowAddr, cols] of props.matrix.cells) {
+    for (const colAddr of cols.keys()) {
+      if (shouldShowSparkles(rowAddr, colAddr)) return true
+    }
+  }
+  return false
+})
 
 const metricRange = computed((): { min: number, max: number } => {
   if (props.dotMetric === 'oracle') return { min: 0, max: 0 }
@@ -455,7 +497,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
 
 <template>
   <div
-    class="px-16 pb-12 flex items-center justify-center"
+    class="px-16 pb-12 flex flex-col items-center justify-center gap-8"
     data-id="collateral-matrix"
     data-list="collateral-matrix"
     :data-key="market.id"
@@ -465,7 +507,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
     :data-column-count="matrix.columns.length"
   >
     <div
-      class="relative max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
+      class="relative isolate max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-separate border-spacing-0">
         <thead class="sticky top-0 z-30 bg-surface">
@@ -727,7 +769,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     v-if="dotMetric === 'roe' && isCorrelatedCell(row.address, col.address)"
                     name="check-circle"
                     class="!w-10 !h-10 text-success-500 shrink-0"
-                    title="Correlated pair"
+                    :aria-label="getCorrelatedCellText(row.address, col.address)"
                   />
                   <SvgIcon
                     v-if="shouldShowSparkles(row.address, col.address)"
@@ -784,6 +826,33 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div
+      v-if="hasCorrelatedRoeCells || hasRewardMetricCells"
+      class="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-p5 text-content-muted"
+      data-id="collateral-matrix-legend"
+    >
+      <span
+        v-if="hasCorrelatedRoeCells"
+        class="inline-flex items-center gap-3 whitespace-nowrap"
+      >
+        <SvgIcon
+          name="check-circle"
+          class="!w-10 !h-10 text-success-500 shrink-0"
+        />
+        Correlated pair
+      </span>
+      <span
+        v-if="hasRewardMetricCells"
+        class="inline-flex items-center gap-3 whitespace-nowrap"
+      >
+        <SvgIcon
+          name="sparks"
+          class="!w-10 !h-10 text-accent-500 shrink-0"
+        />
+        Rewards included
+      </span>
     </div>
   </div>
 
