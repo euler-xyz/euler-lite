@@ -80,12 +80,20 @@ export interface BatchEntry {
   nameOverride?: string
 }
 
-export interface BatchEntryInput extends Omit<BatchEntry, 'id' | 'plan'> {
-  /** Builds this entry once, at add-time, against the current batch end-state. */
-  buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
-  /** Set false for standalone plans that do not need the current simulated account. */
-  requiresPlanningAccount?: boolean
-}
+type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
+
+export type BatchEntryInput = BatchEntryInputBase & (
+  {
+    /** Builds this entry once, at add-time, against the current batch end-state. */
+    buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+    requiresPlanningAccount?: true
+  } | {
+    /** Builds this entry once, at add-time, without a simulated account snapshot. */
+    buildPlan: () => Promise<TransactionPlan>
+    /** Set false for standalone plans that do not need the current simulated account. */
+    requiresPlanningAccount: false
+  }
+)
 
 export interface BatchLayer {
   /** Simulated account snapshot after this layer's entry (layer 0 = real). */
@@ -1483,10 +1491,9 @@ export const useTxBatch = () => {
 
     const add = async () => {
       execError.value = undefined
-      const account = entry.requiresPlanningAccount === false
-        ? undefined
-        : await getEntryPlanningAccount()
-      const plan = await entry.buildPlan(account as Account<IHasVaultAddress>)
+      const plan = entry.requiresPlanningAccount === false
+        ? await entry.buildPlan()
+        : await entry.buildPlan(await getEntryPlanningAccount())
       const cid = chainId.value
       if (cid) {
         await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))

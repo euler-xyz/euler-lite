@@ -115,7 +115,14 @@ const onAddToBatchClick = async () => {
     })
   }
   catch (e) {
-    error('Failed to add to batch', { description: await getTxErrorMessage(e) })
+    let description = 'Unable to prepare this reward claim.'
+    try {
+      description = await getTxErrorMessage(e)
+    }
+    catch (messageError) {
+      logWarn('PortfolioSdkRewardItem/onAddToBatchClick/getTxErrorMessage', messageError)
+    }
+    error('Failed to add to batch', { description })
     logWarn('PortfolioSdkRewardItem/onAddToBatchClick', e)
   }
   finally {
