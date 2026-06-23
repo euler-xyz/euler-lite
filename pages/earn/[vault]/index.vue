@@ -13,7 +13,6 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
-import { rewardCampaignAprPercent } from '~/entities/reward-campaign'
 
 const router = useRouter()
 const route = useRoute()
@@ -42,7 +41,7 @@ useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardCampaignsFromVault } = useRewardsApy()
+const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const isLoading = ref(false)
 const isSubmitting = ref(false)
@@ -105,11 +104,9 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   return undefined
 })
-const supplyRewardCampaigns = computed(() => getSupplyRewardCampaignsFromVault(vault.value))
-const totalRewardsAPY = computed(() =>
-  supplyRewardCampaigns.value.reduce((sum, campaign) => sum + rewardCampaignAprPercent(campaign), 0),
-)
-const hasRewards = computed(() => totalRewardsAPY.value > 0)
+const supplyRewardCampaigns = computed(() => getSupplyRewardCampaigns(vaultAddress))
+const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
+const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
