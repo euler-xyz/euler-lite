@@ -43,6 +43,8 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EVault>((vaul
     vault.asset.symbol,
     vault.asset.name,
     vault.shares.name,
+    vault.address,
+    vault.asset.address,
     product.name,
     product.description,
     ...getEntitiesByVault(vault).map(e => e.name),
