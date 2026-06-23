@@ -10,6 +10,7 @@ import {
 import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
+import { getVaultUtilizationDelta, getVaultUtilizationDeltaActionLabel } from '~/utils/vault-display'
 import annotationPlugin from 'chartjs-plugin-annotation'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler, type ChartData, type ChartOptions } from 'chart.js'
 import { zeroAddress, formatUnits, type Address, type Abi } from 'viem'
@@ -18,6 +19,7 @@ import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
 import { UiFootnoteModal } from '#components'
+import { compactNumber } from '~/utils/string-utils'
 
 // Register Chart.js components
 ChartJS.register(
@@ -271,6 +273,19 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
   }
 }
 
+type FormattedUtilizationDelta = {
+  text: string
+}
+
+const formatUtilizationDelta = (targetUtilizationPercent: number): FormattedUtilizationDelta | null => {
+  const delta = getVaultUtilizationDelta(vault, targetUtilizationPercent)
+  if (!delta) return null
+
+  const amount = compactNumber(formatUnits(delta.amount, vault.asset.decimals), 2)
+  const action = getVaultUtilizationDeltaActionLabel(delta)
+  return action ? { text: `${action}: ${amount} ${vault.asset.symbol}` } : null
+}
+
 // Fetch interest rate model data
 const fetchIRMData = async (kinkFraction: number | null) => {
   if (!eulerLensAddresses.value?.vaultLens) {
@@ -509,6 +524,11 @@ const renderChart = async () => {
             label: (context) => {
               const value = typeof context.parsed.y === 'number' ? context.parsed.y.toFixed(2) : 'N/A'
               return `${context.dataset.label}: ${value}%`
+            },
+            footer: (context) => {
+              const targetUtilization = Number(context[0]?.label)
+              const delta = formatUtilizationDelta(targetUtilization)
+              return delta?.text ?? ''
             },
             labelColor: (context) => {
               return {
