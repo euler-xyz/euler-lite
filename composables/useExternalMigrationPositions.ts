@@ -300,10 +300,11 @@ const readContractsAllowFailure = async (
   context: string,
 ): Promise<ContractReadResult[]> => {
   try {
+    type MulticallArgs = Parameters<typeof client.multicall>[0]
     return await client.multicall({
-      contracts: contracts as Parameters<typeof client.multicall>[0]['contracts'],
+      contracts: contracts as MulticallArgs['contracts'],
       allowFailure: true,
-    }) as ContractReadResult[]
+    } as MulticallArgs) as ContractReadResult[]
   }
   catch (err) {
     logWarn(context, err)

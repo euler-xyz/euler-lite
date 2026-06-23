@@ -389,6 +389,10 @@ export const buildWalletBalanceLayers = (
   })
 }
 
+type BatchSimulationWalletBalances = {
+  simulatedWalletBalances?: Record<string, bigint>[]
+}
+
 const syncOverlay = () => {
   const layer = activeLayer.value > 0 ? layers.value[activeLayer.value] : undefined
   activeLayerPortfolioRef.value = layer?.portfolio
@@ -1390,7 +1394,7 @@ export const useTxBatch = () => {
         }
         return out
       }
-      const simWb = ((sim.simulatedWalletBalances ?? []) as Record<string, bigint>[]).map(normalizeWalletBalances)
+      const simWb = ((sim as BatchSimulationWalletBalances).simulatedWalletBalances ?? []).map(normalizeWalletBalances)
       const touchedTokens = collectWalletBalanceTokens(simWb)
       const realWallet: Record<string, bigint> = {}
       if (touchedTokens.length) {
@@ -1441,7 +1445,8 @@ export const useTxBatch = () => {
       const failureMessage = describeFailure(sim)
       const failedEntries = new Map<number, string>()
       for (const f of sim.failedBatchItems ?? []) {
-        if (typeof f.operationIndex === 'number') failedEntries.set(f.operationIndex, failureMessage)
+        const failedIndex = 'operationIndex' in f && typeof f.operationIndex === 'number' ? f.operationIndex : f.index
+        if (typeof failedIndex === 'number') failedEntries.set(failedIndex, failureMessage)
       }
       const planTargets = plans.map(collectPlanTargets)
       for (const e of sim.vaultStatusErrors ?? []) {
