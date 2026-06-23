@@ -68,7 +68,6 @@ const balance = computed(() => asset.value?.address ? getBalance(asset.value.add
       await until(isLabelsReady).toBe(true)
     }
     vault.value = await updateEarnVault(vaultAddress)
-    await refreshVaultRewards()
     asset.value = vault.value?.asset
 
     if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
@@ -208,18 +207,10 @@ const send = async () => {
     isSubmitting.value = false
   }
 }
-async function refreshVaultRewards() {
-  if (!vault.value) return
-  const { getEulerSdk } = useEulerSdk()
-  const sdk = await getEulerSdk()
-  vault.value.rewards = await sdk.rewardsService.fetchVaultRewards(chainId.value, vault.value.address as Address)
-  vault.value.populated.rewards = true
-}
 const updateEstimates = async () => {
   if (!vault.value) return
   try {
     vault.value = await updateEarnVault(vault.value.address)
-    await refreshVaultRewards()
     if (!asset.value?.address) return
     estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
   }
