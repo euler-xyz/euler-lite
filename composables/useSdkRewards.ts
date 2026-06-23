@@ -25,7 +25,7 @@ export const useSdkRewards = () => {
   const rewards = computed<UserReward[]>(() => {
     const items = portfolio.value?.account.userRewards ?? []
     const currentChainId = chainId.value
-    if (!currentChainId) return items
+    if (!currentChainId) return []
     return items.filter(reward => reward.chainId === currentChainId)
   })
   const isRewardsLoading = computed(() => isPositionsLoading.value)

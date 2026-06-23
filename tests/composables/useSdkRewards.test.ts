@@ -104,6 +104,15 @@ describe('useSdkRewards', () => {
     expect(rewards.value).toEqual([crossChainTurtleReward])
   })
 
+  it('hides rewards when no valid chain is selected', async () => {
+    const { useSdkRewards, currentChainId } = await importUseSdkRewards()
+
+    const { rewards } = useSdkRewards()
+    currentChainId.value = 0
+
+    expect(rewards.value).toEqual([])
+  })
+
   it('builds reward claim plans through the SDK default EVC path', async () => {
     const { useSdkRewards, buildClaimPlan, rewardClaimPlan, reward } = await importUseSdkRewards()
 
