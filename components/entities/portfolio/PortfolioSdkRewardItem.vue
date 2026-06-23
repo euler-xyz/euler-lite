@@ -198,14 +198,23 @@ const onClaimClick = async () => {
 <template>
   <div
     class="relative overflow-hidden bg-surface rounded-xl border border-line-subtle shadow-card p-16 transition-all duration-default ease-default"
-    :class="{ '!border !border-dashed !border-accent-600': isInBatch }"
+    :class="{ '!border !border-dashed !border-line-emphasis': isInBatch }"
     data-id="portfolio-list-item"
     data-list="sdk-rewards"
     :data-key="rewardKey"
     :data-token-address="reward.token.address.toLowerCase()"
     :data-batch-queued="isInBatch ? 'true' : undefined"
   >
-    <div class="flex flex-col gap-12">
+    <div
+      v-if="isInBatch"
+      class="pointer-events-none absolute inset-0 z-10"
+      style="background: repeating-linear-gradient(45deg, transparent 0 9px, rgba(114, 131, 149, .06) 9px 18px);"
+      aria-hidden="true"
+    />
+    <div
+      class="relative z-0 flex flex-col gap-12"
+      :class="{ 'opacity-50 pointer-events-none': isInBatch }"
+    >
       <div class="flex justify-between items-center mb-12">
         <AssetAvatar
           v-if="hasIcon"
