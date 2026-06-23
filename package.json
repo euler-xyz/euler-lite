@@ -32,7 +32,7 @@
     ]
   },
   "dependencies": {
-    "@eulerxyz/euler-v2-sdk": "1.0.8",
+    "@eulerxyz/euler-v2-sdk": "1.0.9",
     "@floating-ui/vue": "2.0.0",
     "@gvade/nuxt3-svg-sprite": "1.0.3",
     "@keyringnetwork/keyring-connect-sdk": "3.2.0",
