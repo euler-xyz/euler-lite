@@ -445,7 +445,7 @@ onMounted(() => {
     <article
       v-for="market in markets"
       :key="market.id"
-      class="bg-surface rounded-12 border border-line-default shadow-card transition-all"
+      class="relative bg-surface rounded-12 border border-line-default shadow-card transition-all"
       data-id="discovery-market-list-item"
       data-list="discovery-market"
       :data-key="market.id"
@@ -453,7 +453,10 @@ onMounted(() => {
       :data-vault-count="market.vaults.length"
       :data-external-collateral-count="market.externalCollateral.length"
       :data-pair-count="getMiniDiagram(market).pairCount"
-      :class="isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis'"
+      :class="[
+        isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis',
+        isMatrixDropdownOpen(market.id) ? 'z-[60]' : isExpanded(market.id) ? 'z-10' : 'z-0',
+      ]"
     >
       <!-- Collapsed Row Card -->
       <DiscoveryMarketCard
@@ -504,7 +507,7 @@ onMounted(() => {
           >
             <!-- Controls: view toggle + metric dropdown -->
             <div
-              class="px-16 pt-12 pb-8 flex flex-wrap items-center gap-8"
+              class="relative z-[70] px-16 pt-12 pb-8 flex flex-wrap items-center gap-8"
               @click.stop
             >
               <!-- Graph / Matrix toggle -->
@@ -577,7 +580,7 @@ onMounted(() => {
                 </div>
                 <div
                   v-if="isMatrixDropdownOpen(market.id)"
-                  class="absolute left-0 top-full mt-4 z-50 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
+                  class="absolute left-0 top-full mt-4 z-[120] bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
                 >
                   <button
                     v-for="option in MATRIX_VIEW_OPTIONS"

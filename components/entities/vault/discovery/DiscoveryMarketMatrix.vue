@@ -167,6 +167,16 @@ const shouldShowSparkles = (
   return hasSupplyRewardsForCell || hasBorrowRewardsForCell
 }
 
+const hasRewardMetricCells = computed((): boolean => {
+  if (props.dotMetric !== 'net-apy' && props.dotMetric !== 'roe') return false
+  for (const [rowAddr, cols] of props.matrix.cells) {
+    for (const colAddr of cols.keys()) {
+      if (shouldShowSparkles(rowAddr, colAddr)) return true
+    }
+  }
+  return false
+})
+
 const metricRange = computed((): { min: number, max: number } => {
   if (props.dotMetric === 'oracle') return { min: 0, max: 0 }
   let min = Infinity
@@ -455,7 +465,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
 
 <template>
   <div
-    class="px-16 pb-12 flex items-center justify-center"
+    class="px-16 pb-12 flex flex-col items-center justify-center gap-8"
     data-id="collateral-matrix"
     data-list="collateral-matrix"
     :data-key="market.id"
@@ -465,7 +475,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
     :data-column-count="matrix.columns.length"
   >
     <div
-      class="relative max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
+      class="relative isolate max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-separate border-spacing-0">
         <thead class="sticky top-0 z-30 bg-surface">
@@ -724,12 +734,6 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     title="Liquidation LTV ramping down"
                   />
                   <SvgIcon
-                    v-if="dotMetric === 'roe' && isCorrelatedCell(row.address, col.address)"
-                    name="check-circle"
-                    class="!w-10 !h-10 text-success-500 shrink-0"
-                    title="Correlated pair"
-                  />
-                  <SvgIcon
                     v-if="shouldShowSparkles(row.address, col.address)"
                     name="sparks"
                     class="!w-10 !h-10 text-accent-500 shrink-0"
@@ -784,6 +788,23 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div
+      v-if="hasRewardMetricCells"
+      class="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-p5 text-content-muted"
+      data-id="collateral-matrix-legend"
+    >
+      <span
+        v-if="hasRewardMetricCells"
+        class="inline-flex items-center gap-3 whitespace-nowrap"
+      >
+        <SvgIcon
+          name="sparks"
+          class="!w-10 !h-10 text-accent-500 shrink-0"
+        />
+        Rewards included
+      </span>
     </div>
   </div>
 

@@ -78,7 +78,7 @@ const cellDataValue = (cell: AttributeCell): string | number =>
     :data-column-count="attributeColumns.length"
   >
     <div
-      class="relative max-h-[60vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
+      class="relative isolate max-h-[60vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-separate border-spacing-0">
         <thead class="sticky top-0 z-30 bg-surface">
