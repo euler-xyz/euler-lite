@@ -86,6 +86,9 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
   emits('close')
   router.push({ path: `/borrow/${collateralAddress}/${borrowVaultAddress}`, query: { network: route.query.network } })
 }
+const closeForMarketNavigation = () => {
+  emits('close')
+}
 </script>
 
 <template>
@@ -128,21 +131,25 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
           <SecuritizeVaultOverview
             v-else-if="isSecuritizeVault(activeCollateralVault)"
             :vault="(activeCollateralVault as SecuritizeCollateralVault)"
+            @market-click="closeForMarketNavigation"
           />
           <VaultOverview
             v-else-if="activeCollateralVault"
             :vault="(activeCollateralVault as EVault)"
             @vault-click="(address: string) => navigateToBorrow(address, (activeCollateralVault as EVault).address)"
+            @market-click="closeForMarketNavigation"
           />
           <VaultOverview
             v-else-if="tab === 'multiply-collateral' && extraVault"
             :vault="extraVault"
             @vault-click="(address: string) => navigateToBorrow(address, extraVault!.address)"
+            @market-click="closeForMarketNavigation"
           />
           <VaultOverview
             v-else-if="tab === 'borrow'"
             :vault="getPairBorrowVault(pair)"
             @vault-click="(address: string) => navigateToBorrow(address, getPairBorrowVault(pair!).address)"
+            @market-click="closeForMarketNavigation"
           />
         </Transition>
       </template>
@@ -151,12 +158,14 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
         <VaultOverview
           :vault="vault"
           @vault-click="(address: string) => navigateToBorrow(address, vault!.address)"
+          @market-click="closeForMarketNavigation"
         />
       </template>
 
       <template v-else-if="securitizeVault">
         <SecuritizeVaultOverview
           :vault="securitizeVault"
+          @market-click="closeForMarketNavigation"
         />
       </template>
 
