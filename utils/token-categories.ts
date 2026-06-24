@@ -23,6 +23,10 @@ const CORRELATED_CATEGORY_LABELS: Record<string, string> = {
   usd: 'USD',
   eth: 'ETH',
   btc: 'BTC',
+  mon: 'MON',
+  avax: 'AVAX',
+  hype: 'HYPE',
+  bnb: 'BNB',
 }
 
 const CORRELATED_CATEGORY_TAGS = new Set(Object.keys(CORRELATED_CATEGORY_LABELS))

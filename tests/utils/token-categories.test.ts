@@ -18,6 +18,10 @@ describe('token category helpers', () => {
 
   it('requires a shared allowlisted category', () => {
     expect(shareTokenCategory(['usd'], ['USD'])).toBe(true)
+    expect(shareTokenCategory(['mon'], ['MON'])).toBe(true)
+    expect(shareTokenCategory(['avax'], ['AVAX'])).toBe(true)
+    expect(shareTokenCategory(['hype'], ['HYPE'])).toBe(true)
+    expect(shareTokenCategory(['bnb'], ['BNB'])).toBe(true)
     expect(getSharedTokenCategory([['usd'], ['USD']])).toBe('usd')
     expect(shareTokenCategory(['other'], ['other'])).toBe(false)
     expect(shareTokenCategory(['stablecoin'], ['stablecoin'])).toBe(false)
@@ -39,6 +43,14 @@ describe('token category helpers', () => {
       ['0x0000000000000000000000000000000000000003', ['other']],
       ['0x0000000000000000000000000000000000000004', ['usd', 'eth']],
       ['0x0000000000000000000000000000000000000005', ['eth']],
+      ['0x0000000000000000000000000000000000000006', ['mon']],
+      ['0x0000000000000000000000000000000000000007', ['MON']],
+      ['0x0000000000000000000000000000000000000008', ['avax']],
+      ['0x0000000000000000000000000000000000000009', ['AVAX']],
+      ['0x000000000000000000000000000000000000000a', ['hype']],
+      ['0x000000000000000000000000000000000000000b', ['HYPE']],
+      ['0x000000000000000000000000000000000000000c', ['bnb']],
+      ['0x000000000000000000000000000000000000000d', ['BNB']],
     ])
     const getTags = (address: string) => tags.get(address.toLowerCase())
 
@@ -96,6 +108,42 @@ describe('token category helpers', () => {
         getTags,
       ),
     ).toBeUndefined()
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x0000000000000000000000000000000000000006',
+          '0x0000000000000000000000000000000000000007',
+        ],
+        getTags,
+      ),
+    ).toBe('MON')
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x0000000000000000000000000000000000000008',
+          '0x0000000000000000000000000000000000000009',
+        ],
+        getTags,
+      ),
+    ).toBe('AVAX')
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x000000000000000000000000000000000000000a',
+          '0x000000000000000000000000000000000000000b',
+        ],
+        getTags,
+      ),
+    ).toBe('HYPE')
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x000000000000000000000000000000000000000c',
+          '0x000000000000000000000000000000000000000d',
+        ],
+        getTags,
+      ),
+    ).toBe('BNB')
   })
 
   it('treats an all-same address set as correlated even without category tags', () => {
