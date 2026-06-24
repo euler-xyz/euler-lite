@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
@@ -145,6 +145,7 @@ const defaultBorrowLiquidityFilter = {
   operator: 'gt',
   value: MIN_BORROW_LIQUIDITY_USD,
   label: `Avail. liquidity > ${formatCompactUsdValue(MIN_BORROW_LIQUIDITY_USD)}`,
+  includeWhenValueUnavailable: true,
 } as const
 
 useUrlQuerySync([
@@ -164,8 +165,8 @@ watch(sortBy, (newSortBy) => {
 })
 
 // Cache for USD values used in sorting (keyed by pair identifier: collateral+borrow address)
-const pairLiquidityUsd = ref<Map<string, number>>(new Map())
-const pairBorrowedUsd = ref<Map<string, number>>(new Map())
+const pairLiquidityUsd = ref<Map<string, number | undefined>>(new Map())
+const pairBorrowedUsd = ref<Map<string, number | undefined>>(new Map())
 let priceLoadId = 0
 
 // Helper to create a unique key for a borrow pair
@@ -218,18 +219,18 @@ const fetchBorrowPrices = useDebounceFn(async () => {
   }
 
   try {
-    const liquidityValues = new Map<string, number>()
-    const borrowedValues = new Map<string, number>()
+    const liquidityValues = new Map<string, number | undefined>()
+    const borrowedValues = new Map<string, number | undefined>()
     await Promise.all(
       pairs.map(async (pair) => {
         const key = getPairKey(pair)
         const [liquidity, borrowed] = await Promise.all([
           Promise.resolve()
-            .then(() => getAssetUsdValueOrZero(getVaultAvailableLiquidity(pair.borrow), pair.borrow, 'on-chain'))
-            .catch(() => 0),
+            .then(() => getAssetUsdValue(getVaultAvailableLiquidity(pair.borrow), pair.borrow, 'on-chain'))
+            .catch(() => undefined),
           Promise.resolve()
-            .then(() => getAssetUsdValueOrZero(pair.borrow.totalBorrowed, pair.borrow, 'on-chain'))
-            .catch(() => 0),
+            .then(() => getAssetUsdValue(pair.borrow.totalBorrowed, pair.borrow, 'on-chain'))
+            .catch(() => undefined),
         ])
         liquidityValues.set(key, liquidity)
         borrowedValues.set(key, borrowed)
@@ -310,8 +311,8 @@ const {
   (pair, metric) => {
     const key = getPairKey(pair)
     switch (metric) {
-      case 'liquidity': return pairLiquidityUsd.value.get(key) ?? 0
-      case 'totalBorrowed': return pairBorrowedUsd.value.get(key) ?? 0
+      case 'liquidity': return pairLiquidityUsd.value.get(key)
+      case 'totalBorrowed': return pairBorrowedUsd.value.get(key)
       case 'supplyApy': return getPairSupplyApy(pair)
       case 'borrowApy': return getPairBorrowApy(pair)
       case 'netApy': return getNetApy(pair)
