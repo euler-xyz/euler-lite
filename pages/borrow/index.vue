@@ -32,7 +32,7 @@ type AssetFilterOptions = { options: AssetFilterOption[], quickFilters: SelectQu
 const CATEGORY_FILTER_LABELS: Record<string, string> = {
   eth: 'ETH',
   btc: 'BTC',
-  usd: 'Stables',
+  usd: 'USD',
 }
 
 const CATEGORY_FILTER_ORDER = ['eth', 'btc', 'usd']
