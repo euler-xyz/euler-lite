@@ -10,7 +10,7 @@ export const useCustomFilters = <T>(
   initialFilters: CustomFilter[] = [],
 ) => {
   const modal = useModal()
-  const customFilters = ref<CustomFilter[]>([...initialFilters])
+  const customFilters = ref<CustomFilter[]>([])
 
   const addCustomFilter = (filter: CustomFilter) => {
     customFilters.value = [...customFilters.value, filter]
@@ -21,7 +21,7 @@ export const useCustomFilters = <T>(
   }
 
   const clearCustomFilters = () => {
-    customFilters.value = [...initialFilters]
+    customFilters.value = []
   }
 
   const openCustomFilterModal = () => {
@@ -34,8 +34,9 @@ export const useCustomFilters = <T>(
   }
 
   const matchesCustomFilters = (item: T): boolean => {
-    if (!customFilters.value.length) return true
-    return customFilters.value.every((f) => {
+    const filters = [...initialFilters, ...customFilters.value]
+    if (!filters.length) return true
+    return filters.every((f) => {
       const val = getValue(item, f.metric)
       if (typeof val !== 'number' || !Number.isFinite(val)) return false
       return f.operator === 'gt' ? val > f.value : val < f.value
