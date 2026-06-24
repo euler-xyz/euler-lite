@@ -40,11 +40,10 @@ onMounted(async () => {
     class="bg-surface-secondary rounded-xl shadow-card"
     data-vault-overview-accordion-section
   >
-    <div class="flex items-center gap-16">
+    <div class="flex items-center gap-16 p-24">
       <button
         type="button"
-        class="flex min-w-0 items-center justify-between gap-16 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-inset"
-        :class="$slots.actions && hasActions ? 'flex-1 p-24 pr-0' : 'w-full p-24'"
+        class="flex min-w-0 flex-1 items-center text-left transition-colors hover:text-accent-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-4 focus-visible:ring-offset-surface-secondary"
         :aria-expanded="isOpen"
         :aria-controls="panelId"
         @click="toggle"
@@ -52,19 +51,28 @@ onMounted(async () => {
         <span class="text-h3 text-content-primary">
           {{ title }}
         </span>
+      </button>
+      <div
+        v-if="$slots.actions && hasActions"
+        class="shrink-0"
+      >
+        <slot name="actions" />
+      </div>
+      <button
+        type="button"
+        class="shrink-0 text-content-tertiary transition-colors hover:text-content-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-4 focus-visible:ring-offset-surface-secondary"
+        :aria-expanded="isOpen"
+        :aria-controls="panelId"
+        :aria-label="`${isOpen ? 'Collapse' : 'Expand'} ${title}`"
+        @click="toggle"
+      >
         <SvgIcon
           name="arrow-down"
-          class="!w-20 !h-20 shrink-0 text-content-tertiary transition-transform"
+          class="!w-20 !h-20 transition-transform"
           :class="{ 'rotate-180': isOpen }"
           aria-hidden="true"
         />
       </button>
-      <div
-        v-if="$slots.actions && hasActions"
-        class="shrink-0 pr-24"
-      >
-        <slot name="actions" />
-      </div>
     </div>
 
     <div
