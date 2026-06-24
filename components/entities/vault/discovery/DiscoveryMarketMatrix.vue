@@ -51,6 +51,8 @@ const hoveredCell = ref<{
   liabilityAddr: string
 } | null>(null)
 
+const unavailableRoeCellLabel = 'Max ROE is unavailable for uncorrelated pairs. Compare Net APY instead.'
+
 // Row/column highlighting helpers — make it easy to scan a cell back to its
 // row label and column header. A row is "highlighted" when it owns either
 // the hovered cell or the currently selected cell; same for columns.
@@ -568,8 +570,8 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
               :data-correlated="matrix.cells.get(row.address)?.get(col.address) ? isCorrelatedCell(row.address, col.address) : undefined"
-              :title="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs.' : undefined"
-              :aria-label="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs' : undefined"
+              :title="isUnavailableRoeCell(row.address, col.address) ? unavailableRoeCellLabel : undefined"
+              :aria-label="isUnavailableRoeCell(row.address, col.address) ? unavailableRoeCellLabel : undefined"
               :data-value="
                 (() => {
                   const cell = matrix.cells.get(row.address)?.get(col.address);
