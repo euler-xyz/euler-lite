@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   areTokenAddressesInSameCorrelatedCategory,
   areTokenAddressesCorrelatedByTags,
+  fromTokenCategoryFilterValue,
   getSharedTokenCategory,
+  getSupportedTokenCategoryOptions,
   getTokenAddressesCorrelationCategoryLabel,
   normalizeTokenCategoryTags,
   shareCommonTokenCategory,
   shareTokenCategory,
+  toTokenCategoryFilterValue,
+  tokenAddressMatchesCategoryFilter,
 } from '~/utils/token-categories'
 
 describe('token category helpers', () => {
@@ -27,6 +31,53 @@ describe('token category helpers', () => {
     expect(shareTokenCategory(['stablecoin'], ['stablecoin'])).toBe(false)
     expect(shareTokenCategory(['usd'], ['eth'])).toBe(false)
     expect(shareTokenCategory(undefined, ['usd'])).toBe(false)
+  })
+
+  it('builds stable category filter values for allowlisted categories', () => {
+    expect(getSupportedTokenCategoryOptions()).toEqual([
+      { tag: 'usd', label: 'USD' },
+      { tag: 'eth', label: 'ETH' },
+      { tag: 'btc', label: 'BTC' },
+      { tag: 'mon', label: 'MON' },
+      { tag: 'avax', label: 'AVAX' },
+      { tag: 'hype', label: 'HYPE' },
+      { tag: 'bnb', label: 'BNB' },
+    ])
+    expect(toTokenCategoryFilterValue(' USD ')).toBe('category:usd')
+    expect(fromTokenCategoryFilterValue('category:usd')).toBe('usd')
+    expect(fromTokenCategoryFilterValue('category:stablecoin')).toBeNull()
+    expect(fromTokenCategoryFilterValue('0x0000000000000000000000000000000000000001')).toBeNull()
+  })
+
+  it('matches token addresses against category filter values', () => {
+    const tags = new Map<string, string[]>([
+      ['0x0000000000000000000000000000000000000001', ['usd']],
+      ['0x0000000000000000000000000000000000000002', ['eth']],
+      ['0x0000000000000000000000000000000000000003', ['other']],
+    ])
+    const getTags = (address: string) => tags.get(address.toLowerCase())
+
+    expect(
+      tokenAddressMatchesCategoryFilter(
+        '0x0000000000000000000000000000000000000001',
+        'category:usd',
+        getTags,
+      ),
+    ).toBe(true)
+    expect(
+      tokenAddressMatchesCategoryFilter(
+        '0x0000000000000000000000000000000000000001',
+        'category:eth',
+        getTags,
+      ),
+    ).toBe(false)
+    expect(
+      tokenAddressMatchesCategoryFilter(
+        '0x0000000000000000000000000000000000000003',
+        'category:other',
+        getTags,
+      ),
+    ).toBe(false)
   })
 
   it('requires one shared allowlisted category across a whole token set', () => {
