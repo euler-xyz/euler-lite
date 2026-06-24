@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { autoLink } from '~/utils/autoLink'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getExplorerLink } from '~/utils/block-explorer'
+import {
+  getManagerProfileAddressEntries,
+  getManagerProfileExternalUrl,
+  getManagerProfileSocialLinks,
+  getShortAddress,
+} from '~/utils/manager-profile'
 
 defineOptions({
   name: 'ManagerProfilePage',
 })
 
 const route = useRoute()
+const { chainId } = useEulerAddresses()
 const slug = computed(() => route.params.slug as string)
 const {
   entity,
@@ -18,22 +26,18 @@ const {
   isLoading,
 } = useEulerManagerProfile(slug)
 
-const socialLinks = computed(() => {
-  if (!entity.value) return []
-  const social = entity.value.social
-  return [
-    entity.value.url ? { label: 'Website', url: entity.value.url } : null,
-    social.twitter ? { label: 'X', url: social.twitter } : null,
-    social.github ? { label: 'GitHub', url: social.github } : null,
-    social.discord ? { label: 'Discord', url: social.discord } : null,
-    social.telegram ? { label: 'Telegram', url: social.telegram } : null,
-    social.youtube ? { label: 'YouTube', url: social.youtube } : null,
-  ].filter(Boolean) as { label: string, url: string }[]
-})
+const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(entity.value) : [])
+const addressEntries = computed(() => entity.value ? getManagerProfileAddressEntries(entity.value) : [])
 
 const hasVaults = computed(() =>
   evaults.value.length > 0 || securitizeVaults.value.length > 0 || earnVaults.value.length > 0,
 )
+
+const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
+
+const copyAddress = (address: string) => {
+  navigator.clipboard.writeText(address)
+}
 </script>
 
 <template>
@@ -99,7 +103,7 @@ const hasVaults = computed(() =>
           </div>
         </div>
 
-        <div class="grid grid-cols-3 gap-12 mobile:grid-cols-1">
+        <div class="grid grid-cols-4 gap-12 mobile:grid-cols-1">
           <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
             <p class="text-p4 uppercase text-content-tertiary">
               Products
@@ -122,6 +126,14 @@ const hasVaults = computed(() =>
             </p>
             <p class="mt-4 text-h3 text-content-primary">
               {{ socialLinks.length }}
+            </p>
+          </div>
+          <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
+            <p class="text-p4 uppercase text-content-tertiary">
+              Addresses
+            </p>
+            <p class="mt-4 text-h3 text-content-primary">
+              {{ addressEntries.length }}
             </p>
           </div>
         </div>
@@ -148,6 +160,46 @@ const hasVaults = computed(() =>
       </section>
 
       <section
+        v-if="addressEntries.length"
+        class="flex flex-col gap-12"
+      >
+        <h2 class="text-h3 text-content-primary">
+          Governance addresses
+        </h2>
+        <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
+          <div
+            v-for="entry in addressEntries"
+            :key="entry.address"
+            class="rounded-8 border border-line-subtle bg-surface-secondary p-16"
+          >
+            <p class="text-p3 text-content-primary">
+              {{ entry.label }}
+            </p>
+            <div class="mt-6 flex min-w-0 items-center gap-6">
+              <NuxtLink
+                :to="getExplorerAddressLink(entry.address)"
+                target="_blank"
+                class="min-w-0 truncate text-p3 text-accent-600 underline hover:text-accent-500"
+              >
+                {{ getShortAddress(entry.address) }}
+              </NuxtLink>
+              <button
+                type="button"
+                class="shrink-0 text-content-muted outline-none hover:text-content-secondary active:text-content-primary"
+                aria-label="Copy address"
+                @click="copyAddress(entry.address)"
+              >
+                <SvgIcon
+                  class="!h-16 !w-16"
+                  name="copy"
+                />
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
         v-if="productEntries.length"
         class="flex flex-col gap-12"
       >
@@ -157,22 +209,55 @@ const hasVaults = computed(() =>
           </h2>
         </div>
         <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
-          <NuxtLink
+          <div
             v-for="entry in productEntries"
             :key="entry.key"
-            :to="{ name: 'explore-market', params: { market: entry.key }, query: { network: route.query.network } }"
-            class="rounded-12 border border-line-default bg-surface p-16 shadow-card transition-all hover:border-line-emphasis hover:shadow-card-hover"
+            class="rounded-12 border border-line-default bg-surface p-16 shadow-card"
           >
-            <p class="text-p2 text-content-primary">
-              {{ entry.product.name }}
-            </p>
-            <p
-              v-if="entry.product.description"
-              class="mt-4 line-clamp-2 text-p3 text-content-tertiary"
+            <div class="flex items-start gap-10">
+              <BaseAvatar
+                v-if="entry.product.logo"
+                :label="entry.product.name"
+                :src="getEulerLabelEntityLogo(entry.product.logo)"
+                class="!h-32 !w-32 shrink-0"
+              />
+              <div class="min-w-0 flex-1">
+                <NuxtLink
+                  :to="{ name: 'explore-market', params: { market: entry.key }, query: { network: route.query.network } }"
+                  class="text-p2 text-content-primary hover:text-accent-600"
+                >
+                  {{ entry.product.name }}
+                </NuxtLink>
+                <p
+                  v-if="entry.product.description"
+                  class="mt-4 line-clamp-2 text-p3 text-content-tertiary"
+                >
+                  {{ entry.product.description }}
+                </p>
+              </div>
+            </div>
+            <div
+              v-if="entry.product.tags?.length || entry.product.url"
+              class="mt-12 flex flex-wrap gap-6"
             >
-              {{ entry.product.description }}
-            </p>
-          </NuxtLink>
+              <span
+                v-for="tag in entry.product.tags"
+                :key="tag"
+                class="rounded-8 bg-surface-secondary px-8 py-4 text-p4 text-content-secondary"
+              >
+                {{ tag }}
+              </span>
+              <a
+                v-if="entry.product.url"
+                :href="getManagerProfileExternalUrl(entry.product.url)"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="rounded-8 bg-surface-secondary px-8 py-4 text-p4 text-accent-600 hover:text-accent-500"
+              >
+                Website
+              </a>
+            </div>
+          </div>
         </div>
       </section>
 

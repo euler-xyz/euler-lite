@@ -30,6 +30,7 @@ export type EulerLabelProduct = {
   portfolioNotice?: string
   entity: string[] | string
   url: string
+  logo?: string
   vaults: string[]
   deprecatedVaults?: string[]
   deprecationReason?: string
