@@ -27,6 +27,7 @@ export const CORRELATED_CATEGORY_LABELS: Record<string, string> = {
   avax: 'AVAX',
   hype: 'HYPE',
   bnb: 'BNB',
+  pt: 'PT',
 }
 
 const CORRELATED_CATEGORY_TAGS = new Set(Object.keys(CORRELATED_CATEGORY_LABELS))
