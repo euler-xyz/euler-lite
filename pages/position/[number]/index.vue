@@ -42,8 +42,9 @@ const {
 } = useTransactionPlanSimulation()
 
 const positionIndex = usePositionIndex()
-const buildRefinanceRoute = (collateralAddress: string) => {
-  const query: Record<string, string> = { collateral: collateralAddress }
+const buildRefinanceRoute = (collateralAddress?: string) => {
+  const query: Record<string, string> = {}
+  if (collateralAddress) query.collateral = collateralAddress
   const network = _route.query.network
   if (typeof network === 'string') query.network = network
   else if (Array.isArray(network) && network[0]) query.network = network[0]
@@ -1292,7 +1293,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 variant="primary-stroke"
                 rounded
                 :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap`"
+                :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : buildRefinanceRoute()"
               >
                 Refinance
               </UiButton>
