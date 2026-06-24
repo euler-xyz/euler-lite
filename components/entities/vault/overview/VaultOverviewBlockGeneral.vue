@@ -6,7 +6,6 @@ import type { Component } from 'vue'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { formatMarketAvailability } from '~/utils/vault-display'
@@ -228,22 +227,10 @@ watchEffect(() => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <BaseAvatar
-              :label="entity.name"
-              :src="getEulerLabelEntityLogo(entity.logo)"
-              class="!w-28 !h-28"
+            <ManagerEntityLink
+              :entities="[entity]"
+              avatar-class="!w-28 !h-28"
             />
-            <a
-              v-if="entity.url"
-              :href="entity.url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-            >{{ entity.name }}</a>
-            <span
-              v-else
-              class="text-p2 text-content-primary"
-            >{{ entity.name }}</span>
           </div>
         </div>
         <div v-else>

@@ -2,7 +2,6 @@
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { getExplorerLink } from '~/utils/block-explorer'
@@ -199,17 +198,10 @@ const supplyCapPercentageDisplay = computed(() => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <BaseAvatar
-              :label="entity.name"
-              :src="getEulerLabelEntityLogo(entity.logo)"
-              class="!w-28 !h-28"
+            <ManagerEntityLink
+              :entities="[entity]"
+              avatar-class="!w-28 !h-28"
             />
-            <a
-              :href="entity.url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-p2 text-content-primary underline"
-            >{{ entity.name }}</a>
           </div>
         </div>
         <VaultTypeChip
