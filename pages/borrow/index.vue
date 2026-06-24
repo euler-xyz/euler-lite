@@ -15,9 +15,31 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import {
+  areTokenAddressesCorrelatedByTags,
+  getSupportedTokenCategoryOptions,
+  normalizeTokenCategoryTags,
+  toTokenCategoryFilterValue,
+  tokenAddressMatchesCategoryFilter,
+} from '~/utils/token-categories'
 import { formatCompactUsdValue } from '~/utils/string-utils'
 import { getBorrowPairSearchAddresses } from '~/utils/borrow-pair'
+import type { SelectOption, SelectQuickFilter } from '~/components/ui/modals/select.types'
+
+type AssetFilterOption = SelectOption
+type AssetFilterOptions = { options: AssetFilterOption[], quickFilters: SelectQuickFilter[] }
+
+const CATEGORY_FILTER_LABELS: Record<string, string> = {
+  eth: 'ETH',
+  btc: 'BTC',
+  usd: 'Stables',
+}
+
+const CATEGORY_FILTER_ORDER = ['eth', 'btc', 'usd']
+const getCategoryFilterOrder = (tag: string): number => {
+  const index = CATEGORY_FILTER_ORDER.indexOf(tag)
+  return index === -1 ? CATEGORY_FILTER_ORDER.length : index
+}
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -337,30 +359,58 @@ watch(chainId, (newChainId, oldChainId) => {
   }
 })
 
-const collateralAssetOptions = computed(() => {
-  return activeBorrowList.value
-    .filter((item, idx, self) => idx === self.findIndex(t => t.collateral.asset.address === item.collateral.asset.address))
-    .map(pair => ({
-      label: pair.collateral.asset.symbol,
-      value: pair.collateral.asset.address,
-      icon: getAssetLogoUrl(pair.collateral.asset.address, pair.collateral.asset.symbol),
+const buildAssetFilterOptions = (
+  assets: { address: string, symbol: string }[],
+): AssetFilterOptions => {
+  const seenAssets = new Set<string>()
+  const availableCategoryTags = new Set<string>()
+  const assetOptions: AssetFilterOption[] = []
+
+  for (const asset of assets) {
+    const categoryTags = normalizeTokenCategoryTags(getTokenCategoryTags(asset.address))
+
+    for (const tag of categoryTags) {
+      availableCategoryTags.add(tag)
+    }
+
+    if (seenAssets.has(asset.address)) continue
+    seenAssets.add(asset.address)
+    assetOptions.push({
+      label: asset.symbol,
+      value: asset.address,
+      icon: getAssetLogoUrl(asset.address, asset.symbol),
+      quickFilterValues: categoryTags.map(toTokenCategoryFilterValue),
+    })
+  }
+
+  const quickFilters = getSupportedTokenCategoryOptions()
+    .filter(({ tag }) => availableCategoryTags.has(tag))
+    .sort((a, b) => getCategoryFilterOrder(a.tag) - getCategoryFilterOrder(b.tag) || a.label.localeCompare(b.label))
+    .map(({ tag, label }) => ({
+      label: CATEGORY_FILTER_LABELS[tag] ?? label,
+      value: toTokenCategoryFilterValue(tag),
     }))
-    .reduce((prev, curr) =>
-      prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
-    )
+
+  return { options: assetOptions, quickFilters }
+}
+
+const matchesAssetFilterSelection = (
+  assetAddress: string,
+  selected: readonly string[],
+): boolean => {
+  if (!selected.length) return true
+
+  return selected.some(value =>
+    value === assetAddress || tokenAddressMatchesCategoryFilter(assetAddress, value, getTokenCategoryTags),
+  )
+}
+
+const collateralAssetOptions = computed(() => {
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.collateral.asset))
 })
 
 const debtAssetOptions = computed(() => {
-  return activeBorrowList.value
-    .filter((item, idx, self) => idx === self.findIndex(t => t.borrow.asset.address === item.borrow.asset.address))
-    .map(pair => ({
-      label: pair.borrow.asset.symbol,
-      value: pair.borrow.asset.address,
-      icon: getAssetLogoUrl(pair.borrow.asset.address, pair.borrow.asset.symbol),
-    }))
-    .reduce((prev, curr) =>
-      prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
-    )
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.borrow.asset))
 })
 
 const marketOptions = computed(() => {
@@ -397,8 +447,8 @@ const filteredBorrowList = computed(() => {
     .filter(matchesSearch)
     .filter(pair =>
       selectedCollateral.value.length || selectedDebt.value.length
-        ? ((!selectedCollateral.value.length || selectedCollateral.value.includes(pair.collateral.asset.address))
-          && (!selectedDebt.value.length || selectedDebt.value.includes(pair.borrow.asset.address)))
+        ? (matchesAssetFilterSelection(pair.collateral.asset.address, selectedCollateral.value)
+          && matchesAssetFilterSelection(pair.borrow.asset.address, selectedDebt.value))
         : true,
     )
     .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(pair.collateral.address).name) : true)
@@ -583,7 +633,8 @@ const sortedBorrowList = computed(() => {
           :key="`collateral-${chainId}`"
           v-model="selectedCollateral"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="collateralAssetOptions"
+          :options="collateralAssetOptions.options"
+          :quick-filters="collateralAssetOptions.quickFilters"
           placeholder="Collateral asset"
           title="Collateral asset"
           modal-input-placeholder="Search asset"
@@ -594,7 +645,8 @@ const sortedBorrowList = computed(() => {
           :key="`debt-${chainId}`"
           v-model="selectedDebt"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="debtAssetOptions"
+          :options="debtAssetOptions.options"
+          :quick-filters="debtAssetOptions.quickFilters"
           placeholder="Debt asset"
           title="Debt asset"
           modal-input-placeholder="Search asset"
