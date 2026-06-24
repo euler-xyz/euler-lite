@@ -12,14 +12,34 @@ const props = withDefaults(defineProps<{
 
 const isOpen = ref(props.defaultOpen)
 const panelId = useId()
+const sectionEl = ref<HTMLElement>()
+
+const collapseIfOnlySection = () => {
+  const parentEl = sectionEl.value?.parentElement
+  if (!parentEl) return
+
+  const sectionCount = parentEl.querySelectorAll(':scope > [data-vault-overview-accordion-section]').length
+  if (sectionCount === 1) {
+    isOpen.value = false
+  }
+}
 
 const toggle = () => {
   isOpen.value = !isOpen.value
 }
+
+onMounted(async () => {
+  await nextTick()
+  collapseIfOnlySection()
+})
 </script>
 
 <template>
-  <section class="bg-surface-secondary rounded-xl shadow-card">
+  <section
+    ref="sectionEl"
+    class="bg-surface-secondary rounded-xl shadow-card"
+    data-vault-overview-accordion-section
+  >
     <div class="flex items-center gap-16">
       <button
         type="button"
