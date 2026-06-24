@@ -46,6 +46,13 @@ const goToManager = () => {
   if (!isLinked.value) return
   void navigateTo(to.value)
 }
+
+const onSpanKeydown = (event: KeyboardEvent) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  event.stopPropagation()
+  goToManager()
+}
 </script>
 
 <template>
@@ -58,12 +65,15 @@ const goToManager = () => {
     />
     <span
       v-if="spanLink && isLinked"
+      role="link"
+      tabindex="0"
       :class="textClass"
       :data-id="dataKey && dataField ? 'data-point' : undefined"
       :data-key="dataKey || undefined"
       :data-field="dataField || undefined"
       :data-value="displayName"
       @click.stop.prevent="goToManager"
+      @keydown="onSpanKeydown"
     >{{ displayName }}</span>
     <NuxtLink
       v-else-if="isLinked"
