@@ -32,7 +32,7 @@ ChartJS.register(
   annotationPlugin,
 )
 
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
 const chartData = shallowRef<ChartData<'line', number[], string> | null>(null)
 const chartOptions = shallowRef<ChartOptions<'line'> | null>(null)
@@ -612,14 +612,14 @@ watch(isDark, async () => {
 </script>
 
 <template>
-  <div
+  <VaultOverviewAccordionSection
     v-if="hasValidIRM"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-16 p-24 shadow-card"
+    title="Interest rate model"
+    :default-open="defaultOpen"
+    :has-actions="!!irmTooltip"
+    content-class="flex flex-col gap-16"
   >
-    <header class="flex items-center justify-between gap-16">
-      <h2 class="text-h3 text-content-primary">
-        Interest rate model
-      </h2>
+    <template #actions>
       <div
         v-if="irmTooltip"
         class="flex shrink-0 items-center gap-8"
@@ -639,7 +639,7 @@ watch(isDark, async () => {
           class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
         />
       </div>
-    </header>
+    </template>
 
     <div class="relative w-full min-h-400">
       <div
@@ -676,5 +676,5 @@ watch(isDark, async () => {
         :value="param.value"
       />
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>

@@ -9,7 +9,7 @@ import { formatNumber } from '~/utils/string-utils'
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const { get: registryGet } = useVaultRegistry()
 
 const onCollateralClick = (address: string) => {
@@ -48,14 +48,13 @@ const allCollateralPairs = computed(() =>
 </script>
 
 <template>
-  <div
+  <VaultOverviewAccordionSection
     v-if="allCollateralPairs.length"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    title="Collateral exposure"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-24"
   >
     <div>
-      <p class="text-h3 text-content-primary mb-12">
-        Collateral exposure
-      </p>
       <p class="text-content-secondary">
         Deposits in this vault can be borrowed.
         Please make sure you're comfortable accepting the collaterals
@@ -121,5 +120,5 @@ const allCollateralPairs = computed(() =>
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>

@@ -3,7 +3,7 @@ import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import type { PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getPairBorrowVault, getPairCollateralVault } from '~/utils/borrow-pair'
 
-const { pair } = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity> }>()
+const { pair, defaultOpen = true } = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, defaultOpen?: boolean }>()
 
 const collateralVault = computed(() => getPairCollateralVault(pair))
 const borrowVault = computed(() => getPairBorrowVault(pair))
@@ -18,13 +18,12 @@ const showVaultTypesSummary = computed(() =>
 </script>
 
 <template>
-  <div
+  <VaultOverviewAccordionSection
     v-if="showVaultTypesSummary"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    title="Vault types"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-24"
   >
-    <p class="text-h3 text-content-primary">
-      Vault types
-    </p>
     <div class="grid grid-cols-[1fr_1px_1fr] gap-20 items-stretch">
       <div class="min-w-0 flex flex-col gap-12">
         <div class="flex items-center gap-8 min-w-0 pl-2">
@@ -86,7 +85,7 @@ const showVaultTypesSummary = computed(() =>
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>
 
 <style scoped lang="scss">

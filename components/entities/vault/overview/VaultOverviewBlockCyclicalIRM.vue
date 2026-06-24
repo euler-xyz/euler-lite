@@ -10,7 +10,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { zeroAddress, formatUnits } from 'viem'
 import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
 
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
 const { get: registryGet } = useVaultRegistry()
 
@@ -282,16 +282,15 @@ const formatDuration = (seconds: bigint): string => {
 </script>
 
 <template>
-  <section
+  <VaultOverviewAccordionSection
     v-if="hasValidIRM && currentCycle"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    title="Interest rate model"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-24"
   >
-    <header class="flex items-center justify-between gap-16">
-      <h2 class="text-h3 text-content-primary">
-        Interest rate model
-      </h2>
+    <template #actions>
       <CyclicalNoteBadge />
-    </header>
+    </template>
 
     <div
       v-if="currentCycle.preStartTimestamp !== null"
@@ -398,7 +397,7 @@ const formatDuration = (seconds: bigint): string => {
         </span>
       </div>
     </footer>
-  </section>
+  </VaultOverviewAccordionSection>
 </template>
 
 <style lang="scss" scoped>

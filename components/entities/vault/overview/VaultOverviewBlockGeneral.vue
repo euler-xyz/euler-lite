@@ -14,7 +14,7 @@ import { formatMarketAvailability } from '~/utils/vault-display'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
@@ -100,151 +100,150 @@ watchEffect(async () => {
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Overview
-    </p>
-    <div class="flex flex-col gap-20">
-      <VaultDeprecationBanner
-        v-if="isDeprecated"
-        :reason="deprecationReason"
-      />
-      <div
-        v-if="isRestricted"
-        class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-      >
-        <div class="flex items-center gap-8">
-          <SvgIcon
-            name="warning"
-            class="!w-20 !h-20 flex-shrink-0"
-          />
-          <p class="text-p3 text-warning-500">
-            This vault is not available in your region.
-          </p>
-        </div>
-      </div>
-      <!-- eslint-disable vue/no-v-html -- trusted label content -->
-      <p
-        v-if="description"
-        class="text-p2 text-content-secondary auto-link"
-        v-html="autoLink(description)"
-      />
-      <!-- eslint-enable vue/no-v-html -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-32 gap-y-24">
-        <VaultOverviewLabelValue
-          label="Price"
-          :value="priceDisplay"
+  <VaultOverviewAccordionSection
+    title="Overview"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-20"
+  >
+    <VaultDeprecationBanner
+      v-if="isDeprecated"
+      :reason="deprecationReason"
+    />
+    <div
+      v-if="isRestricted"
+      class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
+    >
+      <div class="flex items-center gap-8">
+        <SvgIcon
+          name="warning"
+          class="!w-20 !h-20 flex-shrink-0"
         />
-        <VaultOverviewLabelValue
-          v-if="enableVaultTypeDisplay"
-          label="Vault type"
-        >
-          <VaultTypeChip
-            :vault="vault"
-            :type="governanceType"
-            nudge
-            class="w-fit"
-          />
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue label="Market">
-          <div class="flex min-h-28 items-center">
-            <NuxtLink
-              v-if="marketProductKey"
-              :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
-              class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-            >
-              {{ marketProductName }}
-            </NuxtLink>
-            <template v-else>
-              {{ marketProductName || '-' }}
-            </template>
-          </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          v-if="enableEntityBrandingDisplay"
-          label="Risk manager"
-        >
-          <VaultTypeChip
-            v-if="!isGovernorVerified"
-            :vault="vault"
-            type="unknown"
-            nudge
-            class="w-fit"
-          />
-          <div
-            v-else-if="entities.length"
-            class="flex flex-col gap-8"
-          >
-            <div
-              v-for="(entity, idx) in entities"
-              :key="idx"
-              class="flex items-center gap-8"
-              :class="{ 'opacity-20': isGovernanceLimited }"
-            >
-              <BaseAvatar
-                :label="entity.name"
-                :src="getEulerLabelEntityLogo(entity.logo)"
-                class="!w-28 !h-28"
-              />
-              <a
-                v-if="entity.url"
-                :href="entity.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-              >{{ entity.name }}</a>
-              <span
-                v-else
-                class="text-p2 text-content-primary"
-              >{{ entity.name }}</span>
-            </div>
-          </div>
-          <div v-else>
-            -
-          </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue label="Can be borrowed">
-          <div class="flex items-center gap-8">
-            <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
-            <span class="text-p2 text-content-primary">
-              {{ formatMarketAvailability(borrowCount) }}
-            </span>
-          </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue label="Can be used as collateral">
-          <div class="flex items-center gap-8">
-            <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
-            <span class="text-p2 text-content-primary">
-              {{ formatMarketAvailability(collateralCount) }}
-            </span>
-          </div>
-        </VaultOverviewLabelValue>
+        <p class="text-p3 text-warning-500">
+          This vault is not available in your region.
+        </p>
       </div>
-      <div
-        v-if="propertyBadges.length"
-        class="flex flex-col gap-20 pt-8"
+    </div>
+    <!-- eslint-disable vue/no-v-html -- trusted label content -->
+    <p
+      v-if="description"
+      class="text-p2 text-content-secondary auto-link"
+      v-html="autoLink(description)"
+    />
+    <!-- eslint-enable vue/no-v-html -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-32 gap-y-24">
+      <VaultOverviewLabelValue
+        label="Price"
+        :value="priceDisplay"
+      />
+      <VaultOverviewLabelValue
+        v-if="enableVaultTypeDisplay"
+        label="Vault type"
       >
-        <div class="flex items-center gap-12">
-          <p class="text-p4 uppercase tracking-[0.14em] text-content-muted whitespace-nowrap">
-            Types & properties
-          </p>
-          <div class="h-2 flex-1 bg-[var(--border-subtle)] opacity-70" />
-        </div>
-        <div class="flex flex-col">
-          <div
-            v-for="property in propertyBadges"
-            :key="property.label"
-            class="flex w-full flex-col items-start gap-8 border-t border-[var(--border-subtle)] py-16 first:border-t-0 first:pt-0 last:pb-0"
+        <VaultTypeChip
+          :vault="vault"
+          :type="governanceType"
+          nudge
+          class="w-fit"
+        />
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue label="Market">
+        <div class="flex min-h-28 items-center">
+          <NuxtLink
+            v-if="marketProductKey"
+            :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
+            class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
           >
-            <component
-              :is="property.component"
+            {{ marketProductName }}
+          </NuxtLink>
+          <template v-else>
+            {{ marketProductName || '-' }}
+          </template>
+        </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        v-if="enableEntityBrandingDisplay"
+        label="Risk manager"
+      >
+        <VaultTypeChip
+          v-if="!isGovernorVerified"
+          :vault="vault"
+          type="unknown"
+          nudge
+          class="w-fit"
+        />
+        <div
+          v-else-if="entities.length"
+          class="flex flex-col gap-8"
+        >
+          <div
+            v-for="(entity, idx) in entities"
+            :key="idx"
+            class="flex items-center gap-8"
+            :class="{ 'opacity-20': isGovernanceLimited }"
+          >
+            <BaseAvatar
+              :label="entity.name"
+              :src="getEulerLabelEntityLogo(entity.logo)"
+              class="!w-28 !h-28"
             />
-            <span class="text-p3 text-content-tertiary">
-              {{ property.description }}
-            </span>
+            <a
+              v-if="entity.url"
+              :href="entity.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
+            >{{ entity.name }}</a>
+            <span
+              v-else
+              class="text-p2 text-content-primary"
+            >{{ entity.name }}</span>
           </div>
+        </div>
+        <div v-else>
+          -
+        </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue label="Can be borrowed">
+        <div class="flex items-center gap-8">
+          <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
+          <span class="text-p2 text-content-primary">
+            {{ formatMarketAvailability(borrowCount) }}
+          </span>
+        </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue label="Can be used as collateral">
+        <div class="flex items-center gap-8">
+          <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
+          <span class="text-p2 text-content-primary">
+            {{ formatMarketAvailability(collateralCount) }}
+          </span>
+        </div>
+      </VaultOverviewLabelValue>
+    </div>
+    <div
+      v-if="propertyBadges.length"
+      class="flex flex-col gap-20 pt-8"
+    >
+      <div class="flex items-center gap-12">
+        <p class="text-p4 uppercase tracking-[0.14em] text-content-muted whitespace-nowrap">
+          Types & properties
+        </p>
+        <div class="h-2 flex-1 bg-[var(--border-subtle)] opacity-70" />
+      </div>
+      <div class="flex flex-col">
+        <div
+          v-for="property in propertyBadges"
+          :key="property.label"
+          class="flex w-full flex-col items-start gap-8 border-t border-[var(--border-subtle)] py-16 first:border-t-0 first:pt-0 last:pb-0"
+        >
+          <component
+            :is="property.component"
+          />
+          <span class="text-p3 text-content-tertiary">
+            {{ property.description }}
+          </span>
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>

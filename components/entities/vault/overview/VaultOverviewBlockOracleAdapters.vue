@@ -17,6 +17,7 @@ const props = defineProps<{
   vault?: EVault
   vaults?: EVault[]
   collateralVaults?: (EVault | SecuritizeCollateralVault)[]
+  defaultOpen?: boolean
 }>()
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
@@ -301,10 +302,11 @@ const onTooltipMouseLeave = () => {
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Oracles
-    </p>
+  <VaultOverviewAccordionSection
+    title="Oracles"
+    :default-open="props.defaultOpen ?? true"
+    content-class="flex flex-col gap-24"
+  >
     <div
       v-if="!adapterViews.length"
       class="text-p3 text-content-tertiary"
@@ -460,7 +462,7 @@ const onTooltipMouseLeave = () => {
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 
   <Teleport to="body">
     <template v-if="hoveredChecksAdapter?.checks?.length">
