@@ -969,6 +969,7 @@ const hasAllRequiredQuotes = computed(() =>
   (!collateralNeedsSwap.value || !!selectedCollateralQuote.value)
   && (!debtNeedsSwap.value || !!selectedDebtQuote.value),
 )
+const showNextRefinanceMetrics = computed(() => hasAnyChange.value && hasAllRequiredQuotes.value)
 const healthError = computed(() => {
   if (!hasAnyChange.value || !hasAllRequiredQuotes.value || nextHealth.value === null) return null
   if (!Number.isFinite(nextHealth.value)) return null
@@ -1821,7 +1822,7 @@ function getOperationVaultAddresses(): string[] {
             <SummaryRow label="ROE">
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
-                :after="roeAfter !== null && hasAllRequiredQuotes ? formatNumber(roeAfter) : undefined"
+                :after="roeAfter !== null && showNextRefinanceMetrics ? formatNumber(roeAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>
@@ -1830,7 +1831,7 @@ function getOperationVaultAddresses(): string[] {
               align-top
             >
               <p class="text-p2 text-right inline-flex items-center flex-wrap justify-end gap-x-4">
-                <template v-if="currentLiquidationPrice !== null && nextLiquidationPrice !== null && hasAllRequiredQuotes">
+                <template v-if="currentLiquidationPrice !== null && nextLiquidationPrice !== null && showNextRefinanceMetrics">
                   <span class="text-content-tertiary">{{ formatSmartAmount(liqPriceInvert.invertValue(currentLiquidationPrice)) }}<span class="text-p3 ml-2">{{ currentLiqDisplaySymbol }}</span></span>
                   &rarr; <span class="text-content-primary">{{ formatSmartAmount(liqPriceInvert.invertValue(nextLiquidationPrice)) }}<span class="text-content-tertiary text-p3 ml-2">{{ liqPriceInvert.displaySymbol }}</span></span>
                 </template>
@@ -1856,7 +1857,7 @@ function getOperationVaultAddresses(): string[] {
             <SummaryRow label="Liq. buffer">
               <SummaryValue
                 :before="formatLiqBuffer(liqPriceInvert.invertValue(currentPriceRatio), liqPriceInvert.invertValue(currentLiquidationPrice))"
-                :after="nextLiquidationPrice !== null && hasAllRequiredQuotes
+                :after="nextLiquidationPrice !== null && showNextRefinanceMetrics
                   ? formatLiqBuffer(liqPriceInvert.invertValue(nextPriceRatio), liqPriceInvert.invertValue(nextLiquidationPrice))
                   : undefined"
                 suffix="%"
@@ -1865,20 +1866,20 @@ function getOperationVaultAddresses(): string[] {
             <SummaryRow label="LTV">
               <SummaryValue
                 :before="currentLtv !== null ? formatNumber(currentLtv) : undefined"
-                :after="nextLtv !== null && hasAllRequiredQuotes ? formatNumber(nextLtv) : undefined"
+                :after="nextLtv !== null && showNextRefinanceMetrics ? formatNumber(nextLtv) : undefined"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
                 :before="currentHealth !== null ? formatHealthScore(currentHealth) : undefined"
-                :after="nextHealth !== null && hasAllRequiredQuotes ? formatHealthScore(nextHealth) : undefined"
+                :after="nextHealth !== null && showNextRefinanceMetrics ? formatHealthScore(nextHealth) : undefined"
               />
             </SummaryRow>
             <SummaryRow label="Borrow LTV">
               <SummaryValue
                 :before="currentBorrowLtv !== null ? formatNumber(currentBorrowLtv) : undefined"
-                :after="nextBorrowLtv !== null && hasAllRequiredQuotes && hasAnyChange ? formatNumber(nextBorrowLtv) : undefined"
+                :after="nextBorrowLtv !== null && showNextRefinanceMetrics ? formatNumber(nextBorrowLtv) : undefined"
                 suffix="%"
               />
             </SummaryRow>
