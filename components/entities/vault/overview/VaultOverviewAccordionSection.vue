@@ -14,13 +14,13 @@ const isOpen = ref(props.defaultOpen)
 const panelId = useId()
 const sectionEl = ref<HTMLElement>()
 
-const collapseIfOnlySection = () => {
+const expandIfOnlySection = () => {
   const parentEl = sectionEl.value?.parentElement
   if (!parentEl) return
 
   const sectionCount = parentEl.querySelectorAll(':scope > [data-vault-overview-accordion-section]').length
   if (sectionCount === 1) {
-    isOpen.value = false
+    isOpen.value = true
   }
 }
 
@@ -30,7 +30,7 @@ const toggle = () => {
 
 onMounted(async () => {
   await nextTick()
-  collapseIfOnlySection()
+  expandIfOnlySection()
 })
 </script>
 
