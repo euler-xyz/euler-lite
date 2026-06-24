@@ -417,6 +417,7 @@ const hasSelection = (market: MarketGroup): boolean => {
 }
 
 const maxRoeMatrixNotice = 'Max ROE only shown for correlated pairs.'
+const maxMultiplierMatrixNotice = 'Max multiplier only shown for correlated pairs.'
 
 // -- Global event handlers --
 
@@ -619,6 +620,14 @@ onMounted(() => {
               :data-key="market.id"
             >
               {{ maxRoeMatrixNotice }}
+            </p>
+            <p
+              v-if="getExpandedView(market.id) === 'matrix' && getMatrixView(market.id) === 'multiplier'"
+              class="px-16 pb-8 text-center text-p3 text-content-tertiary"
+              data-id="discovery-max-multiplier-correlation-notice"
+              :data-key="market.id"
+            >
+              {{ maxMultiplierMatrixNotice }}
             </p>
 
             <!-- Graph View -->
