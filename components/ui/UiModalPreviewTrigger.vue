@@ -3,6 +3,10 @@ import type { Component } from 'vue'
 import { arrow as arrowMiddleware, autoUpdate, flip, offset, shift, size, useFloating, type Placement } from '@floating-ui/vue'
 import { type ModalData, useModal } from '~/components/ui/composables/useModal'
 
+defineOptions({
+  inheritAttrs: false,
+})
+
 const {
   component,
   modalData,
@@ -10,6 +14,7 @@ const {
   closeDelay = 150,
   ariaLabel = 'Show details',
   placement = 'top',
+  clickable = true,
 } = defineProps<{
   component: Component
   modalData?: ModalData | (() => ModalData)
@@ -17,6 +22,7 @@ const {
   closeDelay?: number
   ariaLabel?: string
   placement?: Placement
+  clickable?: boolean
 }>()
 
 const modal = useModal()
@@ -227,11 +233,13 @@ const openModal = () => {
 }
 
 const onClick = (event: Event) => {
+  if (!clickable) return
   stopNavigation(event)
   openModal()
 }
 
 const onKeydown = (event: KeyboardEvent) => {
+  if (!clickable) return
   if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
   stopNavigation(event)
   openModal()
@@ -286,13 +294,14 @@ onBeforeUnmount(() => {
 
 <template>
   <span
+    v-bind="$attrs"
     ref="trigger"
     class="ui-modal-preview-trigger"
     :aria-label="ariaLabel"
-    role="button"
-    tabindex="0"
-    @pointerdown="stopPointerPropagation"
-    @pointerup="stopPointerPropagation"
+    :role="clickable ? 'button' : undefined"
+    :tabindex="clickable ? 0 : undefined"
+    @pointerdown="clickable ? stopPointerPropagation($event) : undefined"
+    @pointerup="clickable ? stopPointerPropagation($event) : undefined"
     @click.capture="onClick"
     @keydown="onKeydown"
     @mouseenter="onMouseEnter"
@@ -339,7 +348,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss">
-.ui-modal-preview-trigger {
+:where(.ui-modal-preview-trigger) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -347,49 +356,49 @@ onBeforeUnmount(() => {
   height: fit-content;
   border-radius: 4px;
   outline: none;
+}
 
-  &:focus-visible {
-    outline: 2px solid var(--accent-600);
-    outline-offset: 2px;
+.ui-modal-preview-trigger:focus-visible {
+  outline: 2px solid var(--accent-600);
+  outline-offset: 2px;
+}
+
+.ui-modal-preview-trigger__popover {
+  z-index: 3100;
+  position: relative;
+  width: min(480px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  height: fit-content;
+}
+
+.ui-modal-preview-trigger__popover-inner {
+  position: relative;
+}
+
+.ui-modal-preview-trigger__popover-content {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.ui-modal-preview-trigger__arrow {
+  position: absolute;
+  z-index: 3;
+  width: 16px;
+  height: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  pointer-events: none;
+  transform: rotate(45deg);
+
+  &--bottom {
+    border-top: 0;
+    border-left: 0;
   }
 
-  &__popover {
-    z-index: 3100;
-    position: relative;
-    width: min(480px, calc(100vw - 24px));
-    max-width: calc(100vw - 24px);
-    height: fit-content;
-  }
-
-  &__popover-inner {
-    position: relative;
-  }
-
-  &__popover-content {
-    position: relative;
-    z-index: 2;
-    overflow: hidden;
-  }
-
-  &__arrow {
-    position: absolute;
-    z-index: 3;
-    width: 16px;
-    height: 16px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    pointer-events: none;
-    transform: rotate(45deg);
-
-    &--bottom {
-      border-top: 0;
-      border-left: 0;
-    }
-
-    &--top {
-      border-right: 0;
-      border-bottom: 0;
-    }
+  &--top {
+    border-right: 0;
+    border-bottom: 0;
   }
 }
 

@@ -33,23 +33,23 @@ const hasOnlySuccessToneInfo = computed(() =>
 const iconClass = computed(() => {
   switch (highestLevel.value) {
     case 'critical':
-      return '[--ui-footnote-icon-color:var(--error-500)]'
+      return 'text-error-500'
     case 'info':
       return hasOnlySuccessToneInfo.value
-        ? '[--ui-footnote-icon-color:var(--success-500)]'
-        : '[--ui-footnote-icon-color:var(--warning-500)]'
+        ? 'text-success-500'
+        : 'text-warning-500'
     default:
-      return '[--ui-footnote-icon-color:var(--warning-500)]'
+      return 'text-warning-500'
   }
 })
 </script>
 
 <template>
-  <UiFootnote
+  <UiHoverPreviewTooltip
     v-if="highestLevel"
     :icon="highestLevel === 'info' ? 'info-circle' : 'warning'"
     :sections="sections"
-    :tooltip-placement="tooltipPlacement"
-    :class="iconClass"
+    :placement="tooltipPlacement"
+    :icon-class="iconClass"
   />
 </template>

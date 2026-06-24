@@ -140,28 +140,34 @@ const onClick = () => {
                 :name="displayName"
                 :is-unverified="isUnverified"
               />
-              <span
+              <UiHoverPreviewTooltip
                 v-if="isGeoBlocked"
-                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                title="This vault is not available in your region"
+                title="Region restricted"
+                text="This vault is not available in your region"
+                placement="top-start"
               >
-                <SvgIcon
-                  name="warning"
-                  class="!w-14 !h-14"
-                />
-                Restricted
-              </span>
-              <span
+                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
+                  <SvgIcon
+                    name="warning"
+                    class="!w-14 !h-14"
+                  />
+                  Restricted
+                </span>
+              </UiHoverPreviewTooltip>
+              <UiHoverPreviewTooltip
                 v-if="isDeprecated"
-                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                title="This vault has been deprecated."
+                title="Deprecated"
+                text="This vault has been deprecated."
+                placement="top-start"
               >
-                <SvgIcon
-                  name="warning"
-                  class="!w-14 !h-14"
-                />
-                Deprecated
-              </span>
+                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
+                  <SvgIcon
+                    name="warning"
+                    class="!w-14 !h-14"
+                  />
+                  Deprecated
+                </span>
+              </UiHoverPreviewTooltip>
             </div>
             <div
               class="text-h5 text-content-primary"

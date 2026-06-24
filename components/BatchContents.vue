@@ -81,32 +81,43 @@ const simEyeLabel = computed(() =>
           />
           <!-- The whole description is the clickable affordance to open this
                operation's review (replaces the separate (i) icon). -->
-          <button
+          <UiHoverPreviewTooltip
             v-if="entry.review"
-            type="button"
-            class="flex items-center gap-8 min-w-0 flex-1 text-left rounded-8 hover:opacity-80 transition-opacity"
             title="Review operation details"
-            :data-testid="`batch-details-${index}`"
-            @click="openEntryReview(entry)"
+            text="Review operation details"
+            placement="top-start"
+            class="min-w-0 flex-1"
           >
-            <BatchOperationLabel :entry="entry" />
-          </button>
+            <button
+              type="button"
+              class="flex items-center gap-8 min-w-0 flex-1 text-left rounded-8 hover:opacity-80 transition-opacity"
+              :data-testid="`batch-details-${index}`"
+              @click="openEntryReview(entry)"
+            >
+              <BatchOperationLabel :entry="entry" />
+            </button>
+          </UiHoverPreviewTooltip>
           <span
             v-else
             class="min-w-0 flex-1 truncate text-p2 text-content-primary"
           >{{ entry.label }}</span>
-          <button
-            type="button"
-            class="flex items-center justify-center w-28 h-28 rounded-8 text-content-tertiary hover:text-error-500 hover:bg-card-hover shrink-0"
+          <UiHoverPreviewTooltip
             title="Remove from batch"
-            :data-testid="`batch-remove-${index}`"
-            @click="removeEntry(entry.id)"
+            text="Remove from batch"
+            placement="top-start"
           >
-            <SvgIcon
-              name="close"
-              class="!w-16 !h-16"
-            />
-          </button>
+            <button
+              type="button"
+              class="flex items-center justify-center w-28 h-28 rounded-8 text-content-tertiary hover:text-error-500 hover:bg-card-hover shrink-0"
+              :data-testid="`batch-remove-${index}`"
+              @click="removeEntry(entry.id)"
+            >
+              <SvgIcon
+                name="close"
+                class="!w-16 !h-16"
+              />
+            </button>
+          </UiHoverPreviewTooltip>
         </div>
 
         <!-- Persistent (not hover-only) revert reason, aligned under the label -->
