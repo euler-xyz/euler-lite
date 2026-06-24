@@ -416,7 +416,7 @@ const hasSelection = (market: MarketGroup): boolean => {
   return !!selectedGraphNode.value && selectedGraphNode.value.marketId === market.id
 }
 
-const maxRoeMatrixNotice = 'Max ROE only applies to correlated collateral/debt assets. Uncorrelated pairs stay visible and show Net APY elsewhere because ROE assumes the asset price ratio stays stable.'
+const maxRoeMatrixNotice = 'Max ROE only shown for correlated pairs.'
 
 // -- Global event handlers --
 
@@ -611,7 +611,7 @@ onMounted(() => {
 
             <p
               v-if="getExpandedView(market.id) === 'matrix' && getMatrixView(market.id) === 'roe'"
-              class="px-16 pb-8 text-p3 text-content-tertiary"
+              class="px-16 pb-8 text-center text-p3 text-content-tertiary"
               data-id="discovery-max-roe-correlation-notice"
               :data-key="market.id"
             >
