@@ -14,10 +14,12 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, VaultCollateralExposureModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
 const vaultAddress = computed(() => vault.address)
+const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
@@ -184,7 +186,7 @@ watchEffect(async () => {
   <NuxtLink
     class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="isGeoBlocked ? 'opacity-50' : ''"
-    :to="{ path: `/lend/${vault.address}`, query: { network: $route.query.network } }"
+    :to="{ path: `/lend/${vault.address}`, query: { network: vault.chainId } }"
     data-id="vault-list-item"
     :data-list="type"
     :data-key="vault.address.toLowerCase()"
@@ -234,6 +236,11 @@ watchEffect(async () => {
           :data-value="vault.asset.symbol"
         >
           {{ vault.asset.symbol }}
+          <BaseAvatar
+            class="ml-8 inline-flex h-18 w-18 align-[-3px] shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+            :src="chainLogoSrc"
+            :label="String(vault.chainId)"
+          />
         </div>
       </div>
       <div class="flex flex-col items-end">

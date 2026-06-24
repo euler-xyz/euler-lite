@@ -13,6 +13,8 @@ import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/ut
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { getChainLogoUrl } from '~/utils/chain-logo'
+import { getChainById } from '~/entities/chainRegistry'
 
 defineOptions({
   name: 'ExplorePage',
@@ -21,7 +23,7 @@ defineOptions({
 const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGroups()
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
 const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
-const { chainId } = useEulerAddresses()
+const { chainId, selectedChainIds } = useEulerAddresses()
 const { isLoading: isTokenListLoading } = useTokenList()
 const { entities } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
@@ -46,6 +48,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
 
 const selectedMarkets = ref<string[]>([])
 const selectedAssets = ref<string[]>([])
+const selectedChains = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
@@ -54,6 +57,7 @@ useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
   { ref: sortBy, default: 'Active', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
+  { ref: selectedChains, default: [], queryKey: 'chain' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
   { ref: selectedAssets, default: [], queryKey: 'asset' },
   { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
@@ -91,11 +95,17 @@ watch(sortBy, (newSortBy) => {
 watch(chainId, (newChainId, oldChainId) => {
   if (oldChainId !== undefined && newChainId !== oldChainId) {
     clearSearch()
+    selectedChains.value = []
     selectedMarkets.value = []
     selectedAssets.value = []
     selectedRiskManagers.value = []
     clearCustomFilters()
   }
+})
+
+watch(selectedChainIds, (chainIds) => {
+  const allowed = new Set(chainIds.map(String))
+  selectedChains.value = selectedChains.value.filter(id => allowed.has(id))
 })
 
 const marketOptions = computed(() => {
@@ -147,6 +157,17 @@ const riskManagerOptions = computed(() => {
   return buildTvlSortedOptions(entries)
 })
 
+const chainOptions = computed(() =>
+  selectedChainIds.value.map(id => ({
+    label: getChainById(id)?.name ?? String(id),
+    value: String(id),
+    icon: getChainLogoUrl(id),
+  })),
+)
+
+const getGroupChainIds = (group: MarketGroup): number[] =>
+  [...new Set([...group.vaults, ...group.externalCollateral].map(vault => vault.chainId).filter(Boolean))]
+
 const matchesMarketFilter = (group: MarketGroup): boolean => {
   if (!selectedMarkets.value.length) return true
   return group.vaults.some((vault) => {
@@ -168,10 +189,16 @@ const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
   return getUniqueEntitiesByVaults(group.vaults).some(e => selectedRiskManagers.value.includes(e.name))
 }
 
+const matchesChainFilter = (group: MarketGroup): boolean => {
+  if (!selectedChains.value.length) return true
+  return getGroupChainIds(group).some(id => selectedChains.value.includes(String(id)))
+}
+
 const filteredMarkets = computed(() => {
   return marketGroups.value
     .filter(g => g.source === 'product')
     .filter(matchesSearch)
+    .filter(matchesChainFilter)
     .filter(matchesMarketFilter)
     .filter(matchesAssetFilter)
     .filter(matchesRiskManagerFilter)
@@ -322,6 +349,15 @@ const { isSlow } = useSlowLoading(isLoading)
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
+        />
+        <UiSelect
+          :key="`chains-${selectedChainIds.join('-')}`"
+          v-model="selectedChains"
+          :options="chainOptions"
+          placeholder="Chain"
+          title="Chain"
+          modal-input-placeholder="Search chain"
+          icon="globe"
         />
         <UiSelect
           v-if="enableEntityBranding"

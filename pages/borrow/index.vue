@@ -17,6 +17,8 @@ import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { getBorrowPairSearchAddresses } from '~/utils/borrow-pair'
+import { getChainLogoUrl } from '~/utils/chain-logo'
+import { getChainById } from '~/entities/chainRegistry'
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -95,7 +97,7 @@ defineOptions({
 })
 
 const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
-const { chainId } = useEulerAddresses()
+const { chainId, selectedChainIds } = useEulerAddresses()
 
 const isPricesReady = ref(false)
 const { entities, isReady: labelsReady } = useEulerLabels()
@@ -135,6 +137,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaul
 
 const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])
+const selectedChains = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Active')
@@ -144,6 +147,7 @@ useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
   { ref: sortBy, default: 'Active', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
+  { ref: selectedChains, default: [], queryKey: 'chain' },
   { ref: selectedCollateral, default: [], queryKey: 'collateral' },
   { ref: selectedDebt, default: [], queryKey: 'debt' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
@@ -161,7 +165,7 @@ const pairLiquidityUsd = ref<Map<string, number>>(new Map())
 const pairBorrowedUsd = ref<Map<string, number>>(new Map())
 
 // Helper to create a unique key for a borrow pair
-const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
+const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.borrow.chainId}-${pair.collateral.address}-${pair.borrow.address}`
 
 const getPairSortName = (pair: AnyBorrowVaultPair): string =>
   `${pair.collateral.asset.symbol}/${pair.borrow.asset.symbol}`
@@ -290,12 +294,18 @@ const {
 watch(chainId, (newChainId, oldChainId) => {
   if (oldChainId !== undefined && newChainId !== oldChainId) {
     clearSearch()
+    selectedChains.value = []
     selectedCollateral.value = []
     selectedDebt.value = []
     selectedMarkets.value = []
     selectedRiskManagers.value = []
     clearCustomFilters()
   }
+})
+
+watch(selectedChainIds, (chainIds) => {
+  const allowed = new Set(chainIds.map(String))
+  selectedChains.value = selectedChains.value.filter(id => allowed.has(id))
 })
 
 const collateralAssetOptions = computed(() => {
@@ -353,9 +363,20 @@ const riskManagerOptions = computed(() => {
   }))
 })
 
+const chainOptions = computed(() =>
+  selectedChainIds.value.map(id => ({
+    label: getChainById(id)?.name ?? String(id),
+    value: String(id),
+    icon: getChainLogoUrl(id),
+  })),
+)
+
 const filteredBorrowList = computed(() => {
   return activeBorrowList.value
     .filter(matchesSearch)
+    .filter(pair =>
+      selectedChains.value.length ? selectedChains.value.includes(String(pair.borrow.chainId)) : true,
+    )
     .filter(pair =>
       selectedCollateral.value.length || selectedDebt.value.length
         ? ((!selectedCollateral.value.length || selectedCollateral.value.includes(pair.collateral.asset.address))
@@ -517,6 +538,16 @@ const sortedBorrowList = computed(() => {
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
+        />
+        <UiSelect
+          :key="`chains-${selectedChainIds.join('-')}`"
+          v-model="selectedChains"
+          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          :options="chainOptions"
+          placeholder="Chain"
+          title="Chain"
+          modal-input-placeholder="Search chain"
+          icon="globe"
         />
         <UiSelect
           v-if="enableEntityBranding"

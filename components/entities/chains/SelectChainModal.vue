@@ -18,22 +18,20 @@ const deprecatedChains = computed(() =>
 )
 
 const showDeprecated = ref(false)
-const { changeChain } = useWagmi()
+const { selectedChainIds, toggleSelectedChainId } = useEulerAddresses()
 
 const handleClose = () => {
   emits('close')
 }
+const isSelected = (chainId: number) => selectedChainIds.value.includes(chainId)
 const onClick = (chainId: number) => {
-  emits('close')
-  setTimeout(() => {
-    changeChain(chainId)
-  }, 400)
+  toggleSelectedChainId(chainId)
 }
 </script>
 
 <template>
   <BaseModalWrapper
-    title="Select chain"
+    title="Select chains"
     @close="handleClose"
   >
     <div class="mb-24">
@@ -42,6 +40,7 @@ const onClick = (chainId: number) => {
         :key="chain.id"
         :chain-id="chain.id"
         :name="chain.name"
+        :selected="isSelected(chain.id)"
         @click="onClick(chain.id)"
       />
 
@@ -66,6 +65,7 @@ const onClick = (chainId: number) => {
             :key="chain.id"
             :chain-id="chain.id"
             :name="chain.name"
+            :selected="isSelected(chain.id)"
             deprecated
             @click="onClick(chain.id)"
           />

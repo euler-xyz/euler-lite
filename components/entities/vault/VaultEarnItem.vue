@@ -10,9 +10,11 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
+const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
@@ -106,7 +108,7 @@ const supplyApyModalData = computed(() => ({
   <NuxtLink
     class="block no-underline bg-surface rounded-xl border border-line-default shadow-card transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
     :class="isGeoBlocked ? 'opacity-50' : ''"
-    :to="{ path: `/earn/${vault.address}`, query: { network: $route.query.network } }"
+    :to="{ path: `/earn/${vault.address}`, query: { network: vault.chainId } }"
     data-id="vault-list-item"
     data-list="earn"
     :data-key="vault.address.toLowerCase()"
@@ -142,6 +144,11 @@ const supplyApyModalData = computed(() => ({
           :data-value="vault.asset.symbol"
         >
           {{ vault.asset.symbol }}
+          <BaseAvatar
+            class="ml-8 inline-flex h-18 w-18 align-[-3px] shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+            :src="chainLogoSrc"
+            :label="String(vault.chainId)"
+          />
         </div>
         <div
           v-if="description"

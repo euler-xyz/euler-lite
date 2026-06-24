@@ -29,6 +29,7 @@ import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -298,6 +299,8 @@ const asset = computed(() => eVault.value?.asset || securitizeVault.value?.asset
 
 // For components that need the EVault type (VaultLabelsAndAssets, VaultPoints, etc.)
 const vault = computed(() => eVault.value)
+const displayedVault = computed(() => eVault.value || securitizeVault.value)
+const displayedVaultChainLogoSrc = computed(() => displayedVault.value ? getChainLogoUrl(displayedVault.value.chainId) : '')
 
 // Wallet balances from the central (layer-aware) wallet entity — reactive, no
 // direct balanceOf.
@@ -888,6 +891,12 @@ watch(amount, async () => {
           :assets="assets"
           size="large"
         >
+          <BaseAvatar
+            v-if="displayedVault"
+            class="mr-4 h-24 w-24 shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+            :src="displayedVaultChainLogoSrc"
+            :label="String(displayedVault.chainId)"
+          />
           <UiShareLinkButton
             class="-ml-4 !w-24 !h-24"
             :path="`/lend/${(vault || securitizeVault)!.address}`"

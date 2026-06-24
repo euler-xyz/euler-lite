@@ -18,6 +18,7 @@ export type EulerTokenAddresses = {
 } | null
 
 const allowedChainIds = ref<number[]>([])
+const selectedChainIds = ref<number[]>([])
 const eulerChainsConfig = ref<Deployment[]>([])
 const isLoading = ref(false)
 const chainId = ref<number>(0)
@@ -30,13 +31,55 @@ const initAllowedChainIds = () => {
   if (initialized) return
   initialized = true
 
-  const { enabledChainIds } = useChainConfig()
+  const { enabledChainIds, deprecatedChainIds } = useChainConfig()
   allowedChainIds.value = [...enabledChainIds]
-  chainId.value = allowedChainIds.value[0] || 0
+  selectedChainIds.value = allowedChainIds.value.filter(id => !deprecatedChainIds.includes(id))
+  if (!selectedChainIds.value.length) {
+    selectedChainIds.value = [...allowedChainIds.value]
+  }
+  chainId.value = selectedChainIds.value[0] || allowedChainIds.value[0] || 0
 }
 
 export const useEulerAddresses = () => {
   initAllowedChainIds()
+
+  const normalizeSelectedChainIds = (chainIds: readonly number[]): number[] => {
+    const allowed = new Set(allowedChainIds.value)
+    const next = [...new Set(chainIds)]
+      .filter(id => allowed.has(id))
+      .sort((a, b) => a - b)
+
+    return next.length ? next : [chainId.value || allowedChainIds.value[0]].filter(Boolean)
+  }
+
+  const setSelectedChainIds = (_chainIds: readonly number[]) => {
+    const next = normalizeSelectedChainIds(_chainIds)
+    if (
+      next.length === selectedChainIds.value.length
+      && next.every((id, index) => id === selectedChainIds.value[index])
+    ) {
+      return
+    }
+
+    selectedChainIds.value = next
+    if (!selectedChainIds.value.includes(chainId.value)) {
+      chainId.value = selectedChainIds.value[0] || 0
+    }
+  }
+
+  const toggleSelectedChainId = (_chainId: number, selected?: boolean) => {
+    const selectedSet = new Set(selectedChainIds.value)
+    const shouldSelect = selected ?? !selectedSet.has(_chainId)
+
+    if (shouldSelect) {
+      selectedSet.add(_chainId)
+    }
+    else {
+      selectedSet.delete(_chainId)
+    }
+
+    setSelectedChainIds([...selectedSet])
+  }
 
   const changeCurrentChainId = (_chainId: number) => {
     if (!allowedChainIds.value.includes(_chainId)) {
@@ -45,6 +88,9 @@ export const useEulerAddresses = () => {
     }
     if (chainId.value === _chainId) return
     chainId.value = _chainId
+    if (!selectedChainIds.value.includes(_chainId)) {
+      setSelectedChainIds([...selectedChainIds.value, _chainId])
+    }
   }
 
   const loadEulerConfig = async () => {
@@ -98,6 +144,15 @@ export const useEulerAddresses = () => {
 
     return eulerChainsConfig.value[0]
   })
+
+  const getChainConfig = (targetChainId: number) =>
+    eulerChainsConfig.value.find(chain => chain.chainId === targetChainId)
+
+  const selectedChainConfigs = computed(() =>
+    selectedChainIds.value
+      .map(getChainConfig)
+      .filter((chain): chain is Deployment => Boolean(chain)),
+  )
 
   const eulerLensAddresses = computed(() => {
     const config = getCurrentChainConfig.value
@@ -177,10 +232,15 @@ export const useEulerAddresses = () => {
     eulerPeripheryAddresses,
     eulerTokenAddresses,
     getCurrentChainConfig,
+    getChainConfig,
+    selectedChainConfigs,
     eulerChainsConfig,
     chainId,
+    selectedChainIds,
     allowedChainIds,
     changeCurrentChainId,
+    setSelectedChainIds,
+    toggleSelectedChainId,
     isLoading,
     error,
     isReady: computed(() => eulerChainsConfig.value.length > 0 && !error.value),

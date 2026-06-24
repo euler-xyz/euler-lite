@@ -14,13 +14,16 @@ import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-
 import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const { getTokenCategoryTags, isLoaded: isTokenListLoaded } = useTokenList()
-const pairKey = computed(() => `${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
+const pairChainId = computed(() => pair.borrow.chainId)
+const pairChainLogoSrc = computed(() => getChainLogoUrl(pairChainId.value))
+const pairKey = computed(() => `${pairChainId.value}:${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
 
 const isAnyGovernorUnverified = computed(() => {
   const borrowUnverified = !isVaultGovernorVerified(pair.borrow)
@@ -246,12 +249,10 @@ const headlineMetricTrigger = computed(() => showMaxRoe.value ? 'max-roe' : 'net
 const headlineMetricAriaLabel = computed(() => showMaxRoe.value ? 'Show max ROE breakdown' : 'Show net APY breakdown')
 const headlineMetricRewardsAriaLabel = computed(() => showMaxRoe.value ? 'Show max ROE rewards breakdown' : 'Show net APY rewards breakdown')
 
-const route = useRoute()
-
 const linkPath = computed(() => ({
   path: `/borrow/${pair.collateral.address}/${pair.borrow.address}`,
   query: {
-    network: route.query.network,
+    network: pairChainId.value,
     ...(showMaxRoe.value ? { tab: 'multiply' } : {}),
   },
 }))
@@ -333,6 +334,11 @@ const linkPath = computed(() => ({
                 [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
               }}
             </span>
+            <BaseAvatar
+              class="h-18 w-18 shrink-0 shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+              :src="pairChainLogoSrc"
+              :label="String(pairChainId)"
+            />
             <RecentlyAddedBadge
               v-if="isRecentlyAdded"
               class="hidden mobile:inline-flex shrink-0"

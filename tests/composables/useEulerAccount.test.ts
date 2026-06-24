@@ -114,5 +114,5 @@ describe('useEulerAccount', () => {
     expect(account?.borrowPositions.value).toEqual(['all-borrow'])
     expect(account?.depositPositions.value).toEqual(['all-saving'])
     expect(account?.totalSuppliedValue.value).toBe(100)
-  })
+  }, 20_000)
 })

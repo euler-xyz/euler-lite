@@ -15,6 +15,8 @@ import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { getChainLogoUrl } from '~/utils/chain-logo'
+import { getChainById } from '~/entities/chainRegistry'
 
 defineOptions({
   name: 'LendPage',
@@ -22,7 +24,7 @@ defineOptions({
 
 const { borrowList, isEVaultUpdating, isMarketDataResolved } = useVaults()
 const { getVerifiedEVaults } = useVaultRegistry()
-const { chainId } = useEulerAddresses()
+const { chainId, selectedChainIds } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getVerifiedEVaults(showAllLabelEntries.value))
 
@@ -52,6 +54,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EVault>((vaul
 })
 
 const selectedCollateral = ref<string[]>([])
+const selectedChains = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Total Supply')
@@ -61,6 +64,7 @@ useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
   { ref: sortBy, default: 'Total Supply', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
+  { ref: selectedChains, default: [], queryKey: 'chain' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
   { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
@@ -71,6 +75,7 @@ const vaultUsdValues = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 const vaultWalletUsd = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
+const getVaultKey = (vault: { chainId: number, address: string }) => `${vault.chainId}:${vault.address.toLowerCase()}`
 
 const getDisplayedVaultSupplyApy = (vault: EVault): number => {
   const baseApy = getVaultSupplyApy(vault)
@@ -93,9 +98,9 @@ const {
   ],
   (vault, metric) => {
     switch (metric) {
-      case 'totalSupply': return vaultUsdValues.value.get(vault.address) ?? 0
-      case 'liquidity': return vaultLiquidityUsd.value.get(vault.address) ?? 0
-      case 'inWallet': return vaultWalletUsd.value.get(vault.address) ?? 0
+      case 'totalSupply': return vaultUsdValues.value.get(getVaultKey(vault)) ?? 0
+      case 'liquidity': return vaultLiquidityUsd.value.get(getVaultKey(vault)) ?? 0
+      case 'inWallet': return vaultWalletUsd.value.get(getVaultKey(vault)) ?? 0
       case 'supplyApy': return getDisplayedVaultSupplyApy(vault)
       case 'utilization': return vault.utilization
       default: return 0
@@ -106,11 +111,17 @@ const {
 watch(chainId, (newChainId, oldChainId) => {
   if (oldChainId !== undefined && newChainId !== oldChainId) {
     clearSearch()
+    selectedChains.value = []
     selectedCollateral.value = []
     selectedMarkets.value = []
     selectedRiskManagers.value = []
     clearCustomFilters()
   }
+})
+
+watch(selectedChainIds, (chainIds) => {
+  const allowed = new Set(chainIds.map(String))
+  selectedChains.value = selectedChains.value.filter(id => allowed.has(id))
 })
 
 // Lend listing only checks OP_DEPOSIT: it shows a vault as long as depositing is possible,
@@ -150,9 +161,10 @@ const fetchLendPrices = useDebounceFn(async () => {
           getAssetUsdValueOrZero(liquidity, vault, 'off-chain'),
           walletBalance > 0n ? getAssetUsdValueOrZero(walletBalance, vault, 'off-chain') : Promise.resolve(0),
         ])
-        supplyValues.set(vault.address, totalSupply)
-        liquidityValues.set(vault.address, liquidityUsd)
-        walletValues.set(vault.address, wallet)
+        const key = getVaultKey(vault)
+        supplyValues.set(key, totalSupply)
+        liquidityValues.set(key, liquidityUsd)
+        walletValues.set(key, wallet)
       }),
     )
 
@@ -196,7 +208,7 @@ const marketOptions = computed(() => {
     if (!market.name) return []
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
-    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(vault.address) ?? 0, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(getVaultKey(vault)) ?? 0, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
   }))
 })
 
@@ -214,16 +226,25 @@ const assetOptions = computed(() => {
 
 const riskManagerOptions = computed(() => {
   return buildTvlSortedOptions(borrowableVaults.value.flatMap((vault) => {
-    const tvl = vaultUsdValues.value.get(vault.address) ?? 0
+    const tvl = vaultUsdValues.value.get(getVaultKey(vault)) ?? 0
     return getEntitiesByVault(vault).map(entity => ({
       key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
     }))
   }))
 })
 
+const chainOptions = computed(() =>
+  selectedChainIds.value.map(id => ({
+    label: getChainById(id)?.name ?? String(id),
+    value: String(id),
+    icon: getChainLogoUrl(id),
+  })),
+)
+
 const filteredList = computed(() => {
   return borrowableVaults.value
     .filter(matchesSearch)
+    .filter(vault => selectedChains.value.length ? selectedChains.value.includes(String(vault.chainId)) : true)
     .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(vault.asset.address) : true)
     .filter(vault => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(vault.address).name) : true)
     .filter(vault => selectedRiskManagers.value.length
@@ -232,13 +253,13 @@ const filteredList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyRecentlyAddedSort = <T extends { address: string, chainId: number }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
     return compareRecentlyAddedBoost(
       isVaultRecentlyAdded(a.address),
-      vaultLiquidityUsd.value.get(a.address) ?? 0,
+      vaultLiquidityUsd.value.get(getVaultKey(a)) ?? 0,
       isVaultRecentlyAdded(b.address),
-      vaultLiquidityUsd.value.get(b.address) ?? 0,
+      vaultLiquidityUsd.value.get(getVaultKey(b)) ?? 0,
     )
   })
 }
@@ -256,8 +277,8 @@ const sortedList = computed(() => {
   switch (sortBy.value) {
     case 'Total Supply':
       sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
-        const aValue = vaultUsdValues.value.get(a.address) ?? 0
-        const bValue = vaultUsdValues.value.get(b.address) ?? 0
+        const aValue = vaultUsdValues.value.get(getVaultKey(a)) ?? 0
+        const bValue = vaultUsdValues.value.get(getVaultKey(b)) ?? 0
         return bValue - aValue
       }))
       break
@@ -307,6 +328,15 @@ const sortedList = computed(() => {
             { label: 'Supply APY', icon: 'percent' },
           ]"
           title="Sorting type"
+        />
+        <UiSelect
+          :key="`chains-${selectedChainIds.join('-')}`"
+          v-model="selectedChains"
+          :options="chainOptions"
+          placeholder="Chain"
+          title="Chain"
+          modal-input-placeholder="Search chain"
+          icon="globe"
         />
         <UiSelect
           v-if="enableEntityBranding"

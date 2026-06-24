@@ -14,6 +14,8 @@ import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 import { computeSupplyApy } from '~/utils/collateralOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { getChainLogoUrl } from '~/utils/chain-logo'
+import { getChainById } from '~/entities/chainRegistry'
 
 defineOptions({
   name: 'EarnPage',
@@ -25,7 +27,7 @@ const { isReady: labelsReady } = useEulerLabels()
 const isLoading = computed(() => isEarnUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
-const { chainId } = useEulerAddresses()
+const { chainId, selectedChainIds } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getEarnVaults().filter(v =>
   isVerifiedVault(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
@@ -48,6 +50,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EulerEarn>((v
 })
 
 const selectedCollateral = ref<string[]>([])
+const selectedChains = ref<string[]>([])
 const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Total Supply')
 const sortDir = ref<'desc' | 'asc'>('desc')
@@ -61,6 +64,7 @@ useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
   { ref: sortBy, default: 'Total Supply', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
+  { ref: selectedChains, default: [], queryKey: 'chain' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
   { ref: selectedCurators, default: [], queryKey: 'allocator' },
 ])
@@ -69,6 +73,7 @@ useUrlQuerySync([
 const vaultTotalSupplyUsd = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
+const getVaultKey = (vault: { chainId: number, address: string }) => `${vault.chainId}:${vault.address.toLowerCase()}`
 
 // Fetch USD values for all earn vaults. Debounced to collapse the bursts
 // of registry updates streamed during loadVaults's RPC refresh.
@@ -89,8 +94,9 @@ const fetchEarnPrices = useDebounceFn(async () => {
           getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),
           getAssetUsdValueOrZero(vault.availableAssets, vault, 'off-chain'),
         ])
-        totalSupplyValues.set(vault.address, totalSupply)
-        liquidityValues.set(vault.address, liquidity)
+        const key = getVaultKey(vault)
+        totalSupplyValues.set(key, totalSupply)
+        liquidityValues.set(key, liquidity)
       }),
     )
     if (loadId !== priceLoadId) return
@@ -133,8 +139,8 @@ const {
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
   ],
   (vault, metric) => {
-    if (metric === 'totalSupply') return vaultTotalSupplyUsd.value.get(vault.address) ?? 0
-    if (metric === 'liquidity') return vaultLiquidityUsd.value.get(vault.address) ?? 0
+    if (metric === 'totalSupply') return vaultTotalSupplyUsd.value.get(getVaultKey(vault)) ?? 0
+    if (metric === 'liquidity') return vaultLiquidityUsd.value.get(getVaultKey(vault)) ?? 0
     return 0
   },
 )
@@ -142,10 +148,16 @@ const {
 watch(chainId, (newChainId, oldChainId) => {
   if (oldChainId !== undefined && newChainId !== oldChainId) {
     clearSearch()
+    selectedChains.value = []
     selectedCollateral.value = []
     selectedCurators.value = []
     clearCustomFilters()
   }
+})
+
+watch(selectedChainIds, (chainIds) => {
+  const allowed = new Set(chainIds.map(String))
+  selectedChains.value = selectedChains.value.filter(id => allowed.has(id))
 })
 
 const assetOptions = computed(() => {
@@ -162,28 +174,37 @@ const assetOptions = computed(() => {
 
 const curatorOptions = computed(() => {
   return buildTvlSortedOptions(list.value.flatMap((vault) => {
-    const tvl = vaultTotalSupplyUsd.value.get(vault.address) ?? 0
+    const tvl = vaultTotalSupplyUsd.value.get(getVaultKey(vault)) ?? 0
     return getEntitiesByEarnVault(vault).map(entity => ({
       key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
     }))
   }))
 })
 
+const chainOptions = computed(() =>
+  selectedChainIds.value.map(id => ({
+    label: getChainById(id)?.name ?? String(id),
+    value: String(id),
+    icon: getChainLogoUrl(id),
+  })),
+)
+
 const filteredList = computed(() => {
   return list.value
     .filter(matchesSearch)
+    .filter(vault => selectedChains.value.length ? selectedChains.value.includes(String(vault.chainId)) : true)
     .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(vault.asset.address) : true)
     .filter(vault => selectedCurators.value.length ? getEntitiesByEarnVault(vault).some(e => selectedCurators.value.includes(e.name)) : true)
     .filter(matchesCustomFilters)
 })
 
-const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyRecentlyAddedSort = <T extends { address: string, chainId: number }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
     return compareRecentlyAddedBoost(
       isVaultRecentlyAdded(a.address),
-      vaultLiquidityUsd.value.get(a.address) ?? 0,
+      vaultLiquidityUsd.value.get(getVaultKey(a)) ?? 0,
       isVaultRecentlyAdded(b.address),
-      vaultLiquidityUsd.value.get(b.address) ?? 0,
+      vaultLiquidityUsd.value.get(getVaultKey(b)) ?? 0,
     )
   })
 }
@@ -213,8 +234,8 @@ const sortedList = computed(() => {
       break
     case 'Liquidity':
       sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
-        const aValue = vaultLiquidityUsd.value.get(a.address) ?? 0
-        const bValue = vaultLiquidityUsd.value.get(b.address) ?? 0
+        const aValue = vaultLiquidityUsd.value.get(getVaultKey(a)) ?? 0
+        const bValue = vaultLiquidityUsd.value.get(getVaultKey(b)) ?? 0
         return bValue - aValue
       }))
       break
@@ -254,6 +275,15 @@ const sortedList = computed(() => {
             { label: 'Supply APY', icon: 'percent' },
           ]"
           title="Sorting type"
+        />
+        <UiSelect
+          :key="`chains-${selectedChainIds.join('-')}`"
+          v-model="selectedChains"
+          :options="chainOptions"
+          placeholder="Chain"
+          title="Chain"
+          modal-input-placeholder="Search chain"
+          icon="globe"
         />
         <UiSelect
           v-if="enableEntityBranding"

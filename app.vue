@@ -11,7 +11,7 @@ const batchAnnouncementSeen = useLocalStorage('batch-announcement-seen', false)
 const modal = useModal()
 let isBatchAnnouncementOpen = false
 
-const { loadEulerConfig, chainId } = useEulerAddresses()
+const { loadEulerConfig, selectedChainIds } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
 const { loadLabels } = useEulerLabels()
@@ -133,17 +133,18 @@ watch(() => route.name, () => {
   nextTick(checkBatchAnnouncement)
 })
 
-watch([chainId, showAllLabelEntries], () => {
+watch([selectedChainIds, showAllLabelEntries], () => {
   setShowAllLabelEntries(showAllLabelEntries.value)
   resetVaultsState()
   resetBalances()
-  const targetChainId = chainId.value
+  const targetChainIds = selectedChainIds.value.join(',')
   const targetShowAll = showAllLabelEntries.value
   const labelsPromise = loadLabels()
   void loadTokenList()
   void loadCountry()
-  void labelsPromise.then(() => {
-    if (chainId.value !== targetChainId) return
+  void labelsPromise.then((loaded) => {
+    if (loaded === false) return
+    if (selectedChainIds.value.join(',') !== targetChainIds) return
     if (showAllLabelEntries.value !== targetShowAll) return
     void loadVaults()
   })

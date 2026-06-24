@@ -15,8 +15,13 @@ const { connect } = useWagmi()
 
 // Wagmi account info
 const { address, isConnected } = useWagmi()
-const { chainId, allowedChainIds } = useEulerAddresses()
-const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
+const { chainId, selectedChainIds, allowedChainIds } = useEulerAddresses()
+const primarySelectedChainId = computed(() => selectedChainIds.value[0] ?? chainId.value)
+const chainLogoSrc = computed(() => getChainLogoUrl(primarySelectedChainId.value))
+const selectedChainLabel = computed(() => {
+  const count = selectedChainIds.value.length || 1
+  return count === 1 ? String(primarySelectedChainId.value) : `${count} chains`
+})
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -241,8 +246,9 @@ onClickOutside(wrapperRef, () => {
       >
         <BaseAvatar
           :src="chainLogoSrc"
-          :label="String(chainId)"
+          :label="String(primarySelectedChainId)"
         />
+        <span class="mobile:hidden">{{ selectedChainLabel }}</span>
       </UiButton>
       <div
         v-else
@@ -252,8 +258,9 @@ onClickOutside(wrapperRef, () => {
         <div class="ui-button__wrap">
           <BaseAvatar
             :src="chainLogoSrc"
-            :label="String(chainId)"
+            :label="String(primarySelectedChainId)"
           />
+          <span class="mobile:hidden">{{ selectedChainLabel }}</span>
         </div>
       </div>
       <UiButton
