@@ -52,8 +52,8 @@ export type VaultUtilizationDelta = {
 
 export const getVaultUtilizationDeltaActionLabel = (delta: VaultUtilizationDelta | null | undefined): string | null => {
   if (!delta) return null
-  if (delta.direction === 'borrow') return 'Borrow/Withdraw'
-  if (delta.direction === 'repay') return 'Deposit/Repay'
+  if (delta.direction === 'borrow') return 'Borrow'
+  if (delta.direction === 'repay') return 'Repay'
   return 'No change'
 }
 

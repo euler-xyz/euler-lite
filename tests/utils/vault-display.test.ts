@@ -50,18 +50,18 @@ describe('getVaultUtilizationDelta', () => {
 })
 
 describe('getVaultUtilizationDeltaActionLabel', () => {
-  it('labels higher target utilization as borrow or withdraw', () => {
+  it('labels higher target utilization as borrow', () => {
     expect(getVaultUtilizationDeltaActionLabel({
       amount: 740n,
       direction: 'borrow',
-    })).toBe('Borrow/Withdraw')
+    })).toBe('Borrow')
   })
 
-  it('labels lower target utilization as deposit or repay', () => {
+  it('labels lower target utilization as repay', () => {
     expect(getVaultUtilizationDeltaActionLabel({
       amount: 60n,
       direction: 'repay',
-    })).toBe('Deposit/Repay')
+    })).toBe('Repay')
   })
 
   it('labels matching target utilization as no change', () => {
