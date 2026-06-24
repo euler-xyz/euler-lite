@@ -1066,7 +1066,7 @@ watchEffect(async () => {
     debtPriceImpact.value = null
     return
   }
-  const impact = (newDebtUsd / oldDebtUsd - 1) * 100
+  const impact = (oldDebtUsd / newDebtUsd - 1) * 100
   debtPriceImpact.value = Number.isFinite(impact) ? impact : null
 })
 const directPriceImpact = computed(() => {
