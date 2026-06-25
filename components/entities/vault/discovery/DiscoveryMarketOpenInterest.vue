@@ -23,6 +23,9 @@ const isLoading = ref(false)
 const hasError = ref(false)
 const collateralExposureUsd = ref<Record<string, Record<string, number>>>({})
 const refreshedAt = ref<string | null>(null)
+const isExpanded = ref(false)
+
+const COLLAPSED_ROW_COUNT = 4
 
 const borrowVaults = computed(() =>
   matrix.columns
@@ -65,6 +68,12 @@ const rows = computed(() =>
     .sort((a, b) => b.totalUsd - a.totalUsd),
 )
 
+const visibleRows = computed(() =>
+  isExpanded.value ? rows.value : rows.value.slice(0, COLLAPSED_ROW_COUNT),
+)
+
+const hiddenRowCount = computed(() => Math.max(0, rows.value.length - visibleRows.value.length))
+
 const formatPercent = (value: number) => `${compactNumber(value, 1, 0)}%`
 
 const barWidth = (value: number) => ({
@@ -73,6 +82,9 @@ const barWidth = (value: number) => ({
 
 const vaultCountLabel = (count: number) => `${count} vault${count === 1 ? '' : 's'}`
 const groupCountLabel = (count: number) => `${count} group${count === 1 ? '' : 's'}`
+const showMoreLabel = computed(() =>
+  isExpanded.value ? 'Show less' : `Show more${hiddenRowCount.value ? ` (${hiddenRowCount.value})` : ''}`,
+)
 
 const loadOpenInterest = async () => {
   if (!chainId.value || !borrowVaults.value.length) return
@@ -142,71 +154,85 @@ watch(
 
     <div
       v-else-if="rows.length"
-      class="grid gap-10 tablet:grid-cols-2"
+      class="flex flex-col gap-12"
     >
-      <div
-        v-for="row in rows"
-        :key="row.vault.address"
-        class="rounded-12 border border-line-subtle bg-surface-secondary p-12"
-        data-id="discovery-open-interest-row"
-        :data-key="getAddress(row.vault.address).toLowerCase()"
-        :data-vault-address="getAddress(row.vault.address).toLowerCase()"
-      >
-        <div class="mb-10 flex min-w-0 items-start justify-between gap-12">
-          <div class="min-w-0">
-            <p class="truncate text-p3 font-medium text-content-primary">
-              {{ row.vault.asset.symbol }}
-            </p>
-            <p
-              class="text-p4 text-content-tertiary"
-              data-id="data-point"
-              :data-key="getAddress(row.vault.address).toLowerCase()"
-              data-field="open-interest-total"
-              :data-value="row.model.rightNodes.borrowed.displayValue"
-            >
-              {{ row.model.rightNodes.borrowed.displayValue }} open interest
-            </p>
+      <div class="grid gap-10 tablet:grid-cols-2">
+        <div
+          v-for="row in visibleRows"
+          :key="row.vault.address"
+          class="rounded-12 border border-line-subtle bg-surface-secondary p-12"
+          data-id="discovery-open-interest-row"
+          :data-key="getAddress(row.vault.address).toLowerCase()"
+          :data-vault-address="getAddress(row.vault.address).toLowerCase()"
+        >
+          <div class="mb-10 flex min-w-0 items-start justify-between gap-12">
+            <div class="min-w-0">
+              <p class="truncate text-p3 font-medium text-content-primary">
+                {{ row.vault.asset.symbol }}
+              </p>
+              <p
+                class="text-p4 text-content-tertiary"
+                data-id="data-point"
+                :data-key="getAddress(row.vault.address).toLowerCase()"
+                data-field="open-interest-total"
+                :data-value="row.model.rightNodes.borrowed.displayValue"
+              >
+                {{ row.model.rightNodes.borrowed.displayValue }} open interest
+              </p>
+            </div>
+            <span class="rounded-full bg-surface px-8 py-4 text-p4 text-content-secondary">
+              {{ groupCountLabel(row.model.collateralNodes.length) }}
+            </span>
           </div>
-          <span class="rounded-full bg-surface px-8 py-4 text-p4 text-content-secondary">
-            {{ groupCountLabel(row.model.collateralNodes.length) }}
-          </span>
-        </div>
 
-        <div class="flex flex-col gap-8">
-          <div
-            v-for="node in row.model.collateralNodes"
-            :key="node.id"
-            class="rounded-8 bg-surface p-10"
-            data-id="data-point"
-            :data-list="`open-interest:${getAddress(row.vault.address).toLowerCase()}`"
-            :data-key="node.id"
-            data-field="open-interest-backing-asset"
-            :data-value="node.label"
-          >
-            <div class="mb-6 flex min-w-0 items-center justify-between gap-8">
-              <div class="flex min-w-0 items-center gap-6">
-                <span class="truncate text-p3 text-content-primary">{{ node.label }}</span>
-                <span
-                  v-if="node.vaultCount > 1"
-                  class="shrink-0 rounded-full bg-accent-500/10 px-6 py-2 text-p5 text-content-accent"
-                >
-                  {{ vaultCountLabel(node.vaultCount) }}
-                </span>
+          <div class="flex flex-col gap-8">
+            <div
+              v-for="node in row.model.collateralNodes"
+              :key="node.id"
+              class="rounded-8 bg-surface p-10"
+              data-id="data-point"
+              :data-list="`open-interest:${getAddress(row.vault.address).toLowerCase()}`"
+              :data-key="node.id"
+              data-field="open-interest-backing-asset"
+              :data-value="node.label"
+            >
+              <div class="mb-6 flex min-w-0 items-center justify-between gap-8">
+                <div class="flex min-w-0 items-center gap-6">
+                  <span class="truncate text-p3 text-content-primary">{{ node.label }}</span>
+                  <span
+                    v-if="node.vaultCount > 1"
+                    class="shrink-0 rounded-full bg-accent-500/10 px-6 py-2 text-p5 text-content-accent"
+                  >
+                    {{ vaultCountLabel(node.vaultCount) }}
+                  </span>
+                </div>
+                <span class="shrink-0 text-p4 text-content-secondary">{{ formatPercent(node.percentage) }}</span>
               </div>
-              <span class="shrink-0 text-p4 text-content-secondary">{{ formatPercent(node.percentage) }}</span>
+              <div class="h-4 overflow-hidden rounded-full bg-surface-secondary">
+                <div
+                  class="h-full rounded-full bg-accent-500"
+                  :style="barWidth(node.percentage)"
+                />
+              </div>
+              <p class="mt-6 text-p4 text-content-tertiary">
+                {{ node.displayValue }}
+              </p>
             </div>
-            <div class="h-4 overflow-hidden rounded-full bg-surface-secondary">
-              <div
-                class="h-full rounded-full bg-accent-500"
-                :style="barWidth(node.percentage)"
-              />
-            </div>
-            <p class="mt-6 text-p4 text-content-tertiary">
-              {{ node.displayValue }}
-            </p>
           </div>
         </div>
       </div>
+
+      <button
+        v-if="rows.length > COLLAPSED_ROW_COUNT"
+        class="mx-auto text-p3 font-medium text-content-accent hover:text-accent-600 transition-colors cursor-pointer"
+        type="button"
+        data-id="discovery-open-interest-show-more"
+        :data-market-id="market.id"
+        :aria-expanded="isExpanded"
+        @click.stop="isExpanded = !isExpanded"
+      >
+        {{ showMoreLabel }}
+      </button>
     </div>
 
     <div
