@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
-import { isVaultBorrowable } from '~/utils/vault/classification'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -10,7 +9,6 @@ const emits = defineEmits<{
 const { vault } = defineProps<{ vault: EVault, desktopOverview?: boolean }>()
 
 const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
-const isBorrowable = computed(() => isVaultBorrowable(vault))
 </script>
 
 <template>
@@ -30,12 +28,6 @@ const isBorrowable = computed(() => isVaultBorrowable(vault))
     />
 
     <VaultOverviewBlockRiskParameters
-      :vault="vault"
-      :default-open="false"
-    />
-
-    <LazyVaultOverviewBlockOpenInterest
-      v-if="isBorrowable"
       :vault="vault"
       :default-open="false"
     />

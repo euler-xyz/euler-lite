@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildOpenInterestModel,
   findOpenInterestMapForVault,
+  groupCollateralOpenInterestByBackingAsset,
   summarizeCollateralOpenInterest,
 } from '~/utils/vault/open-interest'
 
@@ -30,7 +31,32 @@ describe('open interest utilities', () => {
     expect(summarized).toEqual([
       { address: 'b', label: 'B', valueUsd: 50 },
       { address: 'c', label: 'C', valueUsd: 30 },
-      { address: 'other', label: 'Other', valueUsd: 30 },
+      { address: 'other', label: 'Other', valueUsd: 30, vaultCount: 2 },
+    ])
+  })
+
+  it('groups duplicate collateral vaults by backing asset', () => {
+    const grouped = groupCollateralOpenInterestByBackingAsset([
+      { address: '0x0000000000000000000000000000000000000001', backingAssetAddress: '0x000000000000000000000000000000000000000a', label: 'USDC', valueUsd: 10 },
+      { address: '0x0000000000000000000000000000000000000002', backingAssetAddress: '0x000000000000000000000000000000000000000a', label: 'USDC', valueUsd: 15 },
+      { address: '0x0000000000000000000000000000000000000003', backingAssetAddress: '0x000000000000000000000000000000000000000b', label: 'WETH', valueUsd: 5 },
+    ])
+
+    expect(grouped).toEqual([
+      {
+        address: '0x000000000000000000000000000000000000000a',
+        backingAssetAddress: '0x000000000000000000000000000000000000000a',
+        label: 'USDC',
+        valueUsd: 25,
+        vaultCount: 2,
+      },
+      {
+        address: '0x000000000000000000000000000000000000000b',
+        backingAssetAddress: '0x000000000000000000000000000000000000000b',
+        label: 'WETH',
+        valueUsd: 5,
+        vaultCount: 1,
+      },
     ])
   })
 

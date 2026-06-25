@@ -178,12 +178,13 @@ const getMatrixView = (marketId: string): MatrixViewId =>
 
 const getMatrixVariant = (marketId: string): MatrixVariant => {
   const view = getMatrixView(marketId)
+  if (view === 'open-interest') return 'open-interest'
   return isAttributeMatrixView(view) ? view : 'pairs'
 }
 
 const getDotMetric = (marketId: string): DotMetric => {
   const view = getMatrixView(marketId)
-  if (isAttributeMatrixView(view)) return 'net-apy' // unused for attribute matrices
+  if (isAttributeMatrixView(view) || view === 'open-interest') return 'net-apy' // unused for non-pair matrices
   return view
 }
 
@@ -626,6 +627,13 @@ onMounted(() => {
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-cell="(col: string, lia: string) => onCellClick(market.id, col, lia)"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
+            />
+
+            <!-- Matrix View: Open interest by borrow vault -->
+            <DiscoveryMarketOpenInterest
+              v-else-if="getMatrixVariant(market.id) === 'open-interest'"
+              :market="market"
+              :matrix="matrix"
             />
 
             <!-- Matrix View: Config / Stats attribute matrix -->
