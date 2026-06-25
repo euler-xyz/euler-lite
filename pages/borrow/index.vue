@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
@@ -15,8 +15,31 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
-import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import {
+  areTokenAddressesCorrelatedByTags,
+  getSupportedTokenCategoryOptions,
+  normalizeTokenCategoryTags,
+  toTokenCategoryFilterValue,
+  tokenAddressMatchesCategoryFilter,
+} from '~/utils/token-categories'
+import { formatCompactUsdValue } from '~/utils/string-utils'
 import { getBorrowPairSearchAddresses } from '~/utils/borrow-pair'
+import type { SelectOption, SelectQuickFilter } from '~/components/ui/modals/select.types'
+
+type AssetFilterOption = SelectOption
+type AssetFilterOptions = { options: AssetFilterOption[], quickFilters: SelectQuickFilter[] }
+
+const CATEGORY_FILTER_LABELS: Record<string, string> = {
+  eth: 'ETH',
+  btc: 'BTC',
+  usd: 'USD',
+}
+
+const CATEGORY_FILTER_ORDER = ['eth', 'btc', 'usd']
+const getCategoryFilterOrder = (tag: string): number => {
+  const index = CATEGORY_FILTER_ORDER.indexOf(tag)
+  return index === -1 ? CATEGORY_FILTER_ORDER.length : index
+}
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -99,8 +122,6 @@ const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
 const { entities, isReady: labelsReady } = useEulerLabels()
-const isLoading = computed(() => isEVaultUpdating.value || isEscrowUpdating.value || isTokenListLoading.value || !labelsReady.value || !isPricesReady.value)
-const { isSlow } = useSlowLoading(isLoading)
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
 
@@ -139,6 +160,15 @@ const selectedMarkets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
+const MIN_BORROW_LIQUIDITY_USD = 1000
+const defaultBorrowLiquidityFilter = {
+  id: 'borrow-min-liquidity-usd',
+  metric: 'liquidity',
+  operator: 'gt',
+  value: MIN_BORROW_LIQUIDITY_USD,
+  label: `Avail. liquidity > ${formatCompactUsdValue(MIN_BORROW_LIQUIDITY_USD)}`,
+  includeWhenValueUnavailable: true,
+} as const
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
@@ -157,11 +187,33 @@ watch(sortBy, (newSortBy) => {
 })
 
 // Cache for USD values used in sorting (keyed by pair identifier: collateral+borrow address)
-const pairLiquidityUsd = ref<Map<string, number>>(new Map())
-const pairBorrowedUsd = ref<Map<string, number>>(new Map())
+const pairLiquidityUsd = ref<Map<string, number | undefined>>(new Map())
+const pairBorrowedUsd = ref<Map<string, number | undefined>>(new Map())
+let priceLoadId = 0
 
 // Helper to create a unique key for a borrow pair
 const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
+
+const areBorrowPriceValuesReady = computed(() => {
+  if (!isPricesReady.value) return false
+
+  const liquidityValues = pairLiquidityUsd.value
+  const borrowedValues = pairBorrowedUsd.value
+
+  return activeBorrowList.value.every((pair) => {
+    const key = getPairKey(pair)
+    return liquidityValues.has(key) && borrowedValues.has(key)
+  })
+})
+
+const isLoading = computed(() =>
+  isEVaultUpdating.value
+  || isEscrowUpdating.value
+  || isTokenListLoading.value
+  || !labelsReady.value
+  || !areBorrowPriceValuesReady.value,
+)
+const { isSlow } = useSlowLoading(isLoading)
 
 const getPairSortName = (pair: AnyBorrowVaultPair): string =>
   `${pair.collateral.asset.symbol}/${pair.borrow.asset.symbol}`
@@ -181,6 +233,7 @@ const comparePairNameAsc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): numbe
 // this is the most expensive price-fetch watcher in the app because
 // pair count is combinatorial in collaterals × borrow vaults.
 const fetchBorrowPrices = useDebounceFn(async () => {
+  const loadId = ++priceLoadId
   const pairs = borrowList.value
   if (!pairs.length) {
     isPricesReady.value = true
@@ -188,24 +241,31 @@ const fetchBorrowPrices = useDebounceFn(async () => {
   }
 
   try {
-    const liquidityValues = new Map<string, number>()
-    const borrowedValues = new Map<string, number>()
+    const liquidityValues = new Map<string, number | undefined>()
+    const borrowedValues = new Map<string, number | undefined>()
     await Promise.all(
       pairs.map(async (pair) => {
         const key = getPairKey(pair)
         const [liquidity, borrowed] = await Promise.all([
-          getAssetUsdValueOrZero(getVaultAvailableLiquidity(pair.borrow), pair.borrow, 'on-chain'),
-          getAssetUsdValueOrZero(pair.borrow.totalBorrowed, pair.borrow, 'on-chain'),
+          Promise.resolve()
+            .then(() => getAssetUsdValue(getVaultAvailableLiquidity(pair.borrow), pair.borrow, 'on-chain'))
+            .catch(() => undefined),
+          Promise.resolve()
+            .then(() => getAssetUsdValue(pair.borrow.totalBorrowed, pair.borrow, 'on-chain'))
+            .catch(() => undefined),
         ])
         liquidityValues.set(key, liquidity)
         borrowedValues.set(key, borrowed)
       }),
     )
+    if (loadId !== priceLoadId) return
     pairLiquidityUsd.value = liquidityValues
     pairBorrowedUsd.value = borrowedValues
   }
   finally {
-    isPricesReady.value = true
+    if (loadId === priceLoadId) {
+      isPricesReady.value = true
+    }
   }
 }, DEBOUNCE_LIST_PRICE_FETCH_MS)
 
@@ -273,8 +333,8 @@ const {
   (pair, metric) => {
     const key = getPairKey(pair)
     switch (metric) {
-      case 'liquidity': return pairLiquidityUsd.value.get(key) ?? 0
-      case 'totalBorrowed': return pairBorrowedUsd.value.get(key) ?? 0
+      case 'liquidity': return pairLiquidityUsd.value.get(key)
+      case 'totalBorrowed': return pairBorrowedUsd.value.get(key)
       case 'supplyApy': return getPairSupplyApy(pair)
       case 'borrowApy': return getPairBorrowApy(pair)
       case 'netApy': return getNetApy(pair)
@@ -285,6 +345,7 @@ const {
       default: return 0
     }
   },
+  [defaultBorrowLiquidityFilter],
 )
 
 watch(chainId, (newChainId, oldChainId) => {
@@ -298,30 +359,58 @@ watch(chainId, (newChainId, oldChainId) => {
   }
 })
 
-const collateralAssetOptions = computed(() => {
-  return activeBorrowList.value
-    .filter((item, idx, self) => idx === self.findIndex(t => t.collateral.asset.address === item.collateral.asset.address))
-    .map(pair => ({
-      label: pair.collateral.asset.symbol,
-      value: pair.collateral.asset.address,
-      icon: getAssetLogoUrl(pair.collateral.asset.address, pair.collateral.asset.symbol),
+const buildAssetFilterOptions = (
+  assets: { address: string, symbol: string }[],
+): AssetFilterOptions => {
+  const seenAssets = new Set<string>()
+  const availableCategoryTags = new Set<string>()
+  const assetOptions: AssetFilterOption[] = []
+
+  for (const asset of assets) {
+    const categoryTags = normalizeTokenCategoryTags(getTokenCategoryTags(asset.address))
+
+    for (const tag of categoryTags) {
+      availableCategoryTags.add(tag)
+    }
+
+    if (seenAssets.has(asset.address)) continue
+    seenAssets.add(asset.address)
+    assetOptions.push({
+      label: asset.symbol,
+      value: asset.address,
+      icon: getAssetLogoUrl(asset.address, asset.symbol),
+      quickFilterValues: categoryTags.map(toTokenCategoryFilterValue),
+    })
+  }
+
+  const quickFilters = getSupportedTokenCategoryOptions()
+    .filter(({ tag }) => availableCategoryTags.has(tag))
+    .sort((a, b) => getCategoryFilterOrder(a.tag) - getCategoryFilterOrder(b.tag) || a.label.localeCompare(b.label))
+    .map(({ tag, label }) => ({
+      label: CATEGORY_FILTER_LABELS[tag] ?? label,
+      value: toTokenCategoryFilterValue(tag),
     }))
-    .reduce((prev, curr) =>
-      prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
-    )
+
+  return { options: assetOptions, quickFilters }
+}
+
+const matchesAssetFilterSelection = (
+  assetAddress: string,
+  selected: readonly string[],
+): boolean => {
+  if (!selected.length) return true
+
+  return selected.some(value =>
+    value === assetAddress || tokenAddressMatchesCategoryFilter(assetAddress, value, getTokenCategoryTags),
+  )
+}
+
+const collateralAssetOptions = computed(() => {
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.collateral.asset))
 })
 
 const debtAssetOptions = computed(() => {
-  return activeBorrowList.value
-    .filter((item, idx, self) => idx === self.findIndex(t => t.borrow.asset.address === item.borrow.asset.address))
-    .map(pair => ({
-      label: pair.borrow.asset.symbol,
-      value: pair.borrow.asset.address,
-      icon: getAssetLogoUrl(pair.borrow.asset.address, pair.borrow.asset.symbol),
-    }))
-    .reduce((prev, curr) =>
-      prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
-    )
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.borrow.asset))
 })
 
 const marketOptions = computed(() => {
@@ -358,8 +447,8 @@ const filteredBorrowList = computed(() => {
     .filter(matchesSearch)
     .filter(pair =>
       selectedCollateral.value.length || selectedDebt.value.length
-        ? ((!selectedCollateral.value.length || selectedCollateral.value.includes(pair.collateral.asset.address))
-          && (!selectedDebt.value.length || selectedDebt.value.includes(pair.borrow.asset.address)))
+        ? (matchesAssetFilterSelection(pair.collateral.asset.address, selectedCollateral.value)
+          && matchesAssetFilterSelection(pair.borrow.asset.address, selectedDebt.value))
         : true,
     )
     .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(pair.collateral.address).name) : true)
@@ -544,7 +633,8 @@ const sortedBorrowList = computed(() => {
           :key="`collateral-${chainId}`"
           v-model="selectedCollateral"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="collateralAssetOptions"
+          :options="collateralAssetOptions.options"
+          :quick-filters="collateralAssetOptions.quickFilters"
           placeholder="Collateral asset"
           title="Collateral asset"
           modal-input-placeholder="Search asset"
@@ -555,7 +645,8 @@ const sortedBorrowList = computed(() => {
           :key="`debt-${chainId}`"
           v-model="selectedDebt"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="debtAssetOptions"
+          :options="debtAssetOptions.options"
+          :quick-filters="debtAssetOptions.quickFilters"
           placeholder="Debt asset"
           title="Debt asset"
           modal-input-placeholder="Search asset"

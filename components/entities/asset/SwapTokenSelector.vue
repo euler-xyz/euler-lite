@@ -277,38 +277,51 @@ const handleSelectCustomToken = () => {
             <div class="text-h5 flex items-center">
               {{ opt.asset.symbol }}
               <template v-if="shouldShowAddress(opt.asset.address)">
-                <span
-                  class="ml-6 text-content-tertiary text-p5 font-normal"
-                  :title="opt.asset.address"
+                <UiHoverPreviewTooltip
+                  title="Token address"
+                  :text="opt.asset.address"
+                  placement="top-start"
                 >
-                  {{ truncate(opt.asset.address) }}
-                </span>
-                <button
-                  type="button"
-                  class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                  :aria-label="`Copy ${opt.asset.symbol} address`"
+                  <span class="ml-6 text-content-tertiary text-p5 font-normal">
+                    {{ truncate(opt.asset.address) }}
+                  </span>
+                </UiHoverPreviewTooltip>
+                <UiHoverPreviewTooltip
                   :title="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
-                  @click.stop.prevent="copyAssetAddress(opt.asset.address)"
+                  :text="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
+                  placement="top-start"
                 >
-                  <SvgIcon
-                    class="!w-14 !h-14"
-                    :name="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'check' : 'copy'"
-                  />
-                </button>
-                <NuxtLink
-                  :to="getExplorerAddressLink(opt.asset.address)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                  :aria-label="`Open ${opt.asset.symbol} address in block explorer`"
+                  <button
+                    type="button"
+                    class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                    :aria-label="`Copy ${opt.asset.symbol} address`"
+                    @click.stop.prevent="copyAssetAddress(opt.asset.address)"
+                  >
+                    <SvgIcon
+                      class="!w-14 !h-14"
+                      :name="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'check' : 'copy'"
+                    />
+                  </button>
+                </UiHoverPreviewTooltip>
+                <UiHoverPreviewTooltip
                   title="Open in block explorer"
-                  @click.stop
+                  text="Open in block explorer"
+                  placement="top-start"
                 >
-                  <SvgIcon
-                    class="!w-14 !h-14"
-                    name="arrow-top-right"
-                  />
-                </NuxtLink>
+                  <NuxtLink
+                    :to="getExplorerAddressLink(opt.asset.address)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                    :aria-label="`Open ${opt.asset.symbol} address in block explorer`"
+                    @click.stop
+                  >
+                    <SvgIcon
+                      class="!w-14 !h-14"
+                      name="arrow-top-right"
+                    />
+                  </NuxtLink>
+                </UiHoverPreviewTooltip>
               </template>
               <span
                 v-if="rowGeo(opt.asset.address).showChip"
@@ -371,38 +384,51 @@ const handleSelectCustomToken = () => {
             <div class="text-h5 flex items-center">
               {{ customToken.symbol }}
               <template v-if="shouldShowAddress(customToken.address)">
-                <span
-                  class="ml-6 text-content-tertiary text-p5 font-normal"
-                  :title="customToken.address"
+                <UiHoverPreviewTooltip
+                  title="Token address"
+                  :text="customToken.address"
+                  placement="top-start"
                 >
-                  {{ truncate(customToken.address) }}
-                </span>
-                <button
-                  type="button"
-                  class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                  :aria-label="`Copy ${customToken.symbol} address`"
+                  <span class="ml-6 text-content-tertiary text-p5 font-normal">
+                    {{ truncate(customToken.address) }}
+                  </span>
+                </UiHoverPreviewTooltip>
+                <UiHoverPreviewTooltip
                   :title="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
-                  @click.stop.prevent="copyAssetAddress(customToken.address)"
+                  :text="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
+                  placement="top-start"
                 >
-                  <SvgIcon
-                    class="!w-14 !h-14"
-                    :name="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'check' : 'copy'"
-                  />
-                </button>
-                <NuxtLink
-                  :to="getExplorerAddressLink(customToken.address)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                  :aria-label="`Open ${customToken.symbol} address in block explorer`"
+                  <button
+                    type="button"
+                    class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                    :aria-label="`Copy ${customToken.symbol} address`"
+                    @click.stop.prevent="copyAssetAddress(customToken.address)"
+                  >
+                    <SvgIcon
+                      class="!w-14 !h-14"
+                      :name="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'check' : 'copy'"
+                    />
+                  </button>
+                </UiHoverPreviewTooltip>
+                <UiHoverPreviewTooltip
                   title="Open in block explorer"
-                  @click.stop
+                  text="Open in block explorer"
+                  placement="top-start"
                 >
-                  <SvgIcon
-                    class="!w-14 !h-14"
-                    name="arrow-top-right"
-                  />
-                </NuxtLink>
+                  <NuxtLink
+                    :to="getExplorerAddressLink(customToken.address)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                    :aria-label="`Open ${customToken.symbol} address in block explorer`"
+                    @click.stop
+                  >
+                    <SvgIcon
+                      class="!w-14 !h-14"
+                      name="arrow-top-right"
+                    />
+                  </NuxtLink>
+                </UiHoverPreviewTooltip>
               </template>
             </div>
           </div>

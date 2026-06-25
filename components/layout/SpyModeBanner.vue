@@ -13,7 +13,14 @@ const { isSpyMode, spyShortAddress, spyAddress, clearSpyMode } = useSpyMode()
         class="!w-16 !h-16"
       />
       <span class="text-p3">
-        Viewing as <span :title="spyAddress">{{ spyShortAddress }}</span>
+        Viewing as
+        <UiHoverPreviewTooltip
+          title="Spy address"
+          :text="spyAddress"
+          placement="top-start"
+        >
+          <span>{{ spyShortAddress }}</span>
+        </UiHoverPreviewTooltip>
       </span>
     </div>
     <button

@@ -19,6 +19,9 @@ import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
+const emit = defineEmits<{
+  'market-click': []
+}>()
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
@@ -196,6 +199,7 @@ const supplyCapPercentageDisplay = computed(() => {
             v-if="marketProductKey"
             :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
             class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
+            @click="emit('market-click')"
           >
             {{ marketProductName }}
           </NuxtLink>

@@ -78,7 +78,7 @@ const cellDataValue = (cell: AttributeCell): string | number =>
     :data-column-count="attributeColumns.length"
   >
     <div
-      class="relative max-h-[60vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
+      class="relative isolate max-h-[60vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-separate border-spacing-0">
         <thead class="sticky top-0 z-30 bg-surface">
@@ -101,7 +101,15 @@ const cellDataValue = (cell: AttributeCell): string | number =>
               :data-field="col.attribute.id"
               :class="isAttributeColumnHighlighted(col.attribute.id) ? '!bg-white/[0.06] text-content-primary' : ''"
             >
-              <span :title="col.attribute.tooltip">{{ col.attribute.label }}</span>
+              <span class="inline-flex items-center justify-center gap-4">
+                <span>{{ col.attribute.label }}</span>
+                <UiHoverPreviewTooltip
+                  v-if="col.attribute.tooltip"
+                  :title="col.attribute.label"
+                  :text="col.attribute.tooltip"
+                  placement="top-start"
+                />
+              </span>
             </th>
           </tr>
         </thead>
@@ -159,7 +167,6 @@ const cellDataValue = (cell: AttributeCell): string | number =>
               <template v-if="col.cells[vaultIdx].kind === 'capProgress'">
                 <div
                   class="inline-flex items-center justify-center gap-6 text-p5 text-content-secondary whitespace-nowrap"
-                  :title="col.cells[vaultIdx].hint"
                 >
                   <span>{{ col.cells[vaultIdx].display }}</span>
                   <UiRadialProgress
@@ -167,6 +174,12 @@ const cellDataValue = (cell: AttributeCell): string | number =>
                     :value="col.cells[vaultIdx].capPercent!"
                     :max="100"
                     class="shrink-0"
+                  />
+                  <UiHoverPreviewTooltip
+                    v-if="col.cells[vaultIdx].hint"
+                    :title="col.attribute.label"
+                    :text="col.cells[vaultIdx].hint"
+                    placement="top-start"
                   />
                 </div>
               </template>
@@ -229,9 +242,16 @@ const cellDataValue = (cell: AttributeCell): string | number =>
               <!-- text (default) -->
               <template v-else>
                 <span
-                  class="text-p5 text-content-secondary whitespace-nowrap"
-                  :title="col.cells[vaultIdx].hint"
-                >{{ col.cells[vaultIdx].display }}</span>
+                  class="inline-flex items-center justify-center gap-4 text-p5 text-content-secondary whitespace-nowrap"
+                >
+                  <span>{{ col.cells[vaultIdx].display }}</span>
+                  <UiHoverPreviewTooltip
+                    v-if="col.cells[vaultIdx].hint"
+                    :title="col.attribute.label"
+                    :text="col.cells[vaultIdx].hint"
+                    placement="top-start"
+                  />
+                </span>
               </template>
             </td>
           </tr>

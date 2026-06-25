@@ -13,4 +13,5 @@ export interface CustomFilter {
   operator: 'gt' | 'lt'
   value: number
   label: string
+  includeWhenValueUnavailable?: boolean
 }
