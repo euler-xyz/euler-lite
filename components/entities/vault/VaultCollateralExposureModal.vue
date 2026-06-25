@@ -3,7 +3,6 @@ import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber } from '~/utils/string-utils'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { formatExposureVaultCount } from '~/utils/vault/exposure-groups'
 
 const emits = defineEmits(['close'])
 const router = useRouter()
@@ -19,7 +18,7 @@ const allCollateralPairs = computed(() =>
 )
 
 const collateralGroups = computed(() => getCollateralExposureGroups(allCollateralPairs.value))
-const hasMultipleCollateralGroups = computed(() => collateralGroups.value.length > 1)
+const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
 
 const formatTimeRemaining = (seconds: bigint): string => {
   const days = Number(seconds) / 86400
@@ -54,89 +53,56 @@ const onCollateralClick = (address: string) => {
         Make sure you're comfortable accepting the backing assets and collateral vaults listed below before supplying.
       </p>
       <div
-        v-for="group in collateralGroups"
-        :key="group.asset.address"
-        :class="hasMultipleCollateralGroups
-          ? 'overflow-hidden rounded-12 border border-line-subtle bg-surface text-content-primary'
-          : ''"
+        v-for="pair in collateralPairs"
+        :key="pair.collateral.address"
+        class="cursor-pointer rounded-12 border border-line-subtle bg-surface p-16 text-content-primary transition-colors hover:bg-card-hover"
+        @click="onCollateralClick(pair.collateral.address)"
       >
-        <div
-          v-if="hasMultipleCollateralGroups"
-          class="flex items-center justify-between gap-12 border-b border-line-subtle px-16 py-12"
-        >
-          <div class="flex min-w-0 items-center gap-10">
-            <AssetAvatar
-              :asset="group.asset"
-              size="36"
-            />
-            <div class="min-w-0">
-              <p class="truncate text-p2 text-content-primary">
-                {{ group.asset.symbol }}
-              </p>
-              <p class="text-p4 text-content-tertiary">
-                {{ formatExposureVaultCount(group.vaultCount) }}
-              </p>
-            </div>
-          </div>
+        <div class="min-w-0">
+          <VaultLabelsAndAssets
+            class="min-w-0"
+            :vault="pair.collateral"
+            :assets="[pair.collateral.asset]"
+          />
+          <VaultTypeBadges
+            class="mt-8 w-full justify-end"
+            :vault="pair.collateral"
+            summary-only
+            @click.stop.prevent
+          />
         </div>
-
-        <div :class="hasMultipleCollateralGroups ? 'divide-y divide-line-subtle' : 'flex flex-col gap-12'">
-          <div
-            v-for="pair in group.items"
-            :key="pair.collateral.address"
-            class="cursor-pointer transition-colors hover:bg-card-hover"
-            :class="hasMultipleCollateralGroups
-              ? 'px-16 py-12'
-              : 'rounded-12 border border-line-subtle bg-surface p-16'"
-            @click="onCollateralClick(pair.collateral.address)"
-          >
-            <div class="min-w-0">
-              <VaultLabelsAndAssets
-                class="min-w-0"
-                :vault="pair.collateral"
-                :assets="[pair.collateral.asset]"
-              />
-              <VaultTypeBadges
-                class="mt-8 w-full justify-end"
-                :vault="pair.collateral"
-                summary-only
-                @click.stop.prevent
-              />
-            </div>
-            <div class="flex flex-col gap-12 pt-12">
-              <VaultOverviewLabelValue
-                label="Max LTV"
-                orientation="horizontal"
-                :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
-              />
-              <VaultOverviewLabelValue orientation="horizontal">
-                <template #label>
-                  <span class="flex items-center gap-4">
-                    Liquidation LTV
-                    <span
-                      v-if="pair.ltv.isLiquidationLTVRamping"
-                      @click.stop.prevent
-                    >
-                      <UiFootnote
-                        title="LTV Ramping"
-                        :text="`The Liquidation LTV for this collateral is currently being reduced. Target Liquidation LTV: ${formatNumber(ltvToPercent(pair.ltv.liquidationLTV), 2)}%. Time remaining: ${formatTimeRemaining(pair.ltv.rampTimeRemaining)}.`"
-                        class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
-                      />
-                    </span>
-                  </span>
-                </template>
-                <div class="flex items-center gap-4">
-                  <SvgIcon
-                    v-if="pair.ltv.isLiquidationLTVRamping"
-                    name="arrow-top-right"
-                    class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180"
-                    title="Liquidation LTV ramping down"
+        <div class="flex flex-col gap-12 pt-12">
+          <VaultOverviewLabelValue
+            label="Max LTV"
+            orientation="horizontal"
+            :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
+          />
+          <VaultOverviewLabelValue orientation="horizontal">
+            <template #label>
+              <span class="flex items-center gap-4">
+                Liquidation LTV
+                <span
+                  v-if="pair.ltv.isLiquidationLTVRamping"
+                  @click.stop.prevent
+                >
+                  <UiFootnote
+                    title="LTV Ramping"
+                    :text="`The Liquidation LTV for this collateral is currently being reduced. Target Liquidation LTV: ${formatNumber(ltvToPercent(pair.ltv.liquidationLTV), 2)}%. Time remaining: ${formatTimeRemaining(pair.ltv.rampTimeRemaining)}.`"
+                    class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
                   />
-                  <span>{{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}</span>
-                </div>
-              </VaultOverviewLabelValue>
+                </span>
+              </span>
+            </template>
+            <div class="flex items-center gap-4">
+              <SvgIcon
+                v-if="pair.ltv.isLiquidationLTVRamping"
+                name="arrow-top-right"
+                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180"
+                title="Liquidation LTV ramping down"
+              />
+              <span>{{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}</span>
             </div>
-          </div>
+          </VaultOverviewLabelValue>
         </div>
       </div>
     </div>

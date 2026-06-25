@@ -5,7 +5,6 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
 import { formatNumber } from '~/utils/string-utils'
-import { formatExposureVaultCount } from '~/utils/vault/exposure-groups'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -50,12 +49,16 @@ const allCollateralPairs = computed(() =>
 )
 
 const collateralGroups = computed(() => getCollateralExposureGroups(allCollateralPairs.value))
-const hasMultipleCollateralGroups = computed(() => collateralGroups.value.length > 1)
 const visibleCollateralGroups = computed(() =>
   isExpanded.value ? collateralGroups.value : collateralGroups.value.slice(0, COLLAPSED_GROUP_COUNT),
 )
-const hiddenGroupCount = computed(() =>
-  Math.max(0, collateralGroups.value.length - visibleCollateralGroups.value.length),
+const visibleCollateralPairs = computed(() =>
+  visibleCollateralGroups.value.flatMap(group => group.items),
+)
+const hiddenCollateralPairCount = computed(() =>
+  collateralGroups.value
+    .slice(visibleCollateralGroups.value.length)
+    .reduce((count, group) => count + group.items.length, 0),
 )
 const toggleExpanded = () => {
   isExpanded.value = !isExpanded.value
@@ -78,88 +81,55 @@ const toggleExpanded = () => {
 
     <div class="flex flex-col gap-12">
       <div
-        v-for="group in visibleCollateralGroups"
-        :key="group.asset.address"
-        :class="hasMultipleCollateralGroups
-          ? 'overflow-hidden rounded-12 border border-line-subtle bg-surface'
-          : ''"
+        v-for="pair in visibleCollateralPairs"
+        :key="pair.collateral.address"
+        class="cursor-pointer rounded-12 border border-line-subtle bg-surface p-16 shadow-sm transition-colors hover:bg-card-hover"
+        @click="onCollateralClick(pair.collateral.address)"
       >
-        <div
-          v-if="hasMultipleCollateralGroups"
-          class="flex items-center justify-between gap-12 border-b border-line-subtle px-16 py-12"
-        >
-          <div class="flex min-w-0 items-center gap-10">
-            <AssetAvatar
-              :asset="group.asset"
-              size="36"
-            />
-            <div class="min-w-0">
-              <p class="truncate text-p2 text-content-primary">
-                {{ group.asset.symbol }}
-              </p>
-              <p class="text-p4 text-content-tertiary">
-                {{ formatExposureVaultCount(group.vaultCount) }}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div :class="hasMultipleCollateralGroups ? 'divide-y divide-line-subtle' : 'flex flex-col gap-12'">
-          <div
-            v-for="pair in group.items"
-            :key="pair.collateral.address"
-            class="cursor-pointer transition-colors hover:bg-card-hover"
-            :class="hasMultipleCollateralGroups
-              ? 'px-16 py-12'
-              : 'rounded-12 border border-line-subtle bg-surface p-16 shadow-sm'"
-            @click="onCollateralClick(pair.collateral.address)"
+        <VaultLabelsAndAssets
+          :vault="pair.collateral"
+          :assets="[pair.collateral.asset]"
+        />
+        <div class="mt-12 grid grid-cols-1 gap-12 sm:grid-cols-2">
+          <VaultOverviewLabelValue
+            label="Max LTV"
+            orientation="horizontal"
+            :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
+          />
+          <VaultOverviewLabelValue
+            orientation="horizontal"
           >
-            <VaultLabelsAndAssets
-              :vault="pair.collateral"
-              :assets="[pair.collateral.asset]"
-            />
-            <div class="mt-12 grid grid-cols-1 gap-12 sm:grid-cols-2">
-              <VaultOverviewLabelValue
-                label="Max LTV"
-                orientation="horizontal"
-                :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
-              />
-              <VaultOverviewLabelValue
-                orientation="horizontal"
+            <template #label>
+              <span class="flex items-center gap-4">
+                Liquidation LTV
+                <UiModalPreviewTrigger
+                  v-if="pair.ltv.isLiquidationLTVRamping"
+                  :component="VaultRampDownModal"
+                  :modal-data="() => getRampDownModalData(pair.ltv)"
+                  aria-label="Show liquidation LTV ramp-down details"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
+              </span>
+            </template>
+            <span class="flex items-center gap-4">
+              <UiModalPreviewTrigger
+                v-if="pair.ltv.isLiquidationLTVRamping"
+                :component="VaultRampDownModal"
+                :modal-data="() => getRampDownModalData(pair.ltv)"
+                aria-label="Show liquidation LTV ramp-down details"
               >
-                <template #label>
-                  <span class="flex items-center gap-4">
-                    Liquidation LTV
-                    <UiModalPreviewTrigger
-                      v-if="pair.ltv.isLiquidationLTVRamping"
-                      :component="VaultRampDownModal"
-                      :modal-data="() => getRampDownModalData(pair.ltv)"
-                      aria-label="Show liquidation LTV ramp-down details"
-                    >
-                      <SvgIcon
-                        class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                        name="info-circle"
-                      />
-                    </UiModalPreviewTrigger>
-                  </span>
-                </template>
-                <span class="flex items-center gap-4">
-                  <UiModalPreviewTrigger
-                    v-if="pair.ltv.isLiquidationLTVRamping"
-                    :component="VaultRampDownModal"
-                    :modal-data="() => getRampDownModalData(pair.ltv)"
-                    aria-label="Show liquidation LTV ramp-down details"
-                  >
-                    <SvgIcon
-                      name="arrow-top-right"
-                      class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-                    />
-                  </UiModalPreviewTrigger>
-                  {{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}
-                </span>
-              </VaultOverviewLabelValue>
-            </div>
-          </div>
+                <SvgIcon
+                  name="arrow-top-right"
+                  class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+                />
+              </UiModalPreviewTrigger>
+              {{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}
+            </span>
+          </VaultOverviewLabelValue>
         </div>
       </div>
 
@@ -169,7 +139,7 @@ const toggleExpanded = () => {
         class="self-center text-p4 font-medium text-content-accent transition-colors hover:text-accent-600"
         @click="toggleExpanded"
       >
-        {{ isExpanded ? 'Show less' : `Show more (${hiddenGroupCount})` }}
+        {{ isExpanded ? 'Show less' : `Show more (${hiddenCollateralPairCount})` }}
       </button>
     </div>
   </VaultOverviewAccordionSection>
