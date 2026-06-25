@@ -94,11 +94,11 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-6 rounded-8 border border-line-default bg-surface-elevated px-12 py-8 text-p3 text-content-primary hover:border-line-emphasis hover:text-accent-600 transition-colors"
               >
+                {{ link.label }}
                 <UiIcon
-                  name="globe"
+                  name="arrow-top-right"
                   class="!h-16 !w-16"
                 />
-                {{ link.label }}
               </a>
             </div>
           </div>
