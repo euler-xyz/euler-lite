@@ -28,7 +28,6 @@ const { getChartColors, isDark } = useThemeColors()
 const isLoading = ref(false)
 const hasError = ref(false)
 const collateralExposureUsd = ref<Record<string, Record<string, number>>>({})
-const refreshedAt = ref<string | null>(null)
 const chartData = shallowRef<ChartData<'doughnut', number[], string> | null>(null)
 const chartOptions = shallowRef<ChartOptions<'doughnut'> | null>(null)
 
@@ -150,12 +149,10 @@ const loadOpenInterest = async () => {
     const query = `chainId=${encodeURIComponent(String(chainId.value))}`
     const response = await $fetch<OpenInterestCollateralMapResponse>(`/api/v3/evk/vaults/open-interest/by-collateral?${query}`)
     collateralExposureUsd.value = response.data ?? {}
-    refreshedAt.value = response.meta?.refreshedAt ?? response.meta?.calculationTimestamp ?? null
   }
   catch {
     hasError.value = true
     collateralExposureUsd.value = {}
-    refreshedAt.value = null
   }
   finally {
     isLoading.value = false
@@ -228,12 +225,6 @@ watch([openInterestModel, isDark], () => {
           <div class="min-w-0">
             <p class="text-p3 font-medium text-content-primary">
               Borrow demand by backing asset
-            </p>
-            <p
-              v-if="refreshedAt"
-              class="text-p4 text-content-tertiary"
-            >
-              Updated {{ new Date(refreshedAt).toLocaleString() }}
             </p>
           </div>
         </div>
