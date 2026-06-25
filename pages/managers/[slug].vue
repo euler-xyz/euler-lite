@@ -13,7 +13,6 @@ const route = useRoute()
 const slug = computed(() => route.params.slug as string)
 const {
   entity,
-  productEntries,
   managedMarkets,
   earnVaults,
   isLoading,
@@ -83,46 +82,26 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
             >
               No profile description is available yet.
             </p>
+            <div
+              v-if="socialLinks.length"
+              class="mt-16 flex flex-wrap gap-8"
+            >
+              <a
+                v-for="link in socialLinks"
+                :key="link.label"
+                :href="link.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-6 rounded-8 border border-line-default bg-surface-elevated px-12 py-8 text-p3 text-content-primary hover:border-line-emphasis hover:text-accent-600 transition-colors"
+              >
+                <UiIcon
+                  name="globe"
+                  class="!h-16 !w-16"
+                />
+                {{ link.label }}
+              </a>
+            </div>
           </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
-          <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
-            <p class="text-p4 uppercase text-content-tertiary">
-              Products
-            </p>
-            <p class="mt-4 text-h3 text-content-primary">
-              {{ productEntries.length }}
-            </p>
-          </div>
-          <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
-            <p class="text-p4 uppercase text-content-tertiary">
-              Markets
-            </p>
-            <p class="mt-4 text-h3 text-content-primary">
-              {{ managedMarkets.length }}
-            </p>
-          </div>
-        </div>
-
-        <div
-          v-if="socialLinks.length"
-          class="flex flex-wrap gap-8"
-        >
-          <a
-            v-for="link in socialLinks"
-            :key="link.label"
-            :href="link.url"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center gap-6 rounded-8 border border-line-default bg-surface-elevated px-12 py-8 text-p3 text-content-primary hover:border-line-emphasis hover:text-accent-600 transition-colors"
-          >
-            <UiIcon
-              name="globe"
-              class="!h-16 !w-16"
-            />
-            {{ link.label }}
-          </a>
         </div>
       </section>
 
@@ -131,8 +110,11 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
         class="flex flex-col gap-12"
       >
         <div class="flex items-center justify-between gap-12">
-          <h2 class="text-h3 text-content-primary">
+          <h2 class="flex items-center gap-8 text-h3 text-content-primary">
             Markets
+            <span class="inline-flex min-w-24 items-center justify-center rounded-full bg-surface-secondary px-8 py-2 text-p4 text-content-tertiary">
+              {{ managedMarkets.length }}
+            </span>
           </h2>
         </div>
         <DiscoveryMarketAccordion :markets="managedMarkets" />
@@ -142,8 +124,11 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
         v-if="earnVaults.length"
         class="flex flex-col gap-12"
       >
-        <h2 class="text-h3 text-content-primary">
+        <h2 class="flex items-center gap-8 text-h3 text-content-primary">
           Earn vaults
+          <span class="inline-flex min-w-24 items-center justify-center rounded-full bg-surface-secondary px-8 py-2 text-p4 text-content-tertiary">
+            {{ earnVaults.length }}
+          </span>
         </h2>
         <VaultEarnItem
           v-for="vault in earnVaults"
