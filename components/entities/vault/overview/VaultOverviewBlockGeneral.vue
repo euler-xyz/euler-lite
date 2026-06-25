@@ -9,7 +9,6 @@ import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } fro
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
-import { normalizeAddress } from '~/utils/normalizeAddress'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
@@ -22,7 +21,6 @@ const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { isVaultGovernorVerified } = useVaults()
-const { getEVaults } = useVaultRegistry()
 
 type VaultPropertyBadge = Extract<VaultTypeBadge, 'private' | 'accessControl' | 'governanceLimited' | 'cyclicalNote'>
 
@@ -44,16 +42,6 @@ const deprecationReason = computed(() => isDeprecated.value ? product.deprecatio
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
-
-// Count how many EVaults reference this vault as a borrowable collateral.
-// Use the registry directly, matching the baseline app. `borrowList` is
-// filtered for visible borrow discovery pairs and undercounts deep-linked or
-// otherwise filtered relationships.
-const collateralCount = computed(() => {
-  return getEVaults().filter(v => v.collaterals.some(
-    ltv => normalizeAddress(ltv.address) === vaultAddress.value && ltv.borrowLTV > 0,
-  )).length
-})
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
 const borrowCount = computed(() => {
@@ -212,14 +200,6 @@ watchEffect(async () => {
           <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
           <span class="text-p2 text-content-primary">
             {{ formatMarketAvailability(borrowCount) }}
-          </span>
-        </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue label="Can be used as collateral">
-        <div class="flex items-center gap-8">
-          <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
-          <span class="text-p2 text-content-primary">
-            {{ formatMarketAvailability(collateralCount) }}
           </span>
         </div>
       </VaultOverviewLabelValue>
