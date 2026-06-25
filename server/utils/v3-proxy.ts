@@ -13,6 +13,7 @@ const GET_ONLY_PATHS = new Set([
   '/v3/apys/rewards',
   '/v3/earn/vaults',
   '/v3/evk/vaults',
+  '/v3/evk/vaults/bad-debt',
   '/v3/prices',
   '/v3/rewards/breakdown',
   '/v3/tokens',

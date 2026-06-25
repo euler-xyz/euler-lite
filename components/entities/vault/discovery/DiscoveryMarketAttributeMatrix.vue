@@ -10,6 +10,7 @@ import {
   buildAttributeRowCells,
   isVaultType,
 } from '~/utils/discoveryCalculations'
+import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
@@ -19,6 +20,7 @@ const props = defineProps<{
   view: MatrixViewId
   usdCache: Map<string, VaultUsdCacheEntry>
   apyCache: Map<string, VaultApyCacheEntry>
+  badDebtCache: Map<string, VaultBadDebtCacheEntry>
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
 }>()
 
@@ -37,7 +39,7 @@ interface AttributeColumn {
 const attributeColumns = computed<AttributeColumn[]>(() =>
   props.data.rows.map(attribute => ({
     attribute,
-    cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache),
+    cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache, props.badDebtCache),
   })),
 )
 

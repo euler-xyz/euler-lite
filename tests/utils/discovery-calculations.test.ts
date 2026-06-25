@@ -12,6 +12,7 @@ import {
   type VaultApyCacheEntry,
   type VaultUsdCacheEntry,
 } from '~/utils/discoveryCalculations'
+import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
@@ -267,6 +268,7 @@ describe('attribute stats matrix', () => {
     expect(byRow.get('totalSupply')!.numeric).toBe(1000)
     expect(byRow.get('totalBorrow')!.numeric).toBe(500)
     expect(byRow.get('liquidity')!.numeric).toBe(500)
+    expect(byRow.get('badDebt')!.display).toBe('—')
     expect(byRow.get('utilization')!.numeric).toBe(50)
     expect(byRow.get('supplyCapUsage')!.numeric).toBe(40)
     expect(byRow.get('borrowCapUsage')!.numeric).toBe(50)
@@ -302,6 +304,50 @@ describe('attribute stats matrix', () => {
     expect(byRow.get('supplyApy')!.display).toBe('5.31%')
     expect(byRow.get('borrowApy')!.numeric).toBeCloseTo(1.25)
     expect(byRow.get('borrowApy')!.display).toBe('1.25%')
+  })
+
+  it('uses the bad debt cache for borrowable vault stats', () => {
+    const vault = {
+      ...makeVault('0xBadDebt', []),
+      totalAssets: 1000n,
+      totalBorrowed: 500n,
+      liquidation: { socializeDebt: true },
+    } as unknown as EVault
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const usdCache = new Map<string, VaultUsdCacheEntry>([
+      [vault.address.toLowerCase(), {
+        supply: '$1K',
+        supplyUsd: 1000,
+        borrow: '$500',
+        borrowUsd: 500,
+        liquidity: '$500',
+        liquidityUsd: 500,
+        supplyCap: '$1K',
+        supplyCapUsd: 1000,
+        borrowCap: '$1K',
+        borrowCapUsd: 1000,
+      }],
+    ])
+    const badDebtCache = new Map<string, VaultBadDebtCacheEntry>([
+      [vault.address.toLowerCase(), {
+        badDebtUsd: 125,
+        debtUsd: 150,
+        collateralUsd: 25,
+        coveredDebtUsd: 25,
+        accountCount: 2,
+        calculationTimestamp: '2026-06-25T10:14:59.000Z',
+        priceTimestamp: '2026-06-25T10:14:24.994Z',
+        refreshedAt: '2026-06-25T10:15:08.039Z',
+      }],
+    ])
+
+    const row = STATS_ROWS.find(row => row.id === 'badDebt')!
+    const cell = buildAttributeRowCells(row, columns, usdCache, undefined, badDebtCache)[0]
+
+    expect(cell.display).toBe('$125')
+    expect(cell.numeric).toBe(125)
+    expect(cell.hint).toContain('25% of total borrows')
+    expect(cell.hint).toContain('2 underwater accounts')
   })
 })
 

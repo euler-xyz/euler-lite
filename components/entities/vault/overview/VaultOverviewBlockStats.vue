@@ -3,6 +3,7 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { formatBadDebtOverviewValue } from '~/utils/vault-bad-debt'
 import { VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBorrowable } from '~/utils/vault/classification'
@@ -13,6 +14,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 const isBorrowable = computed(() => isVaultBorrowable(vault))
+const { getVaultBadDebt, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 
 const supplyApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(vault),
@@ -55,6 +57,7 @@ const utilisationWarning = computed(() => getUtilisationWarning(vault, 'general'
 const totalSupplyDisplay = ref('-')
 const totalBorrowedDisplay = ref('-')
 const availableLiquidityDisplay = ref('-')
+const totalBorrowedUsd = ref<number | undefined>(undefined)
 
 watchEffect(async () => {
   const price = await formatAssetValue(vault.totalAssets, vault, 'off-chain')
@@ -64,12 +67,24 @@ watchEffect(async () => {
 watchEffect(async () => {
   const price = await formatAssetValue(vault.totalBorrowed, vault, 'off-chain')
   totalBorrowedDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
+  totalBorrowedUsd.value = price.hasPrice ? price.usdValue : undefined
 })
 
 watchEffect(async () => {
   const liquidity = vault.availableLiquidity
   const price = await formatAssetValue(liquidity, vault, 'off-chain')
   availableLiquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
+})
+
+watchEffect(() => {
+  if (isBorrowable.value) void loadBadDebtForChain()
+})
+
+const badDebtDisplay = computed(() => {
+  if (!isBorrowable.value) return null
+  const badDebt = getVaultBadDebt(vault.address)
+  if (badDebt) return formatBadDebtOverviewValue(badDebt, totalBorrowedUsd.value)
+  return isBadDebtLoading.value ? '...' : null
 })
 </script>
 
@@ -88,6 +103,12 @@ watchEffect(async () => {
         v-if="isBorrowable"
         label="Total borrowed"
         :value="totalBorrowedDisplay"
+        orientation="horizontal"
+      />
+      <VaultOverviewLabelValue
+        v-if="badDebtDisplay"
+        label="Bad debt"
+        :value="badDebtDisplay"
         orientation="horizontal"
       />
       <VaultOverviewLabelValue

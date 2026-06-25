@@ -23,6 +23,7 @@ import {
   type VaultUsdCacheEntry,
   type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
+import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { maxUint256 } from 'viem'
 
@@ -34,6 +35,7 @@ const props = defineProps<{
 const { isMarketDataResolved } = useVaults()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
+const { badDebtByChain, loadBadDebtForChain } = useVaultBadDebt()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -160,11 +162,15 @@ const loadExpandedVaultUsdValues = async () => {
 const onToggle = (market: MarketGroup) => {
   const wasExpanded = isExpanded(market.id)
   toggleExpand(market.id)
-  if (!wasExpanded) loadVaultUsdValues(market)
+  if (!wasExpanded) {
+    loadVaultUsdValues(market)
+    void loadBadDebtForChain()
+  }
 }
 
-watch([() => props.markets, isMarketDataResolved], () => {
+watch([() => props.markets, isMarketDataResolved, chainId], () => {
   void loadExpandedVaultUsdValues()
+  if (expandedMarkets.value.size > 0) void loadBadDebtForChain()
 })
 
 // -- Matrix view selector (single dropdown spans Stats, Configuration,
@@ -246,6 +252,10 @@ const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
     enableRewardsApy: enableRewardsApy.value,
   })
 })
+
+const vaultBadDebtCache = computed<Map<string, VaultBadDebtCacheEntry>>(() =>
+  badDebtByChain.value.get(chainId.value) ?? new Map(),
+)
 
 // -- Cell selection state (matrix view) --
 
@@ -435,6 +445,7 @@ onMounted(() => {
       loadVaultUsdValues(market)
     }
   }
+  if (expandedMarkets.value.size > 0) void loadBadDebtForChain()
 })
 </script>
 
@@ -658,6 +669,7 @@ onMounted(() => {
               :view="getMatrixView(market.id)"
               :usd-cache="vaultUsdCache"
               :apy-cache="vaultApyCache"
+              :bad-debt-cache="vaultBadDebtCache"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />
