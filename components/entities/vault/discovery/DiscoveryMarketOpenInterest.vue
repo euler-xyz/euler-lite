@@ -235,7 +235,7 @@ watch(
 
             <button
               v-if="row.model.collateralNodes.length > COLLAPSED_NODE_COUNT"
-              class="self-start text-p4 font-medium text-content-accent hover:text-accent-600 transition-colors cursor-pointer"
+              class="self-center text-p4 font-medium text-content-accent hover:text-accent-600 transition-colors cursor-pointer"
               type="button"
               data-id="discovery-open-interest-row-show-more"
               :data-key="getAddress(row.vault.address).toLowerCase()"
