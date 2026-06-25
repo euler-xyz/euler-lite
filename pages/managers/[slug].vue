@@ -85,7 +85,7 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
           </div>
         </div>
 
-        <div class="grid grid-cols-3 gap-12 mobile:grid-cols-1">
+        <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
           <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
             <p class="text-p4 uppercase text-content-tertiary">
               Products
@@ -100,14 +100,6 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
             </p>
             <p class="mt-4 text-h3 text-content-primary">
               {{ managedMarkets.length }}
-            </p>
-          </div>
-          <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
-            <p class="text-p4 uppercase text-content-tertiary">
-              Links
-            </p>
-            <p class="mt-4 text-h3 text-content-primary">
-              {{ socialLinks.length }}
             </p>
           </div>
         </div>
