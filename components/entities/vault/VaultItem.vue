@@ -329,7 +329,7 @@ watchEffect(async () => {
           Total supply
           <VaultWarningIcon
             :warning="supplyCapWarning"
-            placement="top-start"
+            tooltip-placement="top-start"
           />
         </div>
         <div

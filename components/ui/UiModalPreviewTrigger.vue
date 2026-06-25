@@ -34,6 +34,7 @@ const isVisible = ref(false)
 const isRendered = ref(false)
 const isPointerInTrigger = ref(false)
 const isPointerInPopover = ref(false)
+const isKeyboardFocusVisible = ref(false)
 
 let mediaQuery: MediaQueryList | undefined
 let openTimer: number | undefined
@@ -155,8 +156,8 @@ const updatePreferredPlacement = () => {
   )
 }
 
-const showPopover = () => {
-  if (!canHover.value) return
+const showPopover = (allowWithoutHover = false) => {
+  if (!allowWithoutHover && !canHover.value) return
   clearOpenTimer()
   clearCloseTimer()
   updatePreferredPlacement()
@@ -176,6 +177,7 @@ const hidePopover = () => {
   clearCloseTimer()
   isVisible.value = false
   isPointerInPopover.value = false
+  isKeyboardFocusVisible.value = false
 }
 
 const scheduleOpen = () => {
@@ -208,6 +210,27 @@ const onMouseLeave = () => {
   scheduleClose()
 }
 
+const togglePopover = () => {
+  if (isVisible.value) {
+    hidePopover()
+  }
+  else {
+    showPopover(true)
+  }
+}
+
+const onFocus = (event: FocusEvent) => {
+  isKeyboardFocusVisible.value = event.target instanceof HTMLElement && event.target.matches(':focus-visible')
+  if (!isKeyboardFocusVisible.value) return
+  showPopover(true)
+}
+
+const onBlur = () => {
+  if (!isPointerInPopover.value) {
+    hidePopover()
+  }
+}
+
 const onPopoverMouseEnter = () => {
   isPointerInPopover.value = true
   clearCloseTimer()
@@ -233,15 +256,23 @@ const openModal = () => {
 }
 
 const onClick = (event: Event) => {
-  if (!clickable) return
   stopNavigation(event)
+  if (!clickable) {
+    if (!canHover.value) {
+      togglePopover()
+    }
+    return
+  }
   openModal()
 }
 
 const onKeydown = (event: KeyboardEvent) => {
-  if (!clickable) return
   if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
   stopNavigation(event)
+  if (!clickable) {
+    togglePopover()
+    return
+  }
   openModal()
 }
 
@@ -298,12 +329,15 @@ onBeforeUnmount(() => {
     ref="trigger"
     class="ui-modal-preview-trigger"
     :aria-label="ariaLabel"
-    :role="clickable ? 'button' : undefined"
-    :tabindex="clickable ? 0 : undefined"
-    @pointerdown="clickable ? stopPointerPropagation($event) : undefined"
-    @pointerup="clickable ? stopPointerPropagation($event) : undefined"
+    role="button"
+    tabindex="0"
+    :aria-expanded="isRendered ? isVisible : undefined"
+    @pointerdown="stopPointerPropagation"
+    @pointerup="stopPointerPropagation"
     @click.capture="onClick"
     @keydown="onKeydown"
+    @focus="onFocus"
+    @blur="onBlur"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
