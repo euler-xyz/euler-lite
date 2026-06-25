@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computeSupplyApyBreakdown, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, isEVault, type EVault, type EulerEarn, type EulerEarnStrategyInfo } from '@eulerxyz/euler-v2-sdk'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
@@ -10,13 +10,14 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { formatExposureAssetCount, groupExposureItemsByBackingAsset } from '~/utils/vault/exposure-groups'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
-const { isVerifiedVault } = useVaultRegistry()
+const { get: registryGet, isVerifiedVault } = useVaultRegistry()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const entityName = computed(() => {
@@ -58,6 +59,39 @@ const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const displayName = computed(() => product.name || vault.shares.name)
 const description = computed(() => getEarnVaultDescription(vault.address))
+const getStrategyVault = (strategy: EulerEarnStrategyInfo): EVault | undefined => {
+  if (strategy.vault && isEVault(strategy.vault)) return strategy.vault as EVault
+  const entry = registryGet(strategy.address)
+  return entry?.vault && isEVault(entry.vault) ? entry.vault as EVault : undefined
+}
+const allocationGroups = computed(() =>
+  groupExposureItemsByBackingAsset(
+    vault.strategies,
+    (strategy) => {
+      const strategyVault = getStrategyVault(strategy)
+      return strategyVault?.asset ?? {
+        address: strategy.address,
+        symbol: strategy.address.slice(0, 6),
+      }
+    },
+  ).sort((a, b) => {
+    if (b.vaultCount !== a.vaultCount) return b.vaultCount - a.vaultCount
+    return a.asset.symbol.localeCompare(b.asset.symbol)
+  }),
+)
+const allocationDisplayGroups = computed(() => allocationGroups.value.slice(0, 3))
+const allocationOverflowCount = computed(() => Math.max(0, allocationGroups.value.length - allocationDisplayGroups.value.length))
+const allocationSummary = computed(() => {
+  if (!allocationGroups.value.length) {
+    return `${vault.strategies.length} ${vault.strategies.length === 1 ? 'strategy' : 'strategies'}`
+  }
+  return `${formatExposureAssetCount(allocationGroups.value.length)} / ${vault.strategies.length} ${vault.strategies.length === 1 ? 'strategy' : 'strategies'}`
+})
+const allocationSymbols = computed(() => {
+  const symbols = allocationDisplayGroups.value.map(group => group.asset.symbol).join(', ')
+  if (!allocationOverflowCount.value) return symbols
+  return `${symbols} +${allocationOverflowCount.value}`
+})
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
   totalSupply: '-',
@@ -273,13 +307,28 @@ const supplyApyModalData = computed(() => ({
           Allocates into
         </div>
         <div
-          class="text-p2 text-content-primary"
+          class="flex min-w-0 flex-col items-end gap-4"
           data-id="data-point"
           :data-key="vault.address.toLowerCase()"
           data-field="allocates-into"
-          :data-value="vault.strategies.length"
+          :data-value="allocationSummary"
         >
-          {{ vault.strategies.length }} {{ vault.strategies.length === 1 ? 'strategy' : 'strategies' }}
+          <div class="flex min-w-0 items-center justify-end gap-6">
+            <AssetAvatar
+              v-if="allocationDisplayGroups.length"
+              :asset="allocationDisplayGroups.map(group => group.asset)"
+              size="20"
+            />
+            <span class="text-p2 text-content-primary whitespace-nowrap">
+              {{ allocationSummary }}
+            </span>
+          </div>
+          <span
+            v-if="allocationSymbols"
+            class="max-w-full truncate text-p4 text-content-tertiary"
+          >
+            {{ allocationSymbols }}
+          </span>
         </div>
       </div>
       <div class="flex flex-col flex-1 items-end text-right mobile:!hidden">
@@ -339,8 +388,23 @@ const supplyApyModalData = computed(() => ({
         <div class="text-content-tertiary text-p3">
           Allocates into
         </div>
-        <div class="text-p2 text-content-primary">
-          {{ vault.strategies.length }} {{ vault.strategies.length === 1 ? 'strategy' : 'strategies' }}
+        <div class="flex min-w-0 flex-col items-end gap-4 text-right">
+          <div class="flex min-w-0 items-center justify-end gap-6">
+            <AssetAvatar
+              v-if="allocationDisplayGroups.length"
+              :asset="allocationDisplayGroups.map(group => group.asset)"
+              size="20"
+            />
+            <span class="text-p2 text-content-primary whitespace-nowrap">
+              {{ allocationSummary }}
+            </span>
+          </div>
+          <span
+            v-if="allocationSymbols"
+            class="max-w-full truncate text-p4 text-content-tertiary"
+          >
+            {{ allocationSymbols }}
+          </span>
         </div>
       </div>
       <div

@@ -10,6 +10,7 @@ import { DateTime } from 'luxon'
 import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
+import { formatExposureVaultCount, groupExposureItemsByBackingAsset } from '~/utils/vault/exposure-groups'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -28,11 +29,13 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
+const isExpanded = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
 const UINT136_MAX = 2n ** 136n - 1n
+const COLLAPSED_GROUP_COUNT = 3
 
 const isPendingRemoval = (strategy: EulerEarnStrategyInfo) => strategy.removableAt > 0
 
@@ -128,6 +131,31 @@ const exposureRows = computed(() => {
   })
 })
 
+const exposureGroups = computed(() =>
+  groupExposureItemsByBackingAsset(
+    exposureRows.value,
+    row => row.vault?.asset ?? {
+      address: row.exposure.address,
+      symbol: row.exposure.address.slice(0, 6),
+    },
+  ).map(group => ({
+    ...group,
+    allocatedAssets: group.items.reduce((sum, row) => sum + row.exposure.allocatedAssets, 0n),
+  })).sort((a, b) => {
+    if (b.allocatedAssets > a.allocatedAssets) return 1
+    if (b.allocatedAssets < a.allocatedAssets) return -1
+    return a.asset.symbol.localeCompare(b.asset.symbol)
+  }),
+)
+
+const visibleExposureGroups = computed(() =>
+  isExpanded.value ? exposureGroups.value : exposureGroups.value.slice(0, COLLAPSED_GROUP_COUNT),
+)
+
+const hiddenGroupCount = computed(() =>
+  Math.max(0, exposureGroups.value.length - visibleExposureGroups.value.length),
+)
+
 watch(isMarketDataResolved, () => {
   if (!exposureVaults.value.length) return
   void loadExposureUsdPrices()
@@ -136,6 +164,11 @@ watch(isMarketDataResolved, () => {
 const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
   if (totalAllocatedAssets.value === 0n) return 0
   return Number(exposure.allocatedAssets) / Number(totalAllocatedAssets.value) * 100
+}
+
+const getGroupAllocationPercentage = (allocatedAssets: bigint) => {
+  if (totalAllocatedAssets.value === 0n) return 0
+  return Number(allocatedAssets) / Number(totalAllocatedAssets.value) * 100
 }
 
 const getStrategySupplyApy = (strategyVault: EVault) => {
@@ -167,6 +200,10 @@ const getExposureAssetAmount = (exposure: typeof exposureList.value[0]) => {
   return `${roundAndCompactTokens(exposure.allocatedAssets, strategyVault?.asset.decimals ?? 18)} ${strategyVault?.asset.symbol ?? ''}`
 }
 
+const toggleExpanded = () => {
+  isExpanded.value = !isExpanded.value
+}
+
 load()
 </script>
 
@@ -193,154 +230,191 @@ load()
       class="flex flex-col gap-12"
     >
       <div
-        v-for="row in exposureRows"
-        :key="row.exposure.address"
-        class="bg-surface rounded-xl text-content-primary block no-underline cursor-pointer shadow-card hover:shadow-card-hover transition-shadow border border-line-default"
-        @click="onExposureClick(row.exposure.address)"
+        v-for="group in visibleExposureGroups"
+        :key="group.asset.address"
+        class="overflow-hidden rounded-12 border border-line-default bg-surface text-content-primary shadow-card"
       >
-        <div
-          class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-start justify-between gap-12 mobile:flex-wrap"
-        >
-          <template v-if="row.vault">
-            <VaultLabelsAndAssets
-              class="min-w-0 flex-1 mobile:order-1"
-              :vault="row.vault"
-              :assets="[{
-                address: row.vault.asset.address,
-                decimals: row.vault.asset.decimals,
-                name: row.vault.asset.name,
-                symbol: row.vault.asset.symbol,
-              }]"
-            >
-              <span
-                v-if="row.hookWarning"
-                @click.stop.prevent
-              >
-                <VaultWarningIcon :warning="row.hookWarning" />
-              </span>
-            </VaultLabelsAndAssets>
-          </template>
-          <template v-else>
-            <div class="flex items-center gap-12 min-w-0 flex-1 mobile:order-1">
-              <AssetAvatar
-                :asset="{ address: row.exposure.vault?.asset.address ?? row.exposure.address, symbol: row.exposure.vault?.asset.symbol ?? '' }"
-                size="40"
-              />
-              <div>
-                <div class="text-content-tertiary text-p3">
-                  {{ row.exposure.vault ? (row.exposure.vault as EVault).shares.name : row.exposure.address }}
-                </div>
-                <div class="text-h5 text-content-primary">
-                  {{ row.exposure.vault?.asset.symbol ?? '' }}
-                </div>
-              </div>
-            </div>
-          </template>
-          <div
-            v-if="row.vault"
-            class="flex flex-col items-end shrink-0 mobile:contents"
-          >
-            <div class="flex flex-col items-end shrink-0 mobile:order-2">
-              <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-                Supply APY
-                <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
-                  :modal-data="getStrategySupplyApyModalData(row.vault)"
-                  aria-label="Show supply APY breakdown"
-                >
-                  <SvgIcon
-                    class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                    name="info-circle"
-                  />
-                </UiModalPreviewTrigger>
-              </div>
-              <div class="text-p2 flex items-center text-accent-600 font-semibold">
-                <UiModalPreviewTrigger
-                  v-if="hasSupplyRewards(row.vault.address)"
-                  :component="VaultSupplyApyModal"
-                  :modal-data="getStrategySupplyApyModalData(row.vault)"
-                  aria-label="Show supply APY rewards breakdown"
-                >
-                  <SvgIcon
-                    class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-                    name="sparks"
-                  />
-                </UiModalPreviewTrigger>
-                {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
-              </div>
-            </div>
-            <VaultTypeBadges
-              class="justify-end mt-8 mobile:order-3 mobile:basis-full mobile:justify-end mobile:mt-0 mobile:pt-4"
-              :vault="row.vault"
-              summary-only
-              @click.stop.prevent
+        <div class="flex items-center justify-between gap-12 border-b border-line-subtle px-16 py-12">
+          <div class="flex min-w-0 items-center gap-10">
+            <AssetAvatar
+              :asset="group.asset"
+              size="36"
             />
+            <div class="min-w-0">
+              <p class="truncate text-p2 text-content-primary">
+                {{ group.asset.symbol }}
+              </p>
+              <p class="text-p4 text-content-tertiary">
+                {{ formatExposureVaultCount(group.vaultCount) }}
+              </p>
+            </div>
           </div>
+          <span class="shrink-0 rounded-8 bg-surface-secondary px-8 py-4 text-p4 text-content-secondary">
+            {{ compactNumber(getGroupAllocationPercentage(group.allocatedAssets), 2) }}%
+          </span>
         </div>
-        <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
-          <VaultOverviewLabelValue
-            label="Current allocation"
-            orientation="horizontal"
-            data-list="earn-exposure-strategy"
-            :data-key="getAddress(row.exposure.address)"
-            data-field="Current allocation"
+
+        <div class="divide-y divide-line-subtle">
+          <div
+            v-for="row in group.items"
+            :key="row.exposure.address"
+            class="cursor-pointer px-16 py-12 transition-colors hover:bg-card-hover"
+            @click="onExposureClick(row.exposure.address)"
           >
-            <template v-if="hasExposureUsdPrice(row.exposure)">
-              {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
-              <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
-            </template>
-            <template v-else>
-              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
-                {{ getExposureAssetAmount(row.exposure) }}
-              </UiExactAmount>
-              <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
-            </template>
-          </VaultOverviewLabelValue>
-          <VaultOverviewLabelValue
-            orientation="horizontal"
-            data-list="earn-exposure-strategy"
-            :data-key="getAddress(row.exposure.address)"
-            data-field="Allocation cap"
-          >
-            <template #label>
-              <span class="flex items-center gap-4">
-                Allocation cap
-                <span @click.stop.prevent>
-                  <UiFootnote
-                    title="Allocation cap"
-                    text="The maximum amount that can be allocated to this strategy."
-                    class="footnote-info [--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
-                  />
-                </span>
-              </span>
-            </template>
-            <span class="flex items-center gap-4">
-              <span
-                v-if="isPendingRemoval(row.exposure)"
-                @click.stop.prevent
-              >
-                <UiFootnote
-                  icon="clock"
-                  title="Pending removal"
-                  :text="getPendingRemovalTooltipText(row.exposure)"
-                  class="footnote-clock [--ui-footnote-icon-color:var(--warning-500)]"
-                />
-              </span>
-              <template v-if="isUnlimitedCap(row.exposure)">
-                ∞
-              </template>
-              <template v-else-if="exposureCapUsdPrices.has(row.exposure.address)">
-                {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address) || 0) }}
+            <div
+              class="flex items-start justify-between gap-12 mobile:flex-wrap"
+            >
+              <template v-if="row.vault">
+                <VaultLabelsAndAssets
+                  class="min-w-0 flex-1 mobile:order-1"
+                  :vault="row.vault"
+                  :assets="[{
+                    address: row.vault.asset.address,
+                    decimals: row.vault.asset.decimals,
+                    name: row.vault.asset.name,
+                    symbol: row.vault.asset.symbol,
+                  }]"
+                >
+                  <span
+                    v-if="row.hookWarning"
+                    @click.stop.prevent
+                  >
+                    <VaultWarningIcon :warning="row.hookWarning" />
+                  </span>
+                </VaultLabelsAndAssets>
               </template>
               <template v-else>
-                <UiExactAmount :exact="formatExactAmount(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
-                  {{ roundAndCompactTokens(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18) }} {{ row.vault?.asset.symbol }}
-                </UiExactAmount>
+                <div class="flex items-center gap-12 min-w-0 flex-1 mobile:order-1">
+                  <AssetAvatar
+                    :asset="{ address: row.exposure.vault?.asset.address ?? row.exposure.address, symbol: row.exposure.vault?.asset.symbol ?? '' }"
+                    size="40"
+                  />
+                  <div>
+                    <div class="text-content-tertiary text-p3">
+                      {{ row.exposure.vault ? (row.exposure.vault as EVault).shares.name : row.exposure.address }}
+                    </div>
+                    <div class="text-h5 text-content-primary">
+                      {{ row.exposure.vault?.asset.symbol ?? '' }}
+                    </div>
+                  </div>
+                </div>
               </template>
-            </span>
-          </VaultOverviewLabelValue>
+              <div
+                v-if="row.vault"
+                class="flex flex-col items-end shrink-0 mobile:contents"
+              >
+                <div class="flex flex-col items-end shrink-0 mobile:order-2">
+                  <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+                    Supply APY
+                    <UiModalPreviewTrigger
+                      :component="VaultSupplyApyModal"
+                      :modal-data="getStrategySupplyApyModalData(row.vault)"
+                      aria-label="Show supply APY breakdown"
+                    >
+                      <SvgIcon
+                        class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                        name="info-circle"
+                      />
+                    </UiModalPreviewTrigger>
+                  </div>
+                  <div class="text-p2 flex items-center text-accent-600 font-semibold">
+                    <UiModalPreviewTrigger
+                      v-if="hasSupplyRewards(row.vault.address)"
+                      :component="VaultSupplyApyModal"
+                      :modal-data="getStrategySupplyApyModalData(row.vault)"
+                      aria-label="Show supply APY rewards breakdown"
+                    >
+                      <SvgIcon
+                        class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                        name="sparks"
+                      />
+                    </UiModalPreviewTrigger>
+                    {{ formatNumber(getStrategySupplyApy(row.vault)) }}%
+                  </div>
+                </div>
+                <VaultTypeBadges
+                  class="justify-end mt-8 mobile:order-3 mobile:basis-full mobile:justify-end mobile:mt-0 mobile:pt-4"
+                  :vault="row.vault"
+                  summary-only
+                  @click.stop.prevent
+                />
+              </div>
+            </div>
+            <div class="flex flex-col gap-12 pt-12">
+              <VaultOverviewLabelValue
+                label="Current allocation"
+                orientation="horizontal"
+                data-list="earn-exposure-strategy"
+                :data-key="getAddress(row.exposure.address)"
+                data-field="Current allocation"
+              >
+                <template v-if="hasExposureUsdPrice(row.exposure)">
+                  {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
+                  <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
+                </template>
+                <template v-else>
+                  <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
+                    {{ getExposureAssetAmount(row.exposure) }}
+                  </UiExactAmount>
+                  <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
+                </template>
+              </VaultOverviewLabelValue>
+              <VaultOverviewLabelValue
+                orientation="horizontal"
+                data-list="earn-exposure-strategy"
+                :data-key="getAddress(row.exposure.address)"
+                data-field="Allocation cap"
+              >
+                <template #label>
+                  <span class="flex items-center gap-4">
+                    Allocation cap
+                    <span @click.stop.prevent>
+                      <UiFootnote
+                        title="Allocation cap"
+                        text="The maximum amount that can be allocated to this strategy."
+                        class="footnote-info [--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+                      />
+                    </span>
+                  </span>
+                </template>
+                <span class="flex items-center gap-4">
+                  <span
+                    v-if="isPendingRemoval(row.exposure)"
+                    @click.stop.prevent
+                  >
+                    <UiFootnote
+                      icon="clock"
+                      title="Pending removal"
+                      :text="getPendingRemovalTooltipText(row.exposure)"
+                      class="footnote-clock [--ui-footnote-icon-color:var(--warning-500)]"
+                    />
+                  </span>
+                  <template v-if="isUnlimitedCap(row.exposure)">
+                    ∞
+                  </template>
+                  <template v-else-if="exposureCapUsdPrices.has(row.exposure.address)">
+                    {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address) || 0) }}
+                  </template>
+                  <template v-else>
+                    <UiExactAmount :exact="formatExactAmount(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
+                      {{ roundAndCompactTokens(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18) }} {{ row.vault?.asset.symbol }}
+                    </UiExactAmount>
+                  </template>
+                </span>
+              </VaultOverviewLabelValue>
+            </div>
+          </div>
         </div>
       </div>
+
+      <button
+        v-if="exposureGroups.length > COLLAPSED_GROUP_COUNT"
+        type="button"
+        class="self-center text-p4 font-medium text-content-accent transition-colors hover:text-accent-600"
+        @click="toggleExpanded"
+      >
+        {{ isExpanded ? 'Show less' : `Show more (${hiddenGroupCount})` }}
+      </button>
     </div>
   </div>
 </template>

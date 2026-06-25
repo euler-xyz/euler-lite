@@ -1,4 +1,8 @@
 import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
+import {
+  groupExposureItemsByBackingAsset,
+  type ExposureBackingAssetGroup,
+} from '~/utils/vault/exposure-groups'
 
 /**
  * A collateral pair with live borrow-side exposure to a vault. Matches the
@@ -7,6 +11,11 @@ import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@euler
 export interface CollateralExposurePair {
   collateral: EVault | SecuritizeCollateralVault
   ltv: EVaultCollateral
+}
+
+export interface CollateralExposureGroup extends ExposureBackingAssetGroup<CollateralExposurePair> {
+  maxBorrowLTV: number
+  maxCurrentLiquidationLTV: number
 }
 
 /**
@@ -76,6 +85,28 @@ export const getCollateralExposurePairs = (
     b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0,
   )
 }
+
+export const getCollateralExposureGroups = (
+  pairs: CollateralExposurePair[],
+): CollateralExposureGroup[] =>
+  groupExposureItemsByBackingAsset(pairs, pair => pair.collateral.asset)
+    .map(group => ({
+      ...group,
+      items: [...group.items].sort((a, b) =>
+        b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0,
+      ),
+      maxBorrowLTV: Math.max(...group.items.map(pair => pair.ltv.borrowLTV), 0),
+      maxCurrentLiquidationLTV: Math.max(...group.items.map(pair => pair.ltv.currentLiquidationLTV), 0),
+    }))
+    .sort((a, b) => {
+      if (b.maxCurrentLiquidationLTV !== a.maxCurrentLiquidationLTV) {
+        return b.maxCurrentLiquidationLTV - a.maxCurrentLiquidationLTV
+      }
+      if (b.maxBorrowLTV !== a.maxBorrowLTV) {
+        return b.maxBorrowLTV - a.maxBorrowLTV
+      }
+      return a.asset.symbol.localeCompare(b.asset.symbol)
+    })
 
 /**
  * Predicate: does the vault have any live borrow-side collateral exposure?
