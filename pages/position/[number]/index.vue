@@ -71,7 +71,7 @@ const collateralCount = computed(() => positionCollateralAddresses.value.length 
 // Whether a specific vault of this position was modified by the active batch
 // layer — drives the dashed "simulated" border on that one box (the collateral
 // or borrow box), not the whole position / summary / risk.
-const { modifiedBalanceKeys, modifiedDebtKeys, entryCount } = useTxBatch()
+const { modifiedBalanceKeys, modifiedDebtKeys, entryCount, isSimulating } = useTxBatch()
 const hasBatchEntries = computed(() => entryCount.value > 0)
 const hasModifiedKey = (keys: Set<string>, vaultAddr?: string) => {
   if (!position.value || !vaultAddr) return false
@@ -782,6 +782,33 @@ const load = async () => {
 watch(position, () => {
   void syncCollateralItems()
 })
+
+// A simulated-only position (e.g. a freshly-added multiply) stops existing the
+// moment simulation is disabled or the batch changes. Rather than stranding the
+// user on a "Position not found" screen, send them back to the portfolio once a
+// position they were viewing disappears — but only after the account and any
+// in-flight resimulation have settled, so we don't redirect on a transient gap.
+// A position that never existed (e.g. a bad URL) keeps the "not found" screen.
+const hasShownPosition = ref(false)
+watch(
+  [position, isPositionsLoading, isSimulating, isConnected, isSpyMode],
+  () => {
+    if (position.value) {
+      hasShownPosition.value = true
+      return
+    }
+    if (
+      !hasShownPosition.value
+      || !isPositionsLoaded.value
+      || isPositionsLoading.value
+      || isSimulating.value
+      || !(isConnected.value || isSpyMode.value)
+    ) return
+    hasShownPosition.value = false
+    router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+  },
+  { immediate: true },
+)
 const borrowApyModalData = computed(() => {
   if (!borrowVault.value) return {}
   return {
