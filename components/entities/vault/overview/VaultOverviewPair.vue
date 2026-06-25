@@ -15,6 +15,10 @@ defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, d
       :pair="pair"
       :default-open="true"
     />
+    <VaultOverviewPairBlockOpenInterest
+      :pair="pair"
+      :default-open="false"
+    />
     <VaultOverviewPairBlockTypes
       :pair="pair"
       :default-open="false"
