@@ -1276,7 +1276,16 @@ export const useTxBatch = () => {
         },
       )
 
-      if (token !== resimToken) return
+      if (token !== resimToken) {
+        // Diagnostic (temporary): a newer resimulation superseded this one after
+        // the sim resolved, so this run bails before populating layers. When that
+        // happens during a plan-time await it's exactly what surfaces as the
+        // misleading "Batch simulation not loaded" (see getEntryPlanningAccount).
+        // Logging the token transition + entry count confirms the trigger in the
+        // field. Safe to remove once the race is confirmed fixed.
+        logWarn('useTxBatch/resimulate', `superseded after sim (token ${token} → ${resimToken}, entries=${entries.value.length})`)
+        return
+      }
 
       // Two distinct failure shapes, both blocking but handled differently:
       //  - simulationError: the EVC call reverted at the top level (couldn't even
@@ -1417,11 +1426,14 @@ export const useTxBatch = () => {
   }
 
   const runResimulate = (): Promise<void> => {
-    const promise = resimulate()
-    resimulatePromise = promise.finally(() => {
-      if (resimulatePromise === promise) resimulatePromise = null
+    // Compare against the *wrapped* promise we store, not the raw resimulate()
+    // promise — otherwise the guard never matches and resimulatePromise is never
+    // cleared, leaving callers (getEntryPlanningAccount) awaiting a stale run.
+    const wrapped: Promise<void> = resimulate().finally(() => {
+      if (resimulatePromise === wrapped) resimulatePromise = null
     })
-    return resimulatePromise
+    resimulatePromise = wrapped
+    return wrapped
   }
 
   // Wire reactivity exactly once, in a detached scope that outlives any single
@@ -1467,9 +1479,23 @@ export const useTxBatch = () => {
     if (finalLayer) return finalLayer
 
     if (entries.value.length > 0) {
-      await (resimulatePromise ?? runResimulate())
-      const refreshedFinalLayer = getCurrentFinalLayer()
-      if (refreshedFinalLayer) return refreshedFinalLayer
+      // A resimulation can be superseded mid-flight: both the entries watcher and
+      // this call kick off runs sharing resimToken, and the loser returns early
+      // (the `token !== resimToken` guard) WITHOUT populating layers or simError.
+      // A single await can therefore resolve on the superseded run, before the
+      // winning run has produced our final layer — which used to surface as a
+      // misleading "Batch simulation not loaded". Re-await the current run until
+      // the final layer for the present entries settles or a real error appears.
+      for (let attempt = 0; attempt < 8; attempt++) {
+        await (resimulatePromise ?? runResimulate())
+        const refreshedFinalLayer = getCurrentFinalLayer()
+        if (refreshedFinalLayer) return refreshedFinalLayer
+        if (simError.value) break
+        // Resolved without our layers and no error: a newer run superseded this
+        // one. If it's already in flight, the next pass awaits it; otherwise kick
+        // a fresh run. The bounded loop guarantees we can't spin forever.
+        if (!resimulatePromise) runResimulate()
+      }
       throw new Error(simError.value ?? 'Batch simulation not loaded')
     }
 
