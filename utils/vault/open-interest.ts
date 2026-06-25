@@ -53,8 +53,8 @@ export interface OpenInterestResponse {
   }>
 }
 
-const MAX_FLOW_WIDTH = 34
-const MIN_FLOW_WIDTH = 2
+const MAX_FLOW_WIDTH = 18
+const MIN_FLOW_WIDTH = 2.5
 
 export const normalizeOpenInterestAddress = (address: string): string => {
   try {

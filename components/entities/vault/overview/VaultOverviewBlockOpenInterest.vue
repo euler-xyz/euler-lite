@@ -64,25 +64,24 @@ const rightRows = computed(() => [
 
 const flowY = (index: number, count: number) => {
   if (count <= 1) return 130
-  const top = 44
-  const bottom = 216
+  const top = 52
+  const bottom = 208
   return top + (bottom - top) * (index / (count - 1))
 }
 
-const rightY = (id: string) => id === 'borrowed' ? 102 : 178
+const rightY = (id: string) => id === 'borrowed' ? 104 : 176
 
 const flowPath = (index: number, count: number) => {
   const y = flowY(index, count)
   const targetY = rightY('borrowed')
-  return `M 168 ${y} C 280 ${y}, 372 ${targetY}, 504 ${targetY}`
-}
-
-const nodeHeight = (valueUsd: number) => {
-  if (model.value.totalUsd <= 0) return 8
-  return Math.max(10, Math.min(96, valueUsd / model.value.totalUsd * 180))
+  return `M 178 ${y} C 270 ${y}, 342 ${targetY}, 420 ${targetY}`
 }
 
 const formatPercent = (value: number) => `${compactNumber(value, 1, 0)}%`
+
+const graphTop = (y: number) => ({
+  top: `${y / 260 * 100}%`,
+})
 
 const loadOpenInterest = async () => {
   if (!chainId.value || !isBorrowable.value) return
@@ -147,14 +146,24 @@ watch(
     </div>
 
     <template v-else>
-      <div class="flex flex-wrap items-center gap-x-20 gap-y-8 text-p3 text-content-secondary">
-        <span v-if="borrowerCount !== null">{{ borrowerCount }} borrowers</span>
-        <span v-if="refreshedAt">Updated {{ new Date(refreshedAt).toLocaleString() }}</span>
+      <div class="flex flex-wrap items-center gap-8 text-p3 text-content-secondary">
+        <span
+          v-if="borrowerCount !== null"
+          class="rounded-full border border-line-subtle bg-surface px-12 py-6"
+        >
+          {{ borrowerCount }} borrowers
+        </span>
+        <span
+          v-if="refreshedAt"
+          class="rounded-full border border-line-subtle bg-surface px-12 py-6"
+        >
+          Updated {{ new Date(refreshedAt).toLocaleString() }}
+        </span>
       </div>
 
-      <div class="w-full overflow-hidden">
+      <div class="relative h-[300px] w-full overflow-hidden rounded-12 border border-line-subtle bg-surface p-16">
         <svg
-          class="h-[260px] w-full text-content-primary"
+          class="pointer-events-none absolute inset-16 h-[calc(100%-32px)] w-[calc(100%-32px)]"
           viewBox="0 0 720 260"
           role="img"
           aria-label="Open interest flow from collateral assets to borrowed liquidity"
@@ -169,13 +178,13 @@ watch(
             >
               <stop
                 offset="0%"
-                stop-color="var(--c-accent-500)"
-                stop-opacity="0.68"
+                stop-color="var(--accent-500)"
+                stop-opacity="0.42"
               />
               <stop
                 offset="100%"
-                stop-color="var(--c-chart-line-b)"
-                stop-opacity="0.76"
+                stop-color="var(--chart-line-b)"
+                stop-opacity="0.56"
               />
             </linearGradient>
           </defs>
@@ -195,78 +204,43 @@ watch(
               <title>{{ `${flow.source.label} exposure: ${flow.source.displayValue} (${formatPercent(flow.source.percentage)})` }}</title>
             </path>
           </g>
-
-          <g
-            v-for="(node, index) in model.collateralNodes"
-            :key="node.id"
-            :transform="`translate(24 ${flowY(index, model.collateralNodes.length) - nodeHeight(node.valueUsd) / 2})`"
-          >
-            <rect
-              width="132"
-              :height="nodeHeight(node.valueUsd)"
-              rx="6"
-              fill="var(--c-surface)"
-              stroke="var(--c-line-subtle)"
-            >
-              <title>{{ `${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})` }}</title>
-            </rect>
-            <text
-              x="12"
-              y="18"
-              class="fill-current text-[13px] font-medium"
-            >
-              {{ node.label }}
-            </text>
-            <text
-              x="12"
-              y="36"
-              class="fill-[var(--c-content-secondary)] text-[12px]"
-            >
-              {{ node.displayValue }}
-            </text>
-          </g>
-
-          <g
-            v-for="node in rightRows"
-            :key="node.id"
-            :transform="`translate(532 ${rightY(node.id) - nodeHeight(node.valueUsd) / 2})`"
-          >
-            <rect
-              width="164"
-              :height="nodeHeight(node.valueUsd)"
-              rx="6"
-              :fill="node.id === 'borrowed' ? 'var(--c-accent-500)' : 'var(--c-surface)'"
-              :fill-opacity="node.id === 'borrowed' ? 0.18 : 1"
-              stroke="var(--c-line-subtle)"
-            >
-              <title>{{ `${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})` }}</title>
-            </rect>
-            <text
-              x="12"
-              y="18"
-              class="fill-current text-[13px] font-medium"
-            >
-              {{ node.label }}
-            </text>
-            <text
-              x="12"
-              y="36"
-              class="fill-[var(--c-content-secondary)] text-[12px]"
-            >
-              {{ node.displayValue }} · {{ formatPercent(node.percentage) }}
-            </text>
-          </g>
         </svg>
+
+        <div
+          v-for="(node, index) in model.collateralNodes"
+          :key="node.id"
+          class="absolute left-16 z-10 flex h-52 w-[178px] -translate-y-1/2 flex-col justify-center rounded-8 border border-line-subtle bg-surface-elevated px-12 shadow-card"
+          :style="graphTop(flowY(index, model.collateralNodes.length))"
+          :title="`${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})`"
+        >
+          <span class="truncate text-p3 font-medium text-content-primary">{{ node.label }}</span>
+          <span class="truncate text-p4 text-content-tertiary">{{ node.displayValue }} · {{ formatPercent(node.percentage) }}</span>
+        </div>
+
+        <div
+          v-for="node in rightRows"
+          :key="node.id"
+          class="absolute right-16 z-10 flex h-56 w-[220px] -translate-y-1/2 flex-col justify-center rounded-8 border px-14 shadow-card"
+          :class="node.id === 'borrowed'
+            ? 'border-accent-500/30 bg-accent-500/10'
+            : 'border-line-subtle bg-surface-elevated'"
+          :style="graphTop(rightY(node.id))"
+          :title="`${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})`"
+        >
+          <span class="truncate text-p3 font-medium text-content-primary">{{ node.label }}</span>
+          <span class="truncate text-p4 text-content-tertiary">{{ node.displayValue }} · {{ formatPercent(node.percentage) }}</span>
+        </div>
       </div>
 
       <div class="grid gap-8 text-p3 text-content-secondary tablet:grid-cols-2">
         <div
           v-for="node in model.collateralNodes"
           :key="`row-${node.id}`"
-          class="flex min-w-0 items-center justify-between gap-12"
+          class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-10 rounded-8 bg-surface px-12 py-8"
         >
           <span class="truncate text-content-primary">{{ node.label }}</span>
-          <span class="shrink-0">{{ node.displayValue }} · {{ formatPercent(node.percentage) }}</span>
+          <span class="shrink-0">{{ node.displayValue }}</span>
+          <span class="shrink-0 text-content-tertiary">{{ formatPercent(node.percentage) }}</span>
         </div>
       </div>
     </template>
