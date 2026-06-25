@@ -51,10 +51,14 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
     </div>
 
     <template v-else>
-      <section class="flex flex-col gap-24 border-b border-line-subtle pb-24">
+      <section class="relative flex flex-col gap-24 border-b border-line-subtle pb-24">
+        <BackButton
+          class="hidden tablet:inline-flex tablet:absolute tablet:top-8 tablet:right-full tablet:mr-12"
+          fallback="/explore"
+        />
         <div class="flex items-start gap-16 mobile:flex-col">
           <BackButton
-            class="mt-8 mobile:mt-0"
+            class="tablet:hidden"
             fallback="/explore"
           />
           <BaseAvatar
