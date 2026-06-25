@@ -250,6 +250,32 @@ const stopPointerPropagation = (event: Event) => {
   event.stopPropagation()
 }
 
+const isInteractiveChildEvent = (event: Event) => {
+  if (!(event.target instanceof Element) || !trigger.value) return false
+  const interactiveChild = event.target.closest([
+    'a[href]',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    'summary',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[role="checkbox"]',
+    '[role="radio"]',
+    '[role="switch"]',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(','))
+
+  return Boolean(
+    interactiveChild
+    && interactiveChild !== trigger.value
+    && trigger.value.contains(interactiveChild),
+  )
+}
+
 const openModal = () => {
   hidePopover()
   modal.open(component, getModalData())
@@ -258,6 +284,7 @@ const openModal = () => {
 const onClick = (event: Event) => {
   if (!clickable) {
     if (!canHover.value) {
+      if (isInteractiveChildEvent(event)) return
       stopNavigation(event)
       togglePopover()
     }

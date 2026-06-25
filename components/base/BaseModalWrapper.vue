@@ -128,7 +128,10 @@ const dragStyle = computed(() => ({
       @pointerup="onPointerUp"
       @pointercancel="onPointerCancel"
     >
-      <div class="hidden mobile:flex justify-center py-8">
+      <div
+        v-if="!inline"
+        class="hidden mobile:flex justify-center py-8"
+      >
         <div class="w-36 h-4 rounded-full bg-surface-subtle" />
       </div>
 
