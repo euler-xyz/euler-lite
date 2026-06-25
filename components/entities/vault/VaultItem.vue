@@ -98,10 +98,10 @@ const collateralOverflowCount = computed(() => Math.max(0, collateralAssets.valu
 const collateralExposureListId = computed(() => `collateral-exposure:${vault.address.toLowerCase()}`)
 
 const balance = computed(() =>
-  getBalance(vault.asset.address as `0x${string}`),
+  getBalance(vault.asset.address as `0x${string}`, vault.chainId),
 )
-const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
-const hasRewards = computed(() => hasSupplyRewards(vault.address))
+const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address, vault.chainId))
+const hasRewards = computed(() => hasSupplyRewards(vault.address, vault.chainId))
 const lendingAPY = computed(() =>
   getVaultSupplyApy(vault),
 )
@@ -150,7 +150,7 @@ const supplyApyModalData = computed(() => ({
     lendingAPY: lendingAPY.value,
     intrinsicAPY: intrinsicAPY.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(vault.address),
+    campaigns: getSupplyRewardCampaigns(vault.address, vault.chainId),
     rewardVaultAddress: vault.address,
   },
 }))

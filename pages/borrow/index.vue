@@ -38,9 +38,9 @@ const getNetApy = (pair: AnyBorrowVaultPair) => {
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
   const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
   const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
-  const supplyRewards = getSupplyRewardApy(pair.collateral.address)
-  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
-  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
+  const supplyRewards = getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId)
+  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
+  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
   return (supplyApy + supplyRewards) - (borrowApy - borrowRewards) + loopingRewards
 }
 
@@ -53,9 +53,9 @@ const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
   const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
   const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
-  const supplyFinal = supplyApy + getSupplyRewardApy(pair.collateral.address)
-  const borrowFinal = borrowApy - getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
-  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
+  const supplyFinal = supplyApy + getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId)
+  const borrowFinal = borrowApy - getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
+  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
   return supplyFinal + (maxMultiplier - 1) * (supplyFinal - borrowFinal) + loopingRewards
 }
 
@@ -166,7 +166,7 @@ const pairLiquidityUsd = ref<Map<string, number>>(new Map())
 const pairBorrowedUsd = ref<Map<string, number>>(new Map())
 
 // Helper to create a unique key for a borrow pair
-const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.borrow.chainId}-${pair.collateral.address}-${pair.borrow.address}`
+const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.chainId}-${pair.borrow.chainId}-${pair.collateral.address}-${pair.borrow.address}`
 
 const getPairSortName = (pair: AnyBorrowVaultPair): string =>
   `${pair.collateral.asset.symbol}/${pair.borrow.asset.symbol}`
@@ -237,14 +237,14 @@ watchEffect(() => {
 const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
   const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
-  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
+  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
   return borrowApy - borrowRewards
 }
 
 const getPairSupplyApy = (pair: AnyBorrowVaultPair): number => {
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
   const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
-  const supplyRewards = getSupplyRewardApy(pair.collateral.address)
+  const supplyRewards = getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId)
   return supplyApy + supplyRewards
 }
 

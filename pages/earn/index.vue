@@ -222,8 +222,8 @@ const sortedList = computed(() => {
   switch (sortBy.value) {
     case 'Total Supply':
       sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
-        const aValue = vaultTotalSupplyUsd.value.get(a.address) ?? 0
-        const bValue = vaultTotalSupplyUsd.value.get(b.address) ?? 0
+        const aValue = vaultTotalSupplyUsd.value.get(getVaultKey(a)) ?? 0
+        const bValue = vaultTotalSupplyUsd.value.get(getVaultKey(b)) ?? 0
         return bValue - aValue
       }))
       break

@@ -40,6 +40,8 @@ export interface BestMaxRoeResult {
   borrowLTV: number
   borrowVaultAddress: string
   collateralAddress: string
+  borrowChainId?: number
+  collateralChainId?: number
 }
 
 export interface EnhancedCellApys {
@@ -980,7 +982,7 @@ export const buildVaultApyCache = (
     // rewards adjustment so Stats agrees with the per-vault card.
     for (const vault of [...market.vaults, ...market.externalCollateral]) {
       if (!isVaultType(vault)) continue
-      const addr = vault.address.toLowerCase()
+      const addr = `${vault.chainId}:${vault.address.toLowerCase()}`
       if (result.has(addr)) continue
       if (!isEVault(vault)) {
         const baseSupply = supplyApyPercent(vault)
@@ -1013,6 +1015,6 @@ export const buildAttributeRowCells = (
 ): AttributeCell[] =>
   columns.map(col => row.getValue(
     col.vault,
-    usdCache.get(col.address),
-    apyCache?.get(col.address),
+    usdCache.get(`${col.chainId}:${col.address}`),
+    apyCache?.get(`${col.chainId}:${col.address}`),
   ))

@@ -75,7 +75,7 @@ const computeEnhancedApys = (
   if (collateral) {
     const base = getVaultSupplyApy(collateral)
     supplyApy = withVaultIntrinsicApy(base, collateral, enableIntrinsicApy.value)
-    supplyRewards = getSupplyRewardApy(collateral.address)
+    supplyRewards = getSupplyRewardApy(collateral.address, collateral.chainId)
   }
 
   let borrowApy = 0
@@ -84,11 +84,11 @@ const computeEnhancedApys = (
   if (liability) {
     const base = getVaultBorrowApy(liability)
     borrowApy = withVaultIntrinsicApy(base, liability, enableIntrinsicApy.value)
-    borrowRewards = getBorrowRewardApy(liability.address, collateral?.address)
+    borrowRewards = getBorrowRewardApy(liability.address, collateral?.address, liability.chainId)
     utilization = isEVault(liability) ? liability.utilization : 0
   }
 
-  const loopingRewards = liability ? getLoopingRewardApy(liability.address, collateral?.address) : 0
+  const loopingRewards = liability ? getLoopingRewardApy(liability.address, collateral?.address, liability.chainId) : 0
 
   const supplyFinal = supplyApy + supplyRewards
   const borrowFinal = borrowApy - borrowRewards
@@ -159,10 +159,10 @@ const shouldShowSparkles = (
   const collateral = findVault(props.market, collateralAddr)
   const liability = findVault(props.market, liabilityAddr)
   const hasSupplyRewardsForCell = collateral
-    ? hasSupplyRewards(collateral.address)
+    ? hasSupplyRewards(collateral.address, collateral.chainId)
     : false
   const hasBorrowRewardsForCell = liability
-    ? hasBorrowRewards(liability.address, collateral?.address)
+    ? hasBorrowRewards(liability.address, collateral?.address, liability.chainId)
     : false
   return hasSupplyRewardsForCell || hasBorrowRewardsForCell
 }

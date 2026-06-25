@@ -111,19 +111,19 @@ const pairName = computed(() => {
   return `${collateralName}/${borrowName}`
 })
 const borrowRewardsAPY = computed(() =>
-  getBorrowRewardApy(pair.borrow.address, pair.collateral.address),
+  getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const supplyRewardsAPY = computed(() =>
-  getSupplyRewardApy(pair.collateral.address),
+  getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId),
 )
 const loopingRewardsAPY = computed(() =>
-  getLoopingRewardApy(pair.borrow.address, pair.collateral.address),
+  getLoopingRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const hasBorrowApyRewards = computed(() =>
-  hasBorrowRewards(pair.borrow.address, pair.collateral.address),
+  hasBorrowRewards(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const hasAnyRewards = computed(() =>
-  hasSupplyRewards(pair.collateral.address) || hasBorrowApyRewards.value || hasLoopingRewards(pair.borrow.address, pair.collateral.address),
+  hasSupplyRewards(pair.collateral.address, pair.collateral.chainId) || hasBorrowApyRewards.value || hasLoopingRewards(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const supplyApy = computed(() => {
   const baseApy = getVaultSupplyApy(pair.collateral)
@@ -192,7 +192,7 @@ const borrowApyModalData = computed(() => ({
     borrowingAPY: getVaultBorrowApy(pair.borrow),
     intrinsicAPY: getVaultIntrinsicApy(pair.borrow, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.borrow, enableIntrinsicApy.value),
-    campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
     rewardVaultAddress: pair.borrow.address,
   },
 }))
@@ -206,7 +206,7 @@ const supplyApyModalData = computed(() => {
       lendingAPY: baseSupply,
       intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
       intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
-      campaigns: getSupplyRewardCampaigns(pair.collateral.address),
+      campaigns: getSupplyRewardCampaigns(pair.collateral.address, pair.collateral.chainId),
       rewardVaultAddress: pair.collateral.address,
     },
   }
@@ -221,9 +221,9 @@ const netApyModalData = computed(() => ({
     supplyRewardAPY: supplyRewardsAPY.value || null,
     borrowRewardAPY: borrowRewardsAPY.value || null,
     loopingRewardAPY: loopingRewardsAPY.value || null,
-    supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address),
-    borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
-    loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address, pair.collateral.chainId),
+    borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
+    loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
   },
 }))
 
@@ -236,6 +236,8 @@ const maxRoeModalData = computed(() => ({
     borrowLTV: ltvToPercent(pair.ltv.borrowLTV),
     borrowVaultAddress: pair.borrow.address,
     collateralAddress: pair.collateral.address,
+    borrowChainId: pair.borrow.chainId,
+    collateralChainId: pair.collateral.chainId,
   },
 }))
 
@@ -550,7 +552,7 @@ const linkPath = computed(() => ({
               :vault="pair.collateral"
             />
             <UiModalPreviewTrigger
-              v-if="hasSupplyRewards(pair.collateral.address)"
+              v-if="hasSupplyRewards(pair.collateral.address, pair.collateral.chainId)"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY rewards breakdown"
@@ -762,7 +764,7 @@ const linkPath = computed(() => ({
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <VaultPoints :vault="pair.collateral" />
           <UiModalPreviewTrigger
-            v-if="hasSupplyRewards(pair.collateral.address)"
+            v-if="hasSupplyRewards(pair.collateral.address, pair.collateral.chainId)"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY rewards breakdown"

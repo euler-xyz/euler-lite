@@ -63,6 +63,8 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
     let bestBorrowLTV = 0
     let bestBorrowVaultAddress = ''
     let bestCollateralAddress = ''
+    let bestBorrowChainId: number | undefined
+    let bestCollateralChainId: number | undefined
     let fallback = -Infinity
     let fallbackHasRewards = false
     let fallbackPair = ''
@@ -70,6 +72,8 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
     let fallbackBorrowAPY = 0
     let fallbackBorrowVaultAddress = ''
     let fallbackCollateralAddress = ''
+    let fallbackBorrowChainId: number | undefined
+    let fallbackCollateralChainId: number | undefined
 
     for (const liability of borrowableVaults) {
       for (const ltv of liability.collaterals) {
@@ -112,6 +116,8 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
           fallbackBorrowAPY = borrowFinal
           fallbackBorrowVaultAddress = liability.address
           fallbackCollateralAddress = collateralAddress
+          fallbackBorrowChainId = liability.chainId
+          fallbackCollateralChainId = collateral.chainId
         }
 
         if (!areTokenAddressesCorrelatedByTags(getVaultAssetAddress(collateral), liability.asset.address, address => getTokenCategoryTags(address, liability.chainId))) continue
@@ -126,6 +132,8 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
           bestBorrowLTV = ltvToPercent(ltv.borrowLTV)
           bestBorrowVaultAddress = liability.address
           bestCollateralAddress = collateralAddress
+          bestBorrowChainId = liability.chainId
+          bestCollateralChainId = collateral.chainId
         }
       }
     }
@@ -142,6 +150,8 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
         borrowLTV: 0,
         borrowVaultAddress: fallbackBorrowVaultAddress,
         collateralAddress: fallbackCollateralAddress,
+        borrowChainId: fallbackBorrowChainId,
+        collateralChainId: fallbackCollateralChainId,
       }
     }
 
@@ -157,6 +167,8 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
       borrowLTV: bestBorrowLTV,
       borrowVaultAddress: bestBorrowVaultAddress,
       collateralAddress: bestCollateralAddress,
+      borrowChainId: bestBorrowChainId,
+      collateralChainId: bestCollateralChainId,
     }
   }
 

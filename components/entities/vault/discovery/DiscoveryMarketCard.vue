@@ -56,6 +56,8 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
     borrowLTV: result.borrowLTV,
     borrowVaultAddress: result.borrowVaultAddress,
     collateralAddress: result.collateralAddress,
+    borrowChainId: result.borrowChainId,
+    collateralChainId: result.collateralChainId,
     isBestInMarket: true,
   },
 })

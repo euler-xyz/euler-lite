@@ -80,7 +80,7 @@ const getVaultKey = (vault: { chainId: number, address: string }) => `${vault.ch
 
 const getDisplayedVaultSupplyApy = (vault: EVault): number => {
   const baseApy = getVaultSupplyApy(vault)
-  return withVaultIntrinsicApy(baseApy, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
+  return withVaultIntrinsicApy(baseApy, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address, vault.chainId)
 }
 
 const {
@@ -155,7 +155,7 @@ const fetchLendPrices = useDebounceFn(async () => {
 
     await Promise.all(
       vaults.map(async (vault) => {
-        const walletBalance = getBalance(vault.asset.address as `0x${string}`)
+        const walletBalance = getBalance(vault.asset.address as `0x${string}`, vault.chainId)
         const liquidity = vault.availableLiquidity
         const [totalSupply, liquidityUsd, wallet] = await Promise.all([
           getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),

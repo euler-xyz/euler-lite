@@ -54,6 +54,7 @@ const makeLtv = (overrides: Partial<any> = {}): EVaultCollateral => ({
 const makeVault = (address: string, collaterals: EVaultCollateral[]): EVault =>
   ({
     type: 'EVault',
+    chainId: 1,
     address,
     collaterals,
     asset: { address, symbol: 'TST' },
@@ -88,9 +89,13 @@ const makeVault = (address: string, collaterals: EVaultCollateral[]): EVault =>
 const makeSecuritizeVault = (address: string): SecuritizeCollateralVault =>
   ({
     type: 'SecuritizeCollateral',
+    chainId: 1,
     address,
     asset: { address, symbol: 'NOTE' },
   }) as unknown as SecuritizeCollateralVault
+
+const cacheKey = (vault: { chainId: number, address: string }) =>
+  `${vault.chainId}:${vault.address.toLowerCase()}`
 
 const makeMarket = (
   vaults: Array<EVault | SecuritizeCollateralVault>,
@@ -179,6 +184,7 @@ describe('getCollateralMatrix', () => {
       address: '0xsecuritize',
       symbol: 'NOTE',
       assetAddress: '0xSecuritize',
+      chainId: 1,
       category: 'external',
     })
   })
@@ -258,7 +264,7 @@ describe('attribute stats matrix', () => {
     }
 
     const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, chainId: vault.chainId, vault, isExternal: false }]
-    const usdCache = new Map([[vault.address.toLowerCase(), usd]])
+    const usdCache = new Map([[cacheKey(vault), usd]])
     const byRow = new Map(STATS_ROWS.map(row => [
       row.id,
       buildAttributeRowCells(row, columns, usdCache)[0],
@@ -291,7 +297,7 @@ describe('attribute stats matrix', () => {
     const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, chainId: vault.chainId, vault, isExternal: false }]
     const usdCache = new Map<string, VaultUsdCacheEntry>()
     const apyCache = new Map<string, VaultApyCacheEntry>([
-      [vault.address.toLowerCase(), { supplyApy: 5.31, borrowApy: 1.25 }],
+      [cacheKey(vault), { supplyApy: 5.31, borrowApy: 1.25 }],
     ])
     const byRow = new Map(STATS_ROWS.map(row => [
       row.id,
@@ -387,7 +393,7 @@ describe('buildVaultApyCache', () => {
 
     const cache = buildVaultApyCache([market], undefined, settings)
 
-    const entry = cache.get(vault.address.toLowerCase())
+    const entry = cache.get(cacheKey(vault))
     expect(entry).toBeDefined()
     // computeSupplyApyBreakdown: lending + intrinsic + rewards = base + (1 + base/100) * intrinsic + lendRewards
     expect(entry!.supplyApy).toBeCloseTo(4 + (1 + 4 / 100) * 1 + 0.5)
@@ -412,7 +418,7 @@ describe('buildVaultApyCache', () => {
 
     const cache = buildVaultApyCache([market], undefined, settings)
 
-    const entry = cache.get(externalVault.address.toLowerCase())
+    const entry = cache.get(cacheKey(externalVault))
     expect(entry).toBeDefined()
     expect(entry!.supplyApy).toBeCloseTo(3 + (1 + 3 / 100) * 1 + 0.5)
     expect(entry!.borrowApy).toBeCloseTo(5 + (1 + 5 / 100) * 1 - 0.25)

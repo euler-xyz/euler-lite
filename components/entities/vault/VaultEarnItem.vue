@@ -39,7 +39,7 @@ const { viewer } = useApyVisibility()
 const { hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const balance = computed(() =>
-  getBalance(vault.asset.address as `0x${string}`),
+  getBalance(vault.asset.address as `0x${string}`, vault.chainId),
 )
 const supplyApyBreakdown = computed(() => computeSupplyApyBreakdown(vault, viewer.value))
 const visibleLendingApy = computed(() => supplyApyBreakdown.value?.lending ?? getVaultSupplyApy(vault))
@@ -55,7 +55,7 @@ const visibleSupplyApy = computed(() => {
   const borrowing = supplyApyBreakdown.value?.borrowing ?? 0
   return visibleLendingApy.value + borrowing + visibleIntrinsicApy.value + visibleRewardsApy.value
 })
-const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vault.address))
+const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vault.address, vault.chainId))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address, vault.chainId))
 const isUnverified = computed(() => !isVerifiedVault(vault.address, vault.chainId))
@@ -97,7 +97,7 @@ const supplyApyModalData = computed(() => ({
     lendingAPY: visibleLendingApy.value,
     intrinsicAPY: visibleIntrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
-    campaigns: settings.value.enableRewardsApy ? getSupplyRewardCampaigns(vault.address) : [],
+    campaigns: settings.value.enableRewardsApy ? getSupplyRewardCampaigns(vault.address, vault.chainId) : [],
     totalSupplyAPY: visibleSupplyApy.value,
     rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',
