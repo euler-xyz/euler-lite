@@ -80,17 +80,11 @@ const allocationGroups = computed(() =>
   }),
 )
 const allocationDisplayGroups = computed(() => allocationGroups.value.slice(0, 3))
-const allocationOverflowCount = computed(() => Math.max(0, allocationGroups.value.length - allocationDisplayGroups.value.length))
 const allocationSummary = computed(() => {
   if (!allocationGroups.value.length) {
     return `${vault.strategies.length} ${vault.strategies.length === 1 ? 'strategy' : 'strategies'}`
   }
   return `${formatExposureAssetCount(allocationGroups.value.length)} / ${vault.strategies.length} ${vault.strategies.length === 1 ? 'strategy' : 'strategies'}`
-})
-const allocationSymbols = computed(() => {
-  const symbols = allocationDisplayGroups.value.map(group => group.asset.symbol).join(', ')
-  if (!allocationOverflowCount.value) return symbols
-  return `${symbols} +${allocationOverflowCount.value}`
 })
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
@@ -323,12 +317,6 @@ const supplyApyModalData = computed(() => ({
               {{ allocationSummary }}
             </span>
           </div>
-          <span
-            v-if="allocationSymbols"
-            class="max-w-full truncate text-p4 text-content-tertiary"
-          >
-            {{ allocationSymbols }}
-          </span>
         </div>
       </div>
       <div class="flex flex-col flex-1 items-end text-right mobile:!hidden">
@@ -399,12 +387,6 @@ const supplyApyModalData = computed(() => ({
               {{ allocationSummary }}
             </span>
           </div>
-          <span
-            v-if="allocationSymbols"
-            class="max-w-full truncate text-p4 text-content-tertiary"
-          >
-            {{ allocationSymbols }}
-          </span>
         </div>
       </div>
       <div

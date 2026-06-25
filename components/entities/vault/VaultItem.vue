@@ -60,13 +60,7 @@ const collateralExposureGroups = computed(() => {
   )
 })
 const collateralDisplayGroups = computed(() => collateralExposureGroups.value.slice(0, 3))
-const collateralOverflowCount = computed(() => Math.max(0, collateralExposureGroups.value.length - collateralDisplayGroups.value.length))
 const collateralExposureSummary = computed(() => formatExposureAssetCount(collateralExposureGroups.value.length))
-const collateralExposureSymbols = computed(() => {
-  const symbols = collateralDisplayGroups.value.map(group => group.asset.symbol).join(', ')
-  if (!collateralOverflowCount.value) return symbols
-  return `${symbols} +${collateralOverflowCount.value}`
-})
 const collateralExposureListId = computed(() => `collateral-exposure:${vault.address.toLowerCase()}`)
 
 const balance = computed(() =>
@@ -406,15 +400,6 @@ watchEffect(async () => {
               </div>
             </div>
           </div>
-          <span
-            class="max-w-full truncate text-p4 text-content-tertiary"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="collateral-exposure-assets"
-            :data-value="collateralExposureSymbols"
-          >
-            {{ collateralExposureSymbols }}
-          </span>
         </div>
         <div
           v-else
@@ -523,9 +508,6 @@ watchEffect(async () => {
                 {{ collateralExposureSummary }}
               </span>
             </div>
-            <span class="max-w-full truncate text-p4 text-content-tertiary">
-              {{ collateralExposureSymbols }}
-            </span>
           </div>
           <div
             v-else
