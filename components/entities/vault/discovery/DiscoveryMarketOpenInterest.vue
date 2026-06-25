@@ -23,9 +23,9 @@ const isLoading = ref(false)
 const hasError = ref(false)
 const collateralExposureUsd = ref<Record<string, Record<string, number>>>({})
 const refreshedAt = ref<string | null>(null)
-const isExpanded = ref(false)
+const expandedRows = ref<Set<string>>(new Set())
 
-const COLLAPSED_ROW_COUNT = 4
+const COLLAPSED_NODE_COUNT = 3
 
 const borrowVaults = computed(() =>
   matrix.columns
@@ -68,12 +68,6 @@ const rows = computed(() =>
     .sort((a, b) => b.totalUsd - a.totalUsd),
 )
 
-const visibleRows = computed(() =>
-  isExpanded.value ? rows.value : rows.value.slice(0, COLLAPSED_ROW_COUNT),
-)
-
-const hiddenRowCount = computed(() => Math.max(0, rows.value.length - visibleRows.value.length))
-
 const formatPercent = (value: number) => `${compactNumber(value, 1, 0)}%`
 
 const barWidth = (value: number) => ({
@@ -82,9 +76,29 @@ const barWidth = (value: number) => ({
 
 const vaultCountLabel = (count: number) => `${count} vault${count === 1 ? '' : 's'}`
 const groupCountLabel = (count: number) => `${count} group${count === 1 ? '' : 's'}`
-const showMoreLabel = computed(() =>
-  isExpanded.value ? 'Show less' : `Show more${hiddenRowCount.value ? ` (${hiddenRowCount.value})` : ''}`,
-)
+
+const rowKey = (vault: EVault) => normalizeOpenInterestAddress(vault.address)
+
+const isRowExpanded = (vault: EVault) => expandedRows.value.has(rowKey(vault))
+
+const toggleRowExpanded = (vault: EVault) => {
+  const key = rowKey(vault)
+  const next = new Set(expandedRows.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedRows.value = next
+}
+
+const visibleNodes = (row: (typeof rows.value)[number]) =>
+  isRowExpanded(row.vault)
+    ? row.model.collateralNodes
+    : row.model.collateralNodes.slice(0, COLLAPSED_NODE_COUNT)
+
+const hiddenNodeCount = (row: (typeof rows.value)[number]) =>
+  Math.max(0, row.model.collateralNodes.length - visibleNodes(row).length)
+
+const nodeShowMoreLabel = (row: (typeof rows.value)[number]) =>
+  isRowExpanded(row.vault) ? 'Show less' : `Show more (${hiddenNodeCount(row)})`
 
 const loadOpenInterest = async () => {
   if (!chainId.value || !borrowVaults.value.length) return
@@ -158,7 +172,7 @@ watch(
     >
       <div class="grid gap-10 tablet:grid-cols-2">
         <div
-          v-for="row in visibleRows"
+          v-for="row in rows"
           :key="row.vault.address"
           class="rounded-12 border border-line-subtle bg-surface-secondary p-12"
           data-id="discovery-open-interest-row"
@@ -187,7 +201,7 @@ watch(
 
           <div class="flex flex-col gap-8">
             <div
-              v-for="node in row.model.collateralNodes"
+              v-for="node in visibleNodes(row)"
               :key="node.id"
               class="rounded-8 bg-surface p-10"
               data-id="data-point"
@@ -218,21 +232,21 @@ watch(
                 {{ node.displayValue }}
               </p>
             </div>
+
+            <button
+              v-if="row.model.collateralNodes.length > COLLAPSED_NODE_COUNT"
+              class="self-start text-p4 font-medium text-content-accent hover:text-accent-600 transition-colors cursor-pointer"
+              type="button"
+              data-id="discovery-open-interest-row-show-more"
+              :data-key="getAddress(row.vault.address).toLowerCase()"
+              :aria-expanded="isRowExpanded(row.vault)"
+              @click.stop="toggleRowExpanded(row.vault)"
+            >
+              {{ nodeShowMoreLabel(row) }}
+            </button>
           </div>
         </div>
       </div>
-
-      <button
-        v-if="rows.length > COLLAPSED_ROW_COUNT"
-        class="mx-auto text-p3 font-medium text-content-accent hover:text-accent-600 transition-colors cursor-pointer"
-        type="button"
-        data-id="discovery-open-interest-show-more"
-        :data-market-id="market.id"
-        :aria-expanded="isExpanded"
-        @click.stop="isExpanded = !isExpanded"
-      >
-        {{ showMoreLabel }}
-      </button>
     </div>
 
     <div
