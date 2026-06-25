@@ -51,6 +51,9 @@ const hoveredCell = ref<{
   liabilityAddr: string
 } | null>(null)
 
+const unavailableRoeCellLabel = 'Max ROE is unavailable for uncorrelated pairs. Compare Net APY instead.'
+const unavailableMultiplierCellLabel = 'Max multiplier is unavailable for uncorrelated pairs.'
+
 // Row/column highlighting helpers — make it easy to scan a cell back to its
 // row label and column header. A row is "highlighted" when it owns either
 // the hovered cell or the currently selected cell; same for columns.
@@ -130,7 +133,7 @@ const getCellMetricValue = (
     case 'lltv':
       return Number(ltvToPercent(cell.ltv.currentLiquidationLTV))
     case 'multiplier':
-      return getMaxMultiplier(cell.ltv.borrowLTV)
+      return isCorrelatedCell(collateralAddr, liabilityAddr) ? getMaxMultiplier(cell.ltv.borrowLTV) : Number.NaN
     case 'net-apy':
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).netApy
     case 'roe': {
@@ -150,6 +153,28 @@ const isUnavailableRoeCell = (
   && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
   && !isCorrelatedCell(collateralAddr, liabilityAddr)
 
+const isUnavailableMultiplierCell = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): boolean =>
+  props.dotMetric === 'multiplier'
+  && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
+  && !isCorrelatedCell(collateralAddr, liabilityAddr)
+
+const getUnavailableMetricLabel = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): string | undefined => {
+  if (isUnavailableRoeCell(collateralAddr, liabilityAddr)) return unavailableRoeCellLabel
+  if (isUnavailableMultiplierCell(collateralAddr, liabilityAddr)) return unavailableMultiplierCellLabel
+  return undefined
+}
+
+const isUnavailableMetricCell = (
+  collateralAddr: string,
+  liabilityAddr: string,
+): boolean => getUnavailableMetricLabel(collateralAddr, liabilityAddr) !== undefined
+
 const shouldShowSparkles = (
   collateralAddr: string,
   liabilityAddr: string,
@@ -166,6 +191,16 @@ const shouldShowSparkles = (
     : false
   return hasSupplyRewardsForCell || hasBorrowRewardsForCell
 }
+
+const hasRewardMetricCells = computed((): boolean => {
+  if (props.dotMetric !== 'net-apy' && props.dotMetric !== 'roe') return false
+  for (const [rowAddr, cols] of props.matrix.cells) {
+    for (const colAddr of cols.keys()) {
+      if (shouldShowSparkles(rowAddr, colAddr)) return true
+    }
+  }
+  return false
+})
 
 const metricRange = computed((): { min: number, max: number } => {
   if (props.dotMetric === 'oracle') return { min: 0, max: 0 }
@@ -455,7 +490,7 @@ const explorerLink = (address: string) => getExplorerLink(address, marketChainId
 
 <template>
   <div
-    class="px-16 pb-12 flex items-center justify-center"
+    class="px-16 pb-12 flex flex-col items-center justify-center gap-8"
     data-id="collateral-matrix"
     data-list="collateral-matrix"
     :data-key="market.id"
@@ -465,7 +500,7 @@ const explorerLink = (address: string) => getExplorerLink(address, marketChainId
     :data-column-count="matrix.columns.length"
   >
     <div
-      class="relative max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
+      class="relative isolate max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-separate border-spacing-0">
         <thead class="sticky top-0 z-30 bg-surface">
@@ -560,8 +595,8 @@ const explorerLink = (address: string) => getExplorerLink(address, marketChainId
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
               :data-correlated="matrix.cells.get(row.address)?.get(col.address) ? isCorrelatedCell(row.address, col.address) : undefined"
-              :title="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs.' : undefined"
-              :aria-label="isUnavailableRoeCell(row.address, col.address) ? 'Max ROE only shown for correlated pairs' : undefined"
+              :title="getUnavailableMetricLabel(row.address, col.address)"
+              :aria-label="getUnavailableMetricLabel(row.address, col.address)"
               :data-value="
                 (() => {
                   const cell = matrix.cells.get(row.address)?.get(col.address);
@@ -726,18 +761,12 @@ const explorerLink = (address: string) => getExplorerLink(address, marketChainId
                     title="Liquidation LTV ramping down"
                   />
                   <SvgIcon
-                    v-if="dotMetric === 'roe' && isCorrelatedCell(row.address, col.address)"
-                    name="check-circle"
-                    class="!w-10 !h-10 text-success-500 shrink-0"
-                    title="Correlated pair"
-                  />
-                  <SvgIcon
                     v-if="shouldShowSparkles(row.address, col.address)"
                     name="sparks"
                     class="!w-10 !h-10 text-accent-500 shrink-0"
                   />
                   <span
-                    v-if="isUnavailableRoeCell(row.address, col.address)"
+                    v-if="isUnavailableMetricCell(row.address, col.address)"
                     class="text-p5 whitespace-nowrap text-content-muted"
                   >
                     -
@@ -786,6 +815,23 @@ const explorerLink = (address: string) => getExplorerLink(address, marketChainId
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div
+      v-if="hasRewardMetricCells"
+      class="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-p5 text-content-muted"
+      data-id="collateral-matrix-legend"
+    >
+      <span
+        v-if="hasRewardMetricCells"
+        class="inline-flex items-center gap-3 whitespace-nowrap"
+      >
+        <SvgIcon
+          name="sparks"
+          class="!w-10 !h-10 text-accent-500 shrink-0"
+        />
+        Rewards included
+      </span>
     </div>
   </div>
 

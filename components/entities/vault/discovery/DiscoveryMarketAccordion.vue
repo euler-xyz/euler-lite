@@ -420,6 +420,9 @@ const hasSelection = (market: MarketGroup): boolean => {
   return !!selectedGraphNode.value && selectedGraphNode.value.marketId === market.id
 }
 
+const maxRoeMatrixNotice = 'Max ROE only shown for correlated pairs.'
+const maxMultiplierMatrixNotice = 'Max multiplier only shown for correlated pairs.'
+
 // -- Global event handlers --
 
 onMounted(() => {
@@ -449,7 +452,7 @@ onMounted(() => {
     <article
       v-for="market in markets"
       :key="market.id"
-      class="bg-surface rounded-12 border border-line-default shadow-card transition-all"
+      class="relative bg-surface rounded-12 border border-line-default shadow-card transition-all"
       data-id="discovery-market-list-item"
       data-list="discovery-market"
       :data-key="market.id"
@@ -457,7 +460,10 @@ onMounted(() => {
       :data-vault-count="market.vaults.length"
       :data-external-collateral-count="market.externalCollateral.length"
       :data-pair-count="getMiniDiagram(market).pairCount"
-      :class="isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis'"
+      :class="[
+        isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis',
+        isMatrixDropdownOpen(market.id) ? 'z-[60]' : isExpanded(market.id) ? 'z-10' : 'z-0',
+      ]"
     >
       <!-- Collapsed Row Card -->
       <DiscoveryMarketCard
@@ -508,7 +514,7 @@ onMounted(() => {
           >
             <!-- Controls: view toggle + metric dropdown -->
             <div
-              class="px-16 pt-12 pb-8 flex flex-wrap items-center gap-8"
+              class="relative z-[70] px-16 pt-12 pb-8 flex flex-wrap items-center gap-8"
               @click.stop
             >
               <!-- Graph / Matrix toggle -->
@@ -558,10 +564,10 @@ onMounted(() => {
                    pair matrix with the corresponding dotMetric. -->
               <div
                 v-if="getExpandedView(market.id) === 'matrix'"
-                class="relative"
+                class="matrix-view-select relative"
               >
                 <div
-                  class="ui-select__field"
+                  class="ui-select__field matrix-view-select__field"
                   data-id="discovery-matrix-view-select"
                   :data-key="market.id"
                   :data-market-id="market.id"
@@ -570,18 +576,18 @@ onMounted(() => {
                 >
                   <UiIcon
                     name="filter"
-                    class="ui-select__icon"
+                    class="ui-select__icon matrix-view-select__icon"
                   />
-                  <span class="ui-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === getMatrixView(market.id))?.label }}</span>
+                  <span class="ui-select__text matrix-view-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === getMatrixView(market.id))?.label }}</span>
                   <UiIcon
                     name="arrow-down"
-                    class="ui-select__arrow"
+                    class="ui-select__arrow matrix-view-select__arrow"
                     :style="isMatrixDropdownOpen(market.id) ? 'transform: rotate(180deg)' : ''"
                   />
                 </div>
                 <div
                   v-if="isMatrixDropdownOpen(market.id)"
-                  class="absolute left-0 top-full mt-4 z-50 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
+                  class="absolute left-0 top-full mt-4 z-[120] bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
                 >
                   <button
                     v-for="option in MATRIX_VIEW_OPTIONS"
@@ -610,6 +616,23 @@ onMounted(() => {
                 variant="ghost"
               />
             </div>
+
+            <p
+              v-if="getExpandedView(market.id) === 'matrix' && getMatrixView(market.id) === 'roe'"
+              class="px-16 pb-8 text-center text-p3 text-content-tertiary"
+              data-id="discovery-max-roe-correlation-notice"
+              :data-key="market.id"
+            >
+              {{ maxRoeMatrixNotice }}
+            </p>
+            <p
+              v-if="getExpandedView(market.id) === 'matrix' && getMatrixView(market.id) === 'multiplier'"
+              class="px-16 pb-8 text-center text-p3 text-content-tertiary"
+              data-id="discovery-max-multiplier-correlation-notice"
+              :data-key="market.id"
+            >
+              {{ maxMultiplierMatrixNotice }}
+            </p>
 
             <!-- Graph View -->
             <DiscoveryMarketGraph
@@ -780,3 +803,54 @@ onMounted(() => {
     </article>
   </div>
 </template>
+
+<style scoped lang="scss">
+.matrix-view-select {
+  width: fit-content;
+  max-width: 100%;
+
+  &__field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    width: fit-content;
+    max-width: 100%;
+    color: var(--ui-select-field-color);
+    font-size: 14px;
+    font-weight: 400;
+    white-space: nowrap;
+    padding: 6px 16px;
+    background: var(--ui-select-field-background-color);
+    border: 1px solid var(--neutral-300);
+    border-radius: 100px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: var(--ui-input-shadow);
+
+    &:hover {
+      border-color: var(--neutral-400);
+      background: var(--neutral-50);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+    }
+  }
+
+  &__icon,
+  &__arrow {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+  &__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__arrow {
+    margin-left: 2px;
+    margin-right: -4px;
+  }
+}
+</style>
