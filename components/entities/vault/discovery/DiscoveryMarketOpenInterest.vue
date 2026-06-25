@@ -100,6 +100,13 @@ const hiddenNodeCount = (row: (typeof rows.value)[number]) =>
 const nodeShowMoreLabel = (row: (typeof rows.value)[number]) =>
   isRowExpanded(row.vault) ? 'Show less' : `Show more (${hiddenNodeCount(row)})`
 
+const isSyntheticNode = (id: string) => id === 'other'
+
+const getNodeAsset = (node: { id: string, label: string }) => ({
+  address: node.id,
+  symbol: node.label,
+})
+
 const loadOpenInterest = async () => {
   if (!chainId.value || !borrowVaults.value.length) return
 
@@ -181,8 +188,12 @@ watch(
         >
           <div class="mb-10 flex min-w-0 items-start justify-between gap-12">
             <div class="min-w-0">
-              <p class="truncate text-p3 font-medium text-content-primary">
-                {{ row.vault.asset.symbol }}
+              <p class="flex min-w-0 items-center gap-6 text-p3 font-medium text-content-primary">
+                <AssetAvatar
+                  :asset="row.vault.asset"
+                  size="20"
+                />
+                <span class="truncate">{{ row.vault.asset.symbol }}</span>
               </p>
               <p
                 class="text-p4 text-content-tertiary"
@@ -212,6 +223,11 @@ watch(
             >
               <div class="mb-6 flex min-w-0 items-center justify-between gap-8">
                 <div class="flex min-w-0 items-center gap-6">
+                  <AssetAvatar
+                    v-if="!isSyntheticNode(node.id)"
+                    :asset="getNodeAsset(node)"
+                    size="16"
+                  />
                   <span class="truncate text-p3 text-content-primary">{{ node.label }}</span>
                   <span
                     v-if="node.vaultCount > 1"
