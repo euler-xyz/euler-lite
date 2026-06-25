@@ -5,11 +5,6 @@ export type ManagerProfileExternalLink = {
   url: string
 }
 
-export type ManagerProfileAddressEntry = {
-  address: string
-  label: string
-}
-
 const withProtocol = (url: string): string => {
   if (url.startsWith('hhttps://')) return `https://${url.slice('hhttps://'.length)}`
   if (/^https?:\/\//i.test(url)) return url
@@ -19,6 +14,21 @@ const withProtocol = (url: string): string => {
 const cleanHandle = (value: string): string => value.trim().replace(/^@+/, '').replace(/^\/+/, '')
 
 export const getManagerProfileExternalUrl = (url: string): string => withProtocol(url.trim())
+
+const SOCIAL_LINK_LABELS: Record<string, string> = {
+  twitter: 'X',
+  github: 'GitHub',
+  discord: 'Discord',
+  telegram: 'Telegram',
+  youtube: 'YouTube',
+}
+
+const getSocialLinkLabel = (platform: string): string =>
+  SOCIAL_LINK_LABELS[platform] ?? platform
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 
 export const getManagerProfileSocialUrl = (platform: string, value: string): string => {
   const normalized = value.trim()
@@ -47,41 +57,27 @@ export const getManagerProfileSocialUrl = (platform: string, value: string): str
 export const getManagerProfileSocialLinks = (
   entity: EulerLabelEntity,
 ): ManagerProfileExternalLink[] => {
-  const social = (entity.social ?? {}) as Partial<EulerLabelEntity['social']>
-  const links: Array<ManagerProfileExternalLink | null> = [
+  const social = entity.social ?? {}
+  const links: ManagerProfileExternalLink[] = ([
     entity.url ? { label: 'Website', url: withProtocol(entity.url) } : null,
-    social.twitter
-      ? { label: 'X', url: getManagerProfileSocialUrl('twitter', social.twitter) }
-      : null,
-    social.github
-      ? { label: 'GitHub', url: getManagerProfileSocialUrl('github', social.github) }
-      : null,
-    social.discord
-      ? { label: 'Discord', url: getManagerProfileSocialUrl('discord', social.discord) }
-      : null,
-    social.telegram
-      ? { label: 'Telegram', url: getManagerProfileSocialUrl('telegram', social.telegram) }
-      : null,
-    social.youtube
-      ? { label: 'YouTube', url: getManagerProfileSocialUrl('youtube', social.youtube) }
-      : null,
-  ]
+    ...Object.entries(social).map(([platform, value]) =>
+      value
+        ? {
+            label: getSocialLinkLabel(platform),
+            url: getManagerProfileSocialUrl(platform, value),
+          }
+        : null,
+    ),
+  ] as Array<ManagerProfileExternalLink | null>).filter((link): link is ManagerProfileExternalLink => Boolean(link?.url))
 
-  return links.filter((link): link is ManagerProfileExternalLink => Boolean(link?.url))
+  const seen = new Set<string>()
+  return links.filter((link) => {
+    const key = `${link.label}:${link.url}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
-
-export const getManagerProfileAddressEntries = (
-  entity: EulerLabelEntity,
-): ManagerProfileAddressEntry[] =>
-  Object.entries(entity.addresses)
-    .map(([address, label]) => ({
-      address,
-      label: label || 'Manager address',
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label) || a.address.localeCompare(b.address))
-
-export const getShortAddress = (address: string): string =>
-  `${address.slice(0, 6)}...${address.slice(-4)}`
 
 export const getEulerLabelEntityKeys = (product: EulerLabelProduct): string[] => {
   if (Array.isArray(product.entity)) return product.entity

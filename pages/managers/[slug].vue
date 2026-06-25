@@ -1,12 +1,8 @@
 <script setup lang="ts">
 import { autoLink } from '~/utils/autoLink'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { getExplorerLink } from '~/utils/block-explorer'
 import {
-  getManagerProfileAddressEntries,
-  getManagerProfileExternalUrl,
   getManagerProfileSocialLinks,
-  getShortAddress,
 } from '~/utils/manager-profile'
 
 defineOptions({
@@ -14,30 +10,16 @@ defineOptions({
 })
 
 const route = useRoute()
-const { chainId } = useEulerAddresses()
 const slug = computed(() => route.params.slug as string)
 const {
   entity,
   productEntries,
-  evaults,
-  securitizeVaults,
+  managedMarkets,
   earnVaults,
-  vaultCount,
   isLoading,
 } = useEulerManagerProfile(slug)
 
 const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(entity.value) : [])
-const addressEntries = computed(() => entity.value ? getManagerProfileAddressEntries(entity.value) : [])
-
-const hasVaults = computed(() =>
-  evaults.value.length > 0 || securitizeVaults.value.length > 0 || earnVaults.value.length > 0,
-)
-
-const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
-
-const copyAddress = (address: string) => {
-  navigator.clipboard.writeText(address)
-}
 </script>
 
 <template>
@@ -103,7 +85,7 @@ const copyAddress = (address: string) => {
           </div>
         </div>
 
-        <div class="grid grid-cols-4 gap-12 mobile:grid-cols-1">
+        <div class="grid grid-cols-3 gap-12 mobile:grid-cols-1">
           <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
             <p class="text-p4 uppercase text-content-tertiary">
               Products
@@ -114,10 +96,10 @@ const copyAddress = (address: string) => {
           </div>
           <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
             <p class="text-p4 uppercase text-content-tertiary">
-              Vaults
+              Markets
             </p>
             <p class="mt-4 text-h3 text-content-primary">
-              {{ vaultCount }}
+              {{ managedMarkets.length }}
             </p>
           </div>
           <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
@@ -126,14 +108,6 @@ const copyAddress = (address: string) => {
             </p>
             <p class="mt-4 text-h3 text-content-primary">
               {{ socialLinks.length }}
-            </p>
-          </div>
-          <div class="rounded-8 border border-line-subtle bg-surface-secondary p-16">
-            <p class="text-p4 uppercase text-content-tertiary">
-              Addresses
-            </p>
-            <p class="mt-4 text-h3 text-content-primary">
-              {{ addressEntries.length }}
             </p>
           </div>
         </div>
@@ -160,148 +134,29 @@ const copyAddress = (address: string) => {
       </section>
 
       <section
-        v-if="addressEntries.length"
-        class="flex flex-col gap-12"
-      >
-        <h2 class="text-h3 text-content-primary">
-          Governance addresses
-        </h2>
-        <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
-          <div
-            v-for="entry in addressEntries"
-            :key="entry.address"
-            class="rounded-8 border border-line-subtle bg-surface-secondary p-16"
-          >
-            <p class="text-p3 text-content-primary">
-              {{ entry.label }}
-            </p>
-            <div class="mt-6 flex min-w-0 items-center gap-6">
-              <NuxtLink
-                :to="getExplorerAddressLink(entry.address)"
-                target="_blank"
-                class="min-w-0 truncate text-p3 text-accent-600 underline hover:text-accent-500"
-              >
-                {{ getShortAddress(entry.address) }}
-              </NuxtLink>
-              <button
-                type="button"
-                class="shrink-0 text-content-muted outline-none hover:text-content-secondary active:text-content-primary"
-                aria-label="Copy address"
-                @click="copyAddress(entry.address)"
-              >
-                <SvgIcon
-                  class="!h-16 !w-16"
-                  name="copy"
-                />
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section
-        v-if="productEntries.length"
+        v-if="managedMarkets.length"
         class="flex flex-col gap-12"
       >
         <div class="flex items-center justify-between gap-12">
           <h2 class="text-h3 text-content-primary">
-            Products managed
+            Markets
           </h2>
         </div>
-        <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
-          <div
-            v-for="entry in productEntries"
-            :key="entry.key"
-            class="rounded-12 border border-line-default bg-surface p-16 shadow-card"
-          >
-            <div class="flex items-start gap-10">
-              <BaseAvatar
-                v-if="entry.product.logo"
-                :label="entry.product.name"
-                :src="getEulerLabelEntityLogo(entry.product.logo)"
-                class="!h-32 !w-32 shrink-0"
-              />
-              <div class="min-w-0 flex-1">
-                <NuxtLink
-                  :to="{ name: 'explore-market', params: { market: entry.key }, query: { network: route.query.network } }"
-                  class="text-p2 text-content-primary hover:text-accent-600"
-                >
-                  {{ entry.product.name }}
-                </NuxtLink>
-                <p
-                  v-if="entry.product.description"
-                  class="mt-4 line-clamp-2 text-p3 text-content-tertiary"
-                >
-                  {{ entry.product.description }}
-                </p>
-              </div>
-            </div>
-            <div
-              v-if="entry.product.tags?.length || entry.product.url"
-              class="mt-12 flex flex-wrap gap-6"
-            >
-              <span
-                v-for="tag in entry.product.tags"
-                :key="tag"
-                class="rounded-8 bg-surface-secondary px-8 py-4 text-p4 text-content-secondary"
-              >
-                {{ tag }}
-              </span>
-              <a
-                v-if="entry.product.url"
-                :href="getManagerProfileExternalUrl(entry.product.url)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="rounded-8 bg-surface-secondary px-8 py-4 text-p4 text-accent-600 hover:text-accent-500"
-              >
-                Website
-              </a>
-            </div>
-          </div>
-        </div>
+        <DiscoveryMarketAccordion :markets="managedMarkets" />
       </section>
 
-      <section class="flex flex-col gap-12">
+      <section
+        v-if="earnVaults.length"
+        class="flex flex-col gap-12"
+      >
         <h2 class="text-h3 text-content-primary">
-          Vaults managed
+          Earn vaults
         </h2>
-        <div
-          v-if="!hasVaults"
-          class="rounded-12 border border-line-default bg-surface p-24 text-p2 text-content-tertiary"
-        >
-          No managed vaults are currently available on this network.
-        </div>
-        <div
-          v-if="evaults.length || securitizeVaults.length"
-          class="flex flex-col gap-12"
-        >
-          <h3 class="text-p3 uppercase text-content-tertiary">
-            Lending vaults
-          </h3>
-          <VaultItem
-            v-for="vault in evaults"
-            :key="vault.address"
-            :vault="vault"
-          />
-          <SecuritizeVaultItem
-            v-for="vault in securitizeVaults"
-            :key="vault.address"
-            :vault="vault"
-          />
-        </div>
-        <div
-          v-if="earnVaults.length"
-          class="flex flex-col gap-12"
-        >
-          <h3 class="text-p3 uppercase text-content-tertiary">
-            Earn vaults
-          </h3>
-          <VaultEarnItem
-            v-for="vault in earnVaults"
-            :key="vault.address"
-            :vault="vault"
-          />
-        </div>
+        <VaultEarnItem
+          v-for="vault in earnVaults"
+          :key="vault.address"
+          :vault="vault"
+        />
       </section>
     </template>
   </section>

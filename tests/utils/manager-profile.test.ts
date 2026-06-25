@@ -4,12 +4,10 @@ import {
   getEulerLabelEntityDisplayName,
   getEulerLabelEntityKeys,
   getEulerLabelEntitySlug,
-  getManagerProfileAddressEntries,
   getManagerProfileExternalUrl,
   getManagerProfilePath,
   getManagerProfileSocialLinks,
   getManagerProfileSocialUrl,
-  getShortAddress,
   isEulerLabelProductManagedBy,
 } from '~/utils/manager-profile'
 
@@ -79,31 +77,13 @@ describe('manager profile helpers', () => {
         discord: '',
         telegram: '',
         github: 'k3-capital',
+        legal: 'legal.k3.capital',
       },
     })).toEqual([
       { label: 'Website', url: 'https://k3.capital' },
       { label: 'X', url: 'https://x.com/k3_capital' },
       { label: 'GitHub', url: 'https://github.com/k3-capital' },
+      { label: 'Legal', url: 'https://legal.k3.capital' },
     ])
-  })
-
-  it('formats manager governance address entries', () => {
-    expect(getManagerProfileAddressEntries({
-      ...entity('K3'),
-      addresses: {
-        '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb': 'Timelock',
-        '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa': 'Multisig',
-      },
-    })).toEqual([
-      {
-        address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        label: 'Multisig',
-      },
-      {
-        address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-        label: 'Timelock',
-      },
-    ])
-    expect(getShortAddress('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).toBe('0xaaaa...aaaa')
   })
 })

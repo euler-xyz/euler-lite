@@ -4,13 +4,7 @@ export type EulerLabelEntity = {
   description: string
   url: string
   addresses: Record<string, string>
-  social: {
-    twitter: string
-    youtube: string
-    discord: string
-    telegram: string
-    github: string
-  }
+  social: Record<string, string | undefined>
 }
 export type EulerLabelVaultOverride = {
   name?: string

@@ -1,6 +1,7 @@
-import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import type { MarketGroup } from '~/entities/lend-discovery'
 import type { EulerLabelProduct } from '~/entities/euler/labels'
-import { getEntitiesByEarnVault, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByEarnVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntitySlug, isEulerLabelProductManagedBy } from '~/utils/manager-profile'
 
 export type ManagerProductEntry = {
@@ -10,18 +11,13 @@ export type ManagerProductEntry = {
 
 export const useEulerManagerProfile = (slug: Ref<string>) => {
   const { entities, products, isReady: labelsReady } = useEulerLabels()
+  const { isEarnUpdating } = useVaults()
+  const { getEarnVaults } = useVaultRegistry()
   const {
-    isEVaultUpdating,
-    isEarnUpdating,
-    isSecuritizeUpdating,
-    isEscrowUpdating,
-  } = useVaults()
-  const {
-    getVerifiedEVaults,
-    getEarnVaults,
-    getSecuritizeVaults,
-  } = useVaultRegistry()
-  const showAllLabelEntries = useShowAllLabelEntries()
+    marketGroups,
+    isReady: marketGroupsReady,
+    isResolvingTVL,
+  } = useMarketGroups()
 
   const entity = computed(() => entities[slug.value] ?? null)
 
@@ -32,27 +28,18 @@ export const useEulerManagerProfile = (slug: Ref<string>) => {
       .sort((a, b) => a.product.name.localeCompare(b.product.name)),
   )
 
-  const managesEntity = (candidate: EVault | SecuritizeCollateralVault): boolean =>
-    getEntitiesByVault(candidate as EVault).some(manager =>
-      getEulerLabelEntitySlug(entities, manager) === slug.value,
-    )
+  const managedProductKeys = computed(() => new Set(productEntries.value.map(entry => entry.key)))
+
+  const managedMarkets = computed<MarketGroup[]>(() =>
+    marketGroups.value
+      .filter(group => group.source === 'product' && managedProductKeys.value.has(group.id))
+      .sort((a, b) => b.metrics.totalTVL - a.metrics.totalTVL || a.name.localeCompare(b.name)),
+  )
 
   const managesEarnEntity = (candidate: EulerEarn): boolean =>
     getEntitiesByEarnVault(candidate).some(manager =>
       getEulerLabelEntitySlug(entities, manager) === slug.value,
     )
-
-  const evaults = computed(() =>
-    getVerifiedEVaults(showAllLabelEntries.value)
-      .filter(managesEntity)
-      .sort((a, b) => a.asset.symbol.localeCompare(b.asset.symbol)),
-  )
-
-  const securitizeVaults = computed(() =>
-    getSecuritizeVaults()
-      .filter(managesEntity)
-      .sort((a, b) => a.asset.symbol.localeCompare(b.asset.symbol)),
-  )
 
   const earnVaults = computed(() =>
     getEarnVaults()
@@ -60,25 +47,18 @@ export const useEulerManagerProfile = (slug: Ref<string>) => {
       .sort((a, b) => a.asset.symbol.localeCompare(b.asset.symbol)),
   )
 
-  const vaultCount = computed(() =>
-    evaults.value.length + securitizeVaults.value.length + earnVaults.value.length,
-  )
-
   const isLoading = computed(() =>
     !labelsReady.value
-    || isEVaultUpdating.value
-    || isEarnUpdating.value
-    || isSecuritizeUpdating.value
-    || isEscrowUpdating.value,
+    || !marketGroupsReady.value
+    || isResolvingTVL.value
+    || isEarnUpdating.value,
   )
 
   return {
     entity,
     productEntries,
-    evaults,
-    securitizeVaults,
+    managedMarkets,
     earnVaults,
-    vaultCount,
     isLoading,
   }
 }
