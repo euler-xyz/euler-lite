@@ -51,19 +51,16 @@ const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(e
     </div>
 
     <template v-else>
-      <div class="flex items-center gap-12">
-        <BackButton fallback="/explore" />
-        <p class="text-p3 text-content-tertiary">
-          Manager profile
-        </p>
-      </div>
-
       <section class="flex flex-col gap-24 border-b border-line-subtle pb-24">
-        <div class="flex items-start gap-20 mobile:flex-col">
+        <div class="flex items-start gap-16 mobile:flex-col">
+          <BackButton
+            class="mt-8 mobile:mt-0"
+            fallback="/explore"
+          />
           <BaseAvatar
             :label="entity.name"
             :src="getEulerLabelEntityLogo(entity.logo)"
-            class="!h-72 !w-72"
+            class="!h-72 !w-72 shrink-0"
           />
           <div class="min-w-0 flex-1">
             <h1 class="text-h2 text-content-primary mobile:text-h3">
