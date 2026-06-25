@@ -16,16 +16,17 @@ const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
 const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
 
 const vaultAddress = computed(() => vault.address)
-const product = useEulerProductOfVault(vaultAddress)
+const vaultChainId = computed(() => vault.chainId)
+const product = useEulerProductOfVault(vaultAddress, vaultChainId)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const { isVerifiedVault } = useVaultRegistry()
 // SecuritizeCollateralVault has governorAdmin, safe to cast for entity lookup
 const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
-const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isUnverified = computed(() => !isVerifiedVault(vault.address, vault.chainId))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
-const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address, vault.chainId) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
@@ -108,6 +109,7 @@ watchEffect(async () => {
     <div class="flex pb-12 p-16 border-b border-line-subtle">
       <AssetAvatar
         :asset="vault.asset"
+        :chain-id="vault.chainId"
         size="40"
       />
       <div class="flex-grow ml-12">

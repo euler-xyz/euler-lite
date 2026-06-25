@@ -36,7 +36,7 @@ import {
   type SnapshotArgsByAddress,
 } from '~/utils/sdk-snapshot-populate-stubs'
 import type { SerialisedSnapshot, SerialisedVault } from '~/utils/snapshot-types'
-import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
+import { getCurrentEulerLabelsData, getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -124,7 +124,7 @@ const borrowList = computed((): AnyBorrowVaultPair[] => {
 
       const collateralVault = registryGetVault(ltv.address, borrowVault.chainId)
       if (!collateralVault) return
-      if (!showAllLabelEntries.value && isVaultNotExplorable(collateralVault.address)) return
+      if (!showAllLabelEntries.value && isVaultNotExplorable(collateralVault.address, collateralVault.chainId)) return
 
       const key = `${borrowVault.chainId}:${borrowVault.address.toLowerCase()}:${ltv.address.toLowerCase()}`
       seenKeys.add(key)
@@ -691,10 +691,10 @@ const loadVaultsForChain = async (startChainId: number, generation: number) => {
   // Filter out non-explorable vaults before any on-chain work
   const explorableVaultAddresses = showAllLabelEntries.value
     ? verifiedVaultAddresses
-    : verifiedVaultAddresses.filter(addr => !isVaultNotExplorable(addr))
+    : verifiedVaultAddresses.filter(addr => !isVaultNotExplorable(addr, startChainId))
   const explorableEarnAddresses = showAllLabelEntries.value
     ? earnVaultAddresses
-    : earnVaultAddresses.filter(addr => !isEarnVaultNotExplorable(addr))
+    : earnVaultAddresses.filter(addr => !isEarnVaultNotExplorable(addr, startChainId))
 
   try {
     if (!silent) {
@@ -1156,17 +1156,17 @@ const getBorrowVaultPair = async (
 }
 
 export const useVaults = () => {
-  const buildVerificationLabels = (): VerificationLabels => {
-    const { entities } = useEulerLabels()
+  const buildVerificationLabels = (chainId?: number): VerificationLabels => {
+    const labelsData = chainId ? getEulerLabelsDataForChain(chainId) : getCurrentEulerLabelsData()
     return {
       getDeclaredEntityKeys: (vaultAddress) => {
-        const productKey = getProductKeyByVault(vaultAddress)
+        const productKey = getProductKeyByVault(vaultAddress, chainId)
         if (!productKey) return undefined
-        const product = getProductByVault(vaultAddress)
+        const product = getProductByVault(vaultAddress, chainId)
         return Array.isArray(product.entity) ? product.entity : [product.entity].filter(Boolean)
       },
       hasEntityAddress: (entityKey, address) => {
-        const entity = entities[entityKey]
+        const entity = labelsData.entities[entityKey]
         return !!entity && Object.keys(entity.addresses ?? {}).includes(address)
       },
     }
@@ -1175,13 +1175,13 @@ export const useVaults = () => {
   // Check if vault's on-chain governorAdmin matches any of the product's declared entities
   const isVaultGovernorVerified = (vault: EVault): boolean => {
     const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
-    const vaultCategory = getVaultCategory(vault.address)
+    const vaultCategory = getVaultCategory(vault.address, vault.chainId)
     return verifyVaultGovernor(
       Object.assign(vault, {
-        verified: vaultCategory === 'escrow' || isVerifiedVault(vault.address),
+        verified: vaultCategory === 'escrow' || isVerifiedVault(vault.address, vault.chainId),
         vaultCategory,
       }),
-      buildVerificationLabels(),
+      buildVerificationLabels(vault.chainId),
     )
   }
 
@@ -1193,8 +1193,8 @@ export const useVaults = () => {
   const isSecuritizeGovernorVerified = (vault: SecuritizeCollateralVault): boolean => {
     const { isVerifiedVault } = useVaultRegistry()
     return verifyVaultGovernor(
-      Object.assign(vault, { verified: isVerifiedVault(vault.address) }),
-      buildVerificationLabels(),
+      Object.assign(vault, { verified: isVerifiedVault(vault.address, vault.chainId) }),
+      buildVerificationLabels(vault.chainId),
     )
   }
 
@@ -1202,8 +1202,8 @@ export const useVaults = () => {
   const isEarnVaultOwnerVerified = (earnVault: EulerEarn): boolean => {
     const { isVerifiedVault } = useVaultRegistry()
     return verifyEarnVaultOwner(
-      Object.assign(earnVault, { verified: isVerifiedVault(earnVault.address) }),
-      buildVerificationLabels(),
+      Object.assign(earnVault, { verified: isVerifiedVault(earnVault.address, earnVault.chainId) }),
+      buildVerificationLabels(earnVault.chainId),
     )
   }
 

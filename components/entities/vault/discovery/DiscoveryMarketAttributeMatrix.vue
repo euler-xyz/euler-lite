@@ -136,6 +136,7 @@ const cellDataValue = (cell: AttributeCell): string | number =>
                 <AssetAvatar
                   class="shrink-0"
                   :asset="{ address: vault.assetAddress, symbol: vault.symbol }"
+                  :chain-id="vault.chainId"
                   size="16"
                 />
                 {{ vault.symbol }}

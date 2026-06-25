@@ -43,8 +43,8 @@ const {
   hasBorrowRewards,
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
-const { chainId } = useEulerAddresses()
 const { getTokenCategoryTags } = useTokenList()
+const marketChainId = computed(() => props.market.vaults[0]?.chainId ?? props.market.externalCollateral[0]?.chainId)
 
 const hoveredCell = ref<{
   collateralAddr: string
@@ -115,7 +115,7 @@ const isCorrelatedCell = (
   return areTokenAddressesCorrelatedByTags(
     collateral.asset.address,
     liability.asset.address,
-    getTokenCategoryTags,
+    address => getTokenCategoryTags(address, liability.chainId),
   )
 }
 
@@ -231,7 +231,7 @@ const columnAssetOracleSteps = computed((): Map<string, OracleRouteStep[]> => {
 // request only fires the first time the user picks the Oracles view.
 // loadAllOracleAdapters is per-chain idempotent (cached by useEulerLabels).
 watch(
-  [() => props.dotMetric, chainId],
+  [() => props.dotMetric, marketChainId],
   ([metric, currentChainId]) => {
     if (metric !== 'oracle' || !currentChainId) return
     void loadAllOracleAdapters(currentChainId)
@@ -450,7 +450,7 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
 })
 
-const explorerLink = (address: string) => getExplorerLink(address, chainId.value, true)
+const explorerLink = (address: string) => getExplorerLink(address, marketChainId.value, true)
 </script>
 
 <template>
@@ -500,6 +500,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               <div class="flex flex-col items-center gap-2">
                 <AssetAvatar
                   :asset="{ address: col.assetAddress, symbol: col.symbol }"
+                  :chain-id="col.chainId"
                   size="16"
                 />
                 {{ col.symbol }}
@@ -540,6 +541,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                 <AssetAvatar
                   class="shrink-0"
                   :asset="{ address: row.assetAddress, symbol: row.symbol }"
+                  :chain-id="row.chainId"
                   size="16"
                 />
                 {{ row.symbol }}

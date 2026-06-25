@@ -20,14 +20,15 @@ const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
 const vaultAddress = computed(() => vault.address)
 const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
-const product = useEulerProductOfVault(vaultAddress)
+const vaultChainId = computed(() => vault.chainId)
+const product = useEulerProductOfVault(vaultAddress, vaultChainId)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const entities = useEulerEntitiesOfVault(vault)
 const { getVaultCategory, isVerifiedVault, get: registryGet } = useVaultRegistry()
-const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isUnverified = computed(() => !isVerifiedVault(vault.address, vault.chainId))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
-const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address, vault.chainId) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
@@ -38,7 +39,7 @@ const entityLogos = computed(() => {
   if (!entityName.value || entities.length === 0) return []
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
-const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
+const isEscrow = computed(() => getVaultCategory(vault.address, vault.chainId) === 'escrow')
 const isBorrowable = computed(() => isVaultBorrowable(vault))
 const displayName = computed(() => {
   if (isEscrow.value) return 'Escrowed collateral'
@@ -114,9 +115,9 @@ const supplyApyWithRewards = computed(
 const utilization = computed(() => vault.utilization)
 const utilizationDisplay = computed(() => compactNumber(utilization.value, 2, 2))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
-const isKeyring = computed(() => isVaultKeyring(vault.address))
-const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address, vault.chainId))
+const isKeyring = computed(() => isVaultKeyring(vault.address, vault.chainId))
+const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address, vault.chainId))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
 const supplyCapWarning = computed(() => getSupplyCapWarning(vault))
 const statsGridCols = computed(() => {
@@ -195,6 +196,7 @@ watchEffect(async () => {
     <div class="flex pb-12 p-16 border-b border-line-subtle">
       <AssetAvatar
         :asset="vault.asset"
+        :chain-id="vault.chainId"
         size="40"
       />
       <div class="flex-grow ml-12">

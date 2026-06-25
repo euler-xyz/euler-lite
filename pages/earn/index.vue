@@ -30,13 +30,13 @@ const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
 const { chainId, selectedChainIds } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getEarnVaults().filter(v =>
-  isVerifiedVault(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
+  isVerifiedVault(v.address, v.chainId) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address, v.chainId)),
 ))
 
 const { enableEntityBranding } = useDeployConfig()
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EulerEarn>((vault) => {
-  const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
+  const product = applyVaultOverrides(getProductByVault(vault.address, vault.chainId), vault.address)
   return [
     vault.asset.symbol,
     vault.asset.name,
@@ -164,8 +164,8 @@ const assetOptions = computed(() => {
   return list.value
     .map(vault => ({
       label: vault.asset.symbol,
-      value: vault.asset.address,
-      icon: getAssetLogoUrl(vault.asset.address, vault.asset.symbol),
+      value: `${vault.chainId}:${vault.asset.address}`,
+      icon: getAssetLogoUrl(vault.asset.address, vault.asset.symbol, vault.chainId),
     }))
     .reduce((prev, curr) =>
       prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
@@ -193,7 +193,7 @@ const filteredList = computed(() => {
   return list.value
     .filter(matchesSearch)
     .filter(vault => selectedChains.value.length ? selectedChains.value.includes(String(vault.chainId)) : true)
-    .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(vault.asset.address) : true)
+    .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(`${vault.chainId}:${vault.asset.address}`) : true)
     .filter(vault => selectedCurators.value.length ? getEntitiesByEarnVault(vault).some(e => selectedCurators.value.includes(e.name)) : true)
     .filter(matchesCustomFilters)
 })
@@ -201,18 +201,18 @@ const filteredList = computed(() => {
 const applyRecentlyAddedSort = <T extends { address: string, chainId: number }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
     return compareRecentlyAddedBoost(
-      isVaultRecentlyAdded(a.address),
+      isVaultRecentlyAdded(a.address, a.chainId),
       vaultLiquidityUsd.value.get(getVaultKey(a)) ?? 0,
-      isVaultRecentlyAdded(b.address),
+      isVaultRecentlyAdded(b.address, b.chainId),
       vaultLiquidityUsd.value.get(getVaultKey(b)) ?? 0,
     )
   })
 }
 
-const applyDeprecatedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyDeprecatedSort = <T extends { address: string, chainId: number }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const ad = isVaultDeprecated(a.address) ? 1 : 0
-    const bd = isVaultDeprecated(b.address) ? 1 : 0
+    const ad = isVaultDeprecated(a.address, a.chainId) ? 1 : 0
+    const bd = isVaultDeprecated(b.address, b.chainId) ? 1 : 0
     return ad - bd
   })
 }

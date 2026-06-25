@@ -52,22 +52,24 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards, getBorrowRewardCampaigns, getSupplyRewardCampaigns, getLoopingRewardCampaigns } = useRewardsApy()
 const collateralProduct = useEulerProductOfVault(
   computed(() => pair.collateral.address),
+  computed(() => pair.collateral.chainId),
 )
 const borrowProduct = useEulerProductOfVault(
   computed(() => pair.borrow.address),
+  computed(() => pair.borrow.chainId),
 )
 
 const isAnyGovernanceLimited = computed(() =>
-  (isVaultGovernanceLimited(pair.collateral.address) || isVaultGovernanceLimited(pair.borrow.address)) && !isAnyGovernorUnverified.value,
+  (isVaultGovernanceLimited(pair.collateral.address, pair.collateral.chainId) || isVaultGovernanceLimited(pair.borrow.address, pair.borrow.chainId)) && !isAnyGovernorUnverified.value,
 )
 
 const isEscrowCollateral = computed(
-  () => getVaultCategory(pair.collateral.address) === 'escrow',
+  () => getVaultCategory(pair.collateral.address, pair.collateral.chainId) === 'escrow',
 )
 
 const isAnyUnverified = computed(() => {
-  const collateralUnverified = !isVerifiedVault(pair.collateral.address)
-  const borrowUnverified = !isVerifiedVault(pair.borrow.address)
+  const collateralUnverified = !isVerifiedVault(pair.collateral.address, pair.collateral.chainId)
+  const borrowUnverified = !isVerifiedVault(pair.borrow.address, pair.borrow.chainId)
   return collateralUnverified || borrowUnverified
 })
 
@@ -84,9 +86,9 @@ const isPairEffectivelyBlocked = computed(() => {
     && isVaultRestrictedByCountry(pair.collateral.address)
 })
 
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address))
-const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
-const isCyclicalNote = computed(() => isVaultCyclicalNote(pair.borrow.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address, pair.collateral.chainId) || isVaultRecentlyAdded(pair.borrow.address, pair.borrow.chainId))
+const isKeyring = computed(() => isVaultKeyring(pair.collateral.address, pair.collateral.chainId) || isVaultKeyring(pair.borrow.address, pair.borrow.chainId))
+const isCyclicalNote = computed(() => isVaultCyclicalNote(pair.borrow.address, pair.borrow.chainId))
 
 const isAnyDeprecated = computed(() => {
   const collateralAddr = getAddress(pair.collateral.address)
@@ -161,13 +163,13 @@ const showMaxRoe = computed(() =>
   && areTokenAddressesCorrelatedByTags(
     pair.collateral.asset.address,
     pair.borrow.asset.address,
-    getTokenCategoryTags,
+    address => getTokenCategoryTags(address, pairChainId.value),
   ),
 )
 const correlatedBadgeTitle = computed(() => {
   const category = getTokenAddressesCorrelationCategoryLabel(
     [pair.collateral.asset.address, pair.borrow.asset.address],
-    getTokenCategoryTags,
+    address => getTokenCategoryTags(address, pairChainId.value),
   )
   return category ? `Correlated category: ${category}` : undefined
 })
@@ -281,7 +283,10 @@ const linkPath = computed(() => ({
         class="flex pl-16 py-16 pb-12 mobile:!p-0 mobile:w-full mobile:min-w-0 mobile:items-center"
       >
         <AssetAvatar
-          :asset="[pair.collateral.asset, pair.borrow.asset]"
+          :asset="[
+            { ...pair.collateral.asset, chainId: pair.collateral.chainId },
+            { ...pair.borrow.asset, chainId: pair.borrow.chainId },
+          ]"
           size="40"
         />
         <div class="flex-grow ml-12 min-w-0">

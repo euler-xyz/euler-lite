@@ -114,7 +114,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
           fallbackCollateralAddress = collateralAddress
         }
 
-        if (!areTokenAddressesCorrelatedByTags(getVaultAssetAddress(collateral), liability.asset.address, getTokenCategoryTags)) continue
+        if (!areTokenAddressesCorrelatedByTags(getVaultAssetAddress(collateral), liability.asset.address, address => getTokenCategoryTags(address, liability.chainId))) continue
 
         if (roe > best) {
           best = roe

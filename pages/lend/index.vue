@@ -17,6 +17,7 @@ import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 import { getChainLogoUrl } from '~/utils/chain-logo'
 import { getChainById } from '~/entities/chainRegistry'
+import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 
 defineOptions({
   name: 'LendPage',
@@ -29,7 +30,7 @@ const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getVerifiedEVaults(showAllLabelEntries.value))
 
 const isPricesReady = ref(false)
-const { entities, isReady: labelsReady } = useEulerLabels()
+const { isReady: labelsReady } = useEulerLabels()
 const isLoading = computed(() => isEVaultUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { settings } = useUserSettings()
@@ -40,7 +41,7 @@ const { getBalance } = useWallets()
 const { enableEntityBranding } = useDeployConfig()
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EVault>((vault) => {
-  const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
+  const product = applyVaultOverrides(getProductByVault(vault.address, vault.chainId), vault.address)
   return [
     vault.asset.symbol,
     vault.asset.name,
@@ -128,7 +129,7 @@ watch(selectedChainIds, (chainIds) => {
 // regardless of OP_TRANSFER state. Contrast with borrow/index.vue which checks both.
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
-    (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
+    (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address, vault.chainId))
     && borrowList.value.some(pair => pair.borrow.address === vault.address)
     && !isOpDisabled(vault, OP_DEPOSIT),
   )
@@ -204,11 +205,11 @@ watchEffect(() => {
 
 const marketOptions = computed(() => {
   return buildTvlSortedOptions(borrowableVaults.value.flatMap((vault) => {
-    const market = getProductByVault(vault.address)
+    const market = getProductByVault(vault.address, vault.chainId)
     if (!market.name) return []
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
-    const entityObj = entityName ? entities[entityName] : null
-    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(getVaultKey(vault)) ?? 0, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    const entityObj = entityName ? getEulerLabelsDataForChain(vault.chainId).entities[entityName] : null
+    return [{ key: `${vault.chainId}:${market.name}`, label: market.name, tvl: vaultUsdValues.value.get(getVaultKey(vault)) ?? 0, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
   }))
 })
 
@@ -216,8 +217,8 @@ const assetOptions = computed(() => {
   return borrowableVaults.value
     .map(vault => ({
       label: vault.asset.symbol,
-      value: vault.asset.address,
-      icon: getAssetLogoUrl(vault.asset.address, vault.asset.symbol),
+      value: `${vault.chainId}:${vault.asset.address}`,
+      icon: getAssetLogoUrl(vault.asset.address, vault.asset.symbol, vault.chainId),
     }))
     .reduce((prev, curr) =>
       prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
@@ -245,8 +246,8 @@ const filteredList = computed(() => {
   return borrowableVaults.value
     .filter(matchesSearch)
     .filter(vault => selectedChains.value.length ? selectedChains.value.includes(String(vault.chainId)) : true)
-    .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(vault.asset.address) : true)
-    .filter(vault => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(vault.address).name) : true)
+    .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(`${vault.chainId}:${vault.asset.address}`) : true)
+    .filter(vault => selectedMarkets.value.length ? selectedMarkets.value.includes(`${vault.chainId}:${getProductByVault(vault.address, vault.chainId).name}`) : true)
     .filter(vault => selectedRiskManagers.value.length
       ? getEntitiesByVault(vault).some(e => selectedRiskManagers.value.includes(e.name))
       : true)
@@ -256,18 +257,18 @@ const filteredList = computed(() => {
 const applyRecentlyAddedSort = <T extends { address: string, chainId: number }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
     return compareRecentlyAddedBoost(
-      isVaultRecentlyAdded(a.address),
+      isVaultRecentlyAdded(a.address, a.chainId),
       vaultLiquidityUsd.value.get(getVaultKey(a)) ?? 0,
-      isVaultRecentlyAdded(b.address),
+      isVaultRecentlyAdded(b.address, b.chainId),
       vaultLiquidityUsd.value.get(getVaultKey(b)) ?? 0,
     )
   })
 }
 
-const applyDeprecatedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyDeprecatedSort = <T extends { address: string, chainId: number }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const ad = isVaultDeprecated(a.address) ? 1 : 0
-    const bd = isVaultDeprecated(b.address) ? 1 : 0
+    const ad = isVaultDeprecated(a.address, a.chainId) ? 1 : 0
+    const bd = isVaultDeprecated(b.address, b.chainId) ? 1 : 0
     return ad - bd
   })
 }

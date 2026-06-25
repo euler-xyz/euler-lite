@@ -19,20 +19,18 @@ export interface TokenListEntry {
 }
 
 // Singleton state
-const tokenMap = shallowRef(new Map<string, TokenListEntry>())
+const tokenMapsByChainId = shallowRef(new Map<number, Map<string, TokenListEntry>>())
 const isLoading = ref(false)
 const isLoaded = ref(false)
 const guard = createRaceGuard()
 
 const loadState = {
-  chainId: 0,
-  timestamp: 0,
-  rawTokens: [] as TokenListEntry[],
+  timestamps: new Map<number, number>(),
 }
 
-const filterByChain = (chainId: number) => {
+const buildTokenMapForChain = (chainId: number, tokens: TokenListEntry[]) => {
   const filtered = new Map<string, TokenListEntry>()
-  for (const token of loadState.rawTokens) {
+  for (const token of tokens) {
     if (token.chainId !== chainId) continue
     try {
       const normalized = getAddress(token.address).toLowerCase()
@@ -76,47 +74,62 @@ const filterByChain = (chainId: number) => {
     filtered.delete(zeroAddress)
   }
 
-  tokenMap.value = filtered
+  return filtered
+}
+
+const getDefaultChainId = (): number => {
+  const { chainId } = useEulerAddresses()
+  return chainId.value
+}
+
+const getTokenMapForChain = (chainId = getDefaultChainId()): Map<string, TokenListEntry> => {
+  return tokenMapsByChainId.value.get(chainId) ?? new Map()
+}
+
+const getUniqueTokenByAddress = (address: string): TokenListEntry | undefined => {
+  const normalized = getAddress(address).toLowerCase()
+  const matches = [...tokenMapsByChainId.value.values()]
+    .map(map => map.get(normalized))
+    .filter((token): token is TokenListEntry => Boolean(token))
+  return matches.length === 1 ? matches[0] : undefined
 }
 
 const loadTokenList = async (forceRefresh = false) => {
   try {
-    const { chainId: currentChainId } = useEulerAddresses()
-    const chainId = currentChainId.value
-    if (!chainId) return
+    const { chainId: currentChainId, selectedChainIds } = useEulerAddresses()
+    const targetChainIds = selectedChainIds.value.length ? selectedChainIds.value : [currentChainId.value].filter(Boolean)
+    if (!targetChainIds.length) return
 
     const now = Date.now()
+    const needsFetch = (chainId: number) =>
+      forceRefresh
+      || !tokenMapsByChainId.value.has(chainId)
+      || (now - (loadState.timestamps.get(chainId) ?? 0)) >= CACHE_TTL_5MIN_MS
 
-    // DefiLlama data is per-chain, so re-fetch when chain changes
-    if (!forceRefresh
-      && loadState.rawTokens.length > 0
-      && loadState.chainId === chainId
-      && (now - loadState.timestamp) < CACHE_TTL_5MIN_MS) {
+    if (!targetChainIds.some(needsFetch)) {
+      isLoaded.value = true
       return
-    }
-
-    // When switching chains, wipe stale cross-chain data immediately so
-    // consumers calling getAllTokens()/hasToken() during the refetch
-    // window see "empty" rather than the previous chain's tokens.
-    if (loadState.chainId !== chainId) {
-      tokenMap.value = new Map()
-      loadState.rawTokens = []
-      loadState.chainId = 0
     }
 
     const gen = guard.next()
     isLoading.value = true
     isLoaded.value = false
 
-    const res = await axios.get('/api/token-list', { params: { chainId } })
+    const results = await Promise.all(targetChainIds.map(async (chainId) => {
+      if (!needsFetch(chainId)) return null
+      const res = await axios.get('/api/token-list', { params: { chainId } })
+      const tokens: TokenListEntry[] = res.data?.tokens || []
+      return { chainId, tokens }
+    }))
     if (guard.isStale(gen)) return
 
-    const tokens: TokenListEntry[] = res.data?.tokens || []
-    loadState.rawTokens = tokens
-    loadState.timestamp = Date.now()
-    loadState.chainId = chainId
-
-    filterByChain(chainId)
+    const next = new Map(tokenMapsByChainId.value)
+    for (const result of results) {
+      if (!result) continue
+      next.set(result.chainId, buildTokenMapForChain(result.chainId, result.tokens))
+      loadState.timestamps.set(result.chainId, Date.now())
+    }
+    tokenMapsByChainId.value = next
     isLoaded.value = true
   }
   catch (e) {
@@ -127,9 +140,12 @@ const loadTokenList = async (forceRefresh = false) => {
   }
 }
 
-export const getTokenListLogoUrl = (address: string): string | undefined => {
+export const getTokenListLogoUrl = (address: string, chainId?: number): string | undefined => {
   try {
-    const logoURI = tokenMap.value.get(getAddress(address).toLowerCase())?.logoURI
+    const token = chainId
+      ? getTokenMapForChain(chainId).get(getAddress(address).toLowerCase())
+      : getTokenMapForChain().get(getAddress(address).toLowerCase()) ?? getUniqueTokenByAddress(address)
+    const logoURI = token?.logoURI
     if (!logoURI) return undefined
     // CoinGecko /thumb/ images are 25x25 — upgrade to /small/ (64x64) for sharper display
     return logoURI.replace('/thumb/', '/small/')
@@ -139,30 +155,30 @@ export const getTokenListLogoUrl = (address: string): string | undefined => {
   }
 }
 
-const hasToken = (address: string): boolean => {
+const hasToken = (address: string, chainId = getDefaultChainId()): boolean => {
   try {
-    return tokenMap.value.has(getAddress(address).toLowerCase())
+    return getTokenMapForChain(chainId).has(getAddress(address).toLowerCase())
   }
   catch {
     return false
   }
 }
 
-const getTokenByAddress = (address: string): TokenListEntry | undefined => {
+const getTokenByAddress = (address: string, chainId = getDefaultChainId()): TokenListEntry | undefined => {
   if (!address) return undefined
   try {
-    return tokenMap.value.get(getAddress(address).toLowerCase())
+    return getTokenMapForChain(chainId).get(getAddress(address).toLowerCase())
   }
   catch {
     return undefined
   }
 }
 
-const getTokenCategoryTags = (address: string): string[] =>
-  normalizeTokenCategoryTags(getTokenByAddress(address)?.tags)
+const getTokenCategoryTags = (address: string, chainId = getDefaultChainId()): string[] =>
+  normalizeTokenCategoryTags(getTokenByAddress(address, chainId)?.tags)
 
-const getAllTokens = (): TokenListEntry[] => {
-  return [...tokenMap.value.values()]
+const getAllTokens = (chainId = getDefaultChainId()): TokenListEntry[] => {
+  return [...getTokenMapForChain(chainId).values()]
 }
 
 const toVaultAsset = (entry: TokenListEntry): VaultAsset => ({
@@ -181,9 +197,9 @@ const tokenIconOverrides = new Map(
   }),
 )
 
-export const getAssetLogoUrl = (address: string, symbol: string): string => {
+export const getAssetLogoUrl = (address: string, symbol: string, chainId?: number): string => {
   return tokenIconOverrides.get(symbol.toLowerCase())
-    ?? getTokenListLogoUrl(address)
+    ?? getTokenListLogoUrl(address, chainId)
     ?? ''
 }
 

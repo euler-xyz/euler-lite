@@ -15,7 +15,8 @@ import { getChainLogoUrl } from '~/utils/chain-logo'
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
 const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
-const product = useEulerProductOfVault(vault.address)
+const vaultChainId = computed(() => vault.chainId)
+const product = useEulerProductOfVault(computed(() => vault.address), vaultChainId)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
 const { isVerifiedVault } = useVaultRegistry()
@@ -56,10 +57,10 @@ const visibleSupplyApy = computed(() => {
 })
 const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vault.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
-const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address, vault.chainId))
+const isUnverified = computed(() => !isVerifiedVault(vault.address, vault.chainId))
 const displayName = computed(() => product.name || vault.shares.name)
-const description = computed(() => getEarnVaultDescription(vault.address))
+const description = computed(() => getEarnVaultDescription(vault.address, vault.chainId))
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
   totalSupply: '-',
@@ -117,6 +118,7 @@ const supplyApyModalData = computed(() => ({
     <div class="flex items-start gap-12 py-16 px-16 pb-12 border-b border-line-subtle">
       <AssetAvatar
         :asset="vault.asset"
+        :chain-id="vault.chainId"
         size="40"
       />
       <div class="min-w-0 flex-1">

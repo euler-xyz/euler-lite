@@ -26,17 +26,19 @@ const normalizeAddress = (address?: string) => {
 
 const vaultAddress = computed(() => normalizeAddress(vault?.address))
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
-const product = useEulerProductOfVault(vaultAddress)
+const vaultChainId = computed(() => vault?.chainId)
+const product = useEulerProductOfVault(vaultAddress, vaultChainId)
 const displayName = computed(() => {
   if (!vault) return ''
-  if (getVaultCategory(vault.address) === 'escrow') {
+  if (getVaultCategory(vault.address, vault.chainId) === 'escrow') {
     return 'Escrowed collateral'
   }
   return product.name || vault.shares.name
 })
 
 const pairVaultAddress = computed(() => pairVault ? normalizeAddress(pairVault.address) : '')
-const pairProduct = useEulerProductOfVault(pairVaultAddress)
+const pairVaultChainId = computed(() => pairVault?.chainId)
+const pairProduct = useEulerProductOfVault(pairVaultAddress, pairVaultChainId)
 
 const isVaultDeprecated = computed(() => {
   const addr = vaultAddress.value
@@ -58,7 +60,7 @@ const isRestricted = computed(() => {
 
 const getVaultLabel = (v?: EVault | EulerEarn | SecuritizeCollateralVault) => {
   if (!v) return ''
-  if (getVaultCategory(v.address) === 'escrow') {
+  if (getVaultCategory(v.address, v.chainId) === 'escrow') {
     return 'Escrowed collateral'
   }
   const addr = normalizeAddress(v.address)
@@ -105,6 +107,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
     />
     <AssetAvatar
       :asset="assets"
+      :chain-id="vault.chainId"
       :size="size === 'large' ? '46' : '38'"
     />
 
@@ -119,7 +122,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
         >
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
-            :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
+            :is-unverified="(!!vault && !isVerifiedVault(vault.address, vault.chainId)) || !!(pairVault && !isVerifiedVault(pairVault.address, pairVault.chainId))"
           />
         </span>
         <span

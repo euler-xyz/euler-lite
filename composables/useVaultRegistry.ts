@@ -5,6 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 
 // Vault type enum - 3 types (escrow is a category of evk, not a separate type)
 export type VaultType = 'evk' | 'earn' | 'securitize'
@@ -205,7 +206,7 @@ const getVerifiedEVaults = (includeNotExplorable = false): EVault[] => {
     .filter(entry =>
       entry.type === 'evk'
       && entry.verified === true
-      && (includeNotExplorable || !isVaultNotExplorable(entry.vault.address)),
+      && (includeNotExplorable || !isVaultNotExplorable(entry.vault.address, entry.vault.chainId)),
     )
     .map(entry => entry.vault) as EVault[]
 }
@@ -225,12 +226,12 @@ const isEarnVault = (address: string, chainId = getDefaultChainId()): boolean =>
 const isSecuritizeVault = (address: string, chainId = getDefaultChainId()): boolean => getType(address, chainId) === 'securitize'
 const isEVaultAddress = (address: string, chainId = getDefaultChainId()): boolean => getType(address, chainId) === 'evk'
 const isVerifiedVault = (address: string, chainId = getDefaultChainId()): boolean => {
-  const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
+  const labels = getEulerLabelsDataForChain(chainId)
   const normalized = normalizeAddress(address)
   return get(normalized, chainId)?.verified === true
     || isKnownEscrowAddress(normalized, chainId)
-    || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
-    || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
+    || labels.verifiedVaultAddresses.some(vault => normalizeAddress(vault) === normalized)
+    || labels.earnVaults.some(vault => normalizeAddress(vault) === normalized)
 }
 const getVaultCategory = (address: string, chainId = getDefaultChainId()): 'standard' | 'escrow' | undefined => {
   return get(address, chainId)?.vaultCategory ?? (isKnownEscrowAddress(address, chainId) ? 'escrow' : undefined)

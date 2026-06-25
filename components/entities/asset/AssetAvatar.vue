@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
-const { asset, size, iconUrl } = defineProps<{
-  asset: { address: string, symbol: string } | { address: string, symbol: string }[]
+const { asset, size, iconUrl, chainId } = defineProps<{
+  asset: { address: string, symbol: string, chainId?: number } | { address: string, symbol: string, chainId?: number }[]
   size?: '16' | '20' | '36' | '38' | '40' | '46'
   iconUrl?: string
+  chainId?: number
 }>()
 
 const sizeClass = computed(() => size ? `icon--${size}` : undefined)
@@ -12,9 +13,9 @@ const sizeClass = computed(() => size ? `icon--${size}` : undefined)
 const src = computed(() => {
   if (iconUrl) return iconUrl
   if (Array.isArray(asset)) {
-    return asset.map(a => getAssetLogoUrl(a.address, a.symbol))
+    return asset.map(a => getAssetLogoUrl(a.address, a.symbol, a.chainId ?? chainId))
   }
-  return getAssetLogoUrl(asset.address, asset.symbol)
+  return getAssetLogoUrl(asset.address, asset.symbol, asset.chainId ?? chainId)
 })
 
 const label = computed(() => {

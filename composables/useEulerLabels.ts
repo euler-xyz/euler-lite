@@ -299,24 +299,29 @@ export const useEulerLabels = () => {
   }
 }
 
-export const useEulerProductOfVault = (vaultAddress: string | Ref<string>) => {
+export const useEulerProductOfVault = (vaultAddress: string | Ref<string>, chainId?: number | Ref<number | undefined>) => {
   return toReactive(computed(() => {
     const addr = unref(vaultAddress)
-    const product = getEulerLabelProductByVault(labelsData.value, addr)
+    const data = chainId === undefined ? labelsData.value : getEulerLabelsDataForChain(unref(chainId) || 0)
+    const product = getEulerLabelProductByVault(data, addr)
     if (!product) return eulerLabelProductEmpty
     return applyEulerLabelVaultOverrides(product, addr) as EulerLabelProduct
   }))
 }
 
+export const useEulerProductOfVaultOnChain = (vaultAddress: string | Ref<string>, chainId: number | Ref<number | undefined>) => {
+  return useEulerProductOfVault(vaultAddress, chainId)
+}
+
 export const useEulerEntitiesOfVault = (vault: EVault | Ref<EVault>) => {
   return toReactive(computed(() =>
-    getEulerLabelEntitiesByVault(labelsData.value, unref(vault)) as EulerLabelEntity[],
+    getEulerLabelEntitiesByVault(getEulerLabelsDataForChain(unref(vault).chainId), unref(vault)) as EulerLabelEntity[],
   ))
 }
 
 export const useEulerEntitiesOfEarnVault = (earnVault: EulerEarn | Ref<EulerEarn>) => {
   return toReactive(computed(() =>
-    getEulerLabelEntitiesByEarnVault(labelsData.value, unref(earnVault)) as EulerLabelEntity[],
+    getEulerLabelEntitiesByEarnVault(getEulerLabelsDataForChain(unref(earnVault).chainId), unref(earnVault)) as EulerLabelEntity[],
   ))
 }
 

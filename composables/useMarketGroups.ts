@@ -9,6 +9,7 @@ import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProdu
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 
 // -- Helpers --
 
@@ -30,6 +31,14 @@ const getCollateralAddresses = (vault: AnyVault): string[] => {
 
 const getVaultAddress = (vault: AnyVault): string =>
   isEVault(vault) ? vault.address : ('address' in vault ? (vault as { address: string }).address : '')
+
+const getVaultKey = (vault: AnyVault): string => {
+  const address = getVaultAddress(vault)
+  return address ? `${vault.chainId}:${address.toLowerCase()}` : ''
+}
+
+const getAddressKey = (chainId: number, address: string): string =>
+  `${chainId}:${address.toLowerCase()}`
 
 const getAssetSymbol = (vault: AnyVault): string => {
   if (isEVault(vault)) return vault.asset.symbol
@@ -55,47 +64,50 @@ const getBorrowAPY = (vault: AnyVault): number => {
 
 const buildProductGroups = (
   allVaults: AnyVault[],
-  products: Record<string, EulerLabelProduct>,
-  entities: Record<string, EulerLabelEntity>,
+  chainIds: readonly number[],
 ): { groups: MarketGroup[], assignedAddresses: Set<string> } => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
-    const addr = getVaultAddress(vault)
-    if (addr) vaultMap.set(addr.toLowerCase(), vault)
+    const key = getVaultKey(vault)
+    if (key) vaultMap.set(key, vault)
   }
 
   const assignedAddresses = new Set<string>()
   const groups: MarketGroup[] = []
 
-  for (const [productKey, product] of Object.entries(products)) {
-    const memberVaults: AnyVault[] = []
-    const allProductAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
-    for (const vaultAddr of allProductAddresses) {
-      const vault = vaultMap.get(vaultAddr.toLowerCase())
-      if (vault) {
-        memberVaults.push(vault)
-        assignedAddresses.add(vaultAddr.toLowerCase())
+  for (const chainId of chainIds) {
+    const labelsData = getEulerLabelsDataForChain(chainId)
+    for (const [productKey, product] of Object.entries(labelsData.products as Record<string, EulerLabelProduct>)) {
+      const memberVaults: AnyVault[] = []
+      const allProductAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
+      for (const vaultAddr of allProductAddresses) {
+        const key = getAddressKey(chainId, vaultAddr)
+        const vault = vaultMap.get(key)
+        if (vault) {
+          memberVaults.push(vault)
+          assignedAddresses.add(key)
+        }
       }
+
+      if (memberVaults.length === 0) continue
+
+      // Resolve curator entity
+      const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
+      const curatorKey = entityKeys[0] || undefined
+      const curator = curatorKey ? labelsData.entities[curatorKey] as EulerLabelEntity | undefined : undefined
+
+      groups.push({
+        id: `${chainId}:${productKey}`,
+        name: product.name,
+        source: 'product',
+        curator,
+        curatorKey,
+        vaults: memberVaults,
+        externalCollateral: [],
+        unknownCollateral: [],
+        metrics: computeMetricsSync(memberVaults),
+      })
     }
-
-    if (memberVaults.length === 0) continue
-
-    // Resolve curator entity
-    const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
-    const curatorKey = entityKeys[0] || undefined
-    const curator = curatorKey ? entities[curatorKey] : undefined
-
-    groups.push({
-      id: productKey,
-      name: product.name,
-      source: 'product',
-      curator,
-      curatorKey,
-      vaults: memberVaults,
-      externalCollateral: [],
-      unknownCollateral: [],
-      metrics: computeMetricsSync(memberVaults),
-    })
   }
 
   return { groups, assignedAddresses }
@@ -111,13 +123,13 @@ const augmentWithCollateralGraph = (
 ): MarketGroup[] => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
-    const addr = getVaultAddress(vault)
-    if (addr) vaultMap.set(addr.toLowerCase(), vault)
+    const key = getVaultKey(vault)
+    if (key) vaultMap.set(key, vault)
   }
 
   return groups.map((group: MarketGroup): MarketGroup => {
     const groupAddresses = new Set(
-      group.vaults.map((v: AnyVault) => getVaultAddress(v).toLowerCase()),
+      group.vaults.map((v: AnyVault) => getVaultKey(v)),
     )
 
     const externalCollateral: AnyVault[] = []
@@ -128,7 +140,7 @@ const augmentWithCollateralGraph = (
     for (const vault of group.vaults) {
       const collateralAddrs = getCollateralAddresses(vault)
       for (const colAddr of collateralAddrs) {
-        const normalized = colAddr.toLowerCase()
+        const normalized = getAddressKey(vault.chainId, colAddr)
         if (groupAddresses.has(normalized) || seenExternal.has(normalized)) continue
         const externalVault = vaultMap.get(normalized)
         if (externalVault) {
@@ -144,7 +156,7 @@ const augmentWithCollateralGraph = (
           // external briefly looks unknown.
           if (dataReady && hasGovernorAdmin(externalVault) && !isVaultGovernorVerified(externalVault) && !seenUnknown.has(normalized)) {
             seenUnknown.add(normalized)
-            unknownCollateral.push(normalized)
+            unknownCollateral.push(colAddr.toLowerCase())
           }
         }
         else {
@@ -160,11 +172,11 @@ const augmentWithCollateralGraph = (
           // label vaults that just haven't been hydrated yet briefly render
           // as `0x...` placeholders for the first second of page load.
           if (!dataReady) continue
-          const knownByLabels = isVaultDeprecated(colAddr) || getProductKeyByVault(colAddr) !== undefined
+          const knownByLabels = isVaultDeprecated(colAddr, vault.chainId) || getProductKeyByVault(colAddr, vault.chainId) !== undefined
           if (knownByLabels) continue
           if (!seenUnknown.has(normalized)) {
             seenUnknown.add(normalized)
-            unknownCollateral.push(normalized)
+            unknownCollateral.push(colAddr.toLowerCase())
           }
         }
       }
@@ -185,8 +197,8 @@ const clusterOrphans = (
   assignedAddresses: Set<string>,
 ): MarketGroup[] => {
   const orphans = allVaults.filter((vault: AnyVault) => {
-    const addr = getVaultAddress(vault)
-    return addr && !assignedAddresses.has(addr.toLowerCase())
+    const key = getVaultKey(vault)
+    return key && !assignedAddresses.has(key)
   })
 
   if (orphans.length === 0) return []
@@ -194,8 +206,8 @@ const clusterOrphans = (
   // Build adjacency graph (undirected) from collateral relationships
   const addrToOrphan = new Map<string, AnyVault>()
   for (const vault of orphans) {
-    const addr = getVaultAddress(vault)
-    if (addr) addrToOrphan.set(addr.toLowerCase(), vault)
+    const key = getVaultKey(vault)
+    if (key) addrToOrphan.set(key, vault)
   }
 
   const orphanAddresses = new Set(addrToOrphan.keys())
@@ -205,10 +217,10 @@ const clusterOrphans = (
   }
 
   for (const vault of orphans) {
-    const addr = getVaultAddress(vault).toLowerCase()
+    const addr = getVaultKey(vault)
     const collateralAddrs = getCollateralAddresses(vault)
     for (const colAddr of collateralAddrs) {
-      const normalized = colAddr.toLowerCase()
+      const normalized = getAddressKey(vault.chainId, colAddr)
       if (orphanAddresses.has(normalized) && normalized !== addr) {
         adjacency.get(addr)?.add(normalized)
         adjacency.get(normalized)?.add(addr)
@@ -278,7 +290,7 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
     assetSymbols.add(symbol)
 
     const addr = getVaultAddress(vault)
-    if (addr && isVaultRecentlyAdded(addr)) hasRecentlyAdded = true
+    if (addr && isVaultRecentlyAdded(addr, vault.chainId)) hasRecentlyAdded = true
 
     if (isBorrowableVault(vault)) {
       borrowableCount++
@@ -363,10 +375,12 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 
 export const useMarketGroups = () => {
   const { getAll } = useVaultRegistry()
-  const { products, entities, isReady: labelsReady } = useEulerLabels()
+  const { isReady: labelsReady } = useEulerLabels()
+  const { selectedChainIds, chainId } = useEulerAddresses()
   const { isVaultGovernorVerified, isCollateralResolved, isMarketDataResolved, isReady: vaultsReady } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
   const isReady = computed(() => labelsReady.value && vaultsReady.value && isMarketDataResolved.value)
+  const activeChainIds = computed(() => selectedChainIds.value.length ? selectedChainIds.value : [chainId.value].filter(Boolean))
 
   /** Every loaded vault, including non-explorable ones (used for collateral lookups) */
   const registryVaults = computed((): AnyVault[] => getAll().map(entry => entry.vault))
@@ -375,7 +389,7 @@ export const useMarketGroups = () => {
   const allVaults = computed((): AnyVault[] => {
     return registryVaults.value.filter((vault) => {
       const address = getVaultAddress(vault)
-      return address ? showAllLabelEntries.value || !isVaultNotExplorable(address) : true
+      return address ? showAllLabelEntries.value || !isVaultNotExplorable(address, vault.chainId) : true
     })
   })
 
@@ -396,7 +410,7 @@ export const useMarketGroups = () => {
     if (vaults.length === 0) return []
 
     // Step 1: Product-label groups
-    const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, products, entities)
+    const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, activeChainIds.value)
 
     // Step 2: Augment with collateral graph — pass the full registry so active
     // LTVs targeting non-explorable vaults still resolve as externalCollateral
@@ -497,7 +511,13 @@ export const useMarketGroups = () => {
 
   /** Fetch a market group on demand for non-explorable products accessed via direct URL */
   const fetchMarketGroupOnDemand = async (productKey: string): Promise<MarketGroup | null> => {
-    const product = products[productKey]
+    const [maybeChainId, ...keyParts] = productKey.split(':')
+    const parsedChainId = Number(maybeChainId)
+    const hasChainPrefix = Number.isInteger(parsedChainId) && keyParts.length > 0
+    const targetChainId = hasChainPrefix ? parsedChainId : chainId.value
+    const targetProductKey = hasChainPrefix ? keyParts.join(':') : productKey
+    const labelsData = getEulerLabelsDataForChain(targetChainId)
+    const product = labelsData.products[targetProductKey] as EulerLabelProduct | undefined
     if (!product) return null
 
     const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
@@ -506,11 +526,10 @@ export const useMarketGroups = () => {
     const memberVaults: EVault[] = []
 
     try {
-      const { chainId } = useEulerAddresses()
       const { getEulerSdk } = useEulerSdk()
       const sdk = await getEulerSdk()
       const result = await sdk.eVaultService.fetchVaults(
-        chainId.value,
+        targetChainId,
         allAddresses.map(addr => getAddress(addr) as Address),
         liteVaultFetchOptions,
       )
@@ -525,10 +544,10 @@ export const useMarketGroups = () => {
 
     const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
     const curatorKey = entityKeys[0] || undefined
-    const curator = curatorKey ? entities[curatorKey] : undefined
+    const curator = curatorKey ? labelsData.entities[curatorKey] as EulerLabelEntity | undefined : undefined
 
     const group: MarketGroup = {
-      id: productKey,
+      id: `${targetChainId}:${targetProductKey}`,
       name: product.name,
       source: 'product',
       curator,

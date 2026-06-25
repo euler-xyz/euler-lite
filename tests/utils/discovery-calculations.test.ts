@@ -257,7 +257,7 @@ describe('attribute stats matrix', () => {
       borrowCapUsd: 1000,
     }
 
-    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, chainId: vault.chainId, vault, isExternal: false }]
     const usdCache = new Map([[vault.address.toLowerCase(), usd]])
     const byRow = new Map(STATS_ROWS.map(row => [
       row.id,
@@ -288,7 +288,7 @@ describe('attribute stats matrix', () => {
         borrowAPY: 0n,
       },
     } as unknown as EVault
-    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, chainId: vault.chainId, vault, isExternal: false }]
     const usdCache = new Map<string, VaultUsdCacheEntry>()
     const apyCache = new Map<string, VaultApyCacheEntry>([
       [vault.address.toLowerCase(), { supplyApy: 5.31, borrowApy: 1.25 }],
@@ -338,7 +338,7 @@ describe('attribute config matrix', () => {
         address: '0xIrm',
       },
     } as unknown as EVault
-    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, chainId: vault.chainId, vault, isExternal: false }]
     const usdCache = new Map<string, VaultUsdCacheEntry>()
     const byRow = new Map(CONFIG_ROWS.map(row => [
       row.id,
