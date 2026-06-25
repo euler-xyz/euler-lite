@@ -100,10 +100,10 @@ const hooksModalData = computed(() => ({
         <template #label>
           <span class="flex items-center gap-4">
             Liquidation bonus
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Liquidation Bonus"
               text="The discount a liquidator receives on collateral when liquidating an unhealthy position. The actual bonus scales dynamically from 0% up to this maximum based on how unhealthy the position is. A more unhealthy position offers a larger bonus to incentivise faster liquidation."
-              class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+              icon-class="text-content-muted hover:text-content-secondary"
             />
           </span>
         </template>
@@ -161,10 +161,10 @@ const hooksModalData = computed(() => ({
         <template #label>
           <span class="flex items-center gap-4">
             Bad debt socialisation
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Bad Debt Socialisation"
               text="When enabled, if a liquidated position has remaining debt but no collateral left, the loss is spread across all depositors by reducing the share token value. This prevents bad debt from accumulating in the vault. When disabled, bad debt remains in the system indefinitely."
-              class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+              icon-class="text-content-muted hover:text-content-secondary"
             />
           </span>
         </template>

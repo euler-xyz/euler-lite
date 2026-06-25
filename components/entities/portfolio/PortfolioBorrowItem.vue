@@ -413,28 +413,34 @@ const openPositionInformationModal = () => {
                     :name="pairName"
                     :is-unverified="isAnyUnverified"
                   />
-                  <span
+                  <UiHoverPreviewTooltip
                     v-if="isGeoBlocked"
-                    class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                    title="This vault is not available in your region"
+                    title="Region restricted"
+                    text="This vault is not available in your region"
+                    placement="top-start"
                   >
-                    <SvgIcon
-                      name="warning"
-                      class="!w-14 !h-14"
-                    />
-                    Restricted
-                  </span>
-                  <span
+                    <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5 shrink-0">
+                      <SvgIcon
+                        name="warning"
+                        class="!w-14 !h-14"
+                      />
+                      Restricted
+                    </span>
+                  </UiHoverPreviewTooltip>
+                  <UiHoverPreviewTooltip
                     v-if="isAnyDeprecated"
-                    class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                    title="One or more vaults in this position have been deprecated."
+                    title="Deprecated"
+                    text="One or more vaults in this position have been deprecated."
+                    placement="top-start"
                   >
-                    <SvgIcon
-                      name="warning"
-                      class="!w-14 !h-14"
-                    />
-                    Deprecated
-                  </span>
+                    <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5 shrink-0">
+                      <SvgIcon
+                        name="warning"
+                        class="!w-14 !h-14"
+                      />
+                      Deprecated
+                    </span>
+                  </UiHoverPreviewTooltip>
                 </div>
                 <div
                   class="text-h5 text-content-primary flex flex-wrap items-center gap-8 min-w-0"

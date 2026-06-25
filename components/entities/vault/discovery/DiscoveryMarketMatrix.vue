@@ -593,7 +593,6 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               :data-field="dotMetric"
               :data-present="!!matrix.cells.get(row.address)?.get(col.address)"
               :data-correlated="matrix.cells.get(row.address)?.get(col.address) ? isCorrelatedCell(row.address, col.address) : undefined"
-              :title="getUnavailableMetricLabel(row.address, col.address)"
               :aria-label="getUnavailableMetricLabel(row.address, col.address)"
               :data-value="
                 (() => {
@@ -670,31 +669,42 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     :data-oracle-address="adapter.oracle"
                     :data-base-address="adapter.base"
                     :data-quote-address="adapter.quote"
-                    :title="adapter.provider"
                     @click.stop="onAssetAdapterClick(adapter, $event, col.address)"
                   >
-                    <BaseAvatar
-                      v-if="adapter.logo"
-                      :src="adapter.logo"
-                      :label="adapter.name"
-                      class="icon--16"
-                    />
-                    <SvgIcon
-                      v-else
-                      name="question-circle"
-                      class="!w-16 !h-16 text-content-tertiary"
-                    />
+                    <UiHoverPreviewTooltip
+                      :title="adapter.name"
+                      :text="adapter.provider || 'Unknown provider'"
+                      placement="top-start"
+                    >
+                      <BaseAvatar
+                        v-if="adapter.logo"
+                        :src="adapter.logo"
+                        :label="adapter.name"
+                        class="icon--16"
+                      />
+                      <SvgIcon
+                        v-else
+                        name="question-circle"
+                        class="!w-16 !h-16 text-content-tertiary"
+                      />
+                    </UiHoverPreviewTooltip>
                     <span
                       v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
                       class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
                       :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
                     />
-                    <SvgIcon
+                    <UiHoverPreviewTooltip
                       v-if="isAdapterPriceFailed(adapter)"
-                      name="warning"
-                      class="absolute -bottom-1 -right-1 !w-10 !h-10 text-warning-500"
                       title="getQuote reverted"
-                    />
+                      text="getQuote reverted"
+                      placement="top-start"
+                      class="absolute -bottom-1 -right-1"
+                    >
+                      <SvgIcon
+                        name="warning"
+                        class="!w-10 !h-10 text-warning-500"
+                      />
+                    </UiHoverPreviewTooltip>
                   </button>
                 </div>
               </template>
@@ -715,31 +725,42 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                       :data-oracle-address="adapter.oracle"
                       :data-base-address="adapter.base"
                       :data-quote-address="adapter.quote"
-                      :title="adapter.provider"
                       @click.stop="onCellAdapterClick(adapter, $event, row.address, col.address)"
                     >
-                      <BaseAvatar
-                        v-if="adapter.logo"
-                        :src="adapter.logo"
-                        :label="adapter.name"
-                        class="icon--16"
-                      />
-                      <SvgIcon
-                        v-else
-                        name="question-circle"
-                        class="!w-16 !h-16 text-content-tertiary"
-                      />
+                      <UiHoverPreviewTooltip
+                        :title="adapter.name"
+                        :text="adapter.provider || 'Unknown provider'"
+                        placement="top-start"
+                      >
+                        <BaseAvatar
+                          v-if="adapter.logo"
+                          :src="adapter.logo"
+                          :label="adapter.name"
+                          class="icon--16"
+                        />
+                        <SvgIcon
+                          v-else
+                          name="question-circle"
+                          class="!w-16 !h-16 text-content-tertiary"
+                        />
+                      </UiHoverPreviewTooltip>
                       <span
                         v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
                         class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
                         :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
                       />
-                      <SvgIcon
+                      <UiHoverPreviewTooltip
                         v-if="isAdapterPriceFailed(adapter)"
-                        name="warning"
-                        class="absolute -bottom-1 -right-1 !w-10 !h-10 text-warning-500"
                         title="getQuote reverted"
-                      />
+                        text="getQuote reverted"
+                        placement="top-start"
+                        class="absolute -bottom-1 -right-1"
+                      >
+                        <SvgIcon
+                          name="warning"
+                          class="!w-10 !h-10 text-warning-500"
+                        />
+                      </UiHoverPreviewTooltip>
                     </button>
                   </div>
                 </template>
@@ -749,15 +770,20 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                   v-if="dotMetric !== 'oracle'"
                   class="inline-flex items-center justify-center gap-2"
                 >
-                  <SvgIcon
+                  <UiHoverPreviewTooltip
                     v-if="
                       dotMetric === 'lltv'
                         && matrix.cells.get(row.address)!.get(col.address)!.ltv.isLiquidationLTVRamping
                     "
-                    name="arrow-top-right"
-                    class="!w-10 !h-10 text-warning-500 shrink-0 rotate-180"
                     title="Liquidation LTV ramping down"
-                  />
+                    text="The Liquidation LTV for this collateral is currently being reduced."
+                    placement="top-start"
+                  >
+                    <SvgIcon
+                      name="arrow-top-right"
+                      class="!w-10 !h-10 text-warning-500 shrink-0 rotate-180"
+                    />
+                  </UiHoverPreviewTooltip>
                   <SvgIcon
                     v-if="shouldShowSparkles(row.address, col.address)"
                     name="sparks"
@@ -767,7 +793,13 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     v-if="isUnavailableMetricCell(row.address, col.address)"
                     class="text-p5 whitespace-nowrap text-content-muted"
                   >
-                    -
+                    <UiHoverPreviewTooltip
+                      title="Max ROE unavailable"
+                      :text="unavailableRoeCellLabel"
+                      placement="top-start"
+                    >
+                      <span>-</span>
+                    </UiHoverPreviewTooltip>
                   </span>
                   <span
                     v-else-if="

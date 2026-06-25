@@ -216,13 +216,18 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <SvgIcon
+          <UiHoverPreviewTooltip
             v-if="isRamping"
-            name="arrow-top-right"
-            class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
             title="Liquidation LTV ramping down"
-            @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
-          />
+            text="The Liquidation LTV for this collateral is currently being reduced."
+            placement="top-start"
+          >
+            <SvgIcon
+              name="arrow-top-right"
+              class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+              @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
+            />
+          </UiHoverPreviewTooltip>
           {{ `${formatNumber(ltvToPercent(currentLiquidationLTV), 2)}%` }}
         </span>
       </VaultOverviewLabelValue>

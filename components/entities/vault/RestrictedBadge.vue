@@ -25,16 +25,21 @@ const openInfoModal = (event: MouseEvent) => {
 </script>
 
 <template>
-  <span
-    class="inline-flex items-center cursor-pointer rounded-8 bg-warning-100 text-warning-500"
-    :class="size === 'large' ? 'gap-8 py-8 px-12' : 'gap-4 py-2 px-8 text-p5'"
-    :title="title"
-    @click="openInfoModal"
+  <UiHoverPreviewTooltip
+    :title="variant === 'restricted' ? 'Asset restricted' : 'Region restricted'"
+    :text="title"
+    placement="top-start"
   >
-    <SvgIcon
-      name="warning"
-      :class="size === 'large' ? '!w-20 !h-20 mr-2' : '!w-14 !h-14'"
-    />
-    Restricted
-  </span>
+    <span
+      class="inline-flex items-center cursor-pointer rounded-8 bg-warning-100 text-warning-500"
+      :class="size === 'large' ? 'gap-8 py-8 px-12' : 'gap-4 py-2 px-8 text-p5'"
+      @click="openInfoModal"
+    >
+      <SvgIcon
+        name="warning"
+        :class="size === 'large' ? '!w-20 !h-20 mr-2' : '!w-14 !h-14'"
+      />
+      Restricted
+    </span>
+  </UiHoverPreviewTooltip>
 </template>

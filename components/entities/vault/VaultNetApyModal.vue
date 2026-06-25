@@ -89,11 +89,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Supply APY
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Supply APY"
                 text="Supply APY is the yield contribution from supplied collateral, shown relative to total supplied value."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -112,11 +112,11 @@ const handleClose = () => {
                 name="sparks"
               />
               <span>Rewards APY</span>
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Rewards APY"
                 text="Rewards APY is the weighted contribution from active eligible reward campaigns for this position."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -173,11 +173,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Intrinsic APY
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Intrinsic APY"
                 text="Intrinsic APY is the weighted contribution from asset-native yield, when intrinsic APY is enabled."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -191,11 +191,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Borrow cost APY
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Borrow cost APY"
                 text="Borrow cost APY is weighted by your borrowed value relative to supplied collateral, so it can be lower than the market Borrow APY."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>

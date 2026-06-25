@@ -3,6 +3,10 @@ import type { Component } from 'vue'
 import { arrow as arrowMiddleware, autoUpdate, flip, offset, shift, size, useFloating, type Placement } from '@floating-ui/vue'
 import { type ModalData, useModal } from '~/components/ui/composables/useModal'
 
+defineOptions({
+  inheritAttrs: false,
+})
+
 const {
   component,
   modalData,
@@ -10,6 +14,7 @@ const {
   closeDelay = 150,
   ariaLabel = 'Show details',
   placement = 'top',
+  clickable = true,
 } = defineProps<{
   component: Component
   modalData?: ModalData | (() => ModalData)
@@ -17,6 +22,7 @@ const {
   closeDelay?: number
   ariaLabel?: string
   placement?: Placement
+  clickable?: boolean
 }>()
 
 const modal = useModal()
@@ -28,6 +34,7 @@ const isVisible = ref(false)
 const isRendered = ref(false)
 const isPointerInTrigger = ref(false)
 const isPointerInPopover = ref(false)
+const isKeyboardFocusVisible = ref(false)
 
 let mediaQuery: MediaQueryList | undefined
 let openTimer: number | undefined
@@ -149,8 +156,8 @@ const updatePreferredPlacement = () => {
   )
 }
 
-const showPopover = () => {
-  if (!canHover.value) return
+const showPopover = (allowWithoutHover = false) => {
+  if (!allowWithoutHover && !canHover.value) return
   clearOpenTimer()
   clearCloseTimer()
   updatePreferredPlacement()
@@ -170,6 +177,7 @@ const hidePopover = () => {
   clearCloseTimer()
   isVisible.value = false
   isPointerInPopover.value = false
+  isKeyboardFocusVisible.value = false
 }
 
 const scheduleOpen = () => {
@@ -202,6 +210,27 @@ const onMouseLeave = () => {
   scheduleClose()
 }
 
+const togglePopover = () => {
+  if (isVisible.value) {
+    hidePopover()
+  }
+  else {
+    showPopover(true)
+  }
+}
+
+const onFocus = (event: FocusEvent) => {
+  isKeyboardFocusVisible.value = event.target instanceof HTMLElement && event.target.matches(':focus-visible')
+  if (!isKeyboardFocusVisible.value) return
+  showPopover(true)
+}
+
+const onBlur = () => {
+  if (!isPointerInPopover.value) {
+    hidePopover()
+  }
+}
+
 const onPopoverMouseEnter = () => {
   isPointerInPopover.value = true
   clearCloseTimer()
@@ -221,12 +250,46 @@ const stopPointerPropagation = (event: Event) => {
   event.stopPropagation()
 }
 
+const isInteractiveChildEvent = (event: Event) => {
+  if (!(event.target instanceof Element) || !trigger.value) return false
+  const interactiveChild = event.target.closest([
+    'a[href]',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    'summary',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[role="checkbox"]',
+    '[role="radio"]',
+    '[role="switch"]',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(','))
+
+  return Boolean(
+    interactiveChild
+    && interactiveChild !== trigger.value
+    && trigger.value.contains(interactiveChild),
+  )
+}
+
 const openModal = () => {
   hidePopover()
   modal.open(component, getModalData())
 }
 
 const onClick = (event: Event) => {
+  if (!clickable) {
+    if (!canHover.value) {
+      if (isInteractiveChildEvent(event)) return
+      stopNavigation(event)
+      togglePopover()
+    }
+    return
+  }
   stopNavigation(event)
   openModal()
 }
@@ -234,6 +297,10 @@ const onClick = (event: Event) => {
 const onKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
   stopNavigation(event)
+  if (!clickable) {
+    togglePopover()
+    return
+  }
   openModal()
 }
 
@@ -286,15 +353,19 @@ onBeforeUnmount(() => {
 
 <template>
   <span
+    v-bind="$attrs"
     ref="trigger"
     class="ui-modal-preview-trigger"
     :aria-label="ariaLabel"
     role="button"
     tabindex="0"
+    :aria-expanded="isRendered ? isVisible : undefined"
     @pointerdown="stopPointerPropagation"
     @pointerup="stopPointerPropagation"
     @click.capture="onClick"
     @keydown="onKeydown"
+    @focus="onFocus"
+    @blur="onBlur"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
@@ -306,6 +377,7 @@ onBeforeUnmount(() => {
       v-if="isRendered"
       ref="floating"
       class="ui-modal-preview-trigger__popover"
+      :class="{ 'ui-modal-preview-trigger__popover--hover-only': !clickable }"
       :style="floatingStyles"
       @click.stop
       @mouseenter="onPopoverMouseEnter"
@@ -339,7 +411,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss">
-.ui-modal-preview-trigger {
+:where(.ui-modal-preview-trigger) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -347,49 +419,53 @@ onBeforeUnmount(() => {
   height: fit-content;
   border-radius: 4px;
   outline: none;
+}
 
-  &:focus-visible {
-    outline: 2px solid var(--accent-600);
-    outline-offset: 2px;
+.ui-modal-preview-trigger:focus-visible {
+  outline: 2px solid var(--accent-600);
+  outline-offset: 2px;
+}
+
+.ui-modal-preview-trigger__popover {
+  z-index: 3100;
+  position: relative;
+  width: min(480px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  height: fit-content;
+
+  &--hover-only {
+    width: min(360px, calc(100vw - 24px));
+  }
+}
+
+.ui-modal-preview-trigger__popover-inner {
+  position: relative;
+}
+
+.ui-modal-preview-trigger__popover-content {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.ui-modal-preview-trigger__arrow {
+  position: absolute;
+  z-index: 3;
+  width: 16px;
+  height: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  pointer-events: none;
+  transform: rotate(45deg);
+
+  &--bottom {
+    border-top: 0;
+    border-left: 0;
   }
 
-  &__popover {
-    z-index: 3100;
-    position: relative;
-    width: min(480px, calc(100vw - 24px));
-    max-width: calc(100vw - 24px);
-    height: fit-content;
-  }
-
-  &__popover-inner {
-    position: relative;
-  }
-
-  &__popover-content {
-    position: relative;
-    z-index: 2;
-    overflow: hidden;
-  }
-
-  &__arrow {
-    position: absolute;
-    z-index: 3;
-    width: 16px;
-    height: 16px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    pointer-events: none;
-    transform: rotate(45deg);
-
-    &--bottom {
-      border-top: 0;
-      border-left: 0;
-    }
-
-    &--top {
-      border-right: 0;
-      border-bottom: 0;
-    }
+  &--top {
+    border-right: 0;
+    border-bottom: 0;
   }
 }
 
