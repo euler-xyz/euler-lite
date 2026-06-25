@@ -256,13 +256,14 @@ const openModal = () => {
 }
 
 const onClick = (event: Event) => {
-  stopNavigation(event)
   if (!clickable) {
     if (!canHover.value) {
+      stopNavigation(event)
       togglePopover()
     }
     return
   }
+  stopNavigation(event)
   openModal()
 }
 
@@ -349,6 +350,7 @@ onBeforeUnmount(() => {
       v-if="isRendered"
       ref="floating"
       class="ui-modal-preview-trigger__popover"
+      :class="{ 'ui-modal-preview-trigger__popover--hover-only': !clickable }"
       :style="floatingStyles"
       @click.stop
       @mouseenter="onPopoverMouseEnter"
@@ -403,6 +405,10 @@ onBeforeUnmount(() => {
   width: min(480px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
   height: fit-content;
+
+  &--hover-only {
+    width: min(360px, calc(100vw - 24px));
+  }
 }
 
 .ui-modal-preview-trigger__popover-inner {

@@ -22,19 +22,20 @@ const {
     :title="modalTitle"
     :inline="inline"
     :close="close"
+    :compact="inline && !close"
     @close="$emit('close')"
   >
     <template v-if="sections">
-      <div class="flex flex-col gap-12">
+      <div class="flex flex-col gap-10">
         <div
           v-for="(section, idx) in sections"
           :key="idx"
           class="flex flex-col gap-4"
         >
-          <div class="text-p2 font-semibold text-content-primary">
+          <div class="text-p3 font-semibold text-content-primary">
             {{ section.title }}
           </div>
-          <div class="text-p2 text-content-primary">
+          <div class="text-p3 text-content-primary">
             {{ section.text }}
           </div>
         </div>
@@ -42,7 +43,7 @@ const {
     </template>
     <div
       v-else
-      class="text-p2 text-content-primary"
+      class="text-p3 text-content-primary"
     >
       {{ text }}
     </div>
