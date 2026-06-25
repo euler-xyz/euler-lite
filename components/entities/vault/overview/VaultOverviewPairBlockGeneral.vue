@@ -263,10 +263,10 @@ const rampDownModalData = computed(() => ({
             <template #label>
               <span class="flex items-center gap-4">
                 Max LTV
-                <UiFootnote
+                <UiHoverPreviewTooltip
                   title="Max LTV"
                   text="The maximum loan-to-value allowed for this collateral and borrow pair before new borrowing is restricted."
-                  tooltip-placement="top-start"
+                  placement="top-start"
                 />
               </span>
             </template>
@@ -277,10 +277,10 @@ const rampDownModalData = computed(() => ({
             <template #label>
               <span class="flex items-center gap-4">
                 Liquidation LTV
-                <UiFootnote
+                <UiHoverPreviewTooltip
                   title="Liquidation LTV"
                   text="The loan-to-value where the position becomes eligible for liquidation. If this value is ramping, the current value can change over time."
-                  tooltip-placement="top-start"
+                  placement="top-start"
                 />
               </span>
             </template>

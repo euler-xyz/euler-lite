@@ -136,10 +136,10 @@ watch(showAllLabelEntries, (showAll) => {
       </h2>
       <div class="flex items-center gap-8">
         <span class="text-h6 text-content-secondary">Show all</span>
-        <UiFootnote
+        <UiHoverPreviewTooltip
           title="Show all"
           text="When enabled, shows positions and deposits in unverified vaults. Interacting with unverified vaults may pose security risks, as such vaults could potentially be used for phishing attempts. Ensure you trust the source before continuing."
-          tooltip-placement="top-end"
+          placement="top-end"
         />
         <UiSwitch
           v-model="isShowAllPositions"
@@ -159,11 +159,11 @@ watch(showAllLabelEntries, (showAll) => {
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Net APY
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Portfolio Net APY"
               text="Net annual percentage yield across all positions. Calculated as total net yield (supply income minus borrow costs) divided by total supplied value."
-              tooltip-placement="bottom-start"
-              class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+              placement="bottom-start"
+              icon-class="text-content-tertiary"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
@@ -182,11 +182,11 @@ watch(showAllLabelEntries, (showAll) => {
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             ROE
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Portfolio ROE"
               text="Account-level return on equity. Calculated as total net yield divided by total equity, where equity is supplied value minus borrowed value."
-              tooltip-placement="bottom-start"
-              class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+              placement="bottom-start"
+              icon-class="text-content-tertiary"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
@@ -210,12 +210,12 @@ watch(showAllLabelEntries, (showAll) => {
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Total supplied
-            <UiFootnote
+            <UiHoverPreviewTooltip
               v-if="totalSuppliedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some supplied assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="bottom-end"
-              class="[--ui-footnote-icon-color:var(--warning-500)]"
+              placement="bottom-end"
+              icon-class="text-warning-500"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
@@ -233,12 +233,12 @@ watch(showAllLabelEntries, (showAll) => {
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Total borrowed
-            <UiFootnote
+            <UiHoverPreviewTooltip
               v-if="totalBorrowedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some borrowed assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="bottom-end"
-              class="[--ui-footnote-icon-color:var(--warning-500)]"
+              placement="bottom-end"
+              icon-class="text-warning-500"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
@@ -256,12 +256,12 @@ watch(showAllLabelEntries, (showAll) => {
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Net asset value
-            <UiFootnote
+            <UiHoverPreviewTooltip
               v-if="totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some assets in your portfolio don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="bottom-end"
-              class="[--ui-footnote-icon-color:var(--warning-500)]"
+              placement="bottom-end"
+              icon-class="text-warning-500"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">

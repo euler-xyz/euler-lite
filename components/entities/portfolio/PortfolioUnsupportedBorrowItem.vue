@@ -131,16 +131,19 @@ const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
               :data-value="marketLabel"
             >
               <span>{{ marketLabel }}</span>
-              <span
-                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
-                title="This position uses collateral that Lite cannot resolve as a supported vault."
+              <UiHoverPreviewTooltip
+                title="Unknown collateral"
+                text="This position uses collateral that Lite cannot resolve as a supported vault."
+                placement="top-start"
               >
-                <SvgIcon
-                  name="warning"
-                  class="!w-14 !h-14"
-                />
-                Unknown
-              </span>
+                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5">
+                  <SvgIcon
+                    name="warning"
+                    class="!w-14 !h-14"
+                  />
+                  Unknown
+                </span>
+              </UiHoverPreviewTooltip>
             </div>
             <div
               class="text-h5 text-content-primary truncate"

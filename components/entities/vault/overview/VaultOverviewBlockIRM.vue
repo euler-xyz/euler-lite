@@ -17,7 +17,7 @@ import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
 import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
-import { UiFootnoteModal } from '#components'
+import { UiHoverPreviewTooltipModal } from '#components'
 
 // Register Chart.js components
 ChartJS.register(
@@ -185,7 +185,7 @@ const openIRMInfoModal = (event: MouseEvent | KeyboardEvent) => {
   event.stopPropagation()
   const tooltip = irmTooltip.value
   if (!tooltip) return
-  modal.open(UiFootnoteModal, {
+  modal.open(UiHoverPreviewTooltipModal, {
     props: {
       modalTitle: tooltip.title,
       text: tooltip.text,
@@ -632,11 +632,11 @@ watch(isDark, async () => {
           title="Interest rate model details"
           @click="openIRMInfoModal"
         />
-        <UiFootnote
+        <UiHoverPreviewTooltip
           :title="irmTooltip.title"
           :text="irmTooltip.text"
-          tooltip-placement="top-end"
-          class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+          placement="top-end"
+          icon-class="text-content-muted hover:text-content-secondary"
         />
       </div>
     </header>
