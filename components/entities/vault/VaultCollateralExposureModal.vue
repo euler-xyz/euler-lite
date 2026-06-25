@@ -19,6 +19,7 @@ const allCollateralPairs = computed(() =>
 )
 
 const collateralGroups = computed(() => getCollateralExposureGroups(allCollateralPairs.value))
+const hasMultipleCollateralGroups = computed(() => collateralGroups.value.length > 1)
 
 const formatTimeRemaining = (seconds: bigint): string => {
   const days = Number(seconds) / 86400
@@ -55,9 +56,14 @@ const onCollateralClick = (address: string) => {
       <div
         v-for="group in collateralGroups"
         :key="group.asset.address"
-        class="overflow-hidden rounded-12 border border-line-subtle bg-surface text-content-primary"
+        :class="hasMultipleCollateralGroups
+          ? 'overflow-hidden rounded-12 border border-line-subtle bg-surface text-content-primary'
+          : ''"
       >
-        <div class="flex items-center justify-between gap-12 border-b border-line-subtle px-16 py-12">
+        <div
+          v-if="hasMultipleCollateralGroups"
+          class="flex items-center justify-between gap-12 border-b border-line-subtle px-16 py-12"
+        >
           <div class="flex min-w-0 items-center gap-10">
             <AssetAvatar
               :asset="group.asset"
@@ -74,11 +80,14 @@ const onCollateralClick = (address: string) => {
           </div>
         </div>
 
-        <div class="divide-y divide-line-subtle">
+        <div :class="hasMultipleCollateralGroups ? 'divide-y divide-line-subtle' : 'flex flex-col gap-12'">
           <div
             v-for="pair in group.items"
             :key="pair.collateral.address"
-            class="cursor-pointer px-16 py-12 transition-colors hover:bg-card-hover"
+            class="cursor-pointer transition-colors hover:bg-card-hover"
+            :class="hasMultipleCollateralGroups
+              ? 'px-16 py-12'
+              : 'rounded-12 border border-line-subtle bg-surface p-16'"
             @click="onCollateralClick(pair.collateral.address)"
           >
             <div class="min-w-0">

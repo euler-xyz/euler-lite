@@ -147,6 +147,7 @@ const exposureGroups = computed(() =>
     return a.asset.symbol.localeCompare(b.asset.symbol)
   }),
 )
+const hasMultipleExposureGroups = computed(() => exposureGroups.value.length > 1)
 
 const visibleExposureGroups = computed(() =>
   isExpanded.value ? exposureGroups.value : exposureGroups.value.slice(0, COLLAPSED_GROUP_COUNT),
@@ -232,9 +233,14 @@ load()
       <div
         v-for="group in visibleExposureGroups"
         :key="group.asset.address"
-        class="overflow-hidden rounded-12 border border-line-default bg-surface text-content-primary shadow-card"
+        :class="hasMultipleExposureGroups
+          ? 'overflow-hidden rounded-12 border border-line-default bg-surface text-content-primary shadow-card'
+          : ''"
       >
-        <div class="flex items-center justify-between gap-12 border-b border-line-subtle px-16 py-12">
+        <div
+          v-if="hasMultipleExposureGroups"
+          class="flex items-center justify-between gap-12 border-b border-line-subtle px-16 py-12"
+        >
           <div class="flex min-w-0 items-center gap-10">
             <AssetAvatar
               :asset="group.asset"
@@ -254,11 +260,14 @@ load()
           </span>
         </div>
 
-        <div class="divide-y divide-line-subtle">
+        <div :class="hasMultipleExposureGroups ? 'divide-y divide-line-subtle' : 'flex flex-col gap-12'">
           <div
             v-for="row in group.items"
             :key="row.exposure.address"
-            class="cursor-pointer px-16 py-12 transition-colors hover:bg-card-hover"
+            class="cursor-pointer transition-colors hover:bg-card-hover"
+            :class="hasMultipleExposureGroups
+              ? 'px-16 py-12'
+              : 'rounded-12 border border-line-default bg-surface p-16 text-content-primary shadow-card'"
             @click="onExposureClick(row.exposure.address)"
           >
             <div
