@@ -62,25 +62,45 @@ const rightRows = computed(() => [
   model.value.rightNodes.cash,
 ].filter(node => node.valueUsd > 0))
 
+const MIN_GRAPH_HEIGHT = 260
+const COLLATERAL_ROW_HEIGHT = 84
+const RIGHT_ROW_OFFSET = 56
+
+const graphHeight = computed(() => Math.max(
+  MIN_GRAPH_HEIGHT,
+  Math.max(1, model.value.collateralNodes.length) * COLLATERAL_ROW_HEIGHT,
+))
+
+const graphHeightStyle = computed(() => ({
+  '--open-interest-graph-height': `${graphHeight.value}px`,
+}))
+
 const flowY = (index: number, count: number) => {
-  if (count <= 1) return 130
-  const top = 52
-  const bottom = 208
+  if (count <= 1) return graphHeight.value / 2
+  const top = 40
+  const bottom = graphHeight.value - 40
   return top + (bottom - top) * (index / (count - 1))
 }
 
-const rightY = (id: string) => id === 'borrowed' ? 104 : 176
+const rightY = (id: string) => {
+  const middle = graphHeight.value / 2
+  return id === 'borrowed' ? middle - RIGHT_ROW_OFFSET : middle + RIGHT_ROW_OFFSET
+}
 
 const flowPath = (index: number, count: number) => {
   const y = flowY(index, count)
   const targetY = rightY('borrowed')
-  return `M 178 ${y} C 270 ${y}, 342 ${targetY}, 420 ${targetY}`
+  return `M 6 ${y} C 40 ${y}, 62 ${targetY}, 96 ${targetY}`
 }
 
 const formatPercent = (value: number) => `${compactNumber(value, 1, 0)}%`
 
 const graphTop = (y: number) => ({
-  top: `${y / 260 * 100}%`,
+  '--open-interest-node-top': `${y / graphHeight.value * 100}%`,
+})
+
+const barWidth = (value: number) => ({
+  width: `${Math.max(2, Math.min(100, value))}%`,
 })
 
 const loadOpenInterest = async () => {
@@ -161,78 +181,126 @@ watch(
         </span>
       </div>
 
-      <div class="relative h-[300px] w-full overflow-hidden rounded-12 border border-line-subtle bg-surface p-16">
-        <svg
-          class="pointer-events-none absolute inset-16 h-[calc(100%-32px)] w-[calc(100%-32px)]"
-          viewBox="0 0 720 260"
-          role="img"
-          aria-label="Open interest flow from collateral assets to borrowed liquidity"
-        >
-          <defs>
-            <linearGradient
-              id="open-interest-flow"
-              x1="0"
-              x2="1"
-              y1="0"
-              y2="0"
-            >
-              <stop
-                offset="0%"
-                stop-color="var(--accent-500)"
-                stop-opacity="0.42"
-              />
-              <stop
-                offset="100%"
-                stop-color="var(--chart-line-b)"
-                stop-opacity="0.56"
-              />
-            </linearGradient>
-          </defs>
-
-          <g
-            v-for="(flow, index) in model.flows"
-            :key="flow.id"
-          >
-            <path
-              :d="flowPath(index, model.flows.length)"
-              fill="none"
-              stroke="url(#open-interest-flow)"
-              stroke-linecap="round"
-              :stroke-width="flow.width"
-              opacity="0.72"
-            >
-              <title>{{ `${flow.source.label} exposure: ${flow.source.displayValue} (${formatPercent(flow.source.percentage)})` }}</title>
-            </path>
-          </g>
-        </svg>
-
-        <div
-          v-for="(node, index) in model.collateralNodes"
-          :key="node.id"
-          class="absolute left-16 z-10 flex h-52 w-[178px] -translate-y-1/2 flex-col justify-center rounded-8 border border-line-subtle bg-surface-elevated px-12 shadow-card"
-          :style="graphTop(flowY(index, model.collateralNodes.length))"
-          :title="`${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})`"
-        >
-          <span class="truncate text-p3 font-medium text-content-primary">{{ node.label }}</span>
-          <span class="truncate text-p4 text-content-tertiary">{{ node.displayValue }} · {{ formatPercent(node.percentage) }}</span>
+      <div class="overflow-hidden rounded-12 border border-line-subtle bg-surface p-14">
+        <div class="mb-10 grid grid-cols-[minmax(148px,178px)_minmax(88px,1fr)_minmax(176px,220px)] items-center gap-14 mobile:hidden">
+          <p class="text-p4 font-medium text-content-secondary">
+            Collateral backing debt
+          </p>
+          <div class="h-px bg-line-subtle" />
+          <p class="text-p4 font-medium text-content-secondary">
+            Vault composition
+          </p>
         </div>
 
-        <div
-          v-for="node in rightRows"
-          :key="node.id"
-          class="absolute right-16 z-10 flex h-56 w-[220px] -translate-y-1/2 flex-col justify-center rounded-8 border px-14 shadow-card"
-          :class="node.id === 'borrowed'
-            ? 'border-accent-500/30 bg-accent-500/10'
-            : 'border-line-subtle bg-surface-elevated'"
-          :style="graphTop(rightY(node.id))"
-          :title="`${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})`"
-        >
-          <span class="truncate text-p3 font-medium text-content-primary">{{ node.label }}</span>
-          <span class="truncate text-p4 text-content-tertiary">{{ node.displayValue }} · {{ formatPercent(node.percentage) }}</span>
+        <div class="grid grid-cols-[minmax(148px,178px)_minmax(88px,1fr)_minmax(176px,220px)] gap-14 mobile:flex mobile:flex-col">
+          <div
+            class="relative h-[var(--open-interest-graph-height)] mobile:flex mobile:h-auto mobile:flex-col mobile:gap-8"
+            :style="graphHeightStyle"
+          >
+            <div
+              v-for="(node, index) in model.collateralNodes"
+              :key="node.id"
+              class="absolute left-0 top-[var(--open-interest-node-top)] z-10 w-full -translate-y-1/2 rounded-8 border border-line-subtle bg-surface-elevated p-10 shadow-card mobile:relative mobile:top-auto mobile:translate-y-0"
+              :style="graphTop(flowY(index, model.collateralNodes.length))"
+              :title="`${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})`"
+            >
+              <div class="flex min-w-0 items-start justify-between gap-8">
+                <span class="truncate text-p3 font-medium text-content-primary">{{ node.label }}</span>
+                <span class="shrink-0 rounded-full bg-accent-500/10 px-6 py-2 text-p5 text-content-accent">{{ formatPercent(node.percentage) }}</span>
+              </div>
+              <div class="mt-7 h-4 overflow-hidden rounded-full bg-surface-secondary">
+                <div
+                  class="h-full rounded-full bg-accent-500"
+                  :style="barWidth(node.percentage)"
+                />
+              </div>
+              <p class="mt-6 truncate text-p4 text-content-tertiary">
+                {{ node.displayValue }}
+              </p>
+            </div>
+          </div>
+
+          <svg
+            class="h-[var(--open-interest-graph-height)] w-full self-stretch mobile:hidden"
+            :style="graphHeightStyle"
+            :viewBox="`0 0 100 ${graphHeight}`"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label="Open interest flow from collateral assets to borrowed liquidity"
+          >
+            <defs>
+              <linearGradient
+                id="open-interest-flow"
+                x1="0"
+                x2="1"
+                y1="0"
+                y2="0"
+              >
+                <stop
+                  offset="0%"
+                  stop-color="var(--accent-500)"
+                  stop-opacity="0.34"
+                />
+                <stop
+                  offset="100%"
+                  stop-color="var(--chart-line-b)"
+                  stop-opacity="0.64"
+                />
+              </linearGradient>
+            </defs>
+
+            <g
+              v-for="(flow, index) in model.flows"
+              :key="flow.id"
+            >
+              <path
+                :d="flowPath(index, model.flows.length)"
+                fill="none"
+                stroke="url(#open-interest-flow)"
+                stroke-linecap="round"
+                :stroke-width="flow.width"
+                opacity="0.84"
+                vector-effect="non-scaling-stroke"
+              >
+                <title>{{ `${flow.source.label} exposure: ${flow.source.displayValue} (${formatPercent(flow.source.percentage)})` }}</title>
+              </path>
+            </g>
+          </svg>
+
+          <div
+            class="relative h-[var(--open-interest-graph-height)] mobile:flex mobile:h-auto mobile:flex-col mobile:gap-8"
+            :style="graphHeightStyle"
+          >
+            <div
+              v-for="node in rightRows"
+              :key="node.id"
+              class="absolute right-0 top-[var(--open-interest-node-top)] z-10 w-full -translate-y-1/2 rounded-8 border p-12 shadow-card mobile:relative mobile:top-auto mobile:translate-y-0"
+              :class="node.id === 'borrowed'
+                ? 'border-line-emphasis bg-surface-elevated'
+                : 'border-line-subtle bg-surface-elevated'"
+              :style="graphTop(rightY(node.id))"
+              :title="`${node.label}: ${node.displayValue} (${formatPercent(node.percentage)})`"
+            >
+              <div class="flex min-w-0 items-start justify-between gap-8">
+                <span class="truncate text-p3 font-medium text-content-primary">{{ node.label }}</span>
+                <span class="shrink-0 rounded-full bg-surface-secondary px-6 py-2 text-p5 text-content-tertiary">{{ formatPercent(node.percentage) }}</span>
+              </div>
+              <div class="mt-7 h-4 overflow-hidden rounded-full bg-surface-secondary">
+                <div
+                  class="h-full rounded-full"
+                  :class="node.id === 'borrowed' ? 'bg-accent-500' : 'bg-content-muted'"
+                  :style="barWidth(node.percentage)"
+                />
+              </div>
+              <p class="mt-6 truncate text-p4 text-content-tertiary">
+                {{ node.displayValue }}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="grid gap-8 text-p3 text-content-secondary tablet:grid-cols-2">
+      <div class="grid gap-8 text-p3 text-content-secondary laptop:grid-cols-2">
         <div
           v-for="node in model.collateralNodes"
           :key="`row-${node.id}`"
