@@ -117,46 +117,48 @@ const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
         >
           Position {{ subAccountIndex }}
         </div>
-        <div class="flex gap-12 w-full">
-          <AssetAvatar
-            :asset="avatarAssets"
-            size="40"
-          />
-          <div class="flex-grow min-w-0">
-            <div
-              class="text-content-tertiary text-p3 mb-4 flex items-center gap-4"
-              data-id="data-point"
-              :data-key="positionKey"
-              data-field="name"
-              :data-value="marketLabel"
-            >
-              <span>{{ marketLabel }}</span>
-              <UiHoverPreviewTooltip
-                title="Unknown collateral"
-                text="This position uses collateral that Lite cannot resolve as a supported vault."
-                placement="top-start"
+        <div class="flex gap-12 w-full mobile:flex-col">
+          <div class="flex gap-12 min-w-0 flex-1">
+            <AssetAvatar
+              :asset="avatarAssets"
+              size="40"
+            />
+            <div class="flex-grow min-w-0">
+              <div
+                class="text-content-tertiary text-p3 mb-4 flex items-center gap-4 min-w-0"
+                data-id="data-point"
+                :data-key="positionKey"
+                data-field="name"
+                :data-value="marketLabel"
               >
-                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5">
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
-                  />
-                  Unknown
-                </span>
-              </UiHoverPreviewTooltip>
-            </div>
-            <div
-              class="text-h5 text-content-primary truncate"
-              data-id="data-point"
-              :data-key="positionKey"
-              data-field="asset-symbols"
-              :data-value="pairSymbols"
-            >
-              {{ pairSymbols }}
+                <span class="min-w-0 truncate">{{ marketLabel }}</span>
+                <UiHoverPreviewTooltip
+                  title="Unknown collateral"
+                  text="This position uses collateral that Lite cannot resolve as a supported vault."
+                  placement="top-start"
+                >
+                  <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5 shrink-0">
+                    <SvgIcon
+                      name="warning"
+                      class="!w-14 !h-14"
+                    />
+                    Unknown
+                  </span>
+                </UiHoverPreviewTooltip>
+              </div>
+              <div
+                class="text-h5 text-content-primary truncate"
+                data-id="data-point"
+                :data-key="positionKey"
+                data-field="asset-symbols"
+                :data-value="pairSymbols"
+              >
+                {{ pairSymbols }}
+              </div>
             </div>
           </div>
-          <div class="flex gap-16 items-start shrink-0">
-            <div class="flex flex-col items-end">
+          <div class="flex gap-16 items-start shrink-0 mobile:!grid mobile:w-full mobile:grid-cols-2 mobile:gap-x-12 mobile:border-t mobile:border-line-subtle mobile:pt-12">
+            <div class="flex flex-col items-end mobile:items-start mobile:min-w-0">
               <div class="text-content-tertiary text-p3 mb-4">
                 Net APY
               </div>
@@ -170,7 +172,7 @@ const pairSymbols = computed(() => `Unknown collateral/${borrowSymbol.value}`)
                 -
               </div>
             </div>
-            <div class="flex flex-col items-end">
+            <div class="flex flex-col items-end mobile:min-w-0">
               <div class="text-content-tertiary text-p3 mb-4">
                 ROE
               </div>
