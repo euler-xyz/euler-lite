@@ -110,7 +110,7 @@ const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  return formatNumber(getVaultSupplyApy(vault.value) + totalRewardsAPY.value)
+  return formatNumber(getVaultSupplyApy(vault.value) + intrinsicApy.value + totalRewardsAPY.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   return formatNumber(estimateSupplyAPY.value)

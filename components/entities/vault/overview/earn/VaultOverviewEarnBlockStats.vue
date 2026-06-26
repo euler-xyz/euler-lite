@@ -12,6 +12,7 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(vault, enableIntrinsicApy.value))
 
 const totalSupplyDisplay = ref('-')
 
@@ -79,7 +80,7 @@ const supplyApyModalData = computed(() => ({
               data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
+          {{ formatNumber(getVaultSupplyApy(vault) + intrinsicApy + rewardSupplyAPY) }}%
         </span>
       </VaultOverviewLabelValue>
     </div>
