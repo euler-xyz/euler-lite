@@ -458,9 +458,13 @@ watch(
                       class="!w-16 !h-16 text-content-tertiary"
                     />
                     <span
-                      v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
+                      v-if="adapter.checksStatus"
                       class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
-                      :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
+                      :class="{
+                        'bg-success-500': adapter.checksStatus === 'positive',
+                        'bg-warning-500': adapter.checksStatus === 'warning',
+                        'bg-error-500': adapter.checksStatus === 'negative',
+                      }"
                     />
                   </span>
                 </div>
