@@ -77,7 +77,7 @@ const handleClose = () => {
               > ({{ intrinsicApyInfo.provider }})</span>
             </p>
             <p class="text-content-primary">
-              Yield intrinsic to the borrowed asset, such as staking yield, which reduces effective borrowing cost
+              Yield intrinsic to the borrowed asset, such as staking yield, which increases effective borrowing cost
             </p>
             <a
               v-if="intrinsicApyInfo?.source"
