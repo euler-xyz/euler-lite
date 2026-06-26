@@ -396,6 +396,52 @@ describe('stitchAccount', () => {
     expect(portfolio.borrows[0]?.healthFactor).toBe(1720000000000000000n)
   })
 
+  it('omits a pre-existing enabled-but-empty collateral from simulated borrow liquidity', () => {
+    // `vault` is a funded collateral; `targetVault` is a leftover EVC enablement
+    // with no balance and no entry in the borrow's lens collaterals. A plain
+    // repay leaves the enabled set unchanged, so `targetVault` is enabled both
+    // before and after the batch. It must NOT surface as a zero-value collateral
+    // row — only collaterals newly enabled by the batch are added unconditionally.
+    const base = accountWithPositions(
+      [collateralPosition(100_000_000n), borrowPosition(50_000_000n, 100)],
+      [vault, targetVault],
+      [borrowVault],
+    )
+    const touched = accountWithPositions(
+      [borrowPosition(25_000_000n, 100)],
+      [vault, targetVault],
+      [borrowVault],
+    )
+
+    const stitched = stitchAccount(base, touched)
+    const stitchedBorrow = stitched.getPosition(subAccount, borrowVault)
+
+    expect(stitchedBorrow?.liquidity?.collaterals.map(collateral => getAddress(collateral.address))).toEqual([vault])
+    expect(stitchedBorrow?.liquidity?.totalCollateralValueUsd).toBe(100)
+  })
+
+  it('never lists the borrow vault as its own collateral', () => {
+    // The EVC can have the borrow vault enabled as a collateral. Its own borrow
+    // position carries debt, so it passes hasPositionValue — but a vault is never
+    // its own collateral (the controller grants it no LTV; the lens omits it), so
+    // it must not appear as a spurious zero-value collateral row.
+    const base = accountWithPositions(
+      [collateralPosition(100_000_000n), borrowPosition(50_000_000n, 100)],
+      [vault, borrowVault],
+      [borrowVault],
+    )
+    const touched = accountWithPositions(
+      [borrowPosition(25_000_000n, 100)],
+      [vault, borrowVault],
+      [borrowVault],
+    )
+
+    const stitched = stitchAccount(base, touched)
+    const stitchedBorrow = stitched.getPosition(subAccount, borrowVault)
+
+    expect(stitchedBorrow?.liquidity?.collaterals.map(collateral => getAddress(collateral.address))).toEqual([vault])
+  })
+
   it('scales existing collateral but does not value newly enabled collateral when risk prices are unavailable', () => {
     const { sourceVault, destinationVault, borrow } = riskAwareBorrowPosition(false)
     const base = accountWithPositions([

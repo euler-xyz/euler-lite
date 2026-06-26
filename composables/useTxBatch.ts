@@ -798,6 +798,7 @@ const hydrateBorrowLiquidity = (
   borrow: StitchPosition,
   positions: StitchPosition[],
   enabledCollaterals: Address[] | undefined,
+  baseEnabledCollaterals: Address[] | undefined,
 ): void => {
   const liquidity = borrow.liquidity
   if (!liquidity || (borrow.borrowed ?? 0n) === 0n) return
@@ -805,6 +806,7 @@ const hydrateBorrowLiquidity = (
   const positionsByVault = positionByVault(positions)
   liquidity.vault = liquidity.vault ?? borrow.vault
   liquidity.liabilityValueUsd = borrow.borrowedValueUsd
+  const borrowVaultKey = getAddress(borrow.vaultAddress).toLowerCase()
 
   const existingCollaterals = new Map<string, StitchLiquidityCollateral>()
   for (const collateral of liquidity.collaterals) {
@@ -812,11 +814,23 @@ const hydrateBorrowLiquidity = (
   }
   const enabledCollateralKeys = enabledCollaterals?.map(address => getAddress(address).toLowerCase())
   const enabledCollateralSet = enabledCollateralKeys ? new Set(enabledCollateralKeys) : undefined
+  // Collaterals that were already enabled on the EVC *before* this batch ran.
+  // Used to tell a collateral newly enabled by the batch (e.g. a collateral
+  // swap) apart from a pre-existing, possibly empty, enablement.
+  const baseEnabledCollateralSet = baseEnabledCollaterals
+    ? new Set(baseEnabledCollaterals.map(address => getAddress(address).toLowerCase()))
+    : undefined
   const collateralAddresses: Address[] = []
   const seen = new Set<string>()
   const addCollateralAddress = (address: string, requireEnabledOrValue: boolean) => {
     const key = getAddress(address).toLowerCase()
     if (seen.has(key)) return
+    // A vault is never its own collateral. The EVC can list the borrow vault in
+    // enabledCollaterals, and its own position carries debt (so it passes the
+    // value guard below), but the controller grants it no LTV — the lens omits
+    // it from liquidity.collaterals and so must we, or it surfaces as a spurious
+    // zero-value collateral row.
+    if (key === borrowVaultKey) return
     const collateralPosition = positionsByVault.get(getAddress(address))
     const hasBalance = hasPositionValue(collateralPosition)
     const isEnabled = enabledCollateralSet?.has(key) ?? true
@@ -827,7 +841,19 @@ const hydrateBorrowLiquidity = (
     collateralAddresses.push(getAddress(address) as Address)
   }
   for (const collateral of liquidity.collaterals) addCollateralAddress(collateral.address, true)
-  for (const collateral of enabledCollateralKeys ?? []) addCollateralAddress(collateral, false)
+  // EVC-enabled collaterals. A collateral *newly* enabled by this batch (not in
+  // the base enabled set) is added unconditionally, since its simulated balance
+  // may not be populated on this position yet — this is what surfaces a
+  // collateral-swap's new collateral. A collateral that was already enabled
+  // before the batch is added under the same guard as the lens collaterals
+  // above, so leftover enabled-but-empty vaults (an account can carry several)
+  // don't show up as spurious zero-value collateral rows. When the base set is
+  // unknown (a brand-new sub-account), every enabled collateral is treated as
+  // newly enabled, preserving the prior unconditional behaviour.
+  for (const collateral of enabledCollateralKeys ?? []) {
+    const wasEnabledBeforeBatch = baseEnabledCollateralSet?.has(collateral) ?? false
+    addCollateralAddress(collateral, wasEnabledBeforeBatch)
+  }
 
   let totalCollateralValueUsd: number | undefined = collateralAddresses.length ? 0 : liquidity.totalCollateralValueUsd
   let hasMissingCollateralUsd = false
@@ -874,9 +900,10 @@ const hydrateBorrowLiquidity = (
 const hydrateStitchedPositions = (
   positions: StitchPosition[],
   enabledCollaterals: Address[] | undefined,
+  baseEnabledCollaterals: Address[] | undefined,
 ): StitchPosition[] => {
   for (const position of positions) hydratePositionMarketValues(position)
-  for (const position of positions) hydrateBorrowLiquidity(position, positions, enabledCollaterals)
+  for (const position of positions) hydrateBorrowLiquidity(position, positions, enabledCollaterals, baseEnabledCollaterals)
   return positions
 }
 
@@ -1122,6 +1149,8 @@ export const stitchAccount = (
         positions: hydrateStitchedPositions(
           mergePositionsByVault(tsa.positions.map(position => clonePosition(position as StitchPosition))),
           tsa.enabledCollaterals,
+          // No base sub-account: every enabled collateral is treated as new.
+          undefined,
         ),
       }
       continue
@@ -1132,7 +1161,15 @@ export const stitchAccount = (
       const vault = getAddress(tp.vaultAddress)
       byVault.set(vault, mergePositionData(byVault.get(vault), tp as StitchPosition))
     }
-    const positions = hydrateStitchedPositions(Array.from(byVault.values()), tsa.enabledCollaterals)
+    // `existing` is still the pre-batch (prevFull) sub-account here — it isn't
+    // overwritten with the simulated EVC state until below — so its enabled
+    // collaterals are the base set against which `tsa.enabledCollaterals` is the
+    // post-batch state.
+    const positions = hydrateStitchedPositions(
+      Array.from(byVault.values()),
+      tsa.enabledCollaterals,
+      existing.enabledCollaterals,
+    )
     mergedSubs[key] = {
       ...existing,
       // Post-op EVC state for this sub-account comes from the simulated layer.
