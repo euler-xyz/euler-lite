@@ -99,7 +99,7 @@ export type OracleAdapterIdentity = {
 // An adapter step (`isAdapter`) only gets a name/provider from the curated
 // oracle-checks dataset (`meta`). When that entry is absent we must NOT fall back
 // to the self-reported onchain `name()` — that value is attacker-controllable and
-// would let an unknown adapter masquerade as a recognised one. Such steps are
+// would let an unknown adapter masquerade as a recognized one. Such steps are
 // flagged as custom adapters and rendered as "Unknown".
 //
 // Structural steps (e.g. ERC-4626 exchange-rate `vault` steps) are not adapters and
@@ -117,20 +117,20 @@ export function resolveOracleAdapterIdentity(
   }
 }
 
-// Classifies a vault's oracle router(s) against the recognised-router allowlist
-// (deployed by the recognised EulerRouterFactory). Returns null — i.e. show
+// Classifies a vault's oracle router(s) against the recognized-router allowlist
+// (deployed by the recognized EulerRouterFactory). Returns null — i.e. show
 // nothing — when the allowlist is unavailable (empty) or there are no routers to
-// check, so a missing dataset never produces a false "unrecognised" warning.
+// check, so a missing dataset never produces a false "unrecognized" warning.
 export function getRouterRecognition(
   routerAddresses: ReadonlyArray<string | undefined | null>,
-  recognised: ReadonlySet<string>,
-): 'recognised' | 'unrecognised' | null {
-  if (!recognised.size) return null
+  recognized: ReadonlySet<string>,
+): 'recognized' | 'unrecognized' | null {
+  if (!recognized.size) return null
   const addresses = routerAddresses
     .filter((address): address is string => typeof address === 'string' && address.length > 0)
     .map(address => address.toLowerCase())
   if (!addresses.length) return null
-  return addresses.every(address => recognised.has(address)) ? 'recognised' : 'unrecognised'
+  return addresses.every(address => recognized.has(address)) ? 'recognized' : 'unrecognized'
 }
 
 type OracleAdapterOptions = {

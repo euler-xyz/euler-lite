@@ -14,7 +14,7 @@ const makeMeta = (overrides: Partial<OracleAdapterMeta> = {}): OracleAdapterMeta
 })
 
 describe('resolveOracleAdapterIdentity', () => {
-  it('uses curated name/provider for a recognised adapter', () => {
+  it('uses curated name/provider for a recognized adapter', () => {
     const meta = makeMeta({ name: 'Chainlink WETH/USD', provider: 'Chainlink' })
     const identity = resolveOracleAdapterIdentity({ name: 'ChainlinkOracle' }, meta, true)
 
@@ -39,7 +39,7 @@ describe('resolveOracleAdapterIdentity', () => {
 
     expect(identity.name).toBeUndefined()
     expect(identity.provider).toBeUndefined()
-    // A curated entry exists, so it is recognised — not a custom adapter.
+    // A curated entry exists, so it is recognized — not a custom adapter.
     expect(identity.isCustomAdapter).toBe(false)
   })
 
@@ -63,28 +63,28 @@ describe('getRouterRecognition (LITE-236)', () => {
   })
 
   it('returns null when there are no router addresses to check', () => {
-    const recognised = new Set([router])
-    expect(getRouterRecognition([], recognised)).toBeNull()
-    expect(getRouterRecognition([undefined, null], recognised)).toBeNull()
+    const recognized = new Set([router])
+    expect(getRouterRecognition([], recognized)).toBeNull()
+    expect(getRouterRecognition([undefined, null], recognized)).toBeNull()
   })
 
-  it('returns "recognised" when every router is in the allowlist', () => {
-    const recognised = new Set([router, otherRouter])
-    expect(getRouterRecognition([router, otherRouter], recognised)).toBe('recognised')
+  it('returns "recognized" when every router is in the allowlist', () => {
+    const recognized = new Set([router, otherRouter])
+    expect(getRouterRecognition([router, otherRouter], recognized)).toBe('recognized')
   })
 
   it('matches addresses case-insensitively', () => {
-    const recognised = new Set([router])
-    expect(getRouterRecognition([router.toUpperCase()], recognised)).toBe('recognised')
+    const recognized = new Set([router])
+    expect(getRouterRecognition([router.toUpperCase()], recognized)).toBe('recognized')
   })
 
   it('ignores nullish entries when classifying', () => {
-    const recognised = new Set([router])
-    expect(getRouterRecognition([undefined, router, null], recognised)).toBe('recognised')
+    const recognized = new Set([router])
+    expect(getRouterRecognition([undefined, router, null], recognized)).toBe('recognized')
   })
 
-  it('returns "unrecognised" when any router is missing from the allowlist', () => {
-    const recognised = new Set([router])
-    expect(getRouterRecognition([router, otherRouter], recognised)).toBe('unrecognised')
+  it('returns "unrecognized" when any router is missing from the allowlist', () => {
+    const recognized = new Set([router])
+    expect(getRouterRecognition([router, otherRouter], recognized)).toBe('unrecognized')
   })
 })

@@ -1,14 +1,14 @@
 import { logWarn } from '~/utils/errorHandling'
 
-// Recognised EulerRouter addresses (deployed by the recognised EulerRouterFactory)
+// Recognized EulerRouter addresses (deployed by the recognized EulerRouterFactory)
 // are published per chain at `{oracle-checks}/{chainId}/routers/all.json` as a flat
 // array of addresses. We proxy + cache them through `/api/oracle-routers` and keep a
 // lowercased Set per chain so router-recognition lookups are O(1).
-const recognisedRoutersRef = shallowRef<Set<string>>(new Set())
-const recognisedRoutersChainId = ref<number | null>(null)
+const recognizedRoutersRef = shallowRef<Set<string>>(new Set())
+const recognizedRoutersChainId = ref<number | null>(null)
 const pendingRouterLoads = new Map<number, Promise<Set<string>>>()
 
-const toRecognisedSet = (data: unknown): Set<string> => {
+const toRecognizedSet = (data: unknown): Set<string> => {
   if (!Array.isArray(data)) return new Set()
   return new Set(
     data
@@ -17,11 +17,11 @@ const toRecognisedSet = (data: unknown): Set<string> => {
   )
 }
 
-const loadRecognisedRouters = async (chainId: number): Promise<Set<string>> => {
+const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return new Set()
 
-  if (recognisedRoutersChainId.value === chainId) {
-    return recognisedRoutersRef.value
+  if (recognizedRoutersChainId.value === chainId) {
+    return recognizedRoutersRef.value
   }
 
   const inflight = pendingRouterLoads.get(chainId)
@@ -29,9 +29,9 @@ const loadRecognisedRouters = async (chainId: number): Promise<Set<string>> => {
 
   const promise = (async () => {
     const data = await $fetch('/api/oracle-routers', { query: { chainId } })
-    const set = toRecognisedSet(data)
-    recognisedRoutersRef.value = set
-    recognisedRoutersChainId.value = chainId
+    const set = toRecognizedSet(data)
+    recognizedRoutersRef.value = set
+    recognizedRoutersChainId.value = chainId
     return set
   })()
 
@@ -40,7 +40,7 @@ const loadRecognisedRouters = async (chainId: number): Promise<Set<string>> => {
     return await promise
   }
   catch (err) {
-    logWarn('useEulerOracleRouters', `Failed to load recognised routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+    logWarn('useEulerOracleRouters', `Failed to load recognized routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
     return new Set()
   }
   finally {
@@ -49,7 +49,7 @@ const loadRecognisedRouters = async (chainId: number): Promise<Set<string>> => {
 }
 
 export const useEulerOracleRouters = () => ({
-  recognisedRouters: computed(() => recognisedRoutersRef.value),
-  recognisedRoutersChainId: readonly(recognisedRoutersChainId),
-  loadRecognisedRouters,
+  recognizedRouters: computed(() => recognizedRoutersRef.value),
+  recognizedRoutersChainId: readonly(recognizedRoutersChainId),
+  loadRecognizedRouters,
 })

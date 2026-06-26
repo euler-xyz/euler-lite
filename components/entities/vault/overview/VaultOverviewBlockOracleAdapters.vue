@@ -21,7 +21,7 @@ const props = defineProps<{
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
-const { recognisedRouters, recognisedRoutersChainId, loadRecognisedRouters } = useEulerOracleRouters()
+const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -131,18 +131,18 @@ watch(
 watch(
   chainId,
   (id) => {
-    if (id) loadRecognisedRouters(id)
+    if (id) loadRecognizedRouters(id)
   },
   { immediate: true },
 )
 
 // LITE-236: flag whether the vault's price oracle (EulerRouter) was deployed by the
-// recognised EulerRouterFactory. Null while the allowlist is still loading for the
-// active chain or unavailable, so we never show a false "unrecognised" warning.
+// recognized EulerRouterFactory. Null while the allowlist is still loading for the
+// active chain or unavailable, so we never show a false "unrecognized" warning.
 const routerRecognition = computed(() => {
-  if (recognisedRoutersChainId.value !== chainId.value) return null
+  if (recognizedRoutersChainId.value !== chainId.value) return null
   const routerAddresses = sourceVaults.value.map(vault => vault.oracle?.oracle)
-  return getRouterRecognition(routerAddresses, recognisedRouters.value)
+  return getRouterRecognition(routerAddresses, recognizedRouters.value)
 })
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
@@ -326,41 +326,41 @@ const onTooltipMouseLeave = () => {
         Oracles
       </p>
       <UiHoverPreviewTooltip
-        v-if="routerRecognition === 'recognised'"
-        title="Recognised oracle router"
-        text="The vault's price oracle was deployed by the recognised EulerRouterFactory."
+        v-if="routerRecognition === 'recognized'"
+        title="Recognized oracle router"
+        text="The vault's price oracle was deployed by the recognized EulerRouterFactory."
         placement="top-start"
       >
         <span
           class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-success-100 text-success-500 text-p5"
           data-id="data-point"
           data-field="oracle-router-recognition"
-          data-value="recognised"
+          data-value="recognized"
         >
           <SvgIcon
             name="check"
             class="!w-12 !h-12"
           />
-          Recognised router
+          Recognized router
         </span>
       </UiHoverPreviewTooltip>
       <UiHoverPreviewTooltip
-        v-else-if="routerRecognition === 'unrecognised'"
-        title="Unrecognised oracle router"
-        text="The vault's price oracle was not deployed by the recognised EulerRouterFactory. Verify the oracle configuration before trusting its prices."
+        v-else-if="routerRecognition === 'unrecognized'"
+        title="Unrecognized oracle router"
+        text="The vault's price oracle was not deployed by the recognized EulerRouterFactory. Verify the oracle configuration before trusting its prices."
         placement="top-start"
       >
         <span
           class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
           data-id="data-point"
           data-field="oracle-router-recognition"
-          data-value="unrecognised"
+          data-value="unrecognized"
         >
           <SvgIcon
             name="warning"
             class="!w-12 !h-12"
           />
-          Unrecognised router
+          Unrecognized router
         </span>
       </UiHoverPreviewTooltip>
     </div>
