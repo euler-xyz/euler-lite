@@ -4,7 +4,7 @@ import type {
   EVault,
   OracleRouteStep,
 } from '@eulerxyz/euler-v2-sdk'
-import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterMeta } from '~/entities/oracle'
+import { getChecksStatus, getRouterRecognition, OracleAdapterCheckSeverity, resolveOracleAdapterIdentity, type OracleAdapterMeta } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
@@ -21,6 +21,7 @@ const props = defineProps<{
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
+const { recognisedRouters, recognisedRoutersChainId, loadRecognisedRouters } = useEulerOracleRouters()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -80,11 +81,11 @@ const knownSymbols = computed(() => {
 })
 
 const adapterViews = computed(() => routeSteps.value.map((step) => {
-  const meta: OracleAdapterMeta | undefined = isOracleAdapterRouteStep(step)
+  const isAdapter = isOracleAdapterRouteStep(step)
+  const meta: OracleAdapterMeta | undefined = isAdapter
     ? oracleAdapters[step.oracle.toLowerCase()]
     : undefined
-  const provider = meta?.provider || step.name
-  const name = meta?.name || step.name
+  const { name, provider, isCustomAdapter } = resolveOracleAdapterIdentity(step, meta, isAdapter)
   const checks = meta?.checks
   const invertPrice = shouldInvertOraclePrice({
     metaBase: meta?.base,
@@ -97,6 +98,7 @@ const adapterViews = computed(() => routeSteps.value.map((step) => {
     ...step,
     name,
     provider,
+    isCustomAdapter,
     methodology: meta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
     label: meta?.label
@@ -125,6 +127,23 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  chainId,
+  (id) => {
+    if (id) loadRecognisedRouters(id)
+  },
+  { immediate: true },
+)
+
+// LITE-236: flag whether the vault's price oracle (EulerRouter) was deployed by the
+// recognised EulerRouterFactory. Null while the allowlist is still loading for the
+// active chain or unavailable, so we never show a false "unrecognised" warning.
+const routerRecognition = computed(() => {
+  if (recognisedRoutersChainId.value !== chainId.value) return null
+  const routerAddresses = sourceVaults.value.map(vault => vault.oracle?.oracle)
+  return getRouterRecognition(routerAddresses, recognisedRouters.value)
+})
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
@@ -302,9 +321,49 @@ const onTooltipMouseLeave = () => {
 
 <template>
   <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Oracles
-    </p>
+    <div class="flex flex-wrap items-center gap-8">
+      <p class="text-h3 text-content-primary">
+        Oracles
+      </p>
+      <UiHoverPreviewTooltip
+        v-if="routerRecognition === 'recognised'"
+        title="Recognised oracle router"
+        text="The vault's price oracle was deployed by the recognised EulerRouterFactory."
+        placement="top-start"
+      >
+        <span
+          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-success-100 text-success-500 text-p5"
+          data-id="data-point"
+          data-field="oracle-router-recognition"
+          data-value="recognised"
+        >
+          <SvgIcon
+            name="check"
+            class="!w-12 !h-12"
+          />
+          Recognised router
+        </span>
+      </UiHoverPreviewTooltip>
+      <UiHoverPreviewTooltip
+        v-else-if="routerRecognition === 'unrecognised'"
+        title="Unrecognised oracle router"
+        text="The vault's price oracle was not deployed by the recognised EulerRouterFactory. Verify the oracle configuration before trusting its prices."
+        placement="top-start"
+      >
+        <span
+          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+          data-id="data-point"
+          data-field="oracle-router-recognition"
+          data-value="unrecognised"
+        >
+          <SvgIcon
+            name="warning"
+            class="!w-12 !h-12"
+          />
+          Unrecognised router
+        </span>
+      </UiHoverPreviewTooltip>
+    </div>
     <div
       v-if="!adapterViews.length"
       class="text-p3 text-content-tertiary"
@@ -388,7 +447,11 @@ const onTooltipMouseLeave = () => {
           >
             <span class="text-content-tertiary">Checks</span>
             <span
-              v-if="!adapter.checks?.length"
+              v-if="adapter.isCustomAdapter"
+              class="text-content-secondary"
+            >Custom — set by risk manager</span>
+            <span
+              v-else-if="!adapter.checks?.length"
               class="text-content-secondary"
             >N/A</span>
             <span

@@ -7,7 +7,7 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
-import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
+import { getChecksStatus, OracleAdapterCheckSeverity, resolveOracleAdapterIdentity, type OracleAdapterCheck } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { truncate, formatNumber } from '~/utils/string-utils'
@@ -293,9 +293,14 @@ interface AdapterView {
 }
 
 const enrichStep = (step: OracleRouteStep): AdapterView => {
-  const meta = isOracleAdapterRouteStep(step) ? oracleAdapters[step.oracle.toLowerCase()] : undefined
-  const provider = meta?.provider || step.name
-  const name = meta?.name || step.name
+  const isAdapter = isOracleAdapterRouteStep(step)
+  const meta = isAdapter ? oracleAdapters[step.oracle.toLowerCase()] : undefined
+  // LITE-235: an adapter with no curated oracle-checks entry must not fall back to
+  // its self-reported onchain name(); render it as unknown instead. The template's
+  // `|| 'Unknown'` fallbacks turn the empty strings into the displayed label.
+  const { name: resolvedName, provider: resolvedProvider } = resolveOracleAdapterIdentity(step, meta, isAdapter)
+  const provider = resolvedProvider ?? ''
+  const name = resolvedName ?? ''
   const checks = meta?.checks
   return {
     key: getOracleRouteStepKey(step),
@@ -672,7 +677,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     @click.stop="onAssetAdapterClick(adapter, $event, col.address)"
                   >
                     <UiHoverPreviewTooltip
-                      :title="adapter.name"
+                      :title="adapter.name || 'Unknown'"
                       :text="adapter.provider || 'Unknown provider'"
                       placement="top-start"
                     >
@@ -728,7 +733,7 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                       @click.stop="onCellAdapterClick(adapter, $event, row.address, col.address)"
                     >
                       <UiHoverPreviewTooltip
-                        :title="adapter.name"
+                        :title="adapter.name || 'Unknown'"
                         :text="adapter.provider || 'Unknown provider'"
                         placement="top-start"
                       >

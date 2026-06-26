@@ -86,6 +86,53 @@ export function getChecksStatus(checks: OracleAdapterCheck[] | undefined): 'posi
   return 'warning'
 }
 
+export type OracleAdapterIdentity = {
+  name?: string
+  provider?: string
+  // True when this is an oracle adapter with no entry in the curated oracle-checks
+  // dataset — i.e. a custom oracle configured by the vault's risk manager.
+  isCustomAdapter: boolean
+}
+
+// Resolves the display name/provider for an oracle route step.
+//
+// An adapter step (`isAdapter`) only gets a name/provider from the curated
+// oracle-checks dataset (`meta`). When that entry is absent we must NOT fall back
+// to the self-reported onchain `name()` — that value is attacker-controllable and
+// would let an unknown adapter masquerade as a recognised one. Such steps are
+// flagged as custom adapters and rendered as "Unknown".
+//
+// Structural steps (e.g. ERC-4626 exchange-rate `vault` steps) are not adapters and
+// keep their decoded name, since it is derived from the route, not self-reported.
+export function resolveOracleAdapterIdentity(
+  step: { name: string },
+  meta: OracleAdapterMeta | undefined,
+  isAdapter: boolean,
+): OracleAdapterIdentity {
+  const fallback = isAdapter ? undefined : step.name
+  return {
+    name: meta?.name || fallback,
+    provider: meta?.provider || fallback,
+    isCustomAdapter: isAdapter && !meta,
+  }
+}
+
+// Classifies a vault's oracle router(s) against the recognised-router allowlist
+// (deployed by the recognised EulerRouterFactory). Returns null — i.e. show
+// nothing — when the allowlist is unavailable (empty) or there are no routers to
+// check, so a missing dataset never produces a false "unrecognised" warning.
+export function getRouterRecognition(
+  routerAddresses: ReadonlyArray<string | undefined | null>,
+  recognised: ReadonlySet<string>,
+): 'recognised' | 'unrecognised' | null {
+  if (!recognised.size) return null
+  const addresses = routerAddresses
+    .filter((address): address is string => typeof address === 'string' && address.length > 0)
+    .map(address => address.toLowerCase())
+  if (!addresses.length) return null
+  return addresses.every(address => recognised.has(address)) ? 'recognised' : 'unrecognised'
+}
+
 type OracleAdapterOptions = {
   base?: Address
   quote?: Address
