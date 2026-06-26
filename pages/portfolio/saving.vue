@@ -71,17 +71,11 @@ usePortfolioBatchScrollTarget(computed(() => [
         v-else-if="earnItems.length === 0"
         class="flex flex-1 justify-center items-center"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-            <SvgIcon name="search" />
-          </div>
-          <template v-if="isConnected">
-            You don't have deposit positions yet
-          </template>
-          <template v-else>
-            Connect your wallet to see your deposit positions
-          </template>
-        </div>
+        <PortfolioEmptyState
+          :active="isConnected"
+          active-text="You don't have deposit positions yet"
+          inactive-text="Connect your wallet to see your deposit positions"
+        />
       </div>
       <div
         v-else
@@ -119,17 +113,11 @@ usePortfolioBatchScrollTarget(computed(() => [
         v-else-if="lendItems.length === 0"
         class="flex flex-1 justify-center items-center"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-            <SvgIcon name="search" />
-          </div>
-          <template v-if="isConnected">
-            You don't have deposit positions yet
-          </template>
-          <template v-else>
-            Connect your wallet to see your deposit positions
-          </template>
-        </div>
+        <PortfolioEmptyState
+          :active="isConnected"
+          active-text="You don't have deposit positions yet"
+          inactive-text="Connect your wallet to see your deposit positions"
+        />
       </div>
       <div
         v-else

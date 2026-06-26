@@ -277,6 +277,29 @@ const sortedList = computed(() => {
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)
 })
+
+const hasActiveFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedCollateral.value.length > 0
+  || selectedMarkets.value.length > 0
+  || selectedRiskManagers.value.length > 0
+  || customFilters.value.length > 0,
+)
+const hasLendMarkets = computed(() => borrowableVaults.value.length > 0)
+const emptyStateTitle = computed(() => hasActiveFilters.value || hasLendMarkets.value ? 'No lend markets found' : 'No lend markets yet')
+const emptyStateDescription = computed(() =>
+  hasActiveFilters.value || hasLendMarkets.value
+    ? 'Try clearing search or filters to uncover more supply opportunities.'
+    : 'No lend markets are available on this network yet.',
+)
+
+const clearLendFilters = () => {
+  clearSearch()
+  selectedCollateral.value = []
+  selectedMarkets.value = []
+  selectedRiskManagers.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
@@ -363,18 +386,26 @@ const sortedList = computed(() => {
         :items="sortedList"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-content-tertiary"
+        class="flex-1"
+        icon="lend-outline"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="hasActiveFilters"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearLendFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>

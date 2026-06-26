@@ -167,6 +167,7 @@ const defaultBorrowLiquidityFilter = {
   operator: 'gt',
   value: MIN_BORROW_LIQUIDITY_USD,
   label: `Avail. liquidity > ${formatCompactUsdValue(MIN_BORROW_LIQUIDITY_USD)}`,
+  tone: 'neutral',
   includeWhenValueUnavailable: true,
 } as const
 
@@ -569,6 +570,34 @@ const sortedBorrowList = computed(() => {
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedPairSort(directed)
 })
+
+const hasDefaultBorrowLiquidityFilter = computed(() =>
+  customFilters.value.some(filter => filter.id === defaultBorrowLiquidityFilter.id),
+)
+const hasClearableFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedCollateral.value.length > 0
+  || selectedDebt.value.length > 0
+  || selectedMarkets.value.length > 0
+  || selectedRiskManagers.value.length > 0
+  || customFilters.value.some(filter => filter.id !== defaultBorrowLiquidityFilter.id),
+)
+const hasBorrowMarkets = computed(() => activeBorrowList.value.length > 0)
+const emptyStateTitle = computed(() => hasClearableFilters.value || hasBorrowMarkets.value ? 'No borrow markets found' : 'No borrow markets yet')
+const emptyStateDescription = computed(() => {
+  if (hasClearableFilters.value) return 'Try clearing search or filters to uncover more borrow pairs.'
+  if (hasDefaultBorrowLiquidityFilter.value && hasBorrowMarkets.value) return 'No borrow pairs match the visible filters.'
+  return 'No borrow markets are available on this network yet.'
+})
+
+const clearBorrowFilters = () => {
+  clearSearch()
+  selectedCollateral.value = []
+  selectedDebt.value = []
+  selectedMarkets.value = []
+  selectedRiskManagers.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
@@ -679,18 +708,26 @@ const sortedBorrowList = computed(() => {
         :items="sortedBorrowList"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-neutral-500"
+        class="flex-1"
+        icon="borrow-outline"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="hasClearableFilters"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearBorrowFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>

@@ -224,6 +224,26 @@ const sortedList = computed(() => {
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)
 })
+
+const hasActiveFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedCollateral.value.length > 0
+  || selectedCurators.value.length > 0
+  || customFilters.value.length > 0,
+)
+const emptyStateTitle = computed(() => hasActiveFilters.value ? 'No earn vaults found' : 'No earn vaults yet')
+const emptyStateDescription = computed(() =>
+  hasActiveFilters.value
+    ? 'Try clearing search or filters to uncover more strategies.'
+    : 'No earn vaults are available on this network yet.',
+)
+
+const clearEarnFilters = () => {
+  clearSearch()
+  selectedCollateral.value = []
+  selectedCurators.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
@@ -300,18 +320,26 @@ const sortedList = computed(() => {
         :items="sortedList"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-neutral-500"
+        class="flex-1"
+        icon="earn-outline"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="hasActiveFilters"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearEarnFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>
