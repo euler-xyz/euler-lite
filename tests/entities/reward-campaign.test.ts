@@ -72,4 +72,12 @@ describe('rewardCampaignDisplay', () => {
       sourceUrl: 'https://app.merkl.xyz/opportunities/monad/EULER/example',
     }).sourceUrl).toBe('https://app.merkl.xyz/opportunities/monad/EULER/example')
   })
+
+  it('links Turtle campaigns to the Turtle stream dashboard', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      campaignId: '557af9e9-88e8-4233-95e1-630b8b37b613',
+      source: 'turtle',
+    }).sourceUrl).toBe('https://dashboard.turtle.xyz/organizations/52974bc3-2c43-4576-ac18-107d92b6e0c7/incentives/streams/557af9e9-88e8-4233-95e1-630b8b37b613')
+  })
 })

@@ -151,9 +151,10 @@ export const buildPlanMarketLabel = (
 }
 
 export const cleanStepLabel = (label: string): string => {
-  return label
+  const cleaned = label
     .replace(/\s*via EVC$/i, '')
     .replace(/^Permit2\s+/i, '')
+  return cleaned ? `${cleaned[0].toUpperCase()}${cleaned.slice(1)}` : cleaned
 }
 
 export const decodeVaultAddressFromData = (data: string): string | undefined => {
@@ -554,6 +555,7 @@ export function buildTransactionPlanDisplaySteps(
       const isRewardOrUnlock = ctx.type === 'reward'
         || ctx.type === 'brevis-reward'
         || ctx.type === 'fuul-reward'
+        || ctx.type === 'turtle-reward'
         || ctx.type === 'reul-unlock'
       const rewardIconUrl = ['EUL', 'rEUL'].includes(ctx.asset.symbol)
         ? getLogoUrl(ctx.asset.address, 'EUL')

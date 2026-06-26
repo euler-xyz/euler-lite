@@ -656,7 +656,7 @@ const addToBatch = async () => {
       }),
       subAccount: receiver,
       multiply: true,
-      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN },
+      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
     })
     redirectAfterAdd('/portfolio', { subAccount: receiver })
   })

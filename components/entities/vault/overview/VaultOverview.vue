@@ -4,6 +4,7 @@ import { isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
+  'market-click': []
 }>()
 const { vault } = defineProps<{ vault: EVault, desktopOverview?: boolean }>()
 
@@ -17,6 +18,7 @@ const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
   >
     <VaultOverviewBlockGeneral
       :vault="vault"
+      @market-click="emits('market-click')"
     />
 
     <VaultOverviewBlockStats

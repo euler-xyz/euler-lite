@@ -10,7 +10,7 @@ import { VaultOverviewModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '
 import { useModal } from '~/components/ui/composables/useModal'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { roundAndCompactTokens } from '~/utils/crypto-utils'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
@@ -26,7 +26,7 @@ const subAccountIndex = computed(() => {
 const { getSupplyRewardCampaignsFromVault } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { viewer, visibleTotal } = useApyVisibility()
+const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 
 const vault = computed(() => position.vault as EulerEarn)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
@@ -58,6 +58,7 @@ watchEffect(() => {
 })
 
 const supplyApyWithRewards = computed(() => visibleTotal(apyBreakdown.value) ?? 0)
+const visibleApyBreakdown = computed(() => visibleBreakdown(apyBreakdown.value))
 
 const hasPrice = ref(false)
 
@@ -70,12 +71,16 @@ watchEffect(() => {
   updateHasPrice()
 })
 
+// Source the breakdown rows and total from the same viewer-aware SDK breakdown
+// the headline uses (visibleApyBreakdown / supplyApyWithRewards), so the tooltip
+// total always matches the displayed figure instead of being recomputed.
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: getVaultSupplyApy(vault.value),
-    intrinsicAPY: getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value),
+    lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
+    intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaignsFromVault(vault.value),
+    totalSupplyAPY: supplyApyWithRewards.value,
     rewardVaultAddress: vault.value.address,
     baseApyAverageLabel: '1h',
   },
@@ -140,28 +145,34 @@ const onClick = () => {
                 :name="displayName"
                 :is-unverified="isUnverified"
               />
-              <span
+              <UiHoverPreviewTooltip
                 v-if="isGeoBlocked"
-                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                title="This vault is not available in your region"
+                title="Region restricted"
+                text="This vault is not available in your region"
+                placement="top-start"
               >
-                <SvgIcon
-                  name="warning"
-                  class="!w-14 !h-14"
-                />
-                Restricted
-              </span>
-              <span
+                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
+                  <SvgIcon
+                    name="warning"
+                    class="!w-14 !h-14"
+                  />
+                  Restricted
+                </span>
+              </UiHoverPreviewTooltip>
+              <UiHoverPreviewTooltip
                 v-if="isDeprecated"
-                class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                title="This vault has been deprecated."
+                title="Deprecated"
+                text="This vault has been deprecated."
+                placement="top-start"
               >
-                <SvgIcon
-                  name="warning"
-                  class="!w-14 !h-14"
-                />
-                Deprecated
-              </span>
+                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
+                  <SvgIcon
+                    name="warning"
+                    class="!w-14 !h-14"
+                  />
+                  Deprecated
+                </span>
+              </UiHoverPreviewTooltip>
             </div>
             <div
               class="text-h5 text-content-primary"

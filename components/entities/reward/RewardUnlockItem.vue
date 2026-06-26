@@ -118,6 +118,7 @@ const onAddToBatchClick = async () => {
     await ensureWalletOnSiteChain()
     await addBatchEntry({
       label: 'Unlock rEUL',
+      requiresPlanningAccount: false,
       buildPlan: async () => buildUnlockREULPlan([item.timestamp]),
       review: getReviewProps(),
     })

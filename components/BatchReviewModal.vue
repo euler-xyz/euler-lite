@@ -388,7 +388,7 @@ const handleClose = () => {
         variant="warning"
         size="compact"
         title="Stale swap quote"
-        description="This batch includes a swap quote that is more than 3 minutes old. Remove and re-add affected operations before executing to refresh quotes."
+        description="This batch includes a swap quote which is more than 3 minutes old. Consider refreshing it to get the best execution price"
       />
 
       <!-- Operations -->

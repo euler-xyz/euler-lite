@@ -1058,14 +1058,19 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 class="text-warning-500"
               >Unknown</span>
               <template v-else>
-                <SvgIcon
+                <UiHoverPreviewTooltip
                   v-if="rampStatus?.isRamping"
-                  name="arrow-top-right"
-                  class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
-                  :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
                   title="Liquidation LTV ramping down"
-                  @click.stop="openRampDownModal"
-                />
+                  text="The Liquidation LTV for this collateral is currently being reduced."
+                  placement="top-start"
+                >
+                  <SvgIcon
+                    name="arrow-top-right"
+                    class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    @click.stop="openRampDownModal"
+                  />
+                </UiHoverPreviewTooltip>
                 {{ positionLTVDisplay }}% / {{ effectiveLiquidationLTVDisplay }}
               </template>
             </div>
@@ -1460,14 +1465,19 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                   />
                 </div>
                 <div class="text-neutral-800 text-p3 flex items-center gap-4">
-                  <SvgIcon
+                  <UiHoverPreviewTooltip
                     v-if="rampStatus?.isRamping"
-                    name="arrow-top-right"
-                    class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
-                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
                     title="Liquidation LTV ramping down"
-                    @click.stop="openRampDownModal"
-                  />
+                    text="The Liquidation LTV for this collateral is currently being reduced."
+                    placement="top-start"
+                  >
+                    <SvgIcon
+                      name="arrow-top-right"
+                      class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                      :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                      @click.stop="openRampDownModal"
+                    />
+                  </UiHoverPreviewTooltip>
                   {{ pairLiquidationLTVPercent === null ? '-' : `${formatNumber(pairLiquidationLTVPercent)}%` }}
                 </div>
               </div>
