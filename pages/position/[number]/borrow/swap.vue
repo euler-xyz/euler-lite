@@ -1174,11 +1174,19 @@ const debtSwapSummary = computed(() =>
     : null,
 )
 const refinanceSwapReviewInfo = computed(() => {
-  if (!collateralNeedsSwap.value || debtNeedsSwap.value || !collateralQuote.value || !targetCollateralVault.value) return {}
+  if (!collateralNeedsSwap.value || debtNeedsSwap.value || !collateralQuote.value || !sourceCollateralEVault.value || !targetCollateralVault.value) return {}
   return {
+    swapFromAsset: sourceCollateralEVault.value.asset,
+    swapFromAmount: trimTrailingZeros(formatUnits(BigInt(collateralQuote.value.amountIn || 0), Number(sourceCollateralEVault.value.asset.decimals))),
     swapToAsset: targetCollateralVault.value.asset,
     swapToAmount: trimTrailingZeros(formatUnits(BigInt(collateralQuote.value.amountOut || 0), Number(targetCollateralVault.value.asset.decimals))),
     swapMode: SwapperMode.EXACT_IN,
+  }
+})
+const refinanceVaultAmounts = computed(() => {
+  if (!sourceCollateralVault.value) return undefined
+  return {
+    [sourceCollateralVault.value.address.toLowerCase()]: formatVaultAmount(currentCollateralAssets.value, sourceCollateralVault.value),
   }
 })
 const collateralRoutedVia = computed(() => getRoutedVia(collateralSelectedProvider.value, collateralQuote.value))
@@ -1465,6 +1473,7 @@ const addToBatch = async () => {
     const targetDebtSymbol = effectiveDebtVault.value.asset.symbol
     const sourceDebtAsset = sourceDebtVault.value.asset
     const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
+    const vaultAmounts = refinanceVaultAmounts.value
     const quoteFetchedAt = effectiveQuoteFetchedAt.value
     const swapReviewInfo = refinanceSwapReviewInfo.value
     const collateralChanged = hasCollateralChange.value
@@ -1482,6 +1491,7 @@ const addToBatch = async () => {
         quoteFetchedAt,
         collateralChanged,
         debtChanged,
+        vaultAmounts,
         sourceDebtVault: sourceDebtVault.value.address,
         sourceCollateralVaults: sourceCollateralVaultAddresses.value,
         ...swapReviewInfo,
@@ -1529,6 +1539,7 @@ const submit = async () => {
           plan: preparedPlan.value ? undefined : plan.value,
           prepared: preparedPlan.value || undefined,
           quoteFetchedAt: effectiveQuoteFetchedAt.value,
+          vaultAmounts: refinanceVaultAmounts.value,
           ...refinanceSwapReviewInfo.value,
           onConfirm: async () => {
             await send()

@@ -39,11 +39,14 @@ export interface StepDecodingContext {
   amount: number | string
   supplyingAssetForBorrow?: { symbol: string, address: string }
   supplyingAmount?: number | string
+  swapFromAsset?: { symbol: string, address: string, decimals?: number | bigint }
+  swapFromAmount?: number | string
   swapToAsset?: { symbol: string, address: string, decimals: number | bigint }
   swapToAmount?: number | string
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
   transferAmounts?: Record<string, string>
+  vaultAmounts?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +348,7 @@ const resolveBatchItemAssetInfo = (
       ? 'remaining'
       : resolved.decoded && resolved.amount
         ? resolved.amount
-        : ctx.amount
+        : ctx.vaultAmounts?.[targetContract.toLowerCase()] ?? ctx.amount
     return { symbol: vaultAsset?.symbol ?? ctx.asset.symbol, address: vaultAsset?.address ?? ctx.asset.address, amount }
   }
 
@@ -478,7 +481,12 @@ export function buildTransactionPlanDisplaySteps(
           toAssetInfo = { symbol: ctx.asset.symbol, address: ctx.asset.address }
         }
         else if (label === 'Swap' && ctx.swapToAsset && ctx.swapToAmount) {
-          assetInfo = { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: lastWithdrawAmount ?? ctx.amount }
+          const swapFromAsset = ctx.swapFromAsset ?? ctx.asset
+          assetInfo = {
+            symbol: swapFromAsset.symbol,
+            address: swapFromAsset.address,
+            amount: ctx.swapFromAmount ?? lastWithdrawAmount ?? ctx.amount,
+          }
           toAssetInfo = { symbol: ctx.swapToAsset.symbol, address: ctx.swapToAsset.address, amount: ctx.swapToAmount }
           const estimatedSide = ctx.swapEstimatedSide
             ?? (ctx.swapMode !== undefined ? getDefaultSwapEstimatedSide(ctx.swapMode) : undefined)
@@ -526,7 +534,7 @@ export function buildTransactionPlanDisplaySteps(
           inferredSwapInput = undefined
         }
         else if ((label === 'Verify min received' || label === 'Verify max debt') && pendingSwapStep && assetInfo) {
-          if (!pendingSwapStep.toAssetInfo?.amount) {
+          if (ctx.type !== 'refinance' && !pendingSwapStep.toAssetInfo?.amount) {
             pendingSwapStep.toAssetInfo = label === 'Verify max debt'
               ? { symbol: assetInfo.symbol, address: assetInfo.address }
               : { ...assetInfo }
