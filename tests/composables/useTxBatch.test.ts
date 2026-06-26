@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -603,5 +603,93 @@ describe('useTxBatch execution errors', () => {
     batch.clearBatch()
 
     expect(batch.execError.value).toBeUndefined()
+  })
+})
+
+describe('awaitFinalPlanningLayer', () => {
+  it('returns the final layer once a superseded run is followed by a populated one', async () => {
+    // attempt 0 + 1: superseded (no layer, no error); attempt 2: layer settles.
+    const sequence: Array<{ account: string } | undefined> = [undefined, undefined, { account: 'final' }]
+    let started = 0
+    const attempts: Array<{ attempt: number, awaitedExisting: boolean, found: boolean }> = []
+
+    const result = await awaitFinalPlanningLayer<{ account: string }>({
+      getFinalLayer: () => sequence.shift(),
+      getSimError: () => undefined,
+      getInFlight: () => null,
+      startRun: () => {
+        started++
+        return Promise.resolve()
+      },
+      onAttempt: info => attempts.push(info),
+    })
+
+    expect(result).toEqual({ account: 'final' })
+    expect(started).toBe(3) // one awaited run per attempt until the layer appears
+    expect(attempts).toEqual([
+      { attempt: 0, awaitedExisting: false, found: false },
+      { attempt: 1, awaitedExisting: false, found: false },
+      { attempt: 2, awaitedExisting: false, found: true },
+    ])
+  })
+
+  it('awaits an in-flight run without starting a new one', async () => {
+    let started = 0
+    let inFlightAwaited = false
+    const inFlight = Promise.resolve().then(() => {
+      inFlightAwaited = true
+    })
+
+    const result = await awaitFinalPlanningLayer<{ account: string }>({
+      getFinalLayer: () => (inFlightAwaited ? { account: 'ready' } : undefined),
+      getSimError: () => undefined,
+      getInFlight: () => inFlight,
+      startRun: () => {
+        started++
+        return Promise.resolve()
+      },
+    })
+
+    expect(result).toEqual({ account: 'ready' })
+    expect(started).toBe(0) // awaited the existing run; never kicked a fresh one
+  })
+
+  it('rejects with the real simError instead of the generic message', async () => {
+    let started = 0
+    await expect(awaitFinalPlanningLayer({
+      getFinalLayer: () => undefined,
+      getSimError: () => 'Vault status check failed',
+      getInFlight: () => null,
+      startRun: () => {
+        started++
+        return Promise.resolve()
+      },
+    })).rejects.toThrow('Vault status check failed')
+    expect(started).toBe(1) // breaks as soon as the first run surfaces a real error
+  })
+
+  it('throws the generic error after exhausting attempts and awaits every run it starts', async () => {
+    // Regression guard for the terminal-iteration race: the old loop kicked a
+    // fresh resimulation on the last pass and then threw WITHOUT awaiting it,
+    // preserving a tail "Batch simulation not loaded". The fixed loop starts
+    // exactly one run per attempt and awaits each before falling through.
+    let started = 0
+    let resolved = 0
+
+    await expect(awaitFinalPlanningLayer({
+      getFinalLayer: () => undefined,
+      getSimError: () => undefined,
+      getInFlight: () => null,
+      startRun: () => {
+        started++
+        return Promise.resolve().then(() => {
+          resolved++
+        })
+      },
+      maxAttempts: 3,
+    })).rejects.toThrow('Batch simulation not loaded')
+
+    expect(started).toBe(3) // no extra un-awaited run kicked on the terminal iteration
+    expect(resolved).toBe(3) // every started run completed (was awaited) before the throw
   })
 })
