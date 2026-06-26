@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -28,7 +28,7 @@ const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
-const { getSupplyRewardApy } = useRewardsApy()
+const { viewer, visibleTotal } = useApyVisibility()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
 const product = useEulerProductOfVault(vaultAddress)
@@ -64,7 +64,7 @@ const sharePosition = computed(() => {
 const sharesBalance = computed(() => sharePosition.value?.shares ?? 0n)
 const assetsBalance = computed(() => sharePosition.value?.assets ?? 0n)
 const delta = ref(0n)
-const estimateSupplyAPY = ref(0)
+const estimateSupplyAPY = ref<number | undefined>(undefined)
 const estimatesError = ref('')
 
 // Reactive USD prices for display
@@ -73,7 +73,10 @@ const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
 const usdPriceGuard = createRaceGuard()
 
-const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
+const supplyApyBreakdown = computed(() =>
+  vault.value ? computeSupplyApyBreakdown(vault.value, viewer.value) : undefined,
+)
+const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
 const amountFixed = computed(() => {
   return FixedPoint.fromValue(
     valueToNano(amount.value || '0', asset.value?.decimals || 0),
@@ -99,18 +102,17 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
-  if (!vault.value) return '0.00'
-  return formatNumber(getVaultSupplyApy(vault.value) + rewardApy.value)
+  return formatNumber(supplyApyTotal.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
-  return formatNumber(estimateSupplyAPY.value + rewardApy.value)
+  return formatNumber(estimateSupplyAPY.value ?? supplyApyTotal.value)
 })
 
 const load = async () => {
   isLoading.value = true
   try {
     vault.value = await getEarnVault(vaultAddress)
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
+    estimateSupplyAPY.value = supplyApyTotal.value
     asset.value = vault.value?.asset
 
     // Fetch fresh share balance and convert to assets
@@ -245,12 +247,12 @@ const updateEstimates = () => {
       throw new Error('Not enough liquidity in vault')
     }
     delta.value = assetsBalance.value - amountFixed.value.value
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
+    estimateSupplyAPY.value = supplyApyTotal.value
   }
   catch (e) {
     logWarn('earn-withdraw/estimates', e)
     delta.value = assetsBalance.value || 0n
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
+    estimateSupplyAPY.value = supplyApyTotal.value
     estimatesError.value = (e as { message: string }).message
   }
   isEstimatesLoading.value = false
