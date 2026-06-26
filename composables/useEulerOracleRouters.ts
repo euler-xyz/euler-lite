@@ -6,6 +6,7 @@ import { logWarn } from '~/utils/errorHandling'
 // lowercased Set per chain so router-recognition lookups are O(1).
 const recognizedRoutersRef = shallowRef<Set<string>>(new Set())
 const recognizedRoutersChainId = ref<number | null>(null)
+const recognizedRoutersByChain = new Map<number, Set<string>>()
 const pendingRouterLoads = new Map<number, Promise<Set<string>>>()
 
 const toRecognizedSet = (data: unknown): Set<string> => {
@@ -20,9 +21,15 @@ const toRecognizedSet = (data: unknown): Set<string> => {
 const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return new Set()
 
-  if (recognizedRoutersChainId.value === chainId) {
-    return recognizedRoutersRef.value
+  recognizedRoutersChainId.value = chainId
+
+  const cached = recognizedRoutersByChain.get(chainId)
+  if (cached) {
+    recognizedRoutersRef.value = cached
+    return cached
   }
+
+  recognizedRoutersRef.value = new Set()
 
   const inflight = pendingRouterLoads.get(chainId)
   if (inflight) return inflight
@@ -30,8 +37,10 @@ const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
   const promise = (async () => {
     const data = await $fetch('/api/oracle-routers', { query: { chainId } })
     const set = toRecognizedSet(data)
-    recognizedRoutersRef.value = set
-    recognizedRoutersChainId.value = chainId
+    recognizedRoutersByChain.set(chainId, set)
+    if (recognizedRoutersChainId.value === chainId) {
+      recognizedRoutersRef.value = set
+    }
     return set
   })()
 
