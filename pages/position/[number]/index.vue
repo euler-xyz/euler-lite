@@ -789,22 +789,27 @@ watch(position, () => {
 // position they were viewing disappears — but only after the account and any
 // in-flight resimulation have settled, so we don't redirect on a transient gap.
 // A position that never existed (e.g. a bad URL) keeps the "not found" screen.
-const hasShownPosition = ref(false)
+//
+// Keyed to the live route param, not a plain boolean: the page component is
+// reused across /position/:number changes (no NuxtPage key), so a boolean would
+// persist and wrongly redirect an invalid index instead of showing "not found".
+const shownPositionIndex = ref<string | null>(null)
 watch(
-  [position, isPositionsLoading, isSimulating, isConnected, isSpyMode],
+  [position, isPositionsLoading, isSimulating, isConnected, isSpyMode, () => _route.params.number],
   () => {
+    const currentIndex = String(_route.params.number ?? '')
     if (position.value) {
-      hasShownPosition.value = true
+      shownPositionIndex.value = currentIndex
       return
     }
     if (
-      !hasShownPosition.value
+      shownPositionIndex.value !== currentIndex
       || !isPositionsLoaded.value
       || isPositionsLoading.value
       || isSimulating.value
       || !(isConnected.value || isSpyMode.value)
     ) return
-    hasShownPosition.value = false
+    shownPositionIndex.value = null
     router.replace({ path: '/portfolio', query: { network: _route.query.network } })
   },
   { immediate: true },

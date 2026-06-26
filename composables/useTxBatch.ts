@@ -771,9 +771,15 @@ const buildCurrentCollateralLiquidityValue = (
   const oracleMid = usdValueToRiskValue(valueUsd, scale)
   if (oracleMid === undefined) return cloneLiquidityValue(existing?.value)
 
+  // Collateral the borrow vault doesn't accept (no meta) contributes zero
+  // risk-adjusted value — not the full oracle price. Otherwise leftover
+  // EVC-enabled collateral the controller won't credit would inflate the
+  // simulated health/LTV. Likewise an unconfigured LTV defaults to zero.
+  if (!collateralMeta) return cloneLiquidityValue(existing?.value)
+
   return {
-    borrowing: applyLtv(oracleMid, collateralMeta?.borrowLTV) ?? oracleMid,
-    liquidation: applyLtv(oracleMid, getEffectiveLiquidationLtv(collateralMeta)) ?? oracleMid,
+    borrowing: applyLtv(oracleMid, collateralMeta.borrowLTV) ?? 0n,
+    liquidation: applyLtv(oracleMid, getEffectiveLiquidationLtv(collateralMeta)) ?? 0n,
     oracleMid,
   }
 }
