@@ -1,24 +1,11 @@
 <script setup lang="ts">
-import {
-  isEVault,
-  type SecuritizeCollateralVault,
-  type OracleRouteStep,
-  type EVault,
-} from '@eulerxyz/euler-v2-sdk'
+import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
-import { getChecksStatus, OracleAdapterCheckSeverity, resolveOracleAdapterIdentity, type OracleAdapterCheck } from '~/entities/oracle'
-import { getOracleProviderLogo } from '~/entities/oracle-providers'
-import { getExplorerLink } from '~/utils/block-explorer'
-import { truncate, formatNumber } from '~/utils/string-utils'
-import { shouldInvertOraclePrice } from '~/utils/oracle-label'
-import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
-import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
+import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterView } from '~/utils/oracle-adapter-views'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
-import type { Address } from 'viem'
-import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
   market: MarketGroup
@@ -28,7 +15,7 @@ const props = defineProps<{
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   selectCell: [collateralAddr: string, liabilityAddr: string]
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
@@ -218,47 +205,51 @@ const metricRange = computed((): { min: number, max: number } => {
   return Number.isFinite(min) ? { min, max } : { min: 0, max: 0 }
 })
 
-// ── Oracle metric: per-cell adapter list + tooltip ────────────────────────────
+// ── Oracle metric: per-cell adapter views ────────────────────────────────────
 
-const getCollateralOracleSteps = (
-  liability: EVault,
-  collateral: EVault | SecuritizeCollateralVault,
-) => {
-  return getCollateralOracleRouteSteps(liability, collateral)
-}
-
-const cellOracleSteps = computed((): Map<string, OracleRouteStep[]> => {
-  const result = new Map<string, OracleRouteStep[]>()
+// Each off-diagonal cell shows every oracle adapter that prices the pair's
+// collateral AND liability assets — the same set the borrow page's Oracles
+// block renders, via the shared collectOracleRouteSteps + buildOracleAdapterViews.
+// The self-diagonal is intentionally left blank: a liability's own asset->UoA
+// oracle already appears in every cell of its column.
+const cellAdapterViews = computed((): Map<string, OracleAdapterView[]> => {
+  const result = new Map<string, OracleAdapterView[]>()
   if (props.dotMetric !== 'oracle') return result
 
-  for (const [colAddr, rowCells] of props.matrix.cells) {
-    for (const [liabAddr] of rowCells) {
-      const collateral = findVault(props.market, colAddr)
-      const liability = findVault(props.market, liabAddr)
-      if (!collateral || !liability) continue
-      if (!isMatrixCompatibleVault(collateral)) continue
-      if (!isEVault(liability)) continue
-      const steps = getCollateralOracleSteps(liability, collateral)
-      if (steps.length) result.set(`${colAddr}:${liabAddr}`, steps)
+  for (const [collateralAddr, rowCells] of props.matrix.cells) {
+    for (const [liabilityAddr] of rowCells) {
+      if (collateralAddr === liabilityAddr) continue
+      const collateral = findVault(props.market, collateralAddr)
+      const liability = findVault(props.market, liabilityAddr)
+      if (!collateral || !isMatrixCompatibleVault(collateral)) continue
+      if (!liability || !isEVault(liability)) continue
+      const steps = collectOracleRouteSteps([liability], [collateral])
+      if (steps.length) {
+        result.set(`${collateralAddr}:${liabilityAddr}`, buildOracleAdapterViews(steps, oracleAdapters))
+      }
     }
   }
   return result
 })
 
-// Per-borrow-vault asset oracle: resolves the borrow vault's own asset against
-// its unit of account. Same set repeated across every cell in a column, so we
-// surface it once as a header row instead.
-const columnAssetOracleSteps = computed((): Map<string, OracleRouteStep[]> => {
-  const result = new Map<string, OracleRouteStep[]>()
-  if (props.dotMetric !== 'oracle') return result
-  for (const col of props.matrix.columns) {
-    const liability = findVault(props.market, col.address)
-    if (!liability || !isEVault(liability)) continue
-    const steps = getDebtOracleRouteSteps(liability)
-    if (steps.length) result.set(col.address, steps)
+const getCellAdapterViews = (collateralAddr: string, liabilityAddr: string): OracleAdapterView[] =>
+  cellAdapterViews.value.get(`${collateralAddr}:${liabilityAddr}`) ?? []
+
+const isOracleCellSelectable = (collateralAddr: string, liabilityAddr: string): boolean =>
+  getCellAdapterViews(collateralAddr, liabilityAddr).length > 0
+
+// Cell click drives the inline oracle detail section below the matrix. In oracle
+// mode only off-diagonal cells that actually have adapters are selectable; other
+// metrics keep the original "any present cell is selectable" behaviour.
+const onCellClick = (collateralAddr: string, liabilityAddr: string) => {
+  if (props.dotMetric === 'oracle') {
+    if (!isOracleCellSelectable(collateralAddr, liabilityAddr)) return
   }
-  return result
-})
+  else if (!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)) {
+    return
+  }
+  emit('selectCell', collateralAddr, liabilityAddr)
+}
 
 // Bulk-load adapter metadata for the chain. Heavy call (1+ MB JSON); the
 // `metric !== 'oracle'` guard short-circuits the immediate run on mount and
@@ -273,224 +264,6 @@ watch(
   },
   { immediate: true },
 )
-
-interface AdapterView {
-  key: string
-  kind: OracleRouteStep['kind']
-  oracle: Address
-  name: string
-  base: Address
-  quote: Address
-  metaBase?: Address
-  metaQuote?: Address
-  provider: string
-  methodology?: string
-  logo?: string
-  label?: { primary: string, suffix?: string }
-  checks?: OracleAdapterCheck[]
-  checksStatus: 'positive' | 'warning' | 'negative' | null
-  failedChecks: OracleAdapterCheck[]
-}
-
-const enrichStep = (step: OracleRouteStep): AdapterView => {
-  const isAdapter = isOracleAdapterRouteStep(step)
-  const meta = isAdapter ? oracleAdapters[step.oracle.toLowerCase()] : undefined
-  // LITE-235: an adapter with no curated oracle-checks entry must not fall back to
-  // its self-reported onchain name(); render it as unknown instead. The template's
-  // `|| 'Unknown'` fallbacks turn the empty strings into the displayed label.
-  const { name: resolvedName, provider: resolvedProvider } = resolveOracleAdapterIdentity(step, meta, isAdapter)
-  const provider = resolvedProvider ?? ''
-  const name = resolvedName ?? ''
-  const checks = meta?.checks
-  return {
-    key: getOracleRouteStepKey(step),
-    kind: step.kind,
-    oracle: step.oracle,
-    name,
-    base: step.base,
-    quote: step.quote,
-    metaBase: meta?.base,
-    metaQuote: meta?.quote,
-    provider,
-    methodology: meta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
-    logo: getOracleProviderLogo(provider, name),
-    label: meta?.label
-      ? {
-          primary: meta.label.split('(')[0].trimEnd(),
-          suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined,
-        }
-      : undefined,
-    checks,
-    checksStatus: getChecksStatus(checks),
-    failedChecks: checks?.filter(c => !c.pass) ?? [],
-  }
-}
-
-const getCellAdapterViews = (collateralAddr: string, liabilityAddr: string): AdapterView[] => {
-  const list = cellOracleSteps.value.get(`${collateralAddr}:${liabilityAddr}`)
-  if (!list) return []
-  return list.map(enrichStep)
-}
-
-const getColumnAssetAdapterViews = (liabilityAddr: string): AdapterView[] => {
-  const list = columnAssetOracleSteps.value.get(liabilityAddr)
-  if (!list) return []
-  return list.map(enrichStep)
-}
-
-const TOOLTIP_WIDTH = 360
-
-interface TooltipContext {
-  view: AdapterView
-  sourceVault: EVault
-  collateralVault: EVault | SecuritizeCollateralVault | null
-}
-
-const tooltipContext = ref<TooltipContext | null>(null)
-const tooltipAdapter = computed(() => tooltipContext.value?.view ?? null)
-const tooltipStyle = ref<CSSProperties>({})
-
-// Single matrix-wide price fetch: in oracle mode we dedup every route step
-// currently shown, run one batchSimulation, and let tooltips read the results
-// from the same map.
-const allOracleSteps = computed<OracleRouteStep[]>(() => {
-  if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, OracleRouteStep>()
-  const ingest = (lists: Iterable<OracleRouteStep[]>) => {
-    for (const list of lists) {
-      for (const step of list) {
-        const key = getOracleRouteStepKey(step)
-        if (!seen.has(key)) seen.set(key, step)
-      }
-    }
-  }
-  ingest(cellOracleSteps.value.values())
-  ingest(columnAssetOracleSteps.value.values())
-  return [...seen.values()]
-})
-
-const oraclePriceSourceVaults = computed<EVault[]>(() => {
-  if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, EVault>()
-  for (const col of props.matrix.columns) {
-    const liability = findVault(props.market, col.address)
-    if (liability && isEVault(liability)) {
-      seen.set(liability.address.toLowerCase(), liability)
-    }
-  }
-  return [...seen.values()]
-})
-
-const oraclePriceCollateralVaults = computed<(EVault | SecuritizeCollateralVault)[]>(() => {
-  if (props.dotMetric !== 'oracle') return []
-  const seen = new Map<string, EVault | SecuritizeCollateralVault>()
-  for (const row of props.matrix.rows) {
-    const v = findVault(props.market, row.address)
-    if (v && isMatrixCompatibleVault(v)) {
-      seen.set(row.address.toLowerCase(), v)
-    }
-  }
-  return [...seen.values()]
-})
-
-const { prices: oraclePrices, isLoading: oraclePricesLoading } = useOracleAdapterPrices(
-  allOracleSteps,
-  oraclePriceSourceVaults,
-  oraclePriceCollateralVaults,
-)
-
-const isAdapterPriceFailed = (adapter: { key: string }): boolean => {
-  if (oraclePricesLoading.value) return false
-  const info = oraclePrices.value.get(adapter.key)
-  return info ? !info.success : false
-}
-
-const tooltipPriceText = computed((): string | null => {
-  const ctx = tooltipContext.value
-  if (!ctx) return null
-  const info = oraclePrices.value.get(ctx.view.key)
-  if (!info?.success) return null
-  const invert = shouldInvertOraclePrice({
-    metaBase: ctx.view.metaBase,
-    metaQuote: ctx.view.metaQuote,
-    callerBase: ctx.view.base,
-    callerQuote: ctx.view.quote,
-  })
-  const rate = invert && info.rate > 0 ? 1 / info.rate : info.rate
-  return formatNumber(rate, 4)
-})
-
-const tooltipPriceLoading = computed(() => oraclePricesLoading.value && !oraclePrices.value.size)
-
-const closeTooltip = () => {
-  tooltipContext.value = null
-}
-
-const positionTooltip = (event: MouseEvent) => {
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - TOOLTIP_WIDTH - 16))
-  const spaceBelow = Math.max(160, window.innerHeight - rect.bottom - 16)
-  const spaceAbove = Math.max(160, rect.top - 16)
-  const flipUp = spaceAbove > spaceBelow
-  tooltipStyle.value = flipUp
-    ? { top: `${rect.top - 8}px`, left: `${left}px`, transform: 'translateY(-100%)', maxHeight: `${spaceAbove}px` }
-    : { top: `${rect.bottom + 8}px`, left: `${left}px`, transform: 'none', maxHeight: `${spaceBelow}px` }
-}
-
-const onCellAdapterClick = (
-  view: AdapterView,
-  event: MouseEvent,
-  collateralAddr: string,
-  liabilityAddr: string,
-) => {
-  if (tooltipContext.value?.view.key === view.key) {
-    closeTooltip()
-    return
-  }
-  const liability = findVault(props.market, liabilityAddr)
-  const collateral = findVault(props.market, collateralAddr)
-  if (!liability || !isEVault(liability)) return
-  positionTooltip(event)
-  tooltipContext.value = {
-    view,
-    sourceVault: liability,
-    collateralVault: collateral && collateral.address.toLowerCase() !== liabilityAddr.toLowerCase() ? collateral : null,
-  }
-}
-
-const onAssetAdapterClick = (
-  view: AdapterView,
-  event: MouseEvent,
-  liabilityAddr: string,
-) => {
-  if (tooltipContext.value?.view.key === view.key) {
-    closeTooltip()
-    return
-  }
-  const liability = findVault(props.market, liabilityAddr)
-  if (!liability || !isEVault(liability)) return
-  positionTooltip(event)
-  tooltipContext.value = {
-    view,
-    sourceVault: liability,
-    collateralVault: null,
-  }
-}
-
-// Document-level bubble-phase listener — `@click.stop` on every logo button
-// and on the tooltip itself prevents this from firing for in-tooltip clicks
-// or for clicks on other adapter triggers. That keeps "click same logo to
-// close" working (vueuse's onClickOutside attaches in capture phase, which
-// would short-circuit the toggle behaviour).
-const onDocumentClick = () => closeTooltip()
-onMounted(() => {
-  document.addEventListener('click', onDocumentClick)
-})
-onUnmounted(() => {
-  document.removeEventListener('click', onDocumentClick)
-})
-
-const explorerLink = (address: string) => getExplorerLink(address, chainId.value, true)
 </script>
 
 <template>
@@ -616,7 +389,9 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
                     : row.address === col.address
                       ? 'bg-white/[0.03]'
                       : '',
-                matrix.cells.get(row.address)?.get(col.address)
+                (dotMetric === 'oracle'
+                  ? isOracleCellSelectable(row.address, col.address)
+                  : !!matrix.cells.get(row.address)?.get(col.address))
                   ? 'cursor-pointer'
                   : '',
               ]"
@@ -649,126 +424,46 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
               "
               @mouseenter="hoveredCell = { collateralAddr: row.address, liabilityAddr: col.address }"
               @mouseleave="hoveredCell = null"
-              @click.stop="
-                matrix.cells.get(row.address)?.get(col.address)
-                  && $emit('selectCell', row.address, col.address)
-              "
+              @click.stop="onCellClick(row.address, col.address)"
             >
-              <!-- Diagonal in oracle mode: surface the borrow vault's own
-                   asset -> UoA oracle (same for every cell in the column,
-                   so we show it once on the self-row instead of repeating). -->
-              <template
-                v-if="dotMetric === 'oracle'
-                  && row.address === col.address
-                  && getColumnAssetAdapterViews(col.address).length"
-              >
-                <div class="inline-flex items-center justify-center gap-4 flex-wrap">
-                  <button
-                    v-for="adapter in getColumnAssetAdapterViews(col.address)"
+              <template v-if="matrix.cells.get(row.address)?.get(col.address)">
+                <!-- Oracle metric: every adapter pricing the pair's collateral &
+                     liability assets. Display-only logos; clicking the cell opens
+                     the inline oracle section below the matrix. -->
+                <div
+                  v-if="dotMetric === 'oracle' && getCellAdapterViews(row.address, col.address).length"
+                  class="inline-flex items-center justify-center gap-4 flex-wrap"
+                >
+                  <span
+                    v-for="adapter in getCellAdapterViews(row.address, col.address)"
                     :key="adapter.key"
-                    type="button"
-                    class="relative inline-flex items-center justify-center cursor-pointer"
+                    class="relative inline-flex items-center justify-center"
                     data-id="oracle-adapter"
-                    :data-key="`${col.address}:${adapter.key}`"
+                    :data-key="`${row.address}:${col.address}:${adapter.key}`"
+                    :data-collateral-address="row.address"
                     :data-borrow-address="col.address"
                     :data-oracle-address="adapter.oracle"
                     :data-base-address="adapter.base"
                     :data-quote-address="adapter.quote"
-                    @click.stop="onAssetAdapterClick(adapter, $event, col.address)"
                   >
-                    <UiHoverPreviewTooltip
-                      :title="adapter.name || 'Unknown'"
-                      :text="adapter.provider || 'Unknown provider'"
-                      placement="top-start"
-                    >
-                      <BaseAvatar
-                        v-if="adapter.logo"
-                        :src="adapter.logo"
-                        :label="adapter.name"
-                        class="icon--16"
-                      />
-                      <SvgIcon
-                        v-else
-                        name="question-circle"
-                        class="!w-16 !h-16 text-content-tertiary"
-                      />
-                    </UiHoverPreviewTooltip>
+                    <BaseAvatar
+                      v-if="adapter.logo"
+                      :src="adapter.logo"
+                      :label="adapter.name"
+                      class="icon--16"
+                    />
+                    <SvgIcon
+                      v-else
+                      name="question-circle"
+                      class="!w-16 !h-16 text-content-tertiary"
+                    />
                     <span
                       v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
                       class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
                       :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
                     />
-                    <UiHoverPreviewTooltip
-                      v-if="isAdapterPriceFailed(adapter)"
-                      title="getQuote reverted"
-                      text="getQuote reverted"
-                      placement="top-start"
-                      class="absolute -bottom-1 -right-1"
-                    >
-                      <SvgIcon
-                        name="warning"
-                        class="!w-10 !h-10 text-warning-500"
-                      />
-                    </UiHoverPreviewTooltip>
-                  </button>
+                  </span>
                 </div>
-              </template>
-
-              <template v-else-if="matrix.cells.get(row.address)?.get(col.address)">
-                <!-- Oracle metric: render adapter logos -->
-                <template v-if="dotMetric === 'oracle'">
-                  <div class="inline-flex items-center justify-center gap-4 flex-wrap">
-                    <button
-                      v-for="adapter in getCellAdapterViews(row.address, col.address)"
-                      :key="adapter.key"
-                      type="button"
-                      class="relative inline-flex items-center justify-center cursor-pointer"
-                      data-id="oracle-adapter"
-                      :data-key="`${row.address}:${col.address}:${adapter.key}`"
-                      :data-collateral-address="row.address"
-                      :data-borrow-address="col.address"
-                      :data-oracle-address="adapter.oracle"
-                      :data-base-address="adapter.base"
-                      :data-quote-address="adapter.quote"
-                      @click.stop="onCellAdapterClick(adapter, $event, row.address, col.address)"
-                    >
-                      <UiHoverPreviewTooltip
-                        :title="adapter.name || 'Unknown'"
-                        :text="adapter.provider || 'Unknown provider'"
-                        placement="top-start"
-                      >
-                        <BaseAvatar
-                          v-if="adapter.logo"
-                          :src="adapter.logo"
-                          :label="adapter.name"
-                          class="icon--16"
-                        />
-                        <SvgIcon
-                          v-else
-                          name="question-circle"
-                          class="!w-16 !h-16 text-content-tertiary"
-                        />
-                      </UiHoverPreviewTooltip>
-                      <span
-                        v-if="adapter.checksStatus === 'warning' || adapter.checksStatus === 'negative'"
-                        class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
-                        :class="adapter.checksStatus === 'negative' ? 'bg-error-500' : 'bg-warning-500'"
-                      />
-                      <UiHoverPreviewTooltip
-                        v-if="isAdapterPriceFailed(adapter)"
-                        title="getQuote reverted"
-                        text="getQuote reverted"
-                        placement="top-start"
-                        class="absolute -bottom-1 -right-1"
-                      >
-                        <SvgIcon
-                          name="warning"
-                          class="!w-10 !h-10 text-warning-500"
-                        />
-                      </UiHoverPreviewTooltip>
-                    </button>
-                  </div>
-                </template>
 
                 <!-- Numeric metrics: original rendering -->
                 <div
@@ -876,146 +571,4 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
   >
     Tap a cell, row, or column header to see lending/borrowing options below.
   </p>
-
-  <!-- Oracle adapter tooltip — mirrors VaultOverviewBlockOracleAdapters card layout -->
-  <Teleport to="body">
-    <div
-      v-if="tooltipAdapter"
-      class="fixed z-[9999] bg-surface-secondary border border-line-subtle rounded-xl p-16 shadow-card overflow-y-auto flex flex-col gap-12"
-      :style="[tooltipStyle, { width: `${TOOLTIP_WIDTH}px` }]"
-      @click.stop
-    >
-      <!-- Header: oracle label / pair + address & close -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-8">
-        <div class="text-p2 text-content-primary font-medium">
-          <template v-if="tooltipAdapter.label">
-            {{ tooltipAdapter.label.primary }}
-            <span
-              v-if="tooltipAdapter.label.suffix"
-              class="text-content-tertiary ml-2"
-            >{{ tooltipAdapter.label.suffix }}</span>
-          </template>
-          <template v-else>
-            Oracle
-          </template>
-        </div>
-        <div class="flex items-center gap-8 flex-shrink-0">
-          <NuxtLink
-            :to="explorerLink(tooltipAdapter.oracle)"
-            target="_blank"
-            class="text-accent-600 underline cursor-pointer hover:text-accent-500 text-p3"
-            @click.stop
-          >
-            {{ truncate(tooltipAdapter.oracle, 6) }}
-          </NuxtLink>
-          <button
-            type="button"
-            class="text-content-muted hover:text-content-secondary cursor-pointer"
-            aria-label="Close"
-            @click.stop="closeTooltip"
-          >
-            <SvgIcon
-              name="close"
-              class="!w-14 !h-14"
-            />
-          </button>
-        </div>
-      </div>
-
-      <!-- Provider / Methodology / Price / Checks grid (mirrors borrow page) -->
-      <div class="grid grid-cols-2 gap-12 text-p3">
-        <div class="flex flex-col gap-4">
-          <span class="text-content-tertiary">Provider</span>
-          <div class="flex items-center gap-8">
-            <BaseAvatar
-              v-if="tooltipAdapter.logo"
-              :src="tooltipAdapter.logo"
-              :label="tooltipAdapter.name"
-              class="icon--20"
-            />
-            <SvgIcon
-              v-else
-              name="question-circle"
-              class="!w-20 !h-20 text-content-tertiary"
-            />
-            <span class="text-content-primary">{{ tooltipAdapter.provider || 'Unknown' }}</span>
-          </div>
-        </div>
-        <div class="flex flex-col gap-4">
-          <span class="text-content-tertiary">Methodology</span>
-          <span class="text-content-primary">{{ tooltipAdapter.methodology || 'Unknown' }}</span>
-        </div>
-        <div class="flex flex-col gap-4">
-          <span class="text-content-tertiary">Price</span>
-          <span
-            v-if="tooltipPriceLoading"
-            class="text-content-secondary animate-pulse"
-          >...</span>
-          <span
-            v-else-if="tooltipPriceText === null"
-            class="flex items-center text-warning-500"
-          >
-            <SvgIcon
-              name="warning"
-              class="mr-2 !w-16 !h-16"
-            />
-            Unknown
-          </span>
-          <span
-            v-else
-            class="text-content-primary"
-          >{{ tooltipPriceText }}</span>
-        </div>
-        <div class="flex flex-col gap-4">
-          <span class="text-content-tertiary">Checks</span>
-          <span
-            v-if="!tooltipAdapter.checks?.length"
-            class="text-content-secondary"
-          >N/A</span>
-          <span
-            v-else
-            class="flex items-center gap-6"
-          >
-            <span
-              class="inline-block w-8 h-8 rounded-full flex-shrink-0"
-              :class="{
-                'bg-success-500': tooltipAdapter.checksStatus === 'positive',
-                'bg-warning-500': tooltipAdapter.checksStatus === 'warning',
-                'bg-error-500': tooltipAdapter.checksStatus === 'negative',
-              }"
-            />
-            <span class="text-content-primary">
-              <template v-if="tooltipAdapter.checksStatus === 'positive'">{{ tooltipAdapter.checks.length }} passed</template>
-              <template v-else>{{ tooltipAdapter.failedChecks.length }} failed</template>
-            </span>
-          </span>
-        </div>
-      </div>
-
-      <!-- Failed checks detail -->
-      <div
-        v-if="tooltipAdapter.failedChecks.length"
-        class="flex flex-col gap-6 border-t border-line-subtle pt-12 text-p3"
-      >
-        <div
-          v-for="(check, i) in tooltipAdapter.failedChecks"
-          :key="`${check.id}-${i}`"
-          class="flex items-start gap-8"
-        >
-          <SvgIcon
-            name="warning"
-            class="!w-16 !h-16 mt-1 flex-shrink-0"
-            :class="{
-              'text-error-500': check.severity === OracleAdapterCheckSeverity.High,
-              'text-warning-500': check.severity !== OracleAdapterCheckSeverity.High,
-            }"
-          />
-          <div>
-            <span class="text-content-primary font-medium">{{ check.id }}: </span>
-            <span class="text-content-secondary">{{ check.message }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </Teleport>
 </template>

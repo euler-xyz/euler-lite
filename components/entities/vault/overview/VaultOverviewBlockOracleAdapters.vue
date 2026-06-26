@@ -4,13 +4,12 @@ import type {
   EVault,
   OracleRouteStep,
 } from '@eulerxyz/euler-v2-sdk'
-import { getChecksStatus, getRouterRecognition, OracleAdapterCheckSeverity, resolveOracleAdapterIdentity, type OracleAdapterMeta } from '~/entities/oracle'
-import { getOracleProviderLogo } from '~/entities/oracle-providers'
+import { getRouterRecognition, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
-import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
-import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
+import { isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
+import { buildOracleAdapterViews, collectOracleRouteSteps } from '~/utils/oracle-adapter-views'
 import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
@@ -35,33 +34,7 @@ const sourceVaults = computed(() => {
   return []
 })
 
-const getCollateralRouteSteps = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) => {
-  return getCollateralOracleRouteSteps(vault, collateralVault)
-}
-
-const routeSteps = computed(() => {
-  const entries: OracleRouteStep[] = []
-  const deduped = new Map<string, OracleRouteStep>()
-
-  sourceVaults.value.forEach((vault) => {
-    entries.push(...getDebtOracleRouteSteps(vault))
-
-    if (props.collateralVaults?.length) {
-      props.collateralVaults.forEach((collateralVault) => {
-        entries.push(...getCollateralRouteSteps(vault, collateralVault))
-      })
-    }
-  })
-
-  entries.forEach((step) => {
-    const key = getOracleRouteStepKey(step)
-    if (!deduped.has(key)) {
-      deduped.set(key, step)
-    }
-  })
-
-  return [...deduped.values()]
-})
+const routeSteps = computed(() => collectOracleRouteSteps(sourceVaults.value, props.collateralVaults ?? []))
 
 const knownSymbols = computed(() => {
   const map = buildKnownSymbols()
@@ -80,39 +53,7 @@ const knownSymbols = computed(() => {
   return map
 })
 
-const adapterViews = computed(() => routeSteps.value.map((step) => {
-  const isAdapter = isOracleAdapterRouteStep(step)
-  const meta: OracleAdapterMeta | undefined = isAdapter
-    ? oracleAdapters[step.oracle.toLowerCase()]
-    : undefined
-  const { name, provider, isCustomAdapter } = resolveOracleAdapterIdentity(step, meta, isAdapter)
-  const checks = meta?.checks
-  const invertPrice = shouldInvertOraclePrice({
-    metaBase: meta?.base,
-    metaQuote: meta?.quote,
-    callerBase: step.base,
-    callerQuote: step.quote,
-  })
-
-  return {
-    ...step,
-    name,
-    provider,
-    isCustomAdapter,
-    methodology: meta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
-    logo: getOracleProviderLogo(provider, name),
-    label: meta?.label
-      ? {
-          primary: meta.label.split('(')[0].trimEnd(),
-          suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined,
-        }
-      : undefined,
-    invertPrice,
-    checks,
-    checksStatus: getChecksStatus(checks),
-    failedChecks: checks?.filter(c => !c.pass) ?? [],
-  }
-}))
+const adapterViews = computed(() => buildOracleAdapterViews(routeSteps.value, oracleAdapters))
 
 watch(
   () => routeSteps.value,
