@@ -212,7 +212,7 @@ const updateEstimates = async () => {
   try {
     vault.value = await updateEarnVault(vault.value.address)
     if (!asset.value?.address) return
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
+    estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + intrinsicApy.value + totalRewardsAPY.value
   }
   catch (e) {
     logWarn('earn-supply/estimates', e)
@@ -234,7 +234,7 @@ const supplyApyModalData = computed(() => ({
 }))
 
 // Initialize estimateSupplyAPY after vault is loaded
-estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
+estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + intrinsicApy.value + totalRewardsAPY.value
 
 watch(amount, () => {
   clearSimulationError()
