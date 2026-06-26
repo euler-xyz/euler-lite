@@ -105,6 +105,7 @@ watch(
   () => [prepared, plan, walletAddress.value, currentChainId.value] as const,
   async () => {
     const requestId = ++prepareRequestId
+    hasCopiedCalldata.value = false
     prepareError.value = ''
     preparedPlan.value = undefined
 
