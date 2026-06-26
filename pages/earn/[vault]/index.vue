@@ -108,9 +108,12 @@ const supplyRewardCampaigns = computed(() => getSupplyRewardCampaigns(vaultAddre
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
 const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
 const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
+const supplyApyTotal = computed(() =>
+  vault.value ? getVaultSupplyApy(vault.value) + intrinsicApy.value + totalRewardsAPY.value : 0,
+)
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  return formatNumber(getVaultSupplyApy(vault.value) + intrinsicApy.value + totalRewardsAPY.value)
+  return formatNumber(supplyApyTotal.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   return formatNumber(estimateSupplyAPY.value)
@@ -224,6 +227,7 @@ const supplyApyModalData = computed(() => ({
     intrinsicAPY: intrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: supplyRewardCampaigns.value,
+    totalSupplyAPY: supplyApyTotal.value,
     rewardVaultAddress: vaultAddress,
     baseApyAverageLabel: '1h',
   },
