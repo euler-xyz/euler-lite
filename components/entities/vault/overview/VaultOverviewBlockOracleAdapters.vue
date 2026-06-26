@@ -528,7 +528,7 @@ const onTooltipMouseLeave = () => {
               }"
             >
               <SvgIcon
-                :name="check.pass ? 'check' : 'x'"
+                :name="check.pass ? 'check' : 'close'"
                 class="!w-10 !h-10 text-white"
               />
             </span>
