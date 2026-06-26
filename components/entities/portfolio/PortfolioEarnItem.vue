@@ -10,7 +10,7 @@ import { VaultOverviewModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '
 import { useModal } from '~/components/ui/composables/useModal'
 import { formatNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { roundAndCompactTokens } from '~/utils/crypto-utils'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
@@ -26,7 +26,7 @@ const subAccountIndex = computed(() => {
 const { getSupplyRewardCampaignsFromVault } = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { viewer, visibleTotal } = useApyVisibility()
+const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 
 const vault = computed(() => position.vault as EulerEarn)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
@@ -58,6 +58,7 @@ watchEffect(() => {
 })
 
 const supplyApyWithRewards = computed(() => visibleTotal(apyBreakdown.value) ?? 0)
+const visibleApyBreakdown = computed(() => visibleBreakdown(apyBreakdown.value))
 
 const hasPrice = ref(false)
 
@@ -70,12 +71,16 @@ watchEffect(() => {
   updateHasPrice()
 })
 
+// Source the breakdown rows and total from the same viewer-aware SDK breakdown
+// the headline uses (visibleApyBreakdown / supplyApyWithRewards), so the tooltip
+// total always matches the displayed figure instead of being recomputed.
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: getVaultSupplyApy(vault.value),
-    intrinsicAPY: getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value),
+    lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
+    intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaignsFromVault(vault.value),
+    totalSupplyAPY: supplyApyWithRewards.value,
     rewardVaultAddress: vault.value.address,
     baseApyAverageLabel: '1h',
   },
