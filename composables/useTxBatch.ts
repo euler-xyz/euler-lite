@@ -1236,6 +1236,44 @@ const getEntryMarketLabelOverride = (entry: BatchEntry): string | undefined => {
   return typeof label === 'string' && label.trim() ? label : undefined
 }
 
+/**
+ * Resolve the post-cart "final layer" account for planning the next batch op,
+ * retrying across superseded resimulations.
+ *
+ * A resimulation can be superseded mid-flight (a newer run shares `resimToken`
+ * and the loser returns early WITHOUT populating layers or `simError`), so a
+ * single await can resolve before our final layer exists. Each pass awaits the
+ * current run — `getInFlight() ?? startRun()` both starts a fresh run when none
+ * is in flight AND awaits it — so every run this loop starts is awaited before
+ * we re-check or fall through to the throw. (Critically: no run is ever started
+ * on the terminal iteration without being awaited, which would otherwise re-throw
+ * "Batch simulation not loaded" while a fresh run was still in flight.)
+ *
+ * Extracted from `getEntryPlanningAccount` so the superseded-run/retry invariant
+ * is unit-testable without the SDK; see tests/composables/useTxBatch.test.ts.
+ */
+export const awaitFinalPlanningLayer = async <T>(opts: {
+  getFinalLayer: () => T | undefined
+  getSimError: () => string | undefined
+  getInFlight: () => Promise<void> | null
+  startRun: () => Promise<void>
+  maxAttempts?: number
+  onAttempt?: (info: { attempt: number, awaitedExisting: boolean, found: boolean }) => void
+}): Promise<T> => {
+  const { getFinalLayer, getSimError, getInFlight, startRun, maxAttempts = 8, onAttempt } = opts
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const inFlight = getInFlight()
+    await (inFlight ?? startRun())
+    const layer = getFinalLayer()
+    onAttempt?.({ attempt, awaitedExisting: inFlight !== null, found: layer !== undefined })
+    if (layer !== undefined) return layer
+    // A real error is terminal; stop retrying and surface it below. Otherwise the
+    // run was superseded — loop and await whatever run is current next pass.
+    if (getSimError()) break
+  }
+  throw new Error(getSimError() ?? 'Batch simulation not loaded')
+}
+
 export const useTxBatch = () => {
   const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
@@ -1570,40 +1608,32 @@ export const useTxBatch = () => {
     if (finalLayer) return finalLayer
 
     if (entries.value.length > 0) {
-      // A resimulation can be superseded mid-flight: both the entries watcher and
-      // this call kick off runs sharing resimToken, and the loser returns early
-      // (the `token !== resimToken` guard) WITHOUT populating layers or simError.
-      // A single await can therefore resolve on the superseded run, before the
-      // winning run has produced our final layer — which used to surface as a
-      // misleading "Batch simulation not loaded". Re-await the current run until
-      // the final layer for the present entries settles or a real error appears.
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const awaitedExisting = resimulatePromise !== null
-        await (resimulatePromise ?? runResimulate())
-        const refreshedFinalLayer = getCurrentFinalLayer()
-        // Found on attempt 0 is the healthy path (warn/quiet). Not finding it —
-        // i.e. the awaited run resolved without our layers — is the suspected race;
-        // log it at error so we capture each re-attempt in the field.
-        logBatchDiag('getEntryPlanningAccount:attempt', {
-          attempt,
-          awaitedExisting,
-          finalLayerFound: refreshedFinalLayer !== undefined,
-        }, refreshedFinalLayer !== undefined ? 'warn' : 'error')
-        if (refreshedFinalLayer) return refreshedFinalLayer
-        if (simError.value) {
-          logBatchDiag('getEntryPlanningAccount:simError-break', { attempt }, 'error')
-          break
-        }
-        // Resolved without our layers and no error: a newer run superseded this
-        // one. If it's already in flight, the next pass awaits it; otherwise kick
-        // a fresh run. The bounded loop guarantees we can't spin forever.
-        if (!resimulatePromise) runResimulate()
+      // Retry across superseded resimulations until the final layer for the
+      // present entries settles or a real error appears (see awaitFinalPlanningLayer).
+      try {
+        return await awaitFinalPlanningLayer<Account<IHasVaultAddress>>({
+          getFinalLayer: getCurrentFinalLayer,
+          getSimError: () => simError.value,
+          getInFlight: () => resimulatePromise,
+          startRun: runResimulate,
+          // Found on attempt 0 is the healthy path (warn/quiet). Not finding it —
+          // i.e. the awaited run resolved without our layers — is the suspected
+          // race; log at error so we capture each re-attempt in the field.
+          onAttempt: ({ attempt, awaitedExisting, found }) =>
+            logBatchDiag('getEntryPlanningAccount:attempt', {
+              attempt,
+              awaitedExisting,
+              finalLayerFound: found,
+            }, found ? 'warn' : 'error'),
+        })
       }
-      // This is THE event we're hunting. Full state is in the helper snapshot.
-      logBatchDiag('getEntryPlanningAccount:throw', {
-        thrownMessage: simError.value ?? 'Batch simulation not loaded',
-      }, 'error')
-      throw new Error(simError.value ?? 'Batch simulation not loaded')
+      catch (error) {
+        // This is THE event we're hunting. Full state is in the helper snapshot.
+        logBatchDiag('getEntryPlanningAccount:throw', {
+          thrownMessage: simError.value ?? 'Batch simulation not loaded',
+        }, 'error')
+        throw error
+      }
     }
 
     if (baseAccountSnapshot) {
