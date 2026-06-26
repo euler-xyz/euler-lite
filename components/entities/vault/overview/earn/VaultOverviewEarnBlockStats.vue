@@ -12,6 +12,8 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(vault, enableIntrinsicApy.value))
+const supplyApyTotal = computed(() => getVaultSupplyApy(vault) + intrinsicApy.value + rewardSupplyAPY.value)
 
 const totalSupplyDisplay = ref('-')
 
@@ -33,6 +35,7 @@ const supplyApyModalData = computed(() => ({
     intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vault.address),
+    totalSupplyAPY: supplyApyTotal.value,
     rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',
   },
@@ -79,7 +82,7 @@ const supplyApyModalData = computed(() => ({
               data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
+          {{ formatNumber(supplyApyTotal) }}%
         </span>
       </VaultOverviewLabelValue>
     </div>
