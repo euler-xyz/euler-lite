@@ -62,6 +62,21 @@ if ! pnpm -C packages/euler-v2-sdk run build; then
   pnpm -C packages/euler-v2-sdk run build
 fi
 
+# Stamp the SDK clone with the version this app pins. The source branch may carry
+# no version field (e.g. `main`, which is versioned only at release time) or a
+# version from a different release line — either breaks linking by branch: npm
+# pack requires a version, and the forced install must satisfy the app's exact
+# spec for `npm ls`. Reading the pin from the app keeps any branch installable
+# without publishing, and tracks future version bumps automatically.
+SDK_TARGET_SPEC="$(node -p "const p=require('/usr/src/app/package.json'); (p.dependencies||{})['@eulerxyz/euler-v2-sdk'] || (p.devDependencies||{})['@eulerxyz/euler-v2-sdk'] || ''")"
+SDK_TARGET_VERSION="$(printf '%s' "$SDK_TARGET_SPEC" | sed 's/^[^0-9]*//')"
+if [ -z "$SDK_TARGET_VERSION" ]; then
+  echo "Could not determine the pinned @eulerxyz/euler-v2-sdk version from the app's package.json." >&2
+  exit 1
+fi
+echo "Stamping SDK clone version to ${SDK_TARGET_VERSION} to match the app's pin."
+node -e "const fs=require('fs'); const f='./packages/euler-v2-sdk/package.json'; const j=JSON.parse(fs.readFileSync(f,'utf8')); j.version=process.argv[1]; fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n');" "$SDK_TARGET_VERSION"
+
 mkdir -p "$SDK_PACK_DIR"
 npm pack ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
 
