@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
@@ -192,20 +191,15 @@ const borrowApyModalData = computed(() => ({
   },
 }))
 
-const supplyApyModalData = computed(() => {
-  const baseSupply = 'interestRateInfo' in pair.collateral
-    ? getVaultSupplyApy(pair.collateral as EVault)
-    : 0
-  return {
-    props: {
-      lendingAPY: baseSupply,
-      intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
-      intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
-      campaigns: getSupplyRewardCampaigns(pair.collateral.address),
-      rewardVaultAddress: pair.collateral.address,
-    },
-  }
-})
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: getVaultSupplyApy(pair.collateral),
+    intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
+    campaigns: getSupplyRewardCampaigns(pair.collateral.address),
+    rewardVaultAddress: pair.collateral.address,
+  },
+}))
 
 const netApyModalData = computed(() => ({
   props: {
