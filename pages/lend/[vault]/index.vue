@@ -382,7 +382,9 @@ const load = async () => {
   isLoading.value = true
   try {
     if (features.value.hasInterestRate && eVault.value) {
-      estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
+      estimateSupplyAPY.value
+        = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+          + totalRewardsAPY.value
     }
     else {
       // For vaults without interest rate info, just use rewards
@@ -605,7 +607,9 @@ const updateEstimates = useDebounceFn(async () => {
 
       if (needsSwap.value && !supplyNano) {
         // No swap quote yet — skip projection, keep current rate
-        estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
+        estimateSupplyAPY.value
+          = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+            + totalRewardsAPY.value
       }
       else {
         const projected = await getProjectedRates(
@@ -617,7 +621,9 @@ const updateEstimates = useDebounceFn(async () => {
         )
         if (estimatesGuard.isStale(gen)) return
         const rawAPY = projected ? nanoToValue(projected.supplyAPY, 25) : getVaultSupplyApy(eVault.value)
-        estimateSupplyAPY.value = rawAPY + totalRewardsAPY.value + intrinsicApy.value
+        estimateSupplyAPY.value
+          = combineApyWithIntrinsic(rawAPY, intrinsicApy.value)
+            + totalRewardsAPY.value
       }
     }
     else {
