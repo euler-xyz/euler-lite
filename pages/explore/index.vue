@@ -298,9 +298,10 @@ const hasActiveFilters = computed(() =>
   || customFilters.value.length > 0,
 )
 const hasExploreMarkets = computed(() => marketGroups.value.some(group => group.source === 'product'))
-const emptyStateTitle = computed(() => hasActiveFilters.value || hasExploreMarkets.value ? 'No markets found' : 'No markets yet')
+const showFilteredEmptyState = computed(() => hasActiveFilters.value && hasExploreMarkets.value)
+const emptyStateTitle = computed(() => showFilteredEmptyState.value ? 'No markets found' : 'No markets yet')
 const emptyStateDescription = computed(() =>
-  hasActiveFilters.value || hasExploreMarkets.value
+  showFilteredEmptyState.value
     ? 'Try clearing search or filters to uncover more markets.'
     : 'No markets are available on this network yet.',
 )
@@ -408,7 +409,7 @@ const clearExploreFilters = () => {
         :description="emptyStateDescription"
       >
         <template
-          v-if="hasActiveFilters"
+          v-if="showFilteredEmptyState"
           #action
         >
           <UiButton

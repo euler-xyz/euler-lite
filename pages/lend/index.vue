@@ -286,9 +286,10 @@ const hasActiveFilters = computed(() =>
   || customFilters.value.length > 0,
 )
 const hasLendMarkets = computed(() => borrowableVaults.value.length > 0)
-const emptyStateTitle = computed(() => hasActiveFilters.value || hasLendMarkets.value ? 'No lend markets found' : 'No lend markets yet')
+const showFilteredEmptyState = computed(() => hasActiveFilters.value && hasLendMarkets.value)
+const emptyStateTitle = computed(() => showFilteredEmptyState.value ? 'No lend markets found' : 'No lend markets yet')
 const emptyStateDescription = computed(() =>
-  hasActiveFilters.value || hasLendMarkets.value
+  showFilteredEmptyState.value
     ? 'Try clearing search or filters to uncover more supply opportunities.'
     : 'No lend markets are available on this network yet.',
 )
@@ -394,7 +395,7 @@ const clearLendFilters = () => {
         :description="emptyStateDescription"
       >
         <template
-          v-if="hasActiveFilters"
+          v-if="showFilteredEmptyState"
           #action
         >
           <UiButton

@@ -3,9 +3,11 @@ import type { PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-s
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 
 const { isConnected } = useWagmi()
+const { isSpyMode } = useSpyMode()
 const { depositPositions, removedDepositPositions, isDepositsLoaded } = useEulerAccount()
 const { isReady } = useVaults()
 const { isEarnVault } = useVaultRegistry()
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 
 const displayedDepositPositions = computed(() => [
   ...removedDepositPositions.value,
@@ -72,7 +74,7 @@ usePortfolioBatchScrollTarget(computed(() => [
         class="flex flex-1 justify-center items-center"
       >
         <PortfolioEmptyState
-          :active="isConnected"
+          :active="hasActiveSession"
           active-text="You don't have deposit positions yet"
           inactive-text="Connect your wallet to see your deposit positions"
         />
@@ -114,7 +116,7 @@ usePortfolioBatchScrollTarget(computed(() => [
         class="flex flex-1 justify-center items-center"
       >
         <PortfolioEmptyState
-          :active="isConnected"
+          :active="hasActiveSession"
           active-text="You don't have deposit positions yet"
           inactive-text="Connect your wallet to see your deposit positions"
         />
