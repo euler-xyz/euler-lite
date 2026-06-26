@@ -288,6 +288,7 @@ interface AdapterView {
   logo?: string
   label?: { primary: string, suffix?: string }
   checks?: OracleAdapterCheck[]
+  isCustomAdapter: boolean
   checksStatus: 'positive' | 'warning' | 'negative' | null
   failedChecks: OracleAdapterCheck[]
 }
@@ -298,7 +299,7 @@ const enrichStep = (step: OracleRouteStep): AdapterView => {
   // LITE-235: an adapter with no curated oracle-checks entry must not fall back to
   // its self-reported onchain name(); render it as unknown instead. The template's
   // `|| 'Unknown'` fallbacks turn the empty strings into the displayed label.
-  const { name: resolvedName, provider: resolvedProvider } = resolveOracleAdapterIdentity(step, meta, isAdapter)
+  const { name: resolvedName, provider: resolvedProvider, isCustomAdapter } = resolveOracleAdapterIdentity(step, meta, isAdapter)
   const provider = resolvedProvider ?? ''
   const name = resolvedName ?? ''
   const checks = meta?.checks
@@ -321,6 +322,7 @@ const enrichStep = (step: OracleRouteStep): AdapterView => {
         }
       : undefined,
     checks,
+    isCustomAdapter,
     checksStatus: getChecksStatus(checks),
     failedChecks: checks?.filter(c => !c.pass) ?? [],
   }
@@ -969,7 +971,11 @@ const explorerLink = (address: string) => getExplorerLink(address, chainId.value
         <div class="flex flex-col gap-4">
           <span class="text-content-tertiary">Checks</span>
           <span
-            v-if="!tooltipAdapter.checks?.length"
+            v-if="tooltipAdapter.isCustomAdapter"
+            class="text-content-secondary"
+          >Custom — set by risk manager</span>
+          <span
+            v-else-if="!tooltipAdapter.checks?.length"
             class="text-content-secondary"
           >N/A</span>
           <span
