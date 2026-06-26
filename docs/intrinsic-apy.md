@@ -90,13 +90,13 @@ The SDK exposes an equivalent on its side: `computeSupplyApyBreakdown(vault)` re
 
 Borrow views call the same helper path, but the UI copy treats intrinsic APY as cost-side yield. `VaultBorrowItem.vue` passes `getVaultIntrinsicApyInfo()` into `VaultBorrowApyModal.vue`; that modal describes intrinsic APY as "yield intrinsic to the borrowed asset ... which increases effective borrowing cost".
 
-The borrow APY modal's breakdown is additive:
+The borrow APY modal uses the same compounded intrinsic helper as supply-side displays, then subtracts borrow rewards:
 
 ```text
-total borrow APY = borrowing APY + intrinsic APY - reward APY
+total borrow APY = borrowing APY + (1 + borrowing APY / 100) * intrinsic APY - reward APY
 ```
 
-Pair-level Net APY and Max ROE screens still use the compounded helper for consistency with vault headline APYs. When changing borrow-side APY copy, keep the direction explicit: intrinsic yield on the debt asset makes borrowing more expensive, while borrow rewards reduce the displayed cost.
+Pair-level Net APY and Max ROE screens use the same compounded helper for consistency with vault headline APYs. When changing borrow-side APY copy, keep the direction explicit: intrinsic yield on the debt asset makes borrowing more expensive, while borrow rewards reduce the displayed cost.
 
 ## User toggle
 

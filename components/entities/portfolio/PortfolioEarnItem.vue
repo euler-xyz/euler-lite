@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { EulerEarn, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { formatAssetValue, getAssetUsdValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -28,16 +28,18 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 
-const vault = computed(() => position.vault as EulerEarn)
+const { getVault: getRegistryVault, isVerifiedVault } = useVaultRegistry()
+const vault = computed(() =>
+  (getRegistryVault(position.vault!.address) as EulerEarn | undefined) ?? (position.vault as EulerEarn),
+)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
 const { modifiedKeys, removedKeys } = useTxBatch()
 const isSimulatedRemoved = computed(() => removedKeys.value.has(positionKey.value))
 const isSimulatedModified = computed(() => !isSimulatedRemoved.value && modifiedKeys.value.has(positionKey.value))
-const apyBreakdown = computed(() => position.getApyBreakdown({ viewer: viewer.value }))
+const apyBreakdown = computed(() => computeSupplyApyBreakdown(vault.value, viewer.value))
 const rewardsExist = computed(() =>
   settings.value.enableRewardsApy && (apyBreakdown.value?.rewards ?? 0) > 0,
 )
-const { isVerifiedVault } = useVaultRegistry()
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value.address))

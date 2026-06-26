@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getSubAccountId as getSubAccountIndex, isSecuritizeCollateralVault, type EVault, type PortfolioSavingsPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, getSubAccountId as getSubAccountIndex, isSecuritizeCollateralVault, type EVault, type PortfolioSavingsPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
@@ -28,7 +28,10 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardCampaignsFromVault } = useRewardsApy()
 const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 
-const vault = computed(() => position.vault!)
+const { getVault: getRegistryVault, getVaultCategory, isVerifiedVault } = useVaultRegistry()
+const vault = computed(() =>
+  (getRegistryVault(position.vault!.address) as VaultEntity | undefined) ?? position.vault!,
+)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
 // Positions the active simulated batch layer modified get a dotted border.
 const { modifiedKeys, removedKeys } = useTxBatch()
@@ -41,7 +44,7 @@ const utilisationWarning = computed(() => {
 
 const isSecuritize = computed(() => isSecuritizeCollateralVault(vault.value))
 
-const apyBreakdown = computed(() => position.getApyBreakdown({ viewer: viewer.value }))
+const apyBreakdown = computed(() => computeSupplyApyBreakdown(vault.value, viewer.value))
 const rewardsExist = computed(() =>
   settings.value.enableRewardsApy && (apyBreakdown.value?.rewards ?? 0) > 0,
 )
@@ -49,7 +52,6 @@ const supplyApyWithRewards = computed(() => visibleTotal(apyBreakdown.value) ?? 
 const visibleApyBreakdown = computed(() => visibleBreakdown(apyBreakdown.value))
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
-const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value.address))
 const isDeprecated = computed(() => isVaultDeprecated(vault.value.address))
 const isEscrow = computed(() => getVaultCategory(vault.value.address) === 'escrow')
