@@ -709,9 +709,29 @@ onMounted(() => {
                     </div>
                   </template>
 
-                  <!-- Cell selection: single lend + single borrow card -->
+                  <!-- Cell selection -->
                   <template v-else>
-                    <div class="flex flex-col gap-12">
+                    <!-- Oracle view: dedicated oracle adapters section for the
+                         selected collateral/liability pair (same component as the
+                         borrow page's Oracles block). -->
+                    <template v-if="getMatrixView(market.id) === 'oracle'">
+                      <template
+                        v-for="pair in [getSelectedBorrowPair(market)]"
+                        :key="'oracle-' + (pair ? `${pair.collateral.address}-${pair.borrow.address}` : '')"
+                      >
+                        <VaultOverviewBlockOracleAdapters
+                          v-if="pair"
+                          :vault="pair.borrow"
+                          :collateral-vaults="[pair.collateral]"
+                        />
+                      </template>
+                    </template>
+
+                    <!-- Other metrics: single lend + single borrow card -->
+                    <div
+                      v-else
+                      class="flex flex-col gap-12"
+                    >
                       <template
                         v-for="lendVault in [getSelectedLendVault(market)]"
                         :key="'lend-' + (lendVault ? getVaultAddress(lendVault) : '')"
