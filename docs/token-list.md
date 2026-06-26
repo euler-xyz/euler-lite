@@ -1,6 +1,6 @@
 # Token List
 
-The token list provides token metadata (name, symbol, decimals, logo URL) used across the app for asset logos, the swap token selector, and wallet balance fetching.
+The token list provides token metadata (name, symbol, decimals, logo URL, and optional category tags) used across the app for asset logos, the swap token selector, wallet balance fetching, correlated-asset logic, and borrow-page asset filters.
 
 ## Architecture
 
@@ -57,6 +57,7 @@ Singleton state with a `shallowRef` token map, keyed by normalized address.
 - **Cache TTL**: 5 minutes. The client skips the API call if the same chain's data was fetched within the last 5 minutes (bypassed by `forceRefresh`).
 - **Race guard**: prevents stale responses (from a previous chain) from overwriting current data.
 - **`filterByChain()`**: filters the raw token array by `chainId`, normalizes addresses, and conditionally includes the native currency (address zero) when the wrapped variant exists.
+- **Tags**: token entries may include `tags?: string[]`. `filterByChain()` normalizes tags with `normalizeTokenCategoryTags()` and copies wrapped-native tags to the native zero-address entry.
 
 ### Exported functions
 
@@ -66,8 +67,22 @@ Singleton state with a `shallowRef` token map, keyed by normalized address.
 | `getAssetLogoUrl(address, symbol)` | Returns logo URL. Checks local overrides (`assets/tokens/`) first, then token list, then `''`. |
 | `getTokenListLogoUrl(address)` | Returns logo URL from token list only. Upgrades CoinGecko `/thumb/` to `/small/`. |
 | `hasToken(address)` | Check if a token is in the current map. |
+| `getTokenByAddress(address)` | Return the normalized token-list entry, including `tags` when present. |
+| `getTokenCategoryTags(address)` | Return normalized category tags from the token entry. Used by correlated-pair checks and borrow-page asset category filters. |
 | `getAllTokens()` | Get all tokens for the current chain. |
 | `toVaultAsset(entry)` | Convert a token list entry to a `VaultAsset`. |
+
+## Category Tags
+
+Category tags are an operational input, not just display metadata. `utils/token-categories.ts` allowlists correlated categories (`usd`, `eth`, `btc`, `mon`, `avax`, `hype`, `bnb`) and uses them to decide whether leveraged metrics are meaningful for a pair or portfolio position.
+
+Current consumers:
+
+- `areTokenAddressesCorrelatedByTags()` gates Max ROE and Max multiplier for pair-level surfaces such as Explore and Borrow.
+- `areTokenAddressesInSameCorrelatedCategory()` gates portfolio ROE when a borrow position has one or more collateral vaults.
+- `toTokenCategoryFilterValue()` and `tokenAddressMatchesCategoryFilter()` power Borrow quick filters such as `category:usd`.
+
+When adding or changing token metadata, keep category tags lowercase and stable. Unsupported tags remain available on the token entry after normalization, but they do not participate in correlation or category quick filters unless added to `CORRELATED_CATEGORY_LABELS`.
 
 ## Loading Strategy
 
