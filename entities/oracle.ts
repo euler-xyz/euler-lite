@@ -78,6 +78,24 @@ export type OracleAdapterMeta = {
   checks?: OracleAdapterCheck[]
 }
 
+export function normalizeOracleAdapterCheckSeverity(severity: unknown): OracleAdapterCheckSeverity {
+  if (typeof severity !== 'string') return OracleAdapterCheckSeverity.Info
+
+  switch (severity.trim().toLowerCase()) {
+    case 'high':
+      return OracleAdapterCheckSeverity.High
+    case 'med':
+    case 'medium':
+      return OracleAdapterCheckSeverity.Medium
+    case 'low':
+      return OracleAdapterCheckSeverity.Low
+    case 'info':
+      return OracleAdapterCheckSeverity.Info
+    default:
+      return OracleAdapterCheckSeverity.Info
+  }
+}
+
 export function getChecksStatus(checks: OracleAdapterCheck[] | undefined): 'positive' | 'warning' | 'negative' | null {
   if (!checks?.length) return null
   const failed = checks.filter(c => !c.pass)

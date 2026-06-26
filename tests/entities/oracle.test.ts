@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Address } from 'viem'
 import {
+  getChecksStatus,
   getRouterRecognition,
+  normalizeOracleAdapterCheckSeverity,
   resolveOracleAdapterIdentity,
   type OracleAdapterMeta,
+  OracleAdapterCheckSeverity,
 } from '~/entities/oracle'
 
 const oracle = '0x0000000000000000000000000000000000000001' as Address
@@ -86,5 +89,30 @@ describe('getRouterRecognition (LITE-236)', () => {
   it('returns "unrecognized" when any router is missing from the allowlist', () => {
     const recognized = new Set([router])
     expect(getRouterRecognition([router, otherRouter], recognized)).toBe('unrecognized')
+  })
+})
+
+describe('normalizeOracleAdapterCheckSeverity', () => {
+  it('accepts oracle-checks wire casing', () => {
+    expect(normalizeOracleAdapterCheckSeverity('High')).toBe(OracleAdapterCheckSeverity.High)
+    expect(normalizeOracleAdapterCheckSeverity('Med')).toBe(OracleAdapterCheckSeverity.Medium)
+    expect(normalizeOracleAdapterCheckSeverity('Info')).toBe(OracleAdapterCheckSeverity.Info)
+  })
+
+  it('keeps enum casing and falls back to info for unknown values', () => {
+    expect(normalizeOracleAdapterCheckSeverity(OracleAdapterCheckSeverity.High)).toBe(OracleAdapterCheckSeverity.High)
+    expect(normalizeOracleAdapterCheckSeverity('wat')).toBe(OracleAdapterCheckSeverity.Info)
+    expect(normalizeOracleAdapterCheckSeverity(undefined)).toBe(OracleAdapterCheckSeverity.Info)
+  })
+})
+
+describe('getChecksStatus', () => {
+  it('treats normalized high-severity failures as negative', () => {
+    expect(getChecksStatus([{
+      id: 'Source code provenance',
+      message: 'Contract metadata hash is not recognized.',
+      pass: false,
+      severity: normalizeOracleAdapterCheckSeverity('High'),
+    }])).toBe('negative')
   })
 })
