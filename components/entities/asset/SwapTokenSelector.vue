@@ -6,6 +6,7 @@ import { formatNumber, truncate } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getExplorerLink } from '~/utils/block-explorer'
+import { filterSelectableTokens, sortSelectableTokens } from '~/utils/token-selector'
 
 export interface SwapTokenSelectMeta {
   isUnknownToken?: boolean
@@ -118,16 +119,9 @@ const tokenOptions = computed((): TokenOption[] => {
     })
   }
 
-  // Sort: tokens with balance first (desc by balance), then vault tokens alphabetically
-  return options.sort((a, b) => {
-    if (a.balance > 0n && b.balance <= 0n) return -1
-    if (a.balance <= 0n && b.balance > 0n) return 1
-    if (a.balance > 0n && b.balance > 0n) {
-      if (a.balanceFormatted > b.balanceFormatted) return -1
-      if (a.balanceFormatted < b.balanceFormatted) return 1
-    }
-    return a.asset.symbol.localeCompare(b.asset.symbol)
-  })
+  // Bubble the relevant tokens to the top (held → Euler assets → the rest); the
+  // full list stays present and reachable by scrolling / searching.
+  return sortSelectableTokens(options)
 })
 
 // Include both vault and token list addresses in known set
@@ -144,23 +138,31 @@ const isUnknownAddress = computed(() => {
   return isAddress(q) && !knownAddresses.value.has(q.toLowerCase())
 })
 
-const filteredOptions = computed(() => {
-  const base = searchQuery.value
-    ? tokenOptions.value.filter((opt) => {
-        const q = searchQuery.value.toLowerCase()
-        return opt.asset.symbol.toLowerCase().includes(q)
-          || opt.asset.name.toLowerCase().includes(q)
-          || opt.asset.address.toLowerCase().includes(q)
-      })
-    : tokenOptions.value
+// Output ("Receive as") shows the full list with relevant tokens bubbled to the
+// top (see sortSelectableTokens); input ("Pay with") narrows to held tokens.
+const filteredOptions = computed(() => filterSelectableTokens(tokenOptions.value, mode, searchQuery.value))
 
-  // For input mode (pay with): filter zero-balance tokens when not searching
-  // For output mode (receive as): always show all tokens
-  if (mode === 'input' && !searchQuery.value) {
-    return base.filter(opt => opt.balance > 0n)
-  }
-  return base
+// Incrementally render rows — and therefore token-icon requests — instead of
+// mounting the whole list at once: start with a capped batch and grow on scroll.
+// Together with the curated default this keeps the picker from firing thousands
+// of icon fetches (the source of the llama.fi 404 flood).
+const INITIAL_RENDER_COUNT = 50
+const RENDER_BATCH = 50
+const renderLimit = ref(INITIAL_RENDER_COUNT)
+const visibleOptions = computed(() => filteredOptions.value.slice(0, renderLimit.value))
+const hasMoreToRender = computed(() => renderLimit.value < filteredOptions.value.length)
+
+watch(searchQuery, () => {
+  renderLimit.value = INITIAL_RENDER_COUNT
 })
+
+const onListScroll = (event: Event) => {
+  if (!hasMoreToRender.value) return
+  const el = event.target as HTMLElement
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
+    renderLimit.value += RENDER_BATCH
+  }
+}
 
 // Compute geo state once per visible row rather than 3x per render
 // (class binding + bg-card-hover + click guard).
@@ -247,9 +249,12 @@ const handleSelectCustomToken = () => {
           clearable
         />
       </div>
-      <div class="flex-1 min-h-0 overflow-auto styled-scrollbar">
+      <div
+        class="flex-1 min-h-0 overflow-auto styled-scrollbar"
+        @scroll="onListScroll"
+      >
         <div
-          v-for="opt in filteredOptions"
+          v-for="opt in visibleOptions"
           :key="opt.asset.address"
           data-id="swap-token-option"
           :data-token-name="opt.asset.name"
@@ -340,6 +345,14 @@ const handleSelectCustomToken = () => {
             </div>
           </div>
         </div>
+        <!-- More rows render as the user scrolls (keeps icon requests bounded) -->
+        <div
+          v-if="hasMoreToRender"
+          class="py-12 text-center text-content-tertiary text-p3"
+        >
+          Scroll or search to see more tokens
+        </div>
+
         <!-- Custom token: loading -->
         <div
           v-if="isUnknownAddress && isCustomTokenLoading"
