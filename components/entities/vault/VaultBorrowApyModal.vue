@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { formatNumber } from '~/utils/string-utils'
+import { combineApyWithIntrinsic } from '~/utils/vault-intrinsic-apy'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignAprPercent, rewardCampaignDisplays } from '~/entities/reward-campaign'
 import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
@@ -23,7 +24,7 @@ const rewardsTotalAPY = computed(() => {
 
 const intrinsicApyValue = computed(() => intrinsicAPY ?? 0)
 const hasIntrinsicApy = computed(() => intrinsicApyValue.value > 0)
-const totalBorrowApy = computed(() => borrowingAPY + intrinsicApyValue.value - (rewardsTotalAPY.value || 0))
+const totalBorrowApy = computed(() => combineApyWithIntrinsic(borrowingAPY, intrinsicApyValue.value) - (rewardsTotalAPY.value || 0))
 
 const rewardsInfo = computed(() => {
   return rewardCampaignDisplays(campaigns, 'borrow', rewardVaultAddress)
