@@ -21,12 +21,22 @@ export function getVaultIntrinsicApy(
   return getVaultIntrinsicApyInfo(vault, enabled).apy
 }
 
+/**
+ * Combine a base APY with an intrinsic (e.g. staking) APY the way a yield-bearing
+ * position actually accrues: the intrinsic yield compounds on top of the base
+ * rather than being a flat sum. `combineApyWithIntrinsic(5, 4) = 5 + 1.05 * 4 = 9.2`.
+ * Shared by the headline figures (via withVaultIntrinsicApy) and the APY tooltips
+ * so both report the same total.
+ */
+export function combineApyWithIntrinsic(baseApy: number, intrinsicApy: number): number {
+  if (!intrinsicApy) return baseApy
+  return baseApy + (1 + baseApy / 100) * intrinsicApy
+}
+
 export function withVaultIntrinsicApy(
   baseApy: number,
   vault: VaultWithIntrinsicApy | undefined,
   enabled: boolean,
 ): number {
-  const intrinsic = getVaultIntrinsicApy(vault, enabled)
-  if (intrinsic === 0) return baseApy
-  return baseApy + (1 + baseApy / 100) * intrinsic
+  return combineApyWithIntrinsic(baseApy, getVaultIntrinsicApy(vault, enabled))
 }

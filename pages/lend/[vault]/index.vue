@@ -5,7 +5,7 @@ import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
@@ -350,7 +350,7 @@ const baseSupplyApy = computed(() => {
   if (!eVault.value) return 0
   return getVaultSupplyApy(eVault.value)
 })
-const supplyApyWithIntrinsic = computed(() => baseSupplyApy.value + intrinsicApy.value)
+const supplyApyWithIntrinsic = computed(() => combineApyWithIntrinsic(baseSupplyApy.value, intrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!eVault.value && !securitizeVault.value) return '0.00'
   return formatNumber(supplyApyWithIntrinsic.value + totalRewardsAPY.value)
@@ -382,7 +382,9 @@ const load = async () => {
   isLoading.value = true
   try {
     if (features.value.hasInterestRate && eVault.value) {
-      estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
+      estimateSupplyAPY.value
+        = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+          + totalRewardsAPY.value
     }
     else {
       // For vaults without interest rate info, just use rewards
@@ -605,7 +607,9 @@ const updateEstimates = useDebounceFn(async () => {
 
       if (needsSwap.value && !supplyNano) {
         // No swap quote yet — skip projection, keep current rate
-        estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
+        estimateSupplyAPY.value
+          = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+            + totalRewardsAPY.value
       }
       else {
         const projected = await getProjectedRates(
@@ -617,7 +621,9 @@ const updateEstimates = useDebounceFn(async () => {
         )
         if (estimatesGuard.isStale(gen)) return
         const rawAPY = projected ? nanoToValue(projected.supplyAPY, 25) : getVaultSupplyApy(eVault.value)
-        estimateSupplyAPY.value = rawAPY + totalRewardsAPY.value + intrinsicApy.value
+        estimateSupplyAPY.value
+          = combineApyWithIntrinsic(rawAPY, intrinsicApy.value)
+            + totalRewardsAPY.value
       }
     }
     else {
