@@ -10,12 +10,10 @@ import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import { VaultSupplyApyModal } from '#components'
 import { getAddress, maxUint256 } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
@@ -94,22 +92,6 @@ const supplyApyModalData = computed(() => ({
     rewardVaultAddress: vault.address,
   },
 }))
-
-// Risk parameters - fetch share token exchange rate (ERC4626 standard)
-const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
-
-const loadRiskParameters = () => {
-  try {
-    // Share→asset exchange rate from the SDK vault entity (was a direct
-    // convertToAssets RPC read); the entity derives it from the same data.
-    shareTokenExchangeRate.value = vault.convertToAssets(1n * 10n ** BigInt(vault.shares.decimals))
-  }
-  catch (e) {
-    logWarn('SecuritizeVaultOverview/shareTokenExchangeRate', e)
-  }
-}
-
-loadRiskParameters()
 
 // Price display
 const priceDisplay = ref('-')
@@ -338,17 +320,6 @@ const supplyCapPercentageDisplay = computed(() => {
               :max="100"
             />
           </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          label="Share token exchange rate"
-          orientation="horizontal"
-        >
-          <template v-if="shareTokenExchangeRate !== undefined">
-            {{ formatNumber(nanoToValue(shareTokenExchangeRate, vault.asset.decimals), 6, 2) }}
-          </template>
-          <template v-else>
-            -
-          </template>
         </VaultOverviewLabelValue>
       </div>
     </div>
