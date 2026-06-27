@@ -231,9 +231,11 @@ const hasActiveFilters = computed(() =>
   || selectedCurators.value.length > 0
   || customFilters.value.length > 0,
 )
-const emptyStateTitle = computed(() => hasActiveFilters.value ? 'No earn vaults found' : 'No earn vaults yet')
+const hasEarnVaults = computed(() => list.value.length > 0)
+const showFilteredEmptyState = computed(() => hasActiveFilters.value && hasEarnVaults.value)
+const emptyStateTitle = computed(() => showFilteredEmptyState.value ? 'No earn vaults found' : 'No earn vaults yet')
 const emptyStateDescription = computed(() =>
-  hasActiveFilters.value
+  showFilteredEmptyState.value
     ? 'Try clearing search or filters to uncover more strategies.'
     : 'No earn vaults are available on this network yet.',
 )
@@ -328,7 +330,7 @@ const clearEarnFilters = () => {
         :description="emptyStateDescription"
       >
         <template
-          v-if="hasActiveFilters"
+          v-if="showFilteredEmptyState"
           #action
         >
           <UiButton

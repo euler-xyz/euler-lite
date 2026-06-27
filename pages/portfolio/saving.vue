@@ -64,7 +64,7 @@ usePortfolioBatchScrollTarget(computed(() => [
     </p>
     <div class="flex flex-1 p-8 rounded-12 mb-16 border border-line-default bg-card">
       <div
-        v-if="isConnected && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
+        v-if="hasActiveSession && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />
@@ -106,7 +106,7 @@ usePortfolioBatchScrollTarget(computed(() => [
     </p>
     <div class="flex flex-1 p-8 rounded-12 border border-line-default bg-card">
       <div
-        v-if="isConnected && (!isDepositsLoaded || !isReady)"
+        v-if="hasActiveSession && (!isDepositsLoaded || !isReady)"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />

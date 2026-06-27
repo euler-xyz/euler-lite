@@ -12,7 +12,6 @@ withDefaults(defineProps<{
     aria-hidden="true"
   >
     <span class="ui-empty-state-icon__glow" />
-    <span class="ui-empty-state-icon__euler-mark">e</span>
     <UiIcon
       :name="name"
       class="ui-empty-state-icon__icon"
@@ -37,7 +36,6 @@ withDefaults(defineProps<{
     radial-gradient(circle at 50% 24%, rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0) 60%),
     var(--bg-surface-secondary);
   box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.06);
-  animation: ui-empty-state-icon-float 6s var(--ease-default) infinite;
 
   &::after {
     content: '';
@@ -57,35 +55,11 @@ withDefaults(defineProps<{
     animation: ui-empty-state-icon-glow 7s var(--ease-default) infinite;
   }
 
-  &__euler-mark {
-    position: absolute;
-    right: 8px;
-    bottom: 5px;
-    color: currentColor;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1;
-    opacity: 0.22;
-    transform: rotate(-8deg);
-    animation: ui-empty-state-icon-mark 7s var(--ease-default) infinite;
-  }
-
   &__icon {
     position: relative;
     z-index: 1;
     width: 24px;
     height: 24px;
-  }
-}
-
-@keyframes ui-empty-state-icon-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-2px);
   }
 }
 
@@ -119,24 +93,9 @@ withDefaults(defineProps<{
   }
 }
 
-@keyframes ui-empty-state-icon-mark {
-  0%,
-  100% {
-    opacity: 0.18;
-    transform: translateY(0) rotate(-8deg);
-  }
-
-  50% {
-    opacity: 0.3;
-    transform: translateY(-1px) rotate(-8deg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .ui-empty-state-icon,
   .ui-empty-state-icon::after,
-  .ui-empty-state-icon__glow,
-  .ui-empty-state-icon__euler-mark {
+  .ui-empty-state-icon__glow {
     animation: none;
   }
 }
