@@ -43,9 +43,7 @@ export const updateV3ProxyBackoffFromResponse = (
 ) => {
   if (RETRYABLE_V3_PROXY_STATUSES.has(status)) {
     recordV3ProxyBackoff(key, now)
-    return
   }
-  clearV3ProxyBackoff(key)
 }
 
 export const resetV3ProxyBackoffsForTest = () => {

@@ -153,6 +153,50 @@ describe('/api/v3 proxy route', () => {
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps cooldown when an overlapping success returns after a retryable failure', async () => {
+    let resolveRetryable: (response: Response) => void = () => {}
+    let resolveSuccess: (response: Response) => void = () => {}
+    mocks.fetchWithTimeout
+      .mockReturnValueOnce(new Promise<Response>((resolve) => {
+        resolveRetryable = resolve
+      }))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => {
+        resolveSuccess = resolve
+      }))
+
+    const retryable = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    const success = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+
+    const retryableResult = handler(retryable)
+    const successResult = handler(success)
+
+    await Promise.resolve()
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2)
+
+    resolveRetryable(new Response('{"error":true}', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: { 'content-type': 'application/json' },
+    }))
+    await expect(retryableResult).resolves.toBe('{"error":true}')
+
+    resolveSuccess(new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    await expect(successResult).resolves.toBe('{"ok":true}')
+
+    const blocked = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    await expect(handler(blocked)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
+    expect(blocked.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2)
+  })
+
   it('backs off after transport failures instead of surfacing a generic 500', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('timeout'))
     const first = makeEvent('GET', `https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1`)
