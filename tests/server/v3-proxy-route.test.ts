@@ -53,6 +53,9 @@ type TestEvent = H3Event & {
 }
 
 const ACCOUNT = '0x0000000000000000000000000000000000000001'
+const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000002'
+const VAULT = '0x0000000000000000000000000000000000000003'
+const OTHER_VAULT = '0x0000000000000000000000000000000000000004'
 
 const handler = (await import('~/server/api/v3/[...path]')).default
 const { resetV3ProxyBackoffsForTest } = await import('~/server/utils/v3-proxy-backoff')
@@ -213,6 +216,41 @@ describe('/api/v3 proxy route', () => {
 
     expect(first.context.responseHeaders?.['retry-after']).toBe('10')
     expect(second.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('shares cooldown across dynamic account position paths', async () => {
+    mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('timeout'))
+    const first = makeEvent('GET', `https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1`)
+    const second = makeEvent('GET', `https://app.example/api/v3/accounts/${OTHER_ACCOUNT}/positions?chainId=1`)
+
+    await expect(handler(first)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream unavailable',
+    })
+    await expect(handler(second)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('shares cooldown across dynamic earn vault detail paths', async () => {
+    mocks.fetchWithTimeout.mockResolvedValueOnce(new Response('{"error":true}', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: { 'content-type': 'application/json' },
+    }))
+    const first = makeEvent('GET', `https://app.example/api/v3/earn/vaults/1/${VAULT}`)
+    const second = makeEvent('GET', `https://app.example/api/v3/earn/vaults/1/${OTHER_VAULT}`)
+
+    await expect(handler(first)).resolves.toBe('{"error":true}')
+    await expect(handler(second)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 })

@@ -8,8 +8,18 @@ type V3ProxyBackoffEntry = {
 
 const backoffs = new Map<string, V3ProxyBackoffEntry>()
 
+const normalizeV3ProxyBackoffPath = (pathname: string) => {
+  if (/^\/v3\/accounts\/[^/]+\/positions$/.test(pathname)) {
+    return '/v3/accounts/:address/positions'
+  }
+  if (/^\/v3\/earn\/vaults\/[^/]+\/[^/]+$/.test(pathname)) {
+    return '/v3/earn/vaults/:chainId/:vault'
+  }
+  return pathname
+}
+
 export const buildV3ProxyBackoffKey = (method: string, pathname: string) =>
-  `${method.toUpperCase()} ${pathname}`
+  `${method.toUpperCase()} ${normalizeV3ProxyBackoffPath(pathname)}`
 
 export const readV3ProxyBackoffMs = (
   key: string,
