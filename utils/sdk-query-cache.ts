@@ -3,7 +3,15 @@ import { QueryClient } from '@tanstack/vue-query'
 import { serializeQueryArgs, type BuildQueryFn, type EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
 import { DEFAULT_STALE_TIME_MS, FORM_STALE_TIMES, STALE_TIMES } from '~/utils/sdk-query-policy'
 
-export const sdkQueryClient = new QueryClient()
+// Match the app QueryClient: SDK queries already wrap RPC/V3 callers that have
+// their own retry behavior, so TanStack's default 3 retries amplifies outages.
+export const sdkQueryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 0,
+    },
+  },
+})
 
 type SdkQueryRecord = {
   queryName: string

@@ -3,14 +3,23 @@ import {
   getMethod,
   getRequestURL,
   readRawBody,
+  setResponseHeader,
   setResponseHeaders,
   setResponseStatus,
 } from 'h3'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
+  buildV3ProxyBackoffKey,
+  readV3ProxyBackoffMs,
+  recordV3ProxyBackoff,
+  updateV3ProxyBackoffFromResponse,
+  V3_PROXY_FAILURE_BACKOFF_MS,
+} from '~/server/utils/v3-proxy-backoff'
+import {
   buildV3ProxyRequestHeaders,
   buildV3ProxyTarget,
+  getV3ProxyPath,
   readForwardedV3ResponseHeaders,
   validateV3ProxyUrl,
 } from '~/server/utils/v3-proxy'
@@ -37,14 +46,34 @@ export default defineEventHandler(async (event) => {
   rateLimiter.consume(event, method === 'POST' ? 5 : 1)
 
   const target = buildV3ProxyTarget(requestUrl)
+  const backoffKey = buildV3ProxyBackoffKey(method, getV3ProxyPath(requestUrl))
+  const backoffMs = readV3ProxyBackoffMs(backoffKey)
+  if (backoffMs > 0) {
+    setResponseHeader(event, 'retry-after', Math.ceil(backoffMs / 1_000))
+    throw createError({ statusCode: 503, statusMessage: 'V3 upstream cooling down' })
+  }
+
   const headers = buildV3ProxyRequestHeaders(method)
   const body = method === 'POST' ? await readRawBody(event) : undefined
 
-  const upstream = await fetchWithTimeout(target, undefined, {
-    method,
-    headers,
-    body,
-  })
+  let upstream: Response
+  try {
+    upstream = await fetchWithTimeout(target, undefined, {
+      method,
+      headers,
+      body,
+    })
+  }
+  catch {
+    recordV3ProxyBackoff(backoffKey)
+    setResponseHeader(event, 'retry-after', Math.ceil(V3_PROXY_FAILURE_BACKOFF_MS / 1_000))
+    throw createError({ statusCode: 503, statusMessage: 'V3 upstream unavailable' })
+  }
+
+  updateV3ProxyBackoffFromResponse(backoffKey, upstream.status)
+  if ([429, 500, 502, 503, 504].includes(upstream.status)) {
+    setResponseHeader(event, 'retry-after', Math.ceil(V3_PROXY_FAILURE_BACKOFF_MS / 1_000))
+  }
 
   setResponseStatus(event, upstream.status, upstream.statusText)
   setResponseHeaders(event, readForwardedV3ResponseHeaders(upstream.headers))

@@ -7,9 +7,9 @@ describe('sdkBuildQuery', () => {
     sdkQueryClient.clear()
   })
 
-  it('uses a dedicated query client with default retries', () => {
+  it('uses a dedicated query client without default retries', () => {
     expect(sdkQueryClient).not.toBe(queryClient)
-    expect(sdkQueryClient.getDefaultOptions().queries?.retry).toBeUndefined()
+    expect(sdkQueryClient.getDefaultOptions().queries?.retry).toBe(0)
     expect(queryClient.getDefaultOptions().queries?.retry).toBe(0)
   })
 

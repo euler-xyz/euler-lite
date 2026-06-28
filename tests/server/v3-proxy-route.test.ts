@@ -13,7 +13,16 @@ vi.mock('h3', () => ({
   getRequestURL: (event: TestEvent) => new URL(event.url),
   readRawBody: (event: TestEvent) => event.body,
   setResponseHeaders: (event: TestEvent, headers: Record<string, string>) => {
-    event.context.responseHeaders = headers
+    event.context.responseHeaders = {
+      ...event.context.responseHeaders,
+      ...headers,
+    }
+  },
+  setResponseHeader: (event: TestEvent, name: string, value: number | string) => {
+    event.context.responseHeaders = {
+      ...event.context.responseHeaders,
+      [name]: String(value),
+    }
   },
   setResponseStatus: (event: TestEvent, status: number, statusText?: string) => {
     event.context.status = status
@@ -46,6 +55,7 @@ type TestEvent = H3Event & {
 const ACCOUNT = '0x0000000000000000000000000000000000000001'
 
 const handler = (await import('~/server/api/v3/[...path]')).default
+const { resetV3ProxyBackoffsForTest } = await import('~/server/utils/v3-proxy-backoff')
 
 const makeEvent = (method: string, url: string, body?: string): TestEvent => ({
   method,
@@ -66,6 +76,7 @@ const makeEvent = (method: string, url: string, body?: string): TestEvent => ({
 describe('/api/v3 proxy route', () => {
   afterEach(() => {
     delete process.env.EULER_SDK_V3_API_KEY
+    resetV3ProxyBackoffsForTest()
     vi.clearAllMocks()
   })
 
@@ -119,5 +130,45 @@ describe('/api/v3 proxy route', () => {
     })
     expect(mocks.consume).not.toHaveBeenCalled()
     expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
+  })
+
+  it('backs off repeated requests after a retryable upstream response', async () => {
+    mocks.fetchWithTimeout.mockResolvedValueOnce(new Response('{"error":true}', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: { 'content-type': 'application/json' },
+    }))
+    const first = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    const second = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+
+    await expect(handler(first)).resolves.toBe('{"error":true}')
+    await expect(handler(second)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
+    expect(first.context.status).toBe(502)
+    expect(first.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(second.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('backs off after transport failures instead of surfacing a generic 500', async () => {
+    mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('timeout'))
+    const first = makeEvent('GET', `https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1`)
+    const second = makeEvent('GET', `https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1`)
+
+    await expect(handler(first)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream unavailable',
+    })
+    await expect(handler(second)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
+    expect(first.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(second.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 })
