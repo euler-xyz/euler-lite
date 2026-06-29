@@ -72,13 +72,14 @@ const totalCollateralExposureUsd = computed(() =>
 const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
 const collateralExposureSummary = computed(() => {
   const group = topCollateralExposureGroup.value
-  if (!group || !hasLiveExposureData.value) return '-'
+  if (!group) return '-'
+  if (!hasLiveExposureData.value) return 'Unavailable'
 
   const pct = totalCollateralExposureUsd.value > 0
     ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
     : '0'
 
-  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
+  return `Top: ${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
 })
 
 watchEffect(() => {

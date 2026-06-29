@@ -43,12 +43,14 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
 const isExpanded = ref(false)
+const isCombinedExposureExpanded = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
 const UINT136_MAX = 2n ** 136n - 1n
 const COLLAPSED_GROUP_COUNT = 3
+const COMBINED_COLLAPSED_GROUP_COUNT = 4
 
 const isPendingRemoval = (strategy: EulerEarnStrategyInfo) => strategy.removableAt > 0
 
@@ -197,7 +199,12 @@ const totalCollateralExposureUsd = computed(() =>
 )
 
 const visibleCombinedCollateralExposureGroups = computed(() =>
-  combinedCollateralExposureGroups.value.slice(0, 4),
+  isCombinedExposureExpanded.value
+    ? combinedCollateralExposureGroups.value
+    : combinedCollateralExposureGroups.value.slice(0, COMBINED_COLLAPSED_GROUP_COUNT),
+)
+const hiddenCombinedCollateralExposureCount = computed(() =>
+  Math.max(0, combinedCollateralExposureGroups.value.length - visibleCombinedCollateralExposureGroups.value.length),
 )
 
 const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
@@ -273,6 +280,10 @@ const toggleExpanded = () => {
   isExpanded.value = !isExpanded.value
 }
 
+const toggleCombinedExposureExpanded = () => {
+  isCombinedExposureExpanded.value = !isCombinedExposureExpanded.value
+}
+
 load()
 </script>
 
@@ -333,6 +344,15 @@ load()
             {{ formatLiveExposureUsd(group.openInterestUsd) }}
           </p>
         </div>
+
+        <button
+          v-if="combinedCollateralExposureGroups.length > COMBINED_COLLAPSED_GROUP_COUNT"
+          type="button"
+          class="self-center text-p4 font-medium text-content-accent transition-colors hover:text-accent-600"
+          @click="toggleCombinedExposureExpanded"
+        >
+          {{ isCombinedExposureExpanded ? 'Show less' : `Show more (${hiddenCombinedCollateralExposureCount})` }}
+        </button>
       </div>
     </div>
 
