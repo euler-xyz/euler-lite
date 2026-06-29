@@ -22,7 +22,6 @@ const { chainId } = useEulerAddresses()
 const isLoading = ref(false)
 const hasError = ref(false)
 const collateralExposureUsd = ref<Record<string, Record<string, number>>>({})
-const refreshedAt = ref<string | null>(null)
 const expandedRows = ref<Set<string>>(new Set())
 
 const COLLAPSED_NODE_COUNT = 3
@@ -117,12 +116,10 @@ const loadOpenInterest = async () => {
     const query = `chainId=${encodeURIComponent(String(chainId.value))}`
     const response = await $fetch<OpenInterestCollateralMapResponse>(`/api/v3/evk/vaults/open-interest/by-collateral?${query}`)
     collateralExposureUsd.value = response.data ?? {}
-    refreshedAt.value = response.meta?.refreshedAt ?? response.meta?.calculationTimestamp ?? null
   }
   catch {
     hasError.value = true
     collateralExposureUsd.value = {}
-    refreshedAt.value = null
   }
   finally {
     isLoading.value = false
@@ -144,7 +141,7 @@ watch(
     data-id="discovery-market-open-interest"
     :data-market-id="market.id"
   >
-    <div class="flex flex-wrap items-center justify-between gap-8 py-12">
+    <div class="py-12">
       <div>
         <h4 class="text-p3 font-medium text-content-primary">
           Open interest
@@ -153,12 +150,6 @@ watch(
           Borrow demand grouped by backing asset.
         </p>
       </div>
-      <span
-        v-if="refreshedAt"
-        class="rounded-full border border-line-subtle bg-surface px-10 py-5 text-p4 text-content-secondary"
-      >
-        Updated {{ new Date(refreshedAt).toLocaleString() }}
-      </span>
     </div>
 
     <div
