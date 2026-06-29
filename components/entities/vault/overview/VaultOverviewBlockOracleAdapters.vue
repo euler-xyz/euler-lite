@@ -267,32 +267,13 @@ const onTooltipMouseLeave = () => {
         Oracles
       </p>
       <UiHoverPreviewTooltip
-        v-if="routerRecognition === 'recognized'"
-        title="Recognized oracle router"
-        text="The vault's price oracle was deployed by the recognized EulerRouterFactory."
-        placement="top-start"
-      >
-        <span
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-success-100 text-success-500 text-p5"
-          data-id="data-point"
-          data-field="oracle-router-recognition"
-          data-value="recognized"
-        >
-          <SvgIcon
-            name="check"
-            class="!w-12 !h-12"
-          />
-          Recognized router
-        </span>
-      </UiHoverPreviewTooltip>
-      <UiHoverPreviewTooltip
-        v-else-if="routerRecognition === 'unrecognized'"
+        v-if="routerRecognition === 'unrecognized'"
         title="Unrecognized oracle router"
         text="The vault's price oracle was not deployed by the recognized EulerRouterFactory. Verify the oracle configuration before trusting its prices."
         placement="top-start"
       >
         <span
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
           data-id="data-point"
           data-field="oracle-router-recognition"
           data-value="unrecognized"
