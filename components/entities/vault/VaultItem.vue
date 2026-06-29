@@ -79,7 +79,7 @@ const collateralExposureSummary = computed(() => {
     ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
     : '0'
 
-  return `Top: ${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
+  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
 })
 
 watchEffect(() => {
@@ -382,7 +382,7 @@ watchEffect(async () => {
         :class="isConnected ? 'items-center' : 'items-end text-right'"
       >
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-          Collateral exposure
+          Top backing asset
           <SvgIcon
             v-if="collateralExposureGroups.length > 0"
             class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
@@ -495,7 +495,7 @@ watchEffect(async () => {
       >
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
-            Collateral exposure
+            Top backing asset
             <SvgIcon
               v-if="collateralExposureGroups.length > 0"
               class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
