@@ -1,4 +1,5 @@
 import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
 import {
   groupExposureItemsByBackingAsset,
   type ExposureBackingAssetGroup,
@@ -16,6 +17,14 @@ export interface CollateralExposurePair {
 export interface CollateralExposureGroup extends ExposureBackingAssetGroup<CollateralExposurePair> {
   maxBorrowLTV: number
   maxCurrentLiquidationLTV: number
+  openInterestUsd: number
+}
+
+export interface CollateralExposureBackingAssetSummary {
+  asset: CollateralExposureGroup['asset']
+  groups: CollateralExposureGroup[]
+  openInterestUsd: number
+  vaultCount: number
 }
 
 /**
@@ -24,6 +33,25 @@ export interface CollateralExposureGroup extends ExposureBackingAssetGroup<Colla
  */
 export type CollateralVaultResolver
   = (address: string) => EVault | SecuritizeCollateralVault | undefined
+
+const normalizeAddress = (address: string): string => {
+  try {
+    return getAddress(address).toLowerCase()
+  }
+  catch {
+    return address.toLowerCase()
+  }
+}
+
+const readOpenInterestUsd = (
+  openInterestUsdByCollateral: Record<string, number>,
+  collateralAddress: string,
+): number => {
+  const normalizedCollateral = normalizeAddress(collateralAddress)
+  const entry = Object.entries(openInterestUsdByCollateral)
+    .find(([address]) => normalizeAddress(address) === normalizedCollateral)
+  return entry?.[1] ?? 0
+}
 
 /**
  * Internal predicate: is this collateral/LTV combination "live" — i.e. does it
@@ -88,6 +116,7 @@ export const getCollateralExposurePairs = (
 
 export const getCollateralExposureGroups = (
   pairs: CollateralExposurePair[],
+  openInterestUsdByCollateral: Record<string, number> = {},
 ): CollateralExposureGroup[] =>
   groupExposureItemsByBackingAsset(pairs, pair => pair.collateral.asset)
     .map(group => ({
@@ -97,8 +126,14 @@ export const getCollateralExposureGroups = (
       ),
       maxBorrowLTV: Math.max(...group.items.map(pair => pair.ltv.borrowLTV), 0),
       maxCurrentLiquidationLTV: Math.max(...group.items.map(pair => pair.ltv.currentLiquidationLTV), 0),
+      openInterestUsd: group.items.reduce((sum, pair) =>
+        sum + readOpenInterestUsd(openInterestUsdByCollateral, pair.collateral.address),
+      0),
     }))
     .sort((a, b) => {
+      if (b.openInterestUsd !== a.openInterestUsd) {
+        return b.openInterestUsd - a.openInterestUsd
+      }
       if (b.maxCurrentLiquidationLTV !== a.maxCurrentLiquidationLTV) {
         return b.maxCurrentLiquidationLTV - a.maxCurrentLiquidationLTV
       }
@@ -107,6 +142,37 @@ export const getCollateralExposureGroups = (
       }
       return a.asset.symbol.localeCompare(b.asset.symbol)
     })
+
+export const mergeCollateralExposureGroupsByBackingAsset = (
+  groups: CollateralExposureGroup[],
+): CollateralExposureBackingAssetSummary[] => {
+  const summaries = new Map<string, CollateralExposureBackingAssetSummary>()
+
+  for (const group of groups) {
+    const key = normalizeAddress(group.asset.address)
+    const existing = summaries.get(key)
+    if (existing) {
+      existing.groups.push(group)
+      existing.openInterestUsd += group.openInterestUsd
+      existing.vaultCount += group.vaultCount
+      continue
+    }
+
+    summaries.set(key, {
+      asset: group.asset,
+      groups: [group],
+      openInterestUsd: group.openInterestUsd,
+      vaultCount: group.vaultCount,
+    })
+  }
+
+  return [...summaries.values()].sort((a, b) => {
+    if (b.openInterestUsd !== a.openInterestUsd) {
+      return b.openInterestUsd - a.openInterestUsd
+    }
+    return a.asset.symbol.localeCompare(b.asset.symbol)
+  })
+}
 
 /**
  * Predicate: does the vault have any live borrow-side collateral exposure?

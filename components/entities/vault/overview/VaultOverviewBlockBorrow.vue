@@ -4,13 +4,14 @@ import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
-import { formatNumber } from '~/utils/string-utils'
+import { compactNumber, formatCompactUsdValue, formatNumber } from '~/utils/string-utils'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const { get: registryGet } = useVaultRegistry()
+const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
 const isExpanded = ref(false)
 const COLLAPSED_GROUP_COUNT = 3
 
@@ -48,7 +49,13 @@ const allCollateralPairs = computed(() =>
   ),
 )
 
-const collateralGroups = computed(() => getCollateralExposureGroups(allCollateralPairs.value))
+const openInterestUsdByCollateral = computed(() => getOpenInterestForVault(vault.address))
+const collateralGroups = computed(() =>
+  getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
+)
+const totalOpenInterestUsd = computed(() =>
+  collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
 const visibleCollateralGroups = computed(() =>
   isExpanded.value ? collateralGroups.value : collateralGroups.value.slice(0, COLLAPSED_GROUP_COUNT),
 )
@@ -60,9 +67,21 @@ const hiddenCollateralPairCount = computed(() =>
     .slice(visibleCollateralGroups.value.length)
     .reduce((count, group) => count + group.items.length, 0),
 )
+const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
+  const entry = Object.entries(openInterestUsdByCollateral.value)
+    .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
+  return entry?.[1] ?? 0
+}
+const formatExposurePercent = (valueUsd: number) =>
+  totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
 const toggleExpanded = () => {
   isExpanded.value = !isExpanded.value
 }
+
+watchEffect(() => {
+  if (!vault.address) return
+  void loadOpenInterest()
+})
 </script>
 
 <template>
@@ -75,8 +94,59 @@ const toggleExpanded = () => {
     <div>
       <p class="text-content-secondary">
         Deposits in this vault can be borrowed.
-        Review the backing assets and underlying collateral vaults below before supplying.
+        Review live borrow exposure and configured collateral vaults before supplying.
       </p>
+    </div>
+
+    <div
+      v-if="collateralGroups.length"
+      class="rounded-12 border border-line-subtle bg-surface p-16"
+    >
+      <div class="mb-12 flex min-w-0 items-start justify-between gap-12">
+        <div>
+          <p class="text-p3 font-medium text-content-primary">
+            Live exposure by backing asset
+          </p>
+          <p class="text-p4 text-content-tertiary">
+            {{ totalOpenInterestUsd > 0 ? `${formatCompactUsdValue(totalOpenInterestUsd)} active borrows` : 'No active borrows' }}
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-8">
+        <div
+          v-for="group in visibleCollateralGroups"
+          :key="group.asset.address"
+          class="rounded-8 bg-surface-secondary p-10"
+          data-id="data-point"
+          :data-list="`collateral-exposure-live:${vault.address.toLowerCase()}`"
+          :data-key="group.asset.address"
+          data-field="collateral-exposure-live-backing-asset"
+          :data-value="group.asset.symbol"
+        >
+          <div class="mb-6 flex min-w-0 items-center justify-between gap-8">
+            <div class="flex min-w-0 items-center gap-6">
+              <AssetAvatar
+                :asset="group.asset"
+                size="20"
+              />
+              <span class="truncate text-p3 text-content-primary">{{ group.asset.symbol }}</span>
+            </div>
+            <span class="shrink-0 text-p4 text-content-secondary">
+              {{ formatExposurePercent(group.openInterestUsd) }}
+            </span>
+          </div>
+          <div class="h-4 overflow-hidden rounded-full bg-surface">
+            <div
+              class="h-full rounded-full bg-accent-500"
+              :style="{ width: totalOpenInterestUsd > 0 ? `${Math.max(2, group.openInterestUsd / totalOpenInterestUsd * 100)}%` : '0%' }"
+            />
+          </div>
+          <p class="mt-6 text-p4 text-content-tertiary">
+            {{ formatCompactUsdValue(group.openInterestUsd) }}
+          </p>
+        </div>
+      </div>
     </div>
 
     <div class="flex flex-col gap-12">
@@ -91,6 +161,15 @@ const toggleExpanded = () => {
           :assets="[pair.collateral.asset]"
         />
         <div class="mt-12 grid grid-cols-1 gap-12">
+          <VaultOverviewLabelValue
+            label="Live exposure"
+            orientation="horizontal"
+          >
+            <span class="flex items-center gap-4">
+              {{ formatCompactUsdValue(getPairOpenInterestUsd(pair)) }}
+              <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>
+            </span>
+          </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"

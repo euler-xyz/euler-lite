@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
@@ -11,6 +11,13 @@ import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { groupExposureItemsByBackingAsset } from '~/utils/vault/exposure-groups'
+import {
+  getCollateralExposureGroups,
+  getCollateralExposurePairs,
+  mergeCollateralExposureGroupsByBackingAsset,
+  type CollateralExposureBackingAssetSummary,
+  type CollateralExposureGroup,
+} from '~/utils/vault/collateral-exposure'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -21,7 +28,8 @@ const onExposureClick = (address: string) => {
 }
 const { vault } = defineProps<{ vault: EulerEarn }>()
 
-const { getOrFetch } = useVaultRegistry()
+const { getOrFetch, get: registryGet } = useVaultRegistry()
+const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
 const { isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -161,9 +169,58 @@ const hiddenExposureRowCount = computed(() =>
     .reduce((count, group) => count + group.items.length, 0),
 )
 
+const getStrategyCollateralGroups = (strategyVault: EVault | undefined): CollateralExposureGroup[] => {
+  if (!strategyVault) return []
+
+  return getCollateralExposureGroups(
+    getCollateralExposurePairs(
+      strategyVault,
+      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    ),
+    getOpenInterestForVault(strategyVault.address),
+  )
+}
+
+const combinedCollateralExposureGroups = computed<CollateralExposureBackingAssetSummary[]>(() =>
+  mergeCollateralExposureGroupsByBackingAsset(
+    exposureRows.value.flatMap(row => getStrategyCollateralGroups(row.vault)),
+  ),
+)
+
+const totalCollateralExposureUsd = computed(() =>
+  combinedCollateralExposureGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
+
+const visibleCombinedCollateralExposureGroups = computed(() =>
+  combinedCollateralExposureGroups.value.slice(0, 4),
+)
+
+const formatExposurePercent = (valueUsd: number, totalUsd: number) =>
+  totalUsd > 0 ? `${compactNumber(valueUsd / totalUsd * 100, 1, 0)}%` : '0%'
+
+const getCollateralExposureSummary = (
+  groups: Array<CollateralExposureGroup | CollateralExposureBackingAssetSummary>,
+  totalUsd: number,
+) => {
+  const group = groups[0]
+  if (!group) return '-'
+  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${formatExposurePercent(group.openInterestUsd, totalUsd)}`
+}
+
+const getStrategyCollateralExposureSummary = (strategyVault: EVault | undefined) => {
+  const groups = getStrategyCollateralGroups(strategyVault)
+  const totalUsd = groups.reduce((sum, group) => sum + group.openInterestUsd, 0)
+  return getCollateralExposureSummary(groups, totalUsd)
+}
+
 watch(isMarketDataResolved, () => {
   if (!exposureVaults.value.length) return
   void loadExposureUsdPrices()
+})
+
+watchEffect(() => {
+  if (!exposureRows.value.length) return
+  void loadOpenInterest()
 })
 
 const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
@@ -216,6 +273,55 @@ load()
       <p class="text-h3 text-content-primary mb-12">
         Exposure
       </p>
+    </div>
+
+    <div
+      v-if="combinedCollateralExposureGroups.length"
+      class="rounded-12 border border-line-subtle bg-surface p-16"
+    >
+      <div class="mb-12">
+        <p class="text-p3 font-medium text-content-primary">
+          Combined collateral exposure
+        </p>
+        <p class="text-p4 text-content-tertiary">
+          {{ totalCollateralExposureUsd > 0 ? `${formatCompactUsdValue(totalCollateralExposureUsd)} active borrows` : 'No active borrows' }}
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-8">
+        <div
+          v-for="group in visibleCombinedCollateralExposureGroups"
+          :key="group.asset.address"
+          class="rounded-8 bg-surface-secondary p-10"
+          data-id="data-point"
+          :data-list="`earn-combined-collateral-exposure:${getAddress(vault.address)}`"
+          :data-key="group.asset.address"
+          data-field="combined-collateral-exposure"
+          :data-value="group.asset.symbol"
+        >
+          <div class="mb-6 flex min-w-0 items-center justify-between gap-8">
+            <div class="flex min-w-0 items-center gap-6">
+              <AssetAvatar
+                :asset="group.asset"
+                size="20"
+              />
+              <span class="truncate text-p3 text-content-primary">{{ group.asset.symbol }}</span>
+            </div>
+            <span class="shrink-0 text-p4 text-content-secondary">
+              {{ formatExposurePercent(group.openInterestUsd, totalCollateralExposureUsd) }}
+            </span>
+          </div>
+          <div class="h-4 overflow-hidden rounded-full bg-surface">
+            <div
+              class="h-full rounded-full bg-accent-500"
+              :style="{ width: totalCollateralExposureUsd > 0 ? `${Math.max(2, group.openInterestUsd / totalCollateralExposureUsd * 100)}%` : '0%' }"
+            />
+          </div>
+          <p class="mt-6 text-p4 text-content-tertiary">
+            {{ formatCompactUsdValue(group.openInterestUsd) }}
+          </p>
+        </div>
+      </div>
     </div>
 
     <div
@@ -332,6 +438,15 @@ load()
               </UiExactAmount>
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
+          </VaultOverviewLabelValue>
+          <VaultOverviewLabelValue
+            label="Collateral exposure"
+            orientation="horizontal"
+            data-list="earn-exposure-strategy"
+            :data-key="getAddress(row.exposure.address)"
+            data-field="Collateral exposure"
+          >
+            {{ getStrategyCollateralExposureSummary(row.vault) }}
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             orientation="horizontal"

@@ -15,7 +15,6 @@ import { VaultSupplyApyModal, VaultCollateralExposureModal, UiModalPreviewTrigge
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { formatExposureAssetCount } from '~/utils/vault/exposure-groups'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -25,6 +24,7 @@ const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const entities = useEulerEntitiesOfVault(vault)
 const { getVaultCategory, isVerifiedVault, get: registryGet } = useVaultRegistry()
+const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
@@ -57,11 +57,28 @@ const collateralExposureGroups = computed(() => {
       vault,
       addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
     ),
+    getOpenInterestForVault(vault.address),
   )
 })
-const collateralDisplayGroups = computed(() => collateralExposureGroups.value.slice(0, 3))
-const collateralExposureSummary = computed(() => formatExposureAssetCount(collateralExposureGroups.value.length))
-const collateralExposureListId = computed(() => `collateral-exposure:${vault.address.toLowerCase()}`)
+const topCollateralExposureGroup = computed(() => collateralExposureGroups.value[0])
+const totalCollateralExposureUsd = computed(() =>
+  collateralExposureGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
+const collateralExposureSummary = computed(() => {
+  const group = topCollateralExposureGroup.value
+  if (!group) return '-'
+
+  const pct = totalCollateralExposureUsd.value > 0
+    ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
+    : '0'
+
+  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
+})
+
+watchEffect(() => {
+  if (!isBorrowable.value) return
+  void loadOpenInterest()
+})
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
@@ -372,33 +389,20 @@ watchEffect(async () => {
           @click="onCollateralInfoClick"
         >
           <div class="flex min-w-0 items-center gap-6">
+            <AssetAvatar
+              v-if="topCollateralExposureGroup"
+              :asset="topCollateralExposureGroup.asset"
+              size="20"
+            />
             <span
-              class="text-p2 text-content-primary whitespace-nowrap"
+              class="text-p2 text-content-primary whitespace-nowrap truncate"
               data-id="data-point"
               :data-key="vault.address.toLowerCase()"
               data-field="collateral-exposure-summary"
-              :data-value="collateralExposureGroups.length"
+              :data-value="collateralExposureSummary"
             >
               {{ collateralExposureSummary }}
             </span>
-            <div class="flex items-center">
-              <div
-                v-for="(group, index) in collateralDisplayGroups"
-                :key="group.asset.address"
-                class="flex items-center"
-                :class="index > 0 ? '-ml-8' : ''"
-                data-id="data-point"
-                :data-list="collateralExposureListId"
-                :data-key="group.asset.address.toLowerCase()"
-                data-field="collateral-exposure-asset"
-                :data-value="group.asset.symbol"
-              >
-                <AssetAvatar
-                  :asset="group.asset"
-                  size="20"
-                />
-              </div>
-            </div>
           </div>
         </div>
         <div
@@ -501,7 +505,8 @@ watchEffect(async () => {
           >
             <div class="flex min-w-0 items-center justify-end gap-6">
               <AssetAvatar
-                :asset="collateralDisplayGroups.map(group => group.asset)"
+                v-if="topCollateralExposureGroup"
+                :asset="topCollateralExposureGroup.asset"
                 size="20"
               />
               <span class="text-p2 text-content-primary whitespace-nowrap">

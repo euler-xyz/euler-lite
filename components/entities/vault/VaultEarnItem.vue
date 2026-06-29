@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computeSupplyApyBreakdown, isEVault, type EVault, type EulerEarn, type EulerEarnStrategyInfo } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, isEVault, type EVault, type EulerEarn, type EulerEarnStrategyInfo, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
@@ -7,10 +7,14 @@ import { isVaultRecentlyAdded, getEarnVaultDescription } from '~/utils/eulerLabe
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
-import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { compactNumber, formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
-import { formatExposureAssetCount, groupExposureItemsByBackingAsset } from '~/utils/vault/exposure-groups'
+import {
+  getCollateralExposureGroups,
+  getCollateralExposurePairs,
+  mergeCollateralExposureGroupsByBackingAsset,
+} from '~/utils/vault/collateral-exposure'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
@@ -18,6 +22,7 @@ const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
 const { get: registryGet, isVerifiedVault } = useVaultRegistry()
+const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const entityName = computed(() => {
@@ -64,27 +69,40 @@ const getStrategyVault = (strategy: EulerEarnStrategyInfo): EVault | undefined =
   const entry = registryGet(strategy.address)
   return entry?.vault && isEVault(entry.vault) ? entry.vault as EVault : undefined
 }
-const allocationGroups = computed(() =>
-  groupExposureItemsByBackingAsset(
-    vault.strategies,
-    (strategy) => {
+const combinedCollateralExposureGroups = computed(() =>
+  mergeCollateralExposureGroupsByBackingAsset(
+    vault.strategies.flatMap((strategy) => {
       const strategyVault = getStrategyVault(strategy)
-      return strategyVault?.asset ?? {
-        address: strategy.address,
-        symbol: strategy.address.slice(0, 6),
-      }
-    },
-  ).sort((a, b) => {
-    if (b.vaultCount !== a.vaultCount) return b.vaultCount - a.vaultCount
-    return a.asset.symbol.localeCompare(b.asset.symbol)
-  }),
+      if (!strategyVault) return []
+
+      return getCollateralExposureGroups(
+        getCollateralExposurePairs(
+          strategyVault,
+          addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+        ),
+        getOpenInterestForVault(strategyVault.address),
+      )
+    }),
+  ),
 )
-const allocationDisplayGroups = computed(() => allocationGroups.value.slice(0, 3))
+const topCollateralExposureGroup = computed(() => combinedCollateralExposureGroups.value[0])
+const totalCollateralExposureUsd = computed(() =>
+  combinedCollateralExposureGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
 const allocationSummary = computed(() => {
-  if (!allocationGroups.value.length) {
-    return `${vault.strategies.length} ${vault.strategies.length === 1 ? 'strategy' : 'strategies'}`
-  }
-  return `${formatExposureAssetCount(allocationGroups.value.length)} / ${vault.strategies.length} ${vault.strategies.length === 1 ? 'strategy' : 'strategies'}`
+  const group = topCollateralExposureGroup.value
+  if (!group) return '-'
+
+  const pct = totalCollateralExposureUsd.value > 0
+    ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
+    : '0'
+
+  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
+})
+
+watchEffect(() => {
+  if (!vault.strategies.length) return
+  void loadOpenInterest()
 })
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
@@ -309,8 +327,8 @@ const supplyApyModalData = computed(() => ({
         >
           <div class="flex min-w-0 items-center justify-end gap-6">
             <AssetAvatar
-              v-if="allocationDisplayGroups.length"
-              :asset="allocationDisplayGroups.map(group => group.asset)"
+              v-if="topCollateralExposureGroup"
+              :asset="topCollateralExposureGroup.asset"
               size="20"
             />
             <span class="text-p2 text-content-primary whitespace-nowrap">
@@ -379,8 +397,8 @@ const supplyApyModalData = computed(() => ({
         <div class="flex min-w-0 flex-col items-end gap-4 text-right">
           <div class="flex min-w-0 items-center justify-end gap-6">
             <AssetAvatar
-              v-if="allocationDisplayGroups.length"
-              :asset="allocationDisplayGroups.map(group => group.asset)"
+              v-if="topCollateralExposureGroup"
+              :asset="topCollateralExposureGroup.asset"
               size="20"
             />
             <span class="text-p2 text-content-primary whitespace-nowrap">
