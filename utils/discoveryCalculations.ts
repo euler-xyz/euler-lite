@@ -69,14 +69,13 @@ export const DOT_METRIC_OPTIONS: DotMetricOption[] = [
 
 export type ExpandedViewMode = 'graph' | 'matrix'
 
-export type MatrixVariant = 'pairs' | 'config' | 'stats' | 'open-interest'
+export type MatrixVariant = 'pairs' | 'config' | 'stats'
 export type AttributeMatrixMode = 'config' | 'stats'
-export type OpenInterestMatrixMode = 'open-interest'
 
 // Unified matrix-view selector. Wraps both attribute matrices (stats / config)
 // and pair-matrix metric variants (oracle + numeric metrics). Order is the
 // order shown in the dropdown.
-export type MatrixViewId = AttributeMatrixMode | OpenInterestMatrixMode | DotMetric
+export type MatrixViewId = AttributeMatrixMode | DotMetric
 export interface MatrixViewOption {
   id: MatrixViewId
   label: string
@@ -84,7 +83,6 @@ export interface MatrixViewOption {
 export const MATRIX_VIEW_OPTIONS: MatrixViewOption[] = [
   { id: 'stats', label: 'Stats' },
   { id: 'config', label: 'Configuration' },
-  { id: 'open-interest', label: 'Open Interest' },
   { id: 'oracle', label: 'Oracles' },
   { id: 'net-apy', label: 'Net APY' },
   { id: 'roe', label: 'Max ROE' },
