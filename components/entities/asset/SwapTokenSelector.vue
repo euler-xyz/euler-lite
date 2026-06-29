@@ -6,6 +6,7 @@ import { formatNumber, truncate } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getExplorerLink } from '~/utils/block-explorer'
+import { filterSelectableTokens, sortSelectableTokens } from '~/utils/token-selector'
 
 export interface SwapTokenSelectMeta {
   isUnknownToken?: boolean
@@ -118,16 +119,9 @@ const tokenOptions = computed((): TokenOption[] => {
     })
   }
 
-  // Sort: tokens with balance first (desc by balance), then vault tokens alphabetically
-  return options.sort((a, b) => {
-    if (a.balance > 0n && b.balance <= 0n) return -1
-    if (a.balance <= 0n && b.balance > 0n) return 1
-    if (a.balance > 0n && b.balance > 0n) {
-      if (a.balanceFormatted > b.balanceFormatted) return -1
-      if (a.balanceFormatted < b.balanceFormatted) return 1
-    }
-    return a.asset.symbol.localeCompare(b.asset.symbol)
-  })
+  // Bubble the relevant tokens to the top (held → Euler assets → the rest); the
+  // full list stays present and reachable by scrolling / searching.
+  return sortSelectableTokens(options)
 })
 
 // Include both vault and token list addresses in known set
@@ -144,23 +138,31 @@ const isUnknownAddress = computed(() => {
   return isAddress(q) && !knownAddresses.value.has(q.toLowerCase())
 })
 
-const filteredOptions = computed(() => {
-  const base = searchQuery.value
-    ? tokenOptions.value.filter((opt) => {
-        const q = searchQuery.value.toLowerCase()
-        return opt.asset.symbol.toLowerCase().includes(q)
-          || opt.asset.name.toLowerCase().includes(q)
-          || opt.asset.address.toLowerCase().includes(q)
-      })
-    : tokenOptions.value
+// Output ("Receive as") shows the full list with relevant tokens bubbled to the
+// top (see sortSelectableTokens); input ("Pay with") narrows to held tokens.
+const filteredOptions = computed(() => filterSelectableTokens(tokenOptions.value, mode, searchQuery.value))
 
-  // For input mode (pay with): filter zero-balance tokens when not searching
-  // For output mode (receive as): always show all tokens
-  if (mode === 'input' && !searchQuery.value) {
-    return base.filter(opt => opt.balance > 0n)
-  }
-  return base
+// Incrementally render rows — and therefore token-icon requests — instead of
+// mounting the whole list at once: start with a capped batch and grow on scroll.
+// Together with the curated default this keeps the picker from firing thousands
+// of icon fetches (the source of the llama.fi 404 flood).
+const INITIAL_RENDER_COUNT = 50
+const RENDER_BATCH = 50
+const renderLimit = ref(INITIAL_RENDER_COUNT)
+const visibleOptions = computed(() => filteredOptions.value.slice(0, renderLimit.value))
+const hasMoreToRender = computed(() => renderLimit.value < filteredOptions.value.length)
+
+watch(searchQuery, () => {
+  renderLimit.value = INITIAL_RENDER_COUNT
 })
+
+const onListScroll = (event: Event) => {
+  if (!hasMoreToRender.value) return
+  const el = event.target as HTMLElement
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
+    renderLimit.value += RENDER_BATCH
+  }
+}
 
 // Compute geo state once per visible row rather than 3x per render
 // (class binding + bg-card-hover + click guard).
@@ -247,9 +249,12 @@ const handleSelectCustomToken = () => {
           clearable
         />
       </div>
-      <div class="flex-1 min-h-0 overflow-auto styled-scrollbar">
+      <div
+        class="flex-1 min-h-0 overflow-auto styled-scrollbar"
+        @scroll="onListScroll"
+      >
         <div
-          v-for="opt in filteredOptions"
+          v-for="opt in visibleOptions"
           :key="opt.asset.address"
           data-id="swap-token-option"
           :data-token-name="opt.asset.name"
@@ -270,68 +275,72 @@ const handleSelectCustomToken = () => {
             size="36"
             class="mr-10"
           />
-          <div class="flex-grow">
+          <div class="flex-grow min-w-0">
             <div class="text-content-primary mb-2">
               {{ opt.asset.name }}
             </div>
-            <div class="text-h5 flex items-center">
-              {{ opt.asset.symbol }}
+            <div class="text-h5 flex flex-wrap items-center gap-y-4 mobile:flex-col mobile:items-start">
+              <div class="flex min-w-0 items-center">
+                <span class="min-w-0 break-words">{{ opt.asset.symbol }}</span>
+                <span
+                  v-if="rowGeo(opt.asset.address).showChip"
+                  class="ml-6 inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+                >
+                  Restricted
+                </span>
+              </div>
               <template v-if="shouldShowAddress(opt.asset.address)">
-                <UiHoverPreviewTooltip
-                  title="Token address"
-                  :text="opt.asset.address"
-                  placement="top-start"
-                >
-                  <span class="ml-6 text-content-tertiary text-p5 font-normal">
-                    {{ truncate(opt.asset.address) }}
-                  </span>
-                </UiHoverPreviewTooltip>
-                <UiHoverPreviewTooltip
-                  :title="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
-                  :text="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
-                  placement="top-start"
-                >
-                  <button
-                    type="button"
-                    class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                    :aria-label="`Copy ${opt.asset.symbol} address`"
-                    @click.stop.prevent="copyAssetAddress(opt.asset.address)"
+                <div class="ml-6 inline-flex min-w-0 items-center mobile:ml-0 mobile:w-full">
+                  <UiHoverPreviewTooltip
+                    title="Token address"
+                    :text="opt.asset.address"
+                    placement="top-start"
                   >
-                    <SvgIcon
-                      class="!w-14 !h-14"
-                      :name="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'check' : 'copy'"
-                    />
-                  </button>
-                </UiHoverPreviewTooltip>
-                <UiHoverPreviewTooltip
-                  title="Open in block explorer"
-                  text="Open in block explorer"
-                  placement="top-start"
-                >
-                  <NuxtLink
-                    :to="getExplorerAddressLink(opt.asset.address)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                    :aria-label="`Open ${opt.asset.symbol} address in block explorer`"
-                    @click.stop
+                    <span class="text-content-tertiary text-p5 font-normal">
+                      {{ truncate(opt.asset.address) }}
+                    </span>
+                  </UiHoverPreviewTooltip>
+                  <UiHoverPreviewTooltip
+                    :title="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
+                    :text="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
+                    placement="top-start"
                   >
-                    <SvgIcon
-                      class="!w-14 !h-14"
-                      name="arrow-top-right"
-                    />
-                  </NuxtLink>
-                </UiHoverPreviewTooltip>
+                    <button
+                      type="button"
+                      class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                      :aria-label="`Copy ${opt.asset.symbol} address`"
+                      @click.stop.prevent="copyAssetAddress(opt.asset.address)"
+                    >
+                      <SvgIcon
+                        class="!w-14 !h-14"
+                        :name="isCopied(`asset-${opt.asset.address.toLowerCase()}`) ? 'check' : 'copy'"
+                      />
+                    </button>
+                  </UiHoverPreviewTooltip>
+                  <UiHoverPreviewTooltip
+                    title="Open in block explorer"
+                    text="Open in block explorer"
+                    placement="top-start"
+                  >
+                    <NuxtLink
+                      :to="getExplorerAddressLink(opt.asset.address)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                      :aria-label="`Open ${opt.asset.symbol} address in block explorer`"
+                      @click.stop
+                    >
+                      <SvgIcon
+                        class="!w-14 !h-14"
+                        name="arrow-top-right"
+                      />
+                    </NuxtLink>
+                  </UiHoverPreviewTooltip>
+                </div>
               </template>
-              <span
-                v-if="rowGeo(opt.asset.address).showChip"
-                class="ml-6 inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-              >
-                Restricted
-              </span>
             </div>
           </div>
-          <div class="text-right">
+          <div class="text-right shrink-0 pl-8">
             <div class="text-content-primary mb-2">
               Balance
             </div>
@@ -340,6 +349,14 @@ const handleSelectCustomToken = () => {
             </div>
           </div>
         </div>
+        <!-- More rows render as the user scrolls (keeps icon requests bounded) -->
+        <div
+          v-if="hasMoreToRender"
+          class="py-12 text-center text-content-tertiary text-p3"
+        >
+          Scroll or search to see more tokens
+        </div>
+
         <!-- Custom token: loading -->
         <div
           v-if="isUnknownAddress && isCustomTokenLoading"
@@ -368,7 +385,7 @@ const handleSelectCustomToken = () => {
             size="36"
             class="mr-10"
           />
-          <div class="flex-grow">
+          <div class="flex-grow min-w-0">
             <div class="flex items-center gap-6 mb-2">
               <span class="text-content-primary">{{ customToken.name }}</span>
               <span class="inline-flex items-center rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
@@ -381,58 +398,60 @@ const handleSelectCustomToken = () => {
                 Restricted
               </span>
             </div>
-            <div class="text-h5 flex items-center">
-              {{ customToken.symbol }}
+            <div class="text-h5 flex flex-wrap items-center gap-y-4 mobile:flex-col mobile:items-start">
+              <span class="min-w-0 break-words">{{ customToken.symbol }}</span>
               <template v-if="shouldShowAddress(customToken.address)">
-                <UiHoverPreviewTooltip
-                  title="Token address"
-                  :text="customToken.address"
-                  placement="top-start"
-                >
-                  <span class="ml-6 text-content-tertiary text-p5 font-normal">
-                    {{ truncate(customToken.address) }}
-                  </span>
-                </UiHoverPreviewTooltip>
-                <UiHoverPreviewTooltip
-                  :title="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
-                  :text="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
-                  placement="top-start"
-                >
-                  <button
-                    type="button"
-                    class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                    :aria-label="`Copy ${customToken.symbol} address`"
-                    @click.stop.prevent="copyAssetAddress(customToken.address)"
+                <div class="ml-6 inline-flex min-w-0 items-center mobile:ml-0 mobile:w-full">
+                  <UiHoverPreviewTooltip
+                    title="Token address"
+                    :text="customToken.address"
+                    placement="top-start"
                   >
-                    <SvgIcon
-                      class="!w-14 !h-14"
-                      :name="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'check' : 'copy'"
-                    />
-                  </button>
-                </UiHoverPreviewTooltip>
-                <UiHoverPreviewTooltip
-                  title="Open in block explorer"
-                  text="Open in block explorer"
-                  placement="top-start"
-                >
-                  <NuxtLink
-                    :to="getExplorerAddressLink(customToken.address)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                    :aria-label="`Open ${customToken.symbol} address in block explorer`"
-                    @click.stop
+                    <span class="text-content-tertiary text-p5 font-normal">
+                      {{ truncate(customToken.address) }}
+                    </span>
+                  </UiHoverPreviewTooltip>
+                  <UiHoverPreviewTooltip
+                    :title="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
+                    :text="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'Copied' : 'Copy address'"
+                    placement="top-start"
                   >
-                    <SvgIcon
-                      class="!w-14 !h-14"
-                      name="arrow-top-right"
-                    />
-                  </NuxtLink>
-                </UiHoverPreviewTooltip>
+                    <button
+                      type="button"
+                      class="ml-4 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                      :aria-label="`Copy ${customToken.symbol} address`"
+                      @click.stop.prevent="copyAssetAddress(customToken.address)"
+                    >
+                      <SvgIcon
+                        class="!w-14 !h-14"
+                        :name="isCopied(`asset-${customToken.address.toLowerCase()}`) ? 'check' : 'copy'"
+                      />
+                    </button>
+                  </UiHoverPreviewTooltip>
+                  <UiHoverPreviewTooltip
+                    title="Open in block explorer"
+                    text="Open in block explorer"
+                    placement="top-start"
+                  >
+                    <NuxtLink
+                      :to="getExplorerAddressLink(customToken.address)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="ml-2 inline-flex h-20 w-20 items-center justify-center rounded-6 text-content-muted outline-none hover:bg-surface-secondary hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                      :aria-label="`Open ${customToken.symbol} address in block explorer`"
+                      @click.stop
+                    >
+                      <SvgIcon
+                        class="!w-14 !h-14"
+                        name="arrow-top-right"
+                      />
+                    </NuxtLink>
+                  </UiHoverPreviewTooltip>
+                </div>
               </template>
             </div>
           </div>
-          <div class="text-right">
+          <div class="text-right shrink-0 pl-8">
             <div class="text-content-primary mb-2">
               Balance
             </div>
