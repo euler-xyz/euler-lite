@@ -38,6 +38,11 @@ const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
       @vault-click="(address: string) => emits('vault-click', address)"
     />
 
+    <VaultOverviewBlockOpenInterest
+      :vault="vault"
+      :default-open="false"
+    />
+
     <LazyVaultOverviewBlockCyclicalIRM
       v-if="isCyclicalIRM"
       :vault="vault"
