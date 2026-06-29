@@ -90,7 +90,7 @@ const toggleExpanded = () => {
           :vault="pair.collateral"
           :assets="[pair.collateral.asset]"
         />
-        <div class="mt-12 grid grid-cols-1 gap-12 sm:grid-cols-2">
+        <div class="mt-12 grid grid-cols-1 gap-12">
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"
