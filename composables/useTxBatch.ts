@@ -219,18 +219,15 @@ let batchSlotHints: SlotHints = {}
 // promise + error state) so a single field report is self-contained.
 //
 // IMPORTANT: client `logger.warn` is dropped unless `?verbose` /
-// localStorage.euler_verbose=1 is set (see utils/logger.ts), so the trace level
-// only shows up for devs / on the server. The moments that actually pin the bug
-// (the throw, the version guard, supersessions that fire during a plan-time
-// await) are logged at `severity: 'error'`, which surfaces in every browser.
+// localStorage.euler_verbose=1 is set (see utils/logger.ts), so this temporary
+// trace stays quiet in regular browser sessions while still showing up for devs
+// / on the server.
 // Remove this whole block (and its call sites) once the cause is captured.
 const logBatchDiag = (
   event: string,
   extra?: Record<string, unknown>,
-  severity: 'warn' | 'error' = 'warn',
 ) => {
   logWarn('useTxBatch/diag', event, {
-    severity,
     data: {
       event,
       resimToken,
@@ -1398,9 +1395,8 @@ export const useTxBatch = () => {
         // A newer resimulation superseded this one after the sim resolved, so this
         // run bails before populating layers. When that happens during a plan-time
         // await it's exactly what surfaces as the misleading "Batch simulation not
-        // loaded" (see getEntryPlanningAccount). Logged at error so it surfaces in
-        // the field even without verbose mode.
-        logBatchDiag('resimulate:superseded-after-sim', { token, supersededBy: resimToken }, 'error')
+        // loaded" (see getEntryPlanningAccount).
+        logBatchDiag('resimulate:superseded-after-sim', { token, supersededBy: resimToken })
         return
       }
 
@@ -1425,10 +1421,9 @@ export const useTxBatch = () => {
       // the user's existing positions in vaults the batch never touched.
       const simAccounts = (sim.simulatedAccounts ?? []) as Account<IHasVaultAddress>[]
       // A healthy sim returns exactly one account per operation on top of the
-      // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1. Anything
-      // else is the smoking gun for the "not loaded" symptom (getCurrentFinalLayer
-      // needs layers.length === entries.length + 1), so escalate to error on a
-      // mismatch.
+      // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1.
+      // Anything else is the smoking gun for the "not loaded" symptom
+      // (getCurrentFinalLayer needs layers.length === entries.length + 1).
       logBatchDiag(
         'resimulate:sim-resolved',
         {
@@ -1441,7 +1436,6 @@ export const useTxBatch = () => {
           statusCheckFailed,
           simError: simError.value ?? null,
         },
-        simAccounts.length === plans.length + 1 ? 'warn' : 'error',
       )
       // Version guard: the builder needs one simulated account per operation on
       // top of the pre-batch snapshot (the layered simulation API). An SDK build
@@ -1452,7 +1446,7 @@ export const useTxBatch = () => {
           token,
           simAccounts: simAccounts.length,
           plans: plans.length,
-        }, 'error')
+        })
         simError.value = 'Batch simulation did not return per-operation state layers — the installed @eulerxyz/euler-v2-sdk build does not support the batch builder.'
       }
       const fullLayers: Account<IHasVaultAddress>[] = [baseAccount]
@@ -1498,7 +1492,7 @@ export const useTxBatch = () => {
       if (token !== resimToken) {
         // Superseded during the post-sim wallet fetch — same race as above, just a
         // later checkpoint. Bails before populating layers.
-        logBatchDiag('resimulate:superseded-after-wallet-fetch', { token, supersededBy: resimToken }, 'error')
+        logBatchDiag('resimulate:superseded-after-wallet-fetch', { token, supersededBy: resimToken })
         return
       }
       // Asset metadata (symbol/decimals) for the touched tokens, resolved from
@@ -1560,21 +1554,19 @@ export const useTxBatch = () => {
       })
       activeLayer.value = layers.value.length - 1
       syncOverlay()
-      // Completion checkpoint: layerCount/entryCount come from the helper snapshot.
-      // getCurrentFinalLayer needs layerCount === entryCount + 1; escalate to error
-      // if this run finished without satisfying that (the bug condition).
+      // Completion checkpoint: layerCount/entryCount come from the helper
+      // snapshot. getCurrentFinalLayer needs layerCount === entryCount + 1.
       logBatchDiag(
         'resimulate:complete',
         { token, layersBuilt: layers.value.length },
-        layers.value.length === entries.value.length + 1 ? 'warn' : 'error',
       )
     }
     catch (error) {
       if (token !== resimToken) {
-        logBatchDiag('resimulate:superseded-in-catch', { token, supersededBy: resimToken }, 'error')
+        logBatchDiag('resimulate:superseded-in-catch', { token, supersededBy: resimToken })
         return
       }
-      logBatchDiag('resimulate:threw', { token, error: error instanceof Error ? error.message : String(error) }, 'error')
+      logBatchDiag('resimulate:threw', { token, error: error instanceof Error ? error.message : String(error) })
       logWarn('useTxBatch/resimulate', error)
       simError.value = error instanceof Error ? error.message : String(error)
     }
@@ -1614,7 +1606,7 @@ export const useTxBatch = () => {
       watch([activeLayer, layers], syncOverlay)
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
-        logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
+        logBatchDiag('watch:owner-or-chain-reset')
         resimToken++
         entries.value = []
         layers.value = []
@@ -1653,22 +1645,21 @@ export const useTxBatch = () => {
           getSimError: () => simError.value,
           getInFlight: () => resimulatePromise,
           startRun: runResimulate,
-          // Found on attempt 0 is the healthy path (warn/quiet). Not finding it —
-          // i.e. the awaited run resolved without our layers — is the suspected
-          // race; log at error so we capture each re-attempt in the field.
+          // Found on attempt 0 is the healthy path. Not finding it means the
+          // awaited run resolved without our layers, which is the suspected race.
           onAttempt: ({ attempt, awaitedExisting, found }) =>
             logBatchDiag('getEntryPlanningAccount:attempt', {
               attempt,
               awaitedExisting,
               finalLayerFound: found,
-            }, found ? 'warn' : 'error'),
+            }),
         })
       }
       catch (error) {
         // This is THE event we're hunting. Full state is in the helper snapshot.
         logBatchDiag('getEntryPlanningAccount:throw', {
           thrownMessage: simError.value ?? 'Batch simulation not loaded',
-        }, 'error')
+        })
         throw error
       }
     }
@@ -1681,7 +1672,7 @@ export const useTxBatch = () => {
     const o = owner.value
     const cid = chainId.value
     if (!o || !cid) {
-      logBatchDiag('getEntryPlanningAccount:account-not-loaded', { owner: o, chainId: cid }, 'error')
+      logBatchDiag('getEntryPlanningAccount:account-not-loaded', { owner: o, chainId: cid })
       throw new Error('Account not loaded')
     }
     logBatchDiag('getEntryPlanningAccount:base-snapshot-fetch', { owner: o, chainId: cid })
@@ -1728,7 +1719,7 @@ export const useTxBatch = () => {
       logBatchDiag('addEntry:threw', {
         label: entry.label,
         error: error instanceof Error ? error.message : String(error),
-      }, 'error')
+      })
       logWarn('useTxBatch/addEntry', error)
       simError.value = error instanceof Error ? error.message : String(error)
       throw error
