@@ -12,26 +12,29 @@ export const useCollateralOpenInterest = () => {
   const loadedChainId = useState<string | null>('collateral-open-interest:chain-id', () => null)
   const isLoading = useState('collateral-open-interest:is-loading', () => false)
   const hasError = useState('collateral-open-interest:has-error', () => false)
+  const currentChainId = computed(() => chainId.value ? String(chainId.value) : '')
+  const isLoaded = computed(() => !!currentChainId.value && loadedChainId.value === currentChainId.value && !hasError.value)
 
   const load = async () => {
-    const currentChainId = chainId.value ? String(chainId.value) : ''
-    if (!currentChainId) return
-    if (loadedChainId.value === currentChainId) return
-    if (pendingLoad && pendingChainId === currentChainId) return pendingLoad
+    const chainIdToLoad = currentChainId.value
+    if (!chainIdToLoad) return
+    if (loadedChainId.value === chainIdToLoad) return
+    if (pendingLoad && pendingChainId === chainIdToLoad) return pendingLoad
 
     isLoading.value = true
     hasError.value = false
-    pendingChainId = currentChainId
+    pendingChainId = chainIdToLoad
     pendingLoad = $fetch<OpenInterestCollateralMapResponse>(
-      `/api/v3/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(currentChainId)}`,
+      `/api/v3/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
     )
       .then((response) => {
         data.value = response.data ?? {}
-        loadedChainId.value = currentChainId
+        loadedChainId.value = chainIdToLoad
       })
       .catch(() => {
         hasError.value = true
         data.value = {}
+        loadedChainId.value = null
       })
       .finally(() => {
         isLoading.value = false
@@ -48,6 +51,7 @@ export const useCollateralOpenInterest = () => {
   return {
     data,
     hasError,
+    isLoaded,
     isLoading,
     load,
     getOpenInterestForVault,

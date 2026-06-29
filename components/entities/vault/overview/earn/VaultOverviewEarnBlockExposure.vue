@@ -29,7 +29,12 @@ const onExposureClick = (address: string) => {
 const { vault } = defineProps<{ vault: EulerEarn }>()
 
 const { getOrFetch, get: registryGet } = useVaultRegistry()
-const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 const { isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -195,16 +200,23 @@ const visibleCombinedCollateralExposureGroups = computed(() =>
   combinedCollateralExposureGroups.value.slice(0, 4),
 )
 
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
 const formatExposurePercent = (valueUsd: number, totalUsd: number) =>
-  totalUsd > 0 ? `${compactNumber(valueUsd / totalUsd * 100, 1, 0)}%` : '0%'
+  !hasLiveExposureData.value ? '-' : totalUsd > 0 ? `${compactNumber(valueUsd / totalUsd * 100, 1, 0)}%` : '0%'
+const formatLiveExposureUsd = (valueUsd: number) =>
+  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
+const combinedExposureSubtitle = computed(() => {
+  if (!hasLiveExposureData.value) return 'Live exposure unavailable'
+  return totalCollateralExposureUsd.value > 0 ? `${formatCompactUsdValue(totalCollateralExposureUsd.value)} active borrows` : 'No active borrows'
+})
 
 const getCollateralExposureSummary = (
   groups: Array<CollateralExposureGroup | CollateralExposureBackingAssetSummary>,
   totalUsd: number,
 ) => {
   const group = groups[0]
-  if (!group) return '-'
-  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${formatExposurePercent(group.openInterestUsd, totalUsd)}`
+  if (!group || !hasLiveExposureData.value) return '-'
+  return `${group.asset.symbol} ${formatLiveExposureUsd(group.openInterestUsd)} · ${formatExposurePercent(group.openInterestUsd, totalUsd)}`
 }
 
 const getStrategyCollateralExposureSummary = (strategyVault: EVault | undefined) => {
@@ -284,7 +296,7 @@ load()
           Combined collateral exposure
         </p>
         <p class="text-p4 text-content-tertiary">
-          {{ totalCollateralExposureUsd > 0 ? `${formatCompactUsdValue(totalCollateralExposureUsd)} active borrows` : 'No active borrows' }}
+          {{ combinedExposureSubtitle }}
         </p>
       </div>
 
@@ -314,11 +326,11 @@ load()
           <div class="h-4 overflow-hidden rounded-full bg-surface">
             <div
               class="h-full rounded-full bg-accent-500"
-              :style="{ width: totalCollateralExposureUsd > 0 ? `${Math.max(2, group.openInterestUsd / totalCollateralExposureUsd * 100)}%` : '0%' }"
+              :style="{ width: hasLiveExposureData && totalCollateralExposureUsd > 0 ? `${Math.max(2, group.openInterestUsd / totalCollateralExposureUsd * 100)}%` : '0%' }"
             />
           </div>
           <p class="mt-6 text-p4 text-content-tertiary">
-            {{ formatCompactUsdValue(group.openInterestUsd) }}
+            {{ formatLiveExposureUsd(group.openInterestUsd) }}
           </p>
         </div>
       </div>

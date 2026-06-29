@@ -24,7 +24,12 @@ const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const entities = useEulerEntitiesOfVault(vault)
 const { getVaultCategory, isVerifiedVault, get: registryGet } = useVaultRegistry()
-const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
@@ -64,9 +69,10 @@ const topCollateralExposureGroup = computed(() => collateralExposureGroups.value
 const totalCollateralExposureUsd = computed(() =>
   collateralExposureGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
 )
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
 const collateralExposureSummary = computed(() => {
   const group = topCollateralExposureGroup.value
-  if (!group) return '-'
+  if (!group || !hasLiveExposureData.value) return '-'
 
   const pct = totalCollateralExposureUsd.value > 0
     ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
@@ -390,7 +396,7 @@ watchEffect(async () => {
         >
           <div class="flex min-w-0 items-center gap-6">
             <AssetAvatar
-              v-if="topCollateralExposureGroup"
+              v-if="topCollateralExposureGroup && hasLiveExposureData"
               :asset="topCollateralExposureGroup.asset"
               size="20"
             />
@@ -505,7 +511,7 @@ watchEffect(async () => {
           >
             <div class="flex min-w-0 items-center justify-end gap-6">
               <AssetAvatar
-                v-if="topCollateralExposureGroup"
+                v-if="topCollateralExposureGroup && hasLiveExposureData"
                 :asset="topCollateralExposureGroup.asset"
                 size="20"
               />

@@ -11,7 +11,12 @@ const emits = defineEmits<{
 }>()
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const { get: registryGet } = useVaultRegistry()
-const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 const isExpanded = ref(false)
 const COLLAPSED_GROUP_COUNT = 3
 
@@ -72,8 +77,17 @@ const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollatera
     .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
   return entry?.[1] ?? 0
 }
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
 const formatExposurePercent = (valueUsd: number) =>
-  totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
+  !hasLiveExposureData.value
+    ? '-'
+    : totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
+const formatLiveExposureUsd = (valueUsd: number) =>
+  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
+const liveExposureSubtitle = computed(() => {
+  if (!hasLiveExposureData.value) return 'Live exposure unavailable'
+  return totalOpenInterestUsd.value > 0 ? `${formatCompactUsdValue(totalOpenInterestUsd.value)} active borrows` : 'No active borrows'
+})
 const toggleExpanded = () => {
   isExpanded.value = !isExpanded.value
 }
@@ -108,7 +122,7 @@ watchEffect(() => {
             Live exposure by backing asset
           </p>
           <p class="text-p4 text-content-tertiary">
-            {{ totalOpenInterestUsd > 0 ? `${formatCompactUsdValue(totalOpenInterestUsd)} active borrows` : 'No active borrows' }}
+            {{ liveExposureSubtitle }}
           </p>
         </div>
       </div>
@@ -139,11 +153,11 @@ watchEffect(() => {
           <div class="h-4 overflow-hidden rounded-full bg-surface">
             <div
               class="h-full rounded-full bg-accent-500"
-              :style="{ width: totalOpenInterestUsd > 0 ? `${Math.max(2, group.openInterestUsd / totalOpenInterestUsd * 100)}%` : '0%' }"
+              :style="{ width: hasLiveExposureData && totalOpenInterestUsd > 0 ? `${Math.max(2, group.openInterestUsd / totalOpenInterestUsd * 100)}%` : '0%' }"
             />
           </div>
           <p class="mt-6 text-p4 text-content-tertiary">
-            {{ formatCompactUsdValue(group.openInterestUsd) }}
+            {{ formatLiveExposureUsd(group.openInterestUsd) }}
           </p>
         </div>
       </div>
@@ -166,7 +180,7 @@ watchEffect(() => {
             orientation="horizontal"
           >
             <span class="flex items-center gap-4">
-              {{ formatCompactUsdValue(getPairOpenInterestUsd(pair)) }}
+              {{ formatLiveExposureUsd(getPairOpenInterestUsd(pair)) }}
               <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>
             </span>
           </VaultOverviewLabelValue>

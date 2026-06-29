@@ -22,7 +22,12 @@ const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
 const { get: registryGet, isVerifiedVault } = useVaultRegistry()
-const { load: loadOpenInterest, getOpenInterestForVault } = useCollateralOpenInterest()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const entityName = computed(() => {
@@ -89,9 +94,10 @@ const topCollateralExposureGroup = computed(() => combinedCollateralExposureGrou
 const totalCollateralExposureUsd = computed(() =>
   combinedCollateralExposureGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
 )
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
 const allocationSummary = computed(() => {
   const group = topCollateralExposureGroup.value
-  if (!group) return '-'
+  if (!group || !hasLiveExposureData.value) return '-'
 
   const pct = totalCollateralExposureUsd.value > 0
     ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
@@ -327,7 +333,7 @@ const supplyApyModalData = computed(() => ({
         >
           <div class="flex min-w-0 items-center justify-end gap-6">
             <AssetAvatar
-              v-if="topCollateralExposureGroup"
+              v-if="topCollateralExposureGroup && hasLiveExposureData"
               :asset="topCollateralExposureGroup.asset"
               size="20"
             />
@@ -397,7 +403,7 @@ const supplyApyModalData = computed(() => ({
         <div class="flex min-w-0 flex-col items-end gap-4 text-right">
           <div class="flex min-w-0 items-center justify-end gap-6">
             <AssetAvatar
-              v-if="topCollateralExposureGroup"
+              v-if="topCollateralExposureGroup && hasLiveExposureData"
               :asset="topCollateralExposureGroup.asset"
               size="20"
             />
