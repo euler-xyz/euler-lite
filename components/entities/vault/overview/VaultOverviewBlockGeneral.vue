@@ -10,10 +10,11 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { formatMarketAvailability } from '~/utils/vault-display'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const emit = defineEmits<{
@@ -56,30 +57,44 @@ const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.addres
 const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
+const hasBorrowSideExposure = computed(() => isVaultBorrowable(vault))
 const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasUnavailableExposureSplit = computed(() =>
+  hasLiveExposureData.value
+  && totalSupplyState.value === 'ready'
+  && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
+)
 const exposureValueState = computed<ExposureValueState>(() => {
-  if (hasLiveExposureData.value) return 'ready'
   if (hasOpenInterestError.value) return 'unavailable'
-  return 'loading'
+  if (totalSupplyState.value === 'unavailable') return 'unavailable'
+  if (hasUnavailableExposureSplit.value) return 'unavailable'
+  if (!isOpenInterestLoaded.value) return 'loading'
+  if (totalSupplyState.value === 'loading') return 'loading'
+  return 'ready'
 })
 const totalSupplyUsd = ref(0)
-const collateralExposureGroups = computed(() =>
-  getCollateralExposureGroups(
+const totalSupplyState = ref<ExposureValueState>('loading')
+const collateralExposureGroups = computed(() => {
+  if (!hasBorrowSideExposure.value) return []
+
+  return getCollateralExposureGroups(
     getCollateralExposurePairs(
       vault,
       addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
     ),
     getOpenInterestForVault(vault.address),
-  ),
-)
-const exposureDisplayItems = computed(() =>
-  buildAllocatedVaultExposureDisplayItems({
+  )
+})
+const exposureDisplayItems = computed(() => {
+  if (exposureValueState.value !== 'ready') return []
+
+  return buildAllocatedVaultExposureDisplayItems({
     collateralGroups: collateralExposureGroups.value,
     totalExposureUsd: totalSupplyUsd.value,
     idleAsset: vault.asset,
     utilization: vault.utilization,
-  }),
-)
+  })
+})
 
 const propertyBadgeDetails: Record<VaultPropertyBadge, {
   component: Component
@@ -125,10 +140,11 @@ watchEffect(async () => {
 watchEffect(async () => {
   const price = await formatAssetValue(vault.totalAssets, vault, 'off-chain')
   totalSupplyUsd.value = price.hasPrice ? price.usdValue : 0
+  totalSupplyState.value = price.hasPrice ? 'ready' : 'unavailable'
 })
 
 watchEffect(() => {
-  if (!borrowCount.value) return
+  if (!hasBorrowSideExposure.value) return
   void loadOpenInterest()
 })
 </script>
@@ -250,7 +266,7 @@ watchEffect(() => {
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
-        v-if="borrowCount"
+        v-if="hasBorrowSideExposure"
         label="Exposure"
       >
         <VaultExposureSummary

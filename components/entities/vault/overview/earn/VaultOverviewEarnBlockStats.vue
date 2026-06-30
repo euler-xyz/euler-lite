@@ -8,6 +8,7 @@ import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils
 import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import {
   buildAllocatedVaultExposureDisplayItems,
+  hasMissingUtilizedExposureSplit,
   mergeVaultExposureDisplayItems,
   type ExposureValueState,
 } from '~/utils/vault/exposure-display'
@@ -27,7 +28,12 @@ const {
 } = useCollateralOpenInterest()
 
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
-const strategyAllocationUsdByAddress = ref<Map<string, number>>(new Map())
+interface StrategyAllocationUsd {
+  valueUsd: number
+  valueState: ExposureValueState
+}
+
+const strategyAllocationUsdByAddress = ref<Map<string, StrategyAllocationUsd>>(new Map())
 let strategyAllocationLoadId = 0
 
 const getStrategyVault = (strategy: EulerEarnStrategyInfo): EVault | undefined => {
@@ -57,30 +63,51 @@ const isStrategyAllocationUsdLoaded = computed(() =>
     return !strategyVault || strategyAllocationUsdByAddress.value.has(strategy.address.toLowerCase())
   }),
 )
+const hasUnavailableStrategyAllocationUsd = computed(() =>
+  [...strategyAllocationUsdByAddress.value.values()].some(allocation => allocation.valueState === 'unavailable'),
+)
+const getStrategyCollateralGroups = (strategyVault: EVault) =>
+  getCollateralExposureGroups(
+    getCollateralExposurePairs(
+      strategyVault,
+      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    ),
+    getOpenInterestForVault(strategyVault.address),
+  )
+const hasUnavailableExposureSplit = computed(() => {
+  if (!hasLiveExposureData.value || !isStrategyAllocationUsdLoaded.value) return false
+
+  return vault.strategies.some((strategy) => {
+    const strategyVault = getStrategyVault(strategy)
+    if (!strategyVault) return false
+
+    const allocation = strategyAllocationUsdByAddress.value.get(strategy.address.toLowerCase())
+    if (!allocation || allocation.valueState !== 'ready' || allocation.valueUsd <= 0) return false
+
+    return hasMissingUtilizedExposureSplit(getStrategyCollateralGroups(strategyVault), strategyVault.utilization)
+  })
+})
 const exposureValueState = computed<ExposureValueState>(() => {
   if (!isStrategyAllocationUsdLoaded.value) return 'loading'
-  if (hasLiveExposureData.value) return 'ready'
   if (hasOpenInterestError.value) return 'unavailable'
-  return 'loading'
+  if (hasUnavailableStrategyAllocationUsd.value) return 'unavailable'
+  if (hasUnavailableExposureSplit.value) return 'unavailable'
+  if (!isOpenInterestLoaded.value) return 'loading'
+  return 'ready'
 })
 const exposureDisplayItems = computed(() =>
-  hasLiveExposureData.value && isStrategyAllocationUsdLoaded.value
+  exposureValueState.value === 'ready'
     ? mergeVaultExposureDisplayItems(
         vault.strategies.flatMap((strategy) => {
           const strategyVault = getStrategyVault(strategy)
           if (!strategyVault) return []
 
-          const collateralGroups = getCollateralExposureGroups(
-            getCollateralExposurePairs(
-              strategyVault,
-              addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
-            ),
-            getOpenInterestForVault(strategyVault.address),
-          )
+          const allocation = strategyAllocationUsdByAddress.value.get(strategy.address.toLowerCase())
+          if (!allocation) return []
 
           return buildAllocatedVaultExposureDisplayItems({
-            collateralGroups,
-            totalExposureUsd: strategyAllocationUsdByAddress.value.get(strategy.address.toLowerCase()) ?? 0,
+            collateralGroups: getStrategyCollateralGroups(strategyVault),
+            totalExposureUsd: allocation.valueUsd,
             idleAsset: strategyVault.asset,
             utilization: strategyVault.utilization,
             idleSource: getStrategyMarketSource(strategyVault),
@@ -105,14 +132,18 @@ watchEffect(async () => {
     return {
       address: strategy.address.toLowerCase(),
       valueUsd: price.hasPrice ? price.usdValue : 0,
+      valueState: price.hasPrice ? 'ready' : 'unavailable',
     }
   }))
   if (loadId !== strategyAllocationLoadId) return
 
   strategyAllocationUsdByAddress.value = new Map(
     results
-      .filter((result): result is { address: string, valueUsd: number } => Boolean(result))
-      .map(result => [result.address, result.valueUsd]),
+      .filter((result): result is { address: string } & StrategyAllocationUsd => Boolean(result))
+      .map(result => [result.address, {
+        valueUsd: result.valueUsd,
+        valueState: result.valueState,
+      }]),
   )
 })
 

@@ -15,7 +15,7 @@ import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
 
 const props = defineProps<{
   data: AttributeMatrixData
@@ -71,9 +71,12 @@ const exposureValueState = computed<ExposureValueState>(() => {
 const exposureItemsByVault = computed(() => {
   const result = new Map<string, ReturnType<typeof buildAllocatedVaultExposureDisplayItems>>()
   if (props.view !== 'stats') return result
+  if (!hasLiveExposureData.value) return result
 
   for (const column of props.data.columns) {
     if (!isEVault(column.vault)) continue
+    const totalExposureUsd = props.usdCache.get(column.address)?.supplyUsd
+    if (totalExposureUsd === undefined) continue
 
     const groups = getCollateralExposureGroups(
       getCollateralExposurePairs(
@@ -82,9 +85,11 @@ const exposureItemsByVault = computed(() => {
       ),
       getOpenInterestForVault(column.address),
     )
+    if (hasMissingUtilizedExposureSplit(groups, column.vault.utilization)) continue
+
     result.set(column.address, buildAllocatedVaultExposureDisplayItems({
       collateralGroups: groups,
-      totalExposureUsd: props.usdCache.get(column.address)?.supplyUsd ?? 0,
+      totalExposureUsd,
       idleAsset: column.vault.asset,
       utilization: column.vault.utilization,
     }))

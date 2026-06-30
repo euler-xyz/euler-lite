@@ -79,6 +79,14 @@ export const mergeVaultExposureDisplayItems = (
 const clampPercentFraction = (value: number) =>
   Math.max(0, Math.min(1, Number.isFinite(value) ? value / 100 : 0))
 
+export const hasMissingUtilizedExposureSplit = (
+  collateralGroups: CollateralExposureGroup[],
+  utilization: number,
+): boolean => {
+  const collateralTotalUsd = collateralGroups.reduce((sum, group) => sum + group.openInterestUsd, 0)
+  return collateralTotalUsd <= 0 && clampPercentFraction(utilization) > 0
+}
+
 export const buildAllocatedVaultExposureDisplayItems = ({
   collateralGroups,
   totalExposureUsd,
@@ -96,6 +104,7 @@ export const buildAllocatedVaultExposureDisplayItems = ({
 
   const collateralTotalUsd = collateralGroups.reduce((sum, group) => sum + group.openInterestUsd, 0)
   const utilizedExposureUsd = totalExposureUsd * clampPercentFraction(utilization)
+  if (collateralTotalUsd <= 0 && utilizedExposureUsd > 0) return []
 
   const collateralItems = collateralTotalUsd > 0
     ? collateralGroups

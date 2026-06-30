@@ -18,6 +18,7 @@ import {
 } from '~/utils/vault/collateral-exposure'
 import {
   buildAllocatedVaultExposureDisplayItems,
+  hasMissingUtilizedExposureSplit,
   type ExposureValueState,
 } from '~/utils/vault/exposure-display'
 
@@ -46,6 +47,7 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
+const unavailableExposureUsdPrices = ref<Set<string>>(new Set())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
@@ -111,6 +113,7 @@ const loadExposureUsdPrices = async () => {
   if (loadId !== priceLoadId) return
 
   const newPrices = new Map<string, number>()
+  const newUnavailablePrices = new Set<string>()
   const newCapPrices = new Map<string, number>()
   results.forEach((result) => {
     if (!result) return
@@ -119,11 +122,15 @@ const loadExposureUsdPrices = async () => {
     if (allocationUsd !== undefined) {
       newPrices.set(exposure.address.toLowerCase(), allocationUsd)
     }
+    else {
+      newUnavailablePrices.add(exposure.address.toLowerCase())
+    }
     if (!isUnlimitedCap(exposure) && capUsd !== undefined) {
       newCapPrices.set(exposure.address.toLowerCase(), capUsd)
     }
   })
   exposureUsdPrices.value = newPrices
+  unavailableExposureUsdPrices.value = newUnavailablePrices
   exposureCapUsdPrices.value = newCapPrices
 }
 
@@ -172,12 +179,22 @@ const getStrategyMarketSource = (strategyVault: EVault) => {
   }
 }
 
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
-const exposureValueState = computed<ExposureValueState>(() => {
-  if (hasLiveExposureData.value) return 'ready'
+const getStrategyExposureValueState = (strategyVault: EVault | undefined): ExposureValueState => {
+  if (!strategyVault) return 'unavailable'
+
+  const key = strategyVault.address.toLowerCase()
   if (hasOpenInterestError.value) return 'unavailable'
-  return 'loading'
-})
+  if (unavailableExposureUsdPrices.value.has(key)) return 'unavailable'
+  if (!isOpenInterestLoaded.value) return 'loading'
+  if (!exposureUsdPrices.value.has(key)) return 'loading'
+  if (hasMissingUtilizedExposureSplit(
+    collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+    strategyVault.utilization,
+  )) {
+    return 'unavailable'
+  }
+  return 'ready'
+}
 
 const collateralExposureGroupsByStrategy = computed(() => {
   const groupsByStrategy = new Map<string, CollateralExposureGroup[]>()
@@ -190,8 +207,7 @@ const collateralExposureGroupsByStrategy = computed(() => {
 
 const getStrategyExposureDisplayItems = (strategyVault: EVault | undefined) => {
   if (!strategyVault) return []
-  if (!hasLiveExposureData.value) return []
-  if (!exposureUsdPrices.value.has(strategyVault.address.toLowerCase())) return []
+  if (getStrategyExposureValueState(strategyVault) !== 'ready') return []
 
   return buildAllocatedVaultExposureDisplayItems({
     collateralGroups: collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
@@ -384,7 +400,7 @@ load()
           >
             <VaultExposureSummary
               :items="getStrategyExposureDisplayItems(row.vault)"
-              :value-state="exposureValueState"
+              :value-state="getStrategyExposureValueState(row.vault)"
               :max-visible="5"
               avatar-size="20"
             />

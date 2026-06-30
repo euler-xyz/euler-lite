@@ -14,7 +14,7 @@ import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -65,19 +65,29 @@ const collateralExposureGroups = computed(() => {
   )
 })
 const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasUnavailableExposureSplit = computed(() =>
+  hasLiveExposureData.value
+  && priceValues.value.totalSupplyState === 'ready'
+  && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
+)
 const exposureValueState = computed<ExposureValueState>(() => {
-  if (hasLiveExposureData.value) return 'ready'
   if (hasOpenInterestError.value) return 'unavailable'
-  return 'loading'
+  if (priceValues.value.totalSupplyState === 'unavailable') return 'unavailable'
+  if (hasUnavailableExposureSplit.value) return 'unavailable'
+  if (!isOpenInterestLoaded.value) return 'loading'
+  if (priceValues.value.totalSupplyState === 'loading') return 'loading'
+  return 'ready'
 })
-const exposureDisplayItems = computed(() =>
-  buildAllocatedVaultExposureDisplayItems({
+const exposureDisplayItems = computed(() => {
+  if (exposureValueState.value !== 'ready') return []
+
+  return buildAllocatedVaultExposureDisplayItems({
     collateralGroups: collateralExposureGroups.value,
     totalExposureUsd: priceValues.value.totalSupplyUsd,
     idleAsset: vault.asset,
     utilization: vault.utilization,
-  }),
-)
+  })
+})
 
 watchEffect(() => {
   if (!isBorrowable.value) return
@@ -146,7 +156,10 @@ const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: stri
   liquidity: '-',
   walletBalance: '-',
 })
-const priceValues = ref({ totalSupplyUsd: 0 })
+const priceValues = ref<{ totalSupplyUsd: number, totalSupplyState: ExposureValueState }>({
+  totalSupplyUsd: 0,
+  totalSupplyState: 'loading',
+})
 
 watchEffect(async () => {
   const liquidity = vault.availableLiquidity
@@ -163,6 +176,7 @@ watchEffect(async () => {
   }
   priceValues.value = {
     totalSupplyUsd: supplyResult.hasPrice ? supplyResult.usdValue : 0,
+    totalSupplyState: supplyResult.hasPrice ? 'ready' : 'unavailable',
   }
 })
 </script>

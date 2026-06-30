@@ -27,6 +27,11 @@ const sortedItems = computed(() => sortVaultExposureDisplayItems(items))
 const visibleItems = computed(() => sortedItems.value.slice(0, maxVisible))
 const hiddenCount = computed(() => Math.max(sortedItems.value.length - visibleItems.value.length, 0))
 const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${item.label ?? item.asset.symbol}`
+const emptyValue = computed(() => {
+  if (valueState === 'loading') return 'Loading'
+  if (valueState === 'unavailable') return 'Unavailable'
+  return '-'
+})
 
 const modalData = computed(() => ({
   props: {
@@ -73,7 +78,7 @@ const modalData = computed(() => ({
     v-else
     class="text-p2 text-content-primary"
   >
-    -
+    {{ emptyValue }}
   </span>
 </template>
 
