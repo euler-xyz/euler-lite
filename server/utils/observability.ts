@@ -4,6 +4,12 @@ type IssueLike = Record<string, unknown>
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 
+export interface SafeUrlLogFields {
+  upstreamHost?: string
+  pathTemplate?: string
+  searchKeys: string[]
+}
+
 export function hashIdentifier(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined
   return createHash('sha256').update(value.trim().toLowerCase()).digest('hex').slice(0, 16)
@@ -32,6 +38,26 @@ export function safePathTemplate(pathname: string): string {
 
 export function searchKeys(params: URLSearchParams): string[] {
   return [...new Set([...params.keys()])].sort()
+}
+
+export function safeUrlLogFields(value: unknown): SafeUrlLogFields {
+  if (typeof value !== 'string' || !value.trim()) {
+    return { searchKeys: [] }
+  }
+  try {
+    const url = new URL(value)
+    return {
+      upstreamHost: url.host,
+      pathTemplate: safePathTemplate(url.pathname),
+      searchKeys: searchKeys(url.searchParams),
+    }
+  }
+  catch {
+    return {
+      upstreamHost: urlHost(value),
+      searchKeys: [],
+    }
+  }
 }
 
 export function errorStatus(error: unknown): number | undefined {
