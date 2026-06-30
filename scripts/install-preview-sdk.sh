@@ -67,4 +67,20 @@ npm pack ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
 
 cd /usr/src/app
 npm install --no-save --package-lock=false --ignore-scripts "$SDK_PACK_DIR"/*.tgz
-npm ls @eulerxyz/euler-v2-sdk --depth=0
+if ! npm ls @eulerxyz/euler-v2-sdk --depth=0; then
+  echo "npm ls reported a version mismatch for the preview SDK tarball; validating runtime exports instead."
+fi
+
+node --input-type=module - <<'NODE'
+import { buildEulerSDK, PositionMigrationService } from '@eulerxyz/euler-v2-sdk'
+
+const missing = []
+if (typeof buildEulerSDK !== 'function') missing.push('buildEulerSDK')
+if (typeof PositionMigrationService !== 'function') missing.push('PositionMigrationService')
+
+if (missing.length > 0) {
+  throw new Error(`Preview SDK is missing expected exports: ${missing.join(', ')}`)
+}
+
+console.log('Preview @eulerxyz/euler-v2-sdk migration exports are available.')
+NODE
