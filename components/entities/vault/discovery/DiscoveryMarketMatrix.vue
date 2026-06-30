@@ -497,13 +497,7 @@ watch(
                     v-if="isUnavailableMetricCell(row.address, col.address)"
                     class="text-p5 whitespace-nowrap text-content-muted"
                   >
-                    <UiHoverPreviewTooltip
-                      title="Max ROE unavailable"
-                      :text="unavailableRoeCellLabel"
-                      placement="top-start"
-                    >
-                      <span>-</span>
-                    </UiHoverPreviewTooltip>
+                    -
                   </span>
                   <span
                     v-else-if="
