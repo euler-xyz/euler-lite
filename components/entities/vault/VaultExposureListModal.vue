@@ -61,7 +61,7 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
       <div
         v-for="item in sortedItems"
         :key="itemKey(item)"
-        class="grid min-w-0 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-10 rounded-8 border border-line-subtle bg-surface px-10 py-8"
+        class="grid min-w-0 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-x-10 gap-y-6 rounded-8 border border-line-subtle bg-surface px-10 py-8"
       >
         <AssetAvatar
           class="shrink-0"
@@ -90,34 +90,6 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
           >
             {{ item.asset.name }}
           </div>
-          <div
-            v-if="itemSources(item).length"
-            class="mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-p5 text-content-secondary"
-          >
-            <span class="shrink-0 text-content-tertiary">Markets listed:</span>
-            <template
-              v-for="(source, sourceIdx) in itemSources(item)"
-              :key="`${source.label}:${JSON.stringify(source.to ?? '')}`"
-            >
-              <NuxtLink
-                v-if="source.to"
-                :to="source.to"
-                class="max-w-[180px] truncate underline transition-colors hover:text-accent-600"
-              >
-                {{ source.label }}
-              </NuxtLink>
-              <span
-                v-else
-                class="max-w-[180px] truncate"
-              >
-                {{ source.label }}
-              </span>
-              <span
-                v-if="sourceIdx < itemSources(item).length - 1"
-                class="text-content-tertiary"
-              >,</span>
-            </template>
-          </div>
         </div>
         <div class="flex shrink-0 items-center gap-8 text-right">
           <div>
@@ -133,6 +105,36 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
             :max="100"
             class="shrink-0 [--ui-radial-progress-active-color:var(--accent-600)] [--ui-radial-progress-background-color:var(--neutral-100)]"
           />
+        </div>
+        <div
+          v-if="itemSources(item).length"
+          class="col-span-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-8 border-t border-line-subtle pt-6 text-p5 text-content-secondary"
+        >
+          <span class="shrink-0 text-content-tertiary">Markets listed</span>
+          <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+            <template
+              v-for="(source, sourceIdx) in itemSources(item)"
+              :key="`${source.label}:${JSON.stringify(source.to ?? '')}`"
+            >
+              <NuxtLink
+                v-if="source.to"
+                :to="source.to"
+                class="max-w-[220px] truncate underline transition-colors hover:text-accent-600"
+              >
+                {{ source.label }}
+              </NuxtLink>
+              <span
+                v-else
+                class="max-w-[220px] truncate"
+              >
+                {{ source.label }}
+              </span>
+              <span
+                v-if="sourceIdx < itemSources(item).length - 1"
+                class="text-content-tertiary"
+              >,</span>
+            </template>
+          </div>
         </div>
       </div>
     </div>
