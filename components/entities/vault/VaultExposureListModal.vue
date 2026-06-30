@@ -108,9 +108,9 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
         </div>
         <div
           v-if="itemSources(item).length"
-          class="col-span-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-8 border-t border-line-subtle pt-6 text-p5 text-content-secondary"
+          class="col-span-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 border-t border-line-subtle pt-6 text-p5 text-content-secondary"
         >
-          <span class="shrink-0 text-content-tertiary">Markets listed</span>
+          <span class="shrink-0 text-content-tertiary">Markets listed:</span>
           <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
             <template
               v-for="(source, sourceIdx) in itemSources(item)"
