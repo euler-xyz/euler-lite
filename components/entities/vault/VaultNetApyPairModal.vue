@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { formatNumber } from '~/utils/string-utils'
+import { combineApyWithIntrinsic } from '~/utils/vault-intrinsic-apy'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignDisplays } from '~/entities/reward-campaign'
 
@@ -33,10 +34,10 @@ const {
 }>()
 
 const totalSupplyApy = computed(() =>
-  supplyAPY + (intrinsicSupplyAPY ?? 0) + (supplyRewardAPY || 0),
+  combineApyWithIntrinsic(supplyAPY, intrinsicSupplyAPY ?? 0) + (supplyRewardAPY || 0),
 )
 const totalBorrowApy = computed(() =>
-  borrowAPY + (intrinsicBorrowAPY ?? 0) - (borrowRewardAPY || 0),
+  combineApyWithIntrinsic(borrowAPY, intrinsicBorrowAPY ?? 0) - (borrowRewardAPY || 0),
 )
 const netApy = computed(() => totalSupplyApy.value - totalBorrowApy.value + (loopingRewardAPY || 0))
 

@@ -2,6 +2,7 @@ import { createError, readBody } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
+import { hashIdentifier } from '~/server/utils/observability'
 import { isAbortError } from '~/utils/errorHandling'
 
 const rateLimiter = createRateLimiter({
@@ -64,7 +65,10 @@ export default defineEventHandler(async (event) => {
     const isSuspicious = data?.addressIsSuspicious !== false
 
     if (isSuspicious) {
-      logger.warn({ ctx: 'screen-address', address }, 'flagged, malformed, or ambiguous TRM response — failing closed')
+      logger.warn(
+        { ctx: 'screen-address', addressHash: hashIdentifier(address) },
+        'flagged, malformed, or ambiguous TRM response — failing closed',
+      )
     }
 
     return { addressIsSuspicious: isSuspicious }

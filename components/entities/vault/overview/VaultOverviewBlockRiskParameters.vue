@@ -24,9 +24,14 @@ const supplyCapPercentageDisplay = computed(() => vault.caps.supplyCapUtilizatio
 const borrowCapPercentageDisplay = computed(() => vault.caps.borrowCapUtilization)
 const hookedOperations = computed(() => getVaultHookedOperations(vault))
 const liquidationBonusRange = computed(() => formatLiquidationBonusRange(vault))
+// The share/asset rate only moves as borrow interest accrues, so it is only
+// meaningful on borrowable vaults. A collateral-only vault can have a non-zero
+// borrowCap configured yet still be non-borrowable (no collateral carries a
+// borrow LTV — e.g. "Can be borrowed: No"), so gate on actual borrowability
+// rather than the cap. isVaultBorrowable also keeps the rate visible during
+// wind-down (residual debt) via its `totalBorrowed > 0n` branch.
 const showShareTokenExchangeRate = computed(() =>
-  getVaultCategory(vault.address) !== 'escrow'
-  && (vault.caps.borrowCap !== 0n || vault.totalBorrowed > 0n),
+  getVaultCategory(vault.address) !== 'escrow' && isBorrowable.value,
 )
 
 const supplyCapDisplay = ref('-')

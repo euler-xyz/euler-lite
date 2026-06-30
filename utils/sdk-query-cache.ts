@@ -3,7 +3,17 @@ import { QueryClient } from '@tanstack/vue-query'
 import { serializeQueryArgs, type BuildQueryFn, type EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
 import { DEFAULT_STALE_TIME_MS, FORM_STALE_TIMES, STALE_TIMES } from '~/utils/sdk-query-policy'
 
-export const sdkQueryClient = new QueryClient()
+const DEFAULT_FAILURE_TTL_MS = 5_000
+
+// Match the app QueryClient: SDK queries already wrap RPC/V3 callers that have
+// their own retry behavior, so TanStack's default 3 retries amplifies outages.
+export const sdkQueryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 0,
+    },
+  },
+})
 
 type SdkQueryRecord = {
   queryName: string
@@ -20,6 +30,8 @@ type SdkQueryRecorderWindow = Window & {
   __EULER_SDK_QUERY_RECORDER__?: (record: SdkQueryRecord) => Promise<void> | void
 }
 
+const failureCache = new Map<string, { error: unknown, expiresAt: number }>()
+
 const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): BuildQueryFn => {
   return ((queryName: string, fn, _target: object, context) => {
     const wrapped = (async (...args: Parameters<typeof fn>) => {
@@ -30,9 +42,21 @@ const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): 
 
       const startedAt = queryTimerNow()
       const stack = captureSdkQueryStack()
+      const queryKey = ['sdk', queryName, serializedArgs] as const
+      const failureKey = JSON.stringify(queryKey)
+      let usedCachedFailure = false
       try {
+        const failure = failureCache.get(failureKey)
+        if (failure) {
+          if (failure.expiresAt > Date.now()) {
+            usedCachedFailure = true
+            throw failure.error
+          }
+          failureCache.delete(failureKey)
+        }
+
         const result = await sdkQueryClient.fetchQuery({
-          queryKey: ['sdk', queryName, serializedArgs],
+          queryKey,
           queryFn: async () => {
             const value = await fn(...args)
             return value === undefined ? null : value
@@ -40,11 +64,18 @@ const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): 
           staleTime: staleTimes[queryName as EulerSDKQueryName] ?? DEFAULT_STALE_TIME_MS,
         })
 
+        failureCache.delete(failureKey)
         const value = result === null ? undefined : result
         recordSdkQueryIfRequested({ queryName, serializedArgs, args, status: 'success', durationMs: queryTimerElapsed(startedAt), stack, result: value })
         return value
       }
       catch (error) {
+        if (!usedCachedFailure) {
+          failureCache.set(failureKey, {
+            error,
+            expiresAt: Date.now() + DEFAULT_FAILURE_TTL_MS,
+          })
+        }
         recordSdkQueryIfRequested({ queryName, serializedArgs, args, status: 'error', durationMs: queryTimerElapsed(startedAt), stack, error })
         throw error
       }
@@ -105,10 +136,18 @@ export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 
 export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => {
   const names = new Set<string>(queryNames)
+  for (const key of failureCache.keys()) {
+    const [, queryName] = JSON.parse(key) as [string, string, string]
+    if (names.has(queryName)) failureCache.delete(key)
+  }
   return sdkQueryClient.invalidateQueries({
     predicate: query =>
       query.queryKey[0] === 'sdk'
       && typeof query.queryKey[1] === 'string'
       && names.has(query.queryKey[1]),
   })
+}
+
+export const clearSdkQueryFailureCacheForTest = () => {
+  failureCache.clear()
 }

@@ -13,11 +13,22 @@ export const useCustomFilters = <T>(
   const customFilters = ref<CustomFilter[]>([...initialFilters])
 
   const addCustomFilter = (filter: CustomFilter) => {
-    customFilters.value = [...customFilters.value, filter]
+    const filtersWithoutReplacedDefaults = customFilters.value.filter(existing =>
+      !(existing.tone === 'neutral' && existing.metric === filter.metric),
+    )
+    customFilters.value = [...filtersWithoutReplacedDefaults, filter]
   }
 
   const removeCustomFilter = (id: string) => {
-    customFilters.value = customFilters.value.filter(f => f.id !== id)
+    const removedFilter = customFilters.value.find(f => f.id === id)
+    const nextFilters = customFilters.value.filter(f => f.id !== id)
+    const neutralDefault = removedFilter && removedFilter.tone !== 'neutral'
+      ? initialFilters.find(f => f.tone === 'neutral' && f.metric === removedFilter.metric)
+      : undefined
+
+    customFilters.value = neutralDefault && !nextFilters.some(f => f.metric === neutralDefault.metric)
+      ? [...nextFilters, neutralDefault]
+      : nextFilters
   }
 
   const clearCustomFilters = () => {

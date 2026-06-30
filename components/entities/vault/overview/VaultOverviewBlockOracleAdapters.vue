@@ -4,13 +4,12 @@ import type {
   EVault,
   OracleRouteStep,
 } from '@eulerxyz/euler-v2-sdk'
-import { getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterMeta } from '~/entities/oracle'
-import { getOracleProviderLogo } from '~/entities/oracle-providers'
+import { getRouterRecognition, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
-import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
-import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
+import { isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
+import { buildOracleAdapterViews, collectOracleRouteSteps } from '~/utils/oracle-adapter-views'
 import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
@@ -21,6 +20,7 @@ const props = defineProps<{
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
+const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -34,33 +34,7 @@ const sourceVaults = computed(() => {
   return []
 })
 
-const getCollateralRouteSteps = (vault: EVault, collateralVault: EVault | SecuritizeCollateralVault) => {
-  return getCollateralOracleRouteSteps(vault, collateralVault)
-}
-
-const routeSteps = computed(() => {
-  const entries: OracleRouteStep[] = []
-  const deduped = new Map<string, OracleRouteStep>()
-
-  sourceVaults.value.forEach((vault) => {
-    entries.push(...getDebtOracleRouteSteps(vault))
-
-    if (props.collateralVaults?.length) {
-      props.collateralVaults.forEach((collateralVault) => {
-        entries.push(...getCollateralRouteSteps(vault, collateralVault))
-      })
-    }
-  })
-
-  entries.forEach((step) => {
-    const key = getOracleRouteStepKey(step)
-    if (!deduped.has(key)) {
-      deduped.set(key, step)
-    }
-  })
-
-  return [...deduped.values()]
-})
+const routeSteps = computed(() => collectOracleRouteSteps(sourceVaults.value, props.collateralVaults ?? []))
 
 const knownSymbols = computed(() => {
   const map = buildKnownSymbols()
@@ -79,38 +53,7 @@ const knownSymbols = computed(() => {
   return map
 })
 
-const adapterViews = computed(() => routeSteps.value.map((step) => {
-  const meta: OracleAdapterMeta | undefined = isOracleAdapterRouteStep(step)
-    ? oracleAdapters[step.oracle.toLowerCase()]
-    : undefined
-  const provider = meta?.provider || step.name
-  const name = meta?.name || step.name
-  const checks = meta?.checks
-  const invertPrice = shouldInvertOraclePrice({
-    metaBase: meta?.base,
-    metaQuote: meta?.quote,
-    callerBase: step.base,
-    callerQuote: step.quote,
-  })
-
-  return {
-    ...step,
-    name,
-    provider,
-    methodology: meta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
-    logo: getOracleProviderLogo(provider, name),
-    label: meta?.label
-      ? {
-          primary: meta.label.split('(')[0].trimEnd(),
-          suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined,
-        }
-      : undefined,
-    invertPrice,
-    checks,
-    checksStatus: getChecksStatus(checks),
-    failedChecks: checks?.filter(c => !c.pass) ?? [],
-  }
-}))
+const adapterViews = computed(() => buildOracleAdapterViews(routeSteps.value, oracleAdapters))
 
 watch(
   () => routeSteps.value,
@@ -125,6 +68,23 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  chainId,
+  (id) => {
+    if (id) loadRecognizedRouters(id)
+  },
+  { immediate: true },
+)
+
+// LITE-236: flag whether the vault's price oracle (EulerRouter) was deployed by the
+// recognized EulerRouterFactory. Null while the allowlist is still loading for the
+// active chain or unavailable, so we never show a false "unrecognized" warning.
+const routerRecognition = computed(() => {
+  if (recognizedRoutersChainId.value !== chainId.value) return null
+  const routerAddresses = sourceVaults.value.map(vault => vault.oracle?.oracle)
+  return getRouterRecognition(routerAddresses, recognizedRouters.value)
+})
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
@@ -302,9 +262,30 @@ const onTooltipMouseLeave = () => {
 
 <template>
   <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Oracles
-    </p>
+    <div class="flex flex-wrap items-center gap-8">
+      <p class="text-h3 text-content-primary">
+        Oracles
+      </p>
+      <UiHoverPreviewTooltip
+        v-if="routerRecognition === 'unrecognized'"
+        title="Unrecognized oracle router"
+        text="The vault's price oracle was not deployed by the recognized EulerRouterFactory. Verify the oracle configuration before trusting its prices."
+        placement="top-start"
+      >
+        <span
+          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
+          data-id="data-point"
+          data-field="oracle-router-recognition"
+          data-value="unrecognized"
+        >
+          <SvgIcon
+            name="warning"
+            class="!w-12 !h-12"
+          />
+          Unrecognized router
+        </span>
+      </UiHoverPreviewTooltip>
+    </div>
     <div
       v-if="!adapterViews.length"
       class="text-p3 text-content-tertiary"
@@ -388,7 +369,11 @@ const onTooltipMouseLeave = () => {
           >
             <span class="text-content-tertiary">Checks</span>
             <span
-              v-if="!adapter.checks?.length"
+              v-if="adapter.isCustomAdapter"
+              class="text-content-secondary"
+            >Custom — set by risk manager</span>
+            <span
+              v-else-if="!adapter.checks?.length"
               class="text-content-secondary"
             >N/A</span>
             <span
@@ -524,7 +509,7 @@ const onTooltipMouseLeave = () => {
               }"
             >
               <SvgIcon
-                :name="check.pass ? 'check' : 'x'"
+                :name="check.pass ? 'check' : 'close'"
                 class="!w-10 !h-10 text-white"
               />
             </span>

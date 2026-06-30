@@ -26,8 +26,8 @@ const vueGlobals: Record<string, unknown> = {
   shallowRef,
   reactive,
   shallowReactive,
-  computed,
   readonly,
+  computed,
   watch,
   watchEffect,
 }
