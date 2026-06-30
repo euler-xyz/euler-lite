@@ -396,7 +396,7 @@ const renderChart = async () => {
           pointRadius: 0,
           pointHoverRadius: 6,
           pointHitRadius: 30,
-          tension: 0.4,
+          tension: 0,
           fill: true,
         },
         {
@@ -408,7 +408,7 @@ const renderChart = async () => {
           pointRadius: 0,
           pointHoverRadius: 6,
           pointHitRadius: 30,
-          tension: 0.4,
+          tension: 0,
           fill: true,
         },
       ],
