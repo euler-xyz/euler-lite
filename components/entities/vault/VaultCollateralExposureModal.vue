@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { formatNumber } from '~/utils/string-utils'
+import { compactNumber, formatCompactUsdValue, formatNumber } from '~/utils/string-utils'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 
 const emits = defineEmits(['close'])
@@ -9,6 +9,12 @@ const router = useRouter()
 const route = useRoute()
 const { vault } = defineProps<{ vault: EVault }>()
 const { get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 
 const allCollateralPairs = computed(() =>
   getCollateralExposurePairs(
@@ -17,8 +23,26 @@ const allCollateralPairs = computed(() =>
   ),
 )
 
-const collateralGroups = computed(() => getCollateralExposureGroups(allCollateralPairs.value))
+const openInterestUsdByCollateral = computed(() => getOpenInterestForVault(vault.address))
+const collateralGroups = computed(() =>
+  getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
+)
 const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
+const totalOpenInterestUsd = computed(() =>
+  collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
+const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
+  const entry = Object.entries(openInterestUsdByCollateral.value)
+    .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
+  return entry?.[1] ?? 0
+}
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const formatExposurePercent = (valueUsd: number) =>
+  !hasLiveExposureData.value
+    ? '-'
+    : totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
+const formatLiveExposureUsd = (valueUsd: number) =>
+  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
 
 const formatTimeRemaining = (seconds: bigint): string => {
   const days = Number(seconds) / 86400
@@ -37,6 +61,11 @@ const onCollateralClick = (address: string) => {
   emits('close')
   router.push({ path: `/borrow/${address}/${vault.address}`, query: { network: route.query.network } })
 }
+
+watchEffect(() => {
+  if (!vault.address) return
+  void loadOpenInterest()
+})
 </script>
 
 <template>
@@ -72,6 +101,15 @@ const onCollateralClick = (address: string) => {
           />
         </div>
         <div class="flex flex-col gap-12 pt-12">
+          <VaultOverviewLabelValue
+            label="Live exposure"
+            orientation="horizontal"
+          >
+            <span class="flex items-center gap-4">
+              {{ formatLiveExposureUsd(getPairOpenInterestUsd(pair)) }}
+              <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>
+            </span>
+          </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"
