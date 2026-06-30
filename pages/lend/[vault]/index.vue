@@ -28,6 +28,7 @@ import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyMod
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import { reportClientEvent } from '~/utils/client-observability'
 import { isCowProviderOrQuote } from '~/entities/cowswap'
 
 // Type definitions for vault display
@@ -473,6 +474,16 @@ const submit = async () => {
       }
       catch (e) {
         console.warn('[OperationReviewModal] failed to build plan', e)
+        void reportClientEvent({
+          event: 'tx_plan_build_failed',
+          flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+          phase: 'build',
+          chainId: chainId.value,
+          operationType: needsSwap.value ? 'swap-supply' : 'supply',
+          vaultAddress,
+          assetAddress: asset.value.address,
+          quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+        }, e)
         plan.value = null
       }
 
@@ -485,6 +496,16 @@ const submit = async () => {
         }
         catch (e) {
           console.warn('[OperationReviewModal] failed to prepare plan', e)
+          void reportClientEvent({
+            event: 'tx_plan_prepare_failed',
+            flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+            phase: 'prepare',
+            chainId: chainId.value,
+            operationType: needsSwap.value ? 'swap-supply' : 'supply',
+            vaultAddress,
+            assetAddress: asset.value.address,
+            quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+          }, e)
           simulationError.value = await getTxErrorMessage(e)
           return
         }
@@ -587,6 +608,16 @@ const send = async () => {
   catch (e) {
     error('Transaction failed')
     console.warn(e)
+    void reportClientEvent({
+      event: 'tx_execute_failed',
+      flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+      phase: 'execute',
+      chainId: chainId.value,
+      operationType: needsSwap.value ? 'swap-supply' : 'supply',
+      vaultAddress,
+      assetAddress: asset.value?.address,
+      quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+    }, e)
   }
   finally {
     isSubmitting.value = false
