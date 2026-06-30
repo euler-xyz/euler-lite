@@ -108,24 +108,24 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
         </div>
         <div
           v-if="itemSources(item).length"
-          class="col-span-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 border-t border-line-subtle pt-6 text-p5 text-content-secondary"
+          class="col-span-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-line-subtle pt-6 text-p5 text-content-secondary"
         >
           <span class="shrink-0 text-content-tertiary">Markets listed:</span>
-          <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
-            <template
-              v-for="(source, sourceIdx) in itemSources(item)"
-              :key="`${source.label}:${JSON.stringify(source.to ?? '')}`"
-            >
+          <template
+            v-for="(source, sourceIdx) in itemSources(item)"
+            :key="`${source.label}:${JSON.stringify(source.to ?? '')}`"
+          >
+            <span class="inline-flex min-w-0 max-w-[220px] shrink items-center">
               <NuxtLink
                 v-if="source.to"
                 :to="source.to"
-                class="max-w-[220px] truncate underline transition-colors hover:text-accent-600"
+                class="min-w-0 truncate underline transition-colors hover:text-accent-600"
               >
                 {{ source.label }}
               </NuxtLink>
               <span
                 v-else
-                class="max-w-[220px] truncate"
+                class="min-w-0 truncate"
               >
                 {{ source.label }}
               </span>
@@ -133,8 +133,8 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
                 v-if="sourceIdx < itemSources(item).length - 1"
                 class="text-content-tertiary"
               >,</span>
-            </template>
-          </div>
+            </span>
+          </template>
         </div>
       </div>
     </div>
