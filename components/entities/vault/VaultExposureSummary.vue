@@ -26,6 +26,7 @@ const {
 const sortedItems = computed(() => sortVaultExposureDisplayItems(items))
 const visibleItems = computed(() => sortedItems.value.slice(0, maxVisible))
 const hiddenCount = computed(() => Math.max(sortedItems.value.length - visibleItems.value.length, 0))
+const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${item.label ?? item.asset.symbol}`
 
 const modalData = computed(() => ({
   props: {
@@ -52,7 +53,7 @@ const modalData = computed(() => ({
     >
       <span
         v-for="item in visibleItems"
-        :key="item.asset.address"
+        :key="itemKey(item)"
         class="vault-exposure-summary__avatar"
       >
         <AssetAvatar

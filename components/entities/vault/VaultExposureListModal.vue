@@ -45,6 +45,7 @@ const formatPercent = (item: VaultExposureDisplayItem) => {
 const vaultCountLabel = (count: number) => `${count} vault${count === 1 ? '' : 's'}`
 const displayLabel = (item: VaultExposureDisplayItem) => item.label ?? item.asset.symbol
 const itemSources = (item: VaultExposureDisplayItem) => item.sources ?? []
+const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${displayLabel(item)}`
 </script>
 
 <template>
@@ -59,7 +60,7 @@ const itemSources = (item: VaultExposureDisplayItem) => item.sources ?? []
     >
       <div
         v-for="item in sortedItems"
-        :key="item.asset.address"
+        :key="itemKey(item)"
         class="grid min-w-0 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-10 rounded-8 border border-line-subtle bg-surface px-10 py-8"
       >
         <AssetAvatar
