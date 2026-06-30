@@ -54,6 +54,7 @@ export const useSpyMode = () => {
           address: evcAddress as `0x${string}`,
           abi: evcGetAccountOwnerAbi,
           functionName: 'getAccountOwner',
+          authorizationList: undefined,
           args: [address as `0x${string}`],
         })
 

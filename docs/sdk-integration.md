@@ -25,7 +25,7 @@ The app exposes two SDK instances, both produced by the same factory in `composa
 
   Cache wrapper is `sdkBuildQuery`, which applies `STALE_TIMES` (the per-query stale times from `SDK_QUERY_POLICY`). UI surfaces — vault lists, portfolio display, prices, rewards — consume this instance.
 
-- **`getEulerSdkFresh()` — form-time / plan-time instance.** Pinned to on-chain / direct / subgraph adapters regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Entries that must be live for account discovery, such as `queryAccountVaults`, use `formStaleTimeMs: 0`; plan-critical account/vault reads use shorter form-time windows than browsing reads. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
+- **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Entries that must be live for account discovery, such as `queryAccountVaults`, use `formStaleTimeMs: 0`; plan-critical account/vault reads use shorter form-time windows than browsing reads. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
 
 Both instances share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the fast instance reads from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -78,7 +78,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 
 | SDK field | Value | Backing endpoint |
 |-----------|-------|-----------------|
-| `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/v3` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/v3/[...path].ts`) |
+| `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/v3/[...path].ts`) |
 | `deploymentsUrl` | `/api/euler-chains` | Local proxy |
 | `eulerLabelsBaseUrl` | `/api/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
 | `rewardsMerklApiUrl` | `/api/proxy/merkl` | Merkl proxy |

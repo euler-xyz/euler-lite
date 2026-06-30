@@ -1,5 +1,6 @@
 const EVM_ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 const POSITIVE_INTEGER_RE = /^[1-9]\d*$/
+const TURTLE_STREAM_ID_RE = /^[A-Za-z0-9_-]+$/
 
 const FUUL_INCENTIVE_PROTOCOLS = new Set(['euler', 'euler-looping'])
 const MERKL_OPPORTUNITY_TYPES = new Set([
@@ -107,4 +108,22 @@ export const isAllowedMerklProxyRequest = (
   }
 
   return false
+}
+
+export const isAllowedTurtleProxyRequest = (
+  method: string,
+  path: string,
+  params: URLSearchParams,
+): boolean => {
+  const normalizedMethod = method.toUpperCase()
+  if (normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') return false
+
+  const normalizedPath = normalizePath(path)
+  if (normalizedPath !== 'streams/merkle_proofs') return false
+  if (!hasOnlySearchKeys(params, ['wallet', 'streamIds'])) return false
+
+  const wallet = getSingleParam(params, 'wallet')
+  const streamIds = getSingleParam(params, 'streamIds')
+  return EVM_ADDRESS_RE.test(wallet ?? '')
+    && Boolean(streamIds?.split(',').every(streamId => TURTLE_STREAM_ID_RE.test(streamId)))
 }

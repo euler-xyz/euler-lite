@@ -17,10 +17,12 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { createInFlightDedup } from './in-flight'
+import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
 import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
+import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
 
 export interface ChainVaultsSnapshot {
@@ -130,8 +132,11 @@ function overrideHasTag(
 // SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
 const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
-async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
-  const data = await $fetch<TokenListResponse>('/api/token-list', { query: { chainId } })
+export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
+  const data = await $fetch<TokenListResponse>('/api/token-list', {
+    query: { chainId },
+    headers: INTERNAL_FETCH_HEADERS,
+  })
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
 
@@ -273,7 +278,9 @@ async function buildSnapshot(
   ])
 
   for (const issue of [...evk.errors, ...securitize.errors, ...earn.errors]) {
-    logger.warn({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk vault fetch issue')
+    if (isSdkErrorDiagnostic(issue)) {
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk vault fetch issue')
+    }
   }
 
   const evkVaults = (evk.result.filter(Boolean) as EVault[]).map(vault =>
@@ -295,7 +302,9 @@ async function buildSnapshot(
     ? await sdk.eVaultService.fetchVaults(chainId, referencedEscrowAddresses, vaultOptions)
     : { result: [], errors: [] }
   for (const issue of fetchedEscrow.errors) {
-    logger.warn({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk escrow fetch issue')
+    if (isSdkErrorDiagnostic(issue)) {
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk escrow fetch issue')
+    }
   }
 
   const escrowVaults = [

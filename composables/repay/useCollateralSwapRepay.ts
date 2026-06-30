@@ -3,7 +3,7 @@ import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
-import { formatUnits, zeroAddress, type Address, type Abi } from 'viem'
+import { formatUnits, zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { cowSwapInboxExists } from '~/utils/cowswap-inbox'
@@ -14,7 +14,6 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { getAssetUsdValue, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { maxUint256 } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
@@ -31,6 +30,7 @@ import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } 
 import { COWSWAP_ORDER_DEADLINE_SECONDS, getCowSwapChainConfig, getCowSwapQuoteOrderAmounts, isCowProvider } from '~/entities/cowswap'
 import { type CowSwapClosePositionExecuteParams, useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
+import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -45,6 +45,14 @@ interface UseCollateralSwapRepayOptions {
   runSimulation: (plan: TransactionPlan, stateOverrideOptions?: SimulationStateOverrideOptions) => Promise<boolean>
   getCurrentDebt: () => bigint
   isEligibleForLiquidation: ComputedRef<boolean>
+}
+
+interface CollateralSwapRepayPlanSnapshot {
+  sourceVault?: EVault
+  amount?: string
+  debtAmount?: string
+  direction?: SwapperMode
+  isSameAsset?: boolean
 }
 
 export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) => {
@@ -67,17 +75,20 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address } = useWagmi()
+  const { isSpyMode, spyAddress } = useSpyMode()
+  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
-  const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig, chainId: currentChainId } = useEulerAddresses()
+  const { chainId: currentChainId } = useEulerAddresses()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { refreshAllPositions } = useEulerAccount()
   const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
+  const { entryCount: batchEntryCount, getMergedPlan } = useTxBatch()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
@@ -97,6 +108,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     () => borrowVault.value?.asset.symbol,
   )
   const sourceProduct = useEulerProductOfVault(computed(() => sourceVault.value?.address || ''))
+  const buildBatchAwareGasEstimatePlan = async (candidatePlan: TransactionPlan): Promise<TransactionPlan> => {
+    const batchPlan = batchEntryCount.value > 0 ? getMergedPlan() : null
+    if (!batchPlan) return candidatePlan
+    const sdk = await getEulerSdkFresh()
+    return sdk.executionService.mergePlans([batchPlan, candidatePlan])
+  }
 
   // --- Collateral options ---
   const { collateralOptions: swapCollateralOptions, collateralVaults: swapCollateralVaults } = useSwapCollateralOptions({
@@ -139,12 +156,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     slippage,
     clearSimulationError,
     getCurrentDebt,
-    includeCowSwap: true,
+    includeCowSwap: () => batchEntryCount.value === 0,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
+    buildGasEstimatePlan: buildBatchAwareGasEstimatePlan,
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
-      const subAccount = (position.value?.subAccount || address.value || zeroAddress) as Address
+      const subAccount = (position.value?.subAccount || effectiveAddress.value || zeroAddress) as Address
       return { accountIn: subAccount, accountOut: subAccount }
     },
   })
@@ -305,7 +323,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value) return false
+    if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
@@ -339,7 +357,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
 
   // --- Balance ---
-  const updateSourceBalance = async () => {
+  const updateSourceBalance = () => {
     if (!position.value || !sourceVault.value) {
       sourceAssets.value = 0n
       sourceShares.value = 0n
@@ -347,29 +365,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
     const primaryAddress = normalizeAddressOrEmpty(position.value.collateralVault?.address)
     const targetAddress = normalizeAddressOrEmpty(sourceVault.value.address)
-    sourceAssets.value = targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n
-    sourceShares.value = 0n
-
-    try {
-      if (!isEulerAddressesReady.value) {
-        await loadEulerConfig()
-      }
-      const lensAddress = eulerLensAddresses.value?.accountLens
-      if (!lensAddress) {
-        throw new Error('Account lens address is not available')
-      }
-      const res = await rpcClient.value!.readContract({
-        address: lensAddress as Address,
-        abi: eulerAccountLensABI as Abi,
-        functionName: 'getVaultAccountInfo',
-        args: [position.value.subAccount, sourceVault.value.address],
-      }) as { assets: bigint, shares: bigint }
-      sourceAssets.value = res.assets
-      sourceShares.value = res.shares
-    }
-    catch (e) {
-      logWarn('collateralSwapRepay/loadBalance', e)
-    }
+    // Source collateral assets/shares from the (layer-aware) position rather than
+    // a direct lens read, so it reflects the active batch layer. Unheld ⇒ 0.
+    const match = position.value.collaterals.find(c =>
+      normalizeAddressOrEmpty(c.vaultAddress) === targetAddress)
+    sourceAssets.value = match?.assets ?? (targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n)
+    sourceShares.value = match?.shares ?? 0n
   }
 
   watch([sourceVault, position], () => {
@@ -397,21 +398,47 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     { immediate: true },
   )
 
-  // --- Build / Submit / Send ---
-  async function buildRepayPlan(quote?: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
-    if (!position.value || !borrowVault.value || !sourceVault.value) {
-      throw new Error('Position or vaults not loaded')
-    }
-
-    const subAccount = position.value.subAccount as Address
-    let isFullRepay: boolean
-    let liabilityAmount = 0n
-    let swapMode: SwapperMode | undefined
-
+  // Whether the current inputs repay the whole debt. Mirrors the full-repay
+  // branch in buildRepayPlan, where the plan opts into cleanup (remaining
+  // collateral shares are moved to the owner account).
+  const isFullRepay = computed(() => {
+    if (!position.value || !borrowVault.value || !sourceVault.value) return false
+    const currentDebt = getCurrentDebt()
+    if (currentDebt <= 0n) return false
     if (core.isSameAsset.value) {
       const debtNano = core.debtAmount.value
         ? valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals)
         : valueToNano(core.amount.value, sourceVault.value.asset.decimals)
+      return debtNano >= currentDebt
+    }
+    if (core.direction.value !== SwapperMode.TARGET_DEBT) return false
+    if (!core.debtAmount.value) return true
+    return valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals) >= currentDebt
+  })
+
+  // --- Build / Submit / Send ---
+  async function buildRepayPlan(
+    quote?: SwapQuote,
+    account = planAccount.value,
+    snapshot: CollateralSwapRepayPlanSnapshot = {},
+  ): Promise<TransactionPlan> {
+    const source = snapshot.sourceVault ?? sourceVault.value
+    if (!position.value || !borrowVault.value || !source) {
+      throw new Error('Position or vaults not loaded')
+    }
+
+    const subAccount = position.value.subAccount as Address
+    const sameAsset = snapshot.isSameAsset ?? core.isSameAsset.value
+    const amountInput = snapshot.amount ?? core.amount.value
+    const debtAmountInput = snapshot.debtAmount ?? core.debtAmount.value
+    let isFullRepay: boolean
+    let liabilityAmount = 0n
+    let swapMode: SwapperMode | undefined
+
+    if (sameAsset) {
+      const debtNano = debtAmountInput
+        ? valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+        : valueToNano(amountInput, source.asset.decimals)
       const currentDebtVal = getCurrentDebt()
       isFullRepay = debtNano >= currentDebtVal
       liabilityAmount = isFullRepay ? maxUint256 : debtNano
@@ -421,11 +448,11 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       if (!swapQuote) {
         throw new Error('No quote selected')
       }
-      swapMode = core.direction.value
+      swapMode = snapshot.direction ?? core.direction.value
       const currentDebt = getCurrentDebt()
       let targetDebt = 0n
-      if (swapMode === SwapperMode.TARGET_DEBT && core.debtAmount.value) {
-        const debtAmountNano = valueToNano(core.debtAmount.value, borrowVault.value.asset.decimals)
+      if (swapMode === SwapperMode.TARGET_DEBT && debtAmountInput) {
+        const debtAmountNano = valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
         targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
       }
       isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
@@ -435,9 +462,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       liabilityVault: borrowVault.value.address as Address,
       liabilityAmount,
       receiver: subAccount,
-      fromVault: sourceVault.value.address as Address,
+      fromVault: source.address as Address,
       fromAccount: subAccount,
-      swapQuote: core.isSameAsset.value ? undefined : (quote || core.quotes.selectedQuote.value!),
+      swapQuote: sameAsset ? undefined : (quote || core.quotes.selectedQuote.value!),
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
       account,
@@ -706,6 +733,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     hookWarning,
     liquidityWarning,
     isRepayExceedsDebt: core.isRepayExceedsDebt,
+    isFullRepay,
     // Handlers
     onAmountInput: core.onAmountInput,
     onDebtInput: core.onDebtInput,
@@ -719,5 +747,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     updateSourceBalance,
     initVault,
     resetOnTabSwitch,
+    // Batch
+    buildRepayPlan,
   }
 }

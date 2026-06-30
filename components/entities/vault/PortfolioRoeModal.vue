@@ -24,7 +24,7 @@ const {
 } = defineProps<{
   roeBreakdown?: YieldApyBreakdown
   roe: number
-  multiplier: number
+  multiplier: number | null
   supplyAPY: number
   borrowAPY: number
   supplyRewardAPY?: number | null
@@ -58,6 +58,9 @@ const allRewardsInfo = computed(() => [
 ])
 
 const displayRoe = computed(() => roeBreakdown?.total ?? roe)
+const multiplierDisplay = computed(() =>
+  multiplier !== null && Number.isFinite(multiplier) ? `${formatNumber(multiplier, 2, 2)}x` : '-',
+)
 const hasIntrinsicContribution = computed(() => Math.abs(roeBreakdown?.intrinsicApy ?? 0) > 0)
 const hasRewardContribution = computed(() => Math.abs(roeBreakdown?.rewards ?? 0) > 0)
 const signedPrefix = (value: number) => value < 0 ? '- ' : '+ '
@@ -105,18 +108,18 @@ const handleClose = () => {
             </p>
           </div>
           <div class="text-h5">
-            {{ formatNumber(multiplier, 2, 2) }}x
+            {{ multiplierDisplay }}
           </div>
         </div>
         <div class="flex justify-between items-center">
           <div>
             <p class="mb-4 flex items-center gap-4">
               Supply ROE
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Supply ROE"
                 text="Supply ROE is the leveraged supply-yield contribution shown relative to your net asset value."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -135,11 +138,11 @@ const handleClose = () => {
                 name="sparks"
               />
               <span>Rewards ROE</span>
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Rewards ROE"
                 text="Rewards ROE is the weighted contribution from active eligible reward campaigns for this position."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -196,11 +199,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Intrinsic ROE
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Intrinsic ROE"
                 text="Intrinsic ROE is the leveraged contribution from asset-native yield, when intrinsic APY is enabled."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -214,11 +217,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Borrow cost ROE
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Borrow cost ROE"
                 text="Borrow cost ROE is weighted by your debt relative to net asset value, so it reflects the leveraged cost of this position."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -256,7 +259,7 @@ const handleClose = () => {
             </p>
           </div>
           <div class="text-h5">
-            {{ formatNumber(multiplier, 2, 2) }}x
+            {{ multiplierDisplay }}
           </div>
         </div>
         <div class="flex justify-between items-center mb-16">

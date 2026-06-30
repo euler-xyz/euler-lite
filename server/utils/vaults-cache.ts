@@ -33,6 +33,7 @@ import { logger } from './logger'
 import { reportStatus } from './log'
 import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
+import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import {
   LABEL_FILES,
   refreshLabelFile,
@@ -214,7 +215,9 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
       { errors: escrow.errors, ctx: 'escrow' },
     ] as const) {
       for (const issue of errors as unknown[]) {
-        logger.warn({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue) }, 'sdk fetch issue')
+        if (isSdkErrorDiagnostic(issue)) {
+          logger.error({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue) }, 'sdk fetch issue')
+        }
       }
     }
 

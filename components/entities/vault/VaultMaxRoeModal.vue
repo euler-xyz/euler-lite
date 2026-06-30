@@ -78,13 +78,14 @@ const handleClose = () => {
     :close="close"
     @close="handleClose"
   >
-    <p class="text-content-primary text-p3 mb-16">
+    <p class="text-content-primary text-p3 mb-12">
       ROE (Return on Equity) estimates the annualized return on your own capital in a multiplied position. A positive ROE means the supply yield exceeds borrowing costs at the given multiplier. A negative ROE means the position is gradually losing value to interest costs.
+      Max ROE is shown only when the collateral and debt assets share a correlated category, such as USD, ETH, or BTC. For uncorrelated pairs, Euler shows Net APY instead because ROE assumes the asset price ratio stays stable.
       <template v-if="isBestInMarket">
-        The value shown is the max modelled ROE across possible collateral/borrow pairs in this market. Not guaranteed. Borrowing and multiplied positions involve changing rates, liquidity constraints, and liquidation risk.
+        The value shown is the max modelled ROE across correlated collateral/borrow pairs in this market. Not guaranteed. Borrowing and multiplied positions involve changing rates, liquidity constraints, and liquidation risk.
       </template>
     </p>
-    <div class="mb-24">
+    <div class="mb-12">
       <div class="pb-16 mb-16 border-b border-line-default">
         <div class="flex justify-between items-center mb-16">
           <div>
@@ -338,7 +339,7 @@ const handleClose = () => {
           </p>
         </template>
       </div>
-      <div class="flex justify-between items-center mb-16">
+      <div class="flex justify-between items-center">
         <div>
           <p class="mb-4">
             Formula
@@ -355,7 +356,7 @@ const handleClose = () => {
       </div>
     </div>
 
-    <div class="bg-surface-secondary rounded-12 p-16 flex justify-between items-center mb-16">
+    <div class="bg-surface-secondary rounded-8 px-12 py-10 flex justify-between items-center gap-16">
       <div>
         <p>Max ROE</p>
         <p class="text-content-primary text-p3">

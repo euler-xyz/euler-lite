@@ -251,6 +251,27 @@ The `useMarketGroups` composable (`composables/useMarketGroups.ts`) implements a
 3. **Orphan clustering** — Vaults not assigned to any product are clustered using a BFS connected-component algorithm over their collateral relationships. This produces "Ungrouped" markets.
 4. **Async TVL resolution** — Group metrics (TVL, available liquidity, borrowed) are resolved asynchronously using USD pricing.
 
+### Correlated Pairs, Max ROE, and Max Multiplier
+
+Leveraged return metrics are only shown when the collateral and debt assets are treated as price-correlated. The source of truth is token-list metadata: `useTokenList().getTokenCategoryTags(address)` returns normalized `tags`, and `utils/token-categories.ts` only considers tags present in `CORRELATED_CATEGORY_LABELS` (`usd`, `eth`, `btc`, `mon`, `avax`, `hype`, `bnb`).
+
+Correlation rules:
+
+- **Pair-level**: `areTokenAddressesCorrelatedByTags()` returns true when both assets share an allowlisted category tag, or when they are the same asset address.
+- **Portfolio-level**: `areRoeCollateralVaultsCorrelatedWithBorrow()` requires every resolved collateral asset and the borrow asset to share one allowlisted category.
+- **Math**: `utils/leverage.ts` delegates max multiplier and max ROE formulas to the SDK, then adds looping rewards flat because those rewards are paid per unit of equity rather than scaled by leverage.
+
+The correlation decision is shared across discovery, borrow, and portfolio surfaces:
+
+| Surface | Correlated assets | Uncorrelated assets |
+|---|---|---|
+| Explore market card (`useBestMaxROE`) | Best Max ROE across eligible LTV pairs | Best visible Net APY fallback |
+| Explore matrix (`DiscoveryMarketMatrix.vue`) | Numeric cells in `roe` and `multiplier` views | `-` cell with unavailable-metric tooltip and accordion notice |
+| Borrow pair card (`VaultBorrowItem.vue`) | Max ROE headline, correlated-category badge, Max multiplier column, Multiply tab link | Net APY headline; multiplier column and Multiply tab shortcut are hidden |
+| Portfolio borrow card (`PortfolioBorrowItem.vue`) | Position ROE when all collateral vaults resolve and share the category | Net APY path |
+
+Borrow-page collateral and debt filters reuse the same category metadata. `pages/borrow/index.vue` builds quick-filter values such as `category:usd` from tags present in the active pair list, and matching accepts either an explicit token address or a category match via `tokenAddressMatchesCategoryFilter()`.
+
 ### Key Types
 
 - `MarketGroup` — Core group with vaults, external collateral, metrics, and curator info

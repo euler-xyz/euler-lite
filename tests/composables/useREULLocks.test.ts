@@ -5,7 +5,11 @@ const owner = '0x75cFE4ef963232ae8313aC33e21fC39241338618'
 const reulAddress = '0x1000000000000000000000000000000000000000'
 const eulAddress = '0x2000000000000000000000000000000000000000'
 
-const importUseREULLocks = async () => {
+const importUseREULLocks = async (wallet: {
+  connected?: boolean
+  address?: string
+  chainId?: number
+} = {}) => {
   vi.resetModules()
 
   const lock = {
@@ -15,7 +19,8 @@ const importUseREULLocks = async () => {
     amountToBeBurned: 0n,
   }
   const fetchLocks = vi.fn(async () => [lock])
-  const buildUnlockPlan = vi.fn(async () => ({ kind: 'reul-unlock', steps: [] }))
+  const unlockPlan = { kind: 'reul-unlock', steps: [] }
+  const buildUnlockPlan = vi.fn(async () => unlockPlan)
 
   vi.doMock('~/composables/useEulerSdk', () => ({
     getEulerSdk: vi.fn(async () => ({
@@ -31,9 +36,9 @@ const importUseREULLocks = async () => {
   }))
   vi.stubGlobal('onUnmounted', vi.fn())
   vi.stubGlobal('useWagmi', () => ({
-    isConnected: ref(false),
-    address: ref(undefined),
-    chainId: ref(undefined),
+    isConnected: ref(wallet.connected ?? false),
+    address: ref(wallet.address),
+    chainId: ref(wallet.chainId),
   }))
   vi.stubGlobal('useEulerAddresses', () => ({
     chainId: ref(1),
@@ -52,6 +57,8 @@ const importUseREULLocks = async () => {
   return {
     ...module,
     fetchLocks,
+    buildUnlockPlan,
+    unlockPlan,
     lock,
   }
 }
@@ -83,5 +90,28 @@ describe('useREULLocks', () => {
     })
     expect(locks?.locks.value).toEqual([lock])
     expect(locks?.isLocksLoading.value).toBe(false)
+  })
+
+  it('builds unlock plans through the SDK default EVC path', async () => {
+    const { useREULLocks, buildUnlockPlan, unlockPlan } = await importUseREULLocks({
+      connected: true,
+      address: owner,
+      chainId: 1,
+    })
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await expect(locks.buildUnlockREULPlan([123n])).resolves.toBe(unlockPlan)
+    expect(buildUnlockPlan).toHaveBeenCalledWith({
+      chainId: 1,
+      account: owner,
+      lockTimestamp: 123n,
+      rEulAddress: reulAddress,
+    })
   })
 })

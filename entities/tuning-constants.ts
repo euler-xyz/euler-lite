@@ -38,6 +38,15 @@ export const LIST_INITIAL_BATCH_ROWS = 40
 /** Estimated per-row height for the scroll-restoration spacer reservation. */
 export const LIST_ROW_HEIGHT_PX = 88
 
+// ── Windowed list rendering ───────────────────────────────
+/** Distance (px) beyond the viewport at which windowed list rows are mounted
+ * and unmounted. Larger keeps fast scrolling smoother at the cost of more
+ * mounted rows. */
+export const LIST_RENDER_BUFFER_PX = 800
+/** Rows mounted eagerly on first paint (before the IntersectionObserver's
+ * first pass) so the initial viewport shows real content, not placeholders. */
+export const LIST_EAGER_RENDER_ROWS = 12
+
 // ── Wallet balances ───────────────────────────────────────
 /** TTL for a "full" wallet balance fetch (the one that includes the whole
  * token list for the pay-with selector). Navigating between swap pages

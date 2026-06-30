@@ -39,6 +39,8 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EulerEarn>((v
     vault.asset.symbol,
     vault.asset.name,
     vault.shares.name,
+    vault.address,
+    vault.asset.address,
     product.name,
     product.description,
     ...getEntitiesByEarnVault(vault).map(e => e.name),

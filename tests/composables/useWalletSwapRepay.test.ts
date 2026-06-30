@@ -174,10 +174,15 @@ describe('useWalletSwapRepay', () => {
       address: ref(USER),
       isConnected: ref(true),
     }))
+    vi.stubGlobal('useSpyMode', () => ({
+      isSpyMode: ref(false),
+      spyAddress: ref(undefined),
+    }))
     vi.stubGlobal('usePlanAccount', () => ({
       account: shallowRef(planAccount),
     }))
     vi.stubGlobal('useWallets', () => ({
+      getBalance: vi.fn(() => 1_000n),
       fetchSingleBalance: vi.fn(async () => 1_000n),
     }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))

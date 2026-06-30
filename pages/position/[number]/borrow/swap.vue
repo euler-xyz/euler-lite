@@ -1,37 +1,48 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { formatUnits, zeroAddress, type Address } from 'viem'
+import { isCowProvider } from '~/entities/cowswap'
 
 const route = useRoute()
 const { isConnected, address } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
+const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
 const { planDebtChange } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 
 const positionIndex = usePositionIndex()
 
 // ── Position & vaults ────────────────────────────────────────────────────
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated debt/collateral (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 
 const pairAssetsLabel = usePositionPairLabel(position)
 const fromVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address, collateralVault.value?.address].filter(Boolean)))
+const positionCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
+)
 
 const { borrowOptions, borrowVaults } = useSwapDebtOptions({
   collateralVault: computed(() => collateralVault.value as EVault | undefined),
@@ -88,6 +99,15 @@ const toBorrowApy = computed(() => {
   const base = getVaultBorrowApy(toVault.value)
   return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(toVault.value.address, collateralVault.value?.address)
 })
+const hasSingleCollateralRoeScope = computed(() =>
+  positionCollateralVaults.value.isComplete
+  && positionCollateralVaults.value.vaults.length === 1,
+)
+const isRoeApplicable = computed(() =>
+  hasSingleCollateralRoeScope.value
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, fromVault.value, getTokenCategoryTags)
+  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, toVault.value, getTokenCategoryTags),
+)
 
 const supplyValueUsd = ref<number | null>(null)
 watchEffect(async () => {
@@ -201,7 +221,7 @@ const swap = useSwapPageLogic({
     if (!fromVault.value || !toVault.value || !position.value) return null
     const debtAmount = currentDebt.value
     if (amount > debtAmount) return null
-    const liabilityAccount = (position.value.subAccount || address.value || zeroAddress) as Address
+    const liabilityAccount = (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address
     return {
       params: {
         tokenIn: toVault.value.asset.address as Address,
@@ -255,11 +275,72 @@ const {
   isSameAsset, sameVaultError, errorText, quote,
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
+  effectiveQuoteFetchedAt,
   fromProduct, toProduct, swapPriceInvert, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput: _onFromInput, onRefreshQuotes, submit, openSlippageSettings,
   normalizeAddress, clearSimulationError, requestQuote,
 } = swap
+
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+
+// Add this debt swap (or same-asset migration) to the batch. CoW orders can't
+// be merged into an EVC batch, so they're excluded.
+const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const canAddToBatch = computed(() => {
+  if (isGeoBlocked.value) return false
+  if (!fromVault.value || !toVault.value || !position.value || !(+fromAmount.value)) return false
+  if (isSameAsset.value) return true
+  return !!selectedQuote.value && !isCowSwapSelected.value
+})
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: priceImpact,
+  shouldGateUnknown: computed(() =>
+    !isSameAsset.value
+    && selectedQuote.value !== null
+    && priceImpact.value === null,
+  ),
+})
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithAddToBatchPriceImpact(async () => {
+    const from = fromVault.value
+    const to = toVault.value
+    const pos = position.value
+    if (!from || !to || !pos) return
+    const oldLiabilityVault = from.address as Address
+    const newLiabilityVault = to.address as Address
+    const newLiabilityAsset = to.asset.address as Address
+    const liabilityAccount = (pos.subAccount || effectiveAddress.value || zeroAddress) as Address
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const sameAsset = isSameAsset.value
+    const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    // Name the op after the original position pair (e.g. "Refinance BOLD/USDC",
+    // "BOLD & others/USDC" for multi-collateral), matching the positions list.
+    const pairLabel = pairAssetsLabel.value
+      ?? `${pos.collateralVault?.asset.symbol ?? '?'}/${pos.borrowVault?.asset.symbol ?? '?'}`
+    const label = `Refinance ${pairLabel}`
+    await addBatchEntry({
+      label,
+      nameOverride: label,
+      buildPlan: account => planDebtChange({
+        oldLiabilityVault,
+        newLiabilityVault,
+        liabilityAccount,
+        liabilityAmount: sameAsset ? undefined : amount,
+        newLiabilityAsset,
+        swapQuote,
+        swapperMode: SwapperMode.TARGET_DEBT,
+        account,
+      }),
+      subAccount: pos.subAccount as Address,
+      review: { type: 'swap-borrow', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.TARGET_DEBT, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
+    })
+    fromAmount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: pos.subAccount as Address })
+  })
+}
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
@@ -284,14 +365,9 @@ watchEffect(async () => {
 
 // ── Position loading ─────────────────────────────────────────────────────
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
   await until(isPositionsLoaded).toBe(true)
-
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   isLoading.value = false
 }
 
@@ -302,6 +378,9 @@ watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
 }, { immediate: true })
 
 // ── Debt auto-fill ───────────────────────────────────────────────────────
+// `immediate` matters: `position` is a layer-aware computed that is already
+// populated when navigating here client-side (no currentDebt transition to
+// observe), so without it the amount only auto-fills on a full page load.
 watch([currentDebt, fromVault], () => {
   clearSimulationError()
   if (!position.value) return
@@ -309,7 +388,7 @@ watch([currentDebt, fromVault], () => {
   if (toVault.value) {
     requestQuote()
   }
-})
+}, { immediate: true })
 
 watch(borrowVaults, (vaults) => {
   if (!toVault.value) return
@@ -468,6 +547,8 @@ const onToVaultChange = (selectedIndex: number) => {
                 :loading="isSubmitting || isPreparing"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
+                :can-add-to-batch="canAddToBatch"
+                @add-to-batch="addToBatch"
               >
                 {{ reviewSwapLabel }}
               </VaultFormSubmit>
@@ -480,7 +561,10 @@ const onToVaultChange = (selectedIndex: number) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
                 :after="roeAfter !== null && quote ? formatNumber(roeAfter) : undefined"

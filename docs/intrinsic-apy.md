@@ -2,7 +2,7 @@
 
 Intrinsic APY is yield native to the underlying asset — independent of the Euler lending market. Examples: wstETH earns staking yield from Lido, sDAI earns the DAI Savings Rate, Pendle PT tokens earn implied yield from the fixed-rate market.
 
-Euler Lite compounds this intrinsic yield onto the vault's lending/borrowing APY so users see the total effective return.
+Euler Lite includes this intrinsic yield in APY displays so users see the effective economics of the asset. For supplied assets it increases effective return; for borrowed assets it increases effective borrowing cost.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ The SDK's `intrinsicApyService` is what actually pulls the data from V3 (`/v3/ap
 │   sdk.intrinsicApyService.fetchChainIntrinsicApys(chainId)          │
 └───────────────────────────────────┬───────────────────────────────┘
                                     │ V3 batched/paginated reads via
-                                    │  /api/v3/v3/apys/intrinsic
+                                    │  /api/v3/apys/intrinsic
                                     ▼
                               euler v3 backend
                        (DefiLlama, Pendle, Securitize, …)
@@ -85,6 +85,18 @@ export function withVaultIntrinsicApy(baseApy: number, vault, enabled: boolean):
 - `getVaultIntrinsicApyInfo` returns the full info object including `provider` and `source` for use in APY-breakdown modals.
 
 The SDK exposes an equivalent on its side: `computeSupplyApyBreakdown(vault)` returns `{ lending, intrinsicApy, rewards, total }` with the compounding pre-applied. Use whichever fits the call site; both produce the same numbers for supply.
+
+## Borrow-side display
+
+Borrow views call the same helper path, but the UI copy treats intrinsic APY as cost-side yield. `VaultBorrowItem.vue` passes `getVaultIntrinsicApyInfo()` into `VaultBorrowApyModal.vue`; that modal describes intrinsic APY as "yield intrinsic to the borrowed asset ... which increases effective borrowing cost".
+
+The borrow APY modal uses the same compounded intrinsic helper as supply-side displays, then subtracts borrow rewards:
+
+```text
+total borrow APY = borrowing APY + (1 + borrowing APY / 100) * intrinsic APY - reward APY
+```
+
+Pair-level Net APY and Max ROE screens use the same compounded helper for consistency with vault headline APYs. When changing borrow-side APY copy, keep the direction explicit: intrinsic yield on the debt asset makes borrowing more expensive, while borrow rewards reduce the displayed cost.
 
 ## User toggle
 

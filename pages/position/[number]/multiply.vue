@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
+import { getNetAPY } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import { isEVault, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -22,6 +24,7 @@ import { SlippageSettingsModal, OperationReviewModal } from '#components'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { reportClientEvent } from '~/utils/client-observability'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,9 +34,12 @@ const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { eulerLensAddresses, chainId } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const {
@@ -51,7 +57,11 @@ const priceInvert = usePriceInvert(
 )
 
 const positionIndex = usePositionIndex()
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated debt/collateral (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 
 const isLoading = ref(false)
 const isSubmitting = ref(false)
@@ -96,6 +106,30 @@ const multiplyLongVault = computed<EVault | undefined>(() => {
 const multiplyShortVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+const positionRoeCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, multiplyLongVault.value),
+)
+const projectedMultiplyCollateralVaults = computed(() =>
+  mergeRoeCollateralVaults([
+    ...positionRoeCollateralVaults.value.vaults,
+    multiplySupplyVault.value,
+    multiplyLongVault.value,
+  ]),
+)
+const isMultiplyRoeApplicable = computed(() =>
+  positionRoeCollateralVaults.value.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+)
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...projectedMultiplyCollateralVaults.value.map(vault => vault.asset.address),
+      multiplyShortVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
 const pairAssets = computed<VaultAsset[]>(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
@@ -305,6 +339,38 @@ const multiplyRoeAfter = computed(() => {
     nextSupplyValueUsd.value,
     nextBorrowValueUsd.value,
     multiplyWeightedSupplyApy.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyBefore = computed(() => {
+  if (
+    currentSupplyValueUsd.value === null
+    || currentBorrowValueUsd.value === null
+    || multiplyLongApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    currentSupplyValueUsd.value,
+    multiplyLongApy.value,
+    currentBorrowValueUsd.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyAfter = computed(() => {
+  if (
+    nextSupplyValueUsd.value === null
+    || nextBorrowValueUsd.value === null
+    || multiplyWeightedSupplyApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    nextSupplyValueUsd.value,
+    multiplyWeightedSupplyApy.value,
+    nextBorrowValueUsd.value,
     multiplyBorrowApy.value,
   )
 })
@@ -551,6 +617,52 @@ async function buildMultiplyPlanFromQuote(quote: SwapQuote, account = planAccoun
   })
 }
 
+// Batch the multiply. subAccountSnapshotApplied: true keeps the layer account
+// authoritative (no on-chain sub-account re-fetch that would clobber a
+// simulated earlier batch step). Same-asset multiply (no swap) routes through
+// planMultiplySameAsset; cross-asset needs a non-CoW quote (CoW can't merge).
+const canAddMultiplyToBatch = computed(() => {
+  if (isGeoBlocked.value || isMultiplyRestricted.value) return false
+  if (multiplyDebtAmountNano.value <= 0n) return false
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value || !multiplySubAccount.value) return false
+  if (multiplyIsSameAsset.value) return true
+  return !!multiplyEffectiveQuote.value
+    && !isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)
+})
+const addToBatch = async () => {
+  if (!canAddMultiplyToBatch.value) return
+  await guardWithPriceImpact(async () => {
+    const sameAsset = multiplyIsSameAsset.value
+    const quote = sameAsset ? undefined : multiplyEffectiveQuote.value ?? undefined
+    const supply = multiplySupplyVault.value!.address as Address
+    const supplyAsset = multiplySupplyVault.value!.asset.address as Address
+    const long = multiplyLongVault.value!.address as Address
+    const short = multiplyShortVault.value!.address as Address
+    const debtAmount = multiplyDebtAmountNano.value
+    const receiver = multiplySubAccount.value as Address
+    await addBatchEntry({
+      label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
+      buildPlan: account => planMultiply({
+        collateralVault: supply,
+        collateralAmount: 0n,
+        collateralAsset: supplyAsset,
+        longVault: long,
+        liabilityVault: short,
+        liabilityAmount: debtAmount,
+        receiver,
+        swapQuote: quote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+        subAccountSnapshotApplied: true,
+      }),
+      subAccount: receiver,
+      multiply: true,
+      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
+    })
+    redirectAfterAdd('/portfolio', { subAccount: receiver })
+  })
+}
+
 const requestMultiplyQuote = useDebounceFn(async () => {
   multiplyQuoteError.value = null
 
@@ -610,7 +722,7 @@ const submitMultiply = async () => {
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
-      if (isSubmitting.value || !isConnected.value) {
+      if (isSubmitting.value || (!isConnected.value && !isSpyMode.value)) {
         return
       }
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
@@ -738,7 +850,7 @@ const sendMultiply = async () => {
 }
 
 const isMultiplySubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
     return true
   }
@@ -779,12 +891,8 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   if (!position.value) {
     multiplySupplyVault.value = undefined
     resetMultiplyQuoteState()
@@ -864,7 +972,15 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
           :assets="pairAssets"
           :assets-label="pairAssetsLabel"
           size="large"
-        />
+        >
+          <template #symbol-trailing>
+            <CorrelatedPairBadge
+              v-if="isMultiplyRoeApplicable"
+              compact
+              :title="correlatedBadgeTitle"
+            />
+          </template>
+        </VaultLabelsAndAssets>
 
         <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
           <div class="flex flex-col gap-16 w-full">
@@ -948,6 +1064,8 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :loading="isSubmitting || isPreparing"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddMultiplyToBatch"
+              @add-to-batch="addToBatch"
             >
               Review Multiply
             </VaultFormSubmit>
@@ -958,10 +1076,23 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isMultiplyRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
                 :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              v-else
+              label="Net APY"
+            >
+              <SummaryValue
+                :before="multiplyNetApyBefore !== null ? formatNumber(multiplyNetApyBefore) : undefined"
+                :after="multiplyNetApyAfter !== null && multiplySwapReady ? formatNumber(multiplyNetApyAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>

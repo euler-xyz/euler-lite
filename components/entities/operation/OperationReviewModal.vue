@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { encodeFunctionData, type Address } from 'viem'
-import { flattenBatchEntries, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
+import { encodeFunctionData, getAddress, type Address } from 'viem'
+import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -21,8 +22,8 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt } = defineProps<{
-  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel } = defineProps<{
+  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
@@ -39,17 +40,21 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm: () => void | Promise<void>
+  onConfirm?: () => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
   submittingLabel?: string
   /** Milliseconds since epoch when the active swap quote was fetched */
   quoteFetchedAt?: number | null
+  /** Read-only review (e.g. opened from a batch item): hides the execute button. */
+  hideExecute?: boolean
+  /** Overrides the inferred Euler product name for non-product contexts, such as Earn vaults. */
+  marketLabel?: string
 }>()
 
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
 const { getVault } = useVaultRegistry()
 const { prepareTransactionPlan } = useEulerTx()
 const { eulerCoreAddresses } = useEulerAddresses()
@@ -65,6 +70,7 @@ const {
 
 const tenderlyEnabled = ref(false)
 const { copied, copyToClipboard } = useClipboardCopy()
+const hasCopiedCalldata = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
@@ -99,6 +105,7 @@ watch(
   () => [prepared, plan, walletAddress.value, currentChainId.value] as const,
   async () => {
     const requestId = ++prepareRequestId
+    hasCopiedCalldata.value = false
     prepareError.value = ''
     preparedPlan.value = undefined
 
@@ -173,7 +180,7 @@ const handleTenderlySimulate = async () => {
 const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
-  if (isConfirmDisabled.value) return
+  if (isConfirmDisabled.value || !onConfirm) return
   const result = onConfirm()
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
@@ -198,6 +205,31 @@ const displaySteps = computed((): DisplayStep[] => {
     swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts,
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
+})
+
+// Batch operation details show this as a muted context line. EVK operations use
+// the label product name(s) of the vaults the op touches, joined with " / " when
+// it spans markets (same shape as the positions list's pair label); Earn
+// operations can pass the Earn vault display name.
+const market = computed<string | undefined>(() => {
+  if (marketLabel) return marketLabel
+  const labels = getCurrentEulerLabelsData()
+  return buildPlanMarketLabel(reviewPlan.value, addr => getEulerLabelProductByVault(labels, addr)?.name)
+})
+
+// "Position N" / "Deposits" tag for the sub-account this operation targets,
+// mirroring the pill in the batch review's operations list. Sub-account 0 is the
+// main account ("Deposits"); numbered borrow positions are "Position N".
+const positionTag = computed<string | undefined>(() => {
+  const ownerAddr = (isSpyMode.value ? spyAddress.value : walletAddress.value) || ''
+  if (!subAccount || !ownerAddr) return undefined
+  try {
+    const idx = getSubAccountId(getAddress(ownerAddr), getAddress(subAccount))
+    return idx === 0 ? 'Deposits' : `Position ${idx}`
+  }
+  catch {
+    return undefined
+  }
 })
 
 const copyCalldata = async () => {
@@ -239,7 +271,8 @@ const copyCalldata = async () => {
       }
     }
 
-    copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
+    await copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
+    hasCopiedCalldata.value = true
   }
   catch (err) {
     logWarn('OperationReviewModal/copyCalldata', err)
@@ -268,6 +301,7 @@ const btnLabel = computed(() => {
     case 'reward':
     case 'brevis-reward':
     case 'fuul-reward':
+    case 'turtle-reward':
       return 'Claim'
     case 'disableCollateral':
       return 'Disable collateral'
@@ -283,8 +317,11 @@ const reulUnlockDisclaimerText = computed(() => {
 })
 
 const disclaimerText = computed(() => {
-  if (type !== 'reward') return
+  if (type !== 'reward' && type !== 'turtle-reward') return
   const displayAmount = Number(amount) < 0.01 ? '< 0.01' : formatNumber(amount)
+  if (type === 'turtle-reward') {
+    return `You're claiming all ${displayAmount} ${asset.symbol} through Turtle. Part of this amount could have been earned outside of Euler.`
+  }
   return `You're claiming all ${displayAmount} ${asset.symbol} on Merkl. Part of this amount could have been earned outside of Euler.`
 })
 
@@ -316,26 +353,44 @@ const confirmLabel = computed(() => {
 
 <template>
   <BaseModalWrapper
-    title="Transaction review"
+    :title="hideExecute ? 'Operations' : 'Transaction review'"
     @close="!internalSubmitting && $emit('close')"
   >
     <div class="flex flex-col gap-24">
-      <div
-        v-if="displaySteps.length"
-        class="flex flex-col gap-8"
-      >
-        <div class="bg-surface-secondary rounded-12 p-12 flex flex-col gap-8">
-          <OperationStepsList :steps="displaySteps" />
+      <!-- Operation context (market + position) grouped tightly above its steps,
+           so the operation reads in the context of the position it acts on. -->
+      <div class="flex flex-col gap-10">
+        <div
+          v-if="hideExecute && (market || positionTag)"
+          class="flex items-center justify-between gap-8 px-12"
+        >
+          <div class="min-w-0 flex-1">
+            <BatchMarketLabel :market="market" />
+          </div>
+          <span
+            v-if="hideExecute && positionTag"
+            class="shrink-0 text-h6 text-content-secondary bg-card py-2 px-8 rounded-8 border border-line-default"
+          >
+            {{ positionTag }}
+          </span>
+        </div>
+        <div
+          v-if="displaySteps.length"
+          class="w-full rounded-8 border border-line-default bg-card px-12 py-10 shadow-xs"
+        >
+          <div class="flex w-full flex-col gap-8">
+            <OperationStepsList :steps="displaySteps" />
+          </div>
         </div>
       </div>
 
       <div
-        v-if="reviewPlan?.length"
+        v-if="reviewPlan?.length && !hideExecute"
         class="flex items-center justify-center gap-16"
       >
         <button
           type="button"
-          class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 text-content-primary hover:border-line-emphasis hover:bg-card-hover transition-colors"
           @click="copyCalldata"
         >
           <SvgIcon
@@ -349,10 +404,10 @@ const confirmLabel = computed(() => {
           :href="tenderlyUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-6 text-p3 transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 transition-colors hover:border-line-emphasis hover:bg-card-hover"
           :class="hasTenderlyFailedSimulation
-            ? 'text-error-500 hover:text-error-600'
-            : 'text-success-500 hover:text-success-600'"
+            ? 'text-error-500 hover:text-error-500'
+            : 'text-success-500 hover:text-success-500'"
         >
           <SvgIcon
             :name="hasTenderlyFailedSimulation ? 'warning-circle' : 'check-circle'"
@@ -368,7 +423,7 @@ const confirmLabel = computed(() => {
         <button
           v-else-if="tenderlyEnabled"
           type="button"
-          class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 text-content-primary hover:border-line-emphasis hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
           :disabled="isTenderlyPreparing"
           @click="handleTenderlySimulate"
         >
@@ -381,7 +436,7 @@ const confirmLabel = computed(() => {
         </button>
       </div>
       <p
-        v-if="usesPermit2"
+        v-if="usesPermit2 && !hideExecute && hasCopiedCalldata"
         class="text-p4 text-content-primary text-center"
       >
         Copied calldata does not contain the permit() call. It is only known after the permit2 message is signed.
@@ -421,7 +476,7 @@ const confirmLabel = computed(() => {
       </div>
 
       <UiAlert
-        v-if="type === 'reward'"
+        v-if="disclaimerText"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"
@@ -443,6 +498,7 @@ const confirmLabel = computed(() => {
       />
 
       <UiButton
+        v-if="!hideExecute"
         data-id="operation-review-confirm"
         :data-operation-type="type"
         variant="primary"

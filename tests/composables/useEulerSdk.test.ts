@@ -19,9 +19,16 @@ type BuildEulerSDKOptions = {
     rewardsBrevisApiUrl?: string
     rewardsBrevisProofsApiUrl?: string
     rewardsFuulApiUrl?: string
+    rewardsTurtleApiUrl?: string
     rewardsEnableMerkl?: boolean
     rewardsEnableBrevis?: boolean
     rewardsEnableFuul?: boolean
+    rewardsEnableTurtle?: boolean
+    accountServiceAdapter?: string
+    eVaultServiceAdapter?: string
+    eulerEarnServiceAdapter?: string
+    vaultTypeAdapter?: string
+    rewardsServiceAdapter?: string
   }
   rpcUrls?: Record<number, string>
   deploymentServiceConfig?: unknown
@@ -84,6 +91,7 @@ const importUseEulerSdk = async (
     enableMerkl: true,
     enableIncentra: true,
     enableFuul: true,
+    enableTurtle: true,
   }))
 
   return await import('~/composables/useEulerSdk')
@@ -145,8 +153,8 @@ describe('useEulerSdk', () => {
         1: '/api/rpc/1',
         8453: '/api/rpc/8453',
       },
-      v3ApiUrl: '/api/v3',
-      tokenlistApiBaseUrl: '/api/v3',
+      v3ApiUrl: '/api',
+      tokenlistApiBaseUrl: '/api',
       deploymentsUrl: '/api/euler-chains',
       eulerLabelsBaseUrl: '/api/labels',
       oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
@@ -177,15 +185,16 @@ describe('useEulerSdk', () => {
       rpcUrls: {
         1: '/api/rpc/1',
       },
-      v3ApiUrl: '/api/v3',
-      tokenlistApiBaseUrl: '/api/v3',
-      intrinsicApyV3ApiUrl: '/api/v3',
+      v3ApiUrl: '/api',
+      tokenlistApiBaseUrl: '/api',
+      intrinsicApyV3ApiUrl: '/api',
       deploymentsUrl: '/api/euler-chains',
       eulerLabelsBaseUrl: '/api/labels',
       rewardsMerklApiUrl: '/api/proxy/merkl',
       rewardsBrevisApiUrl: '/api/proxy/incentra/sdk/v1/eulerCampaigns',
       rewardsBrevisProofsApiUrl: '/api/proxy/incentra/v1/getMerkleProofsBatch',
       rewardsFuulApiUrl: '/api/proxy/fuul',
+      rewardsTurtleApiUrl: '/api/proxy/turtle',
       accountVaultsSubgraphUrls: {
         1: '/api/proxy/subgraph/1',
       },
@@ -197,6 +206,33 @@ describe('useEulerSdk', () => {
       eulerEarnServiceAdapter: 'fallback',
       vaultTypeAdapter: 'fallback',
       rewardsServiceAdapter: 'fallback',
+    })
+  })
+
+  it('keeps fresh portfolio reads onchain while resolving rewards through fallback', async () => {
+    const chainIds = ref([8453])
+    const sdk = createMockSdk('fresh')
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {
+        configEulerChainsUrl: '',
+        configLabelsBaseUrl: '',
+        configOracleChecksBaseUrl: '',
+      },
+    }))
+
+    const { getEulerSdkFresh } = await importUseEulerSdk(chainIds, buildEulerSDK)
+    await expect(getEulerSdkFresh()).resolves.toBe(sdk)
+
+    const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
+    expect(options.config).toMatchObject({
+      accountServiceAdapter: 'onchain',
+      eVaultServiceAdapter: 'onchain',
+      eulerEarnServiceAdapter: 'onchain',
+      vaultTypeAdapter: 'subgraph',
+      rewardsServiceAdapter: 'fallback',
+      rewardsTurtleApiUrl: '/api/proxy/turtle',
+      v3ApiUrl: '/api',
     })
   })
 
@@ -217,6 +253,7 @@ describe('useEulerSdk', () => {
       enableMerkl: false,
       enableIncentra: true,
       enableFuul: false,
+      enableTurtle: false,
     }))
 
     await expect(getEulerSdk()).resolves.toBe(sdk)
@@ -225,6 +262,7 @@ describe('useEulerSdk', () => {
     expect(options.config).toMatchObject({
       rewardsEnableMerkl: false,
       rewardsEnableFuul: false,
+      rewardsEnableTurtle: false,
     })
     expect(options.config.rewardsEnableBrevis).toBeUndefined()
   })

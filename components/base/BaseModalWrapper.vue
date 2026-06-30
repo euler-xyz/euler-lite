@@ -5,12 +5,14 @@ const {
   close = true,
   warning = false,
   inline = false,
+  compact = false,
 } = defineProps<{
   title?: string
   full?: boolean
   close?: boolean
   warning?: boolean
   inline?: boolean
+  compact?: boolean
 }>()
 const emit = defineEmits(['close'])
 
@@ -119,19 +121,24 @@ const dragStyle = computed(() => ({
   >
     <!-- Drag zone: pill + header, outside the scroll container -->
     <div
-      class="shrink-0 px-16 pt-12 mobile:pt-0 touch-none select-none"
+      class="shrink-0 mobile:pt-0 touch-none select-none"
+      :class="compact ? 'px-12 pt-10' : 'px-16 pt-12'"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerCancel"
     >
-      <div class="hidden mobile:flex justify-center py-8">
+      <div
+        v-if="!inline"
+        class="hidden mobile:flex justify-center py-8"
+      >
         <div class="w-36 h-4 rounded-full bg-surface-subtle" />
       </div>
 
       <div
         v-if="title || close"
-        class="flex justify-between mb-12 items-center h-36"
+        class="flex justify-between items-center"
+        :class="compact ? 'mb-8 min-h-24' : 'mb-12 h-36'"
       >
         <div
           v-if="close"
@@ -139,7 +146,8 @@ const dragStyle = computed(() => ({
         />
         <p
           v-if="title"
-          class="flex text-center text-h4 items-center gap-8"
+          class="flex text-center items-center gap-8"
+          :class="compact ? 'text-p2 font-semibold' : 'text-h4'"
         >
           <SvgIcon
             v-if="warning"
@@ -163,7 +171,7 @@ const dragStyle = computed(() => ({
               aria-hidden="true"
             >
               <SvgIcon
-                class="ui-button__icon-svg"
+                class="ui-button__icon-svg text-content-secondary"
                 name="close"
               />
             </div>
@@ -175,7 +183,10 @@ const dragStyle = computed(() => ({
     <!-- Scroll container -->
     <div
       class="flex flex-col overflow-x-hidden overscroll-contain px-16 pb-16"
-      :class="[full ? 'flex-grow min-h-0' : 'overflow-y-auto styled-scrollbar']"
+      :class="[
+        full ? 'flex-grow min-h-0' : 'overflow-y-auto styled-scrollbar',
+        compact ? '!px-12 !pb-12' : '',
+      ]"
       @touchstart="onScrollTouchStart"
       @touchmove="onScrollTouchMove"
       @touchend="onScrollTouchEnd"

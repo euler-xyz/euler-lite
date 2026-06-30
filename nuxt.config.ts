@@ -1,6 +1,18 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
+import { lstatSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorage.getItem("theme")==="light"?"light":"dark"}catch(e){}document.documentElement.setAttribute("data-theme",theme);document.documentElement.style.colorScheme=theme})()'
+const eulerSdkPackage = '@eulerxyz/euler-v2-sdk'
+const isLinkedEulerSdk = (() => {
+  try {
+    return lstatSync(resolve(process.cwd(), 'node_modules', ...eulerSdkPackage.split('/'))).isSymbolicLink()
+  }
+  catch {
+    return false
+  }
+})()
 
 export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt'],
@@ -148,12 +160,10 @@ export default defineNuxtConfig({
       configEnableMerkl: '',
       configEnableIncentra: '',
       configEnableFuul: '',
-      // Migration announcement: set to a tweet/announcement URL to show a
-      // one-time modal explaining the app upgrade. Empty = disabled (default).
-      configMigrationAnnouncementUrl: '',
-      // Migration: link to the legacy app shown in the header dropdown.
-      // Empty = no link rendered (default).
-      configMigrationLegacyAppUrl: '',
+      configEnableTurtle: '',
+      // Batch announcement: set to 'true' to show a one-time modal.
+      configEnableBatchAnnouncement: '',
+      configBatchAnnouncementUrl: '',
       // External token list URLs for swap token selector
       configUniswapTokenListUrl: '',
       configDefillamaTokenListUrl: '',
@@ -241,8 +251,20 @@ export default defineNuxtConfig({
       },
     },
     optimizeDeps: {
-      include: ['@eulerxyz/euler-v2-sdk'],
+      // Linked SDK builds should be loaded directly so Vite does not keep
+      // serving stale optimized bundles after rebuilding the sibling package.
+      include: isLinkedEulerSdk ? [] : [eulerSdkPackage],
+      exclude: isLinkedEulerSdk ? [eulerSdkPackage] : [],
       esbuildOptions: { target: 'esnext' },
+    },
+  },
+  typescript: {
+    strict: false,
+    tsConfig: {
+      compilerOptions: {
+        noImplicitOverride: false,
+        noUncheckedIndexedAccess: false,
+      },
     },
   },
 

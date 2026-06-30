@@ -10,6 +10,7 @@ import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
 import { safePathTemplate, searchKeys, urlHost } from '~/server/utils/observability'
 import { isAllowedMerklProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
+import { buildMerklProxyRequestHeaders } from '~/server/utils/merkl-proxy'
 
 /**
  * Server-side proxy for Merkl v4 opportunity / user-reward endpoints.
@@ -22,6 +23,11 @@ import { isAllowedMerklProxyRequest } from '~/server/utils/rewards-proxy-allowli
  * and this handler rewrites the path to `https://api.merkl.xyz/v4/<path>`
  * plus the original query string, forwards the response, and tags the
  * response with permissive caching headers so the browser can reuse it.
+ *
+ * Merkl is reachable anonymously (10 req/sec), but that quota is shared across
+ * all users because every request egresses from this one origin. Set the
+ * server-only `MERKL_API_KEY` env var to send `X-API-Key` upstream for a higher
+ * quota — see `buildMerklProxyRequestHeaders` in `server/utils/merkl-proxy.ts`.
  */
 
 const MERKL_UPSTREAM_BASE = 'https://api.merkl.xyz/v4'
@@ -82,7 +88,7 @@ export default defineEventHandler(async (event) => {
   try {
     upstream = await fetchWithTimeout(target, undefined, {
       method,
-      headers: { accept: 'application/json' },
+      headers: buildMerklProxyRequestHeaders(),
     })
   }
   catch (err) {

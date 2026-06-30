@@ -5,6 +5,7 @@ import type {
   SecuritizeCollateralVault,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 
@@ -19,11 +20,29 @@ export const getPairBorrowVault = (pair: BorrowPairLike): EVault =>
 export const getPairCollateralVault = (pair: BorrowPairLike): EVault | SecuritizeCollateralVault =>
   isBorrowVaultPair(pair) ? pair.collateral : pair.collateralVault as EVault | SecuritizeCollateralVault
 
+export const getPairCollateralVaults = (pair: BorrowPairLike): Array<EVault | SecuritizeCollateralVault> => {
+  if (isBorrowVaultPair(pair)) return [pair.collateral]
+
+  const collaterals = pair.collaterals?.flatMap((collateralPosition) => {
+    const vault = collateralPosition.vault
+    return vault && (isEVault(vault) || isSecuritizeCollateralVault(vault)) ? [vault] : []
+  }) ?? []
+
+  return collaterals.length ? collaterals : [getPairCollateralVault(pair)]
+}
+
 export const getPairBorrowLTV = (pair: BorrowPairLike): number | undefined =>
   isBorrowVaultPair(pair) ? pair.ltv.borrowLTV : pair.borrowLTV
 
 export const getPairCurrentLiquidationLTV = (pair: BorrowPairLike): number | undefined =>
   isBorrowVaultPair(pair) ? pair.ltv.currentLiquidationLTV : getBorrowPositionEffectiveLiquidationLTV(pair)
+
+export const getBorrowPairSearchAddresses = (pair: AnyBorrowVaultPair): string[] => [
+  pair.collateral.address,
+  pair.collateral.asset.address,
+  pair.borrow.address,
+  pair.borrow.asset.address,
+]
 
 /**
  * Resolve the ramp-bearing collateral edge for a pair.

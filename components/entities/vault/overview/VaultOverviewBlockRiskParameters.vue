@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { maxUint256, type Address } from 'viem'
-import { vaultConvertToAssetsAbi } from '~/abis/vault'
+import { maxUint256 } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 
@@ -13,7 +12,6 @@ import { VaultHooksInfoModal } from '#components'
 
 const { vault } = defineProps<{ vault: EVault }>()
 
-const { client: rpcClient } = useRpcClient()
 const { getVaultCategory } = useVaultRegistry()
 
 const shareTokenExchangeRate: Ref<bigint | undefined> = ref()
@@ -26,9 +24,14 @@ const supplyCapPercentageDisplay = computed(() => vault.caps.supplyCapUtilizatio
 const borrowCapPercentageDisplay = computed(() => vault.caps.borrowCapUtilization)
 const hookedOperations = computed(() => getVaultHookedOperations(vault))
 const liquidationBonusRange = computed(() => formatLiquidationBonusRange(vault))
+// The share/asset rate only moves as borrow interest accrues, so it is only
+// meaningful on borrowable vaults. A collateral-only vault can have a non-zero
+// borrowCap configured yet still be non-borrowable (no collateral carries a
+// borrow LTV — e.g. "Can be borrowed: No"), so gate on actual borrowability
+// rather than the cap. isVaultBorrowable also keeps the rate visible during
+// wind-down (residual debt) via its `totalBorrowed > 0n` branch.
 const showShareTokenExchangeRate = computed(() =>
-  getVaultCategory(vault.address) !== 'escrow'
-  && (vault.caps.borrowCap !== 0n || vault.totalBorrowed > 0n),
+  getVaultCategory(vault.address) !== 'escrow' && isBorrowable.value,
 )
 
 const supplyCapDisplay = ref('-')
@@ -60,16 +63,11 @@ watchEffect(async () => {
   borrowCapDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
-const load = async () => {
+const load = () => {
   if (!showShareTokenExchangeRate.value) return
-
-  const client = rpcClient.value!
-  shareTokenExchangeRate.value = await client.readContract({
-    address: vault.address as Address,
-    abi: vaultConvertToAssetsAbi,
-    functionName: 'convertToAssets',
-    args: [1n * 10n ** BigInt(vault.shares.decimals)],
-  }) as bigint
+  // Share→asset exchange rate from the SDK vault entity (was a direct
+  // convertToAssets RPC read); the entity derives it from the same lens data.
+  shareTokenExchangeRate.value = vault.convertToAssets(1n * 10n ** BigInt(vault.shares.decimals))
 }
 
 load()
@@ -107,10 +105,10 @@ const hooksModalData = computed(() => ({
         <template #label>
           <span class="flex items-center gap-4">
             Liquidation bonus
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Liquidation Bonus"
               text="The discount a liquidator receives on collateral when liquidating an unhealthy position. The actual bonus scales dynamically from 0% up to this maximum based on how unhealthy the position is. A more unhealthy position offers a larger bonus to incentivise faster liquidation."
-              class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+              icon-class="text-content-muted hover:text-content-secondary"
             />
           </span>
         </template>
@@ -168,10 +166,10 @@ const hooksModalData = computed(() => ({
         <template #label>
           <span class="flex items-center gap-4">
             Bad debt socialisation
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Bad Debt Socialisation"
               text="When enabled, if a liquidated position has remaining debt but no collateral left, the loss is spread across all depositors by reducing the share token value. This prevents bad debt from accumulating in the vault. When disabled, bad debt remains in the system indefinitely."
-              class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+              icon-class="text-content-muted hover:text-content-secondary"
             />
           </span>
         </template>

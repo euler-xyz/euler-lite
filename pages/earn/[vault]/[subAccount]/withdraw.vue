@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -21,16 +21,18 @@ const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
 const { planWithdrawOrRedeem, executePlan } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getEarnVault, isMarketDataResolved } = useVaults()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
-const { fetchVaultShareBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
-const { getSupplyRewardApy } = useRewardsApy()
+const { viewer, visibleTotal } = useApyVisibility()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
+const product = useEulerProductOfVault(vaultAddress)
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value
@@ -46,10 +48,24 @@ const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
-const assetsBalance = ref(0n)
-const sharesBalance = ref(0n)
+const earnVaultMarketLabel = computed(() => product.name || vault.value?.shares.name || '')
+// Share/asset balances from the layer-aware account entity (no direct balanceOf).
+const sharePosition = computed(() => {
+  const acct = planAccount.value
+  const sub = subAccount.value
+  if (!acct || !sub || !vault.value?.address) return undefined
+  try {
+    const target = getAddress(vault.value.address)
+    return acct.getSubAccount(getAddress(sub))?.positions.find(p => getAddress(p.vaultAddress) === target)
+  }
+  catch {
+    return undefined
+  }
+})
+const sharesBalance = computed(() => sharePosition.value?.shares ?? 0n)
+const assetsBalance = computed(() => sharePosition.value?.assets ?? 0n)
 const delta = ref(0n)
-const estimateSupplyAPY = ref(0)
+const estimateSupplyAPY = ref<number | undefined>(undefined)
 const estimatesError = ref('')
 
 // Reactive USD prices for display
@@ -58,7 +74,10 @@ const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
 const usdPriceGuard = createRaceGuard()
 
-const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
+const supplyApyBreakdown = computed(() =>
+  vault.value ? computeSupplyApyBreakdown(vault.value, viewer.value) : undefined,
+)
+const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
 const amountFixed = computed(() => {
   return FixedPoint.fromValue(
     valueToNano(amount.value || '0', asset.value?.decimals || 0),
@@ -70,7 +89,7 @@ const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
   vault.value,
 ))
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   return withdrawableAssets.value < amountFixed.value.value
     || isLoading.value
     || amountFixed.value.isZero() || amountFixed.value.isNegative()
@@ -84,23 +103,21 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
-  if (!vault.value) return '0.00'
-  return formatNumber(getVaultSupplyApy(vault.value) + rewardApy.value)
+  return formatNumber(supplyApyTotal.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
-  return formatNumber(estimateSupplyAPY.value + rewardApy.value)
+  return formatNumber(estimateSupplyAPY.value ?? supplyApyTotal.value)
 })
 
 const load = async () => {
   isLoading.value = true
   try {
     vault.value = await getEarnVault(vaultAddress)
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
+    estimateSupplyAPY.value = supplyApyTotal.value
     asset.value = vault.value?.asset
 
     // Fetch fresh share balance and convert to assets
-    await fetchShareBalance()
-    await updateBalance()
+    updateBalance()
   }
   catch (e) {
     showError('Unable to load Vault')
@@ -111,23 +128,9 @@ const load = async () => {
   }
 }
 
-const fetchShareBalance = async () => {
-  if (!vault.value?.address) {
-    sharesBalance.value = 0n
-    return
-  }
-  sharesBalance.value = await fetchVaultShareBalance(vault.value.address, subAccount.value)
-}
-
-const updateBalance = async () => {
-  if (!vault.value || (!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
-    assetsBalance.value = 0n
-    delta.value = 0n
-    return
-  }
-
-  assetsBalance.value = vault.value.convertToAssets(sharesBalance.value)
-  delta.value = assetsBalance.value
+// balances are reactive computeds over the account entity; sync delta baseline.
+const updateBalance = () => {
+  delta.value = (!isConnected.value && !isSpyMode.value) ? 0n : assetsBalance.value
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
@@ -186,6 +189,36 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
+const canAddToBatch = computed(() =>
+  !!(+amount.value) && !reviewWithdrawDisabled.value && !!asset.value?.address && !!(subAccount.value ?? effectiveAddress.value),
+)
+const addToBatch = async () => {
+  if (!canAddToBatch.value || !asset.value?.address) return
+  const assets = amountFixed.value.value
+  const ownerAddr = (subAccount.value ?? effectiveAddress.value) as `0x${string}` | undefined
+  if (!ownerAddr) return
+  const label = `Earn withdraw ${amount.value} ${asset.value.symbol}`
+  // Max withdraw → redeem the full share balance (redeem(full_balance)) instead
+  // of withdraw(assets), so the position clears without share-price rounding dust.
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  const shares = sharesBalance.value
+  await addBatchEntry({
+    label,
+    buildPlan: account => planWithdrawOrRedeem({
+      vaultAddress: vaultAddress as `0x${string}`,
+      owner: ownerAddr,
+      isMax,
+      shares,
+      assets,
+      account,
+    }),
+    subAccount: ownerAddr,
+    review: { type: 'withdraw', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
+  })
+  amount.value = ''
+  redirectAfterAdd('/portfolio/saving', { subAccount: ownerAddr, vault: vaultAddress })
+}
+
 const send = async () => {
   try {
     isSubmitting.value = true
@@ -236,12 +269,12 @@ const updateEstimates = () => {
       throw new Error('Not enough liquidity in vault')
     }
     delta.value = assetsBalance.value - amountFixed.value.value
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
+    estimateSupplyAPY.value = supplyApyTotal.value
   }
   catch (e) {
     logWarn('earn-withdraw/estimates', e)
     delta.value = assetsBalance.value || 0n
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value)
+    estimateSupplyAPY.value = supplyApyTotal.value
     estimatesError.value = (e as { message: string }).message
   }
   isEstimatesLoading.value = false
@@ -270,11 +303,8 @@ watchEffect(async () => {
   deltaUsd.value = nextDeltaUsd
 })
 
-watch([isConnected, effectiveAddress], async () => {
-  if (vault.value) {
-    await fetchShareBalance()
-    await updateBalance()
-  }
+watch([isConnected, effectiveAddress, assetsBalance], () => {
+  if (vault.value) updateBalance()
 })
 watch(amount, () => {
   updateEstimates()
@@ -369,6 +399,8 @@ watch(amount, () => {
               :disabled="reviewWithdrawDisabled"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               Review Withdraw
             </VaultFormSubmit>

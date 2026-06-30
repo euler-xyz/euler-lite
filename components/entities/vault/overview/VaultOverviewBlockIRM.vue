@@ -17,7 +17,7 @@ import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
 import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
 import { useModal } from '~/components/ui/composables/useModal'
-import { UiFootnoteModal } from '#components'
+import { UiHoverPreviewTooltipModal } from '#components'
 
 // Register Chart.js components
 ChartJS.register(
@@ -34,8 +34,8 @@ ChartJS.register(
 
 const { vault } = defineProps<{ vault: EVault }>()
 
-const chartData = ref<ChartData<'line'> | null>(null)
-const chartOptions = ref<ChartOptions<'line'> | null>(null)
+const chartData = shallowRef<ChartData<'line', number[], string> | null>(null)
+const chartOptions = shallowRef<ChartOptions<'line'> | null>(null)
 const isLoading = ref(true)
 const hasError = ref(false)
 
@@ -185,7 +185,7 @@ const openIRMInfoModal = (event: MouseEvent | KeyboardEvent) => {
   event.stopPropagation()
   const tooltip = irmTooltip.value
   if (!tooltip) return
-  modal.open(UiFootnoteModal, {
+  modal.open(UiHoverPreviewTooltipModal, {
     props: {
       modalTitle: tooltip.title,
       text: tooltip.text,
@@ -258,6 +258,7 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
       address: utilsLens as Address,
       abi: eulerUtilsLensABI as Abi,
       functionName: 'computeAPYs',
+      authorizationList: undefined,
       // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
       args: [borrowSPY, 1n, 0n, 0n],
     }) as readonly [bigint, bigint]
@@ -286,6 +287,7 @@ const fetchIRMData = async (kinkFraction: number | null) => {
       address: eulerLensAddresses.value.vaultLens as Address,
       abi: eulerVaultLensABI as Abi,
       functionName: 'getVaultInterestRateModelInfo',
+      authorizationList: undefined,
       args: [vault.address, cashData, borrowsData],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
     }) as Record<string, any>
@@ -630,11 +632,11 @@ watch(isDark, async () => {
           title="Interest rate model details"
           @click="openIRMInfoModal"
         />
-        <UiFootnote
+        <UiHoverPreviewTooltip
           :title="irmTooltip.title"
           :text="irmTooltip.text"
-          tooltip-placement="top-end"
-          class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+          placement="top-end"
+          icon-class="text-content-muted hover:text-content-secondary"
         />
       </div>
     </header>

@@ -76,6 +76,7 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `DEV_GEO_COUNTRY` | Local/preview country fallback when Cloudflare geo headers are absent. Do not set in production behind Cloudflare. |
 | `WALLET_SCREENING_URI` | Optional server-side wallet screening endpoint proxied by `/api/screen-address`. |
 | `STABLEWATCH_API_KEY` | Optional server-side Stablewatch key for intrinsic APY data. |
+| `MERKL_API_KEY` | Optional server-side Merkl key. The Merkl API works anonymously (10 req/sec shared across all users via `/api/proxy/merkl`); set this to send `X-API-Key` upstream for a higher quota. Server-only — never exposed to the browser. |
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
@@ -239,6 +240,38 @@ The app will be available at `http://localhost:3000`.
 
 For HTTPS in local development, set `HTTPS_KEY` and `HTTPS_CERT` env vars pointing to your certificate files.
 
+#### Development with the SDK
+
+The committed dependency uses the npm version in `package.json` and `package-lock.json`. Keep those files pinned to a published `@eulerxyz/euler-v2-sdk` version unless the PR is intentionally updating the SDK dependency.
+
+For local Lite + SDK development, link the sibling SDK package without editing Lite package files:
+
+```bash
+cd ../euler-sdks/packages/euler-v2-sdk
+pnpm run build
+npm link
+
+cd ../../../euler-lite
+npm link @eulerxyz/euler-v2-sdk
+npm ls @eulerxyz/euler-v2-sdk --depth=0
+npm run dev
+```
+
+Rebuild the SDK after SDK source changes:
+
+```bash
+cd ../euler-sdks/packages/euler-v2-sdk
+pnpm run build
+```
+
+Return Lite to the committed npm package before final validation:
+
+```bash
+cd ../../../euler-lite
+npm ci
+npm ls @eulerxyz/euler-v2-sdk --depth=0
+```
+
 ### 5. Build for Production
 
 ```bash
@@ -261,6 +294,21 @@ docker run -p 3000:3000 \
 ```
 
 Doppler injects all environment variables at runtime. The server plugins scan the injected env vars and pass config to the client via `window.__APP_CONFIG__` and `window.__CHAIN_CONFIG__`.
+
+The Docker build uses the npm SDK version from `package-lock.json` by default. For a Lite PR that needs an unreleased SDK branch, pass the SDK branch as a build argument:
+
+```bash
+docker build \
+  --build-arg EULER_SDK_BRANCH=feat/sdk-branch \
+  --build-arg APP_PORT=3000 \
+  -t euler-lite .
+```
+
+When `EULER_SDK_BRANCH` is set, the builder clones `euler-xyz/euler-sdks`, builds `packages/euler-v2-sdk`, packs it, and installs that tarball with `--no-save` before running the Lite build. The committed Lite package files still point at the installed npm version.
+
+Railway PR builds use the same Dockerfile. Set `EULER_SDK_BRANCH` for previews that should consume a branch from `https://github.com/euler-xyz/euler-sdks.git`; leave it unset for previews that should use the npm version in `package-lock.json`.
+
+The SDK preview build installs `pnpm@10` by default. Set `EULER_SDK_PNPM_VERSION` if the SDK branch requires another pnpm version.
 
 To run without Doppler, override the `CMD` and pass env vars directly:
 

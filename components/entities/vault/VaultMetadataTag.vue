@@ -30,8 +30,44 @@ const onKeydown = (event: KeyboardEvent) => {
 </script>
 
 <template>
+  <UiHoverPreviewTooltip
+    v-if="title"
+    :title="label"
+    :text="title"
+    placement="top-start"
+  >
+    <component
+      :is="as"
+      :type="as === 'button' ? 'button' : undefined"
+      :role="as === 'span' ? 'button' : undefined"
+      :tabindex="as === 'span' ? 0 : undefined"
+      class="vault-metadata-tag"
+      :class="[
+        `vault-metadata-tag--${tone}`,
+        `vault-metadata-tag--${size}`,
+        {
+          'vault-metadata-tag--block': block,
+          'vault-metadata-tag--nudge': nudge,
+        },
+      ]"
+      @click="$emit('click', $event)"
+      @keydown="onKeydown"
+    >
+      <SvgIcon
+        :name="icon"
+        class="vault-metadata-tag__icon"
+      />
+      <span class="vault-metadata-tag__label">{{ label }}</span>
+      <span class="vault-metadata-tag__spacer" />
+      <SvgIcon
+        name="info-circle"
+        class="vault-metadata-tag__info"
+      />
+    </component>
+  </UiHoverPreviewTooltip>
   <component
     :is="as"
+    v-else
     :type="as === 'button' ? 'button' : undefined"
     :role="as === 'span' ? 'button' : undefined"
     :tabindex="as === 'span' ? 0 : undefined"
@@ -44,7 +80,6 @@ const onKeydown = (event: KeyboardEvent) => {
         'vault-metadata-tag--nudge': nudge,
       },
     ]"
-    :title="title"
     @click="$emit('click', $event)"
     @keydown="onKeydown"
   >

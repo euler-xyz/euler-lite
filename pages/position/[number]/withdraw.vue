@@ -9,15 +9,20 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
-import { getAddress, type Address, zeroAddress } from 'viem'
+import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
+import { isCowProviderOrQuote } from '~/entities/cowswap'
+
 const positionIndex = usePositionIndex()
 const { address } = useWagmi()
-const { planWithdraw, planWithdrawAndSwap } = useEulerTx()
+const { planWithdraw, planWithdrawAndSwap, planRedeem } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { account: cachedAccount } = useFreshAccount()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()
@@ -86,6 +91,17 @@ const form = useCollateralForm({
 
   buildDirectPlan: async ({ vaultAddress, amountNano, subAccount, account }) => {
     const owner = (subAccount ?? address.value) as Address
+    // Withdrawing the entire collateral balance: redeem ALL shares (maxUint256)
+    // instead of a fixed asset amount. A fixed `withdraw(assets)` leaves dust
+    // behind (share-price rounding + interest accrued since the snapshot).
+    if (isFullCollateralWithdraw(amountNano)) {
+      return planRedeem({
+        vaultAddress: vaultAddress as Address,
+        shares: maxUint256,
+        owner,
+        account: account ?? cachedAccount.value,
+      })
+    }
     return planWithdraw({
       vaultAddress: vaultAddress as Address,
       assets: amountNano,
@@ -140,6 +156,73 @@ const form = useCollateralForm({
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
+
+// True when the requested amount covers the entire collateral balance. The Max
+// button fills the exact full-precision balance, so this is an exact match when
+// the position isn't cash-limited. A full withdraw must redeem ALL shares
+// (maxUint256) rather than a fixed asset amount — otherwise share-price rounding
+// and interest accrued since the snapshot leave dust behind.
+const isFullCollateralWithdraw = (assetsNano: bigint) => {
+  const full = form.collateralAssets.value
+  return full > 0n && assetsNano >= full
+}
+
+// Add this collateral withdrawal to the batch — direct or non-CoW swap-out.
+const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
+const canAddToBatch = computed(() => {
+  if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return false
+  if (!(+form.amount.value) || !form.collateralVault.value?.address || !form.position.value) return false
+  if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
+  return true
+})
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: form.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    needsSwap.value
+    && form.swapEffectiveQuote.value !== null
+    && form.swapPriceImpact.value === null,
+  ),
+})
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithAddToBatchPriceImpact(async () => {
+    const v = form.collateralVault.value
+    const a = form.asset.value
+    const pos = form.position.value
+    if (!v?.address || !a?.address || !pos) return
+    const vaultAddress = v.address as Address
+    const assets = valueToNano(form.amount.value, a.decimals)
+    const owner = (pos.subAccount ?? address.value) as Address
+    if (needsSwap.value) {
+      const quote = form.swapEffectiveQuote.value
+      if (!quote) return
+      await addBatchEntry({
+        label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
+        buildPlan: account => planWithdrawAndSwap({ swapQuote: quote, vaultAddress, assets, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
+      })
+    }
+    else if (isFullCollateralWithdraw(assets)) {
+      await addBatchEntry({
+        label: `Withdraw ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planRedeem({ vaultAddress, shares: maxUint256, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'withdraw', asset: a, amount: form.amount.value },
+      })
+    }
+    else {
+      await addBatchEntry({
+        label: `Withdraw ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planWithdraw({ vaultAddress, assets, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'withdraw', asset: a, amount: form.amount.value },
+      })
+    }
+    form.amount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
+  })
+}
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
@@ -392,6 +475,8 @@ watch(selectedOutputAsset, () => {
               :loading="form.isSubmitting.value || form.isPreparing.value"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>
