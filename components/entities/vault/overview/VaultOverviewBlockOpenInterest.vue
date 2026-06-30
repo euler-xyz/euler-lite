@@ -6,10 +6,8 @@ import { getAddress } from 'viem'
 import { compactNumber } from '~/utils/string-utils'
 import {
   buildOpenInterestModel,
-  findOpenInterestMapForVault,
   normalizeOpenInterestAddress,
   type OpenInterestCollateralInput,
-  type OpenInterestCollateralMapResponse,
 } from '~/utils/vault/open-interest'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
@@ -22,10 +20,14 @@ const { vault, defaultOpen = false } = defineProps<{
 const { chainId } = useEulerAddresses()
 const { get: registryGet } = useVaultRegistry()
 const { getChartColors, isDark } = useThemeColors()
+const {
+  load: loadCollateralOpenInterest,
+  getOpenInterestForVault,
+  hasError,
+  isLoaded: isOpenInterestLoaded,
+  isLoading,
+} = useCollateralOpenInterest()
 
-const isLoading = ref(false)
-const hasError = ref(false)
-const collateralExposureUsd = ref<Record<string, Record<string, number>>>({})
 const chartData = shallowRef<ChartData<'doughnut', number[], string> | null>(null)
 const chartOptions = shallowRef<ChartOptions<'doughnut'> | null>(null)
 
@@ -47,7 +49,7 @@ const getCollateralInput = (address: string, valueUsd: number): OpenInterestColl
 }
 
 const openInterestModel = computed(() => {
-  const exposure = findOpenInterestMapForVault(collateralExposureUsd.value, vault.address)
+  const exposure = isOpenInterestLoaded.value ? getOpenInterestForVault(vault.address) : {}
   const collaterals = Object.entries(exposure).map(([address, valueUsd]) =>
     getCollateralInput(address, valueUsd),
   )
@@ -139,26 +141,8 @@ const renderChart = async () => {
 }
 
 const loadOpenInterest = async () => {
-  if (!canLoadOpenInterest.value || !chainId.value || !vault.address) {
-    collateralExposureUsd.value = {}
-    return
-  }
-
-  isLoading.value = true
-  hasError.value = false
-
-  try {
-    const query = `chainId=${encodeURIComponent(String(chainId.value))}`
-    const response = await $fetch<OpenInterestCollateralMapResponse>(`/api/v3/evk/vaults/open-interest/by-collateral?${query}`)
-    collateralExposureUsd.value = response.data ?? {}
-  }
-  catch {
-    hasError.value = true
-    collateralExposureUsd.value = {}
-  }
-  finally {
-    isLoading.value = false
-  }
+  if (!canLoadOpenInterest.value || !chainId.value || !vault.address) return
+  await loadCollateralOpenInterest()
 }
 
 watch(

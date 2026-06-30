@@ -5,6 +5,7 @@ import {
 
 let pendingLoad: Promise<void> | null = null
 let pendingChainId: string | null = null
+let activeRequestId = 0
 
 export const useCollateralOpenInterest = () => {
   const { chainId } = useEulerAddresses()
@@ -21,27 +22,35 @@ export const useCollateralOpenInterest = () => {
     if (loadedChainId.value === chainIdToLoad) return
     if (pendingLoad && pendingChainId === chainIdToLoad) return pendingLoad
 
+    const requestId = ++activeRequestId
     isLoading.value = true
     hasError.value = false
     pendingChainId = chainIdToLoad
-    pendingLoad = $fetch<OpenInterestCollateralMapResponse>(
+    const loadPromise = $fetch<OpenInterestCollateralMapResponse>(
       `/api/v3/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
     )
       .then((response) => {
+        if (requestId !== activeRequestId || currentChainId.value !== chainIdToLoad) return
+
         data.value = response.data ?? {}
         loadedChainId.value = chainIdToLoad
       })
       .catch(() => {
+        if (requestId !== activeRequestId || currentChainId.value !== chainIdToLoad) return
+
         hasError.value = true
         data.value = {}
         loadedChainId.value = null
       })
       .finally(() => {
+        if (pendingLoad !== loadPromise) return
+
         isLoading.value = false
         pendingLoad = null
         pendingChainId = null
       })
 
+    pendingLoad = loadPromise
     return pendingLoad
   }
 
