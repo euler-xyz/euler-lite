@@ -22,7 +22,7 @@ import {
 } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
-import { errorStatus, safePathTemplate, searchKeys, urlHost } from '~/server/utils/observability'
+import { errorStatus, safePathTemplate, safeUrlLogFields, searchKeys } from '~/server/utils/observability'
 import {
   createProxyCache,
   createProxyInFlight,
@@ -110,13 +110,10 @@ export default defineEventHandler(async (event) => {
     return res.body
   }
   catch (err) {
-    const targetUrl = new URL(target)
     logger.warn(
       {
         ctx: 'incentra-proxy',
-        upstreamHost: urlHost(target),
-        pathTemplate: safePathTemplate(targetUrl.pathname),
-        searchKeys: searchKeys(targetUrl.searchParams),
+        ...safeUrlLogFields(target),
         bodyBytes: body?.length,
         status: errorStatus(err),
         err,

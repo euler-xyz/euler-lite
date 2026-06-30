@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
 
+  // Defense-in-depth if this handler is mounted without body-limit middleware.
   const contentLength = Number(event.node.req.headers['content-length'] ?? 0)
   if (Number.isFinite(contentLength) && contentLength > MAX_PAYLOAD_BYTES) {
     logger.warn({ ctx: 'client-error', reason: 'payload-too-large', contentLength, limit: MAX_PAYLOAD_BYTES }, 'request rejected')

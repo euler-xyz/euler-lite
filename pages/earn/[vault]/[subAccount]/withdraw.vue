@@ -161,6 +161,7 @@ const submit = async () => {
         phase: 'build',
         operationType: 'withdraw',
         vaultAddress,
+        assetAddress: asset.value?.address,
       }, e)
       plan.value = null
     }

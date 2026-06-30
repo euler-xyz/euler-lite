@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { safePathTemplate, searchKeys, summarizeSdkIssue, urlHost } from '~/server/utils/observability'
+import { safePathTemplate, safeUrlLogFields, searchKeys, summarizeSdkIssue, urlHost } from '~/server/utils/observability'
 
 describe('server observability helpers', () => {
   it('summarizes SDK issues without raw nested diagnostics', () => {
@@ -26,5 +26,14 @@ describe('server observability helpers', () => {
     expect(urlHost(url.toString())).toBe('api.example')
     expect(safePathTemplate(url.pathname)).toBe('/private/key/users/:address/rewards')
     expect(searchKeys(url.searchParams)).toEqual(['chain_id', 'user_address'])
+    expect(safeUrlLogFields(url.toString())).toEqual({
+      upstreamHost: 'api.example',
+      pathTemplate: '/private/key/users/:address/rewards',
+      searchKeys: ['chain_id', 'user_address'],
+    })
+  })
+
+  it('does not throw or leak raw malformed URLs in log metadata', () => {
+    expect(safeUrlLogFields('not a url / secret-key')).toEqual({ searchKeys: [] })
   })
 })

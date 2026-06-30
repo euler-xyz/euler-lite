@@ -37,6 +37,16 @@ const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 const ALLOWED_EVENTS = new Set<string>(CLIENT_EVENTS)
 const TEXT_FIELDS = ['flow', 'phase', 'routeTemplate', 'operationType', 'quoteProvider', 'reason', 'invariant'] as const
 const NUMBER_FIELDS = ['chainId', 'count'] as const
+const ERROR_KINDS = new Set<ReturnType<typeof summarizeViemError>['kind']>([
+  'rpc-timeout',
+  'rpc-http',
+  'rpc-rate-limited',
+  'rpc-resource-unavailable',
+  'rpc-socket-closed',
+  'rpc-unreachable',
+  'contract-revert',
+  'unknown',
+])
 
 export function routeTemplate(pathname: string): string {
   return pathname
@@ -48,6 +58,8 @@ export function routeTemplate(pathname: string): string {
 const truncate = (value: string, max: number): string => value.length > max ? value.slice(0, max) : value
 const isEvent = (value: unknown): value is ClientObservabilityEvent => typeof value === 'string' && ALLOWED_EVENTS.has(value)
 const isAddress = (value: unknown): value is string => typeof value === 'string' && ADDRESS_RE.test(value)
+const isErrorKind = (value: unknown): value is ReturnType<typeof summarizeViemError>['kind'] =>
+  typeof value === 'string' && ERROR_KINDS.has(value as ReturnType<typeof summarizeViemError>['kind'])
 
 function redactText(value: string): string {
   return value
@@ -171,7 +183,7 @@ export function sanitizeClientObservabilityInput(input: unknown): ClientObservab
   if (error && typeof error === 'object') {
     const err = error as Record<string, unknown>
     payload.error = {
-      kind: typeof err.kind === 'string' ? err.kind as ReturnType<typeof summarizeViemError>['kind'] : 'unknown',
+      kind: isErrorKind(err.kind) ? err.kind : 'unknown',
       name: cleanString(err.name, 80) || 'Error',
       shortMessage: cleanString(err.shortMessage, 240) || '',
       isTransport: typeof err.isTransport === 'boolean' ? err.isTransport : false,
@@ -190,7 +202,9 @@ export function shouldSampleClientPayload(payload: ClientObservabilityPayload): 
 }
 
 export async function reportClientEvent(fields: ClientObservabilityFields, error?: unknown): Promise<void> {
-  if (!import.meta.client || import.meta.dev) return
+  // Production-only by default; set NUXT_PUBLIC_OBSERVABILITY_DEV=true to test
+  // the browser-to-/api/client-error path during local development.
+  if (!import.meta.client || (import.meta.dev && import.meta.env.NUXT_PUBLIC_OBSERVABILITY_DEV !== 'true')) return
   const payload = normalizeClientObservabilityPayload({
     routeTemplate: routeTemplate(window.location.pathname),
     ...fields,

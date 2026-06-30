@@ -69,4 +69,15 @@ describe('client observability payloads', () => {
     expect(JSON.stringify(payload)).not.toContain('walletAddress')
     expect(JSON.stringify(payload)).not.toContain('private-rpc')
   })
+
+  it('rejects forged error kind values from client input', () => {
+    const payload = sanitizeClientObservabilityInput({
+      source: 'client',
+      event: 'client_invariant_missing',
+      fingerprint: 'abc123',
+      error: { kind: 'not-real', name: 'Error', shortMessage: 'boom', isTransport: true },
+    })
+
+    expect(payload?.error?.kind).toBe('unknown')
+  })
 })
