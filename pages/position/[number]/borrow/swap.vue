@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import {
-  AAVE_CONNECTOR_ID,
   isSecuritizeCollateralVault,
-  MORPHO_CONNECTOR_ID,
   SwapperMode,
   type EVault,
   type EulerMigrationTarget,
@@ -18,6 +16,7 @@ import {
 import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type StateOverride } from 'viem'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { useSwapQuotesParallel, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'

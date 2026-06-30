@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import {
-  AAVE_CONNECTOR_ID,
   isSecuritizeCollateralVault,
-  MORPHO_CONNECTOR_ID,
   type AaveMigrationTargetExtraData,
   type AaveMigrationTargetRaw,
   type AavePositionRef,
@@ -20,6 +18,7 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
 import { OperationReviewModal } from '#components'
+import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { formatCompactUsdValue, formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { MODAL_CLOSE_REDIRECT_DELAY_MS } from '~/entities/tuning-constants'

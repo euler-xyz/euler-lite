@@ -1,7 +1,7 @@
 import { readonly, ref, type Ref } from 'vue'
-import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '@eulerxyz/euler-v2-sdk'
 import { erc20Abi, getAddress, type Address } from 'viem'
 import { getEulerSdk } from '~/composables/useEulerSdk'
+import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { logWarn } from '~/utils/errorHandling'
 
