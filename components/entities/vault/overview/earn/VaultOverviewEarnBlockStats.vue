@@ -43,16 +43,16 @@ const getStrategyVault = (strategy: EulerEarnStrategyInfo): EVault | undefined =
 }
 const getStrategyMarketSource = (strategyVault: EVault) => {
   const marketKey = getProductKeyByVault(strategyVault.address)
+  if (!marketKey) return undefined
+
   const marketName = getProductByVault(strategyVault.address).name || strategyVault.asset.symbol
   return {
     label: marketName,
-    to: marketKey
-      ? {
-          name: 'explore-market',
-          params: { market: marketKey },
-          query: { network: route.query.network },
-        }
-      : undefined,
+    to: {
+      name: 'explore-market',
+      params: { market: marketKey },
+      query: { network: route.query.network },
+    },
   }
 }
 
