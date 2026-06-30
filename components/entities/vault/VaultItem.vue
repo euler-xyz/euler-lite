@@ -9,12 +9,12 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { VaultSupplyApyModal, VaultCollateralExposureModal, UiModalPreviewTrigger } from '#components'
+import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { buildAllocatedVaultExposureDisplayItems, type ExposureValueState } from '~/utils/vault/exposure-display'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -53,7 +53,6 @@ const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
-const modal = useModal()
 const collateralExposureGroups = computed(() => {
   if (!isBorrowable.value) return []
 
@@ -65,22 +64,20 @@ const collateralExposureGroups = computed(() => {
     getOpenInterestForVault(vault.address),
   )
 })
-const topCollateralExposureGroup = computed(() => collateralExposureGroups.value[0])
-const totalCollateralExposureUsd = computed(() =>
-  collateralExposureGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
-)
 const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
-const collateralExposureSummary = computed(() => {
-  const group = topCollateralExposureGroup.value
-  if (!group) return '-'
-  if (!hasLiveExposureData.value) return 'Unavailable'
-
-  const pct = totalCollateralExposureUsd.value > 0
-    ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
-    : '0'
-
-  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
+const exposureValueState = computed<ExposureValueState>(() => {
+  if (hasLiveExposureData.value) return 'ready'
+  if (hasOpenInterestError.value) return 'unavailable'
+  return 'loading'
 })
+const exposureDisplayItems = computed(() =>
+  buildAllocatedVaultExposureDisplayItems({
+    collateralGroups: collateralExposureGroups.value,
+    totalExposureUsd: priceValues.value.totalSupplyUsd,
+    idleAsset: vault.asset,
+    utilization: vault.utilization,
+  }),
+)
 
 watchEffect(() => {
   if (!isBorrowable.value) return
@@ -116,8 +113,8 @@ const statsGridCols = computed(() => {
   cols.push('1fr') // Total supply
   if (isBorrowable.value) {
     cols.push('1fr') // Available liquidity
+    cols.push('1fr') // Exposure
     cols.push('1fr') // Utilization
-    cols.push('1fr') // Collateral
   }
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
@@ -144,21 +141,12 @@ const supplyApyModalData = computed(() => ({
     rewardVaultAddress: vault.address,
   },
 }))
-const collateralExposureModalData = computed(() => ({
-  props: { vault },
-}))
-
-const onCollateralInfoClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultCollateralExposureModal, { props: { vault } })
-}
-
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
   totalSupply: '-',
   liquidity: '-',
   walletBalance: '-',
 })
+const priceValues = ref({ totalSupplyUsd: 0 })
 
 watchEffect(async () => {
   const liquidity = vault.availableLiquidity
@@ -172,6 +160,9 @@ watchEffect(async () => {
     totalSupply: supplyResult.hasPrice ? formatCompactUsdValue(supplyResult.usdValue) : supplyResult.display,
     liquidity: liquidityResult.hasPrice ? formatCompactUsdValue(liquidityResult.usdValue) : liquidityResult.display,
     walletBalance: walletResult.hasPrice ? formatCompactUsdValue(walletResult.usdValue) : walletResult.display,
+  }
+  priceValues.value = {
+    totalSupplyUsd: supplyResult.hasPrice ? supplyResult.usdValue : 0,
   }
 })
 </script>
@@ -355,6 +346,29 @@ watchEffect(async () => {
       <div
         v-if="isBorrowable"
         class="flex flex-col flex-1 mobile:!hidden"
+        :class="isConnected ? 'items-center' : 'items-end text-right'"
+      >
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+          Exposure
+        </div>
+        <div
+          class="flex min-w-0 items-center justify-end"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="exposure"
+          :data-value="exposureDisplayItems.map(item => item.label ?? item.asset.symbol).join(',')"
+        >
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+          />
+        </div>
+      </div>
+      <div
+        v-if="isBorrowable"
+        class="flex flex-col flex-1 mobile:!hidden"
         :class="
           isConnected ? 'justify-center items-center' : 'items-end text-right'
         "
@@ -378,53 +392,6 @@ watchEffect(async () => {
             {{ utilizationDisplay }}%
           </div>
         </div>
-      </div>
-      <div
-        v-if="isBorrowable"
-        class="flex flex-col flex-1 mobile:!hidden"
-        :class="isConnected ? 'items-center' : 'items-end text-right'"
-      >
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-          Top backing asset
-          <UiModalPreviewTrigger
-            v-if="collateralExposureGroups.length > 0"
-            :component="VaultCollateralExposureModal"
-            :modal-data="collateralExposureModalData"
-            aria-label="Show collateral exposure details"
-            placement="top-end"
-          >
-            <SvgIcon
-              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-            />
-          </UiModalPreviewTrigger>
-        </div>
-        <div
-          v-if="collateralExposureGroups.length > 0"
-          class="flex min-w-0 cursor-pointer flex-col items-end gap-4"
-          @click="onCollateralInfoClick"
-        >
-          <div class="flex min-w-0 items-center gap-6">
-            <AssetAvatar
-              v-if="topCollateralExposureGroup && hasLiveExposureData"
-              :asset="topCollateralExposureGroup.asset"
-              size="20"
-            />
-            <span
-              class="text-p2 text-content-primary whitespace-nowrap truncate"
-              data-id="data-point"
-              :data-key="vault.address.toLowerCase()"
-              data-field="collateral-exposure-summary"
-              :data-value="collateralExposureSummary"
-            >
-              {{ collateralExposureSummary }}
-            </span>
-          </div>
-        </div>
-        <div
-          v-else
-          class="text-p2 text-content-primary"
-        >-</div>
       </div>
       <div
         v-if="isConnected"
@@ -484,6 +451,25 @@ watchEffect(async () => {
       >
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
+            Exposure
+          </div>
+        </div>
+        <div class="flex min-w-0 flex-1 justify-end text-right">
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+            placement="top-start"
+          />
+        </div>
+      </div>
+      <div
+        v-if="isBorrowable"
+        class="flex w-full justify-between"
+      >
+        <div class="flex-1">
+          <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Utilization
             <VaultWarningIcon :warning="utilisationWarning" />
           </div>
@@ -496,50 +482,6 @@ watchEffect(async () => {
           <div class="text-p2 text-content-primary">
             {{ utilizationDisplay }}%
           </div>
-        </div>
-      </div>
-      <div
-        v-if="isBorrowable"
-        class="flex w-full justify-between gap-12"
-      >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3 flex items-center gap-4">
-            Top backing asset
-            <UiModalPreviewTrigger
-              v-if="collateralExposureGroups.length > 0"
-              :component="VaultCollateralExposureModal"
-              :modal-data="collateralExposureModalData"
-              aria-label="Show collateral exposure details"
-              placement="top-start"
-            >
-              <SvgIcon
-                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                name="info-circle"
-              />
-            </UiModalPreviewTrigger>
-          </div>
-        </div>
-        <div class="flex min-w-0 flex-1 justify-end text-right">
-          <div
-            v-if="collateralExposureGroups.length > 0"
-            class="flex min-w-0 cursor-pointer flex-col items-end gap-4"
-            @click="onCollateralInfoClick"
-          >
-            <div class="flex min-w-0 items-center justify-end gap-6">
-              <AssetAvatar
-                v-if="topCollateralExposureGroup && hasLiveExposureData"
-                :asset="topCollateralExposureGroup.asset"
-                size="20"
-              />
-              <span class="text-p2 text-content-primary whitespace-nowrap">
-                {{ collateralExposureSummary }}
-              </span>
-            </div>
-          </div>
-          <div
-            v-else
-            class="text-p2 text-content-primary"
-          >-</div>
         </div>
       </div>
       <div

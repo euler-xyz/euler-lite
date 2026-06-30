@@ -70,7 +70,7 @@ watchEffect(() => {
 
 <template>
   <BaseModalWrapper
-    title="Collateral exposure"
+    title="Exposure"
     @close="$emit('close')"
   >
     <div
@@ -79,7 +79,7 @@ watchEffect(() => {
     >
       <p class="text-p3 text-content-secondary mb-4">
         Deposits in this vault can be borrowed.
-        Make sure you're comfortable accepting the backing assets and collateral vaults listed below before supplying.
+        Make sure you're comfortable with the exposure assets and vaults listed below before supplying.
       </p>
       <div
         v-for="pair in collateralPairs"

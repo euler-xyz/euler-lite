@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import {
   type MatrixViewId,
   type AttributeMatrixData,
@@ -13,6 +14,8 @@ import {
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { buildAllocatedVaultExposureDisplayItems, type ExposureValueState } from '~/utils/vault/exposure-display'
 
 const props = defineProps<{
   data: AttributeMatrixData
@@ -27,6 +30,13 @@ defineEmits<{
 }>()
 
 const { isVaultGovernorVerified } = useVaults()
+const { get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 
 // Each AttributeRow renders as a *table column*; each vault renders as a *table row*.
 interface AttributeColumn {
@@ -51,6 +61,45 @@ const canShowHooksModal = (vault: AttributeMatrixColumn, cell: AttributeCell) =>
   cell.hookable && isVaultType(vault.vault)
 
 const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault)
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const exposureValueState = computed<ExposureValueState>(() => {
+  if (hasLiveExposureData.value) return 'ready'
+  if (hasOpenInterestError.value) return 'unavailable'
+  return 'loading'
+})
+
+const exposureItemsByVault = computed(() => {
+  const result = new Map<string, ReturnType<typeof buildAllocatedVaultExposureDisplayItems>>()
+  if (props.view !== 'stats') return result
+
+  for (const column of props.data.columns) {
+    if (!isEVault(column.vault)) continue
+
+    const groups = getCollateralExposureGroups(
+      getCollateralExposurePairs(
+        column.vault,
+        addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+      ),
+      getOpenInterestForVault(column.address),
+    )
+    result.set(column.address, buildAllocatedVaultExposureDisplayItems({
+      collateralGroups: groups,
+      totalExposureUsd: props.usdCache.get(column.address)?.supplyUsd ?? 0,
+      idleAsset: column.vault.asset,
+      utilization: column.vault.utilization,
+    }))
+  }
+  return result
+})
+
+const getVaultExposureItems = (vault: AttributeMatrixColumn) =>
+  exposureItemsByVault.value.get(vault.address) ?? []
+
+watchEffect(() => {
+  if (props.view !== 'stats') return
+  if (!props.data.columns.some(column => isEVault(column.vault))) return
+  void loadOpenInterest()
+})
 
 // Hover state — used to highlight the matching vault row label and attribute
 // column header so users can scan from a cell back to its labels.
@@ -63,8 +112,12 @@ const isVaultRowHighlighted = (vaultAddr: string): boolean =>
 const isAttributeColumnHighlighted = (attributeId: string): boolean =>
   hoveredCell.value?.attributeId === attributeId
 
-const cellDataValue = (cell: AttributeCell): string | number =>
-  props.view === 'stats' ? cell.display : (cell.numeric ?? cell.display)
+const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): string | number => {
+  if (cell.kind === 'exposure') {
+    return getVaultExposureItems(vault).map(item => item.label ?? item.asset.symbol).join(',')
+  }
+  return props.view === 'stats' ? cell.display : (cell.numeric ?? cell.display)
+}
 </script>
 
 <template>
@@ -150,7 +203,7 @@ const cellDataValue = (cell: AttributeCell): string | number =>
               :data-key="`${vault.address}:${col.attribute.id}`"
               :data-vault-address="vault.address"
               :data-field="col.attribute.id"
-              :data-value="cellDataValue(col.cells[vaultIdx])"
+              :data-value="cellDataValue(col.cells[vaultIdx], vault)"
               :class="(isVaultRowHighlighted(vault.address) || isAttributeColumnHighlighted(col.attribute.id)) ? '!bg-white/[0.06]' : ''"
               @mouseenter="hoveredCell = { vaultAddr: vault.address, attributeId: col.attribute.id }"
               @mouseleave="hoveredCell = null"
@@ -224,6 +277,17 @@ const cellDataValue = (cell: AttributeCell): string | number =>
                   v-else
                   class="text-p5 text-content-secondary"
                 >{{ col.cells[vaultIdx].display }}</span>
+              </template>
+
+              <!-- exposure: Morpho-style asset stack + full preview list -->
+              <template v-else-if="col.cells[vaultIdx].kind === 'exposure'">
+                <VaultExposureSummary
+                  :items="getVaultExposureItems(vault)"
+                  :value-state="exposureValueState"
+                  :max-visible="4"
+                  avatar-size="16"
+                  placement="top"
+                />
               </template>
 
               <!-- text (default) -->

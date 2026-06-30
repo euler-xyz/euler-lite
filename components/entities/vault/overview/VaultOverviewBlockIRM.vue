@@ -50,7 +50,7 @@ const modal = useModal()
 // Only render the IRM chart for vaults that have live borrow-side exposure —
 // either currently borrowable, or still accruing interest on existing debt
 // while the liquidation LTV ramps down. This mirrors the visibility rule of
-// the "Collateral exposure" block and correctly excludes collateral-only
+// the "Exposure" block and correctly excludes collateral-only
 // vaults that may still carry a non-zero interestRateModelAddress.
 const hasValidIRM = computed(() => {
   const interestRateModelAddress = vault.interestRateModel.address

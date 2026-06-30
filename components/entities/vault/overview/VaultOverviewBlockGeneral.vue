@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import type { Component } from 'vue'
 
@@ -12,6 +12,8 @@ import { autoLink } from '~/utils/autoLink'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { buildAllocatedVaultExposureDisplayItems, type ExposureValueState } from '~/utils/vault/exposure-display'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const emit = defineEmits<{
@@ -21,6 +23,13 @@ const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
 const { isVaultGovernorVerified } = useVaults()
+const { get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 
 type VaultPropertyBadge = Extract<VaultTypeBadge, 'private' | 'accessControl' | 'governanceLimited' | 'cyclicalNote'>
 
@@ -47,6 +56,30 @@ const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.addres
 const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const exposureValueState = computed<ExposureValueState>(() => {
+  if (hasLiveExposureData.value) return 'ready'
+  if (hasOpenInterestError.value) return 'unavailable'
+  return 'loading'
+})
+const totalSupplyUsd = ref(0)
+const collateralExposureGroups = computed(() =>
+  getCollateralExposureGroups(
+    getCollateralExposurePairs(
+      vault,
+      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    ),
+    getOpenInterestForVault(vault.address),
+  ),
+)
+const exposureDisplayItems = computed(() =>
+  buildAllocatedVaultExposureDisplayItems({
+    collateralGroups: collateralExposureGroups.value,
+    totalExposureUsd: totalSupplyUsd.value,
+    idleAsset: vault.asset,
+    utilization: vault.utilization,
+  }),
+)
 
 const propertyBadgeDetails: Record<VaultPropertyBadge, {
   component: Component
@@ -87,6 +120,16 @@ const priceDisplay = ref('-')
 watchEffect(async () => {
   const price = await formatAssetValue(1, vault, 'off-chain')
   priceDisplay.value = price.hasPrice ? formatUsdValue(price.usdValue) : '-'
+})
+
+watchEffect(async () => {
+  const price = await formatAssetValue(vault.totalAssets, vault, 'off-chain')
+  totalSupplyUsd.value = price.hasPrice ? price.usdValue : 0
+})
+
+watchEffect(() => {
+  if (!borrowCount.value) return
+  void loadOpenInterest()
 })
 </script>
 
@@ -196,12 +239,26 @@ watchEffect(async () => {
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue label="Can be borrowed">
-        <div class="flex items-center gap-8">
-          <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
+        <div class="flex min-w-0 items-center gap-8">
+          <UiIcon
+            class="shrink-0"
+            :name="borrowCount ? 'green-tick' : 'red-cross'"
+          />
           <span class="text-p2 text-content-primary">
             {{ formatMarketAvailability(borrowCount) }}
           </span>
         </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        v-if="borrowCount"
+        label="Exposure"
+      >
+        <VaultExposureSummary
+          :items="exposureDisplayItems"
+          :value-state="exposureValueState"
+          :max-visible="5"
+          avatar-size="20"
+        />
       </VaultOverviewLabelValue>
     </div>
     <div

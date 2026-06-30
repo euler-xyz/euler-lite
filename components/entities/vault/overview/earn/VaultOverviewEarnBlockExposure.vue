@@ -10,12 +10,16 @@ import { DateTime } from 'luxon'
 import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
-import { groupExposureItemsByBackingAsset } from '~/utils/vault/exposure-groups'
+import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
+import {
+  buildAllocatedVaultExposureDisplayItems,
+  type ExposureValueState,
+} from '~/utils/vault/exposure-display'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -25,6 +29,7 @@ const onExposureClick = (address: string) => {
   emits('vault-click', address)
 }
 const { vault } = defineProps<{ vault: EulerEarn }>()
+const route = useRoute()
 
 const { getOrFetch, get: registryGet } = useVaultRegistry()
 const {
@@ -40,13 +45,11 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
-const isExpanded = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
 const UINT136_MAX = 2n ** 136n - 1n
-const COLLAPSED_GROUP_COUNT = 3
 
 const isPendingRemoval = (strategy: EulerEarnStrategyInfo) => strategy.removableAt > 0
 
@@ -114,10 +117,10 @@ const loadExposureUsdPrices = async () => {
 
     const { exposure, allocationUsd, capUsd } = result
     if (allocationUsd !== undefined) {
-      newPrices.set(exposure.address, allocationUsd)
+      newPrices.set(exposure.address.toLowerCase(), allocationUsd)
     }
     if (!isUnlimitedCap(exposure) && capUsd !== undefined) {
-      newCapPrices.set(exposure.address, capUsd)
+      newCapPrices.set(exposure.address.toLowerCase(), capUsd)
     }
   })
   exposureUsdPrices.value = newPrices
@@ -142,36 +145,6 @@ const exposureRows = computed(() => {
   })
 })
 
-const exposureGroups = computed(() =>
-  groupExposureItemsByBackingAsset(
-    exposureRows.value,
-    row => row.vault?.asset ?? {
-      address: row.exposure.address,
-      symbol: row.exposure.address.slice(0, 6),
-    },
-  ).map(group => ({
-    ...group,
-    allocatedAssets: group.items.reduce((sum, row) => sum + row.exposure.allocatedAssets, 0n),
-  })).sort((a, b) => {
-    if (b.allocatedAssets > a.allocatedAssets) return 1
-    if (b.allocatedAssets < a.allocatedAssets) return -1
-    return a.asset.symbol.localeCompare(b.asset.symbol)
-  }),
-)
-
-const visibleExposureGroups = computed(() =>
-  isExpanded.value ? exposureGroups.value : exposureGroups.value.slice(0, COLLAPSED_GROUP_COUNT),
-)
-const visibleExposureRows = computed(() =>
-  visibleExposureGroups.value.flatMap(group => group.items),
-)
-
-const hiddenExposureRowCount = computed(() =>
-  exposureGroups.value
-    .slice(visibleExposureGroups.value.length)
-    .reduce((count, group) => count + group.items.length, 0),
-)
-
 const getStrategyCollateralGroups = (strategyVault: EVault | undefined): CollateralExposureGroup[] => {
   if (!strategyVault) return []
 
@@ -184,25 +157,49 @@ const getStrategyCollateralGroups = (strategyVault: EVault | undefined): Collate
   )
 }
 
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
-const formatExposurePercent = (valueUsd: number, totalUsd: number) =>
-  !hasLiveExposureData.value ? '-' : totalUsd > 0 ? `${compactNumber(valueUsd / totalUsd * 100, 1, 0)}%` : '0%'
-const formatLiveExposureUsd = (valueUsd: number) =>
-  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
-
-const getCollateralExposureSummary = (
-  groups: CollateralExposureGroup[],
-  totalUsd: number,
-) => {
-  const group = groups[0]
-  if (!group || !hasLiveExposureData.value) return '-'
-  return `${group.asset.symbol} ${formatLiveExposureUsd(group.openInterestUsd)} · ${formatExposurePercent(group.openInterestUsd, totalUsd)}`
+const getStrategyMarketSource = (strategyVault: EVault) => {
+  const marketKey = getProductKeyByVault(strategyVault.address)
+  const marketName = getProductByVault(strategyVault.address).name || strategyVault.asset.symbol
+  return {
+    label: marketName,
+    to: marketKey
+      ? {
+          name: 'explore-market',
+          params: { market: marketKey },
+          query: { network: route.query.network },
+        }
+      : undefined,
+  }
 }
 
-const getStrategyCollateralExposureSummary = (strategyVault: EVault | undefined) => {
-  const groups = getStrategyCollateralGroups(strategyVault)
-  const totalUsd = groups.reduce((sum, group) => sum + group.openInterestUsd, 0)
-  return getCollateralExposureSummary(groups, totalUsd)
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const exposureValueState = computed<ExposureValueState>(() => {
+  if (hasLiveExposureData.value) return 'ready'
+  if (hasOpenInterestError.value) return 'unavailable'
+  return 'loading'
+})
+
+const collateralExposureGroupsByStrategy = computed(() => {
+  const groupsByStrategy = new Map<string, CollateralExposureGroup[]>()
+  for (const row of exposureRows.value) {
+    if (!row.vault) continue
+    groupsByStrategy.set(getAddress(row.vault.address), getStrategyCollateralGroups(row.vault))
+  }
+  return groupsByStrategy
+})
+
+const getStrategyExposureDisplayItems = (strategyVault: EVault | undefined) => {
+  if (!strategyVault) return []
+  if (!hasLiveExposureData.value) return []
+  if (!exposureUsdPrices.value.has(strategyVault.address.toLowerCase())) return []
+
+  return buildAllocatedVaultExposureDisplayItems({
+    collateralGroups: collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+    totalExposureUsd: exposureUsdPrices.value.get(strategyVault.address.toLowerCase()) ?? 0,
+    idleAsset: strategyVault.asset,
+    utilization: strategyVault.utilization,
+    idleSource: getStrategyMarketSource(strategyVault),
+  })
 }
 
 watch(isMarketDataResolved, () => {
@@ -237,20 +234,16 @@ const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
 })
 
 const hasExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
-  return exposureUsdPrices.value.has(exposure.address)
+  return exposureUsdPrices.value.has(exposure.address.toLowerCase())
 }
 
 const getExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
-  return exposureUsdPrices.value.get(exposure.address) || 0
+  return exposureUsdPrices.value.get(exposure.address.toLowerCase()) || 0
 }
 
 const getExposureAssetAmount = (exposure: typeof exposureList.value[0]) => {
   const strategyVault = exposure.vault as EVault | undefined ?? getExposureVaultByAddress(exposure.address)
   return `${roundAndCompactTokens(exposure.allocatedAssets, strategyVault?.asset.decimals ?? 18)} ${strategyVault?.asset.symbol ?? ''}`
-}
-
-const toggleExpanded = () => {
-  isExpanded.value = !isExpanded.value
 }
 
 load()
@@ -279,7 +272,7 @@ load()
       class="flex flex-col gap-12"
     >
       <div
-        v-for="row in visibleExposureRows"
+        v-for="row in exposureRows"
         :key="row.exposure.address"
         class="cursor-pointer rounded-12 border border-line-default bg-surface p-16 text-content-primary shadow-card transition-colors hover:bg-card-hover"
         @click="onExposureClick(row.exposure.address)"
@@ -365,11 +358,11 @@ load()
         </div>
         <div class="flex flex-col gap-12 pt-12">
           <VaultOverviewLabelValue
-            label="Current allocation"
+            label="Current exposure"
             orientation="horizontal"
             data-list="earn-exposure-strategy"
             :data-key="getAddress(row.exposure.address)"
-            data-field="Current allocation"
+            data-field="Current exposure"
           >
             <template v-if="hasExposureUsdPrice(row.exposure)">
               {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
@@ -383,27 +376,32 @@ load()
             </template>
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
-            label="Collateral exposure"
+            label="Exposure"
             orientation="horizontal"
             data-list="earn-exposure-strategy"
             :data-key="getAddress(row.exposure.address)"
-            data-field="Collateral exposure"
+            data-field="Exposure"
           >
-            {{ getStrategyCollateralExposureSummary(row.vault) }}
+            <VaultExposureSummary
+              :items="getStrategyExposureDisplayItems(row.vault)"
+              :value-state="exposureValueState"
+              :max-visible="5"
+              avatar-size="20"
+            />
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             orientation="horizontal"
             data-list="earn-exposure-strategy"
             :data-key="getAddress(row.exposure.address)"
-            data-field="Allocation cap"
+            data-field="Exposure cap"
           >
             <template #label>
               <span class="flex items-center gap-4">
-                Allocation cap
+                Exposure cap
                 <span @click.stop.prevent>
                   <UiFootnote
-                    title="Allocation cap"
-                    text="The maximum amount that can be allocated to this strategy."
+                    title="Exposure cap"
+                    text="The maximum amount that can be exposed to this strategy."
                     class="footnote-info [--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
                   />
                 </span>
@@ -424,8 +422,8 @@ load()
               <template v-if="isUnlimitedCap(row.exposure)">
                 ∞
               </template>
-              <template v-else-if="exposureCapUsdPrices.has(row.exposure.address)">
-                {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address) || 0) }}
+              <template v-else-if="exposureCapUsdPrices.has(row.exposure.address.toLowerCase())">
+                {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address.toLowerCase()) || 0) }}
               </template>
               <template v-else>
                 <UiExactAmount :exact="formatExactAmount(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
@@ -436,15 +434,6 @@ load()
           </VaultOverviewLabelValue>
         </div>
       </div>
-
-      <button
-        v-if="exposureGroups.length > COLLAPSED_GROUP_COUNT"
-        type="button"
-        class="self-center text-p4 font-medium text-content-accent transition-colors hover:text-accent-600"
-        @click="toggleExpanded"
-      >
-        {{ isExpanded ? 'Show less' : `Show more (${hiddenExposureRowCount})` }}
-      </button>
     </div>
   </div>
 </template>

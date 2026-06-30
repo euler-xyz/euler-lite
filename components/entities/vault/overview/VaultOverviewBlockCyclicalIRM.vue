@@ -15,7 +15,7 @@ const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?:
 const { get: registryGet } = useVaultRegistry()
 
 // Parent already gates rendering to cyclical IRM vaults via v-if,
-// so this component only checks collateral exposure and IRM address.
+// so this component only checks exposure and IRM address.
 const hasValidIRM = computed(() => {
   const interestRateModelAddress = vault.interestRateModel.address
   const hasExposure = hasCollateralExposure(
