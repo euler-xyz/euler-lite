@@ -35,7 +35,7 @@ const props = defineProps<{
 const { isMarketDataResolved } = useVaults()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
-const { badDebtByChain, loadBadDebtForChain } = useVaultBadDebt()
+const { badDebtByChain, isBadDebtLoaded, loadBadDebtForChain } = useVaultBadDebt()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -670,6 +670,7 @@ onMounted(() => {
               :usd-cache="vaultUsdCache"
               :apy-cache="vaultApyCache"
               :bad-debt-cache="vaultBadDebtCache"
+              :show-bad-debt-column="isBadDebtLoaded"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />

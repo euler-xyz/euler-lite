@@ -4,6 +4,7 @@ import {
   STATS_ROWS,
   buildAttributeRowCells,
   buildVaultApyCache,
+  filterAttributeRowsByBadDebtAvailability,
   getActiveExternalCollateral,
   getAttributeMatrixColumns,
   getCollateralMatrix,
@@ -215,6 +216,14 @@ describe('getActiveExternalCollateral', () => {
 })
 
 describe('attribute stats matrix', () => {
+  it('hides the bad debt attribute when bad debt data is unavailable', () => {
+    const hiddenRows = filterAttributeRowsByBadDebtAvailability(STATS_ROWS, false)
+    const visibleRows = filterAttributeRowsByBadDebtAvailability(STATS_ROWS, true)
+
+    expect(hiddenRows.some(row => row.id === 'badDebt')).toBe(false)
+    expect(visibleRows.some(row => row.id === 'badDebt')).toBe(true)
+  })
+
   it('includes Securitize member vaults in attribute columns', () => {
     const eVault = makeVault('0xBorrow', [])
     const securitizeVault = makeSecuritizeVault('0xSecuritize')

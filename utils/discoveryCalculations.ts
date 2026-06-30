@@ -1018,6 +1018,12 @@ export const getAttributeMatrix = (
   columns: getAttributeMatrixColumns(market),
 })
 
+export const filterAttributeRowsByBadDebtAvailability = (
+  rows: AttributeRow[],
+  isBadDebtAvailable: boolean,
+): AttributeRow[] =>
+  isBadDebtAvailable ? rows : rows.filter(row => row.id !== 'badDebt')
+
 export const buildAttributeRowCells = (
   row: AttributeRow,
   columns: AttributeMatrixColumn[],
