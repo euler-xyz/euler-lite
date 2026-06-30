@@ -16,8 +16,11 @@ const emit = defineEmits<{
   <div
     v-for="filter in filters"
     :key="filter.id"
-    class="ui-select__chip ui-select__chip--active"
-    :class="chipClass"
+    class="ui-select__chip"
+    :class="[
+      chipClass,
+      { 'ui-select__chip--active': filter.tone !== 'neutral' },
+    ]"
     @click="emit('remove', filter.id)"
   >
     {{ filter.label }}
