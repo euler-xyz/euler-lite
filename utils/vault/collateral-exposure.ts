@@ -7,7 +7,7 @@ import {
 
 /**
  * A collateral pair with live borrow-side exposure to a vault. Matches the
- * fields rendered by the "Collateral exposure" overview block.
+ * fields rendered by the "Exposure" overview block.
  */
 export interface CollateralExposurePair {
   collateral: EVault | SecuritizeCollateralVault
@@ -175,7 +175,7 @@ export const mergeCollateralExposureGroupsByBackingAsset = (
 }
 
 /**
- * Predicate: does the vault have any live borrow-side collateral exposure?
+ * Predicate: does the vault have any live borrow-side exposure?
  * Mirrors the filter used by {@link getCollateralExposurePairs} but
  * short-circuits on the first match.
  *

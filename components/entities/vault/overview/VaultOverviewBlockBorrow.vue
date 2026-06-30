@@ -17,8 +17,6 @@ const {
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
 } = useCollateralOpenInterest()
-const isExpanded = ref(false)
-const COLLAPSED_GROUP_COUNT = 3
 
 const onCollateralClick = (address: string) => {
   emits('vault-click', address)
@@ -61,17 +59,7 @@ const collateralGroups = computed(() =>
 const totalOpenInterestUsd = computed(() =>
   collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
 )
-const visibleCollateralGroups = computed(() =>
-  isExpanded.value ? collateralGroups.value : collateralGroups.value.slice(0, COLLAPSED_GROUP_COUNT),
-)
-const visibleCollateralPairs = computed(() =>
-  visibleCollateralGroups.value.flatMap(group => group.items),
-)
-const hiddenCollateralPairCount = computed(() =>
-  collateralGroups.value
-    .slice(visibleCollateralGroups.value.length)
-    .reduce((count, group) => count + group.items.length, 0),
-)
+const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
 const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
   const entry = Object.entries(openInterestUsdByCollateral.value)
     .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
@@ -84,9 +72,6 @@ const formatExposurePercent = (valueUsd: number) =>
     : totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
 const formatLiveExposureUsd = (valueUsd: number) =>
   hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
-const toggleExpanded = () => {
-  isExpanded.value = !isExpanded.value
-}
 
 watchEffect(() => {
   if (!vault.address) return
@@ -97,7 +82,7 @@ watchEffect(() => {
 <template>
   <VaultOverviewAccordionSection
     v-if="collateralGroups.length"
-    title="Collateral exposure"
+    title="Exposure"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >
@@ -110,7 +95,7 @@ watchEffect(() => {
 
     <div class="flex flex-col gap-12">
       <div
-        v-for="pair in visibleCollateralPairs"
+        v-for="pair in collateralPairs"
         :key="pair.collateral.address"
         class="cursor-pointer rounded-12 border border-line-subtle bg-surface p-16 shadow-sm transition-colors hover:bg-card-hover"
         @click="onCollateralClick(pair.collateral.address)"
@@ -170,15 +155,6 @@ watchEffect(() => {
           </VaultOverviewLabelValue>
         </div>
       </div>
-
-      <button
-        v-if="collateralGroups.length > COLLAPSED_GROUP_COUNT"
-        type="button"
-        class="self-center text-p4 font-medium text-content-accent transition-colors hover:text-accent-600"
-        @click="toggleExpanded"
-      >
-        {{ isExpanded ? 'Show less' : `Show more (${hiddenCollateralPairCount})` }}
-      </button>
     </div>
   </VaultOverviewAccordionSection>
 </template>

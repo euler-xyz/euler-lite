@@ -161,7 +161,7 @@ watch([openInterestModel, isDark], () => {
 <template>
   <VaultOverviewAccordionSection
     v-if="canLoadOpenInterest && (isLoading || hasError || hasOpenInterest)"
-    title="Open interest"
+    title="Exposure"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-16"
   >
@@ -174,7 +174,7 @@ watch([openInterestModel, isDark], () => {
       v-else-if="hasError"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      Open interest is unavailable for this vault right now.
+      Exposure is unavailable for this vault right now.
     </div>
 
     <div
@@ -210,7 +210,7 @@ watch([openInterestModel, isDark], () => {
         <div class="flex min-w-0 items-center justify-between gap-12">
           <div class="min-w-0">
             <p class="text-p3 font-medium text-content-primary">
-              Borrow demand by backing asset
+              Borrow exposure by asset
             </p>
           </div>
         </div>

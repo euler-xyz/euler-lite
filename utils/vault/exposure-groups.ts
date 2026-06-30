@@ -57,4 +57,4 @@ export const formatExposureVaultCount = (count: number): string =>
   `${count} vault${count === 1 ? '' : 's'}`
 
 export const formatExposureAssetCount = (count: number): string =>
-  `${count} backing asset${count === 1 ? '' : 's'}`
+  `${count} exposure asset${count === 1 ? '' : 's'}`
