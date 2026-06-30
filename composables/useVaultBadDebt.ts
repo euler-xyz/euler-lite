@@ -71,7 +71,6 @@ export const useVaultBadDebt = () => {
     targetChainId = chainId.value,
     { force = false }: { force?: boolean } = {},
   ) => {
-    if (!envConfig.enableV3Backend) return
     if (!force && badDebtByChain.value.has(targetChainId) && !errorByChain.value.has(targetChainId)) return
     const existing = inFlight.get(targetChainId)
     if (existing) return existing
@@ -104,11 +103,15 @@ export const useVaultBadDebt = () => {
 
   const isBadDebtLoading = computed(() => loadingChains.value.has(chainId.value))
   const badDebtError = computed(() => errorByChain.value.get(chainId.value))
+  const isBadDebtLoaded = computed(() =>
+    badDebtByChain.value.has(chainId.value) && !errorByChain.value.has(chainId.value),
+  )
 
   return {
     badDebtByChain,
     badDebtError,
     getVaultBadDebt,
+    isBadDebtLoaded,
     isBadDebtLoading,
     loadBadDebtForChain,
   }
