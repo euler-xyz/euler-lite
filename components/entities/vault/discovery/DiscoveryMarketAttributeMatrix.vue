@@ -68,15 +68,23 @@ const exposureValueState = computed<ExposureValueState>(() => {
   return 'loading'
 })
 
-const exposureItemsByVault = computed(() => {
-  const result = new Map<string, ReturnType<typeof buildAllocatedVaultExposureDisplayItems>>()
+interface MatrixExposureEntry {
+  items: ReturnType<typeof buildAllocatedVaultExposureDisplayItems>
+  valueState: ExposureValueState
+}
+
+const exposureByVault = computed(() => {
+  const result = new Map<string, MatrixExposureEntry>()
   if (props.view !== 'stats') return result
   if (!hasLiveExposureData.value) return result
 
   for (const column of props.data.columns) {
     if (!isEVault(column.vault)) continue
     const totalExposureUsd = props.usdCache.get(column.address)?.supplyUsd
-    if (totalExposureUsd === undefined) continue
+    if (totalExposureUsd === undefined) {
+      result.set(column.address, { items: [], valueState: 'unavailable' })
+      continue
+    }
 
     const groups = getCollateralExposureGroups(
       getCollateralExposurePairs(
@@ -85,20 +93,29 @@ const exposureItemsByVault = computed(() => {
       ),
       getOpenInterestForVault(column.address),
     )
-    if (hasMissingUtilizedExposureSplit(groups, column.vault.utilization)) continue
+    if (hasMissingUtilizedExposureSplit(groups, column.vault.utilization)) {
+      result.set(column.address, { items: [], valueState: 'unavailable' })
+      continue
+    }
 
-    result.set(column.address, buildAllocatedVaultExposureDisplayItems({
-      collateralGroups: groups,
-      totalExposureUsd,
-      idleAsset: column.vault.asset,
-      utilization: column.vault.utilization,
-    }))
+    result.set(column.address, {
+      items: buildAllocatedVaultExposureDisplayItems({
+        collateralGroups: groups,
+        totalExposureUsd,
+        idleAsset: column.vault.asset,
+        utilization: column.vault.utilization,
+      }),
+      valueState: 'ready',
+    })
   }
   return result
 })
 
 const getVaultExposureItems = (vault: AttributeMatrixColumn) =>
-  exposureItemsByVault.value.get(vault.address) ?? []
+  exposureByVault.value.get(vault.address)?.items ?? []
+
+const getVaultExposureValueState = (vault: AttributeMatrixColumn): ExposureValueState =>
+  exposureByVault.value.get(vault.address)?.valueState ?? exposureValueState.value
 
 watchEffect(() => {
   if (props.view !== 'stats') return
@@ -119,6 +136,7 @@ const isAttributeColumnHighlighted = (attributeId: string): boolean =>
 
 const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): string | number => {
   if (cell.kind === 'exposure') {
+    if (getVaultExposureValueState(vault) !== 'ready') return getVaultExposureValueState(vault)
     return getVaultExposureItems(vault).map(item => item.label ?? item.asset.symbol).join(',')
   }
   return props.view === 'stats' ? cell.display : (cell.numeric ?? cell.display)
@@ -288,7 +306,7 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
               <template v-else-if="col.cells[vaultIdx].kind === 'exposure'">
                 <VaultExposureSummary
                   :items="getVaultExposureItems(vault)"
-                  :value-state="exposureValueState"
+                  :value-state="getVaultExposureValueState(vault)"
                   :max-visible="4"
                   avatar-size="16"
                   placement="top"
