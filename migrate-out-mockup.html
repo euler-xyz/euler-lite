@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Euler — Migrate position out (mockup)</title>
+<style>
+  /* ── Dark-theme tokens copied from assets/styles/variables.scss [data-theme="dark"] ── */
+  :root{
+    --bg-body:#08131f;
+    --bg-surface:#08131f;
+    --bg-surface-secondary:#0c1d2f;
+    --bg-surface-elevated:#10263e;
+    --bg-card:#0c1d2f;
+    --bg-card-hover:#10263e;
+
+    --text-primary:#f7f7f8;
+    --text-secondary:#ddfbf4;
+    --text-tertiary:#a1acb8;
+    --text-muted:#728395;
+    --text-inverse:#08131f;
+
+    --border-default:#14304e;
+    --border-subtle:rgba(255,255,255,0.06);
+    --border-emphasis:#435971;
+
+    --accent-100:#e6faf5;
+    --accent-400:#167a62;
+    --accent-500:#1c997c;
+    --accent-600:#23c09b;
+    --accent-700:#2ae5b9;
+    --accent-rgb:28,153,124;
+
+    --warning-500:#ecc033;
+    --warning-100:rgba(236,192,51,0.2);
+    --error-500:#c02723;
+
+    --shadow-card:0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-card-hover:0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -1px rgba(0,0,0,0.04);
+
+    --radius-8:8px; --radius-12:12px; --radius-full:9999px;
+
+    /* protocol brand */
+    --aave:#9896ff; --aave2:#b6509e; --morpho:#2c5be0;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{
+    background:var(--bg-body);
+    color:var(--text-primary);
+    font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+    -webkit-font-smoothing:antialiased;
+    font-size:14px;line-height:20px;
+  }
+
+  /* ── App chrome (simplified header just for context) ── */
+  .topbar{
+    height:56px;display:flex;align-items:center;gap:28px;
+    padding:0 24px;border-bottom:1px solid var(--border-default);
+    background:rgba(8,19,31,0.85);backdrop-filter:blur(20px);
+    position:sticky;top:0;z-index:10;
+  }
+  .logo{font-weight:700;letter-spacing:-0.02em;font-size:16px;color:var(--text-primary);}
+  .navlink{color:var(--text-muted);font-size:14px;text-decoration:none;}
+  .navlink.on{color:var(--text-primary);}
+  .topbar .right{margin-left:auto;display:flex;gap:10px;align-items:center;}
+  .wallet{font-size:13px;color:var(--text-tertiary);border:1px solid var(--border-default);
+    border-radius:var(--radius-full);padding:7px 14px;}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 24px 96px;}
+
+  /* ── Page header ── */
+  .pagehead{display:flex;align-items:center;gap:12px;margin-bottom:24px;}
+  .backbtn{
+    width:36px;height:36px;border-radius:var(--radius-full);
+    border:1px solid var(--border-default);background:var(--bg-surface);
+    display:flex;align-items:center;justify-content:center;color:var(--text-tertiary);
+    cursor:pointer;flex-shrink:0;transition:all .2s;
+  }
+  .backbtn:hover{border-color:var(--border-emphasis);color:var(--text-primary);}
+  h1{font-size:24px;line-height:32px;font-weight:400;margin:0;color:var(--text-primary);}
+
+  /* ── shared card ── */
+  .card{
+    background:var(--bg-card);
+    border:1px solid var(--border-subtle);
+    border-radius:var(--radius-12);
+    box-shadow:var(--shadow-card);
+  }
+
+  /* ── Position-being-migrated card (Positions list pattern) ── */
+  .poscard{overflow:hidden;margin-bottom:14px;}
+  .poscard .head{padding:16px 16px 12px;border-bottom:1px solid var(--border-default);}
+  .pindex{
+    display:inline-block;font-size:14px;font-weight:600;line-height:20px;
+    color:var(--text-secondary);background:var(--bg-surface-secondary);
+    border:1px solid var(--border-default);border-radius:var(--radius-8);
+    padding:4px 12px;margin-bottom:12px;
+  }
+  .pmain{display:flex;gap:12px;align-items:flex-start;}
+  .avatar{display:flex;flex-shrink:0;}
+  .tok{
+    width:40px;height:40px;border-radius:var(--radius-full);
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
+    color:#fff;border:2px solid var(--bg-card);
+  }
+  .avatar .tok:nth-child(2){margin-left:-14px;}
+  .tok.sm{width:28px;height:28px;font-size:11px;}
+  .avatar.sm .tok:nth-child(2){margin-left:-10px;}
+  .pmeta{flex:1;min-width:0;}
+  .pmeta .label{color:var(--text-tertiary);font-size:14px;margin-bottom:4px;}
+  .pmeta .symbols{color:var(--text-primary);font-size:16px;font-weight:600;line-height:20px;}
+  .pmetric{display:flex;flex-direction:column;align-items:flex-end;flex-shrink:0;}
+  .pmetric .label{color:var(--text-tertiary);font-size:14px;margin-bottom:4px;}
+  .pmetric .val{font-size:16px;}
+  .pos-green{color:var(--accent-600);}
+
+  .pbody{padding:12px 16px 16px;display:flex;flex-direction:column;gap:12px;}
+  .stat{display:flex;justify-content:space-between;align-items:center;}
+  .stat .k{color:var(--text-tertiary);font-size:14px;}
+  .stat .v{color:var(--text-primary);font-size:14px;}
+  .progress{display:flex;align-items:center;gap:16px;}
+  .bar{width:111px;height:6px;border-radius:var(--radius-full);background:var(--bg-surface-elevated);overflow:hidden;}
+  .bar > i{display:block;height:100%;background:var(--accent-500);border-radius:var(--radius-full);}
+
+  /* ── arrow divider ── */
+  .flow{display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:13px;margin:18px 2px 16px;}
+  .flow .line{flex:1;height:1px;background:var(--border-default);}
+  .flow .chip{
+    display:inline-flex;align-items:center;gap:7px;color:var(--text-tertiary);
+    border:1px solid var(--border-default);border-radius:var(--radius-full);
+    padding:6px 14px;background:var(--bg-surface-secondary);
+  }
+
+  /* ── Targets section header + filters (Lend pattern) ── */
+  .secthead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:4px;flex-wrap:wrap;}
+  .secthead h2{font-size:18px;line-height:24px;font-weight:600;margin:0;}
+  .secthead p{margin:4px 0 0;color:var(--text-tertiary);font-size:14px;}
+
+  .filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0;}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;min-height:36px;
+    padding:6px 14px;border-radius:var(--radius-full);
+    border:1px solid var(--border-default);background:var(--bg-surface);
+    color:var(--text-tertiary);font-size:14px;cursor:pointer;transition:all .2s;user-select:none;
+  }
+  .pill:hover{border-color:var(--border-emphasis);background:var(--bg-surface-secondary);}
+  .pill .ico{width:15px;height:15px;opacity:.8;}
+  .pill .count{
+    background:rgba(var(--accent-rgb),0.18);color:var(--accent-700);
+    font-size:12px;font-weight:600;border-radius:var(--radius-full);
+    padding:1px 7px;margin-left:2px;
+  }
+  .pill.active{border-color:var(--accent-500);color:var(--text-primary);background:rgba(var(--accent-rgb),0.10);}
+  .pill .caret{margin-left:2px;opacity:.7;}
+  .refresh{margin-left:auto;display:inline-flex;align-items:center;gap:7px;
+    color:var(--text-tertiary);font-size:13px;cursor:pointer;border:none;background:none;font-family:inherit;}
+  .refresh:hover{color:var(--text-primary);}
+
+  /* ── Targets table ── */
+  .trow{
+    display:grid;grid-template-columns:1.6fr 1fr 232px;
+    gap:16px;align-items:center;
+    padding:14px 16px;margin-bottom:10px;
+    background:var(--bg-card);border:1px solid var(--border-subtle);
+    border-radius:var(--radius-12);box-shadow:var(--shadow-card);
+    transition:border-color .2s, box-shadow .2s;
+  }
+  .trow:hover{border-color:var(--border-emphasis);box-shadow:var(--shadow-card-hover);}
+
+  /* col 1 — asset pair + protocol */
+  .pairwrap{display:flex;align-items:center;gap:12px;min-width:0;}
+  .pairmeta{min-width:0;}
+  .protorow{display:flex;align-items:center;gap:7px;color:var(--text-tertiary);font-size:14px;margin-bottom:3px;}
+  .pairsym{font-size:16px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+  .cell .k{display:none;}
+  .cell .label{color:var(--text-tertiary);font-size:12px;margin-bottom:4px;}
+  .cell .v{color:var(--text-primary);font-size:16px;}
+  .cell.r{text-align:right;}
+  .muted{color:var(--text-muted);}
+  .tag{
+    display:inline-block;font-size:13px;color:var(--text-secondary);
+    background:var(--bg-surface-secondary);border:1px solid var(--border-default);
+    border-radius:var(--radius-8);padding:2px 9px;
+  }
+
+  /* actions */
+  .actions{display:flex;gap:8px;justify-content:flex-end;}
+  /* matches UiButton (size medium): border-radius 10px, font-weight 500, min-height 36px */
+  .btn{
+    min-height:36px;padding:8px 16px;border-radius:10px;
+    font-size:14px;line-height:20px;font-weight:500;font-family:inherit;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;
+    border:none;transition:all .2s cubic-bezier(0.4,0,0.2,1);
+  }
+  .btn-primary{background:var(--accent-600);color:#020508;box-shadow:var(--shadow-button);}
+  .btn-primary:hover{background:var(--accent-700);}
+  .btn-primary:active{transform:scale(.98);}
+  .btn-secondary{
+    background:var(--bg-surface-elevated);color:var(--text-secondary);
+    box-shadow:inset 0 0 0 1px var(--border-default), 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .btn-secondary:hover{box-shadow:inset 0 0 0 1px var(--border-emphasis), 0 2px 4px rgba(0,0,0,0.06);}
+
+  .footnote{color:var(--text-muted);font-size:13px;margin-top:18px;display:flex;align-items:center;gap:7px;}
+
+  /* ── responsive: stacked cards (mobile) ── */
+  @media (max-width:900px){
+    .trow{grid-template-columns:1fr 1fr;row-gap:14px;}
+    .pairwrap{grid-column:1 / -1;}
+    .cell.r{text-align:left;}
+    .cell .label{font-size:12px;}
+    .actions{grid-column:1 / -1;}
+    .btn-primary{flex:1;}
+    .btn-secondary{flex:1;}
+    .secthead{align-items:flex-start;}
+  }
+</style>
+</head>
+<body>
+
+  <!-- App header (context only) -->
+  <div class="topbar">
+    <span class="logo">Euler</span>
+    <a class="navlink on" href="#">Portfolio</a>
+    <a class="navlink" href="#">Explore</a>
+    <a class="navlink" href="#">Earn</a>
+    <a class="navlink" href="#">Lend</a>
+    <a class="navlink" href="#">Borrow</a>
+    <div class="right"><span class="wallet">0x6f…3aB1</span></div>
+  </div>
+
+  <div class="wrap">
+
+    <!-- Page header -->
+    <div class="pagehead">
+      <div class="backbtn" title="Back to position">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </div>
+      <h1>Migrate position</h1>
+    </div>
+
+    <!-- ░░░ Position being migrated — Positions-list card ░░░ -->
+    <div class="card poscard">
+      <div class="head">
+        <span class="pindex">Position 3</span>
+        <div class="pmain">
+          <div class="avatar">
+            <span class="tok" style="background:#00a3ff">ws</span>
+            <span class="tok" style="background:#2775ca">$</span>
+          </div>
+          <div class="pmeta">
+            <div class="label">Lido wstETH / USDC</div>
+            <div class="symbols">wstETH/USDC</div>
+          </div>
+          <div class="pmetric">
+            <div class="label">Net APY</div>
+            <div class="val pos-green">2.27%</div>
+          </div>
+        </div>
+      </div>
+      <div class="pbody">
+        <div class="stat"><span class="k">Net asset value</span><span class="v">$7,670.42</span></div>
+        <div class="stat"><span class="k">My Debt</span><span class="v">$7,510.18 <span class="muted">~ 7,500 USDC</span></span></div>
+        <div class="stat"><span class="k">Collateral value</span><span class="v">$15,180.60 <span class="muted">~ 4.20 wstETH</span></span></div>
+        <div class="stat"><span class="k">Health score</span><span class="v">1.42</span></div>
+        <div class="stat">
+          <span class="k">Your LTV</span>
+          <span class="progress">
+            <span class="bar"><i style="width:60%"></i></span>
+            <span class="v">49.48%/82.50%</span>
+          </span>
+        </div>
+      </div>
+    </div>
+    <!-- (the .k / .v labels above use the same flex justify-between rows as PortfolioBorrowItem) -->
+
+    <div class="flow">
+      <span class="line"></span>
+      <span class="chip">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+        Migrate to
+      </span>
+      <span class="line"></span>
+    </div>
+
+    <!-- ░░░ Targets — Lend-style filtered table ░░░ -->
+    <div class="secthead">
+      <div>
+        <h2>Choose a target market</h2>
+        <p>Move this collateral &amp; debt to a compatible external market in one transaction.</p>
+      </div>
+    </div>
+
+    <div class="filters">
+      <!-- "Target protocol" filter — UiSelect pill pattern -->
+      <span class="pill active">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Target protocol
+        <span class="count">2</span>
+        <svg class="caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </span>
+    </div>
+
+    <!-- Target 1 — Aave v3 Core -->
+    <div class="trow">
+      <div class="pairwrap">
+        <div class="avatar sm">
+          <span class="tok sm" style="background:#00a3ff">ws</span>
+          <span class="tok sm" style="background:#2775ca">$</span>
+        </div>
+        <div class="pairmeta">
+          <div class="protorow">Aave v3 <span class="tag">Core</span></div>
+          <div class="pairsym">wstETH/USDC</div>
+        </div>
+      </div>
+      <div class="cell r"><div class="label">Total liquidity</div><div class="v">$128.4M</div></div>
+      <div class="actions">
+        <button class="btn btn-primary">Migrate</button>
+        <button class="btn btn-secondary">Add to batch</button>
+      </div>
+    </div>
+
+    <!-- Target 2 — Aave v3 Prime -->
+    <div class="trow">
+      <div class="pairwrap">
+        <div class="avatar sm">
+          <span class="tok sm" style="background:#00a3ff">ws</span>
+          <span class="tok sm" style="background:#2775ca">$</span>
+        </div>
+        <div class="pairmeta">
+          <div class="protorow">Aave v3 <span class="tag">Prime</span></div>
+          <div class="pairsym">wstETH/USDC</div>
+        </div>
+      </div>
+      <div class="cell r"><div class="label">Total liquidity</div><div class="v">$54.2M</div></div>
+      <div class="actions">
+        <button class="btn btn-primary">Migrate</button>
+        <button class="btn btn-secondary">Add to batch</button>
+      </div>
+    </div>
+
+    <!-- Target 3 — Morpho -->
+    <div class="trow">
+      <div class="pairwrap">
+        <div class="avatar sm">
+          <span class="tok sm" style="background:#00a3ff">ws</span>
+          <span class="tok sm" style="background:#2775ca">$</span>
+        </div>
+        <div class="pairmeta">
+          <div class="protorow">Morpho</div>
+          <div class="pairsym">wstETH/USDC</div>
+        </div>
+      </div>
+      <div class="cell r"><div class="label">Total liquidity</div><div class="v">$22.9M</div></div>
+      <div class="actions">
+        <button class="btn btn-primary">Migrate</button>
+        <button class="btn btn-secondary">Add to batch</button>
+      </div>
+    </div>
+
+    <div class="footnote">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      Only markets compatible with your collateral and debt assets are shown.
+    </div>
+
+  </div>
+</body>
+</html>

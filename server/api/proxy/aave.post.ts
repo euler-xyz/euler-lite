@@ -1,9 +1,9 @@
 /**
- * Server-side proxy for Morpho's GraphQL API.
+ * Server-side proxy for Aave's GraphQL API.
  *
- * Cross-protocol migration reads wallet-specific positions and compatible targets.
- * Keep the upstream server-side for CSP consistency and bypass persistent TTL
- * caching so a just-created/closed position does not stay visible in Lite.
+ * Migration target discovery needs Aave deployment metadata that the browser
+ * cannot fetch directly under the app CSP. Keep this same-origin and uncached
+ * so market/liquidity data reflects the upstream response for each scan.
  */
 import {
   createError,
@@ -20,7 +20,7 @@ import {
   forwardProxied,
 } from '~/server/utils/external-proxy'
 
-const MORPHO_GRAPHQL_URL = 'https://api.morpho.org/graphql'
+const AAVE_GRAPHQL_URL = 'https://api.v3.aave.com/graphql'
 const BROWSER_CACHE_CONTROL = 'no-store'
 
 const cache = createProxyCache(0)
@@ -29,7 +29,7 @@ const inFlight = createProxyInFlight()
 const rateLimiter = createRateLimiter({
   max: 300,
   windowMs: 60_000,
-  label: 'morpho-proxy',
+  label: 'aave-proxy',
 })
 
 export default defineEventHandler(async (event) => {
@@ -48,10 +48,10 @@ export default defineEventHandler(async (event) => {
       cache,
       inFlight,
       method: 'POST',
-      target: MORPHO_GRAPHQL_URL,
+      target: AAVE_GRAPHQL_URL,
       headers: { 'accept': 'application/json', 'content-type': 'application/json' },
       body,
-      ctx: 'morpho-proxy',
+      ctx: 'aave-proxy',
       bypassCache: true,
     })
     setResponseStatus(event, res.status, res.statusText)
@@ -63,7 +63,7 @@ export default defineEventHandler(async (event) => {
     return res.body
   }
   catch (err) {
-    logger.warn({ ctx: 'morpho-proxy', err }, 'upstream failed')
-    throw createError({ statusCode: 502, statusMessage: 'Morpho upstream unavailable' })
+    logger.warn({ ctx: 'aave-proxy', err }, 'upstream failed')
+    throw createError({ statusCode: 502, statusMessage: 'Aave upstream unavailable' })
   }
 })

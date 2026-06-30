@@ -4,6 +4,7 @@ import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
 import { logger } from '~/server/utils/logger'
+import { applyEulerChainsSwapVerifierOverrides } from '~/server/utils/euler-chains-overrides'
 
 const CACHE_TTL_MS = 300_000
 const DEFAULT_URL = 'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/EulerChains.json'
@@ -40,7 +41,7 @@ export function refreshEulerChains(): Promise<unknown[]> {
       throw new Error('Upstream returned a non-array payload')
     }
     cache.set(CACHE_KEY, data)
-    return data
+    return applyEulerChainsSwapVerifierOverrides(data)
   })
 }
 
@@ -50,7 +51,7 @@ export default defineEventHandler(async (event) => {
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
   const cached = cache.get(CACHE_KEY)
-  if (cached) return cached
+  if (cached) return applyEulerChainsSwapVerifierOverrides(cached)
 
   try {
     return await refreshEulerChains()
@@ -59,7 +60,7 @@ export default defineEventHandler(async (event) => {
     logger.warn({ ctx: 'euler-chains', err }, 'upstream fetch failed')
 
     const stale = cache.getStale(CACHE_KEY)
-    if (stale) return stale
+    if (stale) return applyEulerChainsSwapVerifierOverrides(stale)
 
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }

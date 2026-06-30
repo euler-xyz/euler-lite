@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity } from '@eulerxyz/euler-v2-sdk'
+import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
+import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+
+vi.mock('~/composables/useEulerSdk', () => ({
+  getEulerSdkFresh: vi.fn(),
+}))
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -10,6 +15,14 @@ const vault = getAddress('0x797Dd80692C3B2daDAbcE8e30C07fDE5307d48A9')
 const borrowVault = getAddress('0x859160Db5841E5cfB8D3f144C6b3381A85A4b410')
 const targetVault = getAddress('0x3000000000000000000000000000000000000000')
 const WAD = 10n ** 18n
+const routeQuery: { network?: string } = { network: '1' }
+const routerReplace = vi.fn()
+const eulerTxMocks = {
+  prepareTransactionPlan: vi.fn(),
+  executePreparedPlan: vi.fn(),
+  estimateGasForPlan: vi.fn(),
+}
+const scheduleExternalMigrationRefreshes = vi.fn()
 
 const position = (account: Address, shares: bigint) => ({
   account,
@@ -221,16 +234,48 @@ const stubBatchComposableGlobals = () => {
   vi.stubGlobal('useWagmi', () => ({ address: ref(owner), chainId: ref(1) }))
   vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
-  vi.stubGlobal('useEulerTx', () => ({
-    prepareTransactionPlan: vi.fn(),
-    executePreparedPlan: vi.fn(),
-    estimateGasForPlan: vi.fn(),
-  }))
+  vi.stubGlobal('useEulerTx', () => eulerTxMocks)
+  vi.stubGlobal('useExternalMigrationRefresh', () => ({ scheduleExternalMigrationRefreshes }))
+  vi.stubGlobal('useRouter', () => ({ replace: routerReplace }))
+  vi.stubGlobal('useRoute', () => ({ query: routeQuery }))
 }
+
+const createMockSdk = () => ({
+  accountService: {
+    fetchAccount: vi.fn(async () => ({
+      result: accountWithPosition(subAccount, subAccount, 1n),
+      errors: [],
+    })),
+  },
+  executionService: {
+    mergePlans: vi.fn((plans: TransactionPlan[]) => plans.flat()),
+    simulateTransactionPlan: vi.fn(async () => ({
+      simulatedAccounts: [accountWithPosition(subAccount, subAccount, 2n)],
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    })),
+  },
+  portfolioService: {
+    buildPortfolio: vi.fn((account: Account<IHasVaultAddress>) => new Portfolio(account)),
+  },
+  walletService: {
+    fetchWallet: vi.fn(),
+  },
+})
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  eulerTxMocks.prepareTransactionPlan.mockReset()
+  eulerTxMocks.executePreparedPlan.mockReset()
+  eulerTxMocks.estimateGasForPlan.mockReset()
+  scheduleExternalMigrationRefreshes.mockReset()
+  routerReplace.mockReset()
+  routeQuery.network = '1'
   stubBatchComposableGlobals()
+  vi.mocked(getEulerSdkFresh).mockResolvedValue(createMockSdk() as never)
+  useTxBatch().clearBatch()
 })
 
 describe('stitchAccount', () => {
@@ -557,5 +602,30 @@ describe('useTxBatch execution errors', () => {
     batch.clearBatch()
 
     expect(batch.execError.value).toBeUndefined()
+  })
+
+  it('redirects to the portfolio after a successful mined batch execution', async () => {
+    const batch = useTxBatch()
+    const prepared = { kind: 'prepared' }
+    const plan: TransactionPlan = []
+    routeQuery.network = '8453'
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+
+    await batch.addEntry({
+      label: 'Migrate Aave position',
+      buildPlan: async () => plan,
+      refreshExternalMigrationPositions: true,
+    })
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared)
+    expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
+    expect(batch.entryCount.value).toBe(0)
+    expect(routerReplace).toHaveBeenCalledWith({
+      path: '/portfolio',
+      query: { network: '8453' },
+    })
   })
 })

@@ -24,8 +24,10 @@ import type {
   PlanMigrateSameAssetDebtArgs,
   GetMigrationAuthorizationArgs,
   GetMigrationPositionArgs,
+  ListMigrationTargetsArgs,
   MigrationAuthorizationRequest,
   MigrationPosition,
+  MigrationTarget,
   PlanMigrationArgs,
   PlanMigrationSimulationResult,
   SignedMigrationAuthorization,
@@ -49,6 +51,7 @@ import { profAsync } from '~/utils/profiler'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
+const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
   populateMarketPrices: false,
@@ -973,6 +976,11 @@ export const useEulerTx = () => {
     return sdk.positionMigrationService.getPosition(input)
   }
 
+  const listMigrationTargets = async (input: ListMigrationTargetsArgs): Promise<MigrationTarget[]> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.listTargets(input)
+  }
+
   const signMigrationAuthorization = async (
     request: MigrationAuthorizationRequest,
   ): Promise<SignedMigrationAuthorization> => {
@@ -983,9 +991,27 @@ export const useEulerTx = () => {
       throw new Error('Transaction-based migration authorization is not supported in this flow')
     }
     const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    const postMigrationAuthorization = request.postMigrationAuthorization
+      ? await signMigrationAuthorization(request.postMigrationAuthorization)
+      : undefined
     return {
       request,
       signature: signature as Hex,
+      ...(postMigrationAuthorization ? { postMigrationAuthorization } : {}),
+    }
+  }
+
+  const buildPlaceholderMigrationAuthorization = (
+    request: MigrationAuthorizationRequest,
+  ): SignedMigrationAuthorization => {
+    const postMigrationAuthorization = request.postMigrationAuthorization
+      ? buildPlaceholderMigrationAuthorization(request.postMigrationAuthorization)
+      : undefined
+
+    return {
+      request,
+      signature: PLACEHOLDER_AUTHORIZATION_SIGNATURE,
+      ...(postMigrationAuthorization ? { postMigrationAuthorization } : {}),
     }
   }
 
@@ -1287,8 +1313,10 @@ export const useEulerTx = () => {
     planDebtChange,
     planRefinancePosition,
     getMigrationPosition,
+    listMigrationTargets,
     getMigrationAuthorization,
     signMigrationAuthorization,
+    buildPlaceholderMigrationAuthorization,
     planCrossProtocolMigration,
     planCrossProtocolMigrationSimulation,
     planWithdrawOrRedeem,

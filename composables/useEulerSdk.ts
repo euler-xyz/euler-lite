@@ -102,6 +102,8 @@ const buildIncentraProxyApiPath = (path: string) =>
 export const buildSubgraphProxyApiPath = (chainId: number) =>
   buildAppApiPath(`/api/proxy/subgraph/${chainId}`)
 const buildLabelsProxyApiPath = () => buildAppApiPath('/api/labels')
+const buildMorphoProxyApiPath = () => buildAppApiPath('/api/proxy/morpho')
+const buildAaveProxyApiPath = () => buildAppApiPath('/api/proxy/aave')
 
 type SdkBackend = 'fast' | 'onchain'
 
@@ -271,6 +273,10 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
   const sdk = await buildEulerSDK({
     config,
     buildQuery,
+    positionMigrationConnectorConfig: {
+      morpho: { morphoGraphqlUrl: buildMorphoProxyApiPath() },
+      aave: { graphqlEndpoint: buildAaveProxyApiPath() },
+    },
     servicesOverrides: { intrinsicApyService },
     plugins: [
       createPythPlugin({ buildQuery, fetchFn: pythProxyFetch }),

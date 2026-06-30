@@ -30,12 +30,14 @@ const { eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 const { isSpyMode, spyAddress } = useSpyMode()
 const showAllLabelEntries = useShowAllLabelEntries()
+const { settings } = useUserSettings()
+const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 const {
   positions: migrationPositions,
   isLoading: isMigrationLoading,
   error: migrationError,
   hasLoaded: hasMigrationLoaded,
-} = useExternalMigrationPositions()
+} = useExternalMigrationPositions({ enabled: enableExternalMigrations })
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
 const hasShownMigrationTab = ref(false)
@@ -71,7 +73,7 @@ const visibleMigrationPositions = computed(() =>
 )
 const visibleMigrationPositionCount = computed(() => visibleMigrationPositions.value.length)
 const hasMigrationTabSignal = computed(() =>
-  hasActiveMigrationSession.value && (visibleMigrationPositionCount.value > 0 || isMigrationLoading.value),
+  enableExternalMigrations.value && hasActiveMigrationSession.value && (visibleMigrationPositionCount.value > 0 || isMigrationLoading.value),
 )
 watch(hasMigrationTabSignal, (value) => {
   if (value) hasShownMigrationTab.value = true
@@ -82,6 +84,7 @@ watch(hasActiveMigrationSession, (value) => {
 
 const showMigrationTab = computed(() =>
   hasActiveMigrationSession.value
+  && enableExternalMigrations.value
   && (
     visibleMigrationPositionCount.value > 0
     || isMigrationLoading.value

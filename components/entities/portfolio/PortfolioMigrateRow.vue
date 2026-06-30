@@ -208,7 +208,7 @@ const handleMigrate = () => {
           :aria-label="buttonAriaLabel"
           @click="handleMigrate"
         >
-          Migrate
+          Migrate to Euler
         </UiButton>
         <span
           v-if="disabledReason"

@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { readonly, ref, type Ref } from 'vue'
 import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '@eulerxyz/euler-v2-sdk'
 import { erc20Abi, getAddress, type Address } from 'viem'
 import { getEulerSdk } from '~/composables/useEulerSdk'
@@ -64,6 +64,27 @@ export type AaveMigrationCandidate = BaseMigrationCandidate<typeof AAVE_CONNECTO
 export type ExternalMigrationCandidate = MorphoMigrationCandidate | AaveMigrationCandidate
 
 export const EXTERNAL_MIGRATION_DUST_USD = 0.01
+export const POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
+
+const externalMigrationRefreshCounter = ref(0)
+
+export const useExternalMigrationRefresh = () => {
+  const triggerExternalMigrationRefresh = () => {
+    externalMigrationRefreshCounter.value += 1
+  }
+
+  const scheduleExternalMigrationRefreshes = () => {
+    for (const delay of POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS) {
+      setTimeout(triggerExternalMigrationRefresh, delay)
+    }
+  }
+
+  return {
+    externalMigrationRefreshCounter: readonly(externalMigrationRefreshCounter),
+    triggerExternalMigrationRefresh,
+    scheduleExternalMigrationRefreshes,
+  }
+}
 
 const getMigrationPositionSortValue = (position: ExternalMigrationCandidate): number | null => {
   const collateralUsd = position.collateral.amountUsd
@@ -496,6 +517,7 @@ export const useExternalMigrationPositions = (options: {
   const hasLoaded = useState('external-migration:has-loaded', () => false)
   const lastLoadedAt = useState<number | null>('external-migration:last-loaded-at', () => null)
   const loadedFor = useState<ExternalMigrationStateKey>('external-migration:loaded-for', () => ({}))
+  const { externalMigrationRefreshCounter } = useExternalMigrationRefresh()
 
   const owner = computed<Address | undefined>(() => {
     const raw = isSpyMode.value ? spyAddress.value : address.value
@@ -809,6 +831,9 @@ export const useExternalMigrationPositions = (options: {
   watch([owner, chainId, computed(() => options.enabled?.value ?? true)], () => {
     void load()
   }, { immediate: true })
+  watch(externalMigrationRefreshCounter, () => {
+    void load({ force: true })
+  })
 
   return {
     owner,
