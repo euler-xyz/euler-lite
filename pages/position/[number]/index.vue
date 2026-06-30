@@ -1553,6 +1553,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
 
       <div class="mt-auto flex flex-col gap-8">
         <UiButton
+          v-if="enableExternalMigrations"
           size="large"
           variant="primary"
           :disabled="!!migrationDisabledReason"
