@@ -144,6 +144,9 @@ const supplyApyModalData = computed(() => ({
     rewardVaultAddress: vault.address,
   },
 }))
+const collateralExposureModalData = computed(() => ({
+  props: { vault },
+}))
 
 const onCollateralInfoClick = (event: MouseEvent) => {
   event.preventDefault()
@@ -383,12 +386,18 @@ watchEffect(async () => {
       >
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
           Top backing asset
-          <SvgIcon
+          <UiModalPreviewTrigger
             v-if="collateralExposureGroups.length > 0"
-            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onCollateralInfoClick"
-          />
+            :component="VaultCollateralExposureModal"
+            :modal-data="collateralExposureModalData"
+            aria-label="Show collateral exposure details"
+            placement="top-end"
+          >
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+            />
+          </UiModalPreviewTrigger>
         </div>
         <div
           v-if="collateralExposureGroups.length > 0"
@@ -496,12 +505,18 @@ watchEffect(async () => {
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Top backing asset
-            <SvgIcon
+            <UiModalPreviewTrigger
               v-if="collateralExposureGroups.length > 0"
-              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click="onCollateralInfoClick"
-            />
+              :component="VaultCollateralExposureModal"
+              :modal-data="collateralExposureModalData"
+              aria-label="Show collateral exposure details"
+              placement="top-start"
+            >
+              <SvgIcon
+                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+                name="info-circle"
+              />
+            </UiModalPreviewTrigger>
           </div>
         </div>
         <div class="flex min-w-0 flex-1 justify-end text-right">
