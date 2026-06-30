@@ -40,6 +40,11 @@ import {
 } from '~/server/api/labels/[file].get'
 import { encodeBigints } from '~/utils/snapshot-codec'
 import { readV3ApiUrl } from '~/utils/api-url-env'
+import {
+  EVAULT_FETCH_CHUNK_DELAY_MS,
+  EVAULT_FETCH_CHUNK_SIZE,
+  shouldChunkEVaultFetch,
+} from '~/utils/eVaultFetchChunkConfig'
 import type {
   SerialisedSnapshot,
   SerialisedVault,
@@ -63,6 +68,10 @@ export const vaultsCache = createTtlCache<SerialisedSnapshot>({
 })
 
 const inFlight = createInFlightDedup<number, SerialisedSnapshot>()
+
+const waitForEVaultFetchChunkSlot = async () => {
+  await new Promise(resolve => setTimeout(resolve, EVAULT_FETCH_CHUNK_DELAY_MS))
+}
 
 const tryChecksum = (addr: string): Address | undefined => {
   try {
@@ -158,6 +167,41 @@ const wrapVault = (kind: SerialisedVaultKind) => (v: unknown): SerialisedVault =
   data: v,
 })
 
+const fetchEVaultsForSnapshot = async (
+  sdk: EulerSDK,
+  chainId: number,
+  addresses: Address[],
+  opts: VaultFetchOptions,
+): Promise<{ result: unknown[], errors: unknown[] }> => {
+  if (!shouldChunkEVaultFetch(chainId) || addresses.length <= EVAULT_FETCH_CHUNK_SIZE) {
+    const fetched = await sdk.eVaultService.fetchVaults(chainId, addresses, opts)
+    return {
+      result: fetched.result as unknown[],
+      errors: fetched.errors as unknown[],
+    }
+  }
+
+  const result: unknown[] = []
+  const errors: unknown[] = []
+  for (let i = 0; i < addresses.length; i += EVAULT_FETCH_CHUNK_SIZE) {
+    const chunk = addresses.slice(i, i + EVAULT_FETCH_CHUNK_SIZE)
+    try {
+      const fetched = await sdk.eVaultService.fetchVaults(chainId, chunk, opts)
+      result.push(...(fetched.result as unknown[]))
+      errors.push(...(fetched.errors as unknown[]))
+    }
+    catch (err) {
+      errors.push(err)
+    }
+
+    if (i + EVAULT_FETCH_CHUNK_SIZE < addresses.length) {
+      await waitForEVaultFetchChunkSlot()
+    }
+  }
+
+  return { result, errors }
+}
+
 /**
  * Single refresh path. Force-runs by warm-cache; falls back as cold path
  * for the handler when the cache is genuinely empty. Concurrent calls
@@ -190,7 +234,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     const empty = { result: [] as unknown[], errors: [] as unknown[] }
     const [evk, earn, securitize, escrow] = await Promise.all([
       evkAddrs.length
-        ? sdk.eVaultService.fetchVaults(chainId, evkAddrs, opts)
+        ? fetchEVaultsForSnapshot(sdk, chainId, evkAddrs, opts)
         : empty,
       earnAddrs.length
         ? sdk.eulerEarnService.fetchVaults(chainId, earnAddrs, opts)
@@ -203,7 +247,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
           })
         : empty,
       escrowAddrs.length
-        ? sdk.eVaultService.fetchVaults(chainId, escrowAddrs, opts)
+        ? fetchEVaultsForSnapshot(sdk, chainId, escrowAddrs, opts)
         : empty,
     ])
 

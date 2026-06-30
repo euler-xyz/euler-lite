@@ -216,8 +216,8 @@ const size = computed(() => registry.value.size)
  */
 const fetchVaultByType = async (address: string, type: VaultType): Promise<VaultEntity> => {
   const { chainId } = useEulerAddresses()
-  const { getEulerSdk } = useEulerSdk()
-  const sdk = await getEulerSdk()
+  const { getEulerSdkForChain } = useEulerSdk()
+  const sdk = await getEulerSdkForChain(chainId.value)
   const vaultAddress = getAddress(address) as Address
   switch (type) {
     case 'earn': {

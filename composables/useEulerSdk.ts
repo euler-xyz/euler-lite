@@ -37,7 +37,7 @@ const pythProxyFetch: typeof fetch = (input, init) => {
 }
 
 /**
- * Two SDK instances are exposed:
+ * Three SDK entry points are exposed:
  *
  *   - `getEulerSdk()`  — "fast" / browsing instance. Adapter chain is picked
  *     by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`):
@@ -48,6 +48,11 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     Uses the default `sdkBuildQuery` cache policy (sub-minute stale times
  *     for hot reads, longer for catalogue data). Consumed by UI surfaces:
  *     vault lists, portfolio display, prices, rewards.
+ *
+ *   - `getEulerSdkForChain(chainId)` — same browsing cache policy as
+ *     `getEulerSdk()`, but chains listed in `DEPRECATED_CHAINS` are routed to
+ *     the onchain adapter config so their fast reads do not use V3-backed
+ *     account/vault/Earn adapters.
  *
  *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Account and vault
  *     adapters are pinned to on-chain/subgraph reads regardless of the browser
@@ -105,7 +110,7 @@ export const buildSubgraphProxyApiPath = (chainId: number) =>
   buildAppApiPath(`/api/proxy/subgraph/${chainId}`)
 const buildLabelsProxyApiPath = () => buildAppApiPath('/api/labels')
 
-type SdkBackend = 'fast' | 'onchain'
+type SdkBackend = 'fast' | 'deprecated' | 'onchain'
 
 const fallbackAdapterConfig: Partial<EulerSDKConfig> = {
   accountServiceAdapter: 'fallback',
@@ -161,10 +166,11 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   const labelsProxyUrl = buildLabelsProxyApiPath()
   const subgraphUrls = buildSubgraphUrlMap()
   const { enableV3Backend, browserVaultSource } = useEnvConfig()
-  // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins. The
-  // plan-time / 'onchain' instance is forced to onchain regardless — it
-  // exists specifically so the planner sees fresh chain state, not
-  // V3-cached data, even when fast reads can tolerate stale.
+  // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins.
+  // Deprecated-chain fast reads and plan-time / 'onchain' reads are forced
+  // to onchain regardless. The plan-time instance exists specifically so the
+  // planner sees fresh chain state, not V3-cached data, even when fast reads
+  // can tolerate stale.
   const fastSource = backend === 'fast' ? browserVaultSource : 'onchain'
   const config: EulerSDKConfig = {
     // The proxy path is wired regardless of `backend` so that the SDK can still
@@ -325,6 +331,13 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
   return sdk
 }
 
+export const getEulerSdkForChain = async (chainId: number): Promise<EulerSDK> => {
+  const { deprecatedChainIds } = useChainConfig()
+  const backend: SdkBackend = deprecatedChainIds.includes(chainId) ? 'deprecated' : 'fast'
+  const { sdk } = await lookupInstance('cached', backend, sdkBuildQuery)
+  return sdk
+}
+
 /** "Slow"/plan-time instance: account and vault adapters stay onchain/subgraph
  *  regardless of browser source, with zero stale-time on plan-critical queries.
  *  Rewards use fallback so claim planning can combine V3 rows with direct
@@ -337,5 +350,6 @@ export const getEulerSdkFresh = async (): Promise<EulerSDK> => {
 
 export const useEulerSdk = () => ({
   getEulerSdk,
+  getEulerSdkForChain,
   getEulerSdkFresh,
 })

@@ -11,10 +11,12 @@
 import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds, type ChainEnvIssues } from '~/utils/chain-env'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
 import { logger } from '~/utils/logger'
+import { parseEVaultFetchChunkChainIds } from '~/utils/eVaultFetchChunkConfig'
 
 interface ChainConfig {
   enabledChainIds: number[]
   deprecatedChainIds: number[]
+  eVaultFetchChunkChainIds: number[]
   unsupportedChainIds?: number[]
   chainEnvIssues?: ChainEnvIssues
 }
@@ -60,8 +62,9 @@ function normalizeChainConfig(config: ChainConfig): ChainConfig {
   const enabledChainIds = config.enabledChainIds.filter(id => !unknownChainIds.includes(id))
   const enabledSet = new Set(enabledChainIds)
   const deprecatedChainIds = config.deprecatedChainIds.filter(id => enabledSet.has(id))
+  const eVaultFetchChunkChainIds = (config.eVaultFetchChunkChainIds ?? []).filter(id => enabledSet.has(id))
 
-  return { ...config, enabledChainIds, deprecatedChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
+  return { ...config, enabledChainIds, deprecatedChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
 }
 
 function scanEnv(): ChainConfig {
@@ -73,8 +76,9 @@ function scanEnv(): ChainConfig {
   const enabledChainIds = getEnabledChainIds()
   const enabledSet = new Set(enabledChainIds)
   const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
+  const eVaultFetchChunkChainIds = parseEVaultFetchChunkChainIds(process.env, enabledSet)
 
-  return { enabledChainIds, deprecatedChainIds, unsupportedChainIds, chainEnvIssues }
+  return { enabledChainIds, deprecatedChainIds, eVaultFetchChunkChainIds, unsupportedChainIds, chainEnvIssues }
 }
 
 export const useChainConfig = (): ChainConfig => {
@@ -89,7 +93,7 @@ export const useChainConfig = (): ChainConfig => {
   /* eslint-enable @typescript-eslint/no-explicit-any */
   }
   else {
-    cached = { enabledChainIds: [], deprecatedChainIds: [] }
+    cached = { enabledChainIds: [], deprecatedChainIds: [], eVaultFetchChunkChainIds: [] }
   }
 
   return cached!

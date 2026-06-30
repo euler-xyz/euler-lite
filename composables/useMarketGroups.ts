@@ -507,8 +507,8 @@ export const useMarketGroups = () => {
 
     try {
       const { chainId } = useEulerAddresses()
-      const { getEulerSdk } = useEulerSdk()
-      const sdk = await getEulerSdk()
+      const { getEulerSdkForChain } = useEulerSdk()
+      const sdk = await getEulerSdkForChain(chainId.value)
       const result = await sdk.eVaultService.fetchVaults(
         chainId.value,
         allAddresses.map(addr => getAddress(addr) as Address),

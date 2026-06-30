@@ -264,16 +264,22 @@ Whether `V3_API_URL` (or aliases) is set changes how the default `fallback` adap
 
 Pinning either source to `onchain` ignores V3 even when `V3_API_URL` is set. Pinning to `v3` requires `V3_API_URL` — the SDK build throws otherwise, and the boot warning surfaces this misconfiguration before warming starts.
 
+Chains listed in `DEPRECATED_CHAINS` use onchain adapters for chain-aware browser SDK reads and server snapshot builds. The warm-cache plugin skips per-chain warm work for those chains, so regular chains continue to follow the configured V3/fallback source while deprecated chains avoid V3-backed account/vault/Earn reads.
+
+Chains listed in `EVAULT_FETCH_CHUNK_CHAINS` split EVault list reads into small sequential SDK calls in both the browser loader and the server snapshot builder. This is a Lite-side throttle around SDK `eVaultService.fetchVaults` calls for chains whose RPC/lens path does not tolerate larger concurrent onchain EVault reads.
+
 The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=true`). With V3 the snapshot is built quickly from V3's batched endpoints; without V3 it's built from onchain lens multicalls. Either way the browser sees the same wire-format payload and benefits identically.
 
 ## Configuration Flags Summary
 
 | Env var | Side | Values | Default | Effect |
 |---|---|---|---|---|
-| `SERVER_VAULT_CACHE_SOURCE` | server | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `server/utils/sdk-server.ts`. |
-| `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. The "fresh" / plan-time SDK is always `onchain` regardless. |
+| `SERVER_VAULT_CACHE_SOURCE` | server | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `server/utils/sdk-server.ts`; deprecated chains use `onchain`. |
+| `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. `getEulerSdkForChain(chainId)` uses `onchain` for deprecated chains. The "fresh" / plan-time SDK is always `onchain` regardless. |
+| `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains that skip per-chain warm-cache work and use onchain adapters in chain-aware SDK reads. |
+| `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |
 | `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/vaults` returns 503, browser falls through to RPC pipeline. |
-| `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured.
+| `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured. |
 
 ## Verification
 

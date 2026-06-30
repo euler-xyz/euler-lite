@@ -59,10 +59,12 @@ const importUseSdkRewards = async () => {
   vi.stubGlobal('useWagmi', () => ({
     address: ref(owner),
   }))
+  const sdk = {
+    rewardsService: { buildClaimPlan },
+  }
   vi.stubGlobal('useEulerSdk', () => ({
-    getEulerSdk: vi.fn(async () => ({
-      rewardsService: { buildClaimPlan },
-    })),
+    getEulerSdk: vi.fn(async () => sdk),
+    getEulerSdkForChain: vi.fn(async () => sdk),
   }))
 
   const module = await import('~/composables/useSdkRewards')
