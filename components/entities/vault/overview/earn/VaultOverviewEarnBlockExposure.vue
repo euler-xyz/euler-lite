@@ -14,8 +14,6 @@ import { groupExposureItemsByBackingAsset } from '~/utils/vault/exposure-groups'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
-  mergeCollateralExposureGroupsByBackingAsset,
-  type CollateralExposureBackingAssetSummary,
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
 
@@ -43,14 +41,12 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
 const isExpanded = ref(false)
-const isCombinedExposureExpanded = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
 const UINT136_MAX = 2n ** 136n - 1n
 const COLLAPSED_GROUP_COUNT = 3
-const COMBINED_COLLAPSED_GROUP_COUNT = 4
 
 const isPendingRemoval = (strategy: EulerEarnStrategyInfo) => strategy.removableAt > 0
 
@@ -188,37 +184,14 @@ const getStrategyCollateralGroups = (strategyVault: EVault | undefined): Collate
   )
 }
 
-const combinedCollateralExposureGroups = computed<CollateralExposureBackingAssetSummary[]>(() =>
-  mergeCollateralExposureGroupsByBackingAsset(
-    exposureRows.value.flatMap(row => getStrategyCollateralGroups(row.vault)),
-  ),
-)
-
-const totalCollateralExposureUsd = computed(() =>
-  combinedCollateralExposureGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
-)
-
-const visibleCombinedCollateralExposureGroups = computed(() =>
-  isCombinedExposureExpanded.value
-    ? combinedCollateralExposureGroups.value
-    : combinedCollateralExposureGroups.value.slice(0, COMBINED_COLLAPSED_GROUP_COUNT),
-)
-const hiddenCombinedCollateralExposureCount = computed(() =>
-  Math.max(0, combinedCollateralExposureGroups.value.length - visibleCombinedCollateralExposureGroups.value.length),
-)
-
 const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
 const formatExposurePercent = (valueUsd: number, totalUsd: number) =>
   !hasLiveExposureData.value ? '-' : totalUsd > 0 ? `${compactNumber(valueUsd / totalUsd * 100, 1, 0)}%` : '0%'
 const formatLiveExposureUsd = (valueUsd: number) =>
   hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
-const combinedExposureSubtitle = computed(() => {
-  if (!hasLiveExposureData.value) return 'Live exposure unavailable'
-  return totalCollateralExposureUsd.value > 0 ? `${formatCompactUsdValue(totalCollateralExposureUsd.value)} active borrows` : 'No active borrows'
-})
 
 const getCollateralExposureSummary = (
-  groups: Array<CollateralExposureGroup | CollateralExposureBackingAssetSummary>,
+  groups: CollateralExposureGroup[],
   totalUsd: number,
 ) => {
   const group = groups[0]
@@ -280,10 +253,6 @@ const toggleExpanded = () => {
   isExpanded.value = !isExpanded.value
 }
 
-const toggleCombinedExposureExpanded = () => {
-  isCombinedExposureExpanded.value = !isCombinedExposureExpanded.value
-}
-
 load()
 </script>
 
@@ -296,64 +265,6 @@ load()
       <p class="text-h3 text-content-primary mb-12">
         Exposure
       </p>
-    </div>
-
-    <div
-      v-if="combinedCollateralExposureGroups.length"
-      class="rounded-12 border border-line-subtle bg-surface p-16"
-    >
-      <div class="mb-12">
-        <p class="text-p3 font-medium text-content-primary">
-          Combined collateral exposure
-        </p>
-        <p class="text-p4 text-content-tertiary">
-          {{ combinedExposureSubtitle }}
-        </p>
-      </div>
-
-      <div class="flex flex-col gap-8">
-        <div
-          v-for="group in visibleCombinedCollateralExposureGroups"
-          :key="group.asset.address"
-          class="rounded-8 bg-surface-secondary p-10"
-          data-id="data-point"
-          :data-list="`earn-combined-collateral-exposure:${getAddress(vault.address)}`"
-          :data-key="group.asset.address"
-          data-field="combined-collateral-exposure"
-          :data-value="group.asset.symbol"
-        >
-          <div class="mb-6 flex min-w-0 items-center justify-between gap-8">
-            <div class="flex min-w-0 items-center gap-6">
-              <AssetAvatar
-                :asset="group.asset"
-                size="20"
-              />
-              <span class="truncate text-p3 text-content-primary">{{ group.asset.symbol }}</span>
-            </div>
-            <span class="shrink-0 text-p4 text-content-secondary">
-              {{ formatExposurePercent(group.openInterestUsd, totalCollateralExposureUsd) }}
-            </span>
-          </div>
-          <div class="h-4 overflow-hidden rounded-full bg-surface">
-            <div
-              class="h-full rounded-full bg-accent-500"
-              :style="{ width: hasLiveExposureData && totalCollateralExposureUsd > 0 ? `${Math.max(2, group.openInterestUsd / totalCollateralExposureUsd * 100)}%` : '0%' }"
-            />
-          </div>
-          <p class="mt-6 text-p4 text-content-tertiary">
-            {{ formatLiveExposureUsd(group.openInterestUsd) }}
-          </p>
-        </div>
-
-        <button
-          v-if="combinedCollateralExposureGroups.length > COMBINED_COLLAPSED_GROUP_COUNT"
-          type="button"
-          class="self-center text-p4 font-medium text-content-accent transition-colors hover:text-accent-600"
-          @click="toggleCombinedExposureExpanded"
-        >
-          {{ isCombinedExposureExpanded ? 'Show less' : `Show more (${hiddenCombinedCollateralExposureCount})` }}
-        </button>
-      </div>
     </div>
 
     <div
