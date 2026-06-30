@@ -104,7 +104,7 @@ const allocationSummary = computed(() => {
     ? compactNumber(group.openInterestUsd / totalCollateralExposureUsd.value * 100, 1, 0)
     : '0'
 
-  return `Top: ${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
+  return `${group.asset.symbol} ${formatCompactUsdValue(group.openInterestUsd)} · ${pct}%`
 })
 
 watchEffect(() => {
