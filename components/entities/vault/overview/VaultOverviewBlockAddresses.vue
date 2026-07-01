@@ -105,10 +105,10 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
       >
         <span class="flex items-center gap-4">
           Unit of account
-          <UiFootnote
+          <UiHoverPreviewTooltip
             title="Unit of Account"
             text="The reference currency used to denominate prices for LTV and health calculations in this vault. Typically USD or ETH. All collateral and debt values are converted to this unit when determining account health."
-            class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+            icon-class="text-content-muted hover:text-content-secondary"
           />
         </span>
       </template>

@@ -6,7 +6,7 @@
  * server/ module that calls one of these globals at module top level.
  */
 
-import { computed, reactive, ref, shallowReactive, shallowRef, watch, watchEffect } from 'vue'
+import { computed, reactive, readonly, ref, shallowReactive, shallowRef, watch, watchEffect } from 'vue'
 
 type AnyFn = (...args: unknown[]) => unknown
 
@@ -26,6 +26,7 @@ const vueGlobals: Record<string, unknown> = {
   shallowRef,
   reactive,
   shallowReactive,
+  readonly,
   computed,
   watch,
   watchEffect,

@@ -13,4 +13,6 @@ export interface CustomFilter {
   operator: 'gt' | 'lt'
   value: number
   label: string
+  tone?: 'active' | 'neutral'
+  includeWhenValueUnavailable?: boolean
 }

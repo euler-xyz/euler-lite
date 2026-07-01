@@ -467,7 +467,7 @@ const openLegalModal = () => {
 
     <div class="flex items-center gap-8">
       Health score
-      <UiFootnote
+      <UiHoverPreviewTooltip
         title="Your health score"
         text="Health score measures how safe your position is. A score above 1 means you're safe; below 1 means you're at risk of liquidation."
       />

@@ -306,10 +306,10 @@ load()
               <span class="flex items-center gap-4">
                 Allocation cap
                 <span @click.stop.prevent>
-                  <UiFootnote
+                  <UiHoverPreviewTooltip
                     title="Allocation cap"
                     text="The maximum amount that can be allocated to this strategy."
-                    class="footnote-info [--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+                    icon-class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
                   />
                 </span>
               </span>
@@ -319,11 +319,11 @@ load()
                 v-if="isPendingRemoval(row.exposure)"
                 @click.stop.prevent
               >
-                <UiFootnote
+                <UiHoverPreviewTooltip
                   icon="clock"
                   title="Pending removal"
                   :text="getPendingRemovalTooltipText(row.exposure)"
-                  class="footnote-clock [--ui-footnote-icon-color:var(--warning-500)]"
+                  icon-class="!w-14 !h-14 text-warning-500"
                 />
               </span>
               <template v-if="isUnlimitedCap(row.exposure)">
@@ -344,25 +344,3 @@ load()
     </div>
   </div>
 </template>
-
-<style lang="scss" scoped>
-.footnote-info:deep(.ui-footnote__icon) {
-  width: 20px;
-  height: 20px;
-}
-
-.footnote-info {
-  width: 20px;
-  height: 20px;
-}
-
-.footnote-clock:deep(.ui-footnote__icon) {
-  width: 14px;
-  height: 14px;
-}
-
-.footnote-clock {
-  width: 14px;
-  height: 14px;
-}
-</style>

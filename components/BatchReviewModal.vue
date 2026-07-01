@@ -376,7 +376,7 @@ const handleClose = () => {
 
       <UiAlert
         v-if="hasPermit2Approval"
-        variant="warning"
+        variant="info"
         size="compact"
         title="Infinite approval"
         description="You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract that lets you approve once, then sign per-action permissions without new onchain approvals."
