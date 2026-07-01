@@ -18,8 +18,16 @@ const expandIfOnlySection = () => {
   const parentEl = sectionEl.value?.parentElement
   if (!parentEl) return
 
-  const sectionCount = parentEl.querySelectorAll(':scope > [data-vault-overview-accordion-section]').length
-  if (sectionCount === 1) {
+  const sections = Array.from(parentEl.querySelectorAll<HTMLElement>(':scope > [data-vault-overview-accordion-section]'))
+  if (sections.length === 1) {
+    isOpen.value = true
+    return
+  }
+
+  const collapsedSections = sections.filter(section =>
+    section.querySelector('button[aria-expanded="false"]'),
+  )
+  if (collapsedSections.length === 1 && collapsedSections[0] === sectionEl.value) {
     isOpen.value = true
   }
 }
