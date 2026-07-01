@@ -48,10 +48,17 @@ onMounted(async () => {
     class="bg-surface-secondary rounded-xl shadow-card"
     data-vault-overview-accordion-section
   >
-    <div class="group relative flex items-center gap-16 p-24">
+    <div
+      class="group relative flex items-center gap-16 p-24"
+      :data-open="isOpen ? 'true' : undefined"
+    >
+      <span
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-x-0 top-0 bottom-0 z-0 rounded-xl transition-colors group-hover:bg-card-hover group-data-[open=true]:bottom-8"
+      />
       <button
         type="button"
-        class="absolute inset-0 z-0 rounded-xl transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-inset"
+        class="absolute inset-0 z-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-inset"
         :aria-expanded="isOpen"
         :aria-controls="panelId"
         :aria-label="`${isOpen ? 'Collapse' : 'Expand'} ${title}`"
