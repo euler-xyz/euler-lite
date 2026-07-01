@@ -12,6 +12,7 @@ import {
   mergeVaultExposureDisplayItems,
   type ExposureValueState,
 } from '~/utils/vault/exposure-display'
+import { logWarn } from '~/utils/errorHandling'
 
 const { vault } = defineProps<{ vault: EulerEarn }>()
 const route = useRoute()
@@ -92,6 +93,7 @@ const hasUnavailableExposureSplit = computed(() => {
   })
 })
 const exposureValueState = computed<ExposureValueState>(() => {
+  if (!vault.strategies.length) return 'ready'
   if (!isStrategyAllocationUsdLoaded.value) return 'loading'
   if (hasOpenInterestError.value) return 'unavailable'
   if (hasUnavailableStrategyAllocationUsd.value) return 'unavailable'
@@ -128,27 +130,42 @@ watchEffect(() => {
 
 watchEffect(async () => {
   const loadId = ++strategyAllocationLoadId
-  const results = await Promise.all(vault.strategies.map(async (strategy) => {
-    const strategyVault = getStrategyVault(strategy)
-    if (!strategyVault) return null
+  try {
+    const results = await Promise.all(vault.strategies.map(async (strategy) => {
+      const strategyVault = getStrategyVault(strategy)
+      if (!strategyVault) return null
 
-    const price = await formatAssetValue(strategy.allocatedAssets, strategyVault, 'off-chain')
-    return {
-      address: strategy.address.toLowerCase(),
-      valueUsd: price.hasPrice ? price.usdValue : 0,
-      valueState: price.hasPrice ? 'ready' : 'unavailable',
-    }
-  }))
-  if (loadId !== strategyAllocationLoadId) return
+      const price = await formatAssetValue(strategy.allocatedAssets, strategyVault, 'off-chain')
+      return {
+        address: strategy.address.toLowerCase(),
+        valueUsd: price.hasPrice ? price.usdValue : 0,
+        valueState: price.hasPrice ? 'ready' : 'unavailable',
+      }
+    }))
+    if (loadId !== strategyAllocationLoadId) return
 
-  strategyAllocationUsdByAddress.value = new Map(
-    results
-      .filter((result): result is { address: string } & StrategyAllocationUsd => Boolean(result))
-      .map(result => [result.address, {
-        valueUsd: result.valueUsd,
-        valueState: result.valueState,
-      }]),
-  )
+    strategyAllocationUsdByAddress.value = new Map(
+      results
+        .filter((result): result is { address: string } & StrategyAllocationUsd => Boolean(result))
+        .map(result => [result.address, {
+          valueUsd: result.valueUsd,
+          valueState: result.valueState,
+        }]),
+    )
+  }
+  catch (e) {
+    if (loadId !== strategyAllocationLoadId) return
+
+    logWarn('VaultOverviewEarnBlockStats/loadStrategyAllocationUsd', e)
+    strategyAllocationUsdByAddress.value = new Map(
+      vault.strategies
+        .filter(strategy => Boolean(getStrategyVault(strategy)))
+        .map(strategy => [strategy.address.toLowerCase(), {
+          valueUsd: 0,
+          valueState: 'unavailable',
+        }]),
+    )
+  }
 })
 
 const totalSupplyDisplay = ref('-')

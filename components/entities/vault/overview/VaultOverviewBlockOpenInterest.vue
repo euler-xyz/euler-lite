@@ -2,7 +2,6 @@
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { ArcElement, Chart as ChartJS, Legend, Tooltip, type ChartData, type ChartOptions } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
-import { getAddress } from 'viem'
 import { compactNumber } from '~/utils/string-utils'
 import {
   buildOpenInterestModel,
@@ -30,6 +29,7 @@ const {
 
 const chartData = shallowRef<ChartData<'doughnut', number[], string> | null>(null)
 const chartOptions = shallowRef<ChartOptions<'doughnut'> | null>(null)
+const vaultDataKey = computed(() => normalizeOpenInterestAddress(vault.address))
 
 const canLoadOpenInterest = computed(() =>
   vault.collaterals.some(ltv => ltv.currentLiquidationLTV > 0 || ltv.borrowLTV > 0),
@@ -146,7 +146,7 @@ const loadOpenInterest = async () => {
 }
 
 watch(
-  [chainId, canLoadOpenInterest, () => normalizeOpenInterestAddress(vault.address)],
+  [chainId, canLoadOpenInterest, vaultDataKey],
   () => {
     void loadOpenInterest()
   },
@@ -181,8 +181,8 @@ watch([openInterestModel, isDark], () => {
       v-else
       class="grid gap-18 tablet:grid-cols-[minmax(180px,220px)_1fr] tablet:items-center"
       data-id="borrow-open-interest"
-      :data-key="getAddress(vault.address).toLowerCase()"
-      :data-vault-address="getAddress(vault.address).toLowerCase()"
+      :data-key="vaultDataKey"
+      :data-vault-address="vaultDataKey"
     >
       <div class="relative mx-auto h-[220px] w-full max-w-[220px]">
         <Doughnut
@@ -194,7 +194,7 @@ watch([openInterestModel, isDark], () => {
           <p
             class="text-h4 text-content-primary"
             data-id="data-point"
-            :data-key="getAddress(vault.address).toLowerCase()"
+            :data-key="vaultDataKey"
             data-field="open-interest-total"
             :data-value="openInterestModel.rightNodes.borrowed.displayValue"
           >
@@ -221,7 +221,7 @@ watch([openInterestModel, isDark], () => {
             :key="node.id"
             class="rounded-[10px] border border-line-subtle bg-surface p-10"
             data-id="data-point"
-            :data-list="`borrow-open-interest:${getAddress(vault.address).toLowerCase()}`"
+            :data-list="`borrow-open-interest:${vaultDataKey}`"
             :data-key="node.id"
             data-field="open-interest-backing-asset"
             :data-value="node.label"
