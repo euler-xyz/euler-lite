@@ -13,6 +13,7 @@ import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
 import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '~/utils/collateralOptions'
 import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidation'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 import { formatBadDebtHint, formatBadDebtUsd, type VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 
 // ============================================================
@@ -645,7 +646,7 @@ export interface AttributeCell {
   display: string
   numeric?: number
   hint?: string
-  kind?: 'text' | 'capProgress' | 'governor' | 'hooks'
+  kind?: 'text' | 'capProgress' | 'governor' | 'hooks' | 'exposure'
   capPercent?: number
   capUncapped?: boolean
   hookable?: boolean
@@ -894,6 +895,15 @@ export const STATS_ROWS: AttributeRow[] = [
         numeric: usd?.liquidityUsd,
         kind: 'text',
       }
+    },
+  },
+  {
+    id: 'exposure',
+    label: 'Exposure',
+    getValue: (vault) => {
+      if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
+      if (!isVaultBorrowable(vault)) return NA_CELL
+      return { display: 'Exposure', kind: 'exposure' }
     },
   },
   {

@@ -111,7 +111,8 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
     <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-8 mb-4 min-w-0">
         <span
-          class="text-content-tertiary min-w-0"
+          class="block min-w-0 max-w-full truncate text-content-tertiary"
+          :title="pairVault ? displayLabel : displayName"
           data-id="data-point"
           :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
           data-field="name"

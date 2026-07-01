@@ -1,31 +1,48 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { formatNumber } from '~/utils/string-utils'
+import { compactNumber, formatCompactUsdValue, formatNumber } from '~/utils/string-utils'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 
 const emits = defineEmits(['close'])
 const router = useRouter()
 const route = useRoute()
 const { vault } = defineProps<{ vault: EVault }>()
 const { get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+} = useCollateralOpenInterest()
 
-const allCollateralPairs = computed(() => {
-  const pairs: Array<{
-    collateral: EVault | SecuritizeCollateralVault
-    ltv: EVaultCollateral
-  }> = []
+const allCollateralPairs = computed(() =>
+  getCollateralExposurePairs(
+    vault,
+    addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+  ),
+)
 
-  vault.collaterals.forEach((ltv) => {
-    if (ltv.currentLiquidationLTV <= 0) return
-
-    const collateralEntry = registryGet(ltv.address)
-    if (collateralEntry) {
-      pairs.push({ collateral: collateralEntry.vault as EVault | SecuritizeCollateralVault, ltv })
-    }
-  })
-
-  return pairs.sort((a, b) => (b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0))
-})
+const openInterestUsdByCollateral = computed(() => getOpenInterestForVault(vault.address))
+const collateralGroups = computed(() =>
+  getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
+)
+const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
+const totalOpenInterestUsd = computed(() =>
+  collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
+const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
+  const entry = Object.entries(openInterestUsdByCollateral.value)
+    .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
+  return entry?.[1] ?? 0
+}
+const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const formatExposurePercent = (valueUsd: number) =>
+  !hasLiveExposureData.value
+    ? '-'
+    : totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
+const formatLiveExposureUsd = (valueUsd: number) =>
+  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
 
 const formatTimeRemaining = (seconds: bigint): string => {
   const days = Number(seconds) / 86400
@@ -44,43 +61,55 @@ const onCollateralClick = (address: string) => {
   emits('close')
   router.push({ path: `/borrow/${address}/${vault.address}`, query: { network: route.query.network } })
 }
+
+watchEffect(() => {
+  if (!vault.address) return
+  void loadOpenInterest()
+})
 </script>
 
 <template>
   <BaseModalWrapper
-    title="Collateral exposure"
+    title="Exposure"
     @close="$emit('close')"
   >
     <div
-      v-if="allCollateralPairs.length > 0"
+      v-if="collateralGroups.length > 0"
       class="flex flex-col gap-12"
     >
       <p class="text-p3 text-content-secondary mb-4">
         Deposits in this vault can be borrowed.
-        Make sure you're comfortable accepting the collaterals listed below before supplying.
+        Make sure you're comfortable with the exposure assets and vaults listed below before supplying.
       </p>
       <div
-        v-for="pair in allCollateralPairs"
+        v-for="pair in collateralPairs"
         :key="pair.collateral.address"
-        class="bg-surface rounded-12 text-content-primary block no-underline cursor-pointer hover:bg-card-hover transition-colors"
+        class="cursor-pointer rounded-12 border border-line-subtle bg-surface p-16 text-content-primary transition-colors hover:bg-card-hover"
         @click="onCollateralClick(pair.collateral.address)"
       >
-        <div class="px-16 pt-16 pb-12 border-b border-line-subtle">
-          <div class="min-w-0">
-            <VaultLabelsAndAssets
-              class="min-w-0"
-              :vault="pair.collateral"
-              :assets="[pair.collateral.asset]"
-            />
-            <VaultTypeBadges
-              class="mt-8 w-full justify-end"
-              :vault="pair.collateral"
-              summary-only
-              @click.stop.prevent
-            />
-          </div>
+        <div class="min-w-0">
+          <VaultLabelsAndAssets
+            class="min-w-0"
+            :vault="pair.collateral"
+            :assets="[pair.collateral.asset]"
+          />
+          <VaultTypeBadges
+            class="mt-8 w-full justify-end"
+            :vault="pair.collateral"
+            summary-only
+            @click.stop.prevent
+          />
         </div>
-        <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
+        <div class="flex flex-col gap-12 pt-12">
+          <VaultOverviewLabelValue
+            label="Live exposure"
+            orientation="horizontal"
+          >
+            <span class="flex items-center gap-4">
+              {{ formatLiveExposureUsd(getPairOpenInterestUsd(pair)) }}
+              <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>
+            </span>
+          </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
-import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
@@ -11,7 +10,6 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { normalizeAddress } from '~/utils/normalizeAddress'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import { VaultSupplyApyModal } from '#components'
 import { getAddress, maxUint256 } from 'viem'
@@ -27,7 +25,6 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 
 const { chainId } = useEulerAddresses()
 const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
-const { getEVaults } = useVaultRegistry()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
@@ -60,25 +57,6 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
 
 // Count markets where this can be borrowed (securitize vaults cannot be borrow destinations)
 const borrowCount = computed(() => 0)
-
-// Find EVaults where this securitize vault can be used as collateral
-const borrowMarkets = computed(() => {
-  const markets: Array<{
-    borrowVault: EVault
-    ltv: EVaultCollateral
-  }> = []
-
-  getEVaults().forEach((v) => {
-    const ltv = v.collaterals.find(l => normalizeAddress(l.address) === vaultAddress.value && l.borrowLTV > 0)
-    if (ltv) {
-      markets.push({ borrowVault: v, ltv })
-    }
-  })
-
-  return markets
-})
-
-const collateralCount = computed(() => borrowMarkets.value.length)
 
 // Supply APY calculation (intrinsic + rewards, no base interest for securitize vaults)
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
@@ -258,16 +236,6 @@ const supplyCapPercentageDisplay = computed(() => {
           </div>
           <span class="text-p2 text-content-primary">
             {{ formatMarketAvailability(borrowCount) }}
-          </span>
-        </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue label="Can be used as collateral">
-        <div class="flex items-center gap-8">
-          <div>
-            <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
-          </div>
-          <span class="text-p2 text-content-primary">
-            {{ formatMarketAvailability(collateralCount) }}
           </span>
         </div>
       </VaultOverviewLabelValue>

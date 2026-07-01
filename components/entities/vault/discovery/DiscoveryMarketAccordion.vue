@@ -189,7 +189,7 @@ const getMatrixVariant = (marketId: string): MatrixVariant => {
 
 const getDotMetric = (marketId: string): DotMetric => {
   const view = getMatrixView(marketId)
-  if (isAttributeMatrixView(view)) return 'net-apy' // unused for attribute matrices
+  if (isAttributeMatrixView(view)) return 'net-apy' // unused for non-pair matrices
   return view
 }
 

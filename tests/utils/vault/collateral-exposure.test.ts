@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  getCollateralExposureGroups,
   getCollateralExposurePairs,
   hasCollateralExposure,
   type CollateralVaultResolver,
@@ -11,7 +12,7 @@ import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@euler
  * liquidation LTV has fully ramped down to 0 — tests opt in to live config by
  * overriding the fields they care about.
  */
-const makeLtv = (overrides: Partial<any> = {}): EVaultCollateral => ({
+const makeLtv = (overrides: Partial<Omit<EVaultCollateral, 'address'>> & { address?: string } = {}): EVaultCollateral => ({
   address: '0xcoll0000000000000000000000000000000000000',
   borrowLTV: 0,
   liquidationLTV: 0,
@@ -36,8 +37,19 @@ const makeLtv = (overrides: Partial<any> = {}): EVaultCollateral => ({
 const makeCollateral = (
   address: string,
   totalAssets: bigint,
+  asset: Partial<EVault['asset']> = {},
 ): EVault | SecuritizeCollateralVault =>
-  ({ address, totalAssets } as unknown as EVault)
+  ({
+    address,
+    totalAssets,
+    asset: {
+      address,
+      symbol: address,
+      decimals: 18,
+      name: address,
+      ...asset,
+    },
+  } as unknown as EVault)
 
 /**
  * Build a resolver that returns the collateral at a given address, or
@@ -225,5 +237,52 @@ describe('hasCollateralExposure', () => {
       '0xalsodead': makeCollateral('0xalsodead', 0n),
     })
     expect(hasCollateralExposure(vault, resolver)).toBe(true)
+  })
+})
+
+describe('getCollateralExposureGroups', () => {
+  it('groups duplicate collateral vaults by backing asset', () => {
+    const pairs = [
+      {
+        collateral: makeCollateral('0xvault1', 1n, {
+          address: '0x000000000000000000000000000000000000000a',
+          symbol: 'USDC',
+        }),
+        ltv: borrowableLtv('0xvault1'),
+      },
+      {
+        collateral: makeCollateral('0xvault2', 1n, {
+          address: '0x000000000000000000000000000000000000000a',
+          symbol: 'USDC',
+        }),
+        ltv: makeLtv({
+          address: '0xvault2',
+          borrowLTV: 0.7,
+          liquidationLTV: 0.82,
+          currentLiquidationLTV: 0.82,
+        }),
+      },
+      {
+        collateral: makeCollateral('0xvault3', 1n, {
+          address: '0x000000000000000000000000000000000000000b',
+          symbol: 'WETH',
+        }),
+        ltv: makeLtv({
+          address: '0xvault3',
+          borrowLTV: 0.5,
+          liquidationLTV: 0.6,
+          currentLiquidationLTV: 0.6,
+        }),
+      },
+    ]
+
+    const groups = getCollateralExposureGroups(pairs)
+
+    expect(groups).toHaveLength(2)
+    expect(groups[0].asset.symbol).toBe('USDC')
+    expect(groups[0].vaultCount).toBe(2)
+    expect(groups[0].items).toHaveLength(2)
+    expect(groups[0].maxCurrentLiquidationLTV).toBe(0.82)
+    expect(groups[1].asset.symbol).toBe('WETH')
   })
 })
