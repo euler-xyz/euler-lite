@@ -111,6 +111,20 @@ const positionDetailsFallback = computed(() => {
   const search = query.toString()
   return `/position/${positionIndex}${search ? `?${search}` : ''}`
 })
+const clearRouteQueryKeys = (keys: readonly string[]) => {
+  const keysToClear = new Set(keys)
+  const query = Object.fromEntries(
+    Object.entries(route.query).filter(([key]) => !keysToClear.has(key)),
+  )
+  const hasChanges = Object.keys(query).length !== Object.keys(route.query).length
+  if (!hasChanges) return
+
+  void router.replace({
+    path: route.path,
+    query,
+    hash: route.hash,
+  })
+}
 const sourceCollateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => {
   const currentPosition = position.value
   if (!currentPosition) return undefined
@@ -1200,10 +1214,49 @@ const effectiveQuoteFetchedAt = computed(() => {
 })
 
 const targetDebtVaultAddress = computed(() => typeof route.query.to === 'string' ? normalizeVaultAddress(route.query.to) : '')
+const targetCollateralVaultAddress = computed(() =>
+  typeof route.query.targetCollateral === 'string' ? normalizeVaultAddress(route.query.targetCollateral) : '',
+)
+const consumedTargetDebtVaultAddress = ref('')
+const consumedTargetCollateralVaultAddress = ref('')
+
+watch(targetDebtVaultAddress, (address) => {
+  if (!address || address !== consumedTargetDebtVaultAddress.value) {
+    consumedTargetDebtVaultAddress.value = ''
+  }
+})
+watch(targetCollateralVaultAddress, (address) => {
+  if (!address || address !== consumedTargetCollateralVaultAddress.value) {
+    consumedTargetCollateralVaultAddress.value = ''
+  }
+})
+
+const consumeTargetDebtQuery = () => {
+  const address = targetDebtVaultAddress.value
+  if (address) consumedTargetDebtVaultAddress.value = address
+  clearRouteQueryKeys(['to'])
+}
+const consumeTargetCollateralQuery = () => {
+  const address = targetCollateralVaultAddress.value
+  if (address) consumedTargetCollateralVaultAddress.value = address
+  clearRouteQueryKeys(['targetCollateral'])
+}
+
 watch([debtTargetVaults, targetDebtVaultAddress], ([vaults, targetAddress]) => {
-  if (!targetAddress || targetDebtVault.value) return
+  if (!targetAddress || targetDebtVault.value || consumedTargetDebtVaultAddress.value === targetAddress) return
   const vault = vaults.find(candidate => normalizeVaultAddress(candidate.address) === targetAddress)
-  if (vault) targetDebtVault.value = vault
+  if (vault) {
+    targetDebtVault.value = vault
+    consumeTargetDebtQuery()
+  }
+}, { immediate: true })
+watch([collateralTargetVaults, targetCollateralVaultAddress], ([vaults, targetAddress]) => {
+  if (!targetAddress || targetCollateralVault.value || consumedTargetCollateralVaultAddress.value === targetAddress) return
+  const vault = vaults.find(candidate => normalizeVaultAddress(candidate.address) === targetAddress)
+  if (vault) {
+    targetCollateralVault.value = vault
+    consumeTargetCollateralQuery()
+  }
 }, { immediate: true })
 
 watch(debtTargetVaults, (vaults) => {
@@ -1282,6 +1335,7 @@ const onDebtVaultChange = (selectedIndex: number, selectedOption?: CollateralOpt
   clearSimulationError()
   const selected = resolveSelectedVault(debtSelectionVaults.value, selectedIndex, selectedOption)
   if (!selected || !sourceDebtVault.value) return
+  consumeTargetDebtQuery()
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceDebtVault.value.address)) {
     targetDebtVault.value = undefined
     return
@@ -1293,6 +1347,7 @@ const onCollateralVaultChange = (selectedIndex: number, selectedOption?: Collate
   clearSimulationError()
   const selected = resolveSelectedVault(collateralSelectionVaults.value, selectedIndex, selectedOption)
   if (!selected || !sourceCollateralVault.value) return
+  consumeTargetCollateralQuery()
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceCollateralVault.value.address)) {
     targetCollateralVault.value = undefined
     return
