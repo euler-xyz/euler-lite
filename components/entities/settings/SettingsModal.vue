@@ -4,7 +4,7 @@ const { settings, updateSetting } = useUserSettings()
 
 const advancedFeatures = [
   'Batch transactions: queue multiple actions into one atomic transaction',
-  'Migrate eligible positions between Euler, Aave v3, and Morpho',
+  'Migrate Euler positions out to Aave v3 and Morpho',
 ]
 
 defineEmits(['close'])

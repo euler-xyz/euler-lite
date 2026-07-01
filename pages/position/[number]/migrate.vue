@@ -756,15 +756,15 @@ function buildSignatureSteps(target: OutgoingMigrationTarget | undefined, author
   if (target.connectorId === AAVE_CONNECTOR_ID) {
     return [{
       index: 1,
-      label: 'Sign Aave debt delegation',
+      label: 'Signature: Aave debt delegation',
       isSeparateTx: false,
     }]
   }
   return flattenAuthorizationRequests(authorizationRequest).map((request, index) => ({
     index: index + 1,
     label: request.kind === 'typedData' && request.typedData.message.isAuthorized === false
-      ? 'Disable Morpho authorization'
-      : 'Enable Morpho authorization',
+      ? 'Signature: disable Morpho authorization'
+      : 'Signature: enable Morpho authorization',
     isSeparateTx: false,
   }))
 }
@@ -852,7 +852,7 @@ function normalizeAddressKey(value?: string): string {
         />
 
         <div
-          class="flex flex-1 p-8 rounded-12 border border-line-default bg-card"
+          class="flex p-8 rounded-12 border border-line-default bg-card"
           role="group"
           :aria-label="sourcePositionAriaLabel"
         >
@@ -1034,7 +1034,8 @@ function normalizeAddressKey(value?: string): string {
               <UiButton
                 size="medium"
                 variant="secondary"
-                :disabled="!canAddToBatchTarget(target)"
+                :disabled="!!batchingTargetId || !canAddToBatchTarget(target)"
+                :loading="batchingTargetId === target.id"
                 :title="getTargetDisabledReason(target) || undefined"
                 :aria-label="targetActionAriaLabel(target, 'batch')"
                 @click="addMigrationToBatch(target)"

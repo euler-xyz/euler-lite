@@ -7,27 +7,23 @@ defineOptions({
 
 const route = useRoute()
 const router = useRouter()
-const { settings } = useUserSettings()
-const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 const {
   positions,
   isLoading,
   error,
   hasLoaded,
   load,
-} = useExternalMigrationPositions({ enabled: enableExternalMigrations })
+} = useExternalMigrationPositions()
 
 const visiblePositions = computed(() =>
   positions.value.filter(position => !isExternalMigrationDustPosition(position)),
 )
 
 const disabledReason = (position: ExternalMigrationCandidate) => {
-  if (!enableExternalMigrations.value) return 'Enable advanced mode in settings.'
   return position.disabledReason ?? ''
 }
 
 const liveStatus = computed(() => {
-  if (!enableExternalMigrations.value) return 'Migration scanning disabled'
   if (isLoading.value) return 'Scanning Aave and Morpho'
   if (error.value) return 'Migration scan failed'
   if (hasLoaded.value) return `${visiblePositions.value.length} migration positions available`
@@ -46,7 +42,7 @@ const migrate = (position: ExternalMigrationCandidate) => {
 }
 
 onActivated(() => {
-  if (enableExternalMigrations.value && hasLoaded.value) void load({ force: true })
+  if (hasLoaded.value) void load({ force: true })
 })
 </script>
 
@@ -67,21 +63,7 @@ onActivated(() => {
 
     <div class="flex flex-1 p-8 rounded-12 border border-line-default bg-card">
       <div
-        v-if="!enableExternalMigrations"
-        class="portfolio-migrate__error"
-      >
-        <div>
-          <div class="portfolio-migrate__error-title">
-            Migration scanning is disabled
-          </div>
-          <div class="portfolio-migrate__error-text">
-            Enable advanced mode in settings.
-          </div>
-        </div>
-      </div>
-
-      <div
-        v-else-if="isLoading && visiblePositions.length === 0"
+        v-if="isLoading && visiblePositions.length === 0"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />

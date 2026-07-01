@@ -24,6 +24,7 @@ interface KeyringGuardState {
 const props = defineProps<{
   disabled?: boolean
   loading?: boolean
+  addToBatchLoading?: boolean
   disabledReason?: string
   disabledReasonVariant?: DisabledReasonVariant
   /** When defined, the form supports batching: a "+" segment is shown next to the
@@ -82,6 +83,7 @@ const _disabled = computed(() => {
   return props.disabled && !needToSwitchChain.value
 })
 const isLoading = computed(() => props.loading || isResolvingStateOverrideHints.value)
+const isAddToBatchLoading = computed(() => !!props.addToBatchLoading)
 
 const GENERIC_DISABLED_REASON = 'Complete the form fields above to continue.'
 
@@ -191,6 +193,7 @@ const nonTosOperationBlockReason = computed(() =>
 const hasNonTosOperationBlocker = computed(() => !!nonTosOperationBlockReason.value)
 const isAddToBatchBaseDisabled = computed(() =>
   !props.canAddToBatch
+  || isAddToBatchLoading.value
   || isResolvingStateOverrideHints.value
   || needToSwitchChain.value
   || !hasActiveSession.value,
@@ -220,6 +223,7 @@ const tooltipText = computed(() => {
 })
 
 const handleAddToBatch = () => {
+  if (isAddToBatchLoading.value) return
   if (showTosFlow.value) {
     if (isAddToBatchBaseDisabled.value || hasNonTosOperationBlocker.value) return
     modal.open(AcknowledgeTermsModal, {
@@ -228,6 +232,7 @@ const handleAddToBatch = () => {
         onAccept: () => {
           tosGuard?.acceptTerms()
           modal.close()
+          if (isAddToBatchLoading.value) return
           if (isAddToBatchBaseDisabled.value || hasNonTosOperationBlocker.value) return
           emit('add-to-batch')
         },
@@ -257,6 +262,7 @@ const handleAddToBatch = () => {
           size="large"
           variant="primary"
           :disabled="isAddToBatchDisabled"
+          :loading="isAddToBatchLoading"
           data-testid="add-to-batch"
           @click="handleAddToBatch"
         >
@@ -349,15 +355,30 @@ const handleAddToBatch = () => {
       <button
         v-if="supportsBatch && !batchBlocksDirect"
         type="button"
-        class="w-full h-48 flex items-center justify-center gap-6 text-accent-500 text-h6 disabled:opacity-40 transition-opacity hover:opacity-80"
+        class="w-full h-48 relative overflow-hidden flex items-center justify-center text-accent-500 text-h6 disabled:opacity-40 transition-opacity hover:opacity-80"
         :disabled="isAddToBatchDisabled"
         data-testid="add-to-batch"
         @click="handleAddToBatch"
         @mouseenter="onPlusEnter"
         @mouseleave="onPlusLeave"
       >
-        <span class="text-h5 leading-none">+</span>
-        Add to batch
+        <span
+          class="vault-form-submit__batch-content"
+          :class="{ 'vault-form-submit__batch-content--hidden': isAddToBatchLoading }"
+        >
+          <span class="text-h5 leading-none">+</span>
+          Add to batch
+        </span>
+        <span
+          v-if="isAddToBatchLoading"
+          class="vault-form-submit__batch-spinner"
+          aria-hidden="true"
+        >
+          <SvgIcon
+            name="loading"
+            class="!w-20 !h-20"
+          />
+        </span>
       </button>
     </div>
 
@@ -400,6 +421,27 @@ const handleAddToBatch = () => {
     width: 100%;
   }
 
+  &__batch-content {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+
+    &--hidden {
+      visibility: hidden;
+    }
+  }
+
+  &__batch-spinner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    animation: vault-form-submit-spin 0.6s infinite linear;
+  }
+
   &__tooltip {
     position: absolute;
     z-index: 10;
@@ -430,6 +472,16 @@ const handleAddToBatch = () => {
       color: var(--ui-toast-error-text-color);
       box-shadow: none;
     }
+  }
+}
+
+@keyframes vault-form-submit-spin {
+  0% {
+    transform: rotate(0);
+  }
+
+  100% {
+    transform: rotate(360deg);
   }
 }
 </style>

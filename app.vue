@@ -19,8 +19,6 @@ const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
 const showAllLabelEntries = useShowAllLabelEntries()
-const { settings } = useUserSettings()
-const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 
 // Eagerly instantiate useEulerAccount at app root so its internal watchers
 // trigger updatePositions() as soon as balances + lens addresses are ready.
@@ -30,7 +28,7 @@ const enableExternalMigrations = computed(() => settings.value.enableAdvancedMod
 useEulerAccount()
 // Start migratable-position discovery from the same app-root lifecycle so the
 // Portfolio Migrate tab can appear from preloaded shared state.
-useExternalMigrationPositions({ enabled: enableExternalMigrations })
+useExternalMigrationPositions()
 
 // Instantiate the batch store at app root so its simulation watchers stay
 // alive across navigation (mirrors useEulerAccount above).

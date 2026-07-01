@@ -6,6 +6,7 @@ import {
   type EulerMigrationTarget,
   type MigrationAuthorizationRequest,
   type MigrationPosition,
+  type PluginPrefetchData,
   type PortfolioBorrowPosition,
   type SecuritizeCollateralVault,
   type SwapQuote,
@@ -110,7 +111,6 @@ const chainId = currentChainId
 
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
-const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 const positionIndex = usePositionIndex()
 const externalSourceId = computed(() => typeof route.query.source === 'string' ? route.query.source : '')
 const isExternalSourceRoute = computed(() => positionIndex === 'external' && !!externalSourceId.value)
@@ -125,7 +125,7 @@ const {
   isLoading: isExternalPositionsLoading,
   error: externalPositionsError,
   load: loadExternalPositions,
-} = useExternalMigrationPositions({ enabled: enableExternalMigrations })
+} = useExternalMigrationPositions()
 const POST_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
 const inboundExternalEulerAccount = shallowRef<Address | null>(null)
 const inboundExternalEulerAccountKey = ref('')
@@ -134,11 +134,13 @@ const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
 const isLoading = ref(false)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
+const isAddingToBatch = ref(false)
 const plan = shallowRef<TransactionPlan | null>(null)
 const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 const inboundExternalPlan = shallowRef<TransactionPlan | null>(null)
 const inboundExternalPreparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 const inboundExternalAuthorizationConnector = ref<string | null>(null)
+const inboundExternalMigrationPreview = shallowRef<InboundExternalMigrationPreview | null>(null)
 
 const externalPosition = computed<ExternalMigrationCandidate | undefined>(() => {
   if (!isExternalSourceRoute.value) return undefined
@@ -1925,7 +1927,6 @@ const effectiveQuoteFetchedAt = computed(() => {
 
 const inboundMigrationDisabledReason = computed(() => {
   if (!isExternalSourceRoute.value) return null
-  if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
   if (!hasActiveSession.value) return 'Connect wallet to migrate'
   if (isExternalPositionsLoading.value) return 'Loading external position'
   if (externalPositionsError.value && !externalPosition.value) return externalPositionsError.value
@@ -1977,6 +1978,70 @@ type PreparedMigrationTenderlySimulation = {
   prepared: TransactionPlanPrepared
   stateOverrides: StateOverride
 }
+
+type InboundExternalMigrationPreview = {
+  key: string
+  input: InboundExternalMigrationInput
+  tenderlySimulation: PreparedMigrationTenderlySimulation
+  calldataPrepared: TransactionPlanPrepared
+  authorizationRequest?: MigrationAuthorizationRequest
+  prefetch?: PluginPrefetchData
+}
+
+let inboundExternalMigrationPreviewRequestId = 0
+let inboundExternalMigrationPreviewPromise: Promise<InboundExternalMigrationPreview> | null = null
+let inboundExternalMigrationPreviewPromiseKey = ''
+const STALE_INBOUND_EXTERNAL_MIGRATION_PREVIEW_ERROR = 'Migration inputs changed while preparing preview'
+
+const swapQuotePreviewKey = (quote: SwapQuote | null | undefined): string => {
+  if (!quote) return 'none'
+  return [
+    quote.tokenIn.address,
+    quote.tokenOut.address,
+    quote.accountIn,
+    quote.accountOut,
+    quote.vaultIn,
+    quote.receiver,
+    quote.amountIn,
+    quote.amountInMax,
+    quote.amountOut,
+    quote.amountOutMin,
+    quote.slippage,
+    selectedQuoteProviderKey(quote),
+  ].join(':')
+}
+
+const selectedQuoteProviderKey = (quote: SwapQuote): string => {
+  const data = quote.providerData as { provider?: string, name?: string } | undefined
+  return data?.provider || data?.name || ''
+}
+
+const inboundExternalMigrationPreviewKey = computed(() => {
+  const source = externalPosition.value
+  const owner = inboundExternalOwner.value
+  const targetCollateral = targetCollateralVault.value
+  if (!isExternalSourceRoute.value || !source || !owner || !targetCollateral || !chainId.value) return ''
+  if (source.debt && !targetDebtVault.value) return ''
+  if (!isSameCollateralAsset.value && !selectedExternalCollateralQuote.value) return ''
+  if (source.debt && !isSameDebtAsset.value && !selectedExternalDebtQuote.value) return ''
+
+  return [
+    chainId.value,
+    normalizeVaultAddress(owner),
+    externalPositionKey.value,
+    source.connectorId,
+    source.id,
+    targetCollateral.address,
+    targetDebtVault.value?.address ?? 'no-debt',
+    externalCollateralAmount.value.toString(),
+    externalDebtAmount.value.toString(),
+    String(slippage.value),
+    externalCollateralSelectedProvider.value ?? '',
+    externalDebtSelectedProvider.value ?? '',
+    swapQuotePreviewKey(selectedExternalCollateralQuote.value),
+    swapQuotePreviewKey(selectedExternalDebtQuote.value),
+  ].join('|')
+})
 
 const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigrationInput> => {
   const source = externalPosition.value
@@ -2072,6 +2137,7 @@ const buildInboundExternalMigrationExecutionPlan = async (
 const buildInboundExternalMigrationCalldataPreview = async (
   input: InboundExternalMigrationInput,
   authorizationRequest: MigrationAuthorizationRequest | undefined,
+  prefetch?: PluginPrefetchData,
 ): Promise<TransactionPlanPrepared> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2094,20 +2160,21 @@ const buildInboundExternalMigrationCalldataPreview = async (
     debtSwapQuote: input.debtSwapQuote,
     operationName: `${input.source.connectorId}ToEulerMigration`,
   })
-  return prepareTransactionPlan(plan, { account: currentPlanAccount(), chainId: migrationChainId })
+  return prepareTransactionPlan(plan, { account: currentPlanAccount(), chainId: migrationChainId, prefetch })
 }
 
 const buildInboundExternalMigrationPlan = async (): Promise<TransactionPlan> =>
   buildInboundExternalMigrationExecutionPlan(await buildInboundExternalMigrationInput())
 
-const buildInboundExternalMigrationTenderlySimulation = async (
+const buildInboundExternalMigrationSimulationResult = async (
   input: InboundExternalMigrationInput,
-): Promise<PreparedMigrationTenderlySimulation> => {
+  authorizationRequest?: MigrationAuthorizationRequest,
+) => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
   }
   const migrationChainId = input.position.chainId
-  const result = await planCrossProtocolMigrationSimulation({
+  return planCrossProtocolMigrationSimulation({
     direction: 'external-to-euler',
     connectorId: input.source.connectorId,
     chainId: migrationChainId,
@@ -2115,17 +2182,109 @@ const buildInboundExternalMigrationTenderlySimulation = async (
     position: input.position,
     positionRef: input.source.ref,
     target: input.eulerTarget,
+    authorizationRequest,
     removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
     operationName: `${input.source.connectorId}ToEulerMigration`,
   })
-  return {
-    plan: result.plan,
-    prepared: await prepareTransactionPlan(result.plan, { account: currentPlanAccount(), chainId: migrationChainId }),
-    stateOverrides: result.stateOverrides,
+}
+
+const prefetchInboundExternalMigrationPlugins = async (
+  plan: TransactionPlan,
+): Promise<PluginPrefetchData | undefined> => {
+  try {
+    return await prefetchPluginData(plan, { account: currentPlanAccount() })
+  }
+  catch (err) {
+    logWarn('externalMigration/prefetchPluginData', err)
+    return undefined
   }
 }
+
+const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternalMigrationPreview> => {
+  const key = inboundExternalMigrationPreviewKey.value
+  if (!key) throw new Error('Migration inputs are incomplete')
+
+  const cached = inboundExternalMigrationPreview.value
+  if (cached?.key === key) return cached
+  if (inboundExternalMigrationPreviewPromise && inboundExternalMigrationPreviewPromiseKey === key) {
+    return inboundExternalMigrationPreviewPromise
+  }
+
+  const requestId = ++inboundExternalMigrationPreviewRequestId
+  inboundExternalMigrationPreviewPromiseKey = key
+  const promise = (async () => {
+    const input = await buildInboundExternalMigrationInput()
+    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
+    const simulationResult = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest)
+    const prefetch = await prefetchInboundExternalMigrationPlugins(simulationResult.plan)
+    const [tenderlyPrepared, calldataPrepared] = await Promise.all([
+      prepareTransactionPlan(simulationResult.plan, {
+        account: currentPlanAccount(),
+        chainId: input.position.chainId,
+        prefetch,
+      }),
+      buildInboundExternalMigrationCalldataPreview(input, authorizationRequest, prefetch),
+    ])
+
+    if (requestId !== inboundExternalMigrationPreviewRequestId || key !== inboundExternalMigrationPreviewKey.value) {
+      throw new Error(STALE_INBOUND_EXTERNAL_MIGRATION_PREVIEW_ERROR)
+    }
+
+    const preview: InboundExternalMigrationPreview = {
+      key,
+      input,
+      tenderlySimulation: {
+        plan: simulationResult.plan,
+        prepared: tenderlyPrepared,
+        stateOverrides: simulationResult.stateOverrides,
+      },
+      calldataPrepared,
+      ...(authorizationRequest ? { authorizationRequest } : {}),
+      ...(prefetch ? { prefetch } : {}),
+    }
+    inboundExternalMigrationPreview.value = preview
+    inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
+    return preview
+  })()
+
+  inboundExternalMigrationPreviewPromise = promise
+  promise.then(
+    () => {
+      if (inboundExternalMigrationPreviewPromise === promise) {
+        inboundExternalMigrationPreviewPromise = null
+        inboundExternalMigrationPreviewPromiseKey = ''
+      }
+    },
+    () => {
+      if (inboundExternalMigrationPreviewPromise === promise) {
+        inboundExternalMigrationPreviewPromise = null
+        inboundExternalMigrationPreviewPromiseKey = ''
+      }
+    },
+  )
+
+  return promise
+}
+
+const clearInboundExternalMigrationPreview = () => {
+  inboundExternalMigrationPreviewRequestId++
+  inboundExternalMigrationPreview.value = null
+  inboundExternalMigrationPreviewPromise = null
+  inboundExternalMigrationPreviewPromiseKey = ''
+}
+
+const warmInboundExternalMigrationPreview = useDebounceFn(async () => {
+  if (!inboundExternalMigrationPreviewKey.value) return
+  try {
+    await prepareInboundExternalMigrationPreview()
+  }
+  catch (err) {
+    if (err instanceof Error && err.message === STALE_INBOUND_EXTERNAL_MIGRATION_PREVIEW_ERROR) return
+    logWarn('externalMigration/preparePreview', err)
+  }
+}, 150)
 
 const targetDebtVaultAddress = computed(() =>
   isExternalSourceRoute.value || typeof route.query.to !== 'string' ? '' : normalizeVaultAddress(route.query.to),
@@ -2190,6 +2349,11 @@ watch([selectedCollateralQuote, selectedDebtQuote], () => {
 watch([selectedExternalCollateralQuote, selectedExternalDebtQuote], () => {
   clearSimulationError()
 })
+watch(inboundExternalMigrationPreviewKey, (key) => {
+  clearInboundExternalMigrationPreview()
+  inboundExternalAuthorizationConnector.value = null
+  if (key) void warmInboundExternalMigrationPreview()
+}, { immediate: true })
 watch(
   [sourceDebtVault, sourceCollateralVault, targetDebtVault, targetCollateralVault],
   ([sourceDebt, sourceCollateral, targetDebt, targetCollateral]) => {
@@ -2471,22 +2635,19 @@ const reviewInboundExternalMigration = async () => {
     inboundExternalPreparedPlan.value = null
     inboundExternalAuthorizationConnector.value = null
     inboundExternalPlan.value = null
-    const input = await buildInboundExternalMigrationInput()
-    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
-    inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
-    const tenderlySimulation = await buildInboundExternalMigrationTenderlySimulation(input)
-    const calldataPrepared = await buildInboundExternalMigrationCalldataPreview(input, authorizationRequest)
+    const preview = await prepareInboundExternalMigrationPreview()
+    inboundExternalAuthorizationConnector.value = preview.authorizationRequest ? preview.input.source.connectorId : null
 
     modal.open(OperationReviewModal, {
       props: {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(authorizationRequest),
-        calldataPrepared,
-        calldataUsesPlaceholderSignatures: !!authorizationRequest,
-        tenderlyPrepared: tenderlySimulation.prepared,
-        tenderlyStateOverrides: tenderlySimulation.stateOverrides,
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest),
+        calldataPrepared: preview.calldataPrepared,
+        calldataUsesPlaceholderSignatures: !!preview.authorizationRequest,
+        tenderlyPrepared: preview.tenderlySimulation.prepared,
+        tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
@@ -2548,11 +2709,9 @@ const addInboundExternalMigrationToBatch = async () => {
   clearSimulationError()
   try {
     inboundExternalAuthorizationConnector.value = null
-    const input = await buildInboundExternalMigrationInput()
-    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
-    inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
-    const tenderlySimulation = await buildInboundExternalMigrationTenderlySimulation(input)
-    const calldataPrepared = await buildInboundExternalMigrationCalldataPreview(input, authorizationRequest)
+    const preview = await prepareInboundExternalMigrationPreview()
+    const input = preview.input
+    inboundExternalAuthorizationConnector.value = preview.authorizationRequest ? input.source.connectorId : null
     const sourceCollateralSymbol = input.source.collateral.symbol
     const sourceDebtSymbol = input.source.debt?.symbol
     const targetCollateral = targetCollateralVault.value
@@ -2569,17 +2728,17 @@ const addInboundExternalMigrationToBatch = async () => {
     await addBatchEntry({
       label: `Migrate ${positionLabel} to Euler`,
       nameOverride: `Migrate ${positionLabel}`,
-      buildPlan: () => Promise.resolve(tenderlySimulation.plan),
+      buildPlan: () => Promise.resolve(preview.tenderlySimulation.plan),
       buildExecutionPlan: () => buildInboundExternalMigrationExecutionPlan(input),
-      stateOverrides: tenderlySimulation.stateOverrides,
+      stateOverrides: preview.tenderlySimulation.stateOverrides,
       subAccount: input.eulerTarget.eulerAccount,
       refreshExternalMigrationPositions: true,
       review: {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(authorizationRequest),
-        displayPlan: calldataPrepared.plan,
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest),
+        displayPlan: preview.calldataPrepared.plan,
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
@@ -2607,49 +2766,55 @@ const addInboundExternalMigrationToBatch = async () => {
 }
 
 const addToBatch = async () => {
-  if (!canAddToBatch.value) return
-  if (isExternalSourceRoute.value) {
-    await addInboundExternalMigrationToBatch()
-    return
+  if (isAddingToBatch.value || !canAddToBatch.value) return
+  isAddingToBatch.value = true
+  try {
+    if (isExternalSourceRoute.value) {
+      await addInboundExternalMigrationToBatch()
+      return
+    }
+    await guardWithPriceImpact(async () => {
+      if (!canAddToBatch.value || !sourceDebtVault.value || !sourceCollateralVault.value) return
+
+      const refinanceInput = buildRefinanceInput({
+        collateralQuote: selectedCollateralQuote.value,
+        debtQuote: selectedDebtQuote.value,
+      })
+      const refinanceAccount = subAccount.value as Address
+      const sourceCollateralSymbol = sourceCollateralVault.value.asset.symbol
+      const sourceDebtSymbol = sourceDebtVault.value.asset.symbol
+      const targetCollateralSymbol = effectiveCollateralVault.value.asset.symbol
+      const targetDebtSymbol = effectiveDebtVault.value.asset.symbol
+      const sourceDebtAsset = sourceDebtVault.value.asset
+      const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
+      const quoteFetchedAt = effectiveQuoteFetchedAt.value
+      const swapReviewInfo = refinanceSwapReviewInfo.value
+      const collateralChanged = hasCollateralChange.value
+      const debtChanged = hasDebtChange.value
+
+      await addBatchEntry({
+        label: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetCollateralSymbol}/${targetDebtSymbol}`,
+        nameOverride: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
+        buildPlan: account => planRefinancePosition({ ...refinanceInput, account }),
+        subAccount: refinanceAccount,
+        review: {
+          type: 'refinance',
+          asset: sourceDebtAsset,
+          amount: debtAmount,
+          quoteFetchedAt,
+          collateralChanged,
+          debtChanged,
+          sourceDebtVault: sourceDebtVault.value.address,
+          sourceCollateralVaults: sourceCollateralVaultAddresses.value,
+          ...swapReviewInfo,
+        },
+      })
+      redirectAfterAdd('/portfolio', { subAccount: refinanceAccount })
+    })
   }
-  await guardWithPriceImpact(async () => {
-    if (!canAddToBatch.value || !sourceDebtVault.value || !sourceCollateralVault.value) return
-
-    const refinanceInput = buildRefinanceInput({
-      collateralQuote: selectedCollateralQuote.value,
-      debtQuote: selectedDebtQuote.value,
-    })
-    const refinanceAccount = subAccount.value as Address
-    const sourceCollateralSymbol = sourceCollateralVault.value.asset.symbol
-    const sourceDebtSymbol = sourceDebtVault.value.asset.symbol
-    const targetCollateralSymbol = effectiveCollateralVault.value.asset.symbol
-    const targetDebtSymbol = effectiveDebtVault.value.asset.symbol
-    const sourceDebtAsset = sourceDebtVault.value.asset
-    const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
-    const quoteFetchedAt = effectiveQuoteFetchedAt.value
-    const swapReviewInfo = refinanceSwapReviewInfo.value
-    const collateralChanged = hasCollateralChange.value
-    const debtChanged = hasDebtChange.value
-
-    await addBatchEntry({
-      label: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetCollateralSymbol}/${targetDebtSymbol}`,
-      nameOverride: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
-      buildPlan: account => planRefinancePosition({ ...refinanceInput, account }),
-      subAccount: refinanceAccount,
-      review: {
-        type: 'refinance',
-        asset: sourceDebtAsset,
-        amount: debtAmount,
-        quoteFetchedAt,
-        collateralChanged,
-        debtChanged,
-        sourceDebtVault: sourceDebtVault.value.address,
-        sourceCollateralVaults: sourceCollateralVaultAddresses.value,
-        ...swapReviewInfo,
-      },
-    })
-    redirectAfterAdd('/portfolio', { subAccount: refinanceAccount })
-  })
+  finally {
+    isAddingToBatch.value = false
+  }
 }
 
 const submit = async () => {
@@ -2906,7 +3071,7 @@ function buildInboundExternalMigrationSignatureSteps(authorizationRequest: Migra
     const permitValue = getTypedDataAuthorizationValue(authorizationRequest)
     return [{
       index: 1,
-      label: 'Sign Aave permit',
+      label: 'Signature: Aave permit',
       isSeparateTx: false,
       assetInfo: migrationStepAssetInfo(sourceCollateral, permitValue ?? sourceCollateral.amount),
     }]
@@ -3110,6 +3275,7 @@ function getOperationVaultAddresses(): string[] {
                   <VaultFormSubmit
                     :disabled="reviewRefinanceDisabled"
                     :loading="isSubmitting || isPreparing"
+                    :add-to-batch-loading="isAddingToBatch"
                     :disabled-reason="disabledReasonInfo?.message"
                     :disabled-reason-variant="disabledReasonInfo?.variant"
                     :can-add-to-batch="canAddToBatch"
@@ -3402,6 +3568,7 @@ function getOperationVaultAddresses(): string[] {
               <VaultFormSubmit
                 :disabled="reviewRefinanceDisabled"
                 :loading="isSubmitting || isPreparing"
+                :add-to-batch-loading="isAddingToBatch"
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :can-add-to-batch="canAddToBatch"
