@@ -5,7 +5,9 @@ import type { UserReward } from '@eulerxyz/euler-v2-sdk'
 
 const owner = '0x1000000000000000000000000000000000000000' as Address
 
-const importUseSdkRewards = async () => {
+const importUseSdkRewards = async (
+  options: { isConnected?: boolean, isSpyMode?: boolean, isPositionsLoading?: boolean } = {},
+) => {
   vi.resetModules()
   const currentChainId = ref(1)
 
@@ -50,7 +52,7 @@ const importUseSdkRewards = async () => {
   }))
   vi.stubGlobal('useEulerAccount', () => ({
     portfolio: ref({ account: { userRewards: [reward, turtleReward, crossChainTurtleReward] } }),
-    isPositionsLoading: ref(false),
+    isPositionsLoading: ref(options.isPositionsLoading ?? false),
     refreshAllPositions,
   }))
   vi.stubGlobal('useEulerAddresses', () => ({
@@ -58,6 +60,10 @@ const importUseSdkRewards = async () => {
   }))
   vi.stubGlobal('useWagmi', () => ({
     address: ref(owner),
+    isConnected: ref(options.isConnected ?? true),
+  }))
+  vi.stubGlobal('useSpyMode', () => ({
+    isSpyMode: ref(options.isSpyMode ?? false),
   }))
   vi.stubGlobal('useEulerSdk', () => ({
     getEulerSdk: vi.fn(async () => ({
@@ -93,6 +99,29 @@ describe('useSdkRewards', () => {
 
     expect(rewards.value).toEqual([reward, turtleReward])
     expect(isRewardsLoading.value).toBe(false)
+  })
+
+  it('does not stay loading without a wallet or spy session', async () => {
+    const { useSdkRewards } = await importUseSdkRewards({
+      isConnected: false,
+      isSpyMode: false,
+      isPositionsLoading: true,
+    })
+
+    const { isRewardsLoading } = useSdkRewards()
+
+    expect(isRewardsLoading.value).toBe(false)
+  })
+
+  it('stays loading while rewards load for an active session', async () => {
+    const { useSdkRewards } = await importUseSdkRewards({
+      isConnected: true,
+      isPositionsLoading: true,
+    })
+
+    const { isRewardsLoading } = useSdkRewards()
+
+    expect(isRewardsLoading.value).toBe(true)
   })
 
   it('updates visible rewards when the selected chain changes', async () => {
