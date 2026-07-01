@@ -395,71 +395,82 @@ const openPositionInformationModal = () => {
           >
             Position {{ subAccountIndex }}
           </div>
-          <div class="flex gap-12 w-full">
-            <AssetAvatar
-              :asset="collateralVault ? [collateralVault.asset, borrowVault.asset] : [borrowVault.asset]"
-              size="40"
-            />
-            <div class="flex-grow min-w-0">
-              <div
-                class="text-content-tertiary text-p3 mb-4 flex items-center gap-4"
-                data-id="data-point"
-                :data-key="positionKey"
-                data-field="name"
-                :data-value="pairName"
-              >
-                <VaultDisplayName
-                  :name="pairName"
-                  :is-unverified="isAnyUnverified"
-                />
-                <span
-                  v-if="isGeoBlocked"
-                  class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                  title="This vault is not available in your region"
+          <div class="flex gap-12 w-full mobile:flex-col">
+            <div class="flex gap-12 min-w-0 flex-1">
+              <AssetAvatar
+                :asset="collateralVault ? [collateralVault.asset, borrowVault.asset] : [borrowVault.asset]"
+                size="40"
+              />
+              <div class="flex-grow min-w-0">
+                <div
+                  class="text-content-tertiary text-p3 mb-4 flex items-center gap-4 min-w-0"
+                  data-id="data-point"
+                  :data-key="positionKey"
+                  data-field="name"
+                  :data-value="pairName"
                 >
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
+                  <VaultDisplayName
+                    :name="pairName"
+                    :is-unverified="isAnyUnverified"
                   />
-                  Restricted
-                </span>
-                <span
-                  v-if="isAnyDeprecated"
-                  class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-                  title="One or more vaults in this position have been deprecated."
+                  <UiHoverPreviewTooltip
+                    v-if="isGeoBlocked"
+                    title="Region restricted"
+                    text="This vault is not available in your region"
+                    placement="top-start"
+                  >
+                    <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5 shrink-0">
+                      <SvgIcon
+                        name="warning"
+                        class="!w-14 !h-14"
+                      />
+                      Restricted
+                    </span>
+                  </UiHoverPreviewTooltip>
+                  <UiHoverPreviewTooltip
+                    v-if="isAnyDeprecated"
+                    title="Deprecated"
+                    text="One or more vaults in this position have been deprecated."
+                    placement="top-start"
+                  >
+                    <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5 shrink-0">
+                      <SvgIcon
+                        name="warning"
+                        class="!w-14 !h-14"
+                      />
+                      Deprecated
+                    </span>
+                  </UiHoverPreviewTooltip>
+                </div>
+                <div
+                  class="text-h5 text-content-primary flex flex-wrap items-center gap-8 min-w-0"
+                  data-id="data-point"
+                  :data-key="positionKey"
+                  data-field="asset-symbols"
+                  :data-value="pairSymbols"
                 >
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
-                  />
-                  Deprecated
-                </span>
-              </div>
-              <div
-                class="text-h5 text-content-primary flex items-center gap-8 min-w-0"
-                data-id="data-point"
-                :data-key="positionKey"
-                data-field="asset-symbols"
-                :data-value="pairSymbols"
-              >
-                <span class="truncate">{{ pairSymbols }}</span>
-                <span class="inline-flex items-center gap-4">
-                  <CorrelatedPairBadge
-                    v-if="isRoeApplicable"
-                    compact
-                    :title="correlatedBadgeTitle"
-                  />
-                  <CorrelatedPairBadge
-                    v-if="isRoeApplicable && actualMultiplierDisplay !== '-'"
-                    compact
-                    :label="actualMultiplierDisplay"
-                    title="Effective multiplier at your LTV."
-                  />
-                </span>
+                  <span class="min-w-0 truncate">{{ pairSymbols }}</span>
+                  <span class="inline-flex items-center gap-4 shrink-0">
+                    <CorrelatedPairBadge
+                      v-if="isRoeApplicable"
+                      compact
+                      :title="correlatedBadgeTitle"
+                    />
+                    <CorrelatedPairBadge
+                      v-if="isRoeApplicable && actualMultiplierDisplay !== '-'"
+                      compact
+                      :label="actualMultiplierDisplay"
+                      title="Effective multiplier at your LTV."
+                    />
+                  </span>
+                </div>
               </div>
             </div>
-            <div class="flex gap-16 items-start shrink-0">
-              <div class="flex flex-col items-end">
+            <div
+              class="flex gap-16 items-start shrink-0 mobile:!grid mobile:w-full mobile:gap-x-12 mobile:border-t mobile:border-line-subtle mobile:pt-12"
+              :class="isRoeApplicable ? 'mobile:grid-cols-2' : 'mobile:grid-cols-1'"
+            >
+              <div class="flex flex-col items-end mobile:items-start mobile:min-w-0">
                 <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                   Net APY
                   <UiModalPreviewTrigger
@@ -475,7 +486,7 @@ const openPositionInformationModal = () => {
                   </UiModalPreviewTrigger>
                 </div>
                 <div
-                  class="text-p2 flex items-center"
+                  class="text-p2 flex items-center mobile:justify-start"
                   data-id="data-point"
                   :data-key="positionKey"
                   data-field="net-apy"
@@ -499,7 +510,7 @@ const openPositionInformationModal = () => {
               </div>
               <div
                 v-if="isRoeApplicable"
-                class="flex flex-col items-end"
+                class="flex flex-col items-end mobile:min-w-0"
               >
                 <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                   ROE
@@ -516,7 +527,7 @@ const openPositionInformationModal = () => {
                   </UiModalPreviewTrigger>
                 </div>
                 <div
-                  class="text-p2 flex items-center"
+                  class="text-p2 flex items-center justify-end"
                   data-id="data-point"
                   :data-key="positionKey"
                   data-field="roe"

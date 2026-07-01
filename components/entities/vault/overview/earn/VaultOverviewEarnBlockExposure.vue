@@ -415,10 +415,10 @@ load()
               <span class="flex items-center gap-4">
                 Exposure cap
                 <span @click.stop.prevent>
-                  <UiFootnote
+                  <UiHoverPreviewTooltip
                     title="Exposure cap"
                     text="The maximum amount that can be exposed to this strategy."
-                    class="footnote-info [--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+                    icon-class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
                   />
                 </span>
               </span>
@@ -428,11 +428,11 @@ load()
                 v-if="isPendingRemoval(row.exposure)"
                 @click.stop.prevent
               >
-                <UiFootnote
+                <UiHoverPreviewTooltip
                   icon="clock"
                   title="Pending removal"
                   :text="getPendingRemovalTooltipText(row.exposure)"
-                  class="footnote-clock [--ui-footnote-icon-color:var(--warning-500)]"
+                  icon-class="!w-14 !h-14 text-warning-500"
                 />
               </span>
               <template v-if="isUnlimitedCap(row.exposure)">

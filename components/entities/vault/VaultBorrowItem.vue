@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
@@ -192,20 +191,15 @@ const borrowApyModalData = computed(() => ({
   },
 }))
 
-const supplyApyModalData = computed(() => {
-  const baseSupply = 'interestRateInfo' in pair.collateral
-    ? getVaultSupplyApy(pair.collateral as EVault)
-    : 0
-  return {
-    props: {
-      lendingAPY: baseSupply,
-      intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
-      intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
-      campaigns: getSupplyRewardCampaigns(pair.collateral.address),
-      rewardVaultAddress: pair.collateral.address,
-    },
-  }
-})
+const supplyApyModalData = computed(() => ({
+  props: {
+    lendingAPY: getVaultSupplyApy(pair.collateral),
+    intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
+    campaigns: getSupplyRewardCampaigns(pair.collateral.address),
+    rewardVaultAddress: pair.collateral.address,
+  },
+}))
 
 const netApyModalData = computed(() => ({
   props: {
@@ -346,8 +340,8 @@ const linkPath = computed(() => ({
         </div>
       </div>
       <div
-        class="col-span-3 grid grid-cols-[repeat(3,112px)] justify-end gap-x-24 pr-16 py-16 pb-12 mobile:!grid mobile:w-full mobile:gap-x-12 mobile:border-t mobile:border-line-subtle mobile:pt-12 mobile:!px-0 mobile:!pb-0"
-        :class="showMaxRoe ? 'mobile:grid-cols-3' : 'mobile:grid-cols-2'"
+        class="col-span-3 grid justify-end gap-x-24 pr-16 py-16 pb-12 mobile:!grid mobile:w-full mobile:gap-x-12 mobile:border-t mobile:border-line-subtle mobile:pt-12 mobile:!px-0 mobile:!pb-0"
+        :class="showMaxRoe ? 'grid-cols-[repeat(3,112px)] mobile:grid-cols-3' : 'grid-cols-[repeat(2,112px)] mobile:grid-cols-2'"
       >
         <div class="flex flex-col items-end mobile:items-start mobile:min-w-0">
           <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center justify-end gap-4 mobile:text-left mobile:justify-start">
@@ -387,8 +381,8 @@ const linkPath = computed(() => ({
           </div>
         </div>
         <div
+          v-if="showMaxRoe"
           class="flex flex-col items-end mobile:items-center mobile:min-w-0"
-          :class="{ 'mobile:!hidden': !showMaxRoe }"
         >
           <div class="text-content-tertiary text-p3 mb-4 text-right mobile:text-center">
             Max multiplier

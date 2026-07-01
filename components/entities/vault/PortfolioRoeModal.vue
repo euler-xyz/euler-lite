@@ -115,11 +115,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Supply ROE
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Supply ROE"
                 text="Supply ROE is the leveraged supply-yield contribution shown relative to your net asset value."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -138,11 +138,11 @@ const handleClose = () => {
                 name="sparks"
               />
               <span>Rewards ROE</span>
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Rewards ROE"
                 text="Rewards ROE is the weighted contribution from active eligible reward campaigns for this position."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -199,11 +199,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Intrinsic ROE
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Intrinsic ROE"
                 text="Intrinsic ROE is the leveraged contribution from asset-native yield, when intrinsic APY is enabled."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>
@@ -217,11 +217,11 @@ const handleClose = () => {
           <div>
             <p class="mb-4 flex items-center gap-4">
               Borrow cost ROE
-              <UiFootnote
+              <UiHoverPreviewTooltip
                 title="Borrow cost ROE"
                 text="Borrow cost ROE is weighted by your debt relative to net asset value, so it reflects the leveraged cost of this position."
-                tooltip-placement="top-start"
-                class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                placement="top-start"
+                icon-class="text-content-tertiary"
               />
             </p>
           </div>

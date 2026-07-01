@@ -123,21 +123,25 @@ watchEffect(() => {
                   v-if="pair.ltv.isLiquidationLTVRamping"
                   @click.stop.prevent
                 >
-                  <UiFootnote
+                  <UiHoverPreviewTooltip
                     title="LTV Ramping"
                     :text="`The Liquidation LTV for this collateral is currently being reduced. Target Liquidation LTV: ${formatNumber(ltvToPercent(pair.ltv.liquidationLTV), 2)}%. Time remaining: ${formatTimeRemaining(pair.ltv.rampTimeRemaining)}.`"
-                    class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
                   />
                 </span>
               </span>
             </template>
             <div class="flex items-center gap-4">
-              <SvgIcon
+              <UiHoverPreviewTooltip
                 v-if="pair.ltv.isLiquidationLTVRamping"
-                name="arrow-top-right"
-                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180"
                 title="Liquidation LTV ramping down"
-              />
+                text="The Liquidation LTV for this collateral is currently being reduced."
+                placement="top-start"
+              >
+                <SvgIcon
+                  name="arrow-top-right"
+                  class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180"
+                />
+              </UiHoverPreviewTooltip>
               <span>{{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}</span>
             </div>
           </VaultOverviewLabelValue>

@@ -26,6 +26,14 @@ describe('chainRegistry', () => {
     expect(getDefiLlamaChainName(999)).toBe('Hyperliquid')
   })
 
+  it('uses MonadScan as the Monad block explorer', () => {
+    const chain = getChainById(143)
+
+    expect(chain?.blockExplorers?.default.name).toBe('MonadScan')
+    expect(chain?.blockExplorers?.default.url).toBe('https://monadscan.com/')
+    expect(getChainIdByName('monad')).toBe(143)
+  })
+
   it('keeps reverse slug lookup pinned to canonical chain ID collisions', () => {
     expect(getChainIdByName('hyperEvm')).toBe(999)
     expect(getChainIdByName('hyperliquid')).toBe(999)

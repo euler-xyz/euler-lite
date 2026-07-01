@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { isEVault, type EVault, type EulerEarn, type EulerEarnStrategyInfo, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, isEVault, type EVault, type EulerEarn, type EulerEarnStrategyInfo, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import {
@@ -18,7 +18,8 @@ const route = useRoute()
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
+const { getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
+const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 const { get: registryGet } = useVaultRegistry()
 const {
   load: loadOpenInterest,
@@ -27,7 +28,10 @@ const {
   isLoaded: isOpenInterestLoaded,
 } = useCollateralOpenInterest()
 
-const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
+const supplyApyBreakdown = computed(() => computeSupplyApyBreakdown(vault, viewer.value))
+const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
+const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
+const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vault.address))
 interface StrategyAllocationUsd {
   valueUsd: number
   valueState: ExposureValueState
@@ -163,10 +167,11 @@ watchEffect(async () => {
 
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: getVaultSupplyApy(vault),
-    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
+    intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(vault.address),
+    campaigns: settings.value.enableRewardsApy ? getSupplyRewardCampaigns(vault.address) : [],
+    totalSupplyAPY: supplyApyTotal.value,
     rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',
   },
@@ -221,7 +226,7 @@ const supplyApyModalData = computed(() => ({
         </template>
         <span class="flex items-center gap-4">
           <UiModalPreviewTrigger
-            v-if="hasSupplyRewards(vault.address)"
+            v-if="hasRewards"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY rewards breakdown"
@@ -232,7 +237,7 @@ const supplyApyModalData = computed(() => ({
               data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(getVaultSupplyApy(vault) + rewardSupplyAPY) }}%
+          {{ formatNumber(supplyApyTotal) }}%
         </span>
       </VaultOverviewLabelValue>
     </div>
