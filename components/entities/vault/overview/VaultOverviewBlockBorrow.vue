@@ -16,6 +16,7 @@ const {
   getOpenInterestForVault,
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 
 const onCollateralClick = (address: string) => {
@@ -52,7 +53,9 @@ const allCollateralPairs = computed(() =>
   ),
 )
 
-const openInterestUsdByCollateral = computed(() => getOpenInterestForVault(vault.address))
+const openInterestUsdByCollateral = computed<Record<string, number>>(() =>
+  isOpenInterestEnabled.value ? getOpenInterestForVault(vault.address) : {},
+)
 const collateralGroups = computed(() =>
   getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
 )
@@ -65,7 +68,9 @@ const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollatera
     .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
   return entry?.[1] ?? 0
 }
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
 const formatExposurePercent = (valueUsd: number) =>
   !hasLiveExposureData.value
     ? '-'
@@ -74,14 +79,14 @@ const formatLiveExposureUsd = (valueUsd: number) =>
   hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
 
 watchEffect(() => {
-  if (!vault.address) return
+  if (!vault.address || !isOpenInterestEnabled.value) return
   void loadOpenInterest()
 })
 </script>
 
 <template>
   <VaultOverviewAccordionSection
-    v-if="collateralGroups.length"
+    v-if="isOpenInterestEnabled && collateralGroups.length"
     title="Exposure"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"

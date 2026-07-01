@@ -40,6 +40,7 @@ const {
   getOpenInterestForVault,
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 
 // Each AttributeRow renders as a *table column*; each vault renders as a *table row*.
@@ -49,10 +50,12 @@ interface AttributeColumn {
 }
 
 const attributeColumns = computed<AttributeColumn[]>(() =>
-  filterAttributeRowsByBadDebtAvailability(props.data.rows, props.showBadDebtColumn).map(attribute => ({
-    attribute,
-    cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache, props.badDebtCache, props.showBadDebtColumn),
-  })),
+  filterAttributeRowsByBadDebtAvailability(props.data.rows, props.showBadDebtColumn)
+    .filter(attribute => isOpenInterestEnabled.value || attribute.id !== 'exposure')
+    .map(attribute => ({
+      attribute,
+      cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache, props.badDebtCache, props.showBadDebtColumn),
+    })),
 )
 
 const getHooksModalData = (vault: AttributeMatrixColumn) => ({
@@ -65,8 +68,11 @@ const canShowHooksModal = (vault: AttributeMatrixColumn, cell: AttributeCell) =>
   cell.hookable && isVaultType(vault.vault)
 
 const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault)
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
 const exposureValueState = computed<ExposureValueState>(() => {
+  if (!isOpenInterestEnabled.value) return 'unavailable'
   if (hasLiveExposureData.value) return 'ready'
   if (hasOpenInterestError.value) return 'unavailable'
   return 'loading'
@@ -123,6 +129,7 @@ const getVaultExposureValueState = (vault: AttributeMatrixColumn): ExposureValue
 
 watchEffect(() => {
   if (props.view !== 'stats') return
+  if (!isOpenInterestEnabled.value) return
   if (!props.data.columns.some(column => isEVault(column.vault))) return
   void loadOpenInterest()
 })

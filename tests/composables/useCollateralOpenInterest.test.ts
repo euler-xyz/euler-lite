@@ -24,6 +24,56 @@ describe('useCollateralOpenInterest', () => {
     vi.unstubAllGlobals()
   })
 
+  it('does not request open interest when v3 is disabled', async () => {
+    const chainId = ref(1)
+    const states = new Map<string, Ref<unknown>>()
+    const fetchMock = vi.fn()
+
+    vi.stubGlobal('computed', computed)
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
+    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: false }))
+    vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
+      if (!states.has(key)) states.set(key, ref(init()))
+      return states.get(key) as Ref<T>
+    })
+    vi.stubGlobal('$fetch', fetchMock)
+
+    const { useCollateralOpenInterest } = await import('~/composables/useCollateralOpenInterest')
+    const openInterest = useCollateralOpenInterest()
+
+    await openInterest.load()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(openInterest.isOpenInterestEnabled.value).toBe(false)
+    expect(openInterest.isLoading.value).toBe(false)
+    expect(openInterest.hasError.value).toBe(false)
+    expect(openInterest.isLoaded.value).toBe(false)
+  })
+
+  it('marks enabled fetch failures as errors', async () => {
+    const chainId = ref(1)
+    const states = new Map<string, Ref<unknown>>()
+
+    vi.stubGlobal('computed', computed)
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
+    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: true }))
+    vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
+      if (!states.has(key)) states.set(key, ref(init()))
+      return states.get(key) as Ref<T>
+    })
+    vi.stubGlobal('$fetch', vi.fn(() => Promise.reject(new Error('backend down'))))
+
+    const { useCollateralOpenInterest } = await import('~/composables/useCollateralOpenInterest')
+    const openInterest = useCollateralOpenInterest()
+
+    await openInterest.load()
+
+    expect(openInterest.isLoading.value).toBe(false)
+    expect(openInterest.hasError.value).toBe(true)
+    expect(openInterest.isLoaded.value).toBe(false)
+    expect(openInterest.data.value).toEqual({})
+  })
+
   it('ignores stale overlapping chain loads', async () => {
     const chainId = ref(1)
     const states = new Map<string, Ref<unknown>>()
@@ -34,6 +84,7 @@ describe('useCollateralOpenInterest', () => {
 
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
+    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: true }))
     vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
       if (!states.has(key)) states.set(key, ref(init()))
       return states.get(key) as Ref<T>

@@ -25,6 +25,7 @@ const {
   hasError,
   isLoaded: isOpenInterestLoaded,
   isLoading,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 
 const chartData = shallowRef<ChartData<'doughnut', number[], string> | null>(null)
@@ -32,7 +33,8 @@ const chartOptions = shallowRef<ChartOptions<'doughnut'> | null>(null)
 const vaultDataKey = computed(() => normalizeOpenInterestAddress(vault.address))
 
 const canLoadOpenInterest = computed(() =>
-  vault.collaterals.some(ltv => ltv.currentLiquidationLTV > 0 || ltv.borrowLTV > 0),
+  isOpenInterestEnabled.value
+  && vault.collaterals.some(ltv => ltv.currentLiquidationLTV > 0 || ltv.borrowLTV > 0),
 )
 
 const getCollateralInput = (address: string, valueUsd: number): OpenInterestCollateralInput => {
@@ -49,7 +51,7 @@ const getCollateralInput = (address: string, valueUsd: number): OpenInterestColl
 }
 
 const openInterestModel = computed(() => {
-  const exposure = isOpenInterestLoaded.value ? getOpenInterestForVault(vault.address) : {}
+  const exposure: Record<string, number> = isOpenInterestLoaded.value ? getOpenInterestForVault(vault.address) : {}
   const collaterals = Object.entries(exposure).map(([address, valueUsd]) =>
     getCollateralInput(address, valueUsd),
   )

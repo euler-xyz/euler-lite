@@ -9,14 +9,26 @@ let activeRequestId = 0
 
 export const useCollateralOpenInterest = () => {
   const { chainId } = useEulerAddresses()
+  const { enableV3Backend } = useEnvConfig()
   const data = useState<Record<string, Record<string, number>>>('collateral-open-interest:data', () => ({}))
   const loadedChainId = useState<string | null>('collateral-open-interest:chain-id', () => null)
   const isLoading = useState('collateral-open-interest:is-loading', () => false)
   const hasError = useState('collateral-open-interest:has-error', () => false)
   const currentChainId = computed(() => chainId.value ? String(chainId.value) : '')
-  const isLoaded = computed(() => !!currentChainId.value && loadedChainId.value === currentChainId.value && !hasError.value)
+  const isOpenInterestEnabled = computed(() => enableV3Backend)
+  const isLoaded = computed(() =>
+    isOpenInterestEnabled.value
+    && !!currentChainId.value
+    && loadedChainId.value === currentChainId.value
+    && !hasError.value,
+  )
 
   const load = async () => {
+    if (!isOpenInterestEnabled.value) {
+      isLoading.value = false
+      hasError.value = false
+      return
+    }
     const chainIdToLoad = currentChainId.value
     if (!chainIdToLoad) return
     if (loadedChainId.value === chainIdToLoad) return
@@ -62,6 +74,7 @@ export const useCollateralOpenInterest = () => {
     hasError,
     isLoaded,
     isLoading,
+    isOpenInterestEnabled,
     load,
     getOpenInterestForVault,
   }

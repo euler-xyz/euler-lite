@@ -29,6 +29,7 @@ const {
   getOpenInterestForVault,
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
@@ -64,13 +65,16 @@ const collateralExposureGroups = computed(() => {
     getOpenInterestForVault(vault.address),
   )
 })
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
 const hasUnavailableExposureSplit = computed(() =>
   hasLiveExposureData.value
   && priceValues.value.totalSupplyState === 'ready'
   && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
 )
 const exposureValueState = computed<ExposureValueState>(() => {
+  if (!isOpenInterestEnabled.value) return 'unavailable'
   if (hasOpenInterestError.value) return 'unavailable'
   if (priceValues.value.totalSupplyState === 'unavailable') return 'unavailable'
   if (hasUnavailableExposureSplit.value) return 'unavailable'
@@ -90,7 +94,7 @@ const exposureDisplayItems = computed(() => {
 })
 
 watchEffect(() => {
-  if (!isBorrowable.value) return
+  if (!isBorrowable.value || !isOpenInterestEnabled.value) return
   void loadOpenInterest()
 })
 
@@ -123,7 +127,7 @@ const statsGridCols = computed(() => {
   cols.push('1fr') // Total supply
   if (isBorrowable.value) {
     cols.push('1fr') // Available liquidity
-    cols.push('1fr') // Exposure
+    if (isOpenInterestEnabled.value) cols.push('1fr') // Exposure
     cols.push('1fr') // Utilization
   }
   if (isConnected.value) cols.push('1fr') // In wallet
@@ -361,7 +365,7 @@ watchEffect(async () => {
         </div>
       </div>
       <div
-        v-if="isBorrowable"
+        v-if="isBorrowable && isOpenInterestEnabled"
         class="flex flex-col flex-1 mobile:!hidden"
         :class="isConnected ? 'items-center' : 'items-end text-right'"
       >
@@ -463,7 +467,7 @@ watchEffect(async () => {
         </div>
       </div>
       <div
-        v-if="isBorrowable"
+        v-if="isBorrowable && isOpenInterestEnabled"
         class="flex w-full justify-between"
       >
         <div class="flex-1">

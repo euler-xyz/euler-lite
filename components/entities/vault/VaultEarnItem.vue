@@ -33,6 +33,7 @@ const {
   getOpenInterestForVault,
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
@@ -101,7 +102,9 @@ const getStrategyMarketSource = (strategyVault: EVault) => {
     },
   }
 }
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
 const isStrategyAllocationUsdLoaded = computed(() =>
   vault.strategies.every((strategy) => {
     const strategyVault = getStrategyVault(strategy)
@@ -133,6 +136,7 @@ const hasUnavailableExposureSplit = computed(() => {
   })
 })
 const exposureValueState = computed<ExposureValueState>(() => {
+  if (!isOpenInterestEnabled.value) return 'unavailable'
   if (!isStrategyAllocationUsdLoaded.value) return 'loading'
   if (hasOpenInterestError.value) return 'unavailable'
   if (hasUnavailableStrategyAllocationUsd.value) return 'unavailable'
@@ -164,7 +168,7 @@ const exposureDisplayItems = computed(() =>
 )
 
 watchEffect(() => {
-  if (!vault.strategies.length) return
+  if (!vault.strategies.length || !isOpenInterestEnabled.value) return
   void loadOpenInterest()
 })
 
@@ -218,7 +222,7 @@ const statsGridCols = computed(() => {
   if (enableEntityBranding) cols.push('1fr')
   cols.push('1fr') // Total supply
   cols.push('1fr') // Available liquidity
-  cols.push('1fr') // Exposure
+  if (isOpenInterestEnabled.value) cols.push('1fr') // Exposure
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
 })
@@ -400,6 +404,7 @@ const supplyApyModalData = computed(() => ({
         </div>
       </div>
       <div
+        v-if="isOpenInterestEnabled"
         class="flex flex-col flex-1 mobile:!hidden"
         :class="isConnected ? 'items-center' : 'items-end text-right'"
       >
@@ -474,7 +479,10 @@ const supplyApyModalData = computed(() => ({
           >-</div>
         </div>
       </div>
-      <div class="flex w-full justify-between">
+      <div
+        v-if="isOpenInterestEnabled"
+        class="flex w-full justify-between"
+      >
         <div class="text-content-tertiary text-p3">
           Exposure
         </div>
