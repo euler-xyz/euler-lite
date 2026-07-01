@@ -8,13 +8,13 @@ import { VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from 
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 const isBorrowable = computed(() => isVaultBorrowable(vault))
-const { getVaultBadDebt, isBadDebtLoaded, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoaded, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 
 const supplyApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(vault),
@@ -77,11 +77,11 @@ watchEffect(async () => {
 })
 
 watchEffect(() => {
-  if (isBorrowable.value) void loadBadDebtForChain()
+  if (isBorrowable.value && isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 const badDebtDisplay = computed(() => {
-  if (!isBorrowable.value) return null
+  if (!isBorrowable.value || !isBadDebtEnabled.value) return null
   const badDebt = getVaultBadDebt(vault.address)
   if (badDebt) return formatBadDebtOverviewValue(badDebt, totalBorrowedUsd.value)
   if (isBadDebtLoading.value) return '...'
@@ -90,123 +90,122 @@ const badDebtDisplay = computed(() => {
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Statistics
-    </p>
-    <div class="flex flex-col items-start gap-24">
-      <VaultOverviewLabelValue
-        label="Total supply"
-        :value="totalSupplyDisplay"
-        orientation="horizontal"
-      />
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        label="Total borrowed"
-        :value="totalBorrowedDisplay"
-        orientation="horizontal"
-      />
-      <VaultOverviewLabelValue
-        v-if="badDebtDisplay"
-        label="Bad debt"
-        :value="badDebtDisplay"
-        orientation="horizontal"
-      />
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        label="Available liquidity"
-        :value="availableLiquidityDisplay"
-        orientation="horizontal"
-      />
-      <VaultOverviewLabelValue
-        orientation="horizontal"
-      >
-        <template #label>
-          <span class="flex items-center gap-4">
-            Supply APY
-            <UiModalPreviewTrigger
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show supply APY breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
-                name="info-circle"
-                data-modal-trigger="supply-apy"
-              />
-            </UiModalPreviewTrigger>
-          </span>
-        </template>
+  <VaultOverviewAccordionSection
+    title="Statistics"
+    :default-open="defaultOpen"
+    content-class="flex flex-col items-start gap-24"
+  >
+    <VaultOverviewLabelValue
+      label="Total supply"
+      :value="totalSupplyDisplay"
+      orientation="horizontal"
+    />
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      label="Total borrowed"
+      :value="totalBorrowedDisplay"
+      orientation="horizontal"
+    />
+    <VaultOverviewLabelValue
+      v-if="badDebtDisplay"
+      label="Bad debt"
+      :value="badDebtDisplay"
+      orientation="horizontal"
+    />
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      label="Available liquidity"
+      :value="availableLiquidityDisplay"
+      orientation="horizontal"
+    />
+    <VaultOverviewLabelValue
+      orientation="horizontal"
+    >
+      <template #label>
         <span class="flex items-center gap-4">
+          Supply APY
           <UiModalPreviewTrigger
-            v-if="hasSupplyRewards(vault.address)"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
-            aria-label="Show supply APY rewards breakdown"
+            aria-label="Show supply APY breakdown"
           >
             <SvgIcon
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
+              class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+              name="info-circle"
               data-modal-trigger="supply-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(supplyApyWithRewards) }}%
         </span>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        orientation="horizontal"
-      >
-        <template #label>
-          <span class="flex items-center gap-4">
-            Borrow APY
-            <UiModalPreviewTrigger
-              :component="VaultBorrowApyModal"
-              :modal-data="borrowApyModalData"
-              aria-label="Show borrow APY breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
-                name="info-circle"
-                data-modal-trigger="borrow-apy"
-              />
-            </UiModalPreviewTrigger>
-          </span>
-        </template>
+      </template>
+      <span class="flex items-center gap-4">
+        <UiModalPreviewTrigger
+          v-if="hasSupplyRewards(vault.address)"
+          :component="VaultSupplyApyModal"
+          :modal-data="supplyApyModalData"
+          aria-label="Show supply APY rewards breakdown"
+        >
+          <SvgIcon
+            class="!w-20 !h-20 text-accent-500 cursor-pointer"
+            name="sparks"
+            data-modal-trigger="supply-apy"
+          />
+        </UiModalPreviewTrigger>
+        {{ formatNumber(supplyApyWithRewards) }}%
+      </span>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      orientation="horizontal"
+    >
+      <template #label>
         <span class="flex items-center gap-4">
+          Borrow APY
           <UiModalPreviewTrigger
-            v-if="hasBorrowRewards(vault.address)"
             :component="VaultBorrowApyModal"
             :modal-data="borrowApyModalData"
-            aria-label="Show borrow APY rewards breakdown"
+            aria-label="Show borrow APY breakdown"
           >
             <SvgIcon
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
+              class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+              name="info-circle"
               data-modal-trigger="borrow-apy"
             />
           </UiModalPreviewTrigger>
-          {{ formatNumber(borrowApyWithRewards) }}%
         </span>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        orientation="horizontal"
-      >
-        <template #label>
-          <span class="flex items-center gap-4">
-            Utilization
-            <VaultWarningIcon :warning="utilisationWarning" />
-          </span>
-        </template>
-        <div class="flex gap-4 items-center">
-          {{ compactNumber(utilization, 2, 2) }}%
-          <UiRadialProgress
-            :value="utilization"
-            :max="100"
+      </template>
+      <span class="flex items-center gap-4">
+        <UiModalPreviewTrigger
+          v-if="hasBorrowRewards(vault.address)"
+          :component="VaultBorrowApyModal"
+          :modal-data="borrowApyModalData"
+          aria-label="Show borrow APY rewards breakdown"
+        >
+          <SvgIcon
+            class="!w-20 !h-20 text-accent-500 cursor-pointer"
+            name="sparks"
+            data-modal-trigger="borrow-apy"
           />
-        </div>
-      </VaultOverviewLabelValue>
-    </div>
-  </div>
+        </UiModalPreviewTrigger>
+        {{ formatNumber(borrowApyWithRewards) }}%
+      </span>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      orientation="horizontal"
+    >
+      <template #label>
+        <span class="flex items-center gap-4">
+          Utilization
+          <VaultWarningIcon :warning="utilisationWarning" />
+        </span>
+      </template>
+      <div class="flex gap-4 items-center">
+        {{ compactNumber(utilization, 2, 2) }}%
+        <UiRadialProgress
+          :value="utilization"
+          :max="100"
+        />
+      </div>
+    </VaultOverviewLabelValue>
+  </VaultOverviewAccordionSection>
 </template>
