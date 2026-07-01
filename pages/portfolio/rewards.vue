@@ -18,6 +18,7 @@ const sortedMerklRewards = computed(() => sortRewardsByUsd(rewards.value.filter(
 const sortedBrevisRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'brevis')))
 const sortedFuulRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'fuul')))
 const sortedTurtleRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'turtle')))
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 </script>
 
 <template>
@@ -43,17 +44,11 @@ const sortedTurtleRewards = computed(() => sortRewardsByUsd(rewards.value.filter
             v-else-if="sortedMerklRewards.length === 0"
             class="flex flex-1 min-h-[100px] justify-center items-center py-32"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-              <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-                <SvgIcon name="search" />
-              </div>
-              <template v-if="isConnected || isSpyMode">
-                You don't have rewards yet
-              </template>
-              <template v-else>
-                Connect your wallet to see your rewards
-              </template>
-            </div>
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
           </div>
           <div
             v-else
@@ -84,17 +79,11 @@ const sortedTurtleRewards = computed(() => sortRewardsByUsd(rewards.value.filter
             v-else-if="sortedBrevisRewards.length === 0"
             class="flex flex-1 min-h-[100px] justify-center items-center py-32"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-              <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-                <SvgIcon name="search" />
-              </div>
-              <template v-if="isConnected || isSpyMode">
-                You don't have rewards yet
-              </template>
-              <template v-else>
-                Connect your wallet to see your rewards
-              </template>
-            </div>
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
           </div>
           <div
             v-else
@@ -125,17 +114,11 @@ const sortedTurtleRewards = computed(() => sortRewardsByUsd(rewards.value.filter
             v-else-if="sortedFuulRewards.length === 0"
             class="flex flex-1 min-h-[100px] justify-center items-center py-32"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-              <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-                <SvgIcon name="search" />
-              </div>
-              <template v-if="isConnected || isSpyMode">
-                You don't have rewards yet
-              </template>
-              <template v-else>
-                Connect your wallet to see your rewards
-              </template>
-            </div>
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
           </div>
           <div
             v-else
@@ -166,17 +149,11 @@ const sortedTurtleRewards = computed(() => sortRewardsByUsd(rewards.value.filter
             v-else-if="sortedTurtleRewards.length === 0"
             class="flex flex-1 min-h-[100px] justify-center items-center py-32"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-              <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-                <SvgIcon name="search" />
-              </div>
-              <template v-if="isConnected || isSpyMode">
-                You don't have rewards yet
-              </template>
-              <template v-else>
-                Connect your wallet to see your rewards
-              </template>
-            </div>
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
           </div>
           <div
             v-else
@@ -208,17 +185,11 @@ const sortedTurtleRewards = computed(() => sortRewardsByUsd(rewards.value.filter
           v-else-if="locks.length === 0"
           class="flex flex-1 min-h-[100px] justify-center items-center"
         >
-          <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-            <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-              <SvgIcon name="search" />
-            </div>
-            <template v-if="isConnected || isSpyMode">
-              You don't have locks yet
-            </template>
-            <template v-else>
-              Connect your wallet to see your locks
-            </template>
-          </div>
+          <PortfolioEmptyState
+            :active="hasActiveSession"
+            active-text="You don't have locks yet"
+            inactive-text="Connect your wallet to see your locks"
+          />
         </div>
         <div
           v-else

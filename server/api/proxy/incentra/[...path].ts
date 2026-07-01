@@ -22,6 +22,7 @@ import {
 } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
+import { safeErrorLogFields, safePathTemplate, safeUrlLogFields, searchKeys } from '~/server/utils/observability'
 import {
   createProxyCache,
   createProxyInFlight,
@@ -60,16 +61,28 @@ const readUpstreamBase = (): string => {
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
   if (method !== 'POST') {
+    logger.warn({ ctx: 'incentra-proxy', method, reason: 'invalid-method' }, 'request rejected')
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
 
   const requestUrl = getRequestURL(event)
   const idx = requestUrl.pathname.indexOf(PROXY_PREFIX)
   if (idx < 0) {
+    logger.warn({ ctx: 'incentra-proxy', method, reason: 'invalid-path' }, 'request rejected')
     throw createError({ statusCode: 404, statusMessage: 'Not an incentra proxy path' })
   }
   const rest = stripLeadingSlash(requestUrl.pathname.slice(idx + PROXY_PREFIX.length))
   if (!isAllowedIncentraProxyRequest(method, rest, requestUrl.searchParams)) {
+    logger.warn(
+      {
+        ctx: 'incentra-proxy',
+        method,
+        reason: 'path-not-allowed',
+        pathTemplate: safePathTemplate(`/${rest}`),
+        searchKeys: searchKeys(requestUrl.searchParams),
+      },
+      'request rejected',
+    )
     throw createError({ statusCode: 404, statusMessage: 'Incentra path not allowed' })
   }
 
@@ -97,7 +110,15 @@ export default defineEventHandler(async (event) => {
     return res.body
   }
   catch (err) {
-    logger.warn({ ctx: 'incentra-proxy', target, err }, 'upstream failed')
+    logger.warn(
+      {
+        ctx: 'incentra-proxy',
+        ...safeUrlLogFields(target),
+        bodyBytes: body?.length,
+        err: safeErrorLogFields(err),
+      },
+      'upstream failed',
+    )
     throw createError({ statusCode: 502, statusMessage: 'Incentra upstream unavailable' })
   }
 })

@@ -205,7 +205,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     amount.value = ''
     direction.value = SwapperMode.TARGET_DEBT
     const currentDebt = getCurrentDebt()
-    let amountNano = 0n
+    let amountNano: bigint
     try {
       amountNano = valueToNano(debtAmount.value || '0', borrowVault.value?.asset.decimals)
     }
@@ -485,7 +485,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       debtPercent.value = 0
       return
     }
-    let amountNano = 0n
+    let amountNano: bigint
     try {
       amountNano = valueToNano(debtAmount.value || '0', borrowVault.value.asset.decimals)
     }

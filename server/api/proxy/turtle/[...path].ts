@@ -17,6 +17,7 @@ import {
 } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
+import { safeErrorLogFields, safeUrlLogFields } from '~/server/utils/observability'
 import {
   createProxyCache,
   createProxyInFlight,
@@ -90,7 +91,14 @@ export default defineEventHandler(async (event) => {
     return res.body
   }
   catch (err) {
-    logger.warn({ ctx: 'turtle-proxy', target, err }, 'upstream failed')
+    logger.warn(
+      {
+        ctx: 'turtle-proxy',
+        ...safeUrlLogFields(target),
+        err: safeErrorLogFields(err),
+      },
+      'upstream failed',
+    )
     throw createError({ statusCode: 502, statusMessage: 'Turtle upstream unavailable' })
   }
 })

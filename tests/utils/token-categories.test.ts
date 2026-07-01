@@ -27,6 +27,7 @@ describe('token category helpers', () => {
     expect(shareTokenCategory(['hype'], ['HYPE'])).toBe(true)
     expect(shareTokenCategory(['bnb'], ['BNB'])).toBe(true)
     expect(getSharedTokenCategory([['usd'], ['USD']])).toBe('usd')
+    expect(shareTokenCategory(['pt'], ['PT'])).toBe(false)
     expect(shareTokenCategory(['other'], ['other'])).toBe(false)
     expect(shareTokenCategory(['stablecoin'], ['stablecoin'])).toBe(false)
     expect(shareTokenCategory(['usd'], ['eth'])).toBe(false)
@@ -42,9 +43,11 @@ describe('token category helpers', () => {
       { tag: 'avax', label: 'AVAX' },
       { tag: 'hype', label: 'HYPE' },
       { tag: 'bnb', label: 'BNB' },
+      { tag: 'pt', label: 'PT' },
     ])
     expect(toTokenCategoryFilterValue(' USD ')).toBe('category:usd')
     expect(fromTokenCategoryFilterValue('category:usd')).toBe('usd')
+    expect(fromTokenCategoryFilterValue('category:pt')).toBe('pt')
     expect(fromTokenCategoryFilterValue('category:stablecoin')).toBeNull()
     expect(fromTokenCategoryFilterValue('0x0000000000000000000000000000000000000001')).toBeNull()
   })
@@ -54,6 +57,7 @@ describe('token category helpers', () => {
       ['0x0000000000000000000000000000000000000001', ['usd']],
       ['0x0000000000000000000000000000000000000002', ['eth']],
       ['0x0000000000000000000000000000000000000003', ['other']],
+      ['0x0000000000000000000000000000000000000004', ['pt']],
     ])
     const getTags = (address: string) => tags.get(address.toLowerCase())
 
@@ -78,6 +82,13 @@ describe('token category helpers', () => {
         getTags,
       ),
     ).toBe(false)
+    expect(
+      tokenAddressMatchesCategoryFilter(
+        '0x0000000000000000000000000000000000000004',
+        'category:pt',
+        getTags,
+      ),
+    ).toBe(true)
   })
 
   it('requires one shared allowlisted category across a whole token set', () => {
@@ -102,6 +113,8 @@ describe('token category helpers', () => {
       ['0x000000000000000000000000000000000000000b', ['HYPE']],
       ['0x000000000000000000000000000000000000000c', ['bnb']],
       ['0x000000000000000000000000000000000000000d', ['BNB']],
+      ['0x000000000000000000000000000000000000000e', ['pt']],
+      ['0x000000000000000000000000000000000000000f', ['PT']],
     ])
     const getTags = (address: string) => tags.get(address.toLowerCase())
 
@@ -195,6 +208,22 @@ describe('token category helpers', () => {
         getTags,
       ),
     ).toBe('BNB')
+    expect(
+      areTokenAddressesCorrelatedByTags(
+        '0x000000000000000000000000000000000000000e',
+        '0x000000000000000000000000000000000000000f',
+        getTags,
+      ),
+    ).toBe(false)
+    expect(
+      getTokenAddressesCorrelationCategoryLabel(
+        [
+          '0x000000000000000000000000000000000000000e',
+          '0x000000000000000000000000000000000000000f',
+        ],
+        getTags,
+      ),
+    ).toBeUndefined()
   })
 
   it('treats an all-same address set as correlated even without category tags', () => {
