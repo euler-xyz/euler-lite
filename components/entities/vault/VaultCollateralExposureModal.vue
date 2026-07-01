@@ -42,6 +42,14 @@ const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollatera
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
+const modalTitle = computed(() =>
+  isOpenInterestEnabled.value ? 'Exposure' : 'Collateral exposure',
+)
+const description = computed(() =>
+  isOpenInterestEnabled.value
+    ? 'Make sure you\'re comfortable with the live exposure assets and configured collateral vaults before supplying.'
+    : 'Make sure you\'re comfortable with the configured collateral vaults and LTVs before supplying.',
+)
 const formatExposurePercent = (valueUsd: number) =>
   !hasLiveExposureData.value
     ? '-'
@@ -75,16 +83,16 @@ watchEffect(() => {
 
 <template>
   <BaseModalWrapper
-    title="Exposure"
+    :title="modalTitle"
     @close="$emit('close')"
   >
     <div
-      v-if="isOpenInterestEnabled && collateralGroups.length > 0"
+      v-if="collateralGroups.length > 0"
       class="flex flex-col gap-12"
     >
       <p class="text-p3 text-content-secondary mb-4">
         Deposits in this vault can be borrowed.
-        Make sure you're comfortable with the exposure assets and vaults listed below before supplying.
+        {{ description }}
       </p>
       <div
         v-for="pair in collateralPairs"
@@ -107,6 +115,7 @@ watchEffect(() => {
         </div>
         <div class="flex flex-col gap-12 pt-12">
           <VaultOverviewLabelValue
+            v-if="isOpenInterestEnabled"
             label="Live exposure"
             orientation="horizontal"
           >

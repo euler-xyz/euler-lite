@@ -71,6 +71,14 @@ const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollatera
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
+const sectionTitle = computed(() =>
+  isOpenInterestEnabled.value ? 'Exposure' : 'Collateral exposure',
+)
+const sectionDescription = computed(() =>
+  isOpenInterestEnabled.value
+    ? 'Review live borrow exposure and configured collateral vaults before supplying.'
+    : 'Review configured collateral vaults and LTVs before supplying.',
+)
 const formatExposurePercent = (valueUsd: number) =>
   !hasLiveExposureData.value
     ? '-'
@@ -86,15 +94,15 @@ watchEffect(() => {
 
 <template>
   <VaultOverviewAccordionSection
-    v-if="isOpenInterestEnabled && collateralGroups.length"
-    title="Exposure"
+    v-if="collateralGroups.length"
+    :title="sectionTitle"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >
     <div>
       <p class="text-content-secondary">
         Deposits in this vault can be borrowed.
-        Review live borrow exposure and configured collateral vaults before supplying.
+        {{ sectionDescription }}
       </p>
     </div>
 
@@ -111,6 +119,7 @@ watchEffect(() => {
         />
         <div class="mt-12 grid grid-cols-1 gap-12">
           <VaultOverviewLabelValue
+            v-if="isOpenInterestEnabled"
             label="Live exposure"
             orientation="horizontal"
           >
