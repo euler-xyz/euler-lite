@@ -41,7 +41,7 @@ interface AttributeColumn {
 const attributeColumns = computed<AttributeColumn[]>(() =>
   filterAttributeRowsByBadDebtAvailability(props.data.rows, props.showBadDebtColumn).map(attribute => ({
     attribute,
-    cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache, props.badDebtCache),
+    cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache, props.badDebtCache, props.showBadDebtColumn),
   })),
 )
 
