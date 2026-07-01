@@ -660,6 +660,7 @@ export interface AttributeRow {
     usd: VaultUsdCacheEntry | undefined,
     apy: VaultApyCacheEntry | undefined,
     badDebt: VaultBadDebtCacheEntry | undefined,
+    isBadDebtLoaded: boolean,
   ) => AttributeCell
 }
 
@@ -898,9 +899,13 @@ export const STATS_ROWS: AttributeRow[] = [
   {
     id: 'badDebt',
     label: 'Bad debt',
-    getValue: (vault, usd, _apy, badDebt) => {
+    getValue: (vault, usd, _apy, badDebt, isBadDebtLoaded) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
-      if (!badDebt) return NA_CELL
+      if (!badDebt) {
+        return isBadDebtLoaded
+          ? { display: '$0', numeric: 0, kind: 'text' }
+          : NA_CELL
+      }
       return {
         display: formatBadDebtUsd(badDebt),
         numeric: badDebt.badDebtUsd,
@@ -1030,10 +1035,12 @@ export const buildAttributeRowCells = (
   usdCache: Map<string, VaultUsdCacheEntry>,
   apyCache?: Map<string, VaultApyCacheEntry>,
   badDebtCache?: Map<string, VaultBadDebtCacheEntry>,
+  isBadDebtLoaded = false,
 ): AttributeCell[] =>
   columns.map(col => row.getValue(
     col.vault,
     usdCache.get(col.address),
     apyCache?.get(col.address),
     badDebtCache?.get(col.address),
+    isBadDebtLoaded,
   ))

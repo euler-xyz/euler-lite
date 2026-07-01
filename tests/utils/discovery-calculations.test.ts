@@ -358,6 +358,26 @@ describe('attribute stats matrix', () => {
     expect(cell.hint).toContain('25% of total borrows')
     expect(cell.hint).toContain('2 underwater accounts')
   })
+
+  it('shows zero bad debt for borrowable vaults when loaded data has no row', () => {
+    const vault = {
+      ...makeVault('0xNoBadDebt', []),
+      totalAssets: 1000n,
+      totalBorrowed: 500n,
+    } as unknown as EVault
+    const columns = [{ address: vault.address.toLowerCase(), symbol: 'TST', assetAddress: vault.asset.address, vault, isExternal: false }]
+    const row = STATS_ROWS.find(row => row.id === 'badDebt')!
+
+    const loadingCell = buildAttributeRowCells(row, columns, new Map(), undefined, new Map(), false)[0]
+    const loadedCell = buildAttributeRowCells(row, columns, new Map(), undefined, new Map(), true)[0]
+
+    expect(loadingCell.display).toBe('—')
+    expect(loadedCell).toMatchObject({
+      display: '$0',
+      numeric: 0,
+      kind: 'text',
+    })
+  })
 })
 
 describe('getMarketEntities', () => {
