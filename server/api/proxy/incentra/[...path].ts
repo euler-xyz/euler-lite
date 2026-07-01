@@ -22,7 +22,7 @@ import {
 } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
-import { errorStatus, safePathTemplate, safeUrlLogFields, searchKeys } from '~/server/utils/observability'
+import { safeErrorLogFields, safePathTemplate, safeUrlLogFields, searchKeys } from '~/server/utils/observability'
 import {
   createProxyCache,
   createProxyInFlight,
@@ -115,8 +115,7 @@ export default defineEventHandler(async (event) => {
         ctx: 'incentra-proxy',
         ...safeUrlLogFields(target),
         bodyBytes: body?.length,
-        status: errorStatus(err),
-        err,
+        err: safeErrorLogFields(err),
       },
       'upstream failed',
     )

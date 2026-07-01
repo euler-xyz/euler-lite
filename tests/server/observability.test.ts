@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { safePathTemplate, safeUrlLogFields, searchKeys, summarizeSdkIssue, urlHost } from '~/server/utils/observability'
+import { safeErrorLogFields, safePathTemplate, safeUrlLogFields, searchKeys, summarizeSdkIssue, urlHost } from '~/server/utils/observability'
 
 describe('server observability helpers', () => {
   it('summarizes SDK issues without raw nested diagnostics', () => {
@@ -44,5 +44,23 @@ describe('server observability helpers', () => {
 
   it('does not throw or leak raw malformed URLs in log metadata', () => {
     expect(safeUrlLogFields('not a url / secret-key')).toEqual({ searchKeys: [] })
+  })
+
+  it('summarizes proxy errors without URL-bearing messages', () => {
+    const cause = new TypeError('Failed to parse URL from not a url / secret-key')
+    const error = Object.assign(new Error('Failed to parse URL from https://rpc.example/private-token'), {
+      code: 'ERR_INVALID_URL',
+      cause,
+    })
+
+    const fields = safeErrorLogFields(error)
+
+    expect(fields).toEqual({
+      name: 'Error',
+      code: 'ERR_INVALID_URL',
+      causeName: 'TypeError',
+    })
+    expect(JSON.stringify(fields)).not.toContain('private-token')
+    expect(JSON.stringify(fields)).not.toContain('secret-key')
   })
 })

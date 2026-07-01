@@ -35,7 +35,7 @@ import {
 } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
-import { safeUrlLogFields } from '~/server/utils/observability'
+import { safeErrorLogFields, safeUrlLogFields } from '~/server/utils/observability'
 import {
   createProxyCache,
   createProxyInFlight,
@@ -119,7 +119,7 @@ export default defineEventHandler(async (event) => {
         ctx: 'subgraph-proxy',
         chainId,
         ...safeUrlLogFields(target),
-        err,
+        err: safeErrorLogFields(err),
       },
       'upstream failed',
     )

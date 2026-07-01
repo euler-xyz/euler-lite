@@ -76,7 +76,7 @@ describe('/api/proxy/subgraph route', () => {
 
   it('returns a sanitized 502 when the configured upstream URL is malformed', async () => {
     process.env.SUBGRAPH_URL_1 = 'not a url'
-    mocks.forwardProxied.mockRejectedValueOnce(new TypeError('Invalid URL'))
+    mocks.forwardProxied.mockRejectedValueOnce(new TypeError('Failed to parse URL from not a url'))
 
     await expect(handler(makeEvent('1'))).rejects.toMatchObject({
       statusCode: 502,
@@ -91,6 +91,9 @@ describe('/api/proxy/subgraph route', () => {
         ctx: 'subgraph-proxy',
         chainId: 1,
         searchKeys: [],
+        err: {
+          name: 'TypeError',
+        },
       }),
       'upstream failed',
     )
