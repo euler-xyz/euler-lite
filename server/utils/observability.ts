@@ -6,7 +6,6 @@ const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 
 export interface SafeUrlLogFields {
   upstreamHost?: string
-  pathTemplate?: string
   searchKeys: string[]
 }
 
@@ -48,7 +47,6 @@ export function safeUrlLogFields(value: unknown): SafeUrlLogFields {
     const url = new URL(value)
     return {
       upstreamHost: url.host,
-      pathTemplate: safePathTemplate(url.pathname),
       searchKeys: searchKeys(url.searchParams),
     }
   }

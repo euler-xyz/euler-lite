@@ -28,9 +28,18 @@ describe('server observability helpers', () => {
     expect(searchKeys(url.searchParams)).toEqual(['chain_id', 'user_address'])
     expect(safeUrlLogFields(url.toString())).toEqual({
       upstreamHost: 'api.example',
-      pathTemplate: '/private/key/users/:address/rewards',
       searchKeys: ['chain_id', 'user_address'],
     })
+  })
+
+  it('does not include path-embedded provider tokens in URL log metadata', () => {
+    const fields = safeUrlLogFields('https://provider.example/v2/secret-token/rpc?key=x')
+
+    expect(fields).toEqual({
+      upstreamHost: 'provider.example',
+      searchKeys: ['key'],
+    })
+    expect(JSON.stringify(fields)).not.toContain('secret-token')
   })
 
   it('does not throw or leak raw malformed URLs in log metadata', () => {
