@@ -27,6 +27,7 @@ const {
   getOpenInterestForVault,
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 
 const supplyApyBreakdown = computed(() => computeSupplyApyBreakdown(vault, viewer.value))
@@ -61,7 +62,9 @@ const getStrategyMarketSource = (strategyVault: EVault) => {
   }
 }
 
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
 const isStrategyAllocationUsdLoaded = computed(() =>
   vault.strategies.every((strategy) => {
     const strategyVault = getStrategyVault(strategy)
@@ -93,6 +96,7 @@ const hasUnavailableExposureSplit = computed(() => {
   })
 })
 const exposureValueState = computed<ExposureValueState>(() => {
+  if (!isOpenInterestEnabled.value) return 'unavailable'
   if (!vault.strategies.length) return 'ready'
   if (!isStrategyAllocationUsdLoaded.value) return 'loading'
   if (hasOpenInterestError.value) return 'unavailable'
@@ -124,7 +128,7 @@ const exposureDisplayItems = computed(() =>
 )
 
 watchEffect(() => {
-  if (!vault.strategies.length) return
+  if (!vault.strategies.length || !isOpenInterestEnabled.value) return
   void loadOpenInterest()
 })
 
@@ -221,13 +225,15 @@ const supplyApyModalData = computed(() => ({
           <span class="text-p2 text-content-primary">
             {{ vault.strategies.length }}
           </span>
-          <span class="h-16 w-1 shrink-0 bg-line-subtle" />
-          <VaultExposureSummary
-            :items="exposureDisplayItems"
-            :value-state="exposureValueState"
-            :max-visible="5"
-            avatar-size="20"
-          />
+          <template v-if="isOpenInterestEnabled">
+            <span class="h-16 w-1 shrink-0 bg-line-subtle" />
+            <VaultExposureSummary
+              :items="exposureDisplayItems"
+              :value-state="exposureValueState"
+              :max-visible="5"
+              avatar-size="20"
+            />
+          </template>
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue

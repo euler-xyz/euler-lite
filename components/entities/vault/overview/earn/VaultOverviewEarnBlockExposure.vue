@@ -38,6 +38,7 @@ const {
   getOpenInterestForVault,
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 const { isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { settings } = useUserSettings()
@@ -181,6 +182,7 @@ const getStrategyMarketSource = (strategyVault: EVault) => {
 
 const getStrategyExposureValueState = (strategyVault: EVault | undefined): ExposureValueState => {
   if (!strategyVault) return 'unavailable'
+  if (!isOpenInterestEnabled.value) return 'unavailable'
 
   const key = strategyVault.address.toLowerCase()
   if (hasOpenInterestError.value) return 'unavailable'
@@ -224,7 +226,7 @@ watch(isMarketDataResolved, () => {
 })
 
 watchEffect(() => {
-  if (!exposureRows.value.length) return
+  if (!exposureRows.value.length || !isOpenInterestEnabled.value) return
   void loadOpenInterest()
 })
 
@@ -392,6 +394,7 @@ load()
             </template>
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
+            v-if="isOpenInterestEnabled"
             label="Exposure"
             orientation="horizontal"
             data-list="earn-exposure-strategy"

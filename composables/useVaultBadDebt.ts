@@ -66,11 +66,17 @@ const fetchBadDebtRows = async (
 export const useVaultBadDebt = () => {
   const { chainId } = useEulerAddresses()
   const envConfig = useEnvConfig()
+  const isBadDebtEnabled = computed(() => envConfig.enableV3Backend)
 
   const loadBadDebtForChain = async (
     targetChainId = chainId.value,
     { force = false }: { force?: boolean } = {},
   ) => {
+    if (!isBadDebtEnabled.value) {
+      setChainLoading(targetChainId, false)
+      setChainError(targetChainId, null)
+      return
+    }
     if (!force && badDebtByChain.value.has(targetChainId) && !errorByChain.value.has(targetChainId)) return
     const existing = inFlight.get(targetChainId)
     if (existing) return existing
@@ -101,16 +107,17 @@ export const useVaultBadDebt = () => {
   ): VaultBadDebtCacheEntry | undefined =>
     badDebtByChain.value.get(targetChainId)?.get(vaultAddress.toLowerCase())
 
-  const isBadDebtLoading = computed(() => loadingChains.value.has(chainId.value))
-  const badDebtError = computed(() => errorByChain.value.get(chainId.value))
+  const isBadDebtLoading = computed(() => isBadDebtEnabled.value && loadingChains.value.has(chainId.value))
+  const badDebtError = computed(() => isBadDebtEnabled.value ? errorByChain.value.get(chainId.value) : undefined)
   const isBadDebtLoaded = computed(() =>
-    badDebtByChain.value.has(chainId.value) && !errorByChain.value.has(chainId.value),
+    isBadDebtEnabled.value && badDebtByChain.value.has(chainId.value) && !errorByChain.value.has(chainId.value),
   )
 
   return {
     badDebtByChain,
     badDebtError,
     getVaultBadDebt,
+    isBadDebtEnabled,
     isBadDebtLoaded,
     isBadDebtLoading,
     loadBadDebtForChain,

@@ -14,7 +14,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns, hasSupplyRewards, hasBorrowRewards } = useRewardsApy()
 const isBorrowable = computed(() => isVaultBorrowable(vault))
-const { getVaultBadDebt, isBadDebtLoaded, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoaded, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 
 const supplyApyWithRewards = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(vault),
@@ -77,11 +77,11 @@ watchEffect(async () => {
 })
 
 watchEffect(() => {
-  if (isBorrowable.value) void loadBadDebtForChain()
+  if (isBorrowable.value && isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 const badDebtDisplay = computed(() => {
-  if (!isBorrowable.value) return null
+  if (!isBorrowable.value || !isBadDebtEnabled.value) return null
   const badDebt = getVaultBadDebt(vault.address)
   if (badDebt) return formatBadDebtOverviewValue(badDebt, totalBorrowedUsd.value)
   if (isBadDebtLoading.value) return '...'

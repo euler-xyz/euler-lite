@@ -30,6 +30,7 @@ const {
   getOpenInterestForVault,
   hasError: hasOpenInterestError,
   isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
 } = useCollateralOpenInterest()
 
 type VaultPropertyBadge = Extract<VaultTypeBadge, 'private' | 'accessControl' | 'governanceLimited' | 'cyclicalNote'>
@@ -58,13 +59,16 @@ const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
 const hasBorrowSideExposure = computed(() => isVaultBorrowable(vault))
-const hasLiveExposureData = computed(() => isOpenInterestLoaded.value && !hasOpenInterestError.value)
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
 const hasUnavailableExposureSplit = computed(() =>
   hasLiveExposureData.value
   && totalSupplyState.value === 'ready'
   && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
 )
 const exposureValueState = computed<ExposureValueState>(() => {
+  if (!isOpenInterestEnabled.value) return 'unavailable'
   if (hasOpenInterestError.value) return 'unavailable'
   if (totalSupplyState.value === 'unavailable') return 'unavailable'
   if (hasUnavailableExposureSplit.value) return 'unavailable'
@@ -144,7 +148,7 @@ watchEffect(async () => {
 })
 
 watchEffect(() => {
-  if (!hasBorrowSideExposure.value) return
+  if (!hasBorrowSideExposure.value || !isOpenInterestEnabled.value) return
   void loadOpenInterest()
 })
 </script>
@@ -266,7 +270,7 @@ watchEffect(() => {
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
-        v-if="hasBorrowSideExposure"
+        v-if="hasBorrowSideExposure && isOpenInterestEnabled"
         label="Exposure"
       >
         <VaultExposureSummary
