@@ -827,6 +827,7 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Swap collateral"

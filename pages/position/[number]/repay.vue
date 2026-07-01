@@ -589,6 +589,7 @@ watch(formTab, () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       :loading="isLoading || isPositionsLoading"
