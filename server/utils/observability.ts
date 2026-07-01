@@ -6,8 +6,14 @@ const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 
 export interface SafeUrlLogFields {
   upstreamHost?: string
-  pathTemplate?: string
   searchKeys: string[]
+}
+
+export interface SafeErrorLogFields {
+  name: string
+  status?: number
+  code?: string | number
+  causeName?: string
 }
 
 export function hashIdentifier(value: unknown): string | undefined {
@@ -48,7 +54,6 @@ export function safeUrlLogFields(value: unknown): SafeUrlLogFields {
     const url = new URL(value)
     return {
       upstreamHost: url.host,
-      pathTemplate: safePathTemplate(url.pathname),
       searchKeys: searchKeys(url.searchParams),
     }
   }
@@ -65,6 +70,27 @@ export function errorStatus(error: unknown): number | undefined {
   const status = (error as { status?: unknown, statusCode?: unknown }).status
     ?? (error as { status?: unknown, statusCode?: unknown }).statusCode
   return typeof status === 'number' && Number.isFinite(status) ? status : undefined
+}
+
+const errorCode = (error: unknown): string | number | undefined => {
+  if (!error || typeof error !== 'object') return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' || typeof code === 'number' ? code : undefined
+}
+
+const errorCauseName = (error: unknown): string | undefined => {
+  if (!error || typeof error !== 'object') return undefined
+  const cause = (error as { cause?: unknown }).cause
+  return cause instanceof Error ? cause.name : undefined
+}
+
+export function safeErrorLogFields(error: unknown): SafeErrorLogFields {
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    ...(errorStatus(error) !== undefined ? { status: errorStatus(error) } : {}),
+    ...(errorCode(error) !== undefined ? { code: errorCode(error) } : {}),
+    ...(errorCauseName(error) !== undefined ? { causeName: errorCauseName(error) } : {}),
+  }
 }
 
 export function summarizeSdkIssue(issue: unknown): Record<string, unknown> {

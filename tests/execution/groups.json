@@ -36,14 +36,6 @@
       ]
     },
     {
-      "id": "swap-collateral",
-      "label": "Open borrow position and swap collateral",
-      "scenarios": [
-        "borrow-open-position-execute",
-        "position-swap-collateral-execute"
-      ]
-    },
-    {
       "id": "swap-and-repay",
       "label": "Open borrow position and repay through wallet swap",
       "scenarios": [

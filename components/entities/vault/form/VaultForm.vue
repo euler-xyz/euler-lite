@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ title?: string, description?: string, loading?: boolean, back?: boolean, backFallback?: string, pageScroll?: boolean }>()
+const props = defineProps<{ title?: string, description?: string, loading?: boolean, back?: boolean, backFallback?: string, backAlwaysFallback?: boolean, pageScroll?: boolean }>()
 
 const formClasses = computed(() => [
   'flex flex-col mobile:min-h-[calc(100dvh-100px)] laptop:px-16',
@@ -28,6 +28,7 @@ const contentClasses = computed(() => [
           v-if="back"
           class="tablet:hidden"
           :fallback="backFallback"
+          :always-fallback="backAlwaysFallback"
         />
         <h1
           v-if="title"

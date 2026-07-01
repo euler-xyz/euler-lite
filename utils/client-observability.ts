@@ -80,6 +80,19 @@ function stableHash(input: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
+function clientPayloadFingerprint(payload: ClientObservabilityPayload): string {
+  return stableHash(JSON.stringify({
+    event: payload.event,
+    flow: payload.flow,
+    phase: payload.phase,
+    routeTemplate: payload.routeTemplate,
+    chainId: payload.chainId,
+    name: payload.name,
+    message: payload.message,
+    kind: payload.error?.kind,
+  }))
+}
+
 function errorCode(error: unknown): number | string | undefined {
   let current = error
   const seen = new WeakSet<object>()
@@ -151,16 +164,7 @@ export function normalizeClientObservabilityPayload(
   }
   addAllowlistedFields(payload, fields as unknown as Record<string, unknown>)
   addErrorSummary(payload, error)
-  payload.fingerprint = stableHash(JSON.stringify({
-    event: payload.event,
-    flow: payload.flow,
-    phase: payload.phase,
-    routeTemplate: payload.routeTemplate,
-    chainId: payload.chainId,
-    name: payload.name,
-    message: payload.message,
-    kind: payload.error?.kind,
-  }))
+  payload.fingerprint = clientPayloadFingerprint(payload)
 
   return payload
 }
@@ -193,6 +197,8 @@ export function sanitizeClientObservabilityInput(input: unknown): ClientObservab
       ...(typeof err.causeName === 'string' ? { causeName: truncate(err.causeName, 80) } : {}),
     }
   }
+
+  payload.fingerprint = clientPayloadFingerprint(payload)
 
   return payload
 }

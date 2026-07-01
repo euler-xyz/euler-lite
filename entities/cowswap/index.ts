@@ -3,8 +3,8 @@ export * from './types'
 export * from './quote-utils'
 
 export {
-  buildClosePositionQuoteAppData,
   buildCollateralSwapQuoteAppData,
+  buildClosePositionQuoteAppData,
   buildOpenPositionQuoteAppData,
   cancelCowSwapOrder,
   type CowSwapPermitCancellation,

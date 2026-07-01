@@ -15,7 +15,7 @@ import { fetchWithTimeout } from './fetchWithTimeout'
 import { createTtlCache } from './cache'
 import { createInFlightDedup, type InFlightDedup } from '~/utils/in-flight'
 import { logger } from './logger'
-import { errorStatus, safeUrlLogFields } from './observability'
+import { safeErrorLogFields, safeUrlLogFields } from './observability'
 
 export interface ExternalProxyCache {
   get: (key: string) => string | undefined
@@ -111,8 +111,7 @@ export async function forwardProxied(args: ProxyForwardArgs): Promise<ProxyForwa
         {
           ctx,
           ...safeUrlLogFields(target),
-          status: errorStatus(err),
-          err: (err as Error).message,
+          err: safeErrorLogFields(err),
         },
         'serving stale on upstream failure',
       )

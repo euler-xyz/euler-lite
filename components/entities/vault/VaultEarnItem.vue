@@ -1,22 +1,40 @@
 <script setup lang="ts">
-import { computeSupplyApyBreakdown, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, isEVault, type EVault, type EulerEarn, type EulerEarnStrategyInfo, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
-import { isVaultRecentlyAdded, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
+import { getEarnVaultDescription, getProductByVault, getProductKeyByVault, isVaultRecentlyAdded } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import {
+  getCollateralExposureGroups,
+  getCollateralExposurePairs,
+} from '~/utils/vault/collateral-exposure'
+import {
+  buildAllocatedVaultExposureDisplayItems,
+  hasMissingUtilizedExposureSplit,
+  mergeVaultExposureDisplayItems,
+  type ExposureValueState,
+} from '~/utils/vault/exposure-display'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
+const route = useRoute()
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
-const { isVerifiedVault } = useVaultRegistry()
+const { get: registryGet, isVerifiedVault } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
+} = useCollateralOpenInterest()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const entityName = computed(() => {
@@ -34,6 +52,13 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { viewer } = useApyVisibility()
 const { hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+interface StrategyAllocationUsd {
+  valueUsd: number
+  valueState: ExposureValueState
+}
+
+const strategyAllocationUsdByAddress = ref<Map<string, StrategyAllocationUsd>>(new Map())
+let strategyAllocationLoadId = 0
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
@@ -58,6 +83,119 @@ const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const displayName = computed(() => product.name || vault.shares.name)
 const description = computed(() => getEarnVaultDescription(vault.address))
+const getStrategyVault = (strategy: EulerEarnStrategyInfo): EVault | undefined => {
+  if (strategy.vault && isEVault(strategy.vault)) return strategy.vault as EVault
+  const entry = registryGet(strategy.address)
+  return entry?.vault && isEVault(entry.vault) ? entry.vault as EVault : undefined
+}
+const getStrategyMarketSource = (strategyVault: EVault) => {
+  const marketKey = getProductKeyByVault(strategyVault.address)
+  if (!marketKey) return undefined
+
+  const marketName = getProductByVault(strategyVault.address).name || strategyVault.asset.symbol
+  return {
+    label: marketName,
+    to: {
+      name: 'explore-market',
+      params: { market: marketKey },
+      query: { network: route.query.network },
+    },
+  }
+}
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
+const isStrategyAllocationUsdLoaded = computed(() =>
+  vault.strategies.every((strategy) => {
+    const strategyVault = getStrategyVault(strategy)
+    return !strategyVault || strategyAllocationUsdByAddress.value.has(strategy.address.toLowerCase())
+  }),
+)
+const hasUnavailableStrategyAllocationUsd = computed(() =>
+  [...strategyAllocationUsdByAddress.value.values()].some(allocation => allocation.valueState === 'unavailable'),
+)
+const getStrategyCollateralGroups = (strategyVault: EVault) =>
+  getCollateralExposureGroups(
+    getCollateralExposurePairs(
+      strategyVault,
+      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    ),
+    getOpenInterestForVault(strategyVault.address),
+  )
+const hasUnavailableExposureSplit = computed(() => {
+  if (!hasLiveExposureData.value || !isStrategyAllocationUsdLoaded.value) return false
+
+  return vault.strategies.some((strategy) => {
+    const strategyVault = getStrategyVault(strategy)
+    if (!strategyVault) return false
+
+    const allocation = strategyAllocationUsdByAddress.value.get(strategy.address.toLowerCase())
+    if (!allocation || allocation.valueState !== 'ready' || allocation.valueUsd <= 0) return false
+
+    return hasMissingUtilizedExposureSplit(getStrategyCollateralGroups(strategyVault), strategyVault.utilization)
+  })
+})
+const exposureValueState = computed<ExposureValueState>(() => {
+  if (!isOpenInterestEnabled.value) return 'unavailable'
+  if (!isStrategyAllocationUsdLoaded.value) return 'loading'
+  if (hasOpenInterestError.value) return 'unavailable'
+  if (hasUnavailableStrategyAllocationUsd.value) return 'unavailable'
+  if (hasUnavailableExposureSplit.value) return 'unavailable'
+  if (!isOpenInterestLoaded.value) return 'loading'
+  return 'ready'
+})
+const strategyExposureItems = computed(() =>
+  exposureValueState.value === 'ready'
+    ? vault.strategies.flatMap((strategy) => {
+        const strategyVault = getStrategyVault(strategy)
+        if (!strategyVault) return []
+
+        const allocation = strategyAllocationUsdByAddress.value.get(strategy.address.toLowerCase())
+        if (!allocation) return []
+
+        return buildAllocatedVaultExposureDisplayItems({
+          collateralGroups: getStrategyCollateralGroups(strategyVault),
+          totalExposureUsd: allocation.valueUsd,
+          idleAsset: strategyVault.asset,
+          utilization: strategyVault.utilization,
+          idleSource: getStrategyMarketSource(strategyVault),
+        })
+      })
+    : [],
+)
+const exposureDisplayItems = computed(() =>
+  mergeVaultExposureDisplayItems(strategyExposureItems.value),
+)
+
+watchEffect(() => {
+  if (!vault.strategies.length || !isOpenInterestEnabled.value) return
+  void loadOpenInterest()
+})
+
+watchEffect(async () => {
+  const loadId = ++strategyAllocationLoadId
+  const results = await Promise.all(vault.strategies.map(async (strategy) => {
+    const strategyVault = getStrategyVault(strategy)
+    if (!strategyVault) return null
+
+    const price = await formatAssetValue(strategy.allocatedAssets, strategyVault, 'off-chain')
+    return {
+      address: strategy.address.toLowerCase(),
+      valueUsd: price.hasPrice ? price.usdValue : 0,
+      valueState: price.hasPrice ? 'ready' : 'unavailable',
+    }
+  }))
+  if (loadId !== strategyAllocationLoadId) return
+
+  strategyAllocationUsdByAddress.value = new Map(
+    results
+      .filter((result): result is { address: string } & StrategyAllocationUsd => Boolean(result))
+      .map(result => [result.address, {
+        valueUsd: result.valueUsd,
+        valueState: result.valueState,
+      }]),
+  )
+})
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
   totalSupply: '-',
@@ -84,7 +222,7 @@ const statsGridCols = computed(() => {
   if (enableEntityBranding) cols.push('1fr')
   cols.push('1fr') // Total supply
   cols.push('1fr') // Available liquidity
-  cols.push('1fr') // Strategies
+  if (isOpenInterestEnabled.value) cols.push('1fr') // Exposure
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
 })
@@ -266,20 +404,26 @@ const supplyApyModalData = computed(() => ({
         </div>
       </div>
       <div
+        v-if="isOpenInterestEnabled"
         class="flex flex-col flex-1 mobile:!hidden"
         :class="isConnected ? 'items-center' : 'items-end text-right'"
       >
         <div class="text-content-tertiary text-p3 mb-4">
-          Allocates into
+          Exposure
         </div>
         <div
-          class="text-p2 text-content-primary"
+          class="flex min-w-0 items-center justify-end"
           data-id="data-point"
           :data-key="vault.address.toLowerCase()"
-          data-field="allocates-into"
-          :data-value="vault.strategies.length"
+          data-field="exposure"
+          :data-value="exposureDisplayItems.map(item => item.label ?? item.asset.symbol).join(',')"
         >
-          {{ vault.strategies.length }} {{ vault.strategies.length === 1 ? 'strategy' : 'strategies' }}
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+          />
         </div>
       </div>
       <div class="flex flex-col flex-1 items-end text-right mobile:!hidden">
@@ -335,12 +479,21 @@ const supplyApyModalData = computed(() => ({
           >-</div>
         </div>
       </div>
-      <div class="flex w-full justify-between">
+      <div
+        v-if="isOpenInterestEnabled"
+        class="flex w-full justify-between"
+      >
         <div class="text-content-tertiary text-p3">
-          Allocates into
+          Exposure
         </div>
-        <div class="text-p2 text-content-primary">
-          {{ vault.strategies.length }} {{ vault.strategies.length === 1 ? 'strategy' : 'strategies' }}
+        <div class="flex min-w-0 items-center justify-end text-right">
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+            placement="top-start"
+          />
         </div>
       </div>
       <div

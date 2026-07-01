@@ -557,7 +557,7 @@ async function preflightSwapApi({ swapApiUrl, chainId }) {
     response = await fetch(endpoint)
   }
   catch (error) {
-    throw new Error(`Swap API preflight failed: ${String(error?.message ?? error)}`)
+    throw new Error(`Swap API preflight failed: ${String(error?.message ?? error)}`, { cause: error })
   }
 
   if (!response.ok) {
@@ -1231,7 +1231,7 @@ function attachNetworkRecorder(page, network) {
     const request = response.request()
     if (!shouldCaptureUrl(response.url()) && !ids.has(request)) return
     const id = ids.get(request) ?? nextId++
-    let body = null
+    let body
     try {
       const text = await response.text()
       body = parseCapturedBody(text, response.url())

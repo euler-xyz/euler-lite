@@ -70,6 +70,27 @@ describe('client observability payloads', () => {
     expect(JSON.stringify(payload)).not.toContain('private-rpc')
   })
 
+  it('fingerprints sanitized server input after preserving error details', () => {
+    const first = sanitizeClientObservabilityInput({
+      source: 'client',
+      event: 'tx_execute_failed',
+      fingerprint: 'client-sampled',
+      message: 'first rpc failure',
+      error: { kind: 'rpc-http', name: 'HttpRequestError', shortMessage: 'HTTP request failed', isTransport: true },
+    })
+    const second = sanitizeClientObservabilityInput({
+      source: 'client',
+      event: 'tx_execute_failed',
+      fingerprint: 'client-sampled',
+      message: 'second rpc failure',
+      error: { kind: 'rpc-timeout', name: 'TimeoutError', shortMessage: 'Timed out', isTransport: true },
+    })
+
+    expect(first?.fingerprint).toMatch(/^[0-9a-f]{8}$/)
+    expect(second?.fingerprint).toMatch(/^[0-9a-f]{8}$/)
+    expect(first?.fingerprint).not.toBe(second?.fingerprint)
+  })
+
   it('rejects forged error kind values from client input', () => {
     const payload = sanitizeClientObservabilityInput({
       source: 'client',

@@ -1,16 +1,23 @@
 <script setup lang="ts">
 import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
-import { getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
-import { formatNumber } from '~/utils/string-utils'
+import { compactNumber, formatCompactUsdValue, formatNumber } from '~/utils/string-utils'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const { get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
+} = useCollateralOpenInterest()
 
 const onCollateralClick = (address: string) => {
   emits('vault-click', address)
@@ -45,40 +52,82 @@ const allCollateralPairs = computed(() =>
     },
   ),
 )
+
+const openInterestUsdByCollateral = computed<Record<string, number>>(() =>
+  isOpenInterestEnabled.value ? getOpenInterestForVault(vault.address) : {},
+)
+const collateralGroups = computed(() =>
+  getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
+)
+const totalOpenInterestUsd = computed(() =>
+  collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
+const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
+const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
+  const entry = Object.entries(openInterestUsdByCollateral.value)
+    .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
+  return entry?.[1] ?? 0
+}
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
+const sectionTitle = computed(() =>
+  isOpenInterestEnabled.value ? 'Exposure' : 'Collateral exposure',
+)
+const sectionDescription = computed(() =>
+  isOpenInterestEnabled.value
+    ? 'Review live borrow exposure and configured collateral vaults before supplying.'
+    : 'Review configured collateral vaults and LTVs before supplying.',
+)
+const formatExposurePercent = (valueUsd: number) =>
+  !hasLiveExposureData.value
+    ? '-'
+    : totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
+const formatLiveExposureUsd = (valueUsd: number) =>
+  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
+
+watchEffect(() => {
+  if (!vault.address || !isOpenInterestEnabled.value) return
+  void loadOpenInterest()
+})
 </script>
 
 <template>
-  <div
-    v-if="allCollateralPairs.length"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+  <VaultOverviewAccordionSection
+    v-if="collateralGroups.length"
+    :title="sectionTitle"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-24"
   >
     <div>
-      <p class="text-h3 text-content-primary mb-12">
-        Collateral exposure
-      </p>
       <p class="text-content-secondary">
         Deposits in this vault can be borrowed.
-        Please make sure you're comfortable accepting the collaterals
-        listed in the table below before supplying.
+        {{ sectionDescription }}
       </p>
     </div>
 
     <div class="flex flex-col gap-12">
       <div
-        v-for="pair in allCollateralPairs"
+        v-for="pair in collateralPairs"
         :key="pair.collateral.address"
-        class="bg-surface rounded-xl text-content-primary block no-underline cursor-pointer hover:bg-card-hover transition-colors shadow-sm"
+        class="cursor-pointer rounded-12 border border-line-subtle bg-surface p-16 shadow-sm transition-colors hover:bg-card-hover"
         @click="onCollateralClick(pair.collateral.address)"
       >
-        <div
-          class="px-16 pt-16 pb-12 border-b border-line-subtle"
-        >
-          <VaultLabelsAndAssets
-            :vault="pair.collateral"
-            :assets="[pair.collateral.asset]"
-          />
-        </div>
-        <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
+        <VaultLabelsAndAssets
+          :vault="pair.collateral"
+          :assets="[pair.collateral.asset]"
+        />
+        <div class="mt-12 grid grid-cols-1 gap-12">
+          <VaultOverviewLabelValue
+            v-if="isOpenInterestEnabled"
+            label="Live exposure"
+            orientation="horizontal"
+          >
+            <span class="flex items-center gap-4">
+              {{ formatLiveExposureUsd(getPairOpenInterestUsd(pair)) }}
+              <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>
+            </span>
+          </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"
@@ -121,5 +170,5 @@ const allCollateralPairs = computed(() =>
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>
