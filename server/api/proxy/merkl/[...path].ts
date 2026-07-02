@@ -8,6 +8,7 @@ import {
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
+import { safePathTemplate, searchKeys, urlHost } from '~/server/utils/observability'
 import { isAllowedMerklProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
 import { buildMerklProxyRequestHeaders } from '~/server/utils/merkl-proxy'
 
@@ -45,6 +46,7 @@ const isUserRewardsPath = (path: string): boolean => /^users\/0x[a-fA-F0-9]{40}\
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
+    logger.warn({ ctx: 'merkl-proxy', method, reason: 'invalid-method' }, 'request rejected')
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
 
@@ -55,10 +57,21 @@ export default defineEventHandler(async (event) => {
   const prefix = '/api/proxy/merkl/'
   const idx = requestUrl.pathname.indexOf(prefix)
   if (idx < 0) {
+    logger.warn({ ctx: 'merkl-proxy', method, reason: 'invalid-path' }, 'request rejected')
     throw createError({ statusCode: 404, statusMessage: 'Not a merkl proxy path' })
   }
   const rest = stripLeadingSlash(requestUrl.pathname.slice(idx + prefix.length))
   if (!isAllowedMerklProxyRequest(method, rest, requestUrl.searchParams)) {
+    logger.warn(
+      {
+        ctx: 'merkl-proxy',
+        method,
+        reason: 'path-not-allowed',
+        pathTemplate: safePathTemplate(`/${rest}`),
+        searchKeys: searchKeys(requestUrl.searchParams),
+      },
+      'request rejected',
+    )
     throw createError({ statusCode: 404, statusMessage: 'Merkl path not allowed' })
   }
 
@@ -79,7 +92,16 @@ export default defineEventHandler(async (event) => {
     })
   }
   catch (err) {
-    logger.warn({ ctx: 'merkl-proxy', target, err }, 'upstream fetch failed')
+    logger.warn(
+      {
+        ctx: 'merkl-proxy',
+        upstreamHost: urlHost(target),
+        pathTemplate: safePathTemplate(targetUrl.pathname),
+        searchKeys: searchKeys(targetUrl.searchParams),
+        err,
+      },
+      'upstream fetch failed',
+    )
     throw createError({ statusCode: 502, statusMessage: 'Merkl upstream unavailable' })
   }
 

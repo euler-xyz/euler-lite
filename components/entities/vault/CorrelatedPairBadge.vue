@@ -10,10 +10,23 @@ const props = withDefaults(defineProps<{
 </script>
 
 <template>
+  <UiHoverPreviewTooltip
+    v-if="props.title"
+    :title="props.label"
+    :text="props.title"
+    placement="top-start"
+  >
+    <span
+      class="correlated-pair-badge inline-flex items-center rounded-8 whitespace-nowrap"
+      :class="props.compact ? 'px-6 py-1' : 'px-8 py-2'"
+    >
+      {{ props.label }}
+    </span>
+  </UiHoverPreviewTooltip>
   <span
+    v-else
     class="correlated-pair-badge inline-flex items-center rounded-8 whitespace-nowrap"
     :class="props.compact ? 'px-6 py-1' : 'px-8 py-2'"
-    :title="props.title || undefined"
   >
     {{ props.label }}
   </span>

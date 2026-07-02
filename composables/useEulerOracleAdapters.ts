@@ -3,17 +3,11 @@ import { toReactive } from '@vueuse/core'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { getEulerSdk } from '~/composables/useEulerSdk'
-import { type OracleAdapterMeta, OracleAdapterCheckSeverity } from '~/entities/oracle'
+import { type OracleAdapterMeta, normalizeOracleAdapterCheckSeverity } from '~/entities/oracle'
 
 const oracleAdaptersRef = shallowRef<Record<string, OracleAdapterMeta>>({})
 const oracleAdaptersChainId = ref<number | null>(null)
 const pendingOracleAdapterLoads = new Map<number, Promise<Record<string, OracleAdapterMeta>>>()
-
-const normalizeSeverity = (severity: unknown): OracleAdapterCheckSeverity => {
-  return Object.values(OracleAdapterCheckSeverity).includes(severity as OracleAdapterCheckSeverity)
-    ? severity as OracleAdapterCheckSeverity
-    : OracleAdapterCheckSeverity.Info
-}
 
 const toOracleAdapterMeta = (metadata: OracleAdapterMetadata): OracleAdapterMeta => ({
   oracle: metadata.oracle,
@@ -27,7 +21,7 @@ const toOracleAdapterMeta = (metadata: OracleAdapterMetadata): OracleAdapterMeta
     id: typeof check.id === 'string' ? check.id : '',
     message: typeof check.message === 'string' ? check.message : '',
     pass: check.pass === true,
-    severity: normalizeSeverity(check.severity),
+    severity: normalizeOracleAdapterCheckSeverity(check.severity),
   })),
 })
 

@@ -156,13 +156,16 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           >
             {{ getDeprecatedVaultCount(market) }} deprecated
           </span>
-          <span
+          <UiHoverPreviewTooltip
             v-if="getUnknownCollateralCount(market) > 0"
-            class="text-error-500 text-p5 mt-4"
-            title="Collateral vaults whose risk manager isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
+            title="Unknown collateral"
+            text="Collateral vaults whose risk manager isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
+            placement="top-start"
           >
-            {{ getUnknownCollateralCount(market) }} unknown
-          </span>
+            <span class="text-error-500 text-p5 mt-4">
+              {{ getUnknownCollateralCount(market) }} unknown
+            </span>
+          </UiHoverPreviewTooltip>
         </div>
       </template>
     </div>

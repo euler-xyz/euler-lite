@@ -6,6 +6,7 @@ import { truncate } from '~/utils/string-utils'
 import { useAddressScreen } from '~/composables/useAddressScreen'
 import { parseChainId } from '~/entities/chainRegistry'
 import { hasBaseAppInjectedProvider, selectBaseAppConnector } from '~/utils/base-app-wallet'
+import { reportClientEvent } from '~/utils/client-observability'
 
 let isChangingChain = false
 let chainChangeCooldownUntil = 0
@@ -59,6 +60,12 @@ function initializeWagmi() {
     const open = nuxtApp.$openWalletModal as (() => Promise<void>) | undefined
     if (!open) {
       console.warn('[useWagmi] $openWalletModal not available — wallet plugin may not have loaded')
+      void reportClientEvent({
+        event: 'wallet_modal_unavailable',
+        chainId: chainId.value,
+        count: getConnectors(config).length,
+        reason: 'open-wallet-modal-missing',
+      })
       return
     }
     await open()

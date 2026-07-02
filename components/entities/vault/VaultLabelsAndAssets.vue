@@ -114,7 +114,8 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
     <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-8 mb-4 min-w-0">
         <span
-          class="text-content-tertiary min-w-0"
+          class="block min-w-0 max-w-full truncate text-content-tertiary"
+          :title="pairVault ? displayLabel : displayName"
           data-id="data-point"
           :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
           data-field="name"
@@ -135,17 +136,22 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           />
           Deprecated
         </span>
-        <span
+        <UiHoverPreviewTooltip
           v-if="isRestricted"
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          title="This vault is not available in your region"
+          title="Region restricted"
+          text="This vault is not available in your region"
+          placement="top-start"
         >
-          <SvgIcon
-            name="warning"
-            class="!w-14 !h-14"
-          />
-          Restricted
-        </span>
+          <span
+            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+          >
+            <SvgIcon
+              name="warning"
+              class="!w-14 !h-14"
+            />
+            Restricted
+          </span>
+        </UiHoverPreviewTooltip>
         <slot />
       </div>
 

@@ -35,6 +35,7 @@ import {
 } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
+import { safeErrorLogFields, safeUrlLogFields } from '~/server/utils/observability'
 import {
   createProxyCache,
   createProxyInFlight,
@@ -67,7 +68,9 @@ const resolveSubgraphUrl = (chainId: number): string | undefined => {
 }
 
 export default defineEventHandler(async (event) => {
-  if (getMethod(event).toUpperCase() !== 'POST') {
+  const method = getMethod(event).toUpperCase()
+  if (method !== 'POST') {
+    logger.warn({ ctx: 'subgraph-proxy', method, reason: 'invalid-method' }, 'request rejected')
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
   await rateLimiter.consume(event)
@@ -75,16 +78,19 @@ export default defineEventHandler(async (event) => {
   const chainIdRaw = getRouterParam(event, 'chainId')
   const chainId = Number(chainIdRaw)
   if (!Number.isInteger(chainId) || chainId <= 0) {
+    logger.warn({ ctx: 'subgraph-proxy', chainIdRaw, reason: 'invalid-chain-id' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
   }
 
   const target = resolveSubgraphUrl(chainId)
   if (!target) {
+    logger.warn({ ctx: 'subgraph-proxy', chainId, reason: 'not-configured' }, 'request rejected')
     throw createError({ statusCode: 404, statusMessage: `No subgraph configured for chain ${chainId}` })
   }
 
   const body = (await readRawBody(event))?.toString() ?? ''
   if (!body) {
+    logger.warn({ ctx: 'subgraph-proxy', chainId, reason: 'empty-body' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Empty GraphQL body' })
   }
 
@@ -108,7 +114,15 @@ export default defineEventHandler(async (event) => {
     return res.body
   }
   catch (err) {
-    logger.warn({ ctx: 'subgraph-proxy', chainId, err }, 'upstream failed')
+    logger.warn(
+      {
+        ctx: 'subgraph-proxy',
+        chainId,
+        ...safeUrlLogFields(target),
+        err: safeErrorLogFields(err),
+      },
+      'upstream failed',
+    )
     throw createError({ statusCode: 502, statusMessage: 'Subgraph upstream unavailable' })
   }
 })

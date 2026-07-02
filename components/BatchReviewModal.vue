@@ -51,9 +51,6 @@ const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
-const nowMs = ref(Date.now())
-const staleQuoteThresholdMs = 3 * 60 * 1000
-let nowTimer: ReturnType<typeof setInterval> | undefined
 const owner = computed(() => (isSpyMode.value ? spyAddress.value : walletAddress.value) || '')
 const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
 const ownerSubAccountKey = computed(() => {
@@ -153,14 +150,6 @@ const reulUnlockWarnings = computed<Array<{ id: string, description: string }>>(
   }),
 )
 
-const hasStaleSwapQuote = computed(() =>
-  entries.value.some((entry) => {
-    const quoteFetchedAt = entry.review?.quoteFetchedAt
-    return typeof quoteFetchedAt === 'number'
-      && nowMs.value - quoteFetchedAt > staleQuoteThresholdMs
-  }),
-)
-
 // Sub-accounts of entries that revert mid-batch (per-item revert: vault
 // liquidity, vault cap, etc.). The op rolls back so its position SHOULD be
 // unchanged, but in some cases the layer's reported health factor still drifts
@@ -224,6 +213,19 @@ const openId = ref<string | null>(null)
 const toggle = (id: string) => {
   openId.value = openId.value === id ? null : id
 }
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
+
+const getQuoteFetchedAt = (entry: { review?: Record<string, unknown> }): number | null => {
+  const value = entry.review?.quoteFetchedAt
+  return typeof value === 'number' ? value : null
+}
+const isEntryQuoteStale = (entry: { review?: Record<string, unknown> }) => {
+  const fetchedAt = getQuoteFetchedAt(entry)
+  return typeof fetchedAt === 'number' && nowMs.value - fetchedAt > staleQuoteThresholdMs
+}
+const hasStaleQuoteEntries = computed(() => entries.value.some(isEntryQuoteStale))
 
 // Approvals the user will be asked to sign, decoded from the prepared plan.
 interface ResolvedApproval { type: string, token: string }
@@ -240,7 +242,6 @@ onMounted(async () => {
   nowTimer = setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
-
   void fetchTenderlyEnabled()
   isPreparing.value = true
   prepareError.value = ''
@@ -376,10 +377,18 @@ const handleClose = () => {
 
       <UiAlert
         v-if="hasPermit2Approval"
-        variant="warning"
+        variant="info"
         size="compact"
         title="Infinite approval"
         description="You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract that lets you approve once, then sign per-action permissions without new onchain approvals."
+      />
+
+      <UiAlert
+        v-if="hasStaleQuoteEntries"
+        variant="warning"
+        size="compact"
+        title="Stale swap quote"
+        description="This batch includes a swap quote which is more than 3 minutes old. Consider refreshing it to get the best execution price"
       />
 
       <!-- Operations -->
@@ -431,6 +440,14 @@ const handleClose = () => {
                 :market="marketByEntryId[entry.id]"
                 class="mt-6 px-12"
               />
+              <UiAlert
+                v-if="isEntryQuoteStale(entry)"
+                class="mt-6"
+                variant="warning"
+                size="compact"
+                title="Stale swap quote"
+                description="This operation uses a swap quote that is more than 3 minutes old."
+              />
               <!-- Same decoded operation steps the per-op review modal shows
                    (the builder row's (i) icon). -->
               <div
@@ -463,14 +480,6 @@ const handleClose = () => {
         size="compact"
         title="rEUL burn mechanics"
         :description="warning.description"
-      />
-
-      <UiAlert
-        v-if="hasStaleSwapQuote"
-        variant="warning"
-        size="compact"
-        title="Stale swap quote"
-        description="This batch includes a swap quote which is more than 3 minutes old. Consider refreshing it to get the best execution price"
       />
 
       <!-- Wallet changes -->

@@ -13,14 +13,17 @@ defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, d
   >
     <VaultOverviewPairBlockGeneral
       :pair="pair"
+      :default-open="true"
     />
     <VaultOverviewPairBlockTypes
       :pair="pair"
+      :default-open="false"
     />
     <!-- Oracle adapters should always come from the liability (borrow) vault -->
     <VaultOverviewBlockOracleAdapters
       :vault="getPairBorrowVault(pair)"
       :collateral-vaults="collateralVaults?.length ? collateralVaults : [getPairCollateralVault(pair)]"
+      :default-open="false"
     />
   </div>
 </template>

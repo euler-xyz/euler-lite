@@ -323,7 +323,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   // --- Submit disabled ---
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value && !isSpyMode.value) return false
+    if (!isConnected.value && !isSpyMode.value) return true
     if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
@@ -551,7 +551,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       signSteps.push({ index: idx++, label: 'Prepare order receiver', isSeparateTx: true })
     }
     signSteps.push({ index: idx++, label: 'Sign EVC permit', isSeparateTx: false })
-    signSteps.push({ index: idx++, label: 'Sign CoW order', isSeparateTx: false })
+    signSteps.push({ index: idx, label: 'Sign CoW order', isSeparateTx: false })
 
     let wIdx = 1
     const wrapperSteps: DisplayStep[] = [
@@ -568,7 +568,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         },
       },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: sourceAsset.symbol, address: sourceAsset.address, amount: core.amount.value }, toAssetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: core.debtAmount.value || '?' } },
-      { index: wIdx++, label: 'Repay', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
+      { index: wIdx, label: 'Repay', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
     ]
 
     const walletWarningsDescription

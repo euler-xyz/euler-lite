@@ -14,7 +14,7 @@ const { productName, symbol, collateralOptions, selected = 0, title = 'Select co
   selected?: number
   title?: string
   apyLabel?: string
-  onSave: (selectedIndex: number) => void
+  onSave: (selectedIndex: number, selectedOption: CollateralOption) => void
 }>()
 
 const { isEscrowVault } = useVaultRegistry()
@@ -69,6 +69,80 @@ const filteredOptions = computed(() => {
     )
 })
 
+type FilteredCollateralOption = { option: CollateralOption, idx: number }
+type GroupedRow
+  = | { kind: 'header', key: string, label: string, note?: string }
+    | { kind: 'empty', key: string, message: string }
+    | { kind: 'option', key: string, option: CollateralOption, idx: number }
+
+// Split the already-filtered list into the two display groups.
+// NOTE: each entry keeps its ORIGINAL `idx` from collateralOptions. Selection
+// and existing callers depend on it, so never re-index here.
+const compatibleOptions = computed(() =>
+  filteredOptions.value.filter(({ option }) => !option.compatibilityWarning),
+)
+const incompatibleOptions = computed(() =>
+  filteredOptions.value.filter(({ option }) => option.compatibilityWarning),
+)
+
+// Every incompatible option shares the same warning copy, so read the note once.
+const incompatibleNote = computed(() =>
+  incompatibleOptions.value[0]?.option.compatibilityWarning?.message ?? '',
+)
+const compatibleNote = computed(() => {
+  return title.toLowerCase().includes('debt')
+    ? 'Debt vaults accepting your current collateral'
+    : 'Collateral vaults accepted by your current debt'
+})
+
+// Keep group headers visible whenever options require migration, even if the
+// compatible bucket is empty, so the absence is explicit.
+const showGroups = computed(() =>
+  incompatibleOptions.value.length > 0,
+)
+
+const groupedRows = computed<GroupedRow[]>(() => {
+  const rows: GroupedRow[] = []
+
+  const pushOptions = (items: FilteredCollateralOption[]) => {
+    for (const { option, idx } of items) {
+      rows.push({ kind: 'option', key: `opt-${idx}`, option, idx })
+    }
+  }
+
+  if (!showGroups.value) {
+    pushOptions(filteredOptions.value)
+    return rows
+  }
+
+  rows.push({
+    kind: 'header',
+    key: 'hdr-compatible',
+    label: 'Compatible',
+    note: compatibleNote.value,
+  })
+  if (compatibleOptions.value.length) {
+    pushOptions(compatibleOptions.value)
+  }
+  else {
+    rows.push({
+      kind: 'empty',
+      key: 'empty-compatible',
+      message: 'No compatible vaults found',
+    })
+  }
+
+  rows.push({
+    kind: 'header',
+    key: 'hdr-incompatible',
+    label: 'Requires migration',
+    note: incompatibleNote.value,
+  })
+  pushOptions(incompatibleOptions.value)
+
+  return rows
+})
+
 const handleClose = () => {
   emits('close')
 }
@@ -89,95 +163,129 @@ const handleClose = () => {
       />
     </div>
     <div class="flex-1 min-h-0 overflow-auto styled-scrollbar">
-      <div
-        v-for="{ option, idx } in filteredOptions"
-        :key="`options-${idx}`"
-        data-id="collateral-option"
-        :data-option-index="String(idx)"
-        :data-option-label="getOptionLabel(option)"
-        :data-option-symbol="getOptionSymbol(option)"
-        :data-option-type="getOptionType(option)"
-        :data-option-asset-address="option.assetAddress?.toLowerCase() ?? ''"
-        :data-option-vault-address="option.vaultAddress?.toLowerCase() ?? ''"
-        :data-option-sub-account="option.subAccount?.toLowerCase() ?? ''"
-        :data-option-disabled="option.disabled ? 'true' : 'false'"
-        class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-10 py-12 px-16 rounded-16"
-        :class="[
-          option.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-          selectedIdx === idx && !option.disabled ? 'bg-card-hover' : '',
-        ]"
-        @click="
-          if (!option.disabled) { selectedIdx = idx;onSave(idx) }
-        "
+      <template
+        v-for="row in groupedRows"
+        :key="row.key"
       >
-        <AssetAvatar
-          :asset="{ address: option.assetAddress || '', symbol: getOptionSymbol(option) }"
-          size="36"
-        />
-        <div class="grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-12 min-w-0">
-          <div class="min-w-0">
-            <div class="text-content-primary mb-2 truncate">
-              {{ getOptionLabel(option) }}
-            </div>
-            <div class="text-h5 flex items-center min-w-0">
-              <span class="truncate">{{ getOptionSymbol(option) }}</span>
-              <div
-                v-if="getOptionType(option) === 'wallet'"
-                class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-accent-600/10 text-accent-600"
-              >
-                Wallet
-              </div>
-              <div
-                v-else-if="getOptionType(option) === 'saving'"
-                class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
-              >
-                Savings
-              </div>
-              <div
-                v-if="getSubAccountLabel(option)"
-                class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-card text-content-secondary"
-              >
-                {{ getSubAccountLabel(option) }}
-              </div>
-              <span
-                v-for="tag in (option.tags || [])"
-                :key="tag"
-                class="ml-6 inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-              >
-                <SvgIcon
-                  name="warning"
-                  class="!w-14 !h-14"
-                />
-                {{ tag }}
-              </span>
-            </div>
+        <div
+          v-if="row.kind === 'header'"
+          class="sticky top-0 z-10 bg-card px-16 pt-12 pb-6"
+        >
+          <div class="flex items-center gap-6">
+            <SvgIcon
+              :name="row.label === 'Compatible' ? 'check-circle' : 'warning'"
+              class="!w-14 !h-14"
+              :class="row.label === 'Compatible' ? 'text-accent-600' : 'text-warning-500'"
+            />
+            <span class="text-[12px] font-semibold uppercase tracking-[0.04em] text-content-tertiary">
+              {{ row.label }}
+            </span>
           </div>
-          <div
-            class="grid justify-end text-right"
-            :class="showBalanceMetric(option) ? 'grid-cols-[max-content_max-content] gap-32' : 'grid-cols-[max-content]'"
+          <p
+            v-if="row.note"
+            class="mt-4 text-p3 text-content-tertiary leading-snug"
           >
-            <div
-              v-if="showBalanceMetric(option)"
-              class="flex flex-col items-end"
-            >
-              <div class="text-content-primary mb-2">
-                Balance
+            {{ row.note }}
+          </p>
+        </div>
+
+        <div
+          v-else-if="row.kind === 'empty'"
+          class="px-16 py-12 text-p3 text-content-tertiary"
+        >
+          {{ row.message }}
+        </div>
+
+        <div
+          v-else-if="row.kind === 'option'"
+          data-id="collateral-option"
+          :data-option-index="String(row.idx)"
+          :data-option-label="getOptionLabel(row.option)"
+          :data-option-symbol="getOptionSymbol(row.option)"
+          :data-option-type="getOptionType(row.option)"
+          :data-option-asset-address="row.option.assetAddress?.toLowerCase() ?? ''"
+          :data-option-vault-address="row.option.vaultAddress?.toLowerCase() ?? ''"
+          :data-option-sub-account="row.option.subAccount?.toLowerCase() ?? ''"
+          :data-option-disabled="row.option.disabled ? 'true' : 'false'"
+          :data-option-compatibility-warning="row.option.compatibilityWarning ? 'true' : 'false'"
+          class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-10 py-12 px-16 rounded-16"
+          :class="[
+            row.option.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+            selectedIdx === row.idx && !row.option.disabled ? 'bg-card-hover' : '',
+          ]"
+          @click="
+            if (!row.option.disabled) { selectedIdx = row.idx;onSave(row.idx, row.option) }
+          "
+        >
+          <AssetAvatar
+            :asset="{ address: row.option.assetAddress || '', symbol: getOptionSymbol(row.option) }"
+            size="36"
+          />
+          <div class="grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-12 min-w-0">
+            <div class="min-w-0">
+              <div class="text-content-primary mb-2 truncate">
+                {{ getOptionLabel(row.option) }}
               </div>
-              <div class="text-h5">
-                {{ getFormattedAmount(option) }}
+              <div class="text-h5 flex items-center min-w-0">
+                <span class="truncate">{{ getOptionSymbol(row.option) }}</span>
+                <div
+                  v-if="getOptionType(row.option) === 'wallet'"
+                  class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-accent-600/10 text-accent-600"
+                >
+                  Wallet
+                </div>
+                <div
+                  v-else-if="getOptionType(row.option) === 'saving'"
+                  class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-[#CBC0951A] text-yellow-600"
+                >
+                  Savings
+                </div>
+                <div
+                  v-if="getSubAccountLabel(row.option)"
+                  class="ml-6 text-[12px] leading-[16px] py-4 px-8 rounded-8 bg-card text-content-secondary"
+                >
+                  {{ getSubAccountLabel(row.option) }}
+                </div>
+                <span
+                  v-for="tag in (row.option.tags || [])"
+                  :key="tag"
+                  class="ml-6 inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+                >
+                  <SvgIcon
+                    name="warning"
+                    class="!w-14 !h-14"
+                  />
+                  {{ tag }}
+                </span>
               </div>
             </div>
-            <div class="flex flex-col items-end min-w-[110px]">
-              <div class="text-content-primary mb-2">
-                {{ getApyLabel(option) }}
+            <div
+              class="grid justify-end text-right"
+              :class="showBalanceMetric(row.option) ? 'grid-cols-[max-content_max-content] gap-32' : 'grid-cols-[max-content]'"
+            >
+              <div
+                v-if="showBalanceMetric(row.option)"
+                class="flex flex-col items-end"
+              >
+                <div class="text-content-primary mb-2">
+                  Balance
+                </div>
+                <div class="text-h5">
+                  {{ getFormattedAmount(row.option) }}
+                </div>
               </div>
-              <div class="text-h5">
-                {{ option.apy !== undefined ? `${formatNumber(option.apy)}%` : '-' }}
+              <div class="flex flex-col items-end min-w-[110px]">
+                <div class="text-content-primary mb-2">
+                  {{ getApyLabel(row.option) }}
+                </div>
+                <div class="text-h5">
+                  {{ row.option.apy !== undefined ? `${formatNumber(row.option.apy)}%` : '-' }}
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
       <div
         v-if="!filteredOptions.length && searchQuery"
         class="py-24 text-center text-content-tertiary text-p3"

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
-import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
@@ -11,7 +10,6 @@ import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { normalizeAddress } from '~/utils/normalizeAddress'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import { VaultSupplyApyModal } from '#components'
 import { getAddress, maxUint256 } from 'viem'
@@ -27,7 +25,6 @@ const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enab
 
 const { chainId } = useEulerAddresses()
 const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
-const { getEVaults } = useVaultRegistry()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
@@ -60,25 +57,6 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
 
 // Count markets where this can be borrowed (securitize vaults cannot be borrow destinations)
 const borrowCount = computed(() => 0)
-
-// Find EVaults where this securitize vault can be used as collateral
-const borrowMarkets = computed(() => {
-  const markets: Array<{
-    borrowVault: EVault
-    ltv: EVaultCollateral
-  }> = []
-
-  getEVaults().forEach((v) => {
-    const ltv = v.collaterals.find(l => normalizeAddress(l.address) === vaultAddress.value && l.borrowLTV > 0)
-    if (ltv) {
-      markets.push({ borrowVault: v, ltv })
-    }
-  })
-
-  return markets
-})
-
-const collateralCount = computed(() => borrowMarkets.value.length)
 
 // Supply APY calculation (intrinsic + rewards, no base interest for securitize vaults)
 const rewardSupplyAPY = computed(() => getSupplyRewardApy(vault.address))
@@ -154,284 +132,262 @@ const supplyCapPercentageDisplay = computed(() => {
     :class="[desktopOverview ? 'gap-16' : 'gap-12']"
   >
     <!-- Overview -->
-    <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    <VaultOverviewAccordionSection
+      title="Overview"
+      :default-open="true"
+      content-class="flex flex-col items-start gap-24"
     >
-      <p class="text-h3 text-content-primary">
-        Overview
-      </p>
-      <div class="flex flex-col items-start gap-24">
-        <VaultDeprecationBanner
-          v-if="isDeprecated"
-          :reason="deprecationReason"
-        />
-        <div
-          v-if="isRestricted"
-          class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-        >
-          <div class="flex items-center gap-8">
-            <SvgIcon
-              name="warning"
-              class="!w-20 !h-20 flex-shrink-0"
-            />
-            <p class="text-p3 text-warning-500">
-              This vault is not available in your region.
-            </p>
-          </div>
-        </div>
-        <div
-          v-if="description"
-          class="w-full rounded-12 p-16 bg-surface-tertiary"
-        >
-          <!-- eslint-disable vue/no-v-html -- trusted label content -->
-          <p
-            class="text-p3 text-content-secondary auto-link"
-            v-html="autoLink(description)"
+      <VaultDeprecationBanner
+        v-if="isDeprecated"
+        :reason="deprecationReason"
+      />
+      <div
+        v-if="isRestricted"
+        class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
+      >
+        <div class="flex items-center gap-8">
+          <SvgIcon
+            name="warning"
+            class="!w-20 !h-20 flex-shrink-0"
           />
-          <!-- eslint-enable vue/no-v-html -->
+          <p class="text-p3 text-warning-500">
+            This vault is not available in your region.
+          </p>
         </div>
-        <VaultOverviewLabelValue
-          label="Price"
-          :value="priceDisplay"
+      </div>
+      <div
+        v-if="description"
+        class="w-full rounded-12 p-16 bg-surface-tertiary"
+      >
+        <!-- eslint-disable vue/no-v-html -- trusted label content -->
+        <p
+          class="text-p3 text-content-secondary auto-link"
+          v-html="autoLink(description)"
         />
-        <VaultOverviewLabelValue label="Market">
-          <NuxtLink
-            v-if="marketProductKey"
-            :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
-            class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
-            @click="emit('market-click')"
-          >
-            {{ marketProductName }}
-          </NuxtLink>
-          <template v-else>
-            {{ marketProductName || '-' }}
-          </template>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          v-if="enableEntityBrandingDisplay"
-          label="Risk manager"
+        <!-- eslint-enable vue/no-v-html -->
+      </div>
+      <VaultOverviewLabelValue
+        label="Price"
+        :value="priceDisplay"
+      />
+      <VaultOverviewLabelValue label="Market">
+        <NuxtLink
+          v-if="marketProductKey"
+          :to="{ name: 'explore-market', params: { market: marketProductKey }, query: { network: route.query.network } }"
+          class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors"
+          @click="emit('market-click')"
+        >
+          {{ marketProductName }}
+        </NuxtLink>
+        <template v-else>
+          {{ marketProductName || '-' }}
+        </template>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        v-if="enableEntityBrandingDisplay"
+        label="Risk manager"
+      >
+        <div
+          v-if="entities.length && isGovernorVerified"
+          class="flex flex-col gap-16"
         >
           <div
-            v-if="entities.length && isGovernorVerified"
-            class="flex flex-col gap-16"
+            v-for="(entity, idx) in entities"
+            :key="idx"
+            class="flex items-center gap-8"
+            :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <div
-              v-for="(entity, idx) in entities"
-              :key="idx"
-              class="flex items-center gap-8"
-              :class="{ 'opacity-20': isGovernanceLimited }"
-            >
-              <BaseAvatar
-                :label="entity.name"
-                :src="getEulerLabelEntityLogo(entity.logo)"
-                class="!w-28 !h-28"
-              />
-              <a
-                :href="entity.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-p2 text-content-primary underline"
-              >{{ entity.name }}</a>
-            </div>
+            <BaseAvatar
+              :label="entity.name"
+              :src="getEulerLabelEntityLogo(entity.logo)"
+              class="!w-28 !h-28"
+            />
+            <a
+              :href="entity.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-p2 text-content-primary underline"
+            >{{ entity.name }}</a>
           </div>
-          <VaultTypeChip
-            v-else-if="!isGovernorVerified"
-            :vault="vault"
-            type="unknown"
-            nudge
-          />
-          <div v-else>
-            -
+        </div>
+        <VaultTypeChip
+          v-else-if="!isGovernorVerified"
+          :vault="vault"
+          type="unknown"
+          nudge
+        />
+        <div v-else>
+          -
+        </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        v-if="enableVaultTypeDisplay"
+        label="Vault type"
+      >
+        <VaultTypeBadges
+          :vault="vault"
+          nudge
+        />
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue label="Can be borrowed">
+        <div class="flex items-center gap-8">
+          <div>
+            <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
           </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          v-if="enableVaultTypeDisplay"
-          label="Vault type"
-        >
-          <VaultTypeBadges
-            :vault="vault"
-            nudge
-          />
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue label="Can be borrowed">
-          <div class="flex items-center gap-8">
-            <div>
-              <UiIcon :name="borrowCount ? 'green-tick' : 'red-cross'" />
-            </div>
-            <span class="text-p2 text-content-primary">
-              {{ formatMarketAvailability(borrowCount) }}
-            </span>
-          </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue label="Can be used as collateral">
-          <div class="flex items-center gap-8">
-            <div>
-              <UiIcon :name="collateralCount ? 'green-tick' : 'red-cross'" />
-            </div>
-            <span class="text-p2 text-content-primary">
-              {{ formatMarketAvailability(collateralCount) }}
-            </span>
-          </div>
-        </VaultOverviewLabelValue>
-      </div>
-    </div>
+          <span class="text-p2 text-content-primary">
+            {{ formatMarketAvailability(borrowCount) }}
+          </span>
+        </div>
+      </VaultOverviewLabelValue>
+    </VaultOverviewAccordionSection>
 
     <!-- Statistics -->
-    <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    <VaultOverviewAccordionSection
+      title="Statistics"
+      :default-open="true"
+      content-class="flex flex-col items-start gap-24"
     >
-      <p class="text-h3 text-content-primary">
-        Statistics
-      </p>
-      <div class="flex flex-col items-start gap-24">
-        <VaultOverviewLabelValue
-          label="Total supply"
-          :value="totalSupplyDisplay"
-          orientation="horizontal"
-        />
-        <VaultOverviewLabelValue
-          orientation="horizontal"
-        >
-          <template #label>
-            Supply APY
-          </template>
-          <span class="flex items-center gap-4">
-            <UiModalPreviewTrigger
-              v-if="hasSupplyRewards(vault.address)"
-              :component="VaultSupplyApyModal"
-              :modal-data="supplyApyModalData"
-              aria-label="Show supply APY rewards breakdown"
-            >
-              <SvgIcon
-                class="!w-20 !h-20 text-accent-500 cursor-pointer"
-                name="sparks"
-              />
-            </UiModalPreviewTrigger>
-            {{ formatNumber(supplyApyWithRewards) }}%
-          </span>
-        </VaultOverviewLabelValue>
-      </div>
-    </div>
+      <VaultOverviewLabelValue
+        label="Total supply"
+        :value="totalSupplyDisplay"
+        orientation="horizontal"
+      />
+      <VaultOverviewLabelValue
+        orientation="horizontal"
+      >
+        <template #label>
+          Supply APY
+        </template>
+        <span class="flex items-center gap-4">
+          <UiModalPreviewTrigger
+            v-if="hasSupplyRewards(vault.address)"
+            :component="VaultSupplyApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY rewards breakdown"
+          >
+            <SvgIcon
+              class="!w-20 !h-20 text-accent-500 cursor-pointer"
+              name="sparks"
+            />
+          </UiModalPreviewTrigger>
+          {{ formatNumber(supplyApyWithRewards) }}%
+        </span>
+      </VaultOverviewLabelValue>
+    </VaultOverviewAccordionSection>
 
     <!-- Risk Parameters -->
-    <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    <VaultOverviewAccordionSection
+      title="Risk parameters"
+      :default-open="false"
+      content-class="flex flex-col items-start gap-24"
     >
-      <p class="text-h3 text-content-primary">
-        Risk parameters
-      </p>
-      <div class="flex flex-col items-start gap-24">
-        <VaultOverviewLabelValue
-          label="Supply cap"
-          orientation="horizontal"
-        >
-          <div class="flex gap-4 items-center">
-            <span>
-              {{ supplyCapDisplay }}
-              <span v-if="vault.supplyCap && vault.supplyCap < maxUint256 && vault.supplyCap > 0n">
-                ({{ compactNumber(supplyCapPercentageDisplay, 2) }}%)
-              </span>
+      <VaultOverviewLabelValue
+        label="Supply cap"
+        orientation="horizontal"
+      >
+        <div class="flex gap-4 items-center">
+          <span>
+            {{ supplyCapDisplay }}
+            <span v-if="vault.supplyCap && vault.supplyCap < maxUint256 && vault.supplyCap > 0n">
+              ({{ compactNumber(supplyCapPercentageDisplay, 2) }}%)
             </span>
-            <UiRadialProgress
-              v-if="vault.supplyCap && vault.supplyCap < maxUint256 && vault.supplyCap > 0n"
-              :value="supplyCapPercentageDisplay"
-              :max="100"
-            />
-          </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          label="Share token exchange rate"
-          orientation="horizontal"
-        >
-          <template v-if="shareTokenExchangeRate !== undefined">
-            {{ formatNumber(nanoToValue(shareTokenExchangeRate, vault.asset.decimals), 6, 2) }}
-          </template>
-          <template v-else>
-            -
-          </template>
-        </VaultOverviewLabelValue>
-      </div>
-    </div>
+          </span>
+          <UiRadialProgress
+            v-if="vault.supplyCap && vault.supplyCap < maxUint256 && vault.supplyCap > 0n"
+            :value="supplyCapPercentageDisplay"
+            :max="100"
+          />
+        </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        label="Share token exchange rate"
+        orientation="horizontal"
+      >
+        <template v-if="shareTokenExchangeRate !== undefined">
+          {{ formatNumber(nanoToValue(shareTokenExchangeRate, vault.asset.decimals), 6, 2) }}
+        </template>
+        <template v-else>
+          -
+        </template>
+      </VaultOverviewLabelValue>
+    </VaultOverviewAccordionSection>
 
     <!-- Addresses -->
-    <div
-      class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    <VaultOverviewAccordionSection
+      title="Addresses"
+      :default-open="false"
+      content-class="flex flex-col items-start gap-24"
     >
-      <p class="text-h3 text-content-primary">
-        Addresses
-      </p>
-      <div class="flex flex-col items-start gap-24">
-        <VaultOverviewLabelValue
-          :label="`${vault.asset.symbol} token`"
-          orientation="horizontal"
-        >
-          <div class="flex gap-4 items-center">
-            <NuxtLink
-              :to="getExplorerAddressLink(vault.asset.address)"
-              class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-              target="_blank"
-            >
-              {{ getSpecialAddressLabel(vault.asset.address) || shortenAddress(vault.asset.address) }}
-            </NuxtLink>
-            <button
-              class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-              @click="onCopyClick(vault.asset.address)"
-            >
-              <SvgIcon
-                class="!w-18 !h-18"
-                name="copy"
-              />
-            </button>
-          </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          :label="`${vault.asset.symbol} vault`"
-          orientation="horizontal"
-        >
-          <div class="flex gap-4 items-center">
-            <NuxtLink
-              :to="getExplorerAddressLink(vault.address)"
-              class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-              target="_blank"
-            >
-              {{ getSpecialAddressLabel(vault.address) || shortenAddress(vault.address) }}
-            </NuxtLink>
-            <button
-              class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-              @click="onCopyClick(vault.address)"
-            >
-              <SvgIcon
-                class="!w-18 !h-18"
-                name="copy"
-              />
-            </button>
-          </div>
-        </VaultOverviewLabelValue>
-        <VaultOverviewLabelValue
-          v-if="vault.governor && vault.governor !== '0x0000000000000000000000000000000000000000'"
-          label="Risk manager"
-          orientation="horizontal"
-        >
-          <div class="flex gap-4 items-center">
-            <NuxtLink
-              :to="getExplorerAddressLink(vault.governor)"
-              class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-              target="_blank"
-            >
-              {{ getSpecialAddressLabel(vault.governor) || shortenAddress(vault.governor) }}
-            </NuxtLink>
-            <button
-              class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-              @click="onCopyClick(vault.governor)"
-            >
-              <SvgIcon
-                class="!w-18 !h-18"
-                name="copy"
-              />
-            </button>
-          </div>
-        </VaultOverviewLabelValue>
-      </div>
-    </div>
+      <VaultOverviewLabelValue
+        :label="`${vault.asset.symbol} token`"
+        orientation="horizontal"
+      >
+        <div class="flex gap-4 items-center">
+          <NuxtLink
+            :to="getExplorerAddressLink(vault.asset.address)"
+            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
+            target="_blank"
+          >
+            {{ getSpecialAddressLabel(vault.asset.address) || shortenAddress(vault.asset.address) }}
+          </NuxtLink>
+          <button
+            class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
+            @click="onCopyClick(vault.asset.address)"
+          >
+            <SvgIcon
+              class="!w-18 !h-18"
+              name="copy"
+            />
+          </button>
+        </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        :label="`${vault.asset.symbol} vault`"
+        orientation="horizontal"
+      >
+        <div class="flex gap-4 items-center">
+          <NuxtLink
+            :to="getExplorerAddressLink(vault.address)"
+            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
+            target="_blank"
+          >
+            {{ getSpecialAddressLabel(vault.address) || shortenAddress(vault.address) }}
+          </NuxtLink>
+          <button
+            class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
+            @click="onCopyClick(vault.address)"
+          >
+            <SvgIcon
+              class="!w-18 !h-18"
+              name="copy"
+            />
+          </button>
+        </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        v-if="vault.governor && vault.governor !== '0x0000000000000000000000000000000000000000'"
+        label="Risk manager"
+        orientation="horizontal"
+      >
+        <div class="flex gap-4 items-center">
+          <NuxtLink
+            :to="getExplorerAddressLink(vault.governor)"
+            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
+            target="_blank"
+          >
+            {{ getSpecialAddressLabel(vault.governor) || shortenAddress(vault.governor) }}
+          </NuxtLink>
+          <button
+            class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
+            @click="onCopyClick(vault.governor)"
+          >
+            <SvgIcon
+              class="!w-18 !h-18"
+              name="copy"
+            />
+          </button>
+        </div>
+      </VaultOverviewLabelValue>
+    </VaultOverviewAccordionSection>
   </div>
 </template>

@@ -172,7 +172,7 @@ export const useWallets = () => {
     isFetching.value = true
 
     try {
-      const targetAddress = balanceAddress.value as Address
+      const targetAddress = getAddress(balanceAddress.value as Address)
       const sdk = await getEulerSdk()
       const fetches = await Promise.all(targetChainIds.map(async (targetChainId) => {
         const addresses = addressesByChainId.get(targetChainId) ?? new Set<string>()
