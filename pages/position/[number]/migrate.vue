@@ -851,200 +851,203 @@ function normalizeAddressKey(value?: string): string {
           always-fallback
         />
 
-        <div
-          class="flex p-8 rounded-12 border border-line-default bg-card"
-          role="group"
-          :aria-label="sourcePositionAriaLabel"
-        >
-          <PortfolioBorrowItem
-            class="w-full"
-            :position="position"
-            :clickable="false"
-          />
-        </div>
-
         <div class="migrate-position__header">
           <h1 class="text-p1 text-content-primary">
             Migrate from Euler
           </h1>
-          <p class="text-p3 text-content-tertiary mt-4">
+          <p class="text-p3 text-content-secondary">
             Move collateral and debt together to a compatible external market.
           </p>
         </div>
 
-        <div class="migrate-position__target-heading">
-          <div>
-            <h2 class="text-h4 text-content-primary">
-              Select target protocol and market
-            </h2>
-          </div>
-        </div>
-
-        <UiAlert
-          v-if="pageDisabledReason"
-          title="Migration"
-          :description="pageDisabledReason"
-          variant="warning"
-          size="compact"
-        />
-
-        <UiAlert
-          v-if="targetsError"
-          title="Migration targets"
-          :description="targetsError"
-          variant="warning"
-          size="compact"
-        />
-
-        <div
-          v-if="isTargetsLoading"
-          class="migrate-position__targets"
-          aria-label="Loading migration targets"
-        >
+        <section class="flex flex-col gap-12">
+          <h2 class="text-h5 text-content-primary">
+            Source
+          </h2>
           <div
-            v-for="index in 3"
-            :key="index"
-            class="migrate-position__target-row migrate-position__target-row--skeleton"
-          >
-            <span class="migrate-position__skeleton migrate-position__skeleton--pair" />
-            <span class="migrate-position__skeleton migrate-position__skeleton--value" />
-            <span class="migrate-position__skeleton migrate-position__skeleton--actions" />
-          </div>
-        </div>
-
-        <UiAlert
-          v-else-if="noTargetsFound"
-          title="No compatible targets"
-          description="No supported Aave v3 or Morpho market matches this collateral and debt asset pair."
-          variant="warning"
-          size="compact"
-        />
-
-        <div
-          v-else-if="targets.length"
-          class="migrate-position__targets"
-        >
-          <article
-            v-for="target in targets"
-            :key="target.id"
-            class="migrate-position__target-row"
+            class="rounded-12 border border-line-default bg-card p-12"
             role="group"
-            :aria-label="targetRowAriaLabel(target)"
+            :aria-label="sourcePositionAriaLabel"
           >
-            <div class="migrate-position__target-pair">
-              <AssetAvatar
-                :asset="targetAvatarAssets(target)"
-                size="28"
-              />
-              <div class="migrate-position__target-meta">
-                <div class="migrate-position__protocol-row">
-                  <span>{{ target.protocol }}</span>
-                  <span
-                    v-if="targetMarketLabel(target)"
-                    class="migrate-position__market-pill"
-                  >
-                    {{ targetMarketLabel(target) }}
-                  </span>
-                </div>
-                <div class="migrate-position__pair-symbols">
-                  <template v-if="isAaveTarget(target)">
-                    <span class="migrate-position__pair-asset">
-                      <span class="migrate-position__pair-text">{{ targetAssetSymbol(target, 'collateral') }}</span>
-                      <a
-                        v-if="aaveAssetExternalLink(target, 'collateral')"
-                        class="migrate-position__target-external-link"
-                        :href="aaveAssetExternalLink(target, 'collateral')!.href"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        :aria-label="aaveAssetExternalLink(target, 'collateral')!.label"
-                        :title="aaveAssetExternalLink(target, 'collateral')!.label"
-                        @click.stop
-                      >
-                        <SvgIcon
-                          name="arrow-top-right"
-                          class="!w-14 !h-14"
-                        />
-                      </a>
-                    </span>
-                    <span class="migrate-position__pair-separator">/</span>
-                    <span class="migrate-position__pair-asset">
-                      <span class="migrate-position__pair-text">{{ targetAssetSymbol(target, 'debt') }}</span>
-                      <a
-                        v-if="aaveAssetExternalLink(target, 'debt')"
-                        class="migrate-position__target-external-link"
-                        :href="aaveAssetExternalLink(target, 'debt')!.href"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        :aria-label="aaveAssetExternalLink(target, 'debt')!.label"
-                        :title="aaveAssetExternalLink(target, 'debt')!.label"
-                        @click.stop
-                      >
-                        <SvgIcon
-                          name="arrow-top-right"
-                          class="!w-14 !h-14"
-                        />
-                      </a>
-                    </span>
-                  </template>
-                  <template v-else>
-                    <span class="migrate-position__pair-text">{{ targetPairLabel(target) }}</span>
-                    <a
-                      v-for="link in targetExternalLinks(target)"
-                      :key="link.href"
-                      class="migrate-position__target-external-link"
-                      :href="link.href"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      :aria-label="link.label"
-                      :title="link.label"
-                      @click.stop
+            <PortfolioBorrowItem
+              class="w-full"
+              :position="position"
+              :clickable="false"
+            />
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-12">
+          <h2 class="text-h5 text-content-primary">
+            Select target protocol and market
+          </h2>
+
+          <UiAlert
+            v-if="pageDisabledReason"
+            title="Migration"
+            :description="pageDisabledReason"
+            variant="warning"
+            size="compact"
+          />
+
+          <UiAlert
+            v-if="targetsError"
+            title="Migration targets"
+            :description="targetsError"
+            variant="warning"
+            size="compact"
+          />
+
+          <div
+            v-if="isTargetsLoading"
+            class="migrate-position__targets"
+            aria-label="Loading migration targets"
+          >
+            <div
+              v-for="index in 3"
+              :key="index"
+              class="migrate-position__target-row migrate-position__target-row--skeleton"
+            >
+              <span class="migrate-position__skeleton migrate-position__skeleton--pair" />
+              <span class="migrate-position__skeleton migrate-position__skeleton--value" />
+              <span class="migrate-position__skeleton migrate-position__skeleton--actions" />
+            </div>
+          </div>
+
+          <UiAlert
+            v-else-if="noTargetsFound"
+            title="No compatible targets"
+            description="No supported Aave v3 or Morpho market matches this collateral and debt asset pair."
+            variant="warning"
+            size="compact"
+          />
+
+          <div
+            v-else-if="targets.length"
+            class="migrate-position__targets"
+          >
+            <article
+              v-for="target in targets"
+              :key="target.id"
+              class="migrate-position__target-row"
+              role="group"
+              :aria-label="targetRowAriaLabel(target)"
+            >
+              <div class="migrate-position__target-pair">
+                <AssetAvatar
+                  :asset="targetAvatarAssets(target)"
+                  size="28"
+                />
+                <div class="migrate-position__target-meta">
+                  <div class="migrate-position__protocol-row">
+                    <span>{{ target.protocol }}</span>
+                    <span
+                      v-if="targetMarketLabel(target)"
+                      class="migrate-position__market-pill"
                     >
-                      <SvgIcon
-                        name="arrow-top-right"
-                        class="!w-14 !h-14"
-                      />
-                    </a>
-                  </template>
+                      {{ targetMarketLabel(target) }}
+                    </span>
+                  </div>
+                  <div class="migrate-position__pair-symbols">
+                    <template v-if="isAaveTarget(target)">
+                      <span class="migrate-position__pair-asset">
+                        <span class="migrate-position__pair-text">{{ targetAssetSymbol(target, 'collateral') }}</span>
+                        <a
+                          v-if="aaveAssetExternalLink(target, 'collateral')"
+                          class="migrate-position__target-external-link"
+                          :href="aaveAssetExternalLink(target, 'collateral')!.href"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          :aria-label="aaveAssetExternalLink(target, 'collateral')!.label"
+                          :title="aaveAssetExternalLink(target, 'collateral')!.label"
+                          @click.stop
+                        >
+                          <SvgIcon
+                            name="arrow-top-right"
+                            class="!w-14 !h-14"
+                          />
+                        </a>
+                      </span>
+                      <span class="migrate-position__pair-separator">/</span>
+                      <span class="migrate-position__pair-asset">
+                        <span class="migrate-position__pair-text">{{ targetAssetSymbol(target, 'debt') }}</span>
+                        <a
+                          v-if="aaveAssetExternalLink(target, 'debt')"
+                          class="migrate-position__target-external-link"
+                          :href="aaveAssetExternalLink(target, 'debt')!.href"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          :aria-label="aaveAssetExternalLink(target, 'debt')!.label"
+                          :title="aaveAssetExternalLink(target, 'debt')!.label"
+                          @click.stop
+                        >
+                          <SvgIcon
+                            name="arrow-top-right"
+                            class="!w-14 !h-14"
+                          />
+                        </a>
+                      </span>
+                    </template>
+                    <template v-else>
+                      <span class="migrate-position__pair-text">{{ targetPairLabel(target) }}</span>
+                      <a
+                        v-for="link in targetExternalLinks(target)"
+                        :key="link.href"
+                        class="migrate-position__target-external-link"
+                        :href="link.href"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        :aria-label="link.label"
+                        :title="link.label"
+                        @click.stop
+                      >
+                        <SvgIcon
+                          name="arrow-top-right"
+                          class="!w-14 !h-14"
+                        />
+                      </a>
+                    </template>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div class="migrate-position__liquidity">
-              <div class="migrate-position__cell-label">
-                Available liquidity
+              <div class="migrate-position__liquidity">
+                <div class="migrate-position__cell-label">
+                  Available liquidity
+                </div>
+                <div class="migrate-position__cell-value">
+                  {{ targetLiquidityDisplay(target) }}
+                </div>
               </div>
-              <div class="migrate-position__cell-value">
-                {{ targetLiquidityDisplay(target) }}
-              </div>
-            </div>
 
-            <div class="migrate-position__actions">
-              <UiButton
-                class="migrate-position__migrate-button"
-                size="medium"
-                variant="primary"
-                :disabled="!canReviewTarget(target)"
-                :loading="reviewingTargetId === target.id"
-                :title="getTargetDisabledReason(target) || undefined"
-                :aria-label="targetActionAriaLabel(target, 'migrate')"
-                @click="reviewMigration(target)"
-              >
-                Migrate
-              </UiButton>
-              <UiButton
-                size="medium"
-                variant="secondary"
-                :disabled="!!batchingTargetId || !canAddToBatchTarget(target)"
-                :loading="batchingTargetId === target.id"
-                :title="getTargetDisabledReason(target) || undefined"
-                :aria-label="targetActionAriaLabel(target, 'batch')"
-                @click="addMigrationToBatch(target)"
-              >
-                Add to batch
-              </UiButton>
-            </div>
-          </article>
-        </div>
+              <div class="migrate-position__actions">
+                <UiButton
+                  class="migrate-position__migrate-button"
+                  size="medium"
+                  variant="primary"
+                  :disabled="!canReviewTarget(target)"
+                  :loading="reviewingTargetId === target.id"
+                  :title="getTargetDisabledReason(target) || undefined"
+                  :aria-label="targetActionAriaLabel(target, 'migrate')"
+                  @click="reviewMigration(target)"
+                >
+                  Migrate
+                </UiButton>
+                <UiButton
+                  size="medium"
+                  variant="secondary"
+                  :disabled="!!batchingTargetId || !canAddToBatchTarget(target)"
+                  :loading="batchingTargetId === target.id"
+                  :title="getTargetDisabledReason(target) || undefined"
+                  :aria-label="targetActionAriaLabel(target, 'batch')"
+                  @click="addMigrationToBatch(target)"
+                >
+                  Add to batch
+                </UiButton>
+              </div>
+            </article>
+          </div>
+        </section>
       </div>
     </template>
     <template v-else>
@@ -1067,16 +1070,8 @@ function normalizeAddressKey(value?: string): string {
 
   &__header {
     display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  &__target-heading {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 4px;
   }
 
   &__targets {

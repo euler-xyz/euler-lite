@@ -7,6 +7,7 @@ defineOptions({
 
 const route = useRoute()
 const router = useRouter()
+const migratingPositionId = ref('')
 const {
   positions,
   isLoading,
@@ -30,15 +31,21 @@ const liveStatus = computed(() => {
   return ''
 })
 
-const migrate = (position: ExternalMigrationCandidate) => {
-  if (disabledReason(position)) return
-  void router.push({
-    path: '/position/external/borrow/swap',
-    query: {
-      network: route.query.network,
-      source: position.id,
-    },
-  })
+const migrate = async (position: ExternalMigrationCandidate) => {
+  if (disabledReason(position) || migratingPositionId.value) return
+  migratingPositionId.value = position.id
+  try {
+    await router.push({
+      path: '/position/external/borrow/swap',
+      query: {
+        network: route.query.network,
+        source: position.id,
+      },
+    })
+  }
+  catch {
+    migratingPositionId.value = ''
+  }
 }
 
 onActivated(() => {
@@ -98,6 +105,7 @@ onActivated(() => {
           v-for="position in visiblePositions"
           :key="position.id"
           :position="position"
+          :loading="migratingPositionId === position.id"
           :disabled-reason="disabledReason(position)"
           :show-action="true"
           @migrate="migrate(position)"
