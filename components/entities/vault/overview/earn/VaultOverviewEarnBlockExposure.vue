@@ -29,7 +29,7 @@ const emits = defineEmits<{
 const onExposureClick = (address: string) => {
   emits('vault-click', address)
 }
-const { vault } = defineProps<{ vault: EulerEarn }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
 const route = useRoute()
 
 const { getOrFetch, get: registryGet } = useVaultRegistry()
@@ -268,16 +268,12 @@ load()
 </script>
 
 <template>
-  <div
+  <VaultOverviewAccordionSection
     v-if="exposureList.length"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    title="Exposure"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-12"
   >
-    <div>
-      <p class="text-h3 text-content-primary mb-12">
-        Exposure
-      </p>
-    </div>
-
     <div
       v-if="isLoading"
       class="flex items-center justify-center py-32"
@@ -454,7 +450,7 @@ load()
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>
 
 <style lang="scss" scoped>
