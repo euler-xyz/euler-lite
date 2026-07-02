@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import {
+  type Account,
+  type IHasVaultAddress,
   isSecuritizeCollateralVault,
   SwapperMode,
   type EVault,
@@ -65,6 +67,7 @@ import {
 } from '~/utils/vault-hooks'
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import type { CollateralOption } from '~/types/collateral-option'
 
 const route = useRoute()
@@ -89,7 +92,7 @@ const {
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
-const { addEntry: addBatchEntry } = useTxBatch()
+const { addEntry: addBatchEntry, entryCount: batchEntryCount } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
 const { account: planAccount } = usePlanAccount()
@@ -1762,8 +1765,14 @@ const { guardWithPriceImpact } = usePriceImpactGate({
 })
 
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...getOperationVaultAddresses()))
+const isBatchActive = computed(() => batchEntryCount.value > 0)
+const directInboundMigrationDisabledReason = computed(() =>
+  isExternalSourceRoute.value && isBatchActive.value ? BATCH_ACTIVE_REASON : null,
+)
 const validationError = computed(() => {
-  if (isExternalSourceRoute.value) return inboundMigrationDisabledReason.value
+  if (isExternalSourceRoute.value) {
+    return directInboundMigrationDisabledReason.value || inboundMigrationDisabledReason.value
+  }
   if (!hasAnyChange.value) return 'Select a new collateral vault, debt vault, or both'
   if (collateralMigrationDisabledReason.value && targetCollateralVault.value) return collateralMigrationDisabledReason.value
   if (hookWarning.value) return hookWarning.value.message
@@ -2169,6 +2178,7 @@ const buildInboundExternalMigrationPlan = async (): Promise<TransactionPlan> =>
 const buildInboundExternalMigrationSimulationResult = async (
   input: InboundExternalMigrationInput,
   authorizationRequest?: MigrationAuthorizationRequest,
+  account?: Account<IHasVaultAddress>,
 ) => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2186,6 +2196,7 @@ const buildInboundExternalMigrationSimulationResult = async (
     removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
+    account,
     operationName: `${input.source.connectorId}ToEulerMigration`,
   })
 }
@@ -2628,7 +2639,7 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
 
 const reviewInboundExternalMigration = async () => {
   const reviewAsset = externalDebtAsset.value ?? externalCollateralAsset.value
-  if (isOperationBlocked.value || !canReviewInboundExternalMigration.value || !reviewAsset) return
+  if (isOperationBlocked.value || directInboundMigrationDisabledReason.value || !canReviewInboundExternalMigration.value || !reviewAsset) return
   isPreparing.value = true
   clearSimulationError()
   try {
@@ -2725,10 +2736,9 @@ const addInboundExternalMigrationToBatch = async () => {
       ? `${sourceCollateralSymbol}/${sourceDebtSymbol}`
       : sourceCollateralSymbol
 
-    await addBatchEntry({
+    const batchEntry = {
       label: `Migrate ${positionLabel} to Euler`,
       nameOverride: `Migrate ${positionLabel}`,
-      buildPlan: () => Promise.resolve(preview.tenderlySimulation.plan),
       buildExecutionPlan: () => buildInboundExternalMigrationExecutionPlan(input),
       stateOverrides: preview.tenderlySimulation.stateOverrides,
       subAccount: input.eulerTarget.eulerAccount,
@@ -2742,6 +2752,17 @@ const addInboundExternalMigrationToBatch = async () => {
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
+      },
+    }
+
+    await addBatchEntry({
+      ...batchEntry,
+      buildPlan: async (account: Account<IHasVaultAddress>) => {
+        const simulationResult = await buildInboundExternalMigrationSimulationResult(input, preview.authorizationRequest, account)
+        return {
+          plan: simulationResult.plan,
+          stateOverrides: simulationResult.stateOverrides,
+        }
       },
     })
 

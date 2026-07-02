@@ -62,7 +62,7 @@ export interface BatchEntry {
   /** Fixed transaction payload captured when the user added this entry. */
   plan: TransactionPlan
   /** Optional real execution payload builder for entries whose preview plan uses simulation-only state. */
-  buildExecutionPlan?: () => Promise<TransactionPlan>
+  buildExecutionPlan?: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
   /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
   stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
@@ -94,9 +94,14 @@ export interface BatchEntry {
   refreshExternalMigrationPositions?: boolean
 }
 
+type BatchEntryBuildResult = TransactionPlan | {
+  plan: TransactionPlan
+  stateOverrides?: StateOverride
+}
+
 export interface BatchEntryInput extends Omit<BatchEntry, 'id' | 'plan'> {
   /** Builds this entry once, at add-time, against the current batch end-state. */
-  buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+  buildPlan: (account: Account<IHasVaultAddress>) => Promise<BatchEntryBuildResult>
 }
 
 export interface BatchLayer {
@@ -1662,15 +1667,21 @@ export const useTxBatch = () => {
 
     const add = async () => {
       execError.value = undefined
-      const account = await getEntryPlanningAccount()
-      const plan = await entry.buildPlan(account)
+      const buildResult = await entry.buildPlan(await getEntryPlanningAccount())
+      const plan = Array.isArray(buildResult) ? buildResult : buildResult.plan
+      const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
         await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))
       }
       const { buildPlan: _buildPlan, ...fixedEntry } = entry
       registerReviewAssetMeta(fixedEntry.review)
-      entries.value = [...entries.value, { ...fixedEntry, plan, id: `entry-${++idSeq}` }]
+      entries.value = [...entries.value, {
+        ...fixedEntry,
+        ...(builtStateOverrides ? { stateOverrides: builtStateOverrides } : {}),
+        plan,
+        id: `entry-${++idSeq}`,
+      }]
     }
 
     const nextAdd = addEntryQueue.then(add, add)
@@ -1791,11 +1802,36 @@ export const useTxBatch = () => {
     return prepareTransactionPlan(lastMerged)
   }
 
+  const getExecutionPlanningAccount = async (entryIndex: number): Promise<Account<IHasVaultAddress>> => {
+    const getLayerAccount = () => layers.value[entryIndex]?.account
+
+    const layerAccount = getLayerAccount()
+    if (layerAccount) return layerAccount
+
+    if (entries.value.length > 0) {
+      await (resimulatePromise ?? runResimulate())
+      const refreshedLayerAccount = getLayerAccount()
+      if (refreshedLayerAccount) return refreshedLayerAccount
+      throw new Error(simError.value ?? 'Batch simulation not loaded')
+    }
+
+    if (baseAccountSnapshot) return baseAccountSnapshot
+
+    const o = owner.value
+    const cid = chainId.value
+    if (!o || !cid) throw new Error('Account not loaded')
+    const sdk = await getEulerSdkFresh()
+    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, getAddress(o))
+    return baseAccountSnapshot
+  }
+
   const buildMergedExecutionPlan = async (): Promise<TransactionPlan> => {
     const sdk = await getEulerSdkFresh()
     const plans: TransactionPlan[] = []
-    for (const entry of entries.value) {
-      plans.push(entry.buildExecutionPlan ? await entry.buildExecutionPlan() : entry.plan)
+    for (const [index, entry] of entries.value.entries()) {
+      plans.push(entry.buildExecutionPlan
+        ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
+        : entry.plan)
     }
     return sdk.executionService.mergePlans(plans)
   }

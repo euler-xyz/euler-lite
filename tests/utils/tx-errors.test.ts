@@ -101,6 +101,13 @@ describe('formatSimulationFailure: friendly message mapping', () => {
     expect(formatSimulationFailure(result)).toBe('Account liquidity too low for this action.')
   })
 
+  it('maps Aave health-factor failures to Aave account health copy', () => {
+    const result = {
+      failedBatchItems: [{ index: 0, decodedError: [decodedEntry('HealthFactorLowerThanLiquidationThreshold()')] }],
+    } as never
+    expect(formatSimulationFailure(result)).toBe('Aave account health factor would be below the liquidation threshold.')
+  })
+
   it('falls back to the decoded signature when the error name is unmapped', () => {
     const result = {
       accountStatusErrors: [{
@@ -280,5 +287,14 @@ describe('tx-errors: Keyring fee context', () => {
     expect(await getTxErrorMessage(new Error('insufficient funds for gas * price + value'))).toBe(
       'Insufficient balance to cover gas fees and transaction value.',
     )
+  })
+})
+
+describe('tx-errors: Aave health-factor decoding', () => {
+  it('decodes HealthFactorLowerThanLiquidationThreshold selector to a friendly message', async () => {
+    const err = buildRevertError('0x6679996d')
+
+    expect(getTxErrorCode(err)).toBe('HealthFactorLowerThanLiquidationThreshold')
+    expect(await getTxErrorMessage(err)).toBe('Aave account health factor would be below the liquidation threshold.')
   })
 })

@@ -10,6 +10,7 @@ import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
+import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 
 interface KeyringGuardState {
   needsVerification: boolean
@@ -47,7 +48,6 @@ const modal = useModal()
 // A non-empty batch blocks direct execution: the form would build & send its own
 // EVC tx, ignoring the queued batch. The user must clear the batch (or add this
 // op to it) first. The "Add to batch" button next to this one stays enabled.
-const BATCH_ACTIVE_REASON = 'A transaction batch is pending. Add this to the batch, or clear it from the batch drawer to execute directly.'
 const isBatchActive = computed(() => entryCount.value > 0)
 // When a batch is queued and the user could otherwise execute directly, the
 // batch state takes over the button area (ahead of the keyring/TOS/unverified

@@ -628,4 +628,55 @@ describe('useTxBatch execution errors', () => {
       query: { network: '8453' },
     })
   })
+
+  it('passes the pre-entry simulated account to execution plan builders', async () => {
+    const sdk = createMockSdk()
+    const preMigrationAccount = accountWithPosition(subAccount, subAccount, 42n)
+    const finalAccount = accountWithPosition(subAccount, subAccount, 84n)
+    let simulationCallCount = 0
+    sdk.executionService.simulateTransactionPlan.mockImplementation(async () => {
+      simulationCallCount += 1
+      return {
+        simulatedAccounts: simulationCallCount > 1
+          ? [preMigrationAccount, finalAccount]
+          : [preMigrationAccount],
+        simulatedWalletBalances: [],
+        simulatedVaults: [],
+        failedBatchItems: [],
+        insufficientWalletAssets: [],
+      }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    const batch = useTxBatch()
+    const prepared = { kind: 'prepared' }
+    const borrowPlan = [{ type: 'borrow' }] as unknown as TransactionPlan
+    const migrationPreviewPlan = [{ type: 'migration-preview' }] as unknown as TransactionPlan
+    const migrationExecutionPlan = [{ type: 'migration-execution' }] as unknown as TransactionPlan
+    let executionAccount: Account<IHasVaultAddress> | undefined
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+
+    await batch.addEntry({
+      label: 'Borrow USDT',
+      buildPlan: async () => borrowPlan,
+      subAccount,
+    })
+    await batch.addEntry({
+      label: 'Migrate USDC/USDT to Aave',
+      buildPlan: async () => migrationPreviewPlan,
+      buildExecutionPlan: async (account) => {
+        executionAccount = account
+        return migrationExecutionPlan
+      },
+      subAccount,
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await batch.executeBatch()
+
+    expect(executionAccount?.getSubAccount(subAccount)?.positions[0]?.shares).toBe(42n)
+    expect(sdk.executionService.mergePlans).toHaveBeenLastCalledWith([borrowPlan, migrationExecutionPlan])
+  })
 })
