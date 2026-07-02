@@ -231,6 +231,20 @@ const positionDetailsFallback = computed(() => {
   const search = query.toString()
   return `/position/${positionIndex}${search ? `?${search}` : ''}`
 })
+const clearRouteQueryKeys = (keys: readonly string[]) => {
+  const keysToClear = new Set(keys)
+  const query = Object.fromEntries(
+    Object.entries(route.query).filter(([key]) => !keysToClear.has(key)),
+  )
+  const hasChanges = Object.keys(query).length !== Object.keys(route.query).length
+  if (!hasChanges) return
+
+  void router.replace({
+    path: route.path,
+    query,
+    hash: route.hash,
+  })
+}
 const sourceCollateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => {
   const currentPosition = position.value
   if (!currentPosition) return undefined
@@ -1634,6 +1648,7 @@ const hasAllRequiredQuotes = computed(() =>
   (!collateralNeedsSwap.value || !!activeSelectedCollateralQuote.value)
   && (!debtNeedsSwap.value || !!activeSelectedDebtQuote.value),
 )
+const showNextRefinanceMetrics = computed(() => hasAnyChange.value && hasAllRequiredQuotes.value)
 const healthError = computed(() => {
   if (isExternalSourceRoute.value) return null
   if (!hasAnyChange.value || !hasAllRequiredQuotes.value || nextHealth.value === null) return null
@@ -1743,7 +1758,7 @@ watchEffect(async () => {
     debtPriceImpact.value = null
     return
   }
-  const impact = (newDebtUsd / oldDebtUsd - 1) * 100
+  const impact = (oldDebtUsd / newDebtUsd - 1) * 100
   debtPriceImpact.value = Number.isFinite(impact) ? impact : null
 })
 const directPriceImpact = computed(() => {
@@ -1892,11 +1907,19 @@ const debtSwapSummary = computed(() =>
     : null,
 )
 const refinanceSwapReviewInfo = computed(() => {
-  if (!collateralNeedsSwap.value || debtNeedsSwap.value || !activeCollateralQuote.value || !targetCollateralVault.value) return {}
+  if (!collateralNeedsSwap.value || debtNeedsSwap.value || !activeCollateralQuote.value || !sourceCollateralEVault.value || !targetCollateralVault.value) return {}
   return {
+    swapFromAsset: sourceCollateralEVault.value.asset,
+    swapFromAmount: trimTrailingZeros(formatUnits(BigInt(activeCollateralQuote.value.amountIn || 0), Number(sourceCollateralEVault.value.asset.decimals))),
     swapToAsset: targetCollateralVault.value.asset,
     swapToAmount: trimTrailingZeros(formatUnits(BigInt(activeCollateralQuote.value.amountOut || 0), Number(targetCollateralVault.value.asset.decimals))),
     swapMode: SwapperMode.EXACT_IN,
+  }
+})
+const refinanceVaultAmounts = computed(() => {
+  if (!sourceCollateralVault.value) return undefined
+  return {
+    [sourceCollateralVault.value.address.toLowerCase()]: formatVaultAmount(currentCollateralAssets.value, sourceCollateralVault.value),
   }
 })
 const externalMigrationKnownAssets = computed(() => {
@@ -2300,10 +2323,49 @@ const warmInboundExternalMigrationPreview = useDebounceFn(async () => {
 const targetDebtVaultAddress = computed(() =>
   isExternalSourceRoute.value || typeof route.query.to !== 'string' ? '' : normalizeVaultAddress(route.query.to),
 )
+const targetCollateralVaultAddress = computed(() =>
+  isExternalSourceRoute.value || typeof route.query.targetCollateral !== 'string' ? '' : normalizeVaultAddress(route.query.targetCollateral),
+)
+const consumedTargetDebtVaultAddress = ref('')
+const consumedTargetCollateralVaultAddress = ref('')
+
+watch(targetDebtVaultAddress, (address) => {
+  if (!address || address !== consumedTargetDebtVaultAddress.value) {
+    consumedTargetDebtVaultAddress.value = ''
+  }
+})
+watch(targetCollateralVaultAddress, (address) => {
+  if (!address || address !== consumedTargetCollateralVaultAddress.value) {
+    consumedTargetCollateralVaultAddress.value = ''
+  }
+})
+
+const consumeTargetDebtQuery = () => {
+  const address = targetDebtVaultAddress.value
+  if (address) consumedTargetDebtVaultAddress.value = address
+  clearRouteQueryKeys(['to'])
+}
+const consumeTargetCollateralQuery = () => {
+  const address = targetCollateralVaultAddress.value
+  if (address) consumedTargetCollateralVaultAddress.value = address
+  clearRouteQueryKeys(['targetCollateral'])
+}
+
 watch([debtTargetVaults, targetDebtVaultAddress], ([vaults, targetAddress]) => {
-  if (!targetAddress || targetDebtVault.value) return
+  if (!targetAddress || targetDebtVault.value || consumedTargetDebtVaultAddress.value === targetAddress) return
   const vault = vaults.find(candidate => normalizeVaultAddress(candidate.address) === targetAddress)
-  if (vault) targetDebtVault.value = vault
+  if (vault) {
+    targetDebtVault.value = vault
+    consumeTargetDebtQuery()
+  }
+}, { immediate: true })
+watch([collateralTargetVaults, targetCollateralVaultAddress], ([vaults, targetAddress]) => {
+  if (!targetAddress || targetCollateralVault.value || consumedTargetCollateralVaultAddress.value === targetAddress) return
+  const vault = vaults.find(candidate => normalizeVaultAddress(candidate.address) === targetAddress)
+  if (vault) {
+    targetCollateralVault.value = vault
+    consumeTargetCollateralQuery()
+  }
 }, { immediate: true })
 
 watch(debtTargetVaults, (vaults) => {
@@ -2429,6 +2491,7 @@ const onDebtVaultChange = (selectedIndex: number, selectedOption?: CollateralOpt
     return
   }
   if (!sourceDebtVault.value) return
+  consumeTargetDebtQuery()
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceDebtVault.value.address)) {
     targetDebtVault.value = undefined
     return
@@ -2447,6 +2510,7 @@ const onCollateralVaultChange = (selectedIndex: number, selectedOption?: Collate
     return
   }
   if (!sourceCollateralVault.value) return
+  consumeTargetCollateralQuery()
   if (normalizeVaultAddress(selected.address) === normalizeVaultAddress(sourceCollateralVault.value.address)) {
     targetCollateralVault.value = undefined
     return
@@ -2808,6 +2872,7 @@ const addToBatch = async () => {
       const targetDebtSymbol = effectiveDebtVault.value.asset.symbol
       const sourceDebtAsset = sourceDebtVault.value.asset
       const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
+      const vaultAmounts = refinanceVaultAmounts.value
       const quoteFetchedAt = effectiveQuoteFetchedAt.value
       const swapReviewInfo = refinanceSwapReviewInfo.value
       const collateralChanged = hasCollateralChange.value
@@ -2825,6 +2890,7 @@ const addToBatch = async () => {
           quoteFetchedAt,
           collateralChanged,
           debtChanged,
+          vaultAmounts,
           sourceDebtVault: sourceDebtVault.value.address,
           sourceCollateralVaults: sourceCollateralVaultAddresses.value,
           ...swapReviewInfo,
@@ -2880,6 +2946,7 @@ const submit = async () => {
           plan: preparedPlan.value ? undefined : plan.value,
           prepared: preparedPlan.value || undefined,
           quoteFetchedAt: effectiveQuoteFetchedAt.value,
+          vaultAmounts: refinanceVaultAmounts.value,
           ...refinanceSwapReviewInfo.value,
           onConfirm: async () => {
             await send()
@@ -3141,6 +3208,7 @@ function getOperationVaultAddresses(): string[] {
       always-fallback
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="refinanceBackFallback"
       back-always-fallback
@@ -3148,7 +3216,6 @@ function getOperationVaultAddresses(): string[] {
       :description="isExternalSourceRoute ? 'Select Euler vaults for this external source position.' : 'Move debt, collateral, or both to new vaults in one transaction.'"
       class="flex flex-col gap-16 w-full"
       :loading="isExternalSourceRoute ? isExternalPositionsLoading : isLoading || isPositionsLoading"
-      :scroll-mode="isExternalSourceRoute ? 'page' : 'contained'"
       @submit.prevent="submit"
     >
       <template v-if="isExternalSourceRoute">
@@ -3609,7 +3676,7 @@ function getOperationVaultAddresses(): string[] {
             <SummaryRow label="ROE">
               <SummaryValue
                 :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
-                :after="roeAfter !== null && hasAllRequiredQuotes ? formatNumber(roeAfter) : undefined"
+                :after="roeAfter !== null && showNextRefinanceMetrics ? formatNumber(roeAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>
@@ -3618,7 +3685,7 @@ function getOperationVaultAddresses(): string[] {
               align-top
             >
               <p class="text-p2 text-right inline-flex items-center flex-wrap justify-end gap-x-4">
-                <template v-if="currentLiquidationPrice !== null && nextLiquidationPrice !== null && hasAllRequiredQuotes">
+                <template v-if="currentLiquidationPrice !== null && nextLiquidationPrice !== null && showNextRefinanceMetrics">
                   <span class="text-content-tertiary">{{ formatSmartAmount(liqPriceInvert.invertValue(currentLiquidationPrice)) }}<span class="text-p3 ml-2">{{ currentLiqDisplaySymbol }}</span></span>
                   &rarr; <span class="text-content-primary">{{ formatSmartAmount(liqPriceInvert.invertValue(nextLiquidationPrice)) }}<span class="text-content-tertiary text-p3 ml-2">{{ liqPriceInvert.displaySymbol }}</span></span>
                 </template>
@@ -3644,7 +3711,7 @@ function getOperationVaultAddresses(): string[] {
             <SummaryRow label="Liq. buffer">
               <SummaryValue
                 :before="formatLiqBuffer(liqPriceInvert.invertValue(currentPriceRatio), liqPriceInvert.invertValue(currentLiquidationPrice))"
-                :after="nextLiquidationPrice !== null && hasAllRequiredQuotes
+                :after="nextLiquidationPrice !== null && showNextRefinanceMetrics
                   ? formatLiqBuffer(liqPriceInvert.invertValue(nextPriceRatio), liqPriceInvert.invertValue(nextLiquidationPrice))
                   : undefined"
                 suffix="%"
@@ -3653,20 +3720,20 @@ function getOperationVaultAddresses(): string[] {
             <SummaryRow label="LTV">
               <SummaryValue
                 :before="currentLtv !== null ? formatNumber(currentLtv) : undefined"
-                :after="nextLtv !== null && hasAllRequiredQuotes ? formatNumber(nextLtv) : undefined"
+                :after="nextLtv !== null && showNextRefinanceMetrics ? formatNumber(nextLtv) : undefined"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
                 :before="currentHealth !== null ? formatHealthScore(currentHealth) : undefined"
-                :after="nextHealth !== null && hasAllRequiredQuotes ? formatHealthScore(nextHealth) : undefined"
+                :after="nextHealth !== null && showNextRefinanceMetrics ? formatHealthScore(nextHealth) : undefined"
               />
             </SummaryRow>
             <SummaryRow label="Borrow LTV">
               <SummaryValue
                 :before="currentBorrowLtv !== null ? formatNumber(currentBorrowLtv) : undefined"
-                :after="nextBorrowLtv !== null && hasAllRequiredQuotes && hasAnyChange ? formatNumber(nextBorrowLtv) : undefined"
+                :after="nextBorrowLtv !== null && showNextRefinanceMetrics ? formatNumber(nextBorrowLtv) : undefined"
                 suffix="%"
               />
             </SummaryRow>

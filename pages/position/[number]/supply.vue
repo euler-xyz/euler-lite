@@ -219,7 +219,7 @@ const addToBatch = async () => {
         label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
         buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
         subAccount: pos.subAccount as Address,
-        review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a },
+        review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {
@@ -286,6 +286,7 @@ watch(selectedAsset, async () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Supply collateral"

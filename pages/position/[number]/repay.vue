@@ -259,7 +259,7 @@ const addToBatchWithoutWarnings = async () => {
         subAccount: position.value.subAccount as Address,
         affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
         nameOverride: `Repay ${borrowSymbol}`,
-        review: { type: 'repay', asset: swapAsset, amount: swapAmount, swapToAsset: borrowVault.value.asset },
+        review: { type: 'repay', asset: swapAsset, amount: swapAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: walletSwap.quotes.effectiveQuoteFetchedAt.value },
       })
       walletSwap.amount.value = ''
       redirectAfterRepayAdd(isClosing)
@@ -309,7 +309,7 @@ const addToBatchWithoutWarnings = async () => {
       }),
       subAccount: position.value.subAccount as Address,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
-      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : collateral.quotes.effectiveQuoteFetchedAt.value },
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
@@ -340,7 +340,7 @@ const addToBatchWithoutWarnings = async () => {
       }),
       subAccount: position.value.subAccount as Address,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing, sourceSubAccount),
-      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset },
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : savings.quotes.effectiveQuoteFetchedAt.value },
     })
     savings.amount.value = ''
     savings.debtAmount.value = ''
@@ -589,6 +589,7 @@ watch(formTab, () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       :loading="isLoading || isPositionsLoading"
@@ -1070,6 +1071,7 @@ watch(formTab, () => {
                 :asset="savings.sourceVault.value.asset"
                 :vault="savings.sourceVault.value"
                 :collateral-options="savings.savingsOptions.value"
+                collateral-modal-title="Select savings"
                 :selected-source="'vault'"
                 :selected-sub-account="savings.selectedSavingSubAccount.value"
                 :selected-vault-address="savings.sourceVault.value.address"

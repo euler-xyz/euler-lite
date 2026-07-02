@@ -1,7 +1,26 @@
 import { DateTime } from 'luxon'
-import type { RewardCampaign } from '@eulerxyz/euler-v2-sdk'
+import type { Address } from 'viem'
+import type {
+  RewardAction,
+  RewardCampaign as SdkRewardCampaign,
+  RewardSource as SdkRewardSource,
+  UserReward as SdkUserReward,
+} from '@eulerxyz/euler-v2-sdk'
 
-export type { RewardAction, RewardCampaign, RewardSource } from '@eulerxyz/euler-v2-sdk'
+export type { RewardAction }
+
+export type RewardSource = SdkRewardSource | 'turtle'
+
+export type RewardCampaign = Omit<SdkRewardCampaign, 'source'> & {
+  source: RewardSource
+}
+
+export type UserReward = Omit<SdkUserReward, 'provider'> & {
+  provider: RewardSource
+  streamId?: string
+  streamAddress?: Address
+  timestamp?: string
+}
 
 export interface RewardCampaignDisplay {
   id: string
@@ -23,13 +42,17 @@ export const PROVIDER_LABELS: Record<string, string> = {
   merkl: 'Merkl',
   brevis: 'Incentra',
   fuul: 'Fuul',
+  turtle: 'Turtle',
 }
 
 export const PROVIDER_LOGOS: Record<string, string> = {
   merkl: '/entities/merkl.png',
   brevis: '/entities/brevis.png',
   fuul: '/entities/fuul.png',
+  turtle: '/entities/turtle.png',
 }
+
+const TURTLE_DASHBOARD_ORGANIZATION_ID = '52974bc3-2c43-4576-ac18-107d92b6e0c7'
 
 export const PROVIDER_SOURCE_URLS: Partial<Record<RewardCampaign['source'], string>> = {
   merkl: 'https://app.merkl.xyz/?protocol=euler',
@@ -80,7 +103,9 @@ export const rewardCampaignToken = (campaign: RewardCampaign): RewardCampaignDis
 })
 
 export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined =>
-  campaign.sourceUrl || PROVIDER_SOURCE_URLS[campaign.source]
+  campaign.sourceUrl || (campaign.source === 'turtle'
+    ? `https://dashboard.turtle.xyz/organizations/${TURTLE_DASHBOARD_ORGANIZATION_ID}/incentives/streams/${campaign.campaignId}`
+    : PROVIDER_SOURCE_URLS[campaign.source])
 
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
   const parts = [

@@ -51,6 +51,8 @@ export interface StepDecodingContext {
   amount: number | string
   supplyingAssetForBorrow?: StepKnownAsset
   supplyingAmount?: number | string
+  swapFromAsset?: { symbol: string, address: string, decimals?: number | bigint }
+  swapFromAmount?: number | string
   swapToAsset?: { symbol: string, address: string, decimals: number | bigint }
   swapToAmount?: number | string
   swapMode?: SwapperMode
@@ -58,6 +60,7 @@ export interface StepDecodingContext {
   transferAmounts?: Record<string, string>
   knownAssets?: StepKnownAsset[]
   swapQuoteOutputs?: StepKnownSwapOutput[]
+  vaultAmounts?: Record<string, string>
 }
 
 type KnownAsset = StepKnownAsset
@@ -336,9 +339,10 @@ export const buildPlanMarketLabel = (
 }
 
 export const cleanStepLabel = (label: string): string => {
-  return label
+  const cleaned = label
     .replace(/\s*via EVC$/i, '')
     .replace(/^Permit2\s+/i, '')
+  return cleaned ? `${cleaned[0].toUpperCase()}${cleaned.slice(1)}` : cleaned
 }
 
 export const decodeVaultAddressFromData = (data: string): string | undefined => {
@@ -1022,9 +1026,9 @@ const resolveBatchItemAssetInfo = (
       ? 'remaining'
       : resolved.decoded && resolved.amount
         ? resolved.amount
-        : isSharesAmountSelector(data)
+        : ctx.vaultAmounts?.[normalizeAddressKey(targetContract)] ?? (isSharesAmountSelector(data)
           ? undefined
-          : ctx.amount
+          : ctx.amount)
     return { symbol: vaultAsset?.symbol ?? ctx.asset.symbol, address: vaultAsset?.address ?? ctx.asset.address, amount }
   }
 
@@ -1168,7 +1172,12 @@ export function buildTransactionPlanDisplaySteps(
             toAssetInfo = { symbol: ctx.asset.symbol, address: ctx.asset.address }
           }
           else if (label === 'Swap' && ctx.swapToAsset && ctx.swapToAmount) {
-            assetInfo = { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: lastWithdrawAmount ?? ctx.amount }
+            const swapFromAsset = ctx.swapFromAsset ?? ctx.asset
+            assetInfo = {
+              symbol: swapFromAsset.symbol,
+              address: swapFromAsset.address,
+              amount: ctx.swapFromAmount ?? lastWithdrawAmount ?? ctx.amount,
+            }
             toAssetInfo = { symbol: ctx.swapToAsset.symbol, address: ctx.swapToAsset.address, amount: ctx.swapToAmount }
             const estimatedSide = ctx.swapEstimatedSide
               ?? (ctx.swapMode !== undefined ? getDefaultSwapEstimatedSide(ctx.swapMode) : undefined)
@@ -1306,7 +1315,7 @@ export function buildTransactionPlanDisplaySteps(
             inferredSwapInput = undefined
           }
           else if ((label === 'Verify min received' || label === 'Verify max debt') && pendingSwapStep && assetInfo) {
-            if (!pendingSwapStep.toAssetInfo?.amount) {
+            if (ctx.type !== 'refinance' && !pendingSwapStep.toAssetInfo?.amount) {
               const verifiedOutput = label === 'Verify max debt'
                 ? { symbol: assetInfo.symbol, address: assetInfo.address }
                 : { ...assetInfo }
@@ -1334,6 +1343,7 @@ export function buildTransactionPlanDisplaySteps(
       const isRewardOrUnlock = ctx.type === 'reward'
         || ctx.type === 'brevis-reward'
         || ctx.type === 'fuul-reward'
+        || ctx.type === 'turtle-reward'
         || ctx.type === 'reul-unlock'
       const rewardIconUrl = ['EUL', 'rEUL'].includes(ctx.asset.symbol)
         ? getLogoUrl(ctx.asset.address, 'EUL')

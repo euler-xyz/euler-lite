@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { useModal } from '~/components/ui/composables/useModal'
 import { UiSelectModal } from '#components'
+import type { SelectOption, SelectQuickFilter } from '~/components/ui/modals/select.types'
 
 const model = defineModel<string[]>({ required: true })
 const props = defineProps<{
-  options: { label: string, value: string, icon?: string }[]
+  options: SelectOption[]
   placeholder?: string
   title?: string
   icon?: string
   showSelectedOptions?: boolean
   modalInputPlaceholder?: string
-  chipOptions?: { label: string, value: string, icon?: string }[]
+  chipOptions?: SelectOption[]
+  quickFilters?: SelectQuickFilter[]
 }>()
 
 const modal = useModal()
@@ -20,7 +22,7 @@ const displayText = computed(() => {
     return props.placeholder || 'Select...'
   }
 
-  return props.options
+  return [...props.options, ...(props.quickFilters ?? [])]
     .filter(opt => model.value.includes(opt.value))
     .map(opt => opt.label)
     .slice(0, 2)
@@ -52,6 +54,7 @@ const open = () => {
     props: {
       selected: model.value,
       options: props.options,
+      quickFilters: props.quickFilters,
       title: props.title,
       inputPlaceholder: props.modalInputPlaceholder,
       onSave: (selected: string[]) => {

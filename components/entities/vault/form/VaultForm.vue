@@ -7,18 +7,30 @@ const props = withDefaults(defineProps<{
   backFallback?: string
   backAlwaysFallback?: boolean
   scrollMode?: 'contained' | 'page'
+  pageScroll?: boolean
 }>(), {
   scrollMode: 'contained',
 })
 
-const isContainedScroll = computed(() => props.scrollMode === 'contained')
+const isPageScroll = computed(() => props.scrollMode === 'page' || props.pageScroll)
+
+const formClasses = computed(() => [
+  'flex flex-col mobile:min-h-[calc(100dvh-100px)] laptop:px-16',
+  isPageScroll.value
+    ? 'vault-form--page-scroll'
+    : 'laptop:max-h-[calc(100dvh-88px)] laptop:overflow-clip',
+])
+
+const contentClasses = computed(() => [
+  'flex flex-col gap-16 laptop:-mx-16 laptop:px-16 [&>*]:shrink-0',
+  isPageScroll.value ? '' : 'laptop:overflow-y-auto laptop:min-h-0',
+])
 </script>
 
 <template>
   <form
     v-bind="$attrs"
-    class="flex flex-col"
-    :class="isContainedScroll ? 'mobile:min-h-[calc(100dvh-100px)] laptop:max-h-[calc(100dvh-88px)] laptop:overflow-clip laptop:px-16' : 'laptop:px-16'"
+    :class="formClasses"
   >
     <div v-if="back || title || description">
       <div
@@ -56,18 +68,28 @@ const isContainedScroll = computed(() => props.scrollMode === 'contained')
 
     <div
       v-else
-      class="flex flex-col gap-16 [&>*]:shrink-0"
-      :class="isContainedScroll ? 'laptop:overflow-y-auto laptop:min-h-0 laptop:-mx-16 laptop:px-16' : ''"
+      :class="contentClasses"
     >
       <slot />
     </div>
 
     <div
       v-if="!loading"
-      class="flex flex-col gap-8 pt-16"
-      :class="isContainedScroll ? 'laptop:-mx-16 laptop:px-16' : ''"
+      class="flex flex-col gap-8 pt-16 laptop:-mx-16 laptop:px-16"
     >
       <slot name="buttons" />
     </div>
   </form>
 </template>
+
+<style scoped>
+.vault-form--page-scroll {
+  padding-bottom: 48px;
+}
+
+@media (max-width: 900px) {
+  .vault-form--page-scroll {
+    padding-bottom: max(64px, calc(env(safe-area-inset-bottom, 0px) + 48px));
+  }
+}
+</style>

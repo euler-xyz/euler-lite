@@ -30,11 +30,13 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   group.name,
   group.curator?.name,
   ...group.metrics.assetSymbols,
-  ...group.vaults.flatMap((vault) => {
+  ...[...group.vaults, ...group.externalCollateral].flatMap((vault) => {
     const addr = getVaultAddress(vault)
     if (!addr) return []
     const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
+      addr,
+      getVaultAssetAddress(vault),
       product.name,
       product.description,
       ...getEntitiesByVault(vault).map(e => e.name),
@@ -287,6 +289,30 @@ const isLoading = computed(() =>
   || isTokenListLoading.value || !marketGroupsReady.value || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
+
+const hasActiveFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedMarkets.value.length > 0
+  || selectedAssets.value.length > 0
+  || selectedRiskManagers.value.length > 0
+  || customFilters.value.length > 0,
+)
+const hasExploreMarkets = computed(() => marketGroups.value.some(group => group.source === 'product'))
+const showFilteredEmptyState = computed(() => hasActiveFilters.value && hasExploreMarkets.value)
+const emptyStateTitle = computed(() => showFilteredEmptyState.value ? 'No markets found' : 'No markets yet')
+const emptyStateDescription = computed(() =>
+  showFilteredEmptyState.value
+    ? 'Try clearing search or filters to uncover more markets.'
+    : 'No markets are available on this network yet.',
+)
+
+const clearExploreFilters = () => {
+  clearSearch()
+  selectedMarkets.value = []
+  selectedAssets.value = []
+  selectedRiskManagers.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
@@ -375,18 +401,26 @@ const { isSlow } = useSlowLoading(isLoading)
         :markets="sortedMarkets"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-content-tertiary"
+        class="flex-1"
+        icon="nodes"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="showFilteredEmptyState"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearExploreFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>

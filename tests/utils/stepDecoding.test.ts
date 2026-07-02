@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from 'viem'
-import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, type EVCBatchItem, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 import { buildTransactionPlanDisplaySteps, type StepDecodingContext, type VaultLookup } from '~/utils/stepDecoding'
 
@@ -12,6 +12,8 @@ const daiVault = '0x0000000000000000000000000000000000000012' as Address
 const weethVault = '0x0000000000000000000000000000000000000013' as Address
 const wethVault = '0x0000000000000000000000000000000000000014' as Address
 const cbBtcVault = '0x0000000000000000000000000000000000000015' as Address
+const sourceWbtcVault = '0x0000000000000000000000000000000000000016' as Address
+const targetWbtcVault = '0x0000000000000000000000000000000000000017' as Address
 const usdcAsset = '0x0000000000000000000000000000000000000021' as Address
 const daiAsset = '0x0000000000000000000000000000000000000022' as Address
 const weethAsset = '0x0000000000000000000000000000000000000023' as Address
@@ -26,6 +28,7 @@ const aToken = '0x0000000000000000000000000000000000000035' as Address
 const variableDebtToken = '0x0000000000000000000000000000000000000036' as Address
 const bytes32Zero = `0x${'00'.repeat(32)}` as Hex
 const genericHandler = '0x47656e6572696300000000000000000000000000000000000000000000000000' as Hex
+const wbtcAsset = '0x0000000000000000000000000000000000000026' as Address
 
 const swapVerifierAbi = parseAbi([
   'function verifyAmountMinAndDeposit(address vault,address receiver,uint256 amountMin,uint256 deadline)',
@@ -129,6 +132,15 @@ const getVault: VaultLookup = (address) => {
       asset: {
         symbol: 'cbBTC',
         address: cbBtcAsset,
+        decimals: 8,
+      },
+    }
+  }
+  if (normalized === sourceWbtcVault.toLowerCase() || normalized === targetWbtcVault.toLowerCase()) {
+    return {
+      asset: {
+        symbol: 'WBTC',
+        address: wbtcAsset,
         decimals: 8,
       },
     }
@@ -415,8 +427,8 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
     expect(steps[1]).toMatchObject({
       label: 'Swap',
       assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '0.731941' },
-      toAssetInfo: { symbol: 'weETH', address: weethAsset, amount: '0.00037774' },
     })
+    expect(steps[1]?.toAssetInfo).toBeUndefined()
     expect(steps[3]).toMatchObject({
       label: 'Borrow',
       assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00039514' },
@@ -424,7 +436,87 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
     expect(steps[4]).toMatchObject({
       label: 'Swap to repay',
       assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00039514' },
-      toAssetInfo: { symbol: 'cbBTC', address: cbBtcAsset },
+    })
+    expect(steps[4]?.toAssetInfo).toBeUndefined()
+  })
+
+  it('uses explicit collateral swap input metadata for collateral-only refinance reviews', () => {
+    const steps = buildTransactionPlanDisplaySteps(
+      [{
+        type: 'evcBatch',
+        items: [
+          batchItem(encodeFunctionData({
+            abi: vaultAbi,
+            functionName: 'withdraw',
+            args: [25_152n, swapper, account],
+          }), sourceWbtcVault),
+          batchItem(encodeFunctionData({
+            abi: swapperAbi,
+            functionName: 'multicall',
+            args: [[]],
+          }), swapper),
+        ],
+      }] satisfies TransactionPlan,
+      {
+        type: 'refinance',
+        asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+        amount: '9.618704',
+        swapFromAsset: { symbol: 'WBTC', address: wbtcAsset, decimals: 8 },
+        swapFromAmount: '0.00025152',
+        swapToAsset: { symbol: 'weETH', address: weethAsset, decimals: 18 },
+        swapToAmount: '0.00037774',
+        swapMode: SwapperMode.EXACT_IN,
+      },
+      getVault,
+      getLogoUrl,
+    )
+
+    expect(steps[1]).toMatchObject({
+      label: 'Swap',
+      assetInfo: {
+        symbol: 'WBTC',
+        address: wbtcAsset,
+        amount: '0.00025152',
+      },
+      toAssetInfo: {
+        symbol: 'weETH',
+        address: weethAsset,
+        amount: '0.00037774',
+      },
+    })
+  })
+
+  it('uses vault-specific display amounts for same-asset refinance collateral redeems', () => {
+    const steps = buildTransactionPlanDisplaySteps(
+      [{
+        type: 'evcBatch',
+        items: [
+          batchItem(encodeFunctionData({
+            abi: vaultAbi,
+            functionName: 'redeem',
+            args: [25_152n, targetWbtcVault, account],
+          }), sourceWbtcVault),
+        ],
+      }] satisfies TransactionPlan,
+      {
+        type: 'refinance',
+        asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+        amount: '9.618704',
+        vaultAmounts: {
+          [sourceWbtcVault.toLowerCase()]: '0.00025152',
+        },
+      },
+      getVault,
+      getLogoUrl,
+    )
+
+    expect(steps[0]).toMatchObject({
+      label: 'Withdraw',
+      assetInfo: {
+        symbol: 'WBTC',
+        address: wbtcAsset,
+        amount: '0.00025152',
+      },
     })
   })
 })

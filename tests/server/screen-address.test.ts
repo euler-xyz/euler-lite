@@ -3,6 +3,7 @@ import type { H3Event } from 'h3'
 
 const mocks = vi.hoisted(() => ({
   consume: vi.fn(),
+  warn: vi.fn(),
 }))
 
 vi.mock('h3', () => ({
@@ -16,7 +17,7 @@ vi.mock('~/server/utils/rate-limit', () => ({
 
 vi.mock('~/server/utils/logger', () => ({
   logger: {
-    warn: vi.fn(),
+    warn: mocks.warn,
   },
 }))
 
@@ -66,6 +67,24 @@ describe('POST /api/screen-address', () => {
 
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+  })
+
+  it('hashes suspicious addresses in logs', async () => {
+    process.env.WALLET_SCREENING_URI = SCREENING_URI
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ addressIsSuspicious: true }), { status: 200 }),
+    ))
+
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+
+    expect(mocks.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ctx: 'screen-address',
+        addressHash: expect.any(String),
+      }),
+      'flagged, malformed, or ambiguous TRM response — failing closed',
+    )
+    expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(USER)
   })
 
   it('derives vpnIsUsed from trusted request headers', async () => {

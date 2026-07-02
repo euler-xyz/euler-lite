@@ -92,6 +92,8 @@ export interface BatchEntry {
   nameOverride?: string
   /** Refresh external protocol positions after this entry executes in a batch. */
   refreshExternalMigrationPositions?: boolean
+  /** Stable claim identifier for reward rows already queued in the batch. */
+  rewardClaimKey?: string
 }
 
 type BatchEntryBuildResult = TransactionPlan | {
@@ -99,10 +101,20 @@ type BatchEntryBuildResult = TransactionPlan | {
   stateOverrides?: StateOverride
 }
 
-export interface BatchEntryInput extends Omit<BatchEntry, 'id' | 'plan'> {
-  /** Builds this entry once, at add-time, against the current batch end-state. */
-  buildPlan: (account: Account<IHasVaultAddress>) => Promise<BatchEntryBuildResult>
-}
+type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
+
+export type BatchEntryInput = BatchEntryInputBase & (
+  {
+    /** Builds this entry once, at add-time, against the current batch end-state. */
+    buildPlan: (account: Account<IHasVaultAddress>) => Promise<BatchEntryBuildResult>
+    requiresPlanningAccount?: true
+  } | {
+    /** Builds this entry once, at add-time, without a simulated account snapshot. */
+    buildPlan: () => Promise<BatchEntryBuildResult>
+    /** Set false for standalone plans that do not need the current simulated account. */
+    requiresPlanningAccount: false
+  }
+)
 
 export interface BatchLayer {
   /** Simulated account snapshot after this layer's entry (layer 0 = real). */
@@ -219,6 +231,44 @@ const pendingAddSignatures = new Set<string>()
 // Symbol/decimals for touched wallet tokens, for the wallet-changes summary.
 const walletAssetMeta: Record<string, { symbol: string, decimals: number }> = {}
 let batchSlotHints: SlotHints = {}
+
+// TEMP DIAGNOSTICS — hunting an unreproducible "Batch simulation not loaded"
+// error that some users hit when adding a second operation to the batch. Every
+// call snapshots the full resim state machine (token, entry/layer counts,
+// promise + error state) so a single field report is self-contained.
+//
+// IMPORTANT: client `logger.warn` is dropped unless `?verbose` /
+// localStorage.euler_verbose=1 is set (see utils/logger.ts), so the trace level
+// only shows up for devs / on the server. The moments that actually pin the bug
+// (the throw, the version guard, supersessions that fire during a plan-time
+// await) are logged at `severity: 'error'`, which surfaces in every browser.
+// Remove this whole block (and its call sites) once the cause is captured.
+const logBatchDiag = (
+  event: string,
+  extra?: Record<string, unknown>,
+  severity: 'warn' | 'error' = 'warn',
+) => {
+  logWarn('useTxBatch/diag', event, {
+    severity,
+    data: {
+      event,
+      resimToken,
+      hasResimPromise: resimulatePromise !== null,
+      isSimulating: isSimulating.value,
+      entryCount: entries.value.length,
+      layerCount: layers.value.length,
+      activeLayer: activeLayer.value,
+      simError: simError.value ?? null,
+      entries: entries.value.map(e => ({
+        id: e.id,
+        label: e.label,
+        subAccount: e.subAccount,
+        planItems: e.plan?.length ?? 0,
+      })),
+      ...extra,
+    },
+  })
+}
 
 const normalizeTokenKey = (token: string) => {
   try {
@@ -899,6 +949,7 @@ const hydrateBorrowLiquidity = (
   borrow: StitchPosition,
   positions: StitchPosition[],
   enabledCollaterals: Address[] | undefined,
+  baseEnabledCollaterals: Address[] | undefined,
 ): void => {
   const liquidity = borrow.liquidity
   if (!liquidity || (borrow.borrowed ?? 0n) === 0n) return
@@ -906,6 +957,7 @@ const hydrateBorrowLiquidity = (
   const positionsByVault = positionByVault(positions)
   liquidity.vault = liquidity.vault ?? borrow.vault
   liquidity.liabilityValueUsd = borrow.borrowedValueUsd
+  const borrowVaultKey = getAddress(borrow.vaultAddress).toLowerCase()
 
   const existingCollaterals = new Map<string, StitchLiquidityCollateral>()
   for (const collateral of liquidity.collaterals) {
@@ -913,11 +965,23 @@ const hydrateBorrowLiquidity = (
   }
   const enabledCollateralKeys = enabledCollaterals?.map(address => getAddress(address).toLowerCase())
   const enabledCollateralSet = enabledCollateralKeys ? new Set(enabledCollateralKeys) : undefined
+  // Collaterals that were already enabled on the EVC *before* this batch ran.
+  // Used to tell a collateral newly enabled by the batch (e.g. a collateral
+  // swap) apart from a pre-existing, possibly empty, enablement.
+  const baseEnabledCollateralSet = baseEnabledCollaterals
+    ? new Set(baseEnabledCollaterals.map(address => getAddress(address).toLowerCase()))
+    : undefined
   const collateralAddresses: Address[] = []
   const seen = new Set<string>()
   const addCollateralAddress = (address: string, requireEnabledOrValue: boolean) => {
     const key = getAddress(address).toLowerCase()
     if (seen.has(key)) return
+    // A vault is never its own collateral. The EVC can list the borrow vault in
+    // enabledCollaterals, and its own position carries debt (so it passes the
+    // value guard below), but the controller grants it no LTV — the lens omits
+    // it from liquidity.collaterals and so must we, or it surfaces as a spurious
+    // zero-value collateral row.
+    if (key === borrowVaultKey) return
     const collateralPosition = positionsByVault.get(getAddress(address))
     const hasBalance = hasPositionValue(collateralPosition)
     const isEnabled = enabledCollateralSet?.has(key) ?? true
@@ -928,7 +992,19 @@ const hydrateBorrowLiquidity = (
     collateralAddresses.push(getAddress(address) as Address)
   }
   for (const collateral of liquidity.collaterals) addCollateralAddress(collateral.address, true)
-  for (const collateral of enabledCollateralKeys ?? []) addCollateralAddress(collateral, false)
+  // EVC-enabled collaterals. A collateral *newly* enabled by this batch (not in
+  // the base enabled set) is added unconditionally, since its simulated balance
+  // may not be populated on this position yet — this is what surfaces a
+  // collateral-swap's new collateral. A collateral that was already enabled
+  // before the batch is added under the same guard as the lens collaterals
+  // above, so leftover enabled-but-empty vaults (an account can carry several)
+  // don't show up as spurious zero-value collateral rows. When the base set is
+  // unknown (a brand-new sub-account), every enabled collateral is treated as
+  // newly enabled, preserving the prior unconditional behaviour.
+  for (const collateral of enabledCollateralKeys ?? []) {
+    const wasEnabledBeforeBatch = baseEnabledCollateralSet?.has(collateral) ?? false
+    addCollateralAddress(collateral, wasEnabledBeforeBatch)
+  }
 
   let totalCollateralValueUsd: number | undefined = collateralAddresses.length ? 0 : liquidity.totalCollateralValueUsd
   let hasMissingCollateralUsd = false
@@ -975,9 +1051,10 @@ const hydrateBorrowLiquidity = (
 const hydrateStitchedPositions = (
   positions: StitchPosition[],
   enabledCollaterals: Address[] | undefined,
+  baseEnabledCollaterals: Address[] | undefined,
 ): StitchPosition[] => {
   for (const position of positions) hydratePositionMarketValues(position)
-  for (const position of positions) hydrateBorrowLiquidity(position, positions, enabledCollaterals)
+  for (const position of positions) hydrateBorrowLiquidity(position, positions, enabledCollaterals, baseEnabledCollaterals)
   return positions
 }
 
@@ -1034,7 +1111,7 @@ const applyClosedPositions = (
     if (positions.length !== sa.positions.length) changed = true
     subAccounts[subAccount] = {
       ...sa,
-      positions: hydrateStitchedPositions(positions, sa.enabledCollaterals),
+      positions: hydrateStitchedPositions(positions, sa.enabledCollaterals, sa.enabledCollaterals),
     }
   }
 
@@ -1281,6 +1358,8 @@ export const stitchAccount = (
         positions: hydrateStitchedPositions(
           mergePositionsByVault(tsa.positions.map(position => clonePosition(position as StitchPosition))),
           tsa.enabledCollaterals,
+          // No base sub-account: every enabled collateral is treated as new.
+          undefined,
         ),
       }
       continue
@@ -1291,7 +1370,15 @@ export const stitchAccount = (
       const vault = getAddress(tp.vaultAddress)
       byVault.set(vault, mergePositionData(byVault.get(vault), tp as StitchPosition))
     }
-    const positions = hydrateStitchedPositions(Array.from(byVault.values()), tsa.enabledCollaterals)
+    // `existing` is still the pre-batch (prevFull) sub-account here — it isn't
+    // overwritten with the simulated EVC state until below — so its enabled
+    // collaterals are the base set against which `tsa.enabledCollaterals` is the
+    // post-batch state.
+    const positions = hydrateStitchedPositions(
+      Array.from(byVault.values()),
+      tsa.enabledCollaterals,
+      existing.enabledCollaterals,
+    )
     mergedSubs[key] = {
       ...existing,
       // Post-op EVC state for this sub-account comes from the simulated layer.
@@ -1357,6 +1444,44 @@ const getEntryMarketLabelOverride = (entry: BatchEntry): string | undefined => {
   return typeof label === 'string' && label.trim() ? label : undefined
 }
 
+/**
+ * Resolve the post-cart "final layer" account for planning the next batch op,
+ * retrying across superseded resimulations.
+ *
+ * A resimulation can be superseded mid-flight (a newer run shares `resimToken`
+ * and the loser returns early WITHOUT populating layers or `simError`), so a
+ * single await can resolve before our final layer exists. Each pass awaits the
+ * current run — `getInFlight() ?? startRun()` both starts a fresh run when none
+ * is in flight AND awaits it — so every run this loop starts is awaited before
+ * we re-check or fall through to the throw. (Critically: no run is ever started
+ * on the terminal iteration without being awaited, which would otherwise re-throw
+ * "Batch simulation not loaded" while a fresh run was still in flight.)
+ *
+ * Extracted from `getEntryPlanningAccount` so the superseded-run/retry invariant
+ * is unit-testable without the SDK; see tests/composables/useTxBatch.test.ts.
+ */
+export const awaitFinalPlanningLayer = async <T>(opts: {
+  getFinalLayer: () => T | undefined
+  getSimError: () => string | undefined
+  getInFlight: () => Promise<void> | null
+  startRun: () => Promise<void>
+  maxAttempts?: number
+  onAttempt?: (info: { attempt: number, awaitedExisting: boolean, found: boolean }) => void
+}): Promise<T> => {
+  const { getFinalLayer, getSimError, getInFlight, startRun, maxAttempts = 8, onAttempt } = opts
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const inFlight = getInFlight()
+    await (inFlight ?? startRun())
+    const layer = getFinalLayer()
+    onAttempt?.({ attempt, awaitedExisting: inFlight !== null, found: layer !== undefined })
+    if (layer !== undefined) return layer
+    // A real error is terminal; stop retrying and surface it below. Otherwise the
+    // run was superseded — loop and await whatever run is current next pass.
+    if (getSimError()) break
+  }
+  throw new Error(getSimError() ?? 'Batch simulation not loaded')
+}
+
 export const useTxBatch = () => {
   const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
@@ -1381,8 +1506,13 @@ export const useTxBatch = () => {
     const token = ++resimToken
     const o = owner.value
     const cid = chainId.value
+    logBatchDiag('resimulate:start', { token, owner: o, chainId: cid })
 
     if (!o || !cid || entries.value.length === 0) {
+      logBatchDiag('resimulate:empty-batch-reset', {
+        token,
+        reason: !o ? 'no-owner' : !cid ? 'no-chain' : 'no-entries',
+      })
       layers.value = []
       activeLayer.value = 0
       simError.value = undefined
@@ -1440,7 +1570,15 @@ export const useTxBatch = () => {
         },
       )
 
-      if (token !== resimToken) return
+      if (token !== resimToken) {
+        // A newer resimulation superseded this one after the sim resolved, so this
+        // run bails before populating layers. When that happens during a plan-time
+        // await it's exactly what surfaces as the misleading "Batch simulation not
+        // loaded" (see getEntryPlanningAccount). Logged at error so it surfaces in
+        // the field even without verbose mode.
+        logBatchDiag('resimulate:superseded-after-sim', { token, supersededBy: resimToken }, 'error')
+        return
+      }
 
       // Two distinct failure shapes, both blocking but handled differently:
       //  - simulationError: the EVC call reverted at the top level (couldn't even
@@ -1465,12 +1603,37 @@ export const useTxBatch = () => {
       const simAccounts = rawSimAccounts.length === plans.length
         ? [baseAccount, ...rawSimAccounts]
         : rawSimAccounts
+      // A healthy sim returns exactly one account per operation on top of the
+      // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1. Anything
+      // else is the smoking gun for the "not loaded" symptom (getCurrentFinalLayer
+      // needs layers.length === entries.length + 1), so escalate to error on a
+      // mismatch.
+      logBatchDiag(
+        'resimulate:sim-resolved',
+        {
+          token,
+          rawSimAccounts: rawSimAccounts.length,
+          simAccounts: simAccounts.length,
+          plans: plans.length,
+          expectedLayers: plans.length + 1,
+          countMatchesExpected: simAccounts.length === plans.length + 1,
+          simulationError: !!sim.simulationError,
+          statusCheckFailed,
+          simError: simError.value ?? null,
+        },
+        simAccounts.length === plans.length + 1 ? 'warn' : 'error',
+      )
       // Version guard: the builder needs one simulated account per operation on
       // top of the pre-batch snapshot (the layered simulation API). An SDK build
       // without it would otherwise silently render the real state forever. The
       // final-only shape is still enough for one operation, so normalize that
       // case into [base, afterOp0].
       if (!simError.value && simAccounts.length < plans.length + 1) {
+        logBatchDiag('resimulate:version-guard-tripped', {
+          token,
+          simAccounts: simAccounts.length,
+          plans: plans.length,
+        }, 'error')
         simError.value = 'Batch simulation did not return per-operation state layers — the installed @eulerxyz/euler-v2-sdk build does not support the batch builder.'
       }
       const fullLayers: Account<IHasVaultAddress>[] = [baseAccount]
@@ -1518,7 +1681,12 @@ export const useTxBatch = () => {
           logWarn('useTxBatch/fetchWallet', error)
         }
       }
-      if (token !== resimToken) return
+      if (token !== resimToken) {
+        // Superseded during the post-sim wallet fetch — same race as above, just a
+        // later checkpoint. Bails before populating layers.
+        logBatchDiag('resimulate:superseded-after-wallet-fetch', { token, supersededBy: resimToken }, 'error')
+        return
+      }
       // Asset metadata (symbol/decimals) for the touched tokens, resolved from
       // the simulated vault entities, for the wallet-changes summary.
       for (const vault of sim.simulatedVaults ?? []) {
@@ -1579,9 +1747,21 @@ export const useTxBatch = () => {
       })
       activeLayer.value = layers.value.length - 1
       syncOverlay()
+      // Completion checkpoint: layerCount/entryCount come from the helper snapshot.
+      // getCurrentFinalLayer needs layerCount === entryCount + 1; escalate to error
+      // if this run finished without satisfying that (the bug condition).
+      logBatchDiag(
+        'resimulate:complete',
+        { token, layersBuilt: layers.value.length },
+        layers.value.length === entries.value.length + 1 ? 'warn' : 'error',
+      )
     }
     catch (error) {
-      if (token !== resimToken) return
+      if (token !== resimToken) {
+        logBatchDiag('resimulate:superseded-in-catch', { token, supersededBy: resimToken }, 'error')
+        return
+      }
+      logBatchDiag('resimulate:threw', { token, error: error instanceof Error ? error.message : String(error) }, 'error')
       logWarn('useTxBatch/resimulate', error)
       simError.value = error instanceof Error ? error.message : String(error)
     }
@@ -1591,11 +1771,19 @@ export const useTxBatch = () => {
   }
 
   const runResimulate = (): Promise<void> => {
-    const promise = resimulate()
-    resimulatePromise = promise.finally(() => {
-      if (resimulatePromise === promise) resimulatePromise = null
+    // Compare against the *wrapped* promise we store, not the raw resimulate()
+    // promise — otherwise the guard never matches and resimulatePromise is never
+    // cleared, leaving callers (getEntryPlanningAccount) awaiting a stale run.
+    const wrapped: Promise<void> = resimulate().finally(() => {
+      // `cleared === false` means a newer run already replaced this promise, so a
+      // caller awaiting `resimulatePromise` will pick up the newer run next pass.
+      const cleared = resimulatePromise === wrapped
+      if (cleared) resimulatePromise = null
+      logBatchDiag('runResimulate:settled', { cleared })
     })
-    return resimulatePromise
+    resimulatePromise = wrapped
+    logBatchDiag('runResimulate:kicked')
+    return wrapped
   }
 
   // Wire reactivity exactly once, in a detached scope that outlives any single
@@ -1606,12 +1794,14 @@ export const useTxBatch = () => {
       // Any edit to the cart invalidates a prior Tenderly run (it simulated a
       // different fixed plan list), so drop the stale URL before re-simulating.
       watch(entries, () => {
+        logBatchDiag('watch:entries-changed')
         tenderly.clearSimulation()
         void runResimulate()
       })
       watch([activeLayer, layers], syncOverlay)
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
+        logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
         resimToken++
         entries.value = []
         layers.value = []
@@ -1638,20 +1828,50 @@ export const useTxBatch = () => {
     )
 
     const finalLayer = getCurrentFinalLayer()
+    logBatchDiag('getEntryPlanningAccount:enter', { fastPathHit: finalLayer !== undefined })
     if (finalLayer) return finalLayer
 
     if (entries.value.length > 0) {
-      await (resimulatePromise ?? runResimulate())
-      const refreshedFinalLayer = getCurrentFinalLayer()
-      if (refreshedFinalLayer) return refreshedFinalLayer
-      throw new Error(simError.value ?? 'Batch simulation not loaded')
+      // Retry across superseded resimulations until the final layer for the
+      // present entries settles or a real error appears (see awaitFinalPlanningLayer).
+      try {
+        return await awaitFinalPlanningLayer<Account<IHasVaultAddress>>({
+          getFinalLayer: getCurrentFinalLayer,
+          getSimError: () => simError.value,
+          getInFlight: () => resimulatePromise,
+          startRun: runResimulate,
+          // Found on attempt 0 is the healthy path (warn/quiet). Not finding it —
+          // i.e. the awaited run resolved without our layers — is the suspected
+          // race; log at error so we capture each re-attempt in the field.
+          onAttempt: ({ attempt, awaitedExisting, found }) =>
+            logBatchDiag('getEntryPlanningAccount:attempt', {
+              attempt,
+              awaitedExisting,
+              finalLayerFound: found,
+            }, found ? 'warn' : 'error'),
+        })
+      }
+      catch (error) {
+        // This is THE event we're hunting. Full state is in the helper snapshot.
+        logBatchDiag('getEntryPlanningAccount:throw', {
+          thrownMessage: simError.value ?? 'Batch simulation not loaded',
+        }, 'error')
+        throw error
+      }
     }
 
-    if (baseAccountSnapshot) return baseAccountSnapshot
+    if (baseAccountSnapshot) {
+      logBatchDiag('getEntryPlanningAccount:base-snapshot-cached')
+      return baseAccountSnapshot
+    }
 
     const o = owner.value
     const cid = chainId.value
-    if (!o || !cid) throw new Error('Account not loaded')
+    if (!o || !cid) {
+      logBatchDiag('getEntryPlanningAccount:account-not-loaded', { owner: o, chainId: cid }, 'error')
+      throw new Error('Account not loaded')
+    }
+    logBatchDiag('getEntryPlanningAccount:base-snapshot-fetch', { owner: o, chainId: cid })
     const sdk = await getEulerSdkFresh()
     baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, getAddress(o))
     return baseAccountSnapshot
@@ -1667,14 +1887,21 @@ export const useTxBatch = () => {
 
     const add = async () => {
       execError.value = undefined
-      const buildResult = await entry.buildPlan(await getEntryPlanningAccount())
+      logBatchDiag('addEntry:building', {
+        label: entry.label,
+        subAccount: entry.subAccount,
+        requiresPlanningAccount: entry.requiresPlanningAccount !== false,
+      })
+      const buildResult = entry.requiresPlanningAccount === false
+        ? await entry.buildPlan()
+        : await entry.buildPlan(await getEntryPlanningAccount())
       const plan = Array.isArray(buildResult) ? buildResult : buildResult.plan
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
         await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))
       }
-      const { buildPlan: _buildPlan, ...fixedEntry } = entry
+      const { buildPlan: _buildPlan, requiresPlanningAccount: _requiresPlanningAccount, ...fixedEntry } = entry
       registerReviewAssetMeta(fixedEntry.review)
       entries.value = [...entries.value, {
         ...fixedEntry,
@@ -1682,6 +1909,7 @@ export const useTxBatch = () => {
         plan,
         id: `entry-${++idSeq}`,
       }]
+      logBatchDiag('addEntry:added', { label: entry.label, newEntryCount: entries.value.length })
     }
 
     const nextAdd = addEntryQueue.then(add, add)
@@ -1691,6 +1919,10 @@ export const useTxBatch = () => {
       await nextAdd
     }
     catch (error) {
+      logBatchDiag('addEntry:threw', {
+        label: entry.label,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'error')
       logWarn('useTxBatch/addEntry', error)
       simError.value = error instanceof Error ? error.message : String(error)
       throw error

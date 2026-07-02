@@ -3,9 +3,11 @@ import type { PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-s
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 
 const { isConnected } = useWagmi()
+const { isSpyMode } = useSpyMode()
 const { depositPositions, removedDepositPositions, isDepositsLoaded } = useEulerAccount()
 const { isReady } = useVaults()
 const { isEarnVault } = useVaultRegistry()
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 
 const displayedDepositPositions = computed(() => [
   ...removedDepositPositions.value,
@@ -62,7 +64,7 @@ usePortfolioBatchScrollTarget(computed(() => [
     </p>
     <div class="flex flex-1 p-8 rounded-12 mb-16 border border-line-default bg-card">
       <div
-        v-if="isConnected && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
+        v-if="hasActiveSession && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />
@@ -71,17 +73,11 @@ usePortfolioBatchScrollTarget(computed(() => [
         v-else-if="earnItems.length === 0"
         class="flex flex-1 justify-center items-center"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-            <SvgIcon name="search" />
-          </div>
-          <template v-if="isConnected">
-            You don't have deposit positions yet
-          </template>
-          <template v-else>
-            Connect your wallet to see your deposit positions
-          </template>
-        </div>
+        <PortfolioEmptyState
+          :active="hasActiveSession"
+          active-text="You don't have deposit positions yet"
+          inactive-text="Connect your wallet to see your deposit positions"
+        />
       </div>
       <div
         v-else
@@ -110,7 +106,7 @@ usePortfolioBatchScrollTarget(computed(() => [
     </p>
     <div class="flex flex-1 p-8 rounded-12 border border-line-default bg-card">
       <div
-        v-if="isConnected && (!isDepositsLoaded || !isReady)"
+        v-if="hasActiveSession && (!isDepositsLoaded || !isReady)"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />
@@ -119,17 +115,11 @@ usePortfolioBatchScrollTarget(computed(() => [
         v-else-if="lendItems.length === 0"
         class="flex flex-1 justify-center items-center"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-            <SvgIcon name="search" />
-          </div>
-          <template v-if="isConnected">
-            You don't have deposit positions yet
-          </template>
-          <template v-else>
-            Connect your wallet to see your deposit positions
-          </template>
-        </div>
+        <PortfolioEmptyState
+          :active="hasActiveSession"
+          active-text="You don't have deposit positions yet"
+          inactive-text="Connect your wallet to see your deposit positions"
+        />
       </div>
       <div
         v-else

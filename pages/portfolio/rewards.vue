@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { formatUnits } from 'viem'
-import type { UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { UserReward } from '~/entities/reward-campaign'
 
 const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
-const { enableMerkl, enableIncentra, enableFuul } = useDeployConfig()
+const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
 const { rewards, isRewardsLoading } = useSdkRewards()
 const { locks, isLocksLoading } = useREULLocks()
 
@@ -17,6 +17,8 @@ const sortRewardsByUsd = (items: UserReward[]) =>
 const sortedMerklRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'merkl')))
 const sortedBrevisRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'brevis')))
 const sortedFuulRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'fuul')))
+const sortedTurtleRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'turtle')))
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 </script>
 
 <template>
@@ -42,17 +44,11 @@ const sortedFuulRewards = computed(() => sortRewardsByUsd(rewards.value.filter(r
             v-else-if="sortedMerklRewards.length === 0"
             class="flex flex-1 min-h-[100px] justify-center items-center py-32"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-              <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-                <SvgIcon name="search" />
-              </div>
-              <template v-if="isConnected || isSpyMode">
-                You don't have rewards yet
-              </template>
-              <template v-else>
-                Connect your wallet to see your rewards
-              </template>
-            </div>
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
           </div>
           <div
             v-else
@@ -83,17 +79,11 @@ const sortedFuulRewards = computed(() => sortRewardsByUsd(rewards.value.filter(r
             v-else-if="sortedBrevisRewards.length === 0"
             class="flex flex-1 min-h-[100px] justify-center items-center py-32"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-              <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-                <SvgIcon name="search" />
-              </div>
-              <template v-if="isConnected || isSpyMode">
-                You don't have rewards yet
-              </template>
-              <template v-else>
-                Connect your wallet to see your rewards
-              </template>
-            </div>
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
           </div>
           <div
             v-else
@@ -124,17 +114,11 @@ const sortedFuulRewards = computed(() => sortRewardsByUsd(rewards.value.filter(r
             v-else-if="sortedFuulRewards.length === 0"
             class="flex flex-1 min-h-[100px] justify-center items-center py-32"
           >
-            <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-              <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-                <SvgIcon name="search" />
-              </div>
-              <template v-if="isConnected || isSpyMode">
-                You don't have rewards yet
-              </template>
-              <template v-else>
-                Connect your wallet to see your rewards
-              </template>
-            </div>
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
           </div>
           <div
             v-else
@@ -142,6 +126,41 @@ const sortedFuulRewards = computed(() => sortRewardsByUsd(rewards.value.filter(r
           >
             <PortfolioList
               :items="sortedFuulRewards"
+              type="sdk-rewards"
+            />
+          </div>
+        </div>
+      </template>
+
+      <template v-if="enableTurtle">
+        <div class="flex justify-between items-center mb-8">
+          <h3 class="text-h3 font-normal text-neutral-800">
+            Rewards via Turtle
+          </h3>
+        </div>
+        <div class="flex flex-1 rounded-12 p-8 mb-16 border border-line-default bg-card">
+          <div
+            v-if="isRewardsLoading"
+            class="flex flex-1 min-h-[100px] justify-center items-center"
+          >
+            <UiLoader class="text-neutral-500" />
+          </div>
+          <div
+            v-else-if="sortedTurtleRewards.length === 0"
+            class="flex flex-1 min-h-[100px] justify-center items-center py-32"
+          >
+            <PortfolioEmptyState
+              :active="hasActiveSession"
+              active-text="You don't have rewards yet"
+              inactive-text="Connect your wallet to see your rewards"
+            />
+          </div>
+          <div
+            v-else
+            class="flex-1 min-h-[100px]"
+          >
+            <PortfolioList
+              :items="sortedTurtleRewards"
               type="sdk-rewards"
             />
           </div>
@@ -166,17 +185,11 @@ const sortedFuulRewards = computed(() => sortRewardsByUsd(rewards.value.filter(r
           v-else-if="locks.length === 0"
           class="flex flex-1 min-h-[100px] justify-center items-center"
         >
-          <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-            <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-              <SvgIcon name="search" />
-            </div>
-            <template v-if="isConnected || isSpyMode">
-              You don't have locks yet
-            </template>
-            <template v-else>
-              Connect your wallet to see your locks
-            </template>
-          </div>
+          <PortfolioEmptyState
+            :active="hasActiveSession"
+            active-text="You don't have locks yet"
+            inactive-text="Connect your wallet to see your locks"
+          />
         </div>
         <div
           v-else

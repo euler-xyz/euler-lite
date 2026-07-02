@@ -9,7 +9,7 @@ import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSignificant } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 
-const { pair } = defineProps<{ pair: SecuritizeBorrowVaultPair }>()
+const { pair, defaultOpen = true } = defineProps<{ pair: SecuritizeBorrowVaultPair, defaultOpen?: boolean }>()
 const { getTokenCategoryTags } = useTokenList()
 
 const currentLiquidationLTV = computed(() => pair.ltv.currentLiquidationLTV)
@@ -98,10 +98,11 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
 </script>
 
 <template>
-  <div class="bg-body rounded-16 flex flex-col gap-24 p-24">
-    <p class="text-h3 text-white">
-      Overview
-    </p>
+  <VaultOverviewAccordionSection
+    title="Overview"
+    :default-open="defaultOpen"
+    content-class="flex flex-col items-start gap-24"
+  >
     <div class="flex flex-col items-start gap-24">
       <VaultOverviewLabelValue
         label="Price"
@@ -111,7 +112,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
           <span class="text-content-primary">{{ priceInvert.displaySymbol }}</span>
           <button
             type="button"
-            class="ml-4 text-content-primary hover:text-white transition-colors inline-flex"
+            class="ml-4 text-content-primary hover:text-accent-600 transition-colors inline-flex"
             @click.stop="priceInvert.toggle"
           >
             <SvgIcon
@@ -216,16 +217,21 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
           </span>
         </template>
         <span class="flex items-center gap-4">
-          <SvgIcon
+          <UiHoverPreviewTooltip
             v-if="isRamping"
-            name="arrow-top-right"
-            class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
             title="Liquidation LTV ramping down"
-            @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
-          />
+            text="The Liquidation LTV for this collateral is currently being reduced."
+            placement="top-start"
+          >
+            <SvgIcon
+              name="arrow-top-right"
+              class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+              @click.stop.prevent="onRampDownInfoIconClick($event, pair.ltv)"
+            />
+          </UiHoverPreviewTooltip>
           {{ `${formatNumber(ltvToPercent(currentLiquidationLTV), 2)}%` }}
         </span>
       </VaultOverviewLabelValue>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>

@@ -22,8 +22,8 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
-  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
@@ -48,6 +48,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   signatureSteps?: DisplayStep[]
   supplyingAssetForBorrow?: VaultAsset
   supplyingAmount?: number | string
+  swapFromAsset?: VaultAsset
+  swapFromAmount?: number | string
   swapToAsset?: VaultAsset
   swapToAmount?: number | string
   swapMode?: SwapperMode
@@ -60,6 +62,7 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   knownAssets?: StepKnownAsset[]
   swapQuoteOutputs?: StepKnownSwapOutput[]
   confirmLabel?: string
+  vaultAmounts?: Record<string, string>
   submittingLabel?: string
   /** Milliseconds since epoch when the active swap quote was fetched */
   quoteFetchedAt?: number | null
@@ -88,6 +91,7 @@ const {
 
 const tenderlyEnabled = ref(false)
 const { copied, copyToClipboard } = useClipboardCopy()
+const hasCopiedCalldata = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
@@ -126,6 +130,7 @@ watch(
   () => [prepared, plan, walletAddress.value, currentChainId.value, allowConfirmWithoutPlan] as const,
   async () => {
     const requestId = ++prepareRequestId
+    hasCopiedCalldata.value = false
     prepareError.value = ''
     preparedPlan.value = undefined
 
@@ -226,7 +231,7 @@ const rawDisplaySteps = computed((): DisplayStep[] => {
   const ctx: StepDecodingContext = {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
-    swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, knownAssets, swapQuoteOutputs,
+    swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs,
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })
@@ -309,7 +314,8 @@ const copyCalldata = async () => {
       }
     }
 
-    copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
+    await copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
+    hasCopiedCalldata.value = true
   }
   catch (err) {
     logWarn('OperationReviewModal/copyCalldata', err)
@@ -342,6 +348,7 @@ const btnLabel = computed(() => {
     case 'reward':
     case 'brevis-reward':
     case 'fuul-reward':
+    case 'turtle-reward':
       return 'Claim'
     case 'disableCollateral':
       return 'Disable collateral'
@@ -357,8 +364,11 @@ const reulUnlockDisclaimerText = computed(() => {
 })
 
 const disclaimerText = computed(() => {
-  if (type !== 'reward') return
+  if (type !== 'reward' && type !== 'turtle-reward') return
   const displayAmount = Number(amount) < 0.01 ? '< 0.01' : formatNumber(amount)
+  if (type === 'turtle-reward') {
+    return `You're claiming all ${displayAmount} ${asset.symbol} through Turtle. Part of this amount could have been earned outside of Euler.`
+  }
   return `You're claiming all ${displayAmount} ${asset.symbol} on Merkl. Part of this amount could have been earned outside of Euler.`
 })
 
@@ -415,20 +425,22 @@ const confirmLabel = computed(() => {
         </div>
         <div
           v-if="signatureSteps.length || displaySteps.length"
-          class="bg-surface-secondary rounded-12 p-12 flex flex-col gap-8"
+          class="w-full rounded-8 border border-line-default bg-card px-12 py-10 shadow-xs"
         >
-          <OperationStepsList
-            v-if="signatureSteps.length"
-            :steps="signatureSteps"
-          />
-          <div
-            v-if="signatureSteps.length && displaySteps.length"
-            class="border-t border-border-primary my-4"
-          />
-          <OperationStepsList
-            v-if="displaySteps.length"
-            :steps="displaySteps"
-          />
+          <div class="flex w-full flex-col gap-8">
+            <OperationStepsList
+              v-if="signatureSteps.length"
+              :steps="signatureSteps"
+            />
+            <div
+              v-if="signatureSteps.length && displaySteps.length"
+              class="border-t border-border-primary my-4"
+            />
+            <OperationStepsList
+              v-if="displaySteps.length"
+              :steps="displaySteps"
+            />
+          </div>
         </div>
       </div>
 
@@ -439,7 +451,7 @@ const confirmLabel = computed(() => {
         <button
           v-if="canCopyCalldata"
           type="button"
-          class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 text-content-primary hover:border-line-emphasis hover:bg-card-hover transition-colors"
           @click="copyCalldata"
         >
           <SvgIcon
@@ -453,10 +465,10 @@ const confirmLabel = computed(() => {
           :href="tenderlyUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-6 text-p3 transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 transition-colors hover:border-line-emphasis hover:bg-card-hover"
           :class="hasTenderlyFailedSimulation
-            ? 'text-error-500 hover:text-error-600'
-            : 'text-success-500 hover:text-success-600'"
+            ? 'text-error-500 hover:text-error-500'
+            : 'text-success-500 hover:text-success-500'"
         >
           <SvgIcon
             :name="hasTenderlyFailedSimulation ? 'warning-circle' : 'check-circle'"
@@ -472,7 +484,7 @@ const confirmLabel = computed(() => {
         <button
           v-else-if="tenderlyEnabled"
           type="button"
-          class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 text-content-primary hover:border-line-emphasis hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
           :disabled="isTenderlyPreparing"
           @click="handleTenderlySimulate"
         >
@@ -485,7 +497,7 @@ const confirmLabel = computed(() => {
         </button>
       </div>
       <p
-        v-if="usesPermit2 && !hideExecute"
+        v-if="usesPermit2 && !hideExecute && hasCopiedCalldata"
         class="text-p4 text-content-primary text-center"
       >
         Copied calldata does not contain the permit() call. It is only known after the permit2 message is signed.
@@ -531,7 +543,7 @@ const confirmLabel = computed(() => {
       </div>
 
       <UiAlert
-        v-if="type === 'reward'"
+        v-if="disclaimerText"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"

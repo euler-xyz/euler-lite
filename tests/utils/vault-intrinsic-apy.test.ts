@@ -24,6 +24,7 @@
 import { describe, expect, it } from 'vitest'
 import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
 import {
+  combineApyWithIntrinsic,
   EMPTY_INTRINSIC_APY,
   getVaultIntrinsicApy,
   getVaultIntrinsicApyInfo,
@@ -86,6 +87,29 @@ describe('getVaultIntrinsicApy', () => {
 
   it('returns 0 for an undefined vault', () => {
     expect(getVaultIntrinsicApy(undefined, true)).toBe(0)
+  })
+})
+
+describe('combineApyWithIntrinsic', () => {
+  it('pins the compounded total used by Earn/Supply displays and APY modals', () => {
+    const base = 4
+    const intrinsic = 1
+    const rewards = 0.5
+
+    const compounded = combineApyWithIntrinsic(base, intrinsic)
+
+    expect(compounded).toBeCloseTo(4 + (1 + 4 / 100) * 1)
+    expect(compounded + rewards).toBeCloseTo(5.54)
+    expect(base + intrinsic + rewards).toBe(5.5)
+  })
+
+  it('pins borrow-side totals as compounded intrinsic minus rewards', () => {
+    const borrowing = 6
+    const intrinsic = 2
+    const rewards = 0.25
+
+    expect(combineApyWithIntrinsic(borrowing, intrinsic) - rewards)
+      .toBeCloseTo(6 + (1 + 6 / 100) * 2 - 0.25)
   })
 })
 

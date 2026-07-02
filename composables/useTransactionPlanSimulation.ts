@@ -5,9 +5,11 @@ import {
   isNonBlockingApprovalSimulationError,
   isNonBlockingApprovalSimulationFailure,
 } from '~/utils/tx-errors'
+import { reportClientEvent } from '~/utils/client-observability'
 
 export const useTransactionPlanSimulation = () => {
   const { simulatePlan, simulatePreparedPlan } = useEulerTx()
+  const { chainId } = useEulerAddresses()
   const simulationError = ref('')
   const isSimulating = ref(false)
 
@@ -46,6 +48,12 @@ export const useTransactionPlanSimulation = () => {
     catch (e) {
       if (await isNonBlockingApprovalSimulationError(plan, e)) return true
       // Transport / wagmi / SDK-side errors (RPC down, signTypedData rejected, etc.)
+      void reportClientEvent({
+        event: 'tx_plan_prepare_failed',
+        flow: 'transaction',
+        phase: 'simulate',
+        chainId: chainId.value,
+      }, e)
       simulationError.value = await getTxErrorMessage(e)
       return false
     }
@@ -62,6 +70,12 @@ export const useTransactionPlanSimulation = () => {
     }
     catch (e) {
       if (await isNonBlockingApprovalSimulationError(prepared, e)) return true
+      void reportClientEvent({
+        event: 'tx_plan_prepare_failed',
+        flow: 'transaction',
+        phase: 'simulate_prepared',
+        chainId: chainId.value,
+      }, e)
       simulationError.value = await getTxErrorMessage(e)
       return false
     }

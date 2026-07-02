@@ -23,6 +23,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { SlippageSettingsModal, OperationReviewModal } from '#components'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { reportClientEvent } from '~/utils/client-observability'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const route = useRoute()
@@ -36,7 +37,7 @@ const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPlugi
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
-const { eulerLensAddresses } = useEulerAddresses()
+const { eulerLensAddresses, chainId } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
@@ -656,7 +657,7 @@ const addToBatch = async () => {
       }),
       subAccount: receiver,
       multiply: true,
-      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN },
+      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
     })
     redirectAfterAdd('/portfolio', { subAccount: receiver })
   })
@@ -766,6 +767,16 @@ const submitMultiply = async () => {
       }
       catch (e) {
         console.warn('[Multiply] failed to build plan', e)
+        void reportClientEvent({
+          event: 'tx_plan_build_failed',
+          flow: 'multiply',
+          phase: 'build',
+          chainId: chainId.value,
+          operationType: 'multiply',
+          vaultAddress: multiplyLongVault.value.address,
+          assetAddress: multiplyLongVault.value.asset.address,
+          quoteProvider: multiplyRoutedVia.value ?? undefined,
+        }, e)
         plan.value = null
         preparedPlan.value = null
       }
@@ -822,6 +833,16 @@ const sendMultiply = async () => {
   catch (e) {
     console.warn(e)
     error('Transaction failed')
+    void reportClientEvent({
+      event: 'tx_execute_failed',
+      flow: 'multiply',
+      phase: 'execute',
+      chainId: chainId.value,
+      operationType: 'multiply',
+      vaultAddress: multiplyLongVault.value?.address,
+      assetAddress: multiplyLongVault.value?.asset.address,
+      quoteProvider: multiplyRoutedVia.value ?? undefined,
+    }, e)
   }
   finally {
     isSubmitting.value = false
@@ -937,6 +958,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Multiply"

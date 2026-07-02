@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdk } from '~/composables/useEulerSdk'
@@ -246,6 +246,19 @@ const openId = ref<string | null>(null)
 const toggle = (id: string) => {
   openId.value = openId.value === id ? null : id
 }
+const nowMs = ref(Date.now())
+const staleQuoteThresholdMs = 3 * 60 * 1000
+let nowTimer: ReturnType<typeof setInterval> | undefined
+
+const getQuoteFetchedAt = (entry: { review?: Record<string, unknown> }): number | null => {
+  const value = entry.review?.quoteFetchedAt
+  return typeof value === 'number' ? value : null
+}
+const isEntryQuoteStale = (entry: { review?: Record<string, unknown> }) => {
+  const fetchedAt = getQuoteFetchedAt(entry)
+  return typeof fetchedAt === 'number' && nowMs.value - fetchedAt > staleQuoteThresholdMs
+}
+const hasStaleQuoteEntries = computed(() => entries.value.some(isEntryQuoteStale))
 
 // Approvals the user will be asked to sign, decoded from the prepared plan.
 interface ResolvedApproval { type: string, token: string }
@@ -259,6 +272,9 @@ const hasPermit2Approval = computed(() =>
 )
 
 onMounted(async () => {
+  nowTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
   void fetchTenderlyEnabled()
   isPreparing.value = true
   prepareError.value = ''
@@ -282,6 +298,12 @@ onMounted(async () => {
   }
   finally {
     isPreparing.value = false
+  }
+})
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer)
   }
 })
 
@@ -411,10 +433,18 @@ const handleClose = () => {
 
       <UiAlert
         v-if="hasPermit2Approval"
-        variant="warning"
+        variant="info"
         size="compact"
         title="Infinite approval"
         description="You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract that lets you approve once, then sign per-action permissions without new onchain approvals."
+      />
+
+      <UiAlert
+        v-if="hasStaleQuoteEntries"
+        variant="warning"
+        size="compact"
+        title="Stale swap quote"
+        description="This batch includes a swap quote which is more than 3 minutes old. Consider refreshing it to get the best execution price"
       />
 
       <!-- Operations -->
@@ -465,6 +495,14 @@ const handleClose = () => {
               <BatchMarketLabel
                 :market="marketByEntryId[entry.id]"
                 class="mt-6 px-12"
+              />
+              <UiAlert
+                v-if="isEntryQuoteStale(entry)"
+                class="mt-6"
+                variant="warning"
+                size="compact"
+                title="Stale swap quote"
+                description="This operation uses a swap quote that is more than 3 minutes old."
               />
               <!-- Same decoded operation steps the per-op review modal shows
                    (the builder row's (i) icon). -->

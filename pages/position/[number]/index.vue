@@ -43,8 +43,9 @@ const {
 } = useTransactionPlanSimulation()
 
 const positionIndex = usePositionIndex()
-const buildRefinanceRoute = (collateralAddress: string) => {
-  const query: Record<string, string> = { collateral: collateralAddress }
+const buildRefinanceRoute = (collateralAddress?: string) => {
+  const query: Record<string, string> = {}
+  if (collateralAddress) query.collateral = collateralAddress
   const network = _route.query.network
   if (typeof network === 'string') query.network = network
   else if (Array.isArray(network) && network[0]) query.network = network[0]
@@ -1056,14 +1057,19 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 class="text-warning-500"
               >Unknown</span>
               <template v-else>
-                <SvgIcon
+                <UiHoverPreviewTooltip
                   v-if="rampStatus?.isRamping"
-                  name="arrow-top-right"
-                  class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
-                  :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
                   title="Liquidation LTV ramping down"
-                  @click.stop="openRampDownModal"
-                />
+                  text="The Liquidation LTV for this collateral is currently being reduced."
+                  placement="top-start"
+                >
+                  <SvgIcon
+                    name="arrow-top-right"
+                    class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                    @click.stop="openRampDownModal"
+                  />
+                </UiHoverPreviewTooltip>
                 {{ positionLTVDisplay }}% / {{ effectiveLiquidationLTVDisplay }}
               </template>
             </div>
@@ -1291,7 +1297,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 variant="primary-stroke"
                 rounded
                 :disabled="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure"
-                :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : `/position/${positionIndex}/borrow/swap`"
+                :to="isPositionGeoBlocked || isPairFullyRestricted || hasQueryFailure ? undefined : buildRefinanceRoute()"
               >
                 Refinance
               </UiButton>
@@ -1458,14 +1464,19 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                   />
                 </div>
                 <div class="text-neutral-800 text-p3 flex items-center gap-4">
-                  <SvgIcon
+                  <UiHoverPreviewTooltip
                     v-if="rampStatus?.isRamping"
-                    name="arrow-top-right"
-                    class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
-                    :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
                     title="Liquidation LTV ramping down"
-                    @click.stop="openRampDownModal"
-                  />
+                    text="The Liquidation LTV for this collateral is currently being reduced."
+                    placement="top-start"
+                  >
+                    <SvgIcon
+                      name="arrow-top-right"
+                      class="!w-12 !h-12 shrink-0 rotate-180 cursor-pointer"
+                      :class="rampStatus.willBeLiquidated ? 'text-error-500' : 'text-warning-500'"
+                      @click.stop="openRampDownModal"
+                    />
+                  </UiHoverPreviewTooltip>
                   {{ pairLiquidationLTVPercent === null ? '-' : `${formatNumber(pairLiquidationLTVPercent)}%` }}
                 </div>
               </div>
