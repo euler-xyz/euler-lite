@@ -26,7 +26,7 @@ Feeds are deduplicated by `pythAddress:feedId`.
 
 ## Hermes Updates
 
-`fetchPythUpdateData(feedIds, endpoint)` fetches binary update payloads through the server-side `/api/pyth/updates` proxy. The proxy forwards to the configured Hermes endpoint and keeps browser clients away from upstream URL details.
+`fetchPythUpdateData(feedIds, endpoint)` fetches binary update payloads through the server-side `/api/internal/pyth/updates` proxy. The proxy forwards to the configured Hermes endpoint and keeps browser clients away from upstream URL details.
 
 The client helper:
 
@@ -85,7 +85,7 @@ Transaction-path errors are surfaced through SDK simulation and execution result
 |------|---------|
 | `utils/pyth.ts` | Hermes fetching, read-path batch item building, lens simulation helpers |
 | `entities/oracle.ts` | Oracle adapter decoding helpers and Pyth feed types used by UI code |
-| `server/api/pyth/updates.ts` | Server-side Hermes proxy endpoint |
+| `server/api/internal/pyth/updates.ts` | Server-side Hermes proxy endpoint |
 | `composables/useEulerTx.ts` | SDK `TransactionPlan` simulation, preparation, and execution wrapper |
 | `composables/useTransactionPlanSimulation.ts` | Form-level simulation state and error formatting |
 | `docs/pricing-system.md` | Full pricing architecture and vault/account read flow |

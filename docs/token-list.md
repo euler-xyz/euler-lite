@@ -7,9 +7,9 @@ The token list provides token metadata (name, symbol, decimals, logo URL, and op
 ```text
 Client (composables/useTokenList.ts)
   |
-  |  GET /api/token-list?chainId=X  (once per chain switch)
+  |  GET /api/internal/token-list?chainId=X  (once per chain switch)
   v
-Server (server/api/token-list.get.ts)
+Server (server/api/internal/token-list.get.ts)
   |
   +-- Euler SDK token list ┐
   +-- DefiLlama            │  Promise.allSettled — all four concurrent,
@@ -23,7 +23,7 @@ Priority: Euler SDK > DefiLlama > Uniswap > Merkl reward-tokens
 
 ## Server Endpoint
 
-**`/api/token-list?chainId=<number>`**
+**`/api/internal/token-list?chainId=<number>`**
 
 Four data sources, each with its own 5-minute TTL cache and in-flight request deduplication:
 
@@ -32,7 +32,7 @@ Four data sources, each with its own 5-minute TTL cache and in-flight request de
 | Euler SDK token list | Per-chain | Primary. Reliable logo URLs and vault-relevant assets. |
 | DefiLlama | Per-chain | Supplemental. |
 | Uniswap | All chains | Supplemental. |
-| Merkl reward-tokens | Per-chain | Fallback. Fills in rEUL and other reward-specific tokens that rarely appear in general-purpose lists. This source has its own token-list cache and is warmed through `/api/token-list`. |
+| Merkl reward-tokens | Per-chain | Fallback. Fills in rEUL and other reward-specific tokens that rarely appear in general-purpose lists. This source has its own token-list cache and is warmed through `/api/internal/token-list`. |
 
 All four sources run concurrently via `Promise.allSettled`. Each fetcher has its own 5-minute TTL cache, in-flight dedup, and a 10-second timeout that falls back to the stale cached value. On a warm cache the request returns immediately; on a cold cache the response is bounded by the slowest source and contains whatever resolved in time.
 

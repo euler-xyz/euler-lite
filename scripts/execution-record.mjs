@@ -175,7 +175,7 @@ async function main() {
     await installV3VaultResolveRoute(context, vaultSnapshot)
     await installSwapApiRoute(context, swapApiUrl)
     await installScenarioSubgraphDiscoveryRoute(context, fixture, () => activeScenarioState)
-    await context.route('**/api/screen-address', route => route.fulfill({
+    await context.route('**/api/internal/screen-address', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ addressIsSuspicious: false }),
@@ -505,7 +505,7 @@ async function preflightV3Proxy({ appUrl, fixture }) {
   const address = Object.values(fixture.vaults ?? {}).find(Boolean)
   if (!address) return
 
-  const endpoint = `${appUrl}/api/v3/resolve/vaults`
+  const endpoint = `${appUrl}/api/internal/v3/resolve/vaults`
   let response
   let lastError
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -537,7 +537,7 @@ async function preflightV3Proxy({ appUrl, fixture }) {
     const stagingHint = response.status === 401
       ? ' If this run points at v3staging.eul.dev, start Nuxt with V3_API_KEY= so a production key from .env is not forwarded to staging.'
       : ''
-    throw new Error(`Lite app V3 proxy preflight failed: POST /api/v3/resolve/vaults returned ${response.status} ${response.statusText}.${stagingHint}${body ? ` Body: ${body.slice(0, 500)}` : ''}`)
+    throw new Error(`Lite app V3 proxy preflight failed: POST /api/internal/v3/resolve/vaults returned ${response.status} ${response.statusText}.${stagingHint}${body ? ` Body: ${body.slice(0, 500)}` : ''}`)
   }
 
   const json = await response.json().catch(() => null)
@@ -1290,12 +1290,12 @@ function parseCapturedBody(text, rawUrl) {
 function getCapturedBodyLimit(rawUrl) {
   try {
     const url = new URL(rawUrl)
-    if (url.pathname.startsWith('/api/rpc')) return MAX_CAPTURED_RPC_BODY_CHARS
+    if (url.pathname.startsWith('/api/internal/rpc')) return MAX_CAPTURED_RPC_BODY_CHARS
     if (url.hostname.includes('swap')) return MAX_CAPTURED_SWAP_BODY_CHARS
     return MAX_CAPTURED_API_BODY_CHARS
   }
   catch {
-    if (String(rawUrl).includes('/api/rpc')) return MAX_CAPTURED_RPC_BODY_CHARS
+    if (String(rawUrl).includes('/api/internal/rpc')) return MAX_CAPTURED_RPC_BODY_CHARS
     if (String(rawUrl).includes('swap')) return MAX_CAPTURED_SWAP_BODY_CHARS
     return MAX_CAPTURED_API_BODY_CHARS
   }
@@ -1305,15 +1305,15 @@ function shouldCaptureUrl(rawUrl) {
   try {
     const url = new URL(rawUrl)
     const pathName = url.pathname
-    return pathName.startsWith('/api/v3')
-      || pathName.startsWith('/api/proxy')
-      || pathName.startsWith('/api/pyth')
-      || pathName.startsWith('/api/rpc')
-      || pathName.startsWith('/api/euler-chains')
-      || pathName.startsWith('/api/labels')
-      || pathName.startsWith('/api/vaults')
-      || pathName.startsWith('/api/oracle-adapters')
-      || pathName.startsWith('/api/token-list')
+    return pathName.startsWith('/api/internal/v3')
+      || pathName.startsWith('/api/internal/proxy')
+      || pathName.startsWith('/api/internal/pyth')
+      || pathName.startsWith('/api/internal/rpc')
+      || pathName.startsWith('/api/internal/euler-chains')
+      || pathName.startsWith('/api/internal/labels')
+      || pathName.startsWith('/api/internal/vaults')
+      || pathName.startsWith('/api/internal/oracle-adapters')
+      || pathName.startsWith('/api/internal/token-list')
       || url.hostname.includes('swap')
   }
   catch {

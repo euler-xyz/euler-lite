@@ -13,9 +13,9 @@ export const useRpcClient = (): {
     if (!chainId.value) return ''
     if (import.meta.server) {
       const requestUrl = useRequestURL()
-      return `${requestUrl.origin}/api/rpc/${chainId.value}`
+      return `${requestUrl.origin}/api/internal/rpc/${chainId.value}`
     }
-    return `/api/rpc/${chainId.value}`
+    return `/api/internal/rpc/${chainId.value}`
   })
 
   const client = computed(() => {

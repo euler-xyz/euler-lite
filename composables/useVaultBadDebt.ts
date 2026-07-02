@@ -29,7 +29,7 @@ const setChainError = (chainId: number, error: Error | null) => {
 }
 
 const buildBadDebtUrl = (baseUrl: string, chainId: number, offset: number, limit: number): string => {
-  const base = baseUrl.replace(/\/+$/, '') || '/api/v3'
+  const base = baseUrl.replace(/\/+$/, '') || '/api/internal/v3'
   const params = new URLSearchParams({
     chainId: String(chainId),
     minBadDebtUsd: '0',

@@ -9,10 +9,10 @@
  *
  * If an assertion here starts failing, do not relax it before reviewing the
  * threat model in `docs/geo-blocking.md` and the PR that introduced the
- * corresponding defense (see git blame on server/api/labels/[file].get.ts).
+ * corresponding defense (see git blame on server/api/internal/labels/[file].get.ts).
  */
 import { describe, it, expect } from 'vitest'
-import { validateNode } from '~/server/api/labels/[file].get'
+import { validateNode } from '~/server/api/internal/labels/[file].get'
 
 describe('validateNode — size caps', () => {
   it('rejects strings longer than 16 KiB (client-side DoS guard)', () => {

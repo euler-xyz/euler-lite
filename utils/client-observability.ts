@@ -209,7 +209,7 @@ export function shouldSampleClientPayload(payload: ClientObservabilityPayload): 
 
 export async function reportClientEvent(fields: ClientObservabilityFields, error?: unknown): Promise<void> {
   // Production-only by default; set NUXT_PUBLIC_OBSERVABILITY_DEV=true to test
-  // the browser-to-/api/client-error path during local development.
+  // the browser-to-/api/internal/client-error path during local development.
   if (!import.meta.client || (import.meta.dev && import.meta.env.NUXT_PUBLIC_OBSERVABILITY_DEV !== 'true')) return
   const payload = normalizeClientObservabilityPayload({
     routeTemplate: routeTemplate(window.location.pathname),
@@ -229,9 +229,9 @@ export async function reportClientEvent(fields: ClientObservabilityFields, error
   }
 
   const body = JSON.stringify(payload)
-  if (navigator.sendBeacon?.('/api/client-error', new Blob([body], { type: 'application/json' }))) return
+  if (navigator.sendBeacon?.('/api/internal/client-error', new Blob([body], { type: 'application/json' }))) return
 
-  await fetch('/api/client-error', {
+  await fetch('/api/internal/client-error', {
     method: 'POST',
     body,
     headers: { 'content-type': 'application/json' },

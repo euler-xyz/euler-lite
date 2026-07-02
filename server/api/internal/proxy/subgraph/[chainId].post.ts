@@ -3,7 +3,7 @@
  *
  * The SDK's vaultTypeSubgraphAdapter and accountVaultsSubgraphAdapter POST
  * GraphQL queries directly to per-chain URLs. With this proxy in place we
- * point both adapters at `/api/proxy/subgraph/{chainId}`, the handler
+ * point both adapters at `/api/internal/proxy/subgraph/{chainId}`, the handler
  * resolves the real upstream from env and forwards the GraphQL payload.
  *
  * No server-side TTL cache: the subgraph serves freshness-critical

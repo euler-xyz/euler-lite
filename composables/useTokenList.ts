@@ -108,7 +108,7 @@ const loadTokenList = async (forceRefresh = false) => {
     isLoading.value = true
     isLoaded.value = false
 
-    const res = await axios.get('/api/token-list', { params: { chainId } })
+    const res = await axios.get('/api/internal/token-list', { params: { chainId } })
     if (guard.isStale(gen)) return
 
     const tokens: TokenListEntry[] = res.data?.tokens || []

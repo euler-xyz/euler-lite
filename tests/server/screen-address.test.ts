@@ -21,7 +21,7 @@ vi.mock('~/server/utils/logger', () => ({
   },
 }))
 
-const handler = (await import('~/server/api/screen-address.post')).default
+const handler = (await import('~/server/api/internal/screen-address.post')).default
 
 const USER = '0x0000000000000000000000000000000000000001'
 const SCREENING_URI = 'https://trm.example/screen'
@@ -41,7 +41,7 @@ function makeEvent(body: unknown, headers: Record<string, string | string[] | un
   } as unknown as H3Event
 }
 
-describe('POST /api/screen-address', () => {
+describe('POST /api/internal/screen-address', () => {
   afterEach(() => {
     delete process.env.WALLET_SCREENING_URI
     vi.unstubAllGlobals()

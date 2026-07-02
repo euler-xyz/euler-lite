@@ -150,13 +150,13 @@ describe('useEulerSdk', () => {
     const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
     expect(options.config).toMatchObject({
       rpcUrls: {
-        1: '/api/rpc/1',
-        8453: '/api/rpc/8453',
+        1: '/api/internal/rpc/1',
+        8453: '/api/internal/rpc/8453',
       },
-      v3ApiUrl: '/api',
-      tokenlistApiBaseUrl: '/api',
-      deploymentsUrl: '/api/euler-chains',
-      eulerLabelsBaseUrl: '/api/labels',
+      v3ApiUrl: '/api/internal',
+      tokenlistApiBaseUrl: '/api/internal',
+      deploymentsUrl: '/api/internal/euler-chains',
+      eulerLabelsBaseUrl: '/api/internal/labels',
       oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
     })
     expect(options.rpcUrls).toBeUndefined()
@@ -183,23 +183,23 @@ describe('useEulerSdk', () => {
     const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
     expect(options.config).toMatchObject({
       rpcUrls: {
-        1: '/api/rpc/1',
+        1: '/api/internal/rpc/1',
       },
-      v3ApiUrl: '/api',
-      tokenlistApiBaseUrl: '/api',
-      intrinsicApyV3ApiUrl: '/api',
-      deploymentsUrl: '/api/euler-chains',
-      eulerLabelsBaseUrl: '/api/labels',
-      rewardsMerklApiUrl: '/api/proxy/merkl',
-      rewardsBrevisApiUrl: '/api/proxy/incentra/sdk/v1/eulerCampaigns',
-      rewardsBrevisProofsApiUrl: '/api/proxy/incentra/v1/getMerkleProofsBatch',
-      rewardsFuulApiUrl: '/api/proxy/fuul',
-      rewardsTurtleApiUrl: '/api/proxy/turtle',
+      v3ApiUrl: '/api/internal',
+      tokenlistApiBaseUrl: '/api/internal',
+      intrinsicApyV3ApiUrl: '/api/internal',
+      deploymentsUrl: '/api/internal/euler-chains',
+      eulerLabelsBaseUrl: '/api/internal/labels',
+      rewardsMerklApiUrl: '/api/internal/proxy/merkl',
+      rewardsBrevisApiUrl: '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns',
+      rewardsBrevisProofsApiUrl: '/api/internal/proxy/incentra/v1/getMerkleProofsBatch',
+      rewardsFuulApiUrl: '/api/internal/proxy/fuul',
+      rewardsTurtleApiUrl: '/api/internal/proxy/turtle',
       accountVaultsSubgraphUrls: {
-        1: '/api/proxy/subgraph/1',
+        1: '/api/internal/proxy/subgraph/1',
       },
       vaultTypeSubgraphUrls: {
-        1: '/api/proxy/subgraph/1',
+        1: '/api/internal/proxy/subgraph/1',
       },
       accountServiceAdapter: 'fallback',
       eVaultServiceAdapter: 'fallback',
@@ -231,8 +231,8 @@ describe('useEulerSdk', () => {
       eulerEarnServiceAdapter: 'onchain',
       vaultTypeAdapter: 'subgraph',
       rewardsServiceAdapter: 'fallback',
-      rewardsTurtleApiUrl: '/api/proxy/turtle',
-      v3ApiUrl: '/api',
+      rewardsTurtleApiUrl: '/api/internal/proxy/turtle',
+      v3ApiUrl: '/api/internal',
     })
   })
 

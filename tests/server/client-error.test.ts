@@ -11,14 +11,14 @@ vi.mock('h3', () => ({
 vi.mock('~/server/utils/rate-limit', () => ({ createRateLimiter: () => ({ consume: mocks.consume }) }))
 vi.mock('~/server/utils/logger', () => ({ logger: { error: mocks.error, warn: mocks.warn } }))
 
-const handler = (await import('~/server/api/client-error.post')).default
+const handler = (await import('~/server/api/internal/client-error.post')).default
 const event = (body: unknown, headers: Record<string, string | undefined> = {}): H3Event => ({
   method: 'POST',
   context: { body },
   node: { req: { headers }, res: {} },
 }) as unknown as H3Event
 
-describe('POST /api/client-error', () => {
+describe('POST /api/internal/client-error', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('logs only allowlisted client payload fields', async () => {

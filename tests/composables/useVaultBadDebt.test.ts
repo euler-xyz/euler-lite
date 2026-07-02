@@ -16,7 +16,7 @@ describe('useVaultBadDebt', () => {
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
     vi.stubGlobal('useEnvConfig', () => ({
       enableV3Backend: false,
-      v3ApiUrl: '/api/v3',
+      v3ApiUrl: '/api/internal/v3',
     }))
     vi.stubGlobal('fetch', fetchMock)
 

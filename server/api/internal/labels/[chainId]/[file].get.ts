@@ -3,7 +3,7 @@
  *
  *   `${eulerLabelsBaseUrl}/${chainId}/${file}.json`
  *
- * Point the SDK at `eulerLabelsBaseUrl: '/api/labels'` and its built-in
+ * Point the SDK at `eulerLabelsBaseUrl: '/api/internal/labels'` and its built-in
  * fetcher hits this endpoint instead of `raw.githubusercontent.com`.
  *
  * `chainId` is either an integer or the literal string `all` (for the
@@ -21,7 +21,7 @@ import {
   refreshLabelFile,
   type LabelFile,
   type LabelScope,
-} from '~/server/api/labels/[file].get'
+} from '~/server/api/internal/labels/[file].get'
 
 const rateLimiter = createRateLimiter({
   max: 1000,

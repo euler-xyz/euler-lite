@@ -198,7 +198,7 @@ euler-labels/
 └── all/assets.json        ← cross-chain rules (usually patterns)
 ```
 
-The `/api/labels/assets.json?chainId=N` proxy transparently **unions** the per-chain file with `all/assets.json` before returning — the client sees a single merged list. If either file is absent upstream the proxy serves only the present side (empty-shape fallback on 404, matching every other label file). Both files accept both shapes; conventionally addresses live per-chain and patterns live in `all/`, but nothing enforces that split.
+The `/api/internal/labels/assets.json?chainId=N` proxy transparently **unions** the per-chain file with `all/assets.json` before returning — the client sees a single merged list. If either file is absent upstream the proxy serves only the present side (empty-shape fallback on 404, matching every other label file). Both files accept both shapes; conventionally addresses live per-chain and patterns live in `all/`, but nothing enforces that split.
 
 The global file is warmed once on server boot in `warm-cache.ts` alongside the per-chain entries.
 
@@ -511,7 +511,7 @@ Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all
 | `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `isAssetBlockedByCountry`, `isAssetRestrictedByCountry`, `getVaultTags`; `AssetLike` type |
 | `composables/useEulerLabels.ts` | SDK-backed label loading and current label snapshot |
 | `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted`, `getAssetPatternRules` |
-| `server/api/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
+| `server/api/internal/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
 | `server/plugins/warm-cache.ts` | Warms `all/assets.json` once globally plus per-chain label files |
 | `entities/constants.ts` | `SANCTIONED_COUNTRIES`, `COUNTRY_GROUPS` (EU/EEA/EFTA) |
 | `entities/euler/labels.ts` | TypeScript types (`EulerLabelProduct`, `EulerLabelVaultOverride`, `EulerLabelAssetEntry` union with address + pattern fields) |

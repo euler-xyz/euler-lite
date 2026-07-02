@@ -39,7 +39,7 @@ export const useCollateralOpenInterest = () => {
     hasError.value = false
     pendingChainId = chainIdToLoad
     const loadPromise = $fetch<OpenInterestCollateralMapResponse>(
-      `/api/v3/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
+      `/api/internal/v3/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
     )
       .then((response) => {
         if (requestId !== activeRequestId || currentChainId.value !== chainIdToLoad) return
