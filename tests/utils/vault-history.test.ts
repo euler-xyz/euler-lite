@@ -44,7 +44,7 @@ describe('vault history utilities', () => {
       '0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9',
       '7d',
       1_782_984_800_000,
-    )).toBe('/api/v3/evk/vaults/1/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/totals?resolution=1d&from=1782380000&to=1782984800')
+    )).toBe('/api/v3/evk/vaults/1/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/totals?resolution=1d&from=1782345600&to=1782950400')
   })
 
   it('identifies finite cap values', () => {

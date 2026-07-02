@@ -83,7 +83,8 @@ export const buildVaultTotalsHistoryPath = (
   nowMs = Date.now(),
 ): string => {
   const option = VAULT_HISTORY_TIMEFRAMES.find(item => item.value === timeframe) ?? VAULT_HISTORY_TIMEFRAMES[1]
-  const to = Math.floor(nowMs / SECOND)
+  const nowSeconds = Math.floor(nowMs / SECOND)
+  const to = Math.floor(nowSeconds / DAY_SECONDS) * DAY_SECONDS
   const from = to - option.days * DAY_SECONDS
   const params = new URLSearchParams({
     resolution: '1d',
