@@ -286,6 +286,7 @@ watch(selectedAsset, async () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Supply collateral"

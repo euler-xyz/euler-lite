@@ -958,6 +958,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Multiply"
