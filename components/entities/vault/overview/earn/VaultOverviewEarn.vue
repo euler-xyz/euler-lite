@@ -20,6 +20,11 @@ const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
       :vault="vault"
     />
 
+    <VaultOverviewBlockHistory
+      :vault="vault"
+      :default-open="false"
+    />
+
     <VaultOverviewEarnBlockExposure
       :vault="vault"
       @vault-click="(address: string) => emits('vault-click', address)"
