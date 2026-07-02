@@ -1,11 +1,5 @@
 <script setup lang="ts">
-import {
-  isEVault,
-  isSecuritizeCollateralVault,
-  type EVault,
-  type EulerEarn,
-  type SecuritizeCollateralVault,
-} from '@eulerxyz/euler-v2-sdk'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import annotationPlugin from 'chartjs-plugin-annotation'
 import {
   CategoryScale,
@@ -46,7 +40,6 @@ ChartJS.register(
   annotationPlugin,
 )
 
-type HistoryVault = EVault | SecuritizeCollateralVault | EulerEarn
 type MetricOption = {
   value: VaultHistoryMetric
   label: string
@@ -61,7 +54,7 @@ type FetchErrorLike = {
 }
 
 const { vault, defaultOpen = false } = defineProps<{
-  vault: HistoryVault
+  vault: EVault
   defaultOpen?: boolean
 }>()
 
@@ -81,40 +74,28 @@ const DEFAULT_HISTORY_RETRY_AFTER_MS = 1_000
 const MAX_HISTORY_RETRY_AFTER_MS = 10_000
 
 const isBorrowableEVault = computed(() =>
-  isEVault(vault) && isVaultBorrowable(vault),
+  isVaultBorrowable(vault),
 )
 const canLoadHistory = computed(() =>
-  enableV3Backend && isEVault(vault) && Boolean(chainId.value),
+  enableV3Backend && Boolean(chainId.value),
 )
 const decimals = computed(() => Number(vault.asset.decimals ?? 18))
 
 const metricOptions = computed<MetricOption[]>(() => {
-  if (isEVault(vault)) {
-    if (isBorrowableEVault.value) {
-      return [
-        { value: 'apy', label: 'APY' },
-        { value: 'totalSupply', label: 'Total supply' },
-        { value: 'totalBorrows', label: 'Total borrowed' },
-        { value: 'utilization', label: 'Utilization' },
-        { value: 'cash', label: 'Cash' },
-      ]
-    }
-
-    return [
-      { value: 'totalSupply', label: 'Total supply' },
-      { value: 'cash', label: 'Cash' },
-    ]
-  }
-
-  if (isSecuritizeCollateralVault(vault) || 'strategies' in vault) {
+  if (isBorrowableEVault.value) {
     return [
       { value: 'apy', label: 'APY' },
       { value: 'totalSupply', label: 'Total supply' },
+      { value: 'totalBorrows', label: 'Total borrowed' },
+      { value: 'utilization', label: 'Utilization' },
       { value: 'cash', label: 'Cash' },
     ]
   }
 
-  return []
+  return [
+    { value: 'totalSupply', label: 'Total supply' },
+    { value: 'cash', label: 'Cash' },
+  ]
 })
 
 watch(
@@ -175,7 +156,7 @@ const loadHistory = async () => {
   const requestId = ++activeRequestId
   history.value = []
 
-  if (!canLoadHistory.value || !chainId.value || !isEVault(vault)) {
+  if (!canLoadHistory.value || !chainId.value) {
     isLoading.value = false
     hasError.value = false
     return
@@ -208,7 +189,7 @@ const loadHistory = async () => {
 }
 
 watch(
-  [chainId, selectedTimeframe, canLoadHistory],
+  [chainId, selectedTimeframe, canLoadHistory, () => vault.address],
   () => {
     void loadHistory()
   },
@@ -216,11 +197,9 @@ watch(
 )
 
 const supplyCap = computed(() => {
-  if (isEVault(vault)) return vault.caps.supplyCap
-  if (isSecuritizeCollateralVault(vault)) return vault.supplyCap
-  return null
+  return vault.caps.supplyCap
 })
-const borrowCap = computed(() => isEVault(vault) ? vault.caps.borrowCap : null)
+const borrowCap = computed(() => vault.caps.borrowCap)
 const capValue = computed(() => {
   const cap = selectedMetric.value === 'totalSupply'
     ? supplyCap.value
