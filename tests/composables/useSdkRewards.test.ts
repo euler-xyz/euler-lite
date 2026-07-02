@@ -6,7 +6,13 @@ import type { UserReward } from '@eulerxyz/euler-v2-sdk'
 const owner = '0x1000000000000000000000000000000000000000' as Address
 
 const importUseSdkRewards = async (
-  options: { isConnected?: boolean, isSpyMode?: boolean, isPositionsLoading?: boolean } = {},
+  options: {
+    isConnected?: boolean
+    isConnecting?: boolean
+    isReconnecting?: boolean
+    isSpyMode?: boolean
+    isPositionsLoading?: boolean
+  } = {},
 ) => {
   vi.resetModules()
   const currentChainId = ref(1)
@@ -61,6 +67,8 @@ const importUseSdkRewards = async (
   vi.stubGlobal('useWagmi', () => ({
     address: ref(owner),
     isConnected: ref(options.isConnected ?? true),
+    isConnecting: ref(options.isConnecting ?? false),
+    isReconnecting: ref(options.isReconnecting ?? false),
   }))
   vi.stubGlobal('useSpyMode', () => ({
     isSpyMode: ref(options.isSpyMode ?? false),
@@ -116,6 +124,30 @@ describe('useSdkRewards', () => {
   it('stays loading while rewards load for an active session', async () => {
     const { useSdkRewards } = await importUseSdkRewards({
       isConnected: true,
+      isPositionsLoading: true,
+    })
+
+    const { isRewardsLoading } = useSdkRewards()
+
+    expect(isRewardsLoading.value).toBe(true)
+  })
+
+  it('stays loading while rewards load during wallet auto-reconnect', async () => {
+    const { useSdkRewards } = await importUseSdkRewards({
+      isConnected: false,
+      isReconnecting: true,
+      isPositionsLoading: true,
+    })
+
+    const { isRewardsLoading } = useSdkRewards()
+
+    expect(isRewardsLoading.value).toBe(true)
+  })
+
+  it('stays loading while rewards load during wallet connect', async () => {
+    const { useSdkRewards } = await importUseSdkRewards({
+      isConnected: false,
+      isConnecting: true,
       isPositionsLoading: true,
     })
 

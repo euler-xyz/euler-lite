@@ -20,9 +20,11 @@ let delayedRefreshTimers: ReturnType<typeof setTimeout>[] = []
 export const useSdkRewards = () => {
   const { portfolio, isPositionsLoading, refreshAllPositions } = useEulerAccount()
   const { chainId } = useEulerAddresses()
-  const { address: walletAddress, isConnected } = useWagmi()
+  const { address: walletAddress, isConnected, isConnecting, isReconnecting } = useWagmi()
   const { isSpyMode } = useSpyMode()
-  const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
+  const hasActiveSession = computed(() =>
+    isConnected.value || isConnecting.value || isReconnecting.value || isSpyMode.value,
+  )
 
   const rewards = computed<UserReward[]>(() => {
     const items = portfolio.value?.account.userRewards ?? []
