@@ -14,7 +14,7 @@ import {
 } from '~/utils/vault/exposure-display'
 import { logWarn } from '~/utils/errorHandling'
 
-const { vault } = defineProps<{ vault: EulerEarn }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
 const route = useRoute()
 
 const { settings } = useUserSettings()
@@ -200,69 +200,68 @@ const supplyApyModalData = computed(() => ({
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Statistics
-    </p>
-    <div class="flex flex-col items-start gap-24">
-      <VaultOverviewLabelValue
-        label="Total supply"
-        :value="totalSupplyDisplay"
-        orientation="horizontal"
-      />
-      <VaultOverviewLabelValue
-        label="Available liquidity"
-        :value="availableLiquidityDisplay"
-        orientation="horizontal"
-      />
-      <VaultOverviewLabelValue
-        label="Total strategies"
-        orientation="horizontal"
-        data-field="Total strategies"
-        :data-value="vault.strategies.length"
-      >
-        <div class="flex min-w-0 items-center justify-end gap-12">
-          <span class="text-p2 text-content-primary">
-            {{ vault.strategies.length }}
-          </span>
-          <template v-if="isOpenInterestEnabled">
-            <span class="h-16 w-1 shrink-0 bg-line-subtle" />
-            <VaultExposureSummary
-              :items="exposureDisplayItems"
-              :value-state="exposureValueState"
-              :max-visible="5"
-              avatar-size="20"
-            />
-          </template>
-        </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        orientation="horizontal"
-      >
-        <template #label>
-          <span class="flex items-center gap-6">
-            Supply APY
-            <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
-              1h
-            </span>
-          </span>
-        </template>
-        <span class="flex items-center gap-4">
-          <UiModalPreviewTrigger
-            v-if="hasRewards"
-            :component="VaultSupplyApyModal"
-            :modal-data="supplyApyModalData"
-            aria-label="Show supply APY rewards breakdown"
-          >
-            <SvgIcon
-              class="!w-20 !h-20 text-accent-500 cursor-pointer"
-              name="sparks"
-              data-modal-trigger="supply-apy"
-            />
-          </UiModalPreviewTrigger>
-          {{ formatNumber(supplyApyTotal) }}%
+  <VaultOverviewAccordionSection
+    title="Statistics"
+    :default-open="defaultOpen"
+    content-class="flex flex-col items-start gap-24"
+  >
+    <VaultOverviewLabelValue
+      label="Total supply"
+      :value="totalSupplyDisplay"
+      orientation="horizontal"
+    />
+    <VaultOverviewLabelValue
+      label="Available liquidity"
+      :value="availableLiquidityDisplay"
+      orientation="horizontal"
+    />
+    <VaultOverviewLabelValue
+      label="Total strategies"
+      orientation="horizontal"
+      data-field="Total strategies"
+      :data-value="vault.strategies.length"
+    >
+      <div class="flex min-w-0 items-center justify-end gap-12">
+        <span class="text-p2 text-content-primary">
+          {{ vault.strategies.length }}
         </span>
-      </VaultOverviewLabelValue>
-    </div>
-  </div>
+        <template v-if="isOpenInterestEnabled">
+          <span class="h-16 w-1 shrink-0 bg-line-subtle" />
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+          />
+        </template>
+      </div>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      orientation="horizontal"
+    >
+      <template #label>
+        <span class="flex items-center gap-6">
+          Supply APY
+          <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
+            1h
+          </span>
+        </span>
+      </template>
+      <span class="flex items-center gap-4">
+        <UiModalPreviewTrigger
+          v-if="hasRewards"
+          :component="VaultSupplyApyModal"
+          :modal-data="supplyApyModalData"
+          aria-label="Show supply APY rewards breakdown"
+        >
+          <SvgIcon
+            class="!w-20 !h-20 text-accent-500 cursor-pointer"
+            name="sparks"
+            data-modal-trigger="supply-apy"
+          />
+        </UiModalPreviewTrigger>
+        {{ formatNumber(supplyApyTotal) }}%
+      </span>
+    </VaultOverviewLabelValue>
+  </VaultOverviewAccordionSection>
 </template>

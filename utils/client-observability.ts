@@ -27,6 +27,7 @@ export interface ClientObservabilityFields {
 
 export interface ClientObservabilityPayload extends ClientObservabilityFields {
   source: 'client'
+  untrusted: true
   name?: string
   message?: string
   fingerprint: string
@@ -63,6 +64,11 @@ const isErrorKind = (value: unknown): value is ReturnType<typeof summarizeViemEr
 
 function redactText(value: string): string {
   return value
+    .replace(/\bhttps?:\/\/[^\s"'<>]+/gi, '[url-redacted]')
+    .replace(/\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password)=)[^&\s]+/gi, '$1[redacted]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, 'Bearer [redacted]')
+    .replace(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[jwt-redacted]')
+    .replace(/\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9_-]{8,}\b/g, '[token-redacted]')
     .replace(/Request body:\s*[^,\n]+/gi, 'Request body: [redacted]')
     .replace(/\b0x[a-fA-F0-9]{16,}\b/g, '[hex-redacted]')
 }
@@ -159,6 +165,7 @@ export function normalizeClientObservabilityPayload(
 
   const payload: ClientObservabilityPayload = {
     source: 'client',
+    untrusted: true,
     event: fields.event,
     fingerprint: '',
   }
@@ -186,6 +193,8 @@ export function sanitizeClientObservabilityInput(input: unknown): ClientObservab
   const error = record.error
   if (error && typeof error === 'object') {
     const err = error as Record<string, unknown>
+    const functionName = cleanString(err.functionName, 80)
+    const causeName = cleanString(err.causeName, 80)
     payload.error = {
       kind: isErrorKind(err.kind) ? err.kind : 'unknown',
       name: cleanString(err.name, 80) || 'Error',
@@ -193,8 +202,8 @@ export function sanitizeClientObservabilityInput(input: unknown): ClientObservab
       isTransport: typeof err.isTransport === 'boolean' ? err.isTransport : false,
       ...(typeof err.status === 'number' ? { status: err.status } : {}),
       ...(typeof err.code === 'number' ? { code: err.code } : {}),
-      ...(typeof err.functionName === 'string' ? { functionName: truncate(err.functionName, 80) } : {}),
-      ...(typeof err.causeName === 'string' ? { causeName: truncate(err.causeName, 80) } : {}),
+      ...(functionName ? { functionName } : {}),
+      ...(causeName ? { causeName } : {}),
     }
   }
 

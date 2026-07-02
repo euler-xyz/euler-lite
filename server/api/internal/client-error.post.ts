@@ -45,9 +45,12 @@ export default defineEventHandler(async (event) => {
   logger.error(
     {
       ctx: 'client-error',
+      source: 'client',
+      untrusted: true,
       ...payload,
     },
-    payload.message || payload.event,
+    // Client-originated fields are untrusted. Keep the log message static so downstream monitors can allowlist repo-known `(ctx, msg)` logsites and never treat client text as instructions.
+    'client observability event',
   )
 
   return { ok: true }

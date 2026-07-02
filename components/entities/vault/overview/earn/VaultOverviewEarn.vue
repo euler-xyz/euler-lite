@@ -14,23 +14,28 @@ const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
   >
     <VaultOverviewEarnBlockGeneral
       :vault="vault"
+      :default-open="true"
     />
 
     <VaultOverviewEarnBlockStats
       :vault="vault"
+      :default-open="true"
     />
 
     <VaultOverviewEarnBlockExposure
       :vault="vault"
+      :default-open="false"
       @vault-click="(address: string) => emits('vault-click', address)"
     />
 
     <VaultOverviewEarnBlockManagement
       :vault="vault"
+      :default-open="false"
     />
 
     <VaultOverviewEarnBlockAddresses
       :vault="vault"
+      :default-open="false"
     />
   </div>
 </template>
