@@ -109,6 +109,9 @@ const vaultUsdCache = ref<Map<string, VaultUsdCacheEntry>>(new Map())
 const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: string }) =>
   p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
 
+const getVaultCacheKey = (vault: { chainId: number }, address: string) =>
+  `${vault.chainId}:${address.toLowerCase()}`
+
 const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { force?: boolean } = {}) => {
   const existingEntries = vaultUsdCache.value
   const marketEntries = new Map<string, VaultUsdCacheEntry>()
@@ -117,7 +120,8 @@ const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { forc
   await Promise.all(
     allVaults.map(async (vault) => {
       const addr = getVaultAddress(vault).toLowerCase()
-      if (!addr || (!force && existingEntries.has(addr))) return
+      const key = getVaultCacheKey(vault, addr)
+      if (!addr || (!force && existingEntries.has(key))) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
       const borrow = 'totalBorrowed' in vault ? vault.totalBorrowed as bigint : 0n
       const supplyCapRaw = 'caps' in vault ? vault.caps.supplyCap : ('supplyCap' in vault ? vault.supplyCap as bigint : maxUint256)
@@ -135,7 +139,7 @@ const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { forc
         borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
       ])
 
-      marketEntries.set(addr, {
+      marketEntries.set(key, {
         supply: formatUsdOrDisplay(supplyPrice),
         supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
         borrow: formatUsdOrDisplay(borrowPrice),

@@ -48,21 +48,33 @@ const createEmptyEulerLabelsData = (): EulerLabelsData => ({
 } as unknown as EulerLabelsData)
 
 const labelsData = shallowRef<EulerLabelsData>(createEmptyEulerLabelsData())
-const labelsChainId = ref<number | null>(null)
+const labelsByChainId = shallowRef<Map<number, EulerLabelsData>>(new Map())
+const labelsChainIds = ref<number[]>([])
 const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
-let pendingLabelsLoad: Promise<void> | undefined
+let pendingLabelsLoad: Promise<boolean> | undefined
+let pendingLabelsLoadKey = ''
+let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
 
-const setLabelsData = (data: EulerLabelsData, chainId: number | null) => {
+const setLabelsData = (data: EulerLabelsData, chainIds: readonly number[] = []) => {
   labelsData.value = data
-  labelsChainId.value = chainId
+  labelsChainIds.value = [...chainIds]
   labelsVersion.value += 1
 }
 
+const setCachedLabelsData = (chainId: number, data: EulerLabelsData) => {
+  const next = new Map(labelsByChainId.value)
+  next.set(chainId, data)
+  labelsByChainId.value = next
+}
+
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
+
+export const getEulerLabelsDataForChain = (chainId: number): EulerLabelsData =>
+  labelsByChainId.value.get(chainId) ?? labelsData.value
 
 export const getEulerLabelsVersion = (): number => labelsVersion.value
 
@@ -74,7 +86,7 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
     ...data,
     notExplorableEarnVaults: data.notExplorableEarnVaults ?? new Set(),
     assetPatternRules: data.assetPatternRules ?? [],
-  } as unknown as EulerLabelsData, null)
+  } as unknown as EulerLabelsData)
   isReady.value = true
   isLoading.value = false
 }
@@ -90,6 +102,49 @@ const resolveChainId = async (): Promise<number> => {
   return getCurrentChainConfig.value!.chainId
 }
 
+const resolveSelectedChainIds = async (): Promise<number[]> => {
+  const { selectedChainIds, chainId, loadEulerConfig } = useEulerAddresses()
+
+  void loadEulerConfig()
+  if (!selectedChainIds) {
+    const current = await resolveChainId()
+    return [current]
+  }
+
+  await until(selectedChainIds).toMatch(ids => Array.isArray(ids) && ids.length > 0)
+
+  return selectedChainIds.value.length ? selectedChainIds.value : [chainId.value].filter(Boolean)
+}
+
+const unique = <T>(values: readonly T[]): T[] => [...new Set(values)]
+
+const mergeLabelData = (items: EulerLabelsData[]): EulerLabelsData => {
+  const merged = createEmptyEulerLabelsData()
+
+  for (const item of items) {
+    merged.products = { ...merged.products, ...item.products }
+    merged.entities = { ...merged.entities, ...item.entities }
+    merged.points = { ...merged.points, ...item.points }
+    merged.verifiedVaultAddresses = unique([...merged.verifiedVaultAddresses, ...item.verifiedVaultAddresses])
+    merged.earnVaults = unique([...merged.earnVaults, ...item.earnVaults])
+    merged.earnVaultEntries = { ...merged.earnVaultEntries, ...item.earnVaultEntries }
+    merged.earnVaultBlocks = { ...merged.earnVaultBlocks, ...item.earnVaultBlocks }
+    merged.earnVaultRestrictions = { ...merged.earnVaultRestrictions, ...item.earnVaultRestrictions }
+    merged.deprecatedEarnVaults = { ...merged.deprecatedEarnVaults, ...item.deprecatedEarnVaults }
+    merged.earnVaultDescriptions = { ...merged.earnVaultDescriptions, ...item.earnVaultDescriptions }
+    merged.earnVaultNotices = { ...merged.earnVaultNotices, ...item.earnVaultNotices }
+    merged.notExplorableEarnVaults = new Set([
+      ...merged.notExplorableEarnVaults,
+      ...item.notExplorableEarnVaults,
+    ])
+    merged.assetBlocks = { ...merged.assetBlocks, ...item.assetBlocks }
+    merged.assetRestrictions = { ...merged.assetRestrictions, ...item.assetRestrictions }
+    merged.assetPatternRules = [...merged.assetPatternRules, ...item.assetPatternRules]
+  }
+
+  return merged
+}
+
 const products = toReactive(computed(() => labelsData.value.products as Record<string, EulerLabelProduct>))
 const entities = toReactive(computed(() => labelsData.value.entities as Record<string, EulerLabelEntity>))
 const points = toReactive(computed(() => labelsData.value.points as Record<string, EulerLabelPointReward[]>))
@@ -97,12 +152,14 @@ const verifiedVaultAddresses = computed(() => labelsData.value.verifiedVaultAddr
 const earnVaults = computed(() => labelsData.value.earnVaults)
 
 const loadLabels = async (forceRefresh = false) => {
-  if (pendingLabelsLoad && !forceRefresh) return pendingLabelsLoad
+  const targetChainIds = await resolveSelectedChainIds()
+  const targetKey = targetChainIds.join(',')
+
+  if (pendingLabelsLoad && !forceRefresh && pendingLabelsLoadKey === targetKey) return pendingLabelsLoad
+  const generation = ++labelsLoadGeneration
 
   const promise = (async () => {
-    const chainId = await resolveChainId()
-
-    if (!forceRefresh && labelsChainId.value === chainId && isReady.value) return
+    if (!forceRefresh && labelsChainIds.value.join(',') === targetKey && isReady.value) return true
 
     try {
       isReady.value = false
@@ -110,8 +167,8 @@ const loadLabels = async (forceRefresh = false) => {
       const probeGeneration = ++wrapPairProbeGeneration
       Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
-      if (labelsChainId.value !== chainId) {
-        setLabelsData(createEmptyEulerLabelsData(), chainId)
+      if (labelsChainIds.value.join(',') !== targetKey) {
+        setLabelsData(createEmptyEulerLabelsData(), targetChainIds)
       }
 
       if (forceRefresh) {
@@ -119,24 +176,37 @@ const loadLabels = async (forceRefresh = false) => {
       }
 
       const sdk = await getEulerSdk()
-      setLabelsData(await sdk.eulerLabelsService.fetchEulerLabelsData(chainId), chainId)
-      void probeWrapPairs(chainId, probeGeneration)
+      await Promise.all(targetChainIds.map(async (chainId) => {
+        if (!forceRefresh && labelsByChainId.value.has(chainId)) return
+        setCachedLabelsData(chainId, await sdk.eulerLabelsService.fetchEulerLabelsData(chainId))
+      }))
+      if (generation !== labelsLoadGeneration) return false
+      setLabelsData(mergeLabelData(targetChainIds.map(chainId => getEulerLabelsDataForChain(chainId))), targetChainIds)
+      targetChainIds.forEach(chainId => void probeWrapPairs(chainId, probeGeneration))
+      return true
     }
     catch (e) {
       logWarn('labels/load', e)
+      return true
     }
     finally {
-      isLoading.value = false
-      isReady.value = true
+      if (generation === labelsLoadGeneration) {
+        isLoading.value = false
+        isReady.value = true
+      }
     }
   })()
 
   pendingLabelsLoad = promise
+  pendingLabelsLoadKey = targetKey
   try {
     await promise
   }
   finally {
-    if (pendingLabelsLoad === promise) pendingLabelsLoad = undefined
+    if (pendingLabelsLoad === promise) {
+      pendingLabelsLoad = undefined
+      pendingLabelsLoadKey = ''
+    }
   }
 }
 
@@ -144,12 +214,12 @@ const WRAP_PAIR_PROBE_BATCH_SIZE = 25
 
 const probeWrapPairs = async (startChainId: number, generation: number) => {
   const isCurrentProbe = () =>
-    generation === wrapPairProbeGeneration && labelsChainId.value === startChainId
+    generation === wrapPairProbeGeneration && labelsByChainId.value.has(startChainId)
 
   try {
-    const { getCurrentChainConfig } = useEulerAddresses()
-    const config = getCurrentChainConfig.value
-    if (!config || config.chainId !== startChainId || !isCurrentProbe()) return
+    const { getChainConfig } = useEulerAddresses()
+    const config = getChainConfig(startChainId)
+    if (!config || !isCurrentProbe()) return
 
     const evcAddress = config.addresses.coreAddrs.evc
     const sdk = await getEulerSdk()
@@ -167,7 +237,7 @@ const probeWrapPairs = async (startChainId: number, generation: number) => {
     const { getEVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
     const seen = new Set<string>()
     const candidates: string[] = []
-    for (const vault of [...getEVaults(), ...getEarnVaults(), ...getSecuritizeVaults()]) {
+    for (const vault of [...getEVaults(), ...getEarnVaults(), ...getSecuritizeVaults()].filter(v => v.chainId === startChainId)) {
       const asset = vault.asset
       if (!asset?.address) continue
       const checksummed = normalizeAddress(asset.address)
@@ -229,24 +299,29 @@ export const useEulerLabels = () => {
   }
 }
 
-export const useEulerProductOfVault = (vaultAddress: string | Ref<string>) => {
+export const useEulerProductOfVault = (vaultAddress: string | Ref<string>, chainId?: number | Ref<number | undefined>) => {
   return toReactive(computed(() => {
     const addr = unref(vaultAddress)
-    const product = getEulerLabelProductByVault(labelsData.value, addr)
+    const data = chainId === undefined ? labelsData.value : getEulerLabelsDataForChain(unref(chainId) || 0)
+    const product = getEulerLabelProductByVault(data, addr)
     if (!product) return eulerLabelProductEmpty
     return applyEulerLabelVaultOverrides(product, addr) as EulerLabelProduct
   }))
 }
 
+export const useEulerProductOfVaultOnChain = (vaultAddress: string | Ref<string>, chainId: number | Ref<number | undefined>) => {
+  return useEulerProductOfVault(vaultAddress, chainId)
+}
+
 export const useEulerEntitiesOfVault = (vault: EVault | Ref<EVault>) => {
   return toReactive(computed(() =>
-    getEulerLabelEntitiesByVault(labelsData.value, unref(vault)) as EulerLabelEntity[],
+    getEulerLabelEntitiesByVault(getEulerLabelsDataForChain(unref(vault).chainId), unref(vault)) as EulerLabelEntity[],
   ))
 }
 
 export const useEulerEntitiesOfEarnVault = (earnVault: EulerEarn | Ref<EulerEarn>) => {
   return toReactive(computed(() =>
-    getEulerLabelEntitiesByEarnVault(labelsData.value, unref(earnVault)) as EulerLabelEntity[],
+    getEulerLabelEntitiesByEarnVault(getEulerLabelsDataForChain(unref(earnVault).chainId), unref(earnVault)) as EulerLabelEntity[],
   ))
 }
 

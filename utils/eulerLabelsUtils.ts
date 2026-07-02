@@ -30,10 +30,10 @@ import {
   type EulerEarn,
 } from '@eulerxyz/euler-v2-sdk'
 import { eulerLabelProductEmpty, type EulerLabelEarnVaultEntry, type EulerLabelProduct, type EulerLabelEntity, type EulerLabelPointReward } from '~/entities/euler/labels'
-import { getCurrentEulerLabelsData, getEulerLabelWrapPairs } from '~/composables/useEulerLabels'
+import { getCurrentEulerLabelsData, getEulerLabelWrapPairs, getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
-const labels = () => getCurrentEulerLabelsData()
+const labels = (chainId?: number) => chainId ? getEulerLabelsDataForChain(chainId) : getCurrentEulerLabelsData()
 
 const MAX_REGEX_INPUT_LEN = 128
 
@@ -63,27 +63,27 @@ export const isWrapPair = (a: string | undefined, b: string | undefined): boolea
   return pairs[al] === bl || pairs[bl] === al
 }
 
-export const getProductByVault = (vaultAddress: string): EulerLabelProduct =>
-  (getEulerLabelProductByVault(labels(), vaultAddress) as EulerLabelProduct | undefined)
+export const getProductByVault = (vaultAddress: string, chainId?: number): EulerLabelProduct =>
+  (getEulerLabelProductByVault(labels(chainId), vaultAddress) as EulerLabelProduct | undefined)
   || eulerLabelProductEmpty
 
-export const getProductKeyByVault = (vaultAddress: string): string | undefined =>
-  getEulerLabelProductKeyByVault(labels(), vaultAddress)
+export const getProductKeyByVault = (vaultAddress: string, chainId?: number): string | undefined =>
+  getEulerLabelProductKeyByVault(labels(chainId), vaultAddress)
 
 export const getActiveProductVaultAddresses = (): string[] =>
   Object.values(labels().products).flatMap(product => product.vaults)
 
-export const getVaultBlock = (vaultAddress: string): string[] | undefined =>
-  getEulerLabelVaultBlock(labels(), vaultAddress)
+export const getVaultBlock = (vaultAddress: string, chainId?: number): string[] | undefined =>
+  getEulerLabelVaultBlock(labels(chainId), vaultAddress)
 
-export const getEarnVaultBlock = (vaultAddress: string): string[] | undefined =>
-  getEulerLabelEarnVaultBlock(labels(), vaultAddress)
+export const getEarnVaultBlock = (vaultAddress: string, chainId?: number): string[] | undefined =>
+  getEulerLabelEarnVaultBlock(labels(chainId), vaultAddress)
 
-export const getVaultRestricted = (vaultAddress: string): string[] | undefined =>
-  getEulerLabelVaultRestricted(labels(), vaultAddress)
+export const getVaultRestricted = (vaultAddress: string, chainId?: number): string[] | undefined =>
+  getEulerLabelVaultRestricted(labels(chainId), vaultAddress)
 
-export const getEarnVaultRestricted = (vaultAddress: string): string[] | undefined =>
-  getEulerLabelEarnVaultRestricted(labels(), vaultAddress)
+export const getEarnVaultRestricted = (vaultAddress: string, chainId?: number): string[] | undefined =>
+  getEulerLabelEarnVaultRestricted(labels(chainId), vaultAddress)
 
 export const getAssetBlock = (assetAddress: string): string[] | undefined =>
   getEulerLabelAssetBlock(labels(), assetAddress)
@@ -110,9 +110,9 @@ const earnEntryHasTag = (entry: EulerLabelEarnVaultEntry | undefined, tag: strin
 const getEarnEntryByVault = (normalizedVaultAddress: string): EulerLabelEarnVaultEntry | undefined =>
   labels().earnVaultEntries[normalizedVaultAddress.toLowerCase()] as EulerLabelEarnVaultEntry | undefined
 
-export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
+export const isVaultRecentlyAdded = (vaultAddress: string, chainId?: number): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  const product = getEulerLabelProductByVault(labels(chainId), normalized) as EulerLabelProduct | undefined
   return (
     productHasTag(product, 'recently added')
     || vaultOverrideHasTag(product, normalized, 'recently added')
@@ -143,69 +143,69 @@ export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { pr
   return { products: normalized, vaultAddresses: [...allVaults] }
 }
 
-export const isEarnVaultDeprecated = (vaultAddress: string): boolean =>
-  isEulerLabelEarnVaultDeprecated(labels(), vaultAddress)
+export const isEarnVaultDeprecated = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelEarnVaultDeprecated(labels(chainId), vaultAddress)
 
-export const isEarnVaultNotExplorable = (vaultAddress: string): boolean =>
-  isEulerLabelEarnVaultNotExplorable(labels(), vaultAddress)
+export const isEarnVaultNotExplorable = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelEarnVaultNotExplorable(labels(chainId), vaultAddress)
 
-export const getEarnVaultDeprecationReason = (vaultAddress: string): string =>
-  getEulerLabelEarnVaultDeprecationReason(labels(), vaultAddress)
+export const getEarnVaultDeprecationReason = (vaultAddress: string, chainId?: number): string =>
+  getEulerLabelEarnVaultDeprecationReason(labels(chainId), vaultAddress)
 
-export const getEarnVaultDescription = (vaultAddress: string): string =>
-  getEulerLabelEarnVaultDescription(labels(), vaultAddress)
+export const getEarnVaultDescription = (vaultAddress: string, chainId?: number): string =>
+  getEulerLabelEarnVaultDescription(labels(chainId), vaultAddress)
 
-export const getEarnVaultNotice = (vaultAddress: string): string =>
-  getEulerLabelEarnVaultNotice(labels(), vaultAddress)
+export const getEarnVaultNotice = (vaultAddress: string, chainId?: number): string =>
+  getEulerLabelEarnVaultNotice(labels(chainId), vaultAddress)
 
-export const getVaultNotice = (vaultAddress: string): string =>
-  getEulerLabelVaultNotice(labels(), vaultAddress)
+export const getVaultNotice = (vaultAddress: string, chainId?: number): string =>
+  getEulerLabelVaultNotice(labels(chainId), vaultAddress)
 
-export const isVaultNoticeSpecific = (vaultAddress: string): boolean =>
-  isEulerLabelVaultNoticeSpecific(labels(), vaultAddress)
+export const isVaultNoticeSpecific = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelVaultNoticeSpecific(labels(chainId), vaultAddress)
 
-export const isVaultDeprecated = (vaultAddress: string): boolean =>
-  isEulerLabelVaultDeprecated(labels(), vaultAddress)
+export const isVaultDeprecated = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelVaultDeprecated(labels(chainId), vaultAddress)
 
-export const isVaultNotExplorable = (vaultAddress: string): boolean =>
-  isEulerLabelVaultNotExplorable(labels(), vaultAddress)
+export const isVaultNotExplorable = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelVaultNotExplorable(labels(chainId), vaultAddress)
 
-export const isVaultNotExplorableLend = (vaultAddress: string): boolean =>
-  isEulerLabelVaultNotExplorableLend(labels(), vaultAddress)
+export const isVaultNotExplorableLend = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelVaultNotExplorableLend(labels(chainId), vaultAddress)
 
-export const isVaultNotExplorableBorrow = (vaultAddress: string): boolean =>
-  isEulerLabelVaultNotExplorableBorrow(labels(), vaultAddress)
+export const isVaultNotExplorableBorrow = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelVaultNotExplorableBorrow(labels(chainId), vaultAddress)
 
-export const isVaultKeyring = (vaultAddress: string): boolean =>
-  isEulerLabelVaultKeyring(labels(), vaultAddress)
+export const isVaultKeyring = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelVaultKeyring(labels(chainId), vaultAddress)
 
 export const isProductKeyring = (productKey: string): boolean =>
   isEulerLabelProductKeyring(labels(), productKey)
 
-export const isVaultAccessControlled = (vaultAddress: string): boolean =>
-  isEulerLabelVaultAccessControlled(labels(), vaultAddress)
+export const isVaultAccessControlled = (vaultAddress: string, chainId?: number): boolean =>
+  isEulerLabelVaultAccessControlled(labels(chainId), vaultAddress)
 
-export const isVaultGovernanceLimited = (vaultAddress: string): boolean => {
+export const isVaultGovernanceLimited = (vaultAddress: string, chainId?: number): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  const product = getEulerLabelProductByVault(labels(chainId), normalized) as EulerLabelProduct | undefined
   return (
     productHasTag(product, 'governance limited')
     || vaultOverrideHasTag(product, normalized, 'governance limited')
   )
 }
 
-export const isVaultHighUtilisationWarningSuppressed = (vaultAddress: string): boolean => {
+export const isVaultHighUtilisationWarningSuppressed = (vaultAddress: string, chainId?: number): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  const product = getEulerLabelProductByVault(labels(chainId), normalized) as EulerLabelProduct | undefined
   return (
     productHasTag(product, 'suppress high utilisation warning')
     || vaultOverrideHasTag(product, normalized, 'suppress high utilisation warning')
   )
 }
 
-export const isVaultCyclicalNote = (vaultAddress: string): boolean => {
+export const isVaultCyclicalNote = (vaultAddress: string, chainId?: number): boolean => {
   const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  const product = getEulerLabelProductByVault(labels(chainId), normalized) as EulerLabelProduct | undefined
   return (
     productHasTag(product, 'cyclical note')
     || vaultOverrideHasTag(product, normalized, 'cyclical note')
@@ -214,12 +214,13 @@ export const isVaultCyclicalNote = (vaultAddress: string): boolean => {
 
 export type EulerLabelEntityVaultLike = {
   address?: string
+  chainId?: number
   governorAdmin?: string
   governor?: string
 }
 
 export const getEntitiesByVault = (vault: EulerLabelEntityVaultLike): EulerLabelEntity[] =>
-  getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]
+  getEulerLabelEntitiesByVault(labels(vault.chainId), vault) as EulerLabelEntity[]
 
 export const getUniqueEntitiesByVaults = (vaults: EulerLabelEntityVaultLike[]): EulerLabelEntity[] => {
   const seen = new Set<string>()
@@ -237,13 +238,13 @@ export const getUniqueEntitiesByVaults = (vaults: EulerLabelEntityVaultLike[]): 
 }
 
 export const getEntitiesByEarnVault = (earnVault: EulerEarn): EulerLabelEntity[] =>
-  getEulerLabelEntitiesByEarnVault(labels(), earnVault) as EulerLabelEntity[]
+  getEulerLabelEntitiesByEarnVault(labels(earnVault.chainId), earnVault) as EulerLabelEntity[]
 
-export const getPointsByVault = (vaultAddress: string): EulerLabelPointReward[] =>
-  getEulerLabelPointsByVault(labels(), vaultAddress) as EulerLabelPointReward[]
+export const getPointsByVault = (vaultAddress: string, chainId?: number): EulerLabelPointReward[] =>
+  getEulerLabelPointsByVault(labels(chainId), vaultAddress) as EulerLabelPointReward[]
 
 export const applyVaultOverrides = (product: EulerLabelProduct, vaultAddress: string): EulerLabelProduct =>
   applyEulerLabelVaultOverrides(product, vaultAddress) as EulerLabelProduct
 
-export const getVaultProductName = (vaultAddress: string): string =>
-  getEulerLabelVaultProductName(labels(), vaultAddress)
+export const getVaultProductName = (vaultAddress: string, chainId?: number): string =>
+  getEulerLabelVaultProductName(labels(chainId), vaultAddress)

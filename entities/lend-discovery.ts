@@ -80,6 +80,7 @@ export interface MiniNode {
   address: string
   assetAddress: string
   assetSymbol: string
+  chainId?: number
   x: number
   y: number
   /** False for address-only placeholder nodes that have no loaded vault data. */

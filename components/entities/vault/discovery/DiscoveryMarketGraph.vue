@@ -34,7 +34,8 @@ const isGraphEdgeHighlighted = (fromAddr: string, toAddr: string): boolean => {
 }
 
 const isNodeCyclicalNote = (address: string): boolean => {
-  return isVaultCyclicalNote(address)
+  const node = props.diagram.nodes.find(n => n.address === address)
+  return isVaultCyclicalNote(address, node?.chainId)
 }
 </script>
 
@@ -215,16 +216,16 @@ const isNodeCyclicalNote = (address: string): boolean => {
             :cx="node.x"
             :cy="node.y"
             r="12"
-            :style="{ fill: getAssetLogoUrl(node.assetAddress, node.assetSymbol) ? 'var(--graph-node-bg)' : stringToColor(node.assetSymbol), stroke: 'var(--graph-node-border)' }"
+            :style="{ fill: getAssetLogoUrl(node.assetAddress, node.assetSymbol, node.chainId) ? 'var(--graph-node-bg)' : stringToColor(node.assetSymbol), stroke: 'var(--graph-node-border)' }"
             stroke-width="1"
           />
           <image
-            v-if="getAssetLogoUrl(node.assetAddress, node.assetSymbol)"
+            v-if="getAssetLogoUrl(node.assetAddress, node.assetSymbol, node.chainId)"
             :x="node.x - 12"
             :y="node.y - 12"
             width="24"
             height="24"
-            :href="getAssetLogoUrl(node.assetAddress, node.assetSymbol)"
+            :href="getAssetLogoUrl(node.assetAddress, node.assetSymbol, node.chainId)"
             :clip-path="`url(#graph-clip-${market.id}-${node.address})`"
           />
           <text
@@ -258,7 +259,7 @@ const isNodeCyclicalNote = (address: string): boolean => {
             </text>
           </g>
           <!-- Deprecated badge -->
-          <g v-else-if="isVaultDeprecated(node.address)">
+          <g v-else-if="isVaultDeprecated(node.address, node.chainId)">
             <circle
               :cx="node.x + 9"
               :cy="node.y - 9"
@@ -294,7 +295,7 @@ const isNodeCyclicalNote = (address: string): boolean => {
             />
           </g>
           <!-- Keyring (private vault) badge -->
-          <g v-else-if="isVaultKeyring(node.address)">
+          <g v-else-if="isVaultKeyring(node.address, node.chainId)">
             <circle
               :cx="node.x + 9"
               :cy="node.y - 9"

@@ -10,6 +10,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
@@ -23,8 +24,9 @@ import {
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
-const route = useRoute()
-const product = useEulerProductOfVault(vault.address)
+const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
+const vaultChainId = computed(() => vault.chainId)
+const product = useEulerProductOfVault(computed(() => vault.address), vaultChainId)
 const { enableEntityBranding } = useDeployConfig()
 const { isEarnVaultOwnerVerified } = useVaults()
 const { get: registryGet, isVerifiedVault } = useVaultRegistry()
@@ -61,7 +63,7 @@ const strategyAllocationUsdByAddress = ref<Map<string, StrategyAllocationUsd>>(n
 let strategyAllocationLoadId = 0
 
 const balance = computed(() =>
-  getBalance(vault.asset.address as `0x${string}`),
+  getBalance(vault.asset.address as `0x${string}`, vault.chainId),
 )
 const supplyApyBreakdown = computed(() => computeSupplyApyBreakdown(vault, viewer.value))
 const visibleLendingApy = computed(() => supplyApyBreakdown.value?.lending ?? getVaultSupplyApy(vault))
@@ -77,28 +79,28 @@ const visibleSupplyApy = computed(() => {
   const borrowing = supplyApyBreakdown.value?.borrowing ?? 0
   return visibleLendingApy.value + borrowing + visibleIntrinsicApy.value + visibleRewardsApy.value
 })
-const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vault.address))
+const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vault.address, vault.chainId))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
-const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address, vault.chainId))
+const isUnverified = computed(() => !isVerifiedVault(vault.address, vault.chainId))
 const displayName = computed(() => product.name || vault.shares.name)
-const description = computed(() => getEarnVaultDescription(vault.address))
+const description = computed(() => getEarnVaultDescription(vault.address, vault.chainId))
 const getStrategyVault = (strategy: EulerEarnStrategyInfo): EVault | undefined => {
   if (strategy.vault && isEVault(strategy.vault)) return strategy.vault as EVault
-  const entry = registryGet(strategy.address)
+  const entry = registryGet(strategy.address, vault.chainId)
   return entry?.vault && isEVault(entry.vault) ? entry.vault as EVault : undefined
 }
 const getStrategyMarketSource = (strategyVault: EVault) => {
-  const marketKey = getProductKeyByVault(strategyVault.address)
+  const marketKey = getProductKeyByVault(strategyVault.address, strategyVault.chainId)
   if (!marketKey) return undefined
 
-  const marketName = getProductByVault(strategyVault.address).name || strategyVault.asset.symbol
+  const marketName = getProductByVault(strategyVault.address, strategyVault.chainId).name || strategyVault.asset.symbol
   return {
     label: marketName,
     to: {
       name: 'explore-market',
       params: { market: marketKey },
-      query: { network: route.query.network },
+      query: { network: strategyVault.chainId },
     },
   }
 }
@@ -118,7 +120,7 @@ const getStrategyCollateralGroups = (strategyVault: EVault) =>
   getCollateralExposureGroups(
     getCollateralExposurePairs(
       strategyVault,
-      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+      addr => registryGet(addr, strategyVault.chainId)?.vault as EVault | SecuritizeCollateralVault | undefined,
     ),
     getOpenInterestForVault(strategyVault.address),
   )
@@ -232,7 +234,7 @@ const supplyApyModalData = computed(() => ({
     lendingAPY: visibleLendingApy.value,
     intrinsicAPY: visibleIntrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
-    campaigns: settings.value.enableRewardsApy ? getSupplyRewardCampaigns(vault.address) : [],
+    campaigns: settings.value.enableRewardsApy ? getSupplyRewardCampaigns(vault.address, vault.chainId) : [],
     totalSupplyAPY: visibleSupplyApy.value,
     rewardVaultAddress: vault.address,
     baseApyAverageLabel: '1h',
@@ -244,7 +246,7 @@ const supplyApyModalData = computed(() => ({
   <NuxtLink
     class="block no-underline bg-surface rounded-xl border border-line-default shadow-card transition-all duration-default ease-default hover:shadow-card-hover hover:border-line-emphasis"
     :class="isGeoBlocked ? 'opacity-50' : ''"
-    :to="{ path: `/earn/${vault.address}`, query: { network: $route.query.network } }"
+    :to="{ path: `/earn/${vault.address}`, query: { network: vault.chainId } }"
     data-id="vault-list-item"
     data-list="earn"
     :data-key="vault.address.toLowerCase()"
@@ -253,6 +255,7 @@ const supplyApyModalData = computed(() => ({
     <div class="flex items-start gap-12 py-16 px-16 pb-12 border-b border-line-subtle">
       <AssetAvatar
         :asset="vault.asset"
+        :chain-id="vault.chainId"
         size="40"
       />
       <div class="min-w-0 flex-1">
@@ -280,6 +283,11 @@ const supplyApyModalData = computed(() => ({
           :data-value="vault.asset.symbol"
         >
           {{ vault.asset.symbol }}
+          <BaseAvatar
+            class="ml-8 inline-flex h-18 w-18 align-[-3px] shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+            :src="chainLogoSrc"
+            :label="String(vault.chainId)"
+          />
         </div>
         <div
           v-if="description"

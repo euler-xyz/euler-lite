@@ -13,6 +13,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 const router = useRouter()
 const route = useRoute()
@@ -52,6 +53,7 @@ const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref(undefined)
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
+const vaultChainLogoSrc = computed(() => vault.value ? getChainLogoUrl(vault.value.chainId) : '')
 const estimateSupplyAPY = ref(0)
 const earnVaultMarketLabel = computed(() => unref(name) || vault.value?.shares.name || '')
 // Wallet balance from the central (layer-aware) wallet entity — reactive, no
@@ -263,6 +265,12 @@ watch(amount, () => {
           :assets="assets"
           size="large"
         >
+          <BaseAvatar
+            v-if="vault"
+            class="mr-4 h-24 w-24 shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+            :src="vaultChainLogoSrc"
+            :label="String(vault.chainId)"
+          />
           <UiShareLinkButton
             class="-ml-4 !w-24 !h-24"
             :path="`/earn/${vault.address}`"

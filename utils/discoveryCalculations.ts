@@ -25,8 +25,8 @@ export interface MatrixCell {
 }
 
 export interface CollateralMatrixData {
-  rows: Array<{ address: string, symbol: string, assetAddress: string, category: 'escrow' | 'external' | 'borrowable' }>
-  columns: Array<{ address: string, symbol: string, assetAddress: string }>
+  rows: Array<{ address: string, symbol: string, assetAddress: string, chainId: number, category: 'escrow' | 'external' | 'borrowable' }>
+  columns: Array<{ address: string, symbol: string, assetAddress: string, chainId: number }>
   cells: Map<string, Map<string, MatrixCell>>
   pairCount: number
 }
@@ -42,6 +42,8 @@ export interface BestMaxRoeResult {
   borrowLTV: number
   borrowVaultAddress: string
   collateralAddress: string
+  borrowChainId?: number
+  collateralChainId?: number
 }
 
 export interface EnhancedCellApys {
@@ -141,7 +143,7 @@ export const getDeprecatedVaultCount = (market: MarketGroup): number => {
     const addr = getVaultAddress(v).toLowerCase()
     if (!addr || seen.has(addr)) continue
     seen.add(addr)
-    if (isVaultDeprecated(addr)) count++
+    if (isVaultDeprecated(addr, v.chainId)) count++
   }
   return count
 }
@@ -311,6 +313,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       address,
       assetAddress,
       assetSymbol,
+      chainId: vault?.chainId ?? market.vaults[0]?.chainId ?? market.externalCollateral[0]?.chainId,
       x: cx + rx * Math.cos(angle),
       y: cy + ry * Math.sin(angle),
       hasVaultData: Boolean(vault),
@@ -426,14 +429,14 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   const rows: CollateralMatrixData['rows'] = []
   const seenRows = new Set<string>()
 
-  const addRow = (addr: string, symbol: string, assetAddress: string, category: CollateralMatrixData['rows'][0]['category']) => {
+  const addRow = (addr: string, symbol: string, assetAddress: string, chainId: number, category: CollateralMatrixData['rows'][0]['category']) => {
     if (seenRows.has(addr)) return
     seenRows.add(addr)
-    rows.push({ address: addr, symbol, assetAddress, category })
+    rows.push({ address: addr, symbol, assetAddress, chainId, category })
   }
 
-  for (const v of sortedDiagonal) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
-  for (const v of sortedRowOnly) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
+  for (const v of sortedDiagonal) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, v.chainId, 'borrowable')
+  for (const v of sortedRowOnly) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, v.chainId, 'borrowable')
 
   // Escrow + external rows always render at the bottom, even when no
   // borrowable vault references them, so curators can see same-asset escrow
@@ -441,22 +444,22 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   // the dim styling on the label conveys that they're inventory, not active.
   const sortedNonBorrowable = [...nonBorrowable]
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
-  for (const v of sortedNonBorrowable) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'escrow')
+  for (const v of sortedNonBorrowable) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, v.chainId, 'escrow')
 
   const securitizeMembers = market.vaults
     .filter(isSecuritizeVault)
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
-  for (const v of securitizeMembers) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'external')
+  for (const v of securitizeMembers) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, v.chainId, 'external')
 
   const sortedExternal = market.externalCollateral
     .filter(isMatrixCompatibleVault)
     .slice()
     .sort((a, b) => rowAvgLTV(getVaultAddress(b).toLowerCase()) - rowAvgLTV(getVaultAddress(a).toLowerCase()))
-  for (const v of sortedExternal) addRow(getVaultAddress(v).toLowerCase(), getVaultAssetSymbol(v), getVaultAssetAddress(v), 'external')
+  for (const v of sortedExternal) addRow(getVaultAddress(v).toLowerCase(), getVaultAssetSymbol(v), getVaultAssetAddress(v), v.chainId, 'external')
 
   const columns: CollateralMatrixData['columns'] = [
-    ...sortedDiagonal.map(v => ({ address: v.address.toLowerCase(), symbol: v.asset.symbol, assetAddress: v.asset.address })),
-    ...sortedColOnly.map(v => ({ address: v.address.toLowerCase(), symbol: v.asset.symbol, assetAddress: v.asset.address })),
+    ...sortedDiagonal.map(v => ({ address: v.address.toLowerCase(), symbol: v.asset.symbol, assetAddress: v.asset.address, chainId: v.chainId })),
+    ...sortedColOnly.map(v => ({ address: v.address.toLowerCase(), symbol: v.asset.symbol, assetAddress: v.asset.address, chainId: v.chainId })),
   ]
 
   return { rows, columns, cells, pairCount }
@@ -669,6 +672,7 @@ export interface AttributeMatrixColumn {
   address: string
   symbol: string
   assetAddress: string
+  chainId: number
   vault: EVault | SecuritizeCollateralVault
   isExternal: boolean
 }
@@ -679,7 +683,7 @@ export interface AttributeMatrixData {
 }
 
 const isEscrow = (v: EVault | SecuritizeCollateralVault): boolean =>
-  isEVault(v) && useVaultRegistry().getVaultCategory(v.address) === 'escrow'
+  isEVault(v) && useVaultRegistry().getVaultCategory(v.address, v.chainId) === 'escrow'
 
 const compareSymbolAsc = (a: EVault | SecuritizeCollateralVault, b: EVault | SecuritizeCollateralVault): number =>
   a.asset.symbol.localeCompare(b.asset.symbol, undefined, { sensitivity: 'base' })
@@ -715,6 +719,7 @@ export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixC
     address: getVaultAddress(vault).toLowerCase(),
     symbol: vault.asset.symbol,
     assetAddress: vault.asset.address,
+    chainId: vault.chainId,
     vault,
     isExternal,
   })
@@ -796,7 +801,7 @@ export const CONFIG_ROWS: AttributeRow[] = [
     getValue: (vault) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
       const t = vault.interestRateModel.type
-      const label = isVaultCyclicalNote(vault.address)
+      const label = isVaultCyclicalNote(vault.address, vault.chainId)
         ? 'Cyclical note'
         : getIrmTypeLabel(typeof t === 'number' ? t : undefined)
       return { display: label, kind: 'text', hint: vault.interestRateModel.address }
@@ -1008,7 +1013,7 @@ export const buildVaultApyCache = (
     // rewards adjustment so Stats agrees with the per-vault card.
     for (const vault of [...market.vaults, ...market.externalCollateral]) {
       if (!isVaultType(vault)) continue
-      const addr = vault.address.toLowerCase()
+      const addr = `${vault.chainId}:${vault.address.toLowerCase()}`
       if (result.has(addr)) continue
       if (!isEVault(vault)) {
         const baseSupply = supplyApyPercent(vault)
@@ -1049,8 +1054,8 @@ export const buildAttributeRowCells = (
 ): AttributeCell[] =>
   columns.map(col => row.getValue(
     col.vault,
-    usdCache.get(col.address),
-    apyCache?.get(col.address),
+    usdCache.get(`${col.chainId}:${col.address}`),
+    apyCache?.get(`${col.chainId}:${col.address}`),
     badDebtCache?.get(col.address),
     isBadDebtLoaded,
   ))

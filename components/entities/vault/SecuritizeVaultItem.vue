@@ -9,21 +9,24 @@ import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo }
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
+const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
 
 const vaultAddress = computed(() => vault.address)
-const product = useEulerProductOfVault(vaultAddress)
+const vaultChainId = computed(() => vault.chainId)
+const product = useEulerProductOfVault(vaultAddress, vaultChainId)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const { isVerifiedVault } = useVaultRegistry()
 // SecuritizeCollateralVault has governorAdmin, safe to cast for entity lookup
 const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
-const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isUnverified = computed(() => !isVerifiedVault(vault.address, vault.chainId))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
-const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address, vault.chainId) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
@@ -43,10 +46,10 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const balance = computed(() =>
-  getBalance(vault.asset.address as `0x${string}`),
+  getBalance(vault.asset.address as `0x${string}`, vault.chainId),
 )
-const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
-const hasRewards = computed(() => hasSupplyRewards(vault.address))
+const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address, vault.chainId))
+const hasRewards = computed(() => hasSupplyRewards(vault.address, vault.chainId))
 const lendingAPY = computed(() =>
   getVaultSupplyApy(vault),
 )
@@ -62,7 +65,7 @@ const supplyApyModalData = computed(() => ({
     lendingAPY: lendingAPY.value,
     intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(vault.address),
+    campaigns: getSupplyRewardCampaigns(vault.address, vault.chainId),
     rewardVaultAddress: vault.address,
   },
 }))
@@ -97,7 +100,7 @@ watchEffect(async () => {
   <NuxtLink
     class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="isGeoBlocked ? 'opacity-50' : ''"
-    :to="{ path: `/lend/${vault.address}`, query: { network: $route.query.network } }"
+    :to="{ path: `/lend/${vault.address}`, query: { network: vault.chainId } }"
     data-id="vault-list-item"
     data-list="lend"
     :data-key="vault.address.toLowerCase()"
@@ -106,6 +109,7 @@ watchEffect(async () => {
     <div class="flex pb-12 p-16 border-b border-line-subtle">
       <AssetAvatar
         :asset="vault.asset"
+        :chain-id="vault.chainId"
         size="40"
       />
       <div class="flex-grow ml-12">
@@ -131,6 +135,11 @@ watchEffect(async () => {
           :data-value="vault.asset.symbol"
         >
           {{ vault.asset.symbol }}
+          <BaseAvatar
+            class="ml-8 inline-flex h-18 w-18 align-[-3px] shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+            :src="chainLogoSrc"
+            :label="String(vault.chainId)"
+          />
         </div>
       </div>
       <div class="flex flex-col items-end">

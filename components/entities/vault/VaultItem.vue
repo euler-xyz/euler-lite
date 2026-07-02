@@ -13,13 +13,16 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
 const vaultAddress = computed(() => vault.address)
-const product = useEulerProductOfVault(vaultAddress)
+const chainLogoSrc = computed(() => getChainLogoUrl(vault.chainId))
+const vaultChainId = computed(() => vault.chainId)
+const product = useEulerProductOfVault(vaultAddress, vaultChainId)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const entities = useEulerEntitiesOfVault(vault)
@@ -31,9 +34,9 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
-const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isUnverified = computed(() => !isVerifiedVault(vault.address, vault.chainId))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
-const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address, vault.chainId) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
@@ -44,7 +47,7 @@ const entityLogos = computed(() => {
   if (!entityName.value || entities.length === 0) return []
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
-const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
+const isEscrow = computed(() => getVaultCategory(vault.address, vault.chainId) === 'escrow')
 const isBorrowable = computed(() => isVaultBorrowable(vault))
 const displayName = computed(() => {
   if (isEscrow.value) return 'Escrowed collateral'
@@ -60,7 +63,7 @@ const collateralExposureGroups = computed(() => {
   return getCollateralExposureGroups(
     getCollateralExposurePairs(
       vault,
-      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+      addr => registryGet(addr, vault.chainId)?.vault as EVault | SecuritizeCollateralVault | undefined,
     ),
     getOpenInterestForVault(vault.address),
   )
@@ -99,10 +102,10 @@ watchEffect(() => {
 })
 
 const balance = computed(() =>
-  getBalance(vault.asset.address as `0x${string}`),
+  getBalance(vault.asset.address as `0x${string}`, vault.chainId),
 )
-const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
-const hasRewards = computed(() => hasSupplyRewards(vault.address))
+const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address, vault.chainId))
+const hasRewards = computed(() => hasSupplyRewards(vault.address, vault.chainId))
 const lendingAPY = computed(() =>
   getVaultSupplyApy(vault),
 )
@@ -116,9 +119,9 @@ const supplyApyWithRewards = computed(
 const utilization = computed(() => vault.utilization)
 const utilizationDisplay = computed(() => compactNumber(utilization.value, 2, 2))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
-const isKeyring = computed(() => isVaultKeyring(vault.address))
-const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address, vault.chainId))
+const isKeyring = computed(() => isVaultKeyring(vault.address, vault.chainId))
+const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address, vault.chainId))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
 const supplyCapWarning = computed(() => getSupplyCapWarning(vault))
 const statsGridCols = computed(() => {
@@ -151,7 +154,7 @@ const supplyApyModalData = computed(() => ({
     lendingAPY: lendingAPY.value,
     intrinsicAPY: intrinsicAPY.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(vault.address),
+    campaigns: getSupplyRewardCampaigns(vault.address, vault.chainId),
     rewardVaultAddress: vault.address,
   },
 }))
@@ -189,7 +192,7 @@ watchEffect(async () => {
   <NuxtLink
     class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="isGeoBlocked ? 'opacity-50' : ''"
-    :to="{ path: `/lend/${vault.address}`, query: { network: $route.query.network } }"
+    :to="{ path: `/lend/${vault.address}`, query: { network: vault.chainId } }"
     data-id="vault-list-item"
     :data-list="type"
     :data-key="vault.address.toLowerCase()"
@@ -198,6 +201,7 @@ watchEffect(async () => {
     <div class="flex pb-12 p-16 border-b border-line-subtle">
       <AssetAvatar
         :asset="vault.asset"
+        :chain-id="vault.chainId"
         size="40"
       />
       <div class="flex-grow ml-12">
@@ -242,6 +246,11 @@ watchEffect(async () => {
           :data-value="vault.asset.symbol"
         >
           {{ vault.asset.symbol }}
+          <BaseAvatar
+            class="ml-8 inline-flex h-18 w-18 align-[-3px] shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+            :src="chainLogoSrc"
+            :label="String(vault.chainId)"
+          />
         </div>
       </div>
       <div class="flex flex-col items-end">

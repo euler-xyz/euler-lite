@@ -11,6 +11,8 @@ const {
   borrowLTV,
   borrowVaultAddress,
   collateralAddress,
+  borrowChainId,
+  collateralChainId,
   inline = false,
   close = true,
 } = defineProps<{
@@ -21,6 +23,8 @@ const {
   borrowLTV: number
   borrowVaultAddress?: string
   collateralAddress?: string
+  borrowChainId?: number
+  collateralChainId?: number
   isBestInMarket?: boolean
   inline?: boolean
   close?: boolean
@@ -30,32 +34,32 @@ const { getLoopingRewardApy, getLoopingRewardCampaigns, getSupplyRewardApy, getB
 
 const loopingRewardAPR = computed(() =>
   borrowVaultAddress && collateralAddress
-    ? getLoopingRewardApy(borrowVaultAddress, collateralAddress)
+    ? getLoopingRewardApy(borrowVaultAddress, collateralAddress, borrowChainId)
     : 0,
 )
 
 const loopingCampaigns = computed(() => {
   if (!borrowVaultAddress || !collateralAddress) return []
-  return rewardCampaignDisplays(getLoopingRewardCampaigns(borrowVaultAddress, collateralAddress), 'looping')
+  return rewardCampaignDisplays(getLoopingRewardCampaigns(borrowVaultAddress, collateralAddress, borrowChainId), 'looping')
 })
 
 const supplyCampaigns = computed(() => {
   if (!collateralAddress) return []
-  return rewardCampaignDisplays(getSupplyRewardCampaigns(collateralAddress), 'supply')
+  return rewardCampaignDisplays(getSupplyRewardCampaigns(collateralAddress, collateralChainId), 'supply')
 })
 
 const borrowCampaigns = computed(() => {
   if (!borrowVaultAddress || !collateralAddress) return []
-  return rewardCampaignDisplays(getBorrowRewardCampaigns(borrowVaultAddress, collateralAddress), 'borrow')
+  return rewardCampaignDisplays(getBorrowRewardCampaigns(borrowVaultAddress, collateralAddress, borrowChainId), 'borrow')
 })
 
 const supplyRewardAPY = computed(() =>
-  collateralAddress ? getSupplyRewardApy(collateralAddress) : 0,
+  collateralAddress ? getSupplyRewardApy(collateralAddress, collateralChainId) : 0,
 )
 
 const borrowRewardAPY = computed(() =>
   borrowVaultAddress && collateralAddress
-    ? getBorrowRewardApy(borrowVaultAddress, collateralAddress)
+    ? getBorrowRewardApy(borrowVaultAddress, collateralAddress, borrowChainId)
     : 0,
 )
 

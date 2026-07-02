@@ -9,14 +9,17 @@ import { FULL_BALANCES_TTL_MS } from '~/entities/tuning-constants'
 // When a simulated batch layer is active, return its stitched wallet balance for
 // a touched token in place of the real balance. No-op for untouched tokens or
 // the base layer (ref empty), so wallet reads stay transparent.
-const applyLayerOverlay = (tokenAddress: string, realBalance: bigint): bigint => {
-  let key: string
-  try {
-    key = getAddress(tokenAddress).toLowerCase()
-  }
-  catch {
-    key = tokenAddress.toLowerCase()
-  }
+const applyLayerOverlay = (tokenAddress: string, realBalance: bigint, targetChainId?: number): bigint => {
+  const { chainId } = useEulerAddresses()
+  if (targetChainId !== undefined && targetChainId !== chainId.value) return realBalance
+  const key = (() => {
+    try {
+      return getAddress(tokenAddress).toLowerCase()
+    }
+    catch {
+      return tokenAddress.toLowerCase()
+    }
+  })()
   const simulated = activeLayerWalletBalancesRef.value[key]
   return simulated !== undefined ? simulated : realBalance
 }
@@ -25,7 +28,7 @@ const applyLayerOverlay = (tokenAddress: string, realBalance: bigint): bigint =>
 const balances = shallowRef(new Map<string, bigint>())
 const isLoaded = ref(false)
 const isFetching = ref(false)
-const lastFetchChainId = ref<number | null>(null)
+const lastFetchChainKey = ref<string | null>(null)
 const lastFetchAddress = ref<string | null>(null)
 let fetchPromise: Promise<void> | null = null
 
@@ -46,15 +49,30 @@ let lastFullFetchKey: string | null = null
 let lastFullFetchAt = 0
 
 export const useWallets = () => {
-  const { loadedChainId } = useVaults()
+  const { loadedChainId, loadedChainIds } = useVaults()
   const { getByType } = useVaultRegistry()
   const { address, isConnected } = useWagmi()
-  const { chainId } = useEulerAddresses()
+  const { chainId, selectedChainIds } = useEulerAddresses()
 
   const { spyAddress, isSpyMode } = useSpyMode()
   const balanceAddress = computed(() =>
     isSpyMode.value ? spyAddress.value : address.value,
   )
+
+  const normalizeBalanceKey = (targetChainId: number, tokenAddress: string) => {
+    try {
+      return `${targetChainId}:${getAddress(tokenAddress).toLowerCase()}`
+    }
+    catch {
+      return `${targetChainId}:${tokenAddress.toLowerCase()}`
+    }
+  }
+
+  const getFetchChainIds = (): number[] => {
+    const targets = selectedChainIds.value.length ? selectedChainIds.value : [chainId.value].filter(Boolean)
+    const loaded = new Set(loadedChainIds.value.length ? loadedChainIds.value : [loadedChainId.value].filter(Boolean))
+    return targets.filter(id => id && loaded.has(id))
+  }
 
   const updateBalances = async () => {
     // Guard: must be connected or in spy mode
@@ -67,8 +85,9 @@ export const useWallets = () => {
     // changes mid-fetch, and (c) only stamp lastFullFetchKey when the fetch
     // actually included the full token list (not when the mode flipped mid-flight).
     const currentChainId = chainId.value
+    const targetChainIds = getFetchChainIds()
     const wasFullMode = fullBalancesRequesters.value > 0
-    if (!currentChainId) {
+    if (!currentChainId || !targetChainIds.length) {
       return
     }
 
@@ -78,7 +97,7 @@ export const useWallets = () => {
     // `loadedChainId` is only set after a successful loadVaults() and cleared
     // to null on reset, so comparing it to the current chainId is the reliable
     // gate before asking the SDK wallet service for balances.
-    if (loadedChainId.value !== currentChainId) {
+    if (!targetChainIds.includes(currentChainId) && loadedChainId.value !== currentChainId) {
       return
     }
 
@@ -86,9 +105,12 @@ export const useWallets = () => {
     // plus external token list tokens for the swap selector
     // Note: We only fetch underlying token balances here, NOT vault share balances.
     // Share balances are fetched separately on individual pages via the SDK wallet service.
-    const addresses = new Set<string>()
+    const addressesByChainId = new Map<number, Set<string>>()
     const allVaults = [...getByType('evk'), ...getByType('earn'), ...getByType('securitize')]
     allVaults.forEach((vault) => {
+      if (!targetChainIds.includes(vault.chainId)) return
+      const addresses = addressesByChainId.get(vault.chainId) ?? new Set<string>()
+      addressesByChainId.set(vault.chainId, addresses)
       // Only add valid underlying asset addresses (not vault share addresses)
       if (vault.asset?.address && vault.asset.address.startsWith('0x') && vault.asset.address.length === 42) {
         try {
@@ -115,23 +137,29 @@ export const useWallets = () => {
     // the RPC batch with foreign-chain addresses.
     if (fullBalancesRequesters.value > 0) {
       const { getAllTokens } = useTokenList()
-      for (const token of getAllTokens()) {
-        if (token.chainId !== currentChainId) continue
-        try {
-          addresses.add(getAddress(token.address))
-        }
-        catch {
-          // Skip invalid addresses
+      for (const targetChainId of targetChainIds) {
+        const addresses = addressesByChainId.get(targetChainId) ?? new Set<string>()
+        addressesByChainId.set(targetChainId, addresses)
+        for (const token of getAllTokens(targetChainId)) {
+          if (token.chainId !== targetChainId) continue
+          try {
+            addresses.add(getAddress(token.address))
+          }
+          catch {
+            // Skip invalid addresses
+          }
         }
       }
     }
 
     // Always fetch the native (gas) balance via the SDK (zero address) so
     // `nativeBalance` is populated alongside the ERC20 balances.
-    addresses.add(zeroAddress)
-    const includesNativeCurrency = addresses.delete(zeroAddress)
-    const tokenAddresses = [...addresses] as Address[]
-    if (!tokenAddresses.length && !includesNativeCurrency) {
+    for (const targetChainId of targetChainIds) {
+      const addresses = addressesByChainId.get(targetChainId) ?? new Set<string>()
+      addresses.add(zeroAddress)
+      addressesByChainId.set(targetChainId, addresses)
+    }
+    if (![...addressesByChainId.values()].some(addresses => addresses.size > 0)) {
       isLoaded.value = true
       return
     }
@@ -146,21 +174,26 @@ export const useWallets = () => {
     try {
       const targetAddress = getAddress(balanceAddress.value as Address)
       const sdk = await getEulerSdk()
-      const assetsWithSpenders = tokenAddresses.map(asset => ({ asset, spenders: [] }))
-      if (includesNativeCurrency) {
-        assetsWithSpenders.push({ asset: zeroAddress, spenders: [] })
-      }
-      const walletFetch = await sdk.walletService.fetchWallet(currentChainId, targetAddress, assetsWithSpenders)
-      if (walletFetch.errors.length) {
-        logWarn('wallets/fetchBalances', 'wallet service returned diagnostics', {
-          data: {
-            chainId: currentChainId,
-            target: targetAddress,
-            errors: walletFetch.errors,
-          },
-        })
-      }
-      const wallet = walletFetch.result
+      const fetches = await Promise.all(targetChainIds.map(async (targetChainId) => {
+        const addresses = addressesByChainId.get(targetChainId) ?? new Set<string>()
+        const includesNativeCurrency = addresses.delete(zeroAddress)
+        const tokenAddresses = [...addresses] as Address[]
+        const assetsWithSpenders = tokenAddresses.map(asset => ({ asset, spenders: [] }))
+        if (includesNativeCurrency) {
+          assetsWithSpenders.push({ asset: zeroAddress, spenders: [] })
+        }
+        const walletFetch = await sdk.walletService.fetchWallet(targetChainId, targetAddress, assetsWithSpenders)
+        if (walletFetch.errors.length) {
+          logWarn('wallets/fetchBalances', 'wallet service returned diagnostics', {
+            data: {
+              chainId: targetChainId,
+              target: targetAddress,
+              errors: walletFetch.errors,
+            },
+          })
+        }
+        return { chainId: targetChainId, wallet: walletFetch.result }
+      }))
 
       // Only update if still on the same chain and account.
       if (chainId.value === currentChainId && balanceAddress.value && getAddress(balanceAddress.value) === targetAddress) {
@@ -169,15 +202,17 @@ export const useWallets = () => {
         // resetBalances() is called on chain switch and wallet-address
         // change, which is the right boundary to fully clear.
         const merged = new Map(balances.value)
-        for (const asset of wallet.assets) {
-          merged.set(asset.asset, asset.balance)
+        for (const result of fetches) {
+          for (const asset of result.wallet.assets) {
+            merged.set(normalizeBalanceKey(result.chainId, asset.asset), asset.balance)
+          }
         }
         balances.value = merged
-        lastFetchChainId.value = currentChainId
+        lastFetchChainKey.value = targetChainIds.join(',')
         lastFetchAddress.value = targetAddress
         isLoaded.value = true
         if (wasFullMode) {
-          lastFullFetchKey = `${currentChainId}:${targetAddress.toLowerCase()}`
+          lastFullFetchKey = `${targetChainIds.join(',')}:${targetAddress.toLowerCase()}`
           lastFullFetchAt = Date.now()
         }
       }
@@ -187,7 +222,7 @@ export const useWallets = () => {
       // Mark as loaded to avoid infinite retries
       if (chainId.value === currentChainId && !isLoaded.value) {
         isLoaded.value = true
-        lastFetchChainId.value = currentChainId
+        lastFetchChainKey.value = targetChainIds.join(',')
       }
     }
     finally {
@@ -202,10 +237,11 @@ export const useWallets = () => {
 
   // Check if we need to fetch on each call
   const needsFetch = () => {
+    const targetChainKey = getFetchChainIds().join(',')
     return (isConnected.value || isSpyMode.value)
-      && loadedChainId.value === chainId.value
+      && targetChainKey.length > 0
       && !!balanceAddress.value
-      && (lastFetchChainId.value !== chainId.value || !isLoaded.value || lastFetchAddress.value !== balanceAddress.value)
+      && (lastFetchChainKey.value !== targetChainKey || !isLoaded.value || lastFetchAddress.value !== balanceAddress.value)
       && !isFetching.value
   }
 
@@ -217,7 +253,7 @@ export const useWallets = () => {
   // Retry when dependencies become ready (e.g. vaults load after cold start).
   // Watching loadedChainId (instead of the less-specific isReady) ensures we
   // only fire once the registry is confirmed to hold vaults for the active chain.
-  watch([loadedChainId, () => balanceAddress.value], () => {
+  watch([loadedChainId, loadedChainIds, selectedChainIds, () => balanceAddress.value], () => {
     if (needsFetch() && !fetchPromise) {
       fetchPromise = updateBalances()
     }
@@ -229,20 +265,14 @@ export const useWallets = () => {
     lastFullFetchAt = 0
     isLoaded.value = false
     isFetching.value = false
-    lastFetchChainId.value = null
+    lastFetchChainKey.value = null
     lastFetchAddress.value = null
     fetchPromise = null
   }
 
-  const getBalance = (tokenAddress: Address): bigint => {
-    let real: bigint
-    try {
-      real = balances.value.get(getAddress(tokenAddress)) || 0n
-    }
-    catch {
-      real = balances.value.get(tokenAddress) || 0n
-    }
-    return applyLayerOverlay(tokenAddress, real)
+  const getBalance = (tokenAddress: Address, targetChainId = chainId.value): bigint => {
+    const real = balances.value.get(normalizeBalanceKey(targetChainId, tokenAddress)) || 0n
+    return applyLayerOverlay(tokenAddress, real, targetChainId)
   }
 
   // SDK-sourced native (gas) balance, reactive + layer-aware. `updateBalances`
@@ -272,9 +302,9 @@ export const useWallets = () => {
       const real = walletFetch.result.getBalance(normalized as Address)
       // Feed the central wallet entity so getBalance() sees this token too.
       const merged = new Map(balances.value)
-      merged.set(normalized, real)
+      merged.set(normalizeBalanceKey(chainId.value, normalized), real)
       balances.value = merged
-      return applyLayerOverlay(normalized, real)
+      return applyLayerOverlay(normalized, real, chainId.value)
     }
     catch {
       return 0n
@@ -321,7 +351,7 @@ export const useWallets = () => {
  */
 export const useFullBalances = (): void => {
   const { updateBalances } = useWallets()
-  const { chainId } = useEulerAddresses()
+  const { chainId, selectedChainIds } = useEulerAddresses()
   const { address } = useWagmi()
   const { spyAddress, isSpyMode } = useSpyMode()
 
@@ -330,7 +360,8 @@ export const useFullBalances = (): void => {
     if (fullBalancesRequesters.value !== 1) return // not the first requester, data already in-flight / present
 
     const activeAddress = (isSpyMode.value ? spyAddress.value : address.value) ?? ''
-    const expectedKey = `${chainId.value}:${activeAddress.toLowerCase()}`
+    const targetChainKey = (selectedChainIds.value.length ? selectedChainIds.value : [chainId.value].filter(Boolean)).join(',')
+    const expectedKey = `${targetChainKey}:${activeAddress.toLowerCase()}`
     const isFresh = lastFullFetchKey === expectedKey && (Date.now() - lastFullFetchAt) < FULL_BALANCES_TTL_MS
 
     if (!isFresh) {

@@ -11,6 +11,7 @@ import {
 } from '~/utils/discoveryCalculations'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
+import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 
 const props = defineProps<{
   market: MarketGroup
@@ -21,17 +22,27 @@ defineEmits<{
   toggle: []
 }>()
 
-const { products } = useEulerLabels()
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
+const marketProduct = computed(() => {
+  if (props.market.source !== 'product') return undefined
+  const [maybeChainId, ...keyParts] = props.market.id.split(':')
+  const parsedChainId = Number(maybeChainId)
+  const productKey = Number.isInteger(parsedChainId) && keyParts.length > 0 ? keyParts.join(':') : props.market.id
+  const chainId = Number.isInteger(parsedChainId)
+    ? parsedChainId
+    : props.market.vaults[0]?.chainId ?? props.market.externalCollateral[0]?.chainId
+  if (!chainId) return undefined
+  return getEulerLabelsDataForChain(chainId).products[productKey]
+})
 
 const isGovernanceLimited = computed(() =>
-  props.market.source === 'product' && (products[props.market.id]?.tags?.includes('governance limited') ?? false),
+  props.market.source === 'product' && (marketProduct.value?.tags?.includes('governance limited') ?? false),
 )
 
 const getProductDescription = (market: MarketGroup): string => {
   if (market.source !== 'product') return ''
-  return products[market.id]?.description ?? ''
+  return marketProduct.value?.description ?? ''
 }
 
 const getBestMaxRoe = (market: MarketGroup): BestMaxRoeResult => getBestMaxROE(market.id)
@@ -45,6 +56,8 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
     borrowLTV: result.borrowLTV,
     borrowVaultAddress: result.borrowVaultAddress,
     collateralAddress: result.collateralAddress,
+    borrowChainId: result.borrowChainId,
+    collateralChainId: result.collateralChainId,
     isBestInMarket: true,
   },
 })
@@ -313,16 +326,16 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
                 :cx="node.x"
                 :cy="node.y"
                 r="6"
-                :style="{ fill: getAssetLogoUrl(node.assetAddress, node.assetSymbol) ? 'var(--graph-node-bg)' : stringToColor(node.assetSymbol), stroke: 'var(--graph-node-border)' }"
+                :style="{ fill: getAssetLogoUrl(node.assetAddress, node.assetSymbol, node.chainId) ? 'var(--graph-node-bg)' : stringToColor(node.assetSymbol), stroke: 'var(--graph-node-border)' }"
                 stroke-width="0.5"
               />
               <image
-                v-if="getAssetLogoUrl(node.assetAddress, node.assetSymbol)"
+                v-if="getAssetLogoUrl(node.assetAddress, node.assetSymbol, node.chainId)"
                 :x="node.x - 6"
                 :y="node.y - 6"
                 width="12"
                 height="12"
-                :href="getAssetLogoUrl(node.assetAddress, node.assetSymbol)"
+                :href="getAssetLogoUrl(node.assetAddress, node.assetSymbol, node.chainId)"
                 :clip-path="`url(#clip-${market.id}-${node.address})`"
               />
               <text

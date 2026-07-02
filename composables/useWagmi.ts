@@ -20,6 +20,17 @@ const routeNetworkId: Ref<number | null> = ref(null)
 let cachedWagmiData: ReturnType<typeof initializeWagmi> | null = null
 let watchersInitialized = false
 
+const parseChainIds = (value: unknown): number[] => {
+  const rawValues = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+  return [...new Set(rawValues.flatMap((entry) => {
+    if (typeof entry !== 'string') return []
+    return entry.split(',').flatMap((part) => {
+      const parsed = parseChainId(part.trim())
+      return parsed == null ? [] : [parsed]
+    })
+  }))]
+}
+
 function initializeWagmi() {
   const { address: wagmiAddress, isConnected: wagmiIsConnected, connector, chain: wagmiChain, status } = useAccount()
   const { disconnect: wagmiDisconnect } = useDisconnect()
@@ -105,7 +116,13 @@ export const useWagmi = () => {
 
   const route = useRoute()
   const router = useRouter()
-  const { changeCurrentChainId, chainId: currentChainId, allowedChainIds } = useEulerAddresses()
+  const {
+    changeCurrentChainId,
+    chainId: currentChainId,
+    selectedChainIds,
+    setSelectedChainIds,
+    allowedChainIds,
+  } = useEulerAddresses()
   const {
     wagmiAddress,
     wagmiIsConnected,
@@ -216,6 +233,29 @@ export const useWagmi = () => {
     isRouterReplacing = false
   }
 
+  const syncRouteNetworks = async (targetChainIds: readonly number[]) => {
+    const normalized = [...new Set(targetChainIds)]
+      .filter(id => allowedChainIds.value.includes(id))
+      .sort((a, b) => a - b)
+    const value = normalized.join(',')
+    const currentValue = Array.isArray(route.query.networks)
+      ? route.query.networks.join(',')
+      : route.query.networks
+    if (!value || currentValue === value || isRouterReplacing) {
+      return
+    }
+
+    isRouterReplacing = true
+    await router.replace({
+      path: route.path,
+      query: {
+        ...route.query,
+        networks: value,
+      },
+    })
+    isRouterReplacing = false
+  }
+
   const changeChain = async (targetChainId: number) => {
     if (!allowedChainIds.value.includes(targetChainId)) {
       logWarn('useWagmi', `chainId ${targetChainId} is not allowed`)
@@ -231,6 +271,7 @@ export const useWagmi = () => {
       isChangingChain = true
       localStorage.setItem('chainId', String(targetChainId))
       changeCurrentChainId(targetChainId)
+      localStorage.setItem('chainIds', selectedChainIds.value.join(','))
       await syncRouteNetwork(targetChainId)
       routeNetworkId.value = targetChainId
       if (!isInitialRouteSync) {
@@ -298,12 +339,27 @@ export const useWagmi = () => {
       isInitialRouteSync = false
     }, { immediate: true })
 
+    watch(computed(() => route.query.networks), (networks) => {
+      if (isRouterReplacing) return
+      const parsed = parseChainIds(networks)
+        .filter(id => allowedChainIds.value.includes(id))
+      if (!parsed.length) return
+      setSelectedChainIds(parsed)
+      localStorage.setItem('chainIds', parsed.join(','))
+    }, { immediate: true })
+
     watch(currentChainId, (val) => {
       if (!val) {
         return
       }
 
       syncRouteNetwork(val)
+    }, { immediate: true })
+
+    watch(selectedChainIds, (val) => {
+      if (!val.length) return
+      localStorage.setItem('chainIds', val.join(','))
+      syncRouteNetworks(val)
     }, { immediate: true })
 
     watch(wagmiChain, async (val, oldVal) => {

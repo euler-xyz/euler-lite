@@ -13,6 +13,9 @@ import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/ut
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { getChainLogoUrl } from '~/utils/chain-logo'
+import { getChainById } from '~/entities/chainRegistry'
+import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 
 defineOptions({
   name: 'ExplorePage',
@@ -21,9 +24,8 @@ defineOptions({
 const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGroups()
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
 const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
-const { chainId } = useEulerAddresses()
+const { chainId, selectedChainIds } = useEulerAddresses()
 const { isLoading: isTokenListLoading } = useTokenList()
-const { entities } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(group => [
@@ -33,7 +35,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   ...[...group.vaults, ...group.externalCollateral].flatMap((vault) => {
     const addr = getVaultAddress(vault)
     if (!addr) return []
-    const product = applyVaultOverrides(getProductByVault(addr), addr)
+    const product = applyVaultOverrides(getProductByVault(addr, vault.chainId), addr)
     return [
       addr,
       getVaultAssetAddress(vault),
@@ -46,6 +48,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
 
 const selectedMarkets = ref<string[]>([])
 const selectedAssets = ref<string[]>([])
+const selectedChains = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
@@ -54,6 +57,7 @@ useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
   { ref: sortBy, default: 'Active', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
+  { ref: selectedChains, default: [], queryKey: 'chain' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
   { ref: selectedAssets, default: [], queryKey: 'asset' },
   { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
@@ -91,11 +95,17 @@ watch(sortBy, (newSortBy) => {
 watch(chainId, (newChainId, oldChainId) => {
   if (oldChainId !== undefined && newChainId !== oldChainId) {
     clearSearch()
+    selectedChains.value = []
     selectedMarkets.value = []
     selectedAssets.value = []
     selectedRiskManagers.value = []
     clearCustomFilters()
   }
+})
+
+watch(selectedChainIds, (chainIds) => {
+  const allowed = new Set(chainIds.map(String))
+  selectedChains.value = selectedChains.value.filter(id => allowed.has(id))
 })
 
 const marketOptions = computed(() => {
@@ -106,12 +116,13 @@ const marketOptions = computed(() => {
     for (const vault of group.vaults) {
       const addr = getVaultAddress(vault)
       if (!addr) continue
-      const market = getProductByVault(addr)
-      if (!market.name || seenInGroup.has(market.name)) continue
-      seenInGroup.add(market.name)
+      const market = getProductByVault(addr, vault.chainId)
+      const marketKey = `${vault.chainId}:${market.name}`
+      if (!market.name || seenInGroup.has(marketKey)) continue
+      seenInGroup.add(marketKey)
       const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
-      const entityObj = entityName ? entities[entityName] : null
-      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
+      const entityObj = entityName ? getEulerLabelsDataForChain(vault.chainId).entities[entityName] : null
+      entries.push({ key: marketKey, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -123,13 +134,14 @@ const assetOptions = computed(() => {
   for (const group of marketGroups.value) {
     for (const vault of group.vaults) {
       const symbol = getVaultAssetSymbol(vault)
-      if (symbol === '?' || seen.has(symbol)) continue
-      seen.add(symbol)
       const assetAddr = getVaultAssetAddress(vault)
+      const key = `${vault.chainId}:${assetAddr}`
+      if (symbol === '?' || seen.has(key)) continue
+      seen.add(key)
       result.push({
         label: symbol,
-        value: symbol,
-        icon: getAssetLogoUrl(assetAddr, symbol),
+        value: key,
+        icon: getAssetLogoUrl(assetAddr, symbol, vault.chainId),
       })
     }
   }
@@ -147,19 +159,30 @@ const riskManagerOptions = computed(() => {
   return buildTvlSortedOptions(entries)
 })
 
+const chainOptions = computed(() =>
+  selectedChainIds.value.map(id => ({
+    label: getChainById(id)?.name ?? String(id),
+    value: String(id),
+    icon: getChainLogoUrl(id),
+  })),
+)
+
+const getGroupChainIds = (group: MarketGroup): number[] =>
+  [...new Set([...group.vaults, ...group.externalCollateral].map(vault => vault.chainId).filter(Boolean))]
+
 const matchesMarketFilter = (group: MarketGroup): boolean => {
   if (!selectedMarkets.value.length) return true
   return group.vaults.some((vault) => {
     const addr = getVaultAddress(vault)
     if (!addr) return false
-    return selectedMarkets.value.includes(getProductByVault(addr).name)
+    return selectedMarkets.value.includes(`${vault.chainId}:${getProductByVault(addr, vault.chainId).name}`)
   })
 }
 
 const matchesAssetFilter = (group: MarketGroup): boolean => {
   if (!selectedAssets.value.length) return true
   return group.vaults.some(vault =>
-    selectedAssets.value.includes(getVaultAssetSymbol(vault)),
+    selectedAssets.value.includes(`${vault.chainId}:${getVaultAssetAddress(vault)}`),
   )
 }
 
@@ -168,10 +191,16 @@ const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
   return getUniqueEntitiesByVaults(group.vaults).some(e => selectedRiskManagers.value.includes(e.name))
 }
 
+const matchesChainFilter = (group: MarketGroup): boolean => {
+  if (!selectedChains.value.length) return true
+  return getGroupChainIds(group).some(id => selectedChains.value.includes(String(id)))
+}
+
 const filteredMarkets = computed(() => {
   return marketGroups.value
     .filter(g => g.source === 'product')
     .filter(matchesSearch)
+    .filter(matchesChainFilter)
     .filter(matchesMarketFilter)
     .filter(matchesAssetFilter)
     .filter(matchesRiskManagerFilter)
@@ -192,7 +221,7 @@ const applyRecentlyAddedSort = (sorted: MarketGroup[]): MarketGroup[] => {
 const isGroupDeprecated = (group: MarketGroup): boolean => {
   return group.vaults.length > 0 && group.vaults.every((v) => {
     const addr = getVaultAddress(v)
-    return addr ? isVaultDeprecated(addr) : false
+    return addr ? isVaultDeprecated(addr, v.chainId) : false
   })
 }
 
@@ -243,7 +272,7 @@ const sortedMarkets = computed(() => {
         if (total === 0) return 0
         const deprecated = group.vaults.filter((v) => {
           const addr = getVaultAddress(v)
-          return addr ? isVaultDeprecated(addr) : false
+          return addr ? isVaultDeprecated(addr, v.chainId) : false
         }).length
         return deprecated / total
       }
@@ -346,6 +375,15 @@ const clearExploreFilters = () => {
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
+        />
+        <UiSelect
+          :key="`chains-${selectedChainIds.join('-')}`"
+          v-model="selectedChains"
+          :options="chainOptions"
+          placeholder="Chain"
+          title="Chain"
+          modal-input-placeholder="Search chain"
+          icon="globe"
         />
         <UiSelect
           v-if="enableEntityBranding"

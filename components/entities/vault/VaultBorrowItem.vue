@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning, getCollateralSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
@@ -13,13 +14,16 @@ import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-
 import { getAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 
 const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const { getTokenCategoryTags, isLoaded: isTokenListLoaded } = useTokenList()
-const pairKey = computed(() => `${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
+const pairChainId = computed(() => pair.borrow.chainId)
+const pairChainLogoSrc = computed(() => getChainLogoUrl(pairChainId.value))
+const pairKey = computed(() => `${pairChainId.value}:${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
 
 const isAnyGovernorUnverified = computed(() => {
   const borrowUnverified = !isVaultGovernorVerified(pair.borrow)
@@ -48,22 +52,24 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getBorrowRewardApy, getSupplyRewardApy, getLoopingRewardApy, hasSupplyRewards, hasBorrowRewards, hasLoopingRewards, getBorrowRewardCampaigns, getSupplyRewardCampaigns, getLoopingRewardCampaigns } = useRewardsApy()
 const collateralProduct = useEulerProductOfVault(
   computed(() => pair.collateral.address),
+  computed(() => pair.collateral.chainId),
 )
 const borrowProduct = useEulerProductOfVault(
   computed(() => pair.borrow.address),
+  computed(() => pair.borrow.chainId),
 )
 
 const isAnyGovernanceLimited = computed(() =>
-  (isVaultGovernanceLimited(pair.collateral.address) || isVaultGovernanceLimited(pair.borrow.address)) && !isAnyGovernorUnverified.value,
+  (isVaultGovernanceLimited(pair.collateral.address, pair.collateral.chainId) || isVaultGovernanceLimited(pair.borrow.address, pair.borrow.chainId)) && !isAnyGovernorUnverified.value,
 )
 
 const isEscrowCollateral = computed(
-  () => getVaultCategory(pair.collateral.address) === 'escrow',
+  () => getVaultCategory(pair.collateral.address, pair.collateral.chainId) === 'escrow',
 )
 
 const isAnyUnverified = computed(() => {
-  const collateralUnverified = !isVerifiedVault(pair.collateral.address)
-  const borrowUnverified = !isVerifiedVault(pair.borrow.address)
+  const collateralUnverified = !isVerifiedVault(pair.collateral.address, pair.collateral.chainId)
+  const borrowUnverified = !isVerifiedVault(pair.borrow.address, pair.borrow.chainId)
   return collateralUnverified || borrowUnverified
 })
 
@@ -80,9 +86,9 @@ const isPairEffectivelyBlocked = computed(() => {
     && isVaultRestrictedByCountry(pair.collateral.address)
 })
 
-const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address))
-const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
-const isCyclicalNote = computed(() => isVaultCyclicalNote(pair.borrow.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.address, pair.collateral.chainId) || isVaultRecentlyAdded(pair.borrow.address, pair.borrow.chainId))
+const isKeyring = computed(() => isVaultKeyring(pair.collateral.address, pair.collateral.chainId) || isVaultKeyring(pair.borrow.address, pair.borrow.chainId))
+const isCyclicalNote = computed(() => isVaultCyclicalNote(pair.borrow.address, pair.borrow.chainId))
 
 const isAnyDeprecated = computed(() => {
   const collateralAddr = getAddress(pair.collateral.address)
@@ -105,19 +111,19 @@ const pairName = computed(() => {
   return `${collateralName}/${borrowName}`
 })
 const borrowRewardsAPY = computed(() =>
-  getBorrowRewardApy(pair.borrow.address, pair.collateral.address),
+  getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const supplyRewardsAPY = computed(() =>
-  getSupplyRewardApy(pair.collateral.address),
+  getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId),
 )
 const loopingRewardsAPY = computed(() =>
-  getLoopingRewardApy(pair.borrow.address, pair.collateral.address),
+  getLoopingRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const hasBorrowApyRewards = computed(() =>
-  hasBorrowRewards(pair.borrow.address, pair.collateral.address),
+  hasBorrowRewards(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const hasAnyRewards = computed(() =>
-  hasSupplyRewards(pair.collateral.address) || hasBorrowApyRewards.value || hasLoopingRewards(pair.borrow.address, pair.collateral.address),
+  hasSupplyRewards(pair.collateral.address, pair.collateral.chainId) || hasBorrowApyRewards.value || hasLoopingRewards(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
 )
 const supplyApy = computed(() => {
   const baseApy = getVaultSupplyApy(pair.collateral)
@@ -157,13 +163,13 @@ const showMaxRoe = computed(() =>
   && areTokenAddressesCorrelatedByTags(
     pair.collateral.asset.address,
     pair.borrow.asset.address,
-    getTokenCategoryTags,
+    address => getTokenCategoryTags(address, pairChainId.value),
   ),
 )
 const correlatedBadgeTitle = computed(() => {
   const category = getTokenAddressesCorrelationCategoryLabel(
     [pair.collateral.asset.address, pair.borrow.asset.address],
-    getTokenCategoryTags,
+    address => getTokenCategoryTags(address, pairChainId.value),
   )
   return category ? `Correlated category: ${category}` : undefined
 })
@@ -186,20 +192,25 @@ const borrowApyModalData = computed(() => ({
     borrowingAPY: getVaultBorrowApy(pair.borrow),
     intrinsicAPY: getVaultIntrinsicApy(pair.borrow, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.borrow, enableIntrinsicApy.value),
-    campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    campaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
     rewardVaultAddress: pair.borrow.address,
   },
 }))
 
-const supplyApyModalData = computed(() => ({
-  props: {
-    lendingAPY: getVaultSupplyApy(pair.collateral),
-    intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
-    intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
-    campaigns: getSupplyRewardCampaigns(pair.collateral.address),
-    rewardVaultAddress: pair.collateral.address,
-  },
-}))
+const supplyApyModalData = computed(() => {
+  const baseSupply = 'interestRateInfo' in pair.collateral
+    ? getVaultSupplyApy(pair.collateral as EVault)
+    : 0
+  return {
+    props: {
+      lendingAPY: baseSupply,
+      intrinsicAPY: getVaultIntrinsicApy(pair.collateral, enableIntrinsicApy.value),
+      intrinsicApyInfo: getVaultIntrinsicApyInfo(pair.collateral, enableIntrinsicApy.value),
+      campaigns: getSupplyRewardCampaigns(pair.collateral.address, pair.collateral.chainId),
+      rewardVaultAddress: pair.collateral.address,
+    },
+  }
+})
 
 const netApyModalData = computed(() => ({
   props: {
@@ -210,9 +221,9 @@ const netApyModalData = computed(() => ({
     supplyRewardAPY: supplyRewardsAPY.value || null,
     borrowRewardAPY: borrowRewardsAPY.value || null,
     loopingRewardAPY: loopingRewardsAPY.value || null,
-    supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address),
-    borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address),
-    loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address),
+    supplyCampaigns: getSupplyRewardCampaigns(pair.collateral.address, pair.collateral.chainId),
+    borrowCampaigns: getBorrowRewardCampaigns(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
+    loopingCampaigns: getLoopingRewardCampaigns(pair.borrow.address, pair.collateral.address, pair.borrow.chainId),
   },
 }))
 
@@ -225,6 +236,8 @@ const maxRoeModalData = computed(() => ({
     borrowLTV: ltvToPercent(pair.ltv.borrowLTV),
     borrowVaultAddress: pair.borrow.address,
     collateralAddress: pair.collateral.address,
+    borrowChainId: pair.borrow.chainId,
+    collateralChainId: pair.collateral.chainId,
   },
 }))
 
@@ -240,12 +253,10 @@ const headlineMetricTrigger = computed(() => showMaxRoe.value ? 'max-roe' : 'net
 const headlineMetricAriaLabel = computed(() => showMaxRoe.value ? 'Show max ROE breakdown' : 'Show net APY breakdown')
 const headlineMetricRewardsAriaLabel = computed(() => showMaxRoe.value ? 'Show max ROE rewards breakdown' : 'Show net APY rewards breakdown')
 
-const route = useRoute()
-
 const linkPath = computed(() => ({
   path: `/borrow/${pair.collateral.address}/${pair.borrow.address}`,
   query: {
-    network: route.query.network,
+    network: pairChainId.value,
     ...(showMaxRoe.value ? { tab: 'multiply' } : {}),
   },
 }))
@@ -274,7 +285,10 @@ const linkPath = computed(() => ({
         class="flex pl-16 py-16 pb-12 mobile:!p-0 mobile:w-full mobile:min-w-0 mobile:items-center"
       >
         <AssetAvatar
-          :asset="[pair.collateral.asset, pair.borrow.asset]"
+          :asset="[
+            { ...pair.collateral.asset, chainId: pair.collateral.chainId },
+            { ...pair.borrow.asset, chainId: pair.borrow.chainId },
+          ]"
           size="40"
         />
         <div class="flex-grow ml-12 min-w-0">
@@ -327,6 +341,11 @@ const linkPath = computed(() => ({
                 [pair.collateral.asset.symbol, pair.borrow.asset.symbol].join("/")
               }}
             </span>
+            <BaseAvatar
+              class="h-18 w-18 shrink-0 shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
+              :src="pairChainLogoSrc"
+              :label="String(pairChainId)"
+            />
             <RecentlyAddedBadge
               v-if="isRecentlyAdded"
               class="hidden mobile:inline-flex shrink-0"
@@ -533,7 +552,7 @@ const linkPath = computed(() => ({
               :vault="pair.collateral"
             />
             <UiModalPreviewTrigger
-              v-if="hasSupplyRewards(pair.collateral.address)"
+              v-if="hasSupplyRewards(pair.collateral.address, pair.collateral.chainId)"
               :component="VaultSupplyApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY rewards breakdown"
@@ -745,7 +764,7 @@ const linkPath = computed(() => ({
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <VaultPoints :vault="pair.collateral" />
           <UiModalPreviewTrigger
-            v-if="hasSupplyRewards(pair.collateral.address)"
+            v-if="hasSupplyRewards(pair.collateral.address, pair.collateral.chainId)"
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY rewards breakdown"

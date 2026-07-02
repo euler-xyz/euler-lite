@@ -231,6 +231,7 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
                 <AssetAvatar
                   class="shrink-0"
                   :asset="{ address: vault.assetAddress, symbol: vault.symbol }"
+                  :chain-id="vault.chainId"
                   size="16"
                 />
                 {{ vault.symbol }}

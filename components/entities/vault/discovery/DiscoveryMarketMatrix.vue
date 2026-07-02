@@ -30,8 +30,8 @@ const {
   hasBorrowRewards,
 } = useRewardsApy()
 const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
-const { chainId } = useEulerAddresses()
 const { getTokenCategoryTags } = useTokenList()
+const marketChainId = computed(() => props.market.vaults[0]?.chainId ?? props.market.externalCollateral[0]?.chainId)
 
 const hoveredCell = ref<{
   collateralAddr: string
@@ -65,7 +65,7 @@ const computeEnhancedApys = (
   if (collateral) {
     const base = getVaultSupplyApy(collateral)
     supplyApy = withVaultIntrinsicApy(base, collateral, enableIntrinsicApy.value)
-    supplyRewards = getSupplyRewardApy(collateral.address)
+    supplyRewards = getSupplyRewardApy(collateral.address, collateral.chainId)
   }
 
   let borrowApy = 0
@@ -74,11 +74,11 @@ const computeEnhancedApys = (
   if (liability) {
     const base = getVaultBorrowApy(liability)
     borrowApy = withVaultIntrinsicApy(base, liability, enableIntrinsicApy.value)
-    borrowRewards = getBorrowRewardApy(liability.address, collateral?.address)
+    borrowRewards = getBorrowRewardApy(liability.address, collateral?.address, liability.chainId)
     utilization = isEVault(liability) ? liability.utilization : 0
   }
 
-  const loopingRewards = liability ? getLoopingRewardApy(liability.address, collateral?.address) : 0
+  const loopingRewards = liability ? getLoopingRewardApy(liability.address, collateral?.address, liability.chainId) : 0
 
   const supplyFinal = supplyApy + supplyRewards
   const borrowFinal = borrowApy - borrowRewards
@@ -105,7 +105,7 @@ const isCorrelatedCell = (
   return areTokenAddressesCorrelatedByTags(
     collateral.asset.address,
     liability.asset.address,
-    getTokenCategoryTags,
+    address => getTokenCategoryTags(address, liability.chainId),
   )
 }
 
@@ -171,10 +171,10 @@ const shouldShowSparkles = (
   const collateral = findVault(props.market, collateralAddr)
   const liability = findVault(props.market, liabilityAddr)
   const hasSupplyRewardsForCell = collateral
-    ? hasSupplyRewards(collateral.address)
+    ? hasSupplyRewards(collateral.address, collateral.chainId)
     : false
   const hasBorrowRewardsForCell = liability
-    ? hasBorrowRewards(liability.address, collateral?.address)
+    ? hasBorrowRewards(liability.address, collateral?.address, liability.chainId)
     : false
   return hasSupplyRewardsForCell || hasBorrowRewardsForCell
 }
@@ -257,7 +257,7 @@ const onCellClick = (collateralAddr: string, liabilityAddr: string) => {
 // request only fires the first time the user picks the Oracles view.
 // loadAllOracleAdapters is per-chain idempotent (cached by useEulerLabels).
 watch(
-  [() => props.dotMetric, chainId],
+  [() => props.dotMetric, marketChainId],
   ([metric, currentChainId]) => {
     if (metric !== 'oracle' || !currentChainId) return
     void loadAllOracleAdapters(currentChainId)
@@ -313,6 +313,7 @@ watch(
               <div class="flex flex-col items-center gap-2">
                 <AssetAvatar
                   :asset="{ address: col.assetAddress, symbol: col.symbol }"
+                  :chain-id="col.chainId"
                   size="16"
                 />
                 {{ col.symbol }}
@@ -353,6 +354,7 @@ watch(
                 <AssetAvatar
                   class="shrink-0"
                   :asset="{ address: row.assetAddress, symbol: row.symbol }"
+                  :chain-id="row.chainId"
                   size="16"
                 />
                 {{ row.symbol }}

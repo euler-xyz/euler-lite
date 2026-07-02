@@ -24,10 +24,14 @@ import {
 } from '~/utils/token-categories'
 import { formatCompactUsdValue } from '~/utils/string-utils'
 import { getBorrowPairSearchAddresses } from '~/utils/borrow-pair'
+import { getChainLogoUrl } from '~/utils/chain-logo'
+import { getChainById } from '~/entities/chainRegistry'
+import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 import type { SelectOption, SelectQuickFilter } from '~/components/ui/modals/select.types'
 
 type AssetFilterOption = SelectOption
 type AssetFilterOptions = { options: AssetFilterOption[], quickFilters: SelectQuickFilter[] }
+type BorrowFilterAsset = { address: string, symbol: string, chainId: number }
 
 const CATEGORY_FILTER_LABELS: Record<string, string> = {
   eth: 'ETH',
@@ -50,7 +54,7 @@ const isCorrelatedPair = (pair: AnyBorrowVaultPair) =>
   areTokenAddressesCorrelatedByTags(
     pair.collateral.asset.address,
     pair.borrow.asset.address,
-    getTokenCategoryTags,
+    address => getTokenCategoryTags(address, pair.borrow.chainId),
   )
 
 const getNetApy = (pair: AnyBorrowVaultPair) => {
@@ -58,9 +62,9 @@ const getNetApy = (pair: AnyBorrowVaultPair) => {
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
   const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
   const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
-  const supplyRewards = getSupplyRewardApy(pair.collateral.address)
-  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
-  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
+  const supplyRewards = getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId)
+  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
+  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
   return (supplyApy + supplyRewards) - (borrowApy - borrowRewards) + loopingRewards
 }
 
@@ -73,9 +77,9 @@ const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
   const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
   const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
-  const supplyFinal = supplyApy + getSupplyRewardApy(pair.collateral.address)
-  const borrowFinal = borrowApy - getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
-  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
+  const supplyFinal = supplyApy + getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId)
+  const borrowFinal = borrowApy - getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
+  const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
   return supplyFinal + (maxMultiplier - 1) * (supplyFinal - borrowFinal) + loopingRewards
 }
 
@@ -118,17 +122,17 @@ defineOptions({
 })
 
 const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
-const { chainId } = useEulerAddresses()
+const { chainId, selectedChainIds } = useEulerAddresses()
 
 const isPricesReady = ref(false)
-const { entities, isReady: labelsReady } = useEulerLabels()
+const { isReady: labelsReady } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
   borrowList.value.filter((pair) => {
-    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
-    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address)) return false
+    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address, pair.borrow.chainId)) return false
+    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address, pair.collateral.chainId)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
     // Securitize collateral has no EVault hook flags — only check EVault collateral.
     // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
@@ -139,7 +143,7 @@ const activeBorrowList = computed(() =>
 )
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>((pair) => {
-  const product = applyVaultOverrides(getProductByVault(pair.collateral.address), pair.collateral.address)
+  const product = applyVaultOverrides(getProductByVault(pair.collateral.address, pair.collateral.chainId), pair.collateral.address)
   return [
     pair.collateral.asset.symbol,
     pair.collateral.asset.name,
@@ -156,6 +160,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaul
 
 const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])
+const selectedChains = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Active')
@@ -175,6 +180,7 @@ useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
   { ref: sortBy, default: 'Active', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
+  { ref: selectedChains, default: [], queryKey: 'chain' },
   { ref: selectedCollateral, default: [], queryKey: 'collateral' },
   { ref: selectedDebt, default: [], queryKey: 'debt' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
@@ -193,7 +199,7 @@ const pairBorrowedUsd = ref<Map<string, number | undefined>>(new Map())
 let priceLoadId = 0
 
 // Helper to create a unique key for a borrow pair
-const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
+const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.chainId}-${pair.borrow.chainId}-${pair.collateral.address}-${pair.borrow.address}`
 
 const areBorrowPriceValuesReady = computed(() => {
   if (!isPricesReady.value) return false
@@ -293,14 +299,14 @@ watchEffect(() => {
 const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {
   const baseBorrowApy = getVaultBorrowApy(pair.borrow)
   const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
-  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
+  const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address, pair.borrow.chainId)
   return borrowApy - borrowRewards
 }
 
 const getPairSupplyApy = (pair: AnyBorrowVaultPair): number => {
   const baseSupplyApy = getVaultSupplyApy(pair.collateral)
   const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
-  const supplyRewards = getSupplyRewardApy(pair.collateral.address)
+  const supplyRewards = getSupplyRewardApy(pair.collateral.address, pair.collateral.chainId)
   return supplyApy + supplyRewards
 }
 
@@ -352,6 +358,7 @@ const {
 watch(chainId, (newChainId, oldChainId) => {
   if (oldChainId !== undefined && newChainId !== oldChainId) {
     clearSearch()
+    selectedChains.value = []
     selectedCollateral.value = []
     selectedDebt.value = []
     selectedMarkets.value = []
@@ -361,25 +368,26 @@ watch(chainId, (newChainId, oldChainId) => {
 })
 
 const buildAssetFilterOptions = (
-  assets: { address: string, symbol: string }[],
+  assets: BorrowFilterAsset[],
 ): AssetFilterOptions => {
   const seenAssets = new Set<string>()
   const availableCategoryTags = new Set<string>()
   const assetOptions: AssetFilterOption[] = []
 
   for (const asset of assets) {
-    const categoryTags = normalizeTokenCategoryTags(getTokenCategoryTags(asset.address))
+    const value = `${asset.chainId}:${asset.address}`
+    const categoryTags = normalizeTokenCategoryTags(getTokenCategoryTags(asset.address, asset.chainId))
 
     for (const tag of categoryTags) {
       availableCategoryTags.add(tag)
     }
 
-    if (seenAssets.has(asset.address)) continue
-    seenAssets.add(asset.address)
+    if (seenAssets.has(value)) continue
+    seenAssets.add(value)
     assetOptions.push({
       label: asset.symbol,
-      value: asset.address,
-      icon: getAssetLogoUrl(asset.address, asset.symbol),
+      value,
+      icon: getAssetLogoUrl(asset.address, asset.symbol, asset.chainId),
       quickFilterValues: categoryTags.map(toTokenCategoryFilterValue),
     })
   }
@@ -396,36 +404,48 @@ const buildAssetFilterOptions = (
 }
 
 const matchesAssetFilterSelection = (
-  assetAddress: string,
+  asset: BorrowFilterAsset,
   selected: readonly string[],
 ): boolean => {
   if (!selected.length) return true
 
-  return selected.some(value =>
-    value === assetAddress || tokenAddressMatchesCategoryFilter(assetAddress, value, getTokenCategoryTags),
+  const assetValue = `${asset.chainId}:${asset.address}`
+  return selected.some(selectedValue =>
+    selectedValue === assetValue || tokenAddressMatchesCategoryFilter(asset.address, selectedValue, address => getTokenCategoryTags(address, asset.chainId)),
   )
 }
 
+watch(selectedChainIds, (chainIds) => {
+  const allowed = new Set(chainIds.map(String))
+  selectedChains.value = selectedChains.value.filter(id => allowed.has(id))
+})
+
 const collateralAssetOptions = computed(() => {
-  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.collateral.asset))
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => ({
+    ...pair.collateral.asset,
+    chainId: pair.collateral.chainId,
+  })))
 })
 
 const debtAssetOptions = computed(() => {
-  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.borrow.asset))
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => ({
+    ...pair.borrow.asset,
+    chainId: pair.borrow.chainId,
+  })))
 })
 
 const marketOptions = computed(() => {
   const counted = new Set<string>()
   return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
-    const market = getProductByVault(pair.collateral.address)
+    const market = getProductByVault(pair.collateral.address, pair.collateral.chainId)
     if (!market.name) return []
-    const dedupKey = `${market.name}:${pair.borrow.address}`
+    const dedupKey = `${market.name}:${pair.borrow.chainId}:${pair.borrow.address}`
     const pairKey = getPairKey(pair)
     const tvl = counted.has(dedupKey) ? 0 : (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
     counted.add(dedupKey)
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
-    const entityObj = entityName ? entities[entityName] : null
-    return [{ key: market.name, label: market.name, tvl, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    const entityObj = entityName ? getEulerLabelsDataForChain(pair.collateral.chainId).entities[entityName] : null
+    return [{ key: `${pair.collateral.chainId}:${market.name}`, label: market.name, tvl, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
   }))
 })
 
@@ -435,7 +455,7 @@ const riskManagerOptions = computed(() => {
     const pairKey = getPairKey(pair)
     const pairTvl = (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
     return getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).map((entity) => {
-      const dedupKey = `${entity.name}:${pair.borrow.address}`
+      const dedupKey = `${entity.name}:${pair.borrow.chainId}:${pair.borrow.address}`
       const tvl = counted.has(dedupKey) ? 0 : pairTvl
       counted.add(dedupKey)
       return { key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }
@@ -443,16 +463,27 @@ const riskManagerOptions = computed(() => {
   }))
 })
 
+const chainOptions = computed(() =>
+  selectedChainIds.value.map(id => ({
+    label: getChainById(id)?.name ?? String(id),
+    value: String(id),
+    icon: getChainLogoUrl(id),
+  })),
+)
+
 const filteredBorrowList = computed(() => {
   return activeBorrowList.value
     .filter(matchesSearch)
     .filter(pair =>
+      selectedChains.value.length ? selectedChains.value.includes(String(pair.borrow.chainId)) : true,
+    )
+    .filter(pair =>
       selectedCollateral.value.length || selectedDebt.value.length
-        ? (matchesAssetFilterSelection(pair.collateral.asset.address, selectedCollateral.value)
-          && matchesAssetFilterSelection(pair.borrow.asset.address, selectedDebt.value))
+        ? (matchesAssetFilterSelection({ ...pair.collateral.asset, chainId: pair.collateral.chainId }, selectedCollateral.value)
+          && matchesAssetFilterSelection({ ...pair.borrow.asset, chainId: pair.borrow.chainId }, selectedDebt.value))
         : true,
     )
-    .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(pair.collateral.address).name) : true)
+    .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(`${pair.collateral.chainId}:${getProductByVault(pair.collateral.address, pair.collateral.chainId).name}`) : true)
     .filter(pair => selectedRiskManagers.value.length
       ? getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).some(e => selectedRiskManagers.value.includes(e.name))
       : true)
@@ -460,7 +491,7 @@ const filteredBorrowList = computed(() => {
 })
 
 const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
-  isVaultRecentlyAdded(pair.collateral.address) || isVaultRecentlyAdded(pair.borrow.address)
+  isVaultRecentlyAdded(pair.collateral.address, pair.collateral.chainId) || isVaultRecentlyAdded(pair.borrow.address, pair.borrow.chainId)
 
 const applyRecentlyAddedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
@@ -478,8 +509,8 @@ const compareRecentlyAddedPairBoost = (a: AnyBorrowVaultPair, b: AnyBorrowVaultP
 
 const applyDeprecatedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
-    const ad = (isVaultDeprecated(a.borrow.address) || isVaultDeprecated(a.collateral.address)) ? 1 : 0
-    const bd = (isVaultDeprecated(b.borrow.address) || isVaultDeprecated(b.collateral.address)) ? 1 : 0
+    const ad = (isVaultDeprecated(a.borrow.address, a.borrow.chainId) || isVaultDeprecated(a.collateral.address, a.collateral.chainId)) ? 1 : 0
+    const bd = (isVaultDeprecated(b.borrow.address, b.borrow.chainId) || isVaultDeprecated(b.collateral.address, b.collateral.chainId)) ? 1 : 0
     return ad - bd
   })
 }
@@ -635,6 +666,16 @@ const clearBorrowFilters = () => {
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
+        />
+        <UiSelect
+          :key="`chains-${selectedChainIds.join('-')}`"
+          v-model="selectedChains"
+          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          :options="chainOptions"
+          placeholder="Chain"
+          title="Chain"
+          modal-input-placeholder="Search chain"
+          icon="globe"
         />
         <UiSelect
           v-if="enableEntityBranding"

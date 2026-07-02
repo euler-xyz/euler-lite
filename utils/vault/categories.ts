@@ -8,6 +8,7 @@
 import { StandardEVaultPerspectives, VaultType } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, isAddress, type Address } from 'viem'
 import { logger } from '~/utils/logger'
+import { getEulerLabelsDataForChain } from '~/composables/useEulerLabels'
 
 export type VaultCategory = 'evk' | 'earn' | 'securitize' | 'escrow'
 
@@ -123,8 +124,8 @@ const populatePerAddressFromCategories = (chainId: number, categories: VaultCate
  * Fetch (or reuse cached) the full chain categorization. Deduplicates
  * concurrent callers for the same chain onto one SDK request set.
  */
-export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
-  const chainId = getChainId()
+export const fetchChainVaultCategories = async (targetChainId?: number): Promise<VaultCategories> => {
+  const chainId = targetChainId ?? getChainId()
   if (!chainId) return emptyCategories()
 
   const cached = chainCategoriesCache.get(chainId)
@@ -134,14 +135,16 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
   if (existing) return (await existing) ?? emptyCategories()
 
   const promise = (async () => {
-    const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
+    const data = getEulerLabelsDataForChain(chainId)
+    const verifiedVaultAddresses = data.verifiedVaultAddresses
+    const earnVaults = data.earnVaults
     const categories = emptyCategories()
     const escrowAddresses = await fetchEscrowAddressSet(chainId)
-    const labelledEarn = new Set(uniqueAddresses(earnVaults.value).map(address => address.toLowerCase()))
-    const labelledVerified = uniqueAddresses(verifiedVaultAddresses.value)
+    const labelledEarn = new Set(uniqueAddresses(earnVaults).map(address => address.toLowerCase()))
+    const labelledVerified = uniqueAddresses(verifiedVaultAddresses)
     const addresses = uniqueAddresses([
       ...labelledVerified,
-      ...earnVaults.value,
+      ...earnVaults,
       ...[...escrowAddresses],
     ])
 
@@ -166,7 +169,7 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
       if (category) addCategory(categories, category, address)
     }
 
-    for (const address of earnVaults.value) {
+    for (const address of earnVaults) {
       if (isAddress(address)) addCategory(categories, 'earn', address)
     }
 
@@ -198,8 +201,8 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
  * Resolve the category of a single vault address from SDK metadata. Escrow
  * membership is checked first because escrow is a more specific EVault label.
  */
-export const fetchVaultCategory = async (address: string): Promise<VaultCategory | null> => {
-  const chainId = getChainId()
+export const fetchVaultCategory = async (address: string, targetChainId?: number): Promise<VaultCategory | null> => {
+  const chainId = targetChainId ?? getChainId()
   if (!chainId || !isAddress(address)) return null
 
   const normalized = normalize(address)
@@ -238,18 +241,18 @@ export const fetchVaultCategory = async (address: string): Promise<VaultCategory
  * Check if an address is a securitize vault. Registry type wins; otherwise
  * falls back to SDK-backed categorization.
  */
-export const isSecuritizeVault = async (address: string): Promise<boolean> => {
+export const isSecuritizeVault = async (address: string, targetChainId?: number): Promise<boolean> => {
   try {
     const { useVaultRegistry } = await import('~/composables/useVaultRegistry')
     const { getType } = useVaultRegistry()
-    const registryType = getType(address)
+    const registryType = getType(address, targetChainId)
     if (registryType) return registryType === 'securitize'
   }
   catch {
     // registry unavailable (e.g. called outside setup) — fall through
   }
 
-  const category = await fetchVaultCategory(address)
+  const category = await fetchVaultCategory(address, targetChainId)
   return category === 'securitize'
 }
 
