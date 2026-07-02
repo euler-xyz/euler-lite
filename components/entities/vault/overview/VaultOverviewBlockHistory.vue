@@ -51,6 +51,14 @@ type MetricOption = {
   value: VaultHistoryMetric
   label: string
 }
+type FetchErrorLike = {
+  status?: number
+  statusCode?: number
+  response?: {
+    status?: number
+    headers?: Pick<Headers, 'get'>
+  }
+}
 
 const { vault, defaultOpen = false } = defineProps<{
   vault: HistoryVault
@@ -67,6 +75,10 @@ const history = shallowRef<VaultHistoryPoint[]>([])
 const isLoading = ref(false)
 const hasError = ref(false)
 let activeRequestId = 0
+
+const RETRYABLE_HISTORY_STATUSES = new Set([429, 500, 502, 503, 504])
+const DEFAULT_HISTORY_RETRY_AFTER_MS = 1_000
+const MAX_HISTORY_RETRY_AFTER_MS = 10_000
 
 const isBorrowableEVault = computed(() =>
   isEVault(vault) && isVaultBorrowable(vault),
@@ -115,6 +127,50 @@ watch(
   { immediate: true },
 )
 
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const readRetryAfterMs = (error: unknown): number | null => {
+  const fetchError = error as FetchErrorLike
+  const status = fetchError.response?.status ?? fetchError.statusCode ?? fetchError.status
+  if (typeof status !== 'number' || !RETRYABLE_HISTORY_STATUSES.has(status)) return null
+
+  const retryAfter = fetchError.response?.headers?.get('retry-after')
+  if (!retryAfter) return DEFAULT_HISTORY_RETRY_AFTER_MS
+
+  const seconds = Number(retryAfter)
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(seconds * 1_000, MAX_HISTORY_RETRY_AFTER_MS)
+  }
+
+  const retryAt = Date.parse(retryAfter)
+  if (Number.isFinite(retryAt)) {
+    return Math.min(Math.max(retryAt - Date.now(), 0), MAX_HISTORY_RETRY_AFTER_MS)
+  }
+
+  return DEFAULT_HISTORY_RETRY_AFTER_MS
+}
+
+const fetchVaultTotalsHistoryWithCooldownRetry = async (
+  path: string,
+  isCurrent: () => boolean,
+): Promise<VaultTotalsHistoryResponse> => {
+  let attempt = 0
+
+  while (true) {
+    try {
+      return await $fetch<VaultTotalsHistoryResponse>(path, { retry: 0 })
+    }
+    catch (error) {
+      const retryAfterMs = readRetryAfterMs(error)
+      if (attempt > 0 || retryAfterMs === null || !isCurrent()) throw error
+
+      attempt += 1
+      await wait(retryAfterMs)
+      if (!isCurrent()) throw error
+    }
+  }
+}
+
 const loadHistory = async () => {
   const requestId = ++activeRequestId
   history.value = []
@@ -129,8 +185,9 @@ const loadHistory = async () => {
   hasError.value = false
 
   try {
-    const response = await $fetch<VaultTotalsHistoryResponse>(
+    const response = await fetchVaultTotalsHistoryWithCooldownRetry(
       buildVaultTotalsHistoryPath(chainId.value, vault.address, selectedTimeframe.value),
+      () => requestId === activeRequestId,
     )
     if (requestId !== activeRequestId) return
 
