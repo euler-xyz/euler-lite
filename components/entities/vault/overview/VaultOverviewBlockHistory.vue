@@ -18,7 +18,9 @@ import { compactNumber } from '~/utils/string-utils'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import {
   buildVaultTotalsHistoryPath,
+  getVaultHistoryTimeRange,
   parseVaultTotalsHistory,
+  VAULT_HISTORY_FETCH_TIMEFRAME,
   VAULT_HISTORY_TIMEFRAMES,
   type VaultHistoryMetric,
   type VaultHistoryPoint,
@@ -60,7 +62,8 @@ const { getChartColors, isDark } = useThemeColors()
 
 const selectedMetric = ref<VaultHistoryMetric>('totalSupply')
 const selectedTimeframe = ref<VaultHistoryTimeframe>('30d')
-const history = shallowRef<VaultHistoryPoint[]>([])
+const fetchedHistory = shallowRef<VaultHistoryPoint[]>([])
+const fetchedHistoryEnd = ref<number | null>(null)
 const isLoading = ref(false)
 const hasError = ref(false)
 let activeRequestId = 0
@@ -77,6 +80,21 @@ const canLoadHistory = computed(() =>
   enableV3Backend && Boolean(chainId.value),
 )
 const decimals = computed(() => Number(vault.asset.decimals ?? 18))
+const selectedTimeframeOption = computed(() =>
+  VAULT_HISTORY_TIMEFRAMES.find(timeframe => timeframe.value === selectedTimeframe.value) ?? VAULT_HISTORY_TIMEFRAMES[1],
+)
+const history = computed(() => {
+  const to = fetchedHistoryEnd.value
+  if (to === null) return fetchedHistory.value
+
+  const from = to - selectedTimeframeOption.value.days * 24 * 60 * 60
+  return fetchedHistory.value.filter((point) => {
+    const timestamp = Math.floor(Date.parse(point.timestamp) / 1_000)
+    return Number.isFinite(timestamp)
+      && timestamp >= from
+      && timestamp <= to
+  })
+})
 const hasBorrowHistory = computed(() =>
   history.value.some(point =>
     (point.totalBorrows ?? 0) > 0
@@ -167,7 +185,8 @@ const loadHistory = async () => {
   const requestId = ++activeRequestId
 
   if (!canLoadHistory.value || !chainId.value) {
-    history.value = []
+    fetchedHistory.value = []
+    fetchedHistoryEnd.value = null
     activeHistoryContext = null
     isLoading.value = false
     hasError.value = false
@@ -181,30 +200,35 @@ const loadHistory = async () => {
   const canPreserveHistory = activeHistoryContext !== null
     && activeHistoryContext.address === requestContext.address
     && activeHistoryContext.chainId === requestContext.chainId
-    && history.value.length > 0
+    && fetchedHistory.value.length > 0
 
   if (!canPreserveHistory) {
-    history.value = []
+    fetchedHistory.value = []
+    fetchedHistoryEnd.value = null
   }
 
   isLoading.value = true
   hasError.value = false
 
   try {
+    const requestTime = Date.now()
+    const { to } = getVaultHistoryTimeRange(VAULT_HISTORY_FETCH_TIMEFRAME, requestTime)
     const response = await fetchVaultTotalsHistoryWithCooldownRetry(
-      buildVaultTotalsHistoryPath(chainId.value, vault.address, selectedTimeframe.value),
+      buildVaultTotalsHistoryPath(chainId.value, vault.address, VAULT_HISTORY_FETCH_TIMEFRAME, requestTime),
       () => requestId === activeRequestId,
     )
     if (requestId !== activeRequestId) return
 
-    history.value = parseVaultTotalsHistory(response, decimals.value)
+    fetchedHistory.value = parseVaultTotalsHistory(response, decimals.value)
+    fetchedHistoryEnd.value = to
     activeHistoryContext = requestContext
   }
   catch (error) {
     if (requestId !== activeRequestId) return
 
     if (!canPreserveHistory) {
-      history.value = []
+      fetchedHistory.value = []
+      fetchedHistoryEnd.value = null
       activeHistoryContext = null
     }
     hasError.value = true
@@ -218,7 +242,7 @@ const loadHistory = async () => {
 }
 
 watch(
-  [chainId, selectedTimeframe, canLoadHistory, () => vault.address],
+  [chainId, canLoadHistory, () => vault.address],
   () => {
     void loadHistory()
   },

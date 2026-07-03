@@ -7,6 +7,7 @@ export const VAULT_HISTORY_TIMEFRAMES = [
 ] as const
 
 export type VaultHistoryTimeframe = typeof VAULT_HISTORY_TIMEFRAMES[number]['value']
+export const VAULT_HISTORY_FETCH_TIMEFRAME: VaultHistoryTimeframe = '90d'
 export type VaultHistoryMetric = 'apy' | 'totalSupply' | 'totalBorrows' | 'utilization' | 'cash'
 export type VaultHistoryPoint = {
   timestamp: string
@@ -77,16 +78,25 @@ export const parseVaultTotalsHistory = (
     .filter((point): point is VaultHistoryPoint => point !== null)
 }
 
+export const getVaultHistoryTimeRange = (
+  timeframe: VaultHistoryTimeframe,
+  nowMs = Date.now(),
+): { from: number, to: number } => {
+  const option = VAULT_HISTORY_TIMEFRAMES.find(item => item.value === timeframe) ?? VAULT_HISTORY_TIMEFRAMES[1]
+  const nowSeconds = Math.floor(nowMs / SECOND)
+  const to = Math.floor(nowSeconds / DAY_SECONDS) * DAY_SECONDS
+  const from = to - option.days * DAY_SECONDS
+
+  return { from, to }
+}
+
 export const buildVaultTotalsHistoryPath = (
   chainId: string | number,
   address: string,
   timeframe: VaultHistoryTimeframe,
   nowMs = Date.now(),
 ): string => {
-  const option = VAULT_HISTORY_TIMEFRAMES.find(item => item.value === timeframe) ?? VAULT_HISTORY_TIMEFRAMES[1]
-  const nowSeconds = Math.floor(nowMs / SECOND)
-  const to = Math.floor(nowSeconds / DAY_SECONDS) * DAY_SECONDS
-  const from = to - option.days * DAY_SECONDS
+  const { from, to } = getVaultHistoryTimeRange(timeframe, nowMs)
   const params = new URLSearchParams({
     resolution: '1d',
     from: String(from),

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildVaultTotalsHistoryPath,
+  getVaultHistoryTimeRange,
   hasFiniteCap,
   parseVaultTotalsHistory,
 } from '~/utils/vault-history'
@@ -75,6 +76,13 @@ describe('vault history utilities', () => {
       '7d',
       1_782_984_800_000,
     )).toBe('/api/v3/evk/vaults/1/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/totals?resolution=1d&from=1782345600&to=1782950400')
+  })
+
+  it('returns the same bounded range used by the totals-history URL', () => {
+    expect(getVaultHistoryTimeRange('90d', 1_782_984_800_000)).toEqual({
+      from: 1775174400,
+      to: 1782950400,
+    })
   })
 
   it('identifies finite cap values', () => {
