@@ -171,13 +171,20 @@ describe('cors internal API boundary', () => {
     expect(event.headers['X-API-Stability']).toBe('internal; may-break-without-notice')
   })
 
-  it('allows loopback server-side internal requests without Origin', async () => {
+  it('rejects loopback requests without a first-party cookie or internal sentinel', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     const handler = await loadHandler()
-    const event = makeEvent('/api/internal/euler-chains', {}, 'GET', {}, '127.0.0.1')
 
-    expect(handler(event)).toBeUndefined()
-    expect(event.headers['X-API-Stability']).toBe('internal; may-break-without-notice')
+    try {
+      handler(makeEvent('/api/internal/euler-chains', {}, 'GET', {}, '127.0.0.1'))
+      throw new Error('Expected internal API call to be rejected')
+    }
+    catch (err) {
+      expect(err).toMatchObject({
+        statusCode: 403,
+        statusMessage: 'Forbidden',
+      })
+    }
   })
 
   it('allows same-process internal requests with the internal sentinel', async () => {

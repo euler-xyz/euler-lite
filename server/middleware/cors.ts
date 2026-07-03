@@ -42,7 +42,6 @@ function parseAllowedOrigins(): Set<string> {
 let allowedOrigins: Set<string> | null = null
 const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
 const FIRST_PARTY_COOKIE_VALUE = randomBytes(32).toString('base64url')
-const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 
 function getSingleHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value
@@ -63,10 +62,6 @@ function isFirstPartyRequest(event: H3Event): boolean {
 function isSecureRequest(event: H3Event, url: URL): boolean {
   const forwardedProto = getSingleHeader(event.node.req.headers['x-forwarded-proto'])?.toLowerCase()
   return url.protocol === 'https:' || forwardedProto === 'https'
-}
-
-function isLoopbackRequest(event: H3Event): boolean {
-  return LOOPBACK_ADDRESSES.has(event.node.req.socket.remoteAddress ?? '')
 }
 
 function shouldSetFirstPartyCookie(url: URL): boolean {
@@ -153,7 +148,7 @@ export default defineEventHandler((event) => {
     }
     throw createError({ statusCode: 403, statusMessage: 'Origin not allowed' })
   }
-  else if (!origin && !isFirstPartyRequest(event) && !isInternalRequest(event) && !isLoopbackRequest(event) && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
+  else if (!origin && !isFirstPartyRequest(event) && !isInternalRequest(event) && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
     logger.warn({ ctx: 'cors', path: url.pathname }, 'rejected internal endpoint call without Origin')
     throw createError({
       statusCode: 403,
