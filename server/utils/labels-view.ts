@@ -1,70 +1,56 @@
 /**
- * Per-chain "labels view" — the substrate both /api/public/is-known and
- * /api/public/metadata derive from. Folds the snapshot + label files + escrow
- * perspective + token list into one shape with all the derived maps pre-built:
- *
- *   - snapshot                    (vault data)
- *   - productByVault              (address → product descriptor; includes deprecated vaults)
- *   - deprecatedSet               (addresses listed under deprecatedVaults[])
- *   - earnByAddr / deprecatedEarnSet
- *   - escrowAddresses             (Set form of escrow perspective)
- *   - entitiesRaw                 (kept for downstream EntityInfo composition)
- *   - tokenLogos
- *   - verificationLabels          (the shape the shared rule consumes)
- *
- * In-flight dedup collapses concurrent rebuilds onto a single upstream pass.
- * No TTL cache here — the underlying snapshot / labels / token-list / escrow
- * already cache, and each consumer (verified-vaults, vault-metadata) keeps
- * its own final-shape cache, so an extra layer between them adds no value.
+ * Per-chain "labels view" shared by /api/public/is-known and
+ * /api/public/metadata. It keeps Lite's public API/cache policy in the app,
+ * but sources normalized labels and vault entities through the SDK.
  */
+import {
+  StandardEVaultPerspectives,
+  VaultType,
+  type EulerEarn,
+  type EulerLabelEarnVaultEntry,
+  type EulerLabelEntity,
+  type EulerLabelProduct,
+  type EulerLabelsData,
+  type EulerSDK,
+  type EVault,
+  type SecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { createInFlightDedup } from './in-flight'
-import { fetchEscrowPerspectiveAddresses } from './escrow-perspective'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
-import {
-  buildEntityAddressSets,
-  declaredKeysOf,
-  fetchLabels,
-  tryChecksum,
-  type EntityEntry,
-} from './labels-helpers'
+import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
-import { refreshChainVaults, vaultsCache } from './vaults-cache'
-import { deserialiseSnapshot } from '~/entities/vault'
-import type { ChainVaultsSnapshot, VerificationLabels } from '~/entities/vault'
+import { summarizeSdkIssue } from './observability'
+import { getServerSdk } from './sdk-server'
+import { isSdkErrorDiagnostic } from './sdk-diagnostics'
+import type { VerificationLabels } from '~/utils/vault/governor-verification'
 
-export interface ProductEntryFull {
-  name?: unknown
-  description?: unknown
-  portfolioNotice?: unknown
-  deprecationReason?: unknown
-  entity?: unknown
-  vaults?: unknown
-  deprecatedVaults?: unknown
-  vaultOverrides?: unknown
-  isGovernanceLimited?: unknown
+export interface ChainVaultsSnapshot {
+  evkVaults: EVault[]
+  securitizeVaults: SecuritizeCollateralVault[]
+  earnVaults: EulerEarn[]
+  escrowVaults: EVault[]
 }
+
+export type ProductEntryFull = EulerLabelProduct
 
 export interface VaultOverride {
   name?: unknown
   description?: unknown
   portfolioNotice?: unknown
   deprecationReason?: unknown
+  tags?: unknown
 }
 
-export interface EntityEntryFull extends EntityEntry {
-  name?: unknown
-  logo?: unknown
-  description?: unknown
-  url?: unknown
+export interface EntityEntryFull extends EulerLabelEntity {
+  name: string
+  logo: string
+  description: string
+  url: string
 }
 
-export interface EarnVaultEntry {
-  address?: unknown
-  description?: unknown
-  portfolioNotice?: unknown
-  deprecationReason?: unknown
-  deprecated?: unknown
+export interface EarnVaultEntry extends EulerLabelEarnVaultEntry {
+  address: string
 }
 
 interface TokenListResponse {
@@ -82,7 +68,8 @@ export interface ProductDescriptor {
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
-  isGovernanceLimited: boolean
+  governanceLimited: boolean
+  forceUnverified: boolean
   entityKeys: string[]
   vaultOverrides: Record<string, VaultOverride>
 }
@@ -121,7 +108,31 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
+function uniqueAddresses(addresses: Iterable<string>): Address[] {
+  const result = new Map<string, Address>()
+  for (const address of addresses) {
+    const checksummed = tryChecksum(address)
+    if (checksummed) result.set(checksummed.toLowerCase(), checksummed)
+  }
+  return [...result.values()]
+}
+
+function hasTag(tags: unknown, tag: string): boolean {
+  return Array.isArray(tags) && tags.includes(tag)
+}
+
+function overrideHasTag(
+  overrides: Record<string, VaultOverride>,
+  address: Address,
+  tag: string,
+): boolean {
+  return hasTag(overrides[address]?.tags, tag)
+}
+
+// SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
+const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
+
+export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   const data = await $fetch<TokenListResponse>('/api/token-list', {
     query: { chainId },
     headers: INTERNAL_FETCH_HEADERS,
@@ -129,14 +140,7 @@ async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
 
-async function loadSnapshot(chainId: number): Promise<ChainVaultsSnapshot> {
-  const key = String(chainId)
-  const cached = vaultsCache.get(key) ?? vaultsCache.getStale(key)
-  const serialised = cached ?? await refreshChainVaults(chainId)
-  return deserialiseSnapshot(serialised)
-}
-
-function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
+export function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
 } {
@@ -158,45 +162,44 @@ function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
       deprecationReason: strOrNull(product.deprecationReason),
-      isGovernanceLimited: product.isGovernanceLimited === true,
+      governanceLimited: hasTag(product.tags, 'governance limited'),
+      forceUnverified: strOrNull(product.deprecationReason)?.toLowerCase().includes('unrecognized entity') === true,
       entityKeys: declaredKeysOf(product.entity),
       vaultOverrides: overrides,
     }
-    // Include both vaults and deprecatedVaults so the shared verification rule
-    // sees the same product context the client's getProductByVault does.
-    if (Array.isArray(product.vaults)) {
-      for (const v of product.vaults) {
-        const addr = tryChecksum(v)
-        if (addr) productByVault.set(addr, desc)
-      }
+    const descriptorForVault = (addr: Address): ProductDescriptor => ({
+      ...desc,
+      governanceLimited: desc.governanceLimited || overrideHasTag(overrides, addr, 'governance limited'),
+    })
+    for (const v of product.vaults ?? []) {
+      const addr = tryChecksum(v)
+      if (addr) productByVault.set(addr, descriptorForVault(addr))
     }
-    if (Array.isArray(product.deprecatedVaults)) {
-      for (const v of product.deprecatedVaults) {
-        const addr = tryChecksum(v)
-        if (addr) {
-          productByVault.set(addr, desc)
-          deprecatedSet.add(addr)
-        }
+    for (const v of product.deprecatedVaults ?? []) {
+      const addr = tryChecksum(v)
+      if (addr) {
+        productByVault.set(addr, descriptorForVault(addr))
+        deprecatedSet.add(addr)
       }
     }
   }
   return { productByVault, deprecatedSet }
 }
 
-function buildEarnEntryMap(entries: unknown[]): {
+function buildEarnEntryMap(labels: EulerLabelsData): {
   earnByAddr: Map<Address, EarnVaultEntry>
   deprecatedEarnSet: Set<Address>
 } {
   const earnByAddr = new Map<Address, EarnVaultEntry>()
   const deprecatedEarnSet = new Set<Address>()
-  for (const entry of entries) {
-    if (entry && typeof entry === 'object') {
-      const obj = entry as EarnVaultEntry
-      const addr = tryChecksum(obj.address)
-      if (!addr) continue
-      earnByAddr.set(addr, obj)
-      if (obj.deprecated === true) deprecatedEarnSet.add(addr)
-    }
+  for (const entry of Object.values(labels.earnVaultEntries)) {
+    const addr = tryChecksum(entry.address)
+    if (!addr) continue
+    earnByAddr.set(addr, entry as EarnVaultEntry)
+  }
+  for (const address of Object.keys(labels.deprecatedEarnVaults)) {
+    const addr = tryChecksum(address)
+    if (addr) deprecatedEarnSet.add(addr)
   }
   return { earnByAddr, deprecatedEarnSet }
 }
@@ -213,47 +216,133 @@ export function buildTokenLogoMap(tokens: TokenListEntry[]): Map<string, string>
   return map
 }
 
+function withVaultMetadata<T extends object>(
+  vault: T,
+  metadata: { verified: true, vaultCategory?: 'standard' | 'escrow' },
+): T {
+  return Object.assign(vault, metadata)
+}
+
+async function buildSnapshot(
+  chainId: number,
+  sdk: EulerSDK,
+  labels: EulerLabelsData,
+): Promise<{ snapshot: ChainVaultsSnapshot, escrowAddresses: Set<Address> }> {
+  const escrowAddresses = new Set<Address>(
+    uniqueAddresses(await sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW])),
+  )
+  const candidates = uniqueAddresses([
+    ...labels.verifiedVaultAddresses,
+    ...labels.earnVaults,
+  ])
+
+  const types = candidates.length > 0
+    ? await sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)
+    : {}
+
+  const earnSet = new Set(uniqueAddresses(labels.earnVaults).map(addr => addr.toLowerCase()))
+  const evkAddresses: Address[] = []
+  const securitizeAddresses: Address[] = []
+  const earnAddresses: Address[] = []
+
+  for (const address of candidates) {
+    const lower = address.toLowerCase()
+    const type = types[address] ?? types[address.toLowerCase() as Address]
+    if (type === VaultType.SecuritizeCollateral) {
+      securitizeAddresses.push(address)
+    }
+    else if (type === VaultType.EulerEarn || earnSet.has(lower)) {
+      earnAddresses.push(address)
+    }
+    else {
+      evkAddresses.push(address)
+    }
+  }
+
+  const vaultOptions = {
+    populateMarketPrices: true,
+    populateCollaterals: true,
+    populateStrategyVaults: true,
+    populateRewards: true,
+    eVaultFetchOptions: {
+      populateMarketPrices: true,
+      populateCollaterals: true,
+      populateRewards: true,
+    },
+  }
+
+  const [evk, securitize, earn] = await Promise.all([
+    evkAddresses.length ? sdk.eVaultService.fetchVaults(chainId, evkAddresses, vaultOptions) : { result: [], errors: [] },
+    securitizeAddresses.length ? sdk.securitizeVaultService.fetchVaults(chainId, securitizeAddresses, { populateMarketPrices: true, populateRewards: true }) : { result: [], errors: [] },
+    earnAddresses.length ? sdk.eulerEarnService.fetchVaults(chainId, earnAddresses, vaultOptions) : { result: [], errors: [] },
+  ])
+
+  for (const issue of [...evk.errors, ...securitize.errors, ...earn.errors]) {
+    if (isSdkErrorDiagnostic(issue)) {
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk vault fetch issue')
+    }
+  }
+
+  const evkVaults = (evk.result.filter(Boolean) as EVault[]).map(vault =>
+    withVaultMetadata(vault, {
+      verified: true,
+      vaultCategory: escrowAddresses.has(vault.address) ? 'escrow' : 'standard',
+    }),
+  )
+  const securitizeVaults = (securitize.result.filter(Boolean) as SecuritizeCollateralVault[])
+    .map(vault => withVaultMetadata(vault, { verified: true }))
+  const earnVaults = (earn.result.filter(Boolean) as EulerEarn[])
+    .map(vault => withVaultMetadata(vault, { verified: true }))
+  const referencedEscrowAddresses = uniqueAddresses(evkVaults.flatMap(vault =>
+    (vault.collaterals ?? []).map(collateral => collateral.address).filter(address => escrowAddresses.has(address)),
+  ).concat(earnVaults.flatMap(vault =>
+    (vault.strategies ?? []).map(strategy => strategy.address).filter(address => escrowAddresses.has(address)),
+  )))
+  const fetchedEscrow = referencedEscrowAddresses.length
+    ? await sdk.eVaultService.fetchVaults(chainId, referencedEscrowAddresses, vaultOptions)
+    : { result: [], errors: [] }
+  for (const issue of fetchedEscrow.errors) {
+    if (isSdkErrorDiagnostic(issue)) {
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk escrow fetch issue')
+    }
+  }
+
+  const escrowVaults = [
+    ...evkVaults.filter(vault => escrowAddresses.has(vault.address)),
+    ...(fetchedEscrow.result.filter(Boolean) as EVault[]),
+  ].map(vault =>
+    withVaultMetadata(vault, {
+      verified: true,
+      vaultCategory: 'escrow',
+    }),
+  )
+
+  return {
+    escrowAddresses,
+    snapshot: {
+      evkVaults,
+      securitizeVaults,
+      earnVaults,
+      escrowVaults,
+    },
+  }
+}
+
 async function assembleLabelsView(chainId: number): Promise<LabelsView> {
-  const [products, entities, earn, escrow, snapshot, tokens] = await Promise.allSettled([
-    fetchLabels<Record<string, ProductEntryFull>>(chainId, 'products.json'),
-    fetchLabels<Record<string, EntityEntryFull>>(chainId, 'entities.json'),
-    fetchLabels<unknown[]>(chainId, 'earn-vaults.json'),
-    fetchEscrowPerspectiveAddresses(chainId),
-    loadSnapshot(chainId),
+  const sdk = await getSdk(chainId)
+  const [labels, tokens] = await Promise.allSettled([
+    sdk.eulerLabelsService.fetchEulerLabelsData(chainId),
     fetchTokenList(chainId),
   ])
 
-  if (products.status === 'rejected') {
-    const reason = products.reason instanceof Error ? products.reason.message : String(products.reason)
-    throw new Error(`products.json fetch failed: ${reason}`)
-  }
-  if (entities.status === 'rejected') {
-    const reason = entities.reason instanceof Error ? entities.reason.message : String(entities.reason)
-    throw new Error(`entities.json fetch failed: ${reason}`)
-  }
-  if (snapshot.status === 'rejected') {
-    const reason = snapshot.reason instanceof Error ? snapshot.reason.message : String(snapshot.reason)
-    throw new Error(`vault snapshot fetch failed: ${reason}`)
+  if (labels.status === 'rejected') {
+    const reason = labels.reason instanceof Error ? labels.reason.message : String(labels.reason)
+    throw new Error(`labels fetch failed: ${reason}`)
   }
 
-  const { productByVault, deprecatedSet } = buildProductDescriptors(products.value ?? {})
-  const { earnByAddr, deprecatedEarnSet } = earn.status === 'fulfilled' && Array.isArray(earn.value)
-    ? buildEarnEntryMap(earn.value)
-    : { earnByAddr: new Map<Address, EarnVaultEntry>(), deprecatedEarnSet: new Set<Address>() }
-  if (earn.status === 'rejected') {
-    logger.warn({ ctx: 'labels-view', chainId, err: earn.reason }, 'earn-vaults fetch failed')
-  }
-
-  const escrowAddresses = new Set<Address>()
-  if (escrow.status === 'fulfilled') {
-    for (const a of escrow.value) {
-      const addr = tryChecksum(a)
-      if (addr) escrowAddresses.add(addr)
-    }
-  }
-  else {
-    logger.warn({ ctx: 'labels-view', chainId, err: escrow.reason }, 'escrow fetch failed')
-  }
+  const { snapshot, escrowAddresses } = await buildSnapshot(chainId, sdk, labels.value)
+  const { productByVault, deprecatedSet } = buildProductDescriptors(labels.value.products as Record<string, ProductEntryFull>)
+  const { earnByAddr, deprecatedEarnSet } = buildEarnEntryMap(labels.value)
 
   const tokenLogos = tokens.status === 'fulfilled'
     ? buildTokenLogoMap(tokens.value)
@@ -262,7 +351,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
     logger.warn({ ctx: 'labels-view', chainId, err: tokens.reason }, 'token-list fetch failed')
   }
 
-  const entitiesRaw = entities.value ?? {}
+  const entitiesRaw = labels.value.entities as Record<string, EntityEntryFull>
   const entityAddresses = buildEntityAddressSets(entitiesRaw)
 
   const verificationLabels: VerificationLabels = {
@@ -276,7 +365,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   return {
     chainId,
-    snapshot: snapshot.value,
+    snapshot,
     productByVault,
     deprecatedSet,
     earnByAddr,

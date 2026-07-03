@@ -1,11 +1,11 @@
-import type { SwapApiQuote } from '~/entities/swap'
+import { SwapperMode, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 
 export type SwapQuoteAmountField = 'amountIn' | 'amountOut'
 export type SwapQuoteCompare = 'max' | 'min'
 
 export type SwapQuoteCard = {
   provider: string
-  quote: SwapApiQuote
+  quote: SwapQuote
   fetchedAt?: number
   amountUsd?: number
   gasCostNative?: bigint
@@ -13,6 +13,13 @@ export type SwapQuoteCard = {
   /** Route is genuinely gas-free (e.g. CoW intents). Distinguishes
    *  "gas is known to be 0" from "gas estimate unavailable". */
   isGasless?: boolean
+  /** Raw plan built during gas estimation. Consumers (e.g. multiply Review)
+   *  can reuse this on submit instead of calling the planner a second time. */
+  plan?: TransactionPlan
+  /** Prepared envelope built lazily after a quote is selected. When present,
+   *  Review-click can skip `prepareTransactionPlan` (plugin pipeline) and go
+   *  straight to simulate/execute against this envelope. */
+  preparedPlan?: TransactionPlanPrepared
 }
 
 /** Whether the gas cost on a card is trustworthy (known-zero for gasless
@@ -31,7 +38,7 @@ const parseBigInt = (value?: string | number | bigint | null) => {
 }
 
 export const getQuoteAmount = (
-  quote: SwapApiQuote | null | undefined,
+  quote: SwapQuote | null | undefined,
   field: SwapQuoteAmountField,
 ) => {
   if (!quote) {
@@ -44,6 +51,13 @@ export const getQuoteCardAmount = (
   card: SwapQuoteCard,
   field: SwapQuoteAmountField,
 ) => getQuoteAmount(card.quote, field)
+
+export const getSwapInputAmount = (quote: SwapQuote, swapperMode: SwapperMode) => {
+  const amountIn = parseBigInt(quote.amountIn)
+  const amountInMax = parseBigInt(quote.amountInMax)
+  if (swapperMode === SwapperMode.EXACT_IN) return amountIn
+  return amountInMax > 0n ? amountInMax : amountIn
+}
 
 /**
  * Compare-aware score for ranking AND display.
@@ -85,11 +99,11 @@ export const sortQuoteCards = (
 }
 
 export const pickBestQuote = (
-  quotes: SwapApiQuote[],
+  quotes: SwapQuote[],
   field: SwapQuoteAmountField,
   compare: SwapQuoteCompare,
 ) => {
-  return quotes.reduce<SwapApiQuote | null>((current, quote) => {
+  return quotes.reduce<SwapQuote | null>((current, quote) => {
     if (!current) {
       return quote
     }

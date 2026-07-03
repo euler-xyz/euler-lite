@@ -1,6 +1,7 @@
 import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
+import { resolveLabelsBaseUrl } from './labels-base-url'
 import {
   buildLabelsView,
   type EntityEntryFull,
@@ -11,8 +12,15 @@ import { refreshVerifiedAddressSet } from './verified-vaults'
 import {
   resolveEarnGoverningEntityKeys,
   resolveGoverningEntityKeys,
-} from '~/entities/vault'
-import type { EarnVault, SecuritizeVault, Vault, VaultAsset } from '~/entities/vault'
+} from '~/utils/vault/governor-verification'
+import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+
+interface VaultAsset {
+  address: string
+  symbol: string
+  name: string
+  decimals: number
+}
 
 const CACHE_TTL_MS = 300_000
 const ESCROW_VAULT_NAME = 'Escrowed collateral'
@@ -42,7 +50,7 @@ export interface VaultMetadata {
   deprecationReason: string | null
   /** True if the vault is listed under any product's `deprecatedVaults` (or earn-vaults `deprecated: true`). */
   deprecated: boolean
-  /** True when the owning product has `isGovernanceLimited: true` (governor exists but no active risk management). False for vaults without a product. */
+  /** True when the owning product has the `governance limited` tag. False for vaults without a product. */
   governanceLimited: boolean
   /** The owning product slug from products.json (e.g. "euler-prime"), or null for vaults outside any product (escrow, earn-only entries, governor mismatch with no product). */
   productId: string | null
@@ -67,14 +75,6 @@ function strOrNull(value: unknown): string | null {
 
 function strOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : ''
-}
-
-function resolveLabelsBaseUrl(): string {
-  const explicit = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
-  if (explicit) return explicit
-  const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
-  const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
-  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
 }
 
 function entityLogoUrl(fileName: string): string {
@@ -109,8 +109,12 @@ function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry
   }
 }
 
+function vaultName(vault: EVault | SecuritizeCollateralVault | EulerEarn): string {
+  return strOrEmpty(vault.shares?.name) || strOrEmpty(vault.asset?.name)
+}
+
 function buildEvkMetadata(
-  vault: Vault | SecuritizeVault,
+  vault: EVault | SecuritizeCollateralVault,
   type: 'evk' | 'securitize',
   ctx: BuildContext,
 ): VaultMetadata | null {
@@ -122,7 +126,7 @@ function buildEvkMetadata(
   // the snapshot could leak one), render it the same way buildEscrowMetadata
   // would. Mirrors isVaultGovernorVerified's `vaultCategory === 'escrow'` guard.
   if (ctx.view.escrowAddresses.has(addr) || ('vaultCategory' in vault && vault.vaultCategory === 'escrow')) {
-    return buildEscrowMetadata(addr, vault as Vault, ctx)
+    return buildEscrowMetadata(addr, vault as EVault, ctx)
   }
 
   const verified = ctx.verifiedSet.has(addr)
@@ -150,19 +154,19 @@ function buildEvkMetadata(
     chainId: ctx.chainId,
     address: addr,
     type,
-    name: labelName ?? strOrEmpty(vault.name),
+    name: labelName ?? vaultName(vault),
     description,
     portfolioNotice,
     deprecationReason,
     deprecated,
-    governanceLimited: product?.isGovernanceLimited === true,
+    governanceLimited: product?.governanceLimited === true,
     productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.view.tokenLogos),
     entities,
   }
 }
 
-function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata | null {
+function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata | null {
   const addr = tryChecksum(vault.address)
   if (!addr) return null
 
@@ -187,12 +191,12 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
     chainId: ctx.chainId,
     address: addr,
     type: 'earn',
-    name: labelName ?? strOrEmpty(vault.name),
+    name: labelName ?? vaultName(vault),
     description,
     portfolioNotice,
     deprecationReason,
     deprecated,
-    governanceLimited: product?.isGovernanceLimited === true,
+    governanceLimited: product?.governanceLimited === true,
     productId: product?.slug ?? null,
     asset: buildAsset(vault.asset, ctx.view.tokenLogos),
     entities,
@@ -201,7 +205,7 @@ function buildEarnMetadata(vault: EarnVault, ctx: BuildContext): VaultMetadata |
 
 function buildEscrowMetadata(
   addr: Address,
-  vault: Vault | undefined,
+  vault: EVault | undefined,
   ctx: BuildContext,
 ): VaultMetadata {
   return {
@@ -240,7 +244,7 @@ function computeMetadata(ctx: BuildContext): Map<string, VaultMetadata> {
   // latter carries asset data for the referenced collateral vaults). Any
   // escrow address outside the snapshot subset gets a thin entry with
   // asset:null — known v1 limitation.
-  const escrowFromSnapshot = new Map<Address, Vault>()
+  const escrowFromSnapshot = new Map<Address, EVault>()
   for (const v of ctx.view.snapshot.escrowVaults) {
     const addr = tryChecksum(v.address)
     if (addr) escrowFromSnapshot.set(addr, v)

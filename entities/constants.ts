@@ -7,6 +7,7 @@ export const ERROR_MESSAGE_MAP: Record<string, string> = {
   E_BadSupplyCap: 'Supply cap is invalid.',
   E_BadBorrowCap: 'Borrow cap is invalid.',
   E_AccountLiquidity: 'Account liquidity too low for this action.',
+  E_InsufficientBalance: 'Not enough balance for this operation.',
   E_InsufficientCash: 'Not enough liquidity in the vault.',
   E_NotEnoughLiquidity: 'Not enough liquidity in the vault.',
   NotEnoughLiquidity: 'Not enough liquidity in the vault.',
@@ -35,17 +36,6 @@ export const ERROR_SIGNATURE_MAP: Record<string, string> = {
   ...EVC_ERROR_SIGNATURES,
 }
 
-export const NON_BLOCKING_SIMULATION_ERRORS = new Set([
-  'E_TransferFromFailed',
-  'INSUFFICIENT_ALLOWANCE',
-  'E_InsufficientAllowance',
-  'TRANSFER_FROM_FAILED',
-  'TRANSFER_FAILED',
-  'SAFE_TRANSFER_FAILED',
-  'SAFE_TRANSFER_FROM_FAILED',
-  '0x9773bb71',
-])
-
 export const TTL_INFINITY = BigInt(
   '0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
 )
@@ -54,7 +44,7 @@ export const TTL_LIQUIDATION = -BigInt(1)
 export const TTL_ERROR = -BigInt(2)
 
 export { CACHE_TTL_15S_MS as DEFAULT_PRICE_CACHE_TTL_MS } from './tuning-constants'
-export const EXCLUDED_SWAP_PROVIDERS = new Set<string>([])
+export const EXCLUDED_SWAP_PROVIDERS = new Set<string>()
 export const SWAP_DEFAULT_DEADLINE_SECONDS = 1800
 export const SLIPPAGE_OVERRIDE_STORAGE_KEY = 'swap-slippage-override'
 export const SLIPPAGE_STORAGE_KEY = 'swap-slippage'
@@ -74,12 +64,6 @@ export const EUR_ADDRESS: Address = '0x00000000000000000000000000000000000003d2'
 export const BTC_ADDRESS: Address = '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB'
 export const ETH_ADDRESS: Address = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 
-// Tokens that revert when changing a non-zero allowance to another non-zero value.
-// For these tokens, approve must be reset to 0 before setting a new value.
-export const APPROVE_RESET_REQUIRED_TOKENS = new Set<string>([
-  '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT on Ethereum
-])
-
 // ERC-20 allowance slot candidates checked during simulation state-override probing.
 // Sequential range (0..ALLOWANCE_MAX_SEQUENTIAL_SLOT) covers standard ERC-20 layouts
 // and OZ Upgradeable tokens where inherited contracts shift the base slot index.
@@ -95,6 +79,7 @@ export const INTEREST_RATE_MODEL_TYPE = {
   ADAPTIVE_CURVE: 2,
   KINKY: 3,
   FIXED_CYCLICAL_BINARY: 4,
+  FIXED_CYCLICAL_BINARY_MONTHLY: 5,
 } as const
 
 // EVK Vault.configFlags is a bitmask. CFG_DONT_SOCIALIZE_DEBT is the only
@@ -170,7 +155,9 @@ export const PYTH_ORACLE_COMPONENTS = [
   { name: 'maxConfWidth', type: 'uint256' },
 ] as const
 
-export const SECONDS_IN_YEAR = 31_536_000
+// Gregorian year (365.2425 * 86400). Matches EVK/Lens SECONDS_PER_YEAR used by
+// on-chain APY math, so display values round-trip exactly with contract output.
+export const SECONDS_IN_YEAR = 31_556_952
 export const TARGET_TIME_AGO = 3600
 
 export const PERMIT2_TYPES = {
@@ -190,15 +177,9 @@ export const PERMIT2_TYPES = {
 export const MAX_UINT48 = (1n << 48n) - 1n
 export const MAX_UINT160 = (1n << 160n) - 1n
 
-export const MERKL_DISTRIBUTOR_ADDRESS = '0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae'
 export const MERKL_API_BASE_URL = 'https://api.merkl.xyz/v4'
 export const DEFILLAMA_YIELDS_URL = 'https://yields.llama.fi/pools'
 export const SECURITIZE_FEED_URL = 'https://public-feed.securitize.io/asset-stats'
-export const BREVIS_API_URL = 'https://incentra-prd.brevis.network/sdk/v1/eulerCampaigns'
-export const BREVIS_MERKLE_PROOF_URL = 'https://incentra-prd.brevis.network/v1/getMerkleProofsBatch'
-export const FUUL_API_BASE_URL = 'https://api.fuul.xyz/api/v1'
-export const FUUL_MANAGER_ADDRESS = '0x8a0836dA623ea1083c85acB958DeEa3716b39dc6'
-export const FUUL_FACTORY_ADDRESS = '0xa0080A60EE9f1985151161Fa6b09652Dc46afdEF'
 export const STABLEWATCH_SOURCE_URL = 'https://stablewatch.io'
 
 // Re-export geo-blocking constants (separated to avoid pulling BigInt into server builds)

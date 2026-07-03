@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 
@@ -14,19 +13,22 @@ const {
   depositPositions,
   totalSuppliedValueInfo,
   totalBorrowedValueInfo,
+  netAssetMarketValueInfo,
   portfolioRoe,
   portfolioNetApy,
   isPositionsLoaded,
   isShowAllPositions,
   refreshAllPositions,
 } = useEulerAccount()
-const { rewards } = useMerkl()
-const { locks } = useREULLocks()
-const { isConnected, address } = useAccount()
+const { refresh: refreshFreshAccount } = useFreshAccount()
+const { rewards } = useSdkRewards()
+const { locks, refreshLocks } = useREULLocks()
+const { isConnected, address } = useWagmi()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 const { isSpyMode, spyAddress } = useSpyMode()
+const showAllLabelEntries = useShowAllLabelEntries()
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
 
@@ -64,10 +66,44 @@ const tabs = computed(() => [
   },
 ])
 
-const updatePositions = async () => {
+const portfolioNetApyDisplay = computed(() =>
+  Number.isFinite(portfolioNetApy.value) ? `${formatNumber(portfolioNetApy.value)}%` : '-',
+)
+const portfolioRoeDisplay = computed(() =>
+  Number.isFinite(portfolioRoe.value) ? `${formatNumber(portfolioRoe.value)}%` : '-',
+)
+const totalSuppliedDisplay = computed(() => {
+  const { total, hasMissingPrices } = totalSuppliedValueInfo.value
+  if (total === 0 && hasMissingPrices) return '—'
+  return formatCompactUsdValue(total)
+})
+const totalBorrowedDisplay = computed(() => {
+  const { total, hasMissingPrices } = totalBorrowedValueInfo.value
+  if (total === 0 && hasMissingPrices) return '—'
+  return formatCompactUsdValue(total)
+})
+const netAssetValueInfo = computed(() => {
+  return netAssetMarketValueInfo.value
+})
+const netAssetValueDisplay = computed(() => {
+  const { total, hasMissingPrices } = netAssetValueInfo.value
+  if (total === 0 && hasMissingPrices) return '—'
+  return formatCompactUsdValue(total)
+})
+
+const updatePositions = async (
+  options: { portfolioSource?: 'fast' | 'fresh', preemptPortfolio?: boolean } = {},
+) => {
   const targetAddress = isSpyMode.value ? spyAddress.value : address.value
   if (!targetAddress) return
-  await refreshAllPositions(eulerLensAddresses.value, targetAddress)
+  // Refresh the rich portfolio snapshot (drives the UI on this page) and the
+  // plan-time Account snapshot in parallel. The two write into disjoint stores,
+  // so the calls are independent.
+  refreshFreshAccount()
+  await refreshAllPositions(eulerLensAddresses.value, targetAddress, {
+    source: options.portfolioSource,
+    preempt: options.preemptPortfolio,
+  })
 }
 
 onActivated(async () => {
@@ -84,8 +120,12 @@ onDeactivated(() => {
 })
 
 watch(portfolioRefreshCounter, () => {
-  updatePositions()
+  updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })
+  void refreshLocks(false)
 })
+watch(showAllLabelEntries, (showAll) => {
+  isShowAllPositions.value = showAll
+}, { immediate: true })
 </script>
 
 <template>
@@ -96,10 +136,10 @@ watch(portfolioRefreshCounter, () => {
       </h2>
       <div class="flex items-center gap-8">
         <span class="text-h6 text-content-secondary">Show all</span>
-        <UiFootnote
+        <UiHoverPreviewTooltip
           title="Show all"
           text="When enabled, shows positions and deposits in unverified vaults. Interacting with unverified vaults may pose security risks, as such vaults could potentially be used for phishing attempts. Ensure you trust the source before continuing."
-          tooltip-placement="top-end"
+          placement="top-end"
         />
         <UiSwitch
           v-model="isShowAllPositions"
@@ -109,7 +149,7 @@ watch(portfolioRefreshCounter, () => {
 
     <PortfolioShowAllHint />
 
-    <PortfolioUnresolvedBanner />
+    <PortfolioRampingBanner />
 
     <div class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch">
       <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
@@ -119,38 +159,46 @@ watch(portfolioRefreshCounter, () => {
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Net APY
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Portfolio Net APY"
               text="Net annual percentage yield across all positions. Calculated as total net yield (supply income minus borrow costs) divided by total supplied value."
-              tooltip-placement="bottom-start"
-              class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+              placement="bottom-start"
+              icon-class="text-content-tertiary"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
             <div
               class="text-h5"
               :class="[portfolioNetApy >= 0 ? 'text-accent-600' : 'text-error-500']"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-net-apy"
+              :data-value="Number.isFinite(portfolioNetApy) ? portfolioNetApy : '-'"
             >
-              {{ Number.isFinite(portfolioNetApy) ? `${formatNumber(portfolioNetApy)}%` : '-' }}
+              {{ portfolioNetApyDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             ROE
-            <UiFootnote
+            <UiHoverPreviewTooltip
               title="Portfolio ROE"
-              text="Return on equity across all positions. Calculated as total net yield divided by total equity (supplied value minus borrowed value)."
-              tooltip-placement="bottom-start"
-              class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+              text="Account-level return on equity. Calculated as total net yield divided by total equity, where equity is supplied value minus borrowed value."
+              placement="bottom-start"
+              icon-class="text-content-tertiary"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
             <div
               class="text-h5"
               :class="[portfolioRoe >= 0 ? 'text-accent-600' : 'text-error-500']"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-roe"
+              :data-value="Number.isFinite(portfolioRoe) ? portfolioRoe : '-'"
             >
-              {{ Number.isFinite(portfolioRoe) ? `${formatNumber(portfolioRoe)}%` : '-' }}
+              {{ portfolioRoeDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
@@ -162,64 +210,69 @@ watch(portfolioRefreshCounter, () => {
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Total supplied
-            <UiFootnote
+            <UiHoverPreviewTooltip
               v-if="totalSuppliedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some supplied assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="bottom-end"
-              class="[--ui-footnote-icon-color:var(--warning-500)]"
+              placement="bottom-end"
+              icon-class="text-warning-500"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-            <div class="text-h5 text-content-primary">
-              {{ (() => {
-                const { total, hasMissingPrices } = totalSuppliedValueInfo
-                if (total === 0 && hasMissingPrices) return '—'
-                return formatCompactUsdValue(total)
-              })() }}
+            <div
+              class="text-h5 text-content-primary"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-total-supplied"
+              :data-value="totalSuppliedValueInfo.hasMissingPrices ? totalSuppliedDisplay : totalSuppliedValueInfo.total"
+            >
+              {{ totalSuppliedDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Total borrowed
-            <UiFootnote
+            <UiHoverPreviewTooltip
               v-if="totalBorrowedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some borrowed assets don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="bottom-end"
-              class="[--ui-footnote-icon-color:var(--warning-500)]"
+              placement="bottom-end"
+              icon-class="text-warning-500"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-            <div class="text-h5 text-content-primary">
-              {{ (() => {
-                const { total, hasMissingPrices } = totalBorrowedValueInfo
-                if (total === 0 && hasMissingPrices) return '—'
-                return formatCompactUsdValue(total)
-              })() }}
+            <div
+              class="text-h5 text-content-primary"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-total-borrowed"
+              :data-value="totalBorrowedValueInfo.hasMissingPrices ? totalBorrowedDisplay : totalBorrowedValueInfo.total"
+            >
+              {{ totalBorrowedDisplay }}
             </div>
           </BaseLoadableContent>
         </div>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Net asset value
-            <UiFootnote
+            <UiHoverPreviewTooltip
               v-if="totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices"
               title="Incomplete pricing"
               text="Some assets in your portfolio don't have price data available. The displayed value may be higher than shown."
-              tooltip-placement="bottom-end"
-              class="[--ui-footnote-icon-color:var(--warning-500)]"
+              placement="bottom-end"
+              icon-class="text-warning-500"
             />
           </div>
           <BaseLoadableContent :loading="isConnected && (!isPositionsLoaded || !isBalancesLoaded)">
-            <div class="text-h5 text-content-primary">
-              {{ (() => {
-                const netValue = totalSuppliedValueInfo.total - totalBorrowedValueInfo.total
-                const hasMissing = totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices
-                if (netValue === 0 && hasMissing) return '—'
-                return formatCompactUsdValue(netValue)
-              })() }}
+            <div
+              class="text-h5 text-content-primary"
+              data-id="data-point"
+              :data-key="spyAddress || address"
+              data-field="portfolio-net-asset-value"
+              :data-value="netAssetValueInfo.hasMissingPrices ? netAssetValueDisplay : netAssetValueInfo.total"
+            >
+              {{ netAssetValueDisplay }}
             </div>
           </BaseLoadableContent>
         </div>

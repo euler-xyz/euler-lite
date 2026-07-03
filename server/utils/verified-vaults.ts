@@ -2,7 +2,7 @@ import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
 import { buildLabelsView, type LabelsView } from './labels-view'
 import { logger } from '~/server/utils/logger'
-import { isEarnVaultOwnerVerified, isVaultGovernorVerified } from '~/entities/vault'
+import { isEarnVaultOwnerVerified, isVaultGovernorVerified } from '~/utils/vault/governor-verification'
 
 const CACHE_TTL_MS = 300_000
 
@@ -20,14 +20,16 @@ function computeVerifiedSet(view: LabelsView): Set<string> {
   for (const addr of view.escrowAddresses) result.add(addr)
 
   for (const vault of view.snapshot.evkVaults) {
+    const addr = tryChecksum(vault.address)
+    if (addr && view.productByVault.get(addr)?.forceUnverified === true) continue
     if (isVaultGovernorVerified(vault, view.verificationLabels)) {
-      const addr = tryChecksum(vault.address)
       if (addr) result.add(addr)
     }
   }
   for (const vault of view.snapshot.securitizeVaults) {
+    const addr = tryChecksum(vault.address)
+    if (addr && view.productByVault.get(addr)?.forceUnverified === true) continue
     if (isVaultGovernorVerified(vault, view.verificationLabels)) {
-      const addr = tryChecksum(vault.address)
       if (addr) result.add(addr)
     }
   }

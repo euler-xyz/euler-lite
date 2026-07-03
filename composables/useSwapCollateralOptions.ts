@@ -1,59 +1,43 @@
-import { getAddress, type Address } from 'viem'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { getAddress, maxUint256, type Address } from 'viem'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import type { Vault } from '~/entities/vault'
+
 import type { VaultTagContext } from '~/composables/useGeoBlock'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
+import { isOpDisabled, OP_SKIM } from '~/utils/vault-hooks'
 
 export const useSwapCollateralOptions = ({
   currentVault,
   liabilityVault,
   tagContext = 'swap-target',
 }: {
-  currentVault: Ref<Vault | undefined>
-  liabilityVault?: Ref<Vault | undefined>
+  currentVault: Ref<EVault | undefined>
+  liabilityVault?: Ref<EVault | undefined>
   tagContext?: VaultTagContext
 }) => {
   const { borrowList } = useVaults()
-  const { getVault: registryGetVault, getVerifiedEvkVaults, getEscrowVaults } = useVaultRegistry()
+  const { getVault: registryGetVault, getVerifiedEVaults, getEscrowVaults, getVaultCategory } = useVaultRegistry()
   const { getBalance } = useWallets()
-  const { withIntrinsicSupplyApy, version: intrinsicVersion } = useIntrinsicApy()
-  const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer } = useApyVisibility()
 
-  const collateralVaults = computed(() => {
-    const current = currentVault.value
-    const currentAddress = current ? getAddress(current.address) : null
-    const liability = liabilityVault?.value
-
-    let candidates: Vault[] = []
-
-    if (liability) {
-      // When we have a liability vault, get collaterals from LTV configuration
-      candidates = liability.collateralLTVs
-        .filter(ltv => ltv.borrowLTV > 0n)
-        .map(ltv => registryGetVault(ltv.collateral) as Vault | undefined)
-        .filter((vault): vault is Vault => Boolean(vault))
-    }
-    else {
-      // Without liability vault, show borrowable vaults + all escrow vaults
-      const borrowable = new Set(
-        borrowList.value.map(pair => getAddress(pair.borrow.address)),
-      )
-      // Get verified EVK vaults that are borrowable and non-escrow
-      const standardVaults = getVerifiedEvkVaults()
-        .filter(vault => vault.vaultCategory !== 'escrow')
-        .filter(vault => borrowable.has(getAddress(vault.address)))
-      // Get all escrow vaults (always valid as collateral, already have verified: true)
-      const escrowVaults = getEscrowVaults()
-
-      candidates = [...standardVaults, ...escrowVaults]
-    }
-
-    const unique = new Map<string, Vault>()
+  const filterTargetCollateralCandidates = (candidates: EVault[], currentAddress: string | null) => {
+    const unique = new Map<string, EVault>()
     candidates.forEach((vault) => {
       const address = getAddress(vault.address)
       if (currentAddress && address === currentAddress) {
+        return
+      }
+      if (vault.totalAssets <= 0n || vault.caps.supplyCap === 0n) {
+        return
+      }
+      if (vault.caps.supplyCap < maxUint256 && vault.totalAssets >= vault.caps.supplyCap) {
+        return
+      }
+      if (isOpDisabled(vault, OP_SKIM)) {
         return
       }
       if (!unique.has(address)) {
@@ -62,22 +46,75 @@ export const useSwapCollateralOptions = ({
     })
 
     return [...unique.values()]
+  }
+
+  const getBorrowableCollateralCandidates = () => {
+    // Without liability vault, show borrowable vaults + all escrow vaults
+    const borrowable = new Set(
+      borrowList.value.map(pair => getAddress(pair.borrow.address)),
+    )
+    // Get verified EVaults that are borrowable and non-escrow
+    const standardVaults = getVerifiedEVaults()
+      .filter(vault => getVaultCategory(vault.address) !== 'escrow')
+      .filter(vault => borrowable.has(getAddress(vault.address)))
+    // Get all escrow vaults (always valid as collateral, already have verified: true)
+    const escrowVaults = getEscrowVaults()
+
+    return [...standardVaults, ...escrowVaults]
+  }
+
+  const baseCollateralCandidates = computed(() => {
+    const current = currentVault.value
+    const currentAddress = current ? getAddress(current.address) : null
+    const liability = liabilityVault?.value
+
+    const candidates = liability
+      // When we have a liability vault, get collaterals from LTV configuration
+      ? liability.collaterals
+          .filter(ltv => ltv.borrowLTV > 0)
+          .map(ltv => registryGetVault(ltv.address) as EVault | undefined)
+          .filter((vault): vault is EVault => Boolean(vault))
+      : getBorrowableCollateralCandidates()
+
+    return filterTargetCollateralCandidates(candidates, currentAddress)
+  })
+
+  const allCollateralVaults = computed(() => {
+    const current = currentVault.value
+    const currentAddress = current ? getAddress(current.address) : null
+    return filterTargetCollateralCandidates(
+      [...getVerifiedEVaults(), ...getEscrowVaults()],
+      currentAddress,
+    )
   })
 
   const collateralOptions = useReactiveMap(
-    collateralVaults,
-    [rewardsVersion, intrinsicVersion],
-    async (vault) => {
-      const balance = getBalance(vault.asset.address as Address)
-      const amount = nanoToValue(balance, vault.asset.decimals)
-      const apy = computeSupplyApy(vault, withIntrinsicSupplyApy, getSupplyRewardApy)
-      const type = vault.vaultCategory === 'escrow' ? 'escrow' : 'vault'
-      return buildCollateralOption({ vault, type, amount, priceAmount: amount, apy, tagContext, showBalance: false })
-    },
+    baseCollateralCandidates,
+    [viewer, enableIntrinsicApy, enableRewardsApy],
+    buildCollateralOptionForVault,
   )
 
+  const allCollateralOptions = useReactiveMap(
+    allCollateralVaults,
+    [viewer, enableIntrinsicApy, enableRewardsApy],
+    buildCollateralOptionForVault,
+  )
+
+  async function buildCollateralOptionForVault(vault: EVault) {
+    const balance = getBalance(vault.asset.address as Address)
+    const amount = nanoToValue(balance, vault.asset.decimals)
+    const apy = computeSupplyApy(vault, viewer.value, {
+      enableIntrinsicApy: enableIntrinsicApy.value,
+      enableRewardsApy: enableRewardsApy.value,
+    })
+    const type = getVaultCategory(vault.address) === 'escrow' ? 'escrow' : 'vault'
+    return buildCollateralOption({ vault, type, amount, priceAmount: amount, apy, tagContext })
+  }
+
   return {
-    collateralVaults,
+    collateralVaults: baseCollateralCandidates,
     collateralOptions,
+    allCollateralVaults,
+    allCollateralOptions,
   }
 }

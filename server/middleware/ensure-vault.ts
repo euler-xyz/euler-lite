@@ -1,6 +1,8 @@
 import { getRequestURL, sendRedirect } from 'h3'
-import { isAddress } from 'viem'
-import { getVaultCategory } from '../utils/vault-categories-store'
+import { VaultType } from '@eulerxyz/euler-v2-sdk'
+import { getAddress, isAddress, type Address } from 'viem'
+import { withWallClock } from '../utils/fetchWithTimeout'
+import { getServerSdk } from '../utils/sdk-server'
 
 /**
  * Vault route patterns:
@@ -10,6 +12,24 @@ import { getVaultCategory } from '../utils/vault-categories-store'
  */
 const LEND_EARN_RE = /^\/(lend|earn)\/([^/?#]+)/
 const BORROW_RE = /^\/borrow\/([^/?#]+)\/([^/?#]+)/
+const VAULT_ROUTE_VALIDATION_BUDGET_MS = 8_000
+
+const resolveVaultTypes = async (
+  chainId: number,
+  addresses: Address[],
+): Promise<Partial<Record<Address, string>> | undefined> => {
+  try {
+    return await withWallClock(
+      async () => (await getServerSdk(chainId)).vaultMetaService.fetchVaultTypes(chainId, addresses),
+      VAULT_ROUTE_VALIDATION_BUDGET_MS,
+      'vault route validation',
+    )
+  }
+  catch (err) {
+    console.warn('[ensure-vault] failed to validate vault route', err)
+    return undefined
+  }
+}
 
 export default defineEventHandler(async (event) => {
   const url = getRequestURL(event)
@@ -43,24 +63,33 @@ export default defineEventHandler(async (event) => {
   const query = url.searchParams.toString()
   const redirectUrl = `/${section}${query ? `?${query}` : ''}`
 
-  // Validate addresses are well-formed
+  // Validate route address segments before resolving vault types. Snapshot
+  // membership is not exhaustive: unverified EVK vaults can still be valid
+  // direct links when the SDK resolver recognizes them.
+  const normalized: Address[] = []
   for (const addr of addresses) {
-    if (!isAddress(addr)) {
+    if (!isAddress(addr, { strict: false })) {
       return sendRedirect(event, redirectUrl, 302)
     }
+    normalized.push(getAddress(addr))
   }
 
-  // Resolve chain from ?network= query param
+  // Resolve chain from ?network= query param. If it is absent, keep the route
+  // client-backed because we cannot pick the right chain resolver safely.
   const networkParam = url.searchParams.get('network')
   const chainId = networkParam ? parseInt(networkParam, 10) : NaN
   if (!chainId || isNaN(chainId)) {
     return
   }
 
-  // Check each vault address exists in the factory
-  for (const addr of addresses) {
-    const category = await getVaultCategory(chainId, addr)
-    if (!category) {
+  const types = await resolveVaultTypes(chainId, normalized)
+  if (!types) {
+    return
+  }
+
+  for (const addr of normalized) {
+    const type = types[addr] ?? types[addr.toLowerCase() as Address]
+    if (!type || type === VaultType.Unknown) {
       return sendRedirect(event, redirectUrl, 302)
     }
   }

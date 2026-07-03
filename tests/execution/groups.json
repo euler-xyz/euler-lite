@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "lend-basic",
+      "label": "Supply, withdraw, deposit-with-swap, and redeem",
+      "scenarios": [
+        "lend-supply-execute",
+        "lend-withdraw-execute",
+        "lend-supply-with-swap-execute",
+        "lend-redeem-execute"
+      ]
+    },
+    {
+      "id": "multiply-with-swap",
+      "label": "Open borrow position and multiply with swap",
+      "scenarios": [
+        "borrow-open-position-execute",
+        "position-multiply-with-swap-execute"
+      ]
+    },
+    {
+      "id": "same-asset-collateral-migration",
+      "label": "Supply and rebalance savings to a same-asset vault",
+      "scenarios": [
+        "lend-supply-execute",
+        "position-same-asset-collateral-migration-execute"
+      ]
+    },
+    {
+      "id": "withdraw-and-swap",
+      "label": "Supply and withdraw savings through swap",
+      "scenarios": [
+        "lend-supply-execute",
+        "position-withdraw-and-swap-execute"
+      ]
+    },
+    {
+      "id": "swap-and-repay",
+      "label": "Open borrow position and repay through wallet swap",
+      "scenarios": [
+        "borrow-open-position-execute",
+        "position-swap-and-repay-wallet-execute"
+      ]
+    },
+    {
+      "id": "repay-with-swap",
+      "label": "Open borrow position and repay with swapped collateral",
+      "scenarios": [
+        "borrow-open-position-execute",
+        "position-repay-collateral-swap-execute"
+      ]
+    },
+    {
+      "id": "repay-from-deposit",
+      "label": "Open borrow position and repay from savings",
+      "scenarios": [
+        "borrow-open-position-execute",
+        "lend-supply-usdt-for-repay-source",
+        "position-repay-from-deposit-execute"
+      ]
+    },
+    {
+      "id": "redeem-and-swap",
+      "label": "Redeem USDC savings through swap",
+      "scenarios": [
+        "lend-supply-execute",
+        "lend-redeem-and-swap-execute"
+      ]
+    },
+    {
+      "id": "repay-from-wallet",
+      "label": "Open borrow position and repay from wallet",
+      "scenarios": [
+        "borrow-open-position-execute",
+        "position-repay-wallet-execute"
+      ]
+    },
+    {
+      "id": "swap-debt",
+      "label": "Open borrow position and swap debt",
+      "scenarios": [
+        "borrow-open-weth-debt-position-execute",
+        "position-swap-debt-execute"
+      ]
+    },
+    {
+      "id": "cleanup-transfer",
+      "label": "Open borrow position and max repay cleanup transfer sweep",
+      "scenarios": [
+        "borrow-open-position-execute",
+        "position-repay-wallet-max-cleanup-execute"
+      ]
+    },
+    {
+      "id": "swap-and-borrow",
+      "label": "Open borrow position with swapped collateral",
+      "scenarios": [
+        "borrow-swap-and-borrow-execute"
+      ]
+    },
+    {
+      "id": "reul-unlock",
+      "label": "Unlock matured rEUL as an impersonated holder",
+      "scenarios": [
+        "reul-unlock-execute"
+      ]
+    },
+    {
+      "id": "reul-unlock-partial",
+      "label": "Early-unlock a partially-vested rEUL lock and show the burn warning",
+      "scenarios": [
+        "reul-unlock-partial-execute"
+      ]
+    },
+    {
+      "id": "earn-supply-withdraw",
+      "label": "Supply to and withdraw from a EulerEarn vault",
+      "scenarios": [
+        "earn-supply-execute",
+        "earn-withdraw-execute"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,5 @@
-import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi } from 'viem'
+import { encodeFunctionData, decodeFunctionResult, zeroAddress, type Address, type Hex, type Abi, type PublicClient } from 'viem'
 import { EVC_ABI, type BatchItem, type BatchItemResult } from '~/abis/evc'
-import { getPublicClient } from '~/utils/public-client'
 import { isTransportError } from '~/utils/viem-errors'
 import { logger } from '~/utils/logger'
 
@@ -31,38 +30,42 @@ const isBatchTransportError = (err: unknown): boolean => {
  * This is more reliable than Multicall3 as EVC is guaranteed to exist on all Euler chains.
  *
  * When batch items carry value (e.g. Pyth update fees), the total is automatically
- * summed for msg.value and a balance state override is added for the caller.
+ * summed for msg.value and a balance state override is added for the zeroAddress
+ * sender. The SDK's BatchSimulationAdapter does not set this override, so we hold
+ * the call here rather than delegating — the only piece going through the SDK is
+ * the provider (sourced via sdk.providerService.getProvider).
  *
+ * @param provider - viem PublicClient (typically sourced from sdk.providerService)
  * @param evcAddress - EVC contract address
  * @param items - Array of batch items (target, data, value)
- * @param rpcUrl - JSON-RPC URL
  * @returns Array of BatchItemResult in same order as items
  */
 export const evcBatchCall = async (
+  provider: PublicClient,
   evcAddress: string,
   items: BatchItem[],
-  rpcUrl: string,
 ): Promise<BatchItemResult[]> => {
   if (items.length === 0) {
     return []
   }
 
-  const client = getPublicClient(rpcUrl)
   const totalValue = items.reduce((sum, item) => sum + item.value, 0n)
 
-  // Errors (403, network failures, timeouts) propagate to callers so they can
-  // distinguish "RPC is down" from "individual call reverted on-chain".
   const callData = encodeFunctionData({
     abi: EVC_ABI,
     functionName: 'batchSimulation',
     args: [items],
   })
 
-  const result = await client.call({
+  // Errors (403, network failures, timeouts) propagate to callers so they can
+  // distinguish "RPC is down" from "individual call reverted on-chain".
+  const result = await provider.call({
     to: evcAddress as Address,
-    data: callData,
+    data: callData as Hex,
     value: totalValue,
-    ...(totalValue > 0n ? { stateOverride: [{ address: zeroAddress as `0x${string}`, balance: totalValue }] } : {}),
+    ...(totalValue > 0n
+      ? { stateOverride: [{ address: zeroAddress, balance: totalValue }] }
+      : {}),
   })
 
   if (!result.data) {
@@ -100,11 +103,11 @@ export const buildBatchItem = (
  * Execute a single chunk of lens calls via EVC batchSimulation.
  */
 const executeLensChunk = async <T>(
+  provider: PublicClient,
   evcAddress: string,
   lensAddress: string,
   lensAbi: Abi | readonly unknown[],
   calls: Array<{ functionName: string, args: unknown[] }>,
-  rpcUrl: string,
 ): Promise<Array<BatchLensResult<T>>> => {
   const items: BatchItem[] = calls.map((call) => {
     const callData = encodeFunctionData({
@@ -117,7 +120,7 @@ const executeLensChunk = async <T>(
 
   let batchResults: BatchItemResult[]
   try {
-    batchResults = await evcBatchCall(evcAddress, items, rpcUrl)
+    batchResults = await evcBatchCall(provider, evcAddress, items)
   }
   catch (err) {
     if (isBatchTransportError(err)) {
@@ -154,20 +157,20 @@ const executeLensChunk = async <T>(
  * Batch multiple lens calls using EVC batchSimulation.
  * Automatically chunks into sub-batches to stay within gas limits.
  *
+ * @param provider - viem PublicClient (typically sourced from sdk.providerService)
  * @param evcAddress - EVC contract address
  * @param lensAddress - Lens contract address
  * @param lensAbi - ABI for the lens contract
  * @param calls - Array of { functionName, args } to call
- * @param rpcUrl - JSON-RPC URL
  * @param batchSize - Max calls per batchSimulation (default 25)
  * @returns Array of decoded results (or null for failed calls)
  */
 export const batchLensCalls = async <T>(
+  provider: PublicClient,
   evcAddress: string,
   lensAddress: string,
   lensAbi: Abi | readonly unknown[],
   calls: Array<{ functionName: string, args: unknown[] }>,
-  rpcUrl: string,
   batchSize = 25,
 ): Promise<Array<BatchLensResult<T>>> => {
   if (calls.length === 0) {
@@ -175,13 +178,13 @@ export const batchLensCalls = async <T>(
   }
 
   if (calls.length <= batchSize) {
-    return executeLensChunk<T>(evcAddress, lensAddress, lensAbi, calls, rpcUrl)
+    return executeLensChunk<T>(provider, evcAddress, lensAddress, lensAbi, calls)
   }
 
   const allResults: Array<BatchLensResult<T>> = []
   for (let i = 0; i < calls.length; i += batchSize) {
     const chunk = calls.slice(i, i + batchSize)
-    const chunkResults = await executeLensChunk<T>(evcAddress, lensAddress, lensAbi, chunk, rpcUrl)
+    const chunkResults = await executeLensChunk<T>(provider, evcAddress, lensAddress, lensAbi, chunk)
     allResults.push(...chunkResults)
 
     // Stop processing further chunks if the RPC endpoint itself is failing

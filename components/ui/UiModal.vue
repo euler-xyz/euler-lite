@@ -33,7 +33,7 @@ const close = () => {
   isComponentVisible.value = false
 }
 const onClickWrapper = () => {
-  if (!data.isNotClosable || data.closeOnBackdropWhenAllowed) {
+  if (!data.isNotClosable) {
     close()
   }
 }
@@ -50,10 +50,6 @@ const handlePreventClose = (value: boolean) => {
 
 onMounted(() => {
   isComponentVisible.value = true
-})
-
-onBeforeUnmount(() => {
-  isComponentVisible.value = false
 })
 </script>
 

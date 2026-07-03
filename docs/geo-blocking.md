@@ -350,7 +350,7 @@ For soft-restricted vaults, the behavior depends on the context:
 
 **Default selection**: `AssetInput.vue` watches the collateral options list and auto-advances past disabled options. If the first option is blocked/restricted/deprecated, the first enabled option is selected instead. This prevents a disabled vault from being pre-selected when a modal opens or a page loads.
 
-The three swap pages (`/lend/[vault]/swap`, `/position/[number]/collateral/swap`, `/position/[number]/borrow/swap`) also skip disabled vaults in their `syncToVault` fallback logic, using `getVaultTags(address, 'swap-target')` to find the first enabled vault.
+The swap/refinance pages (`/lend/[vault]/swap`, `/position/[number]/borrow/swap`) also skip disabled vaults in their `syncToVault` fallback logic, using `getVaultTags(address, 'swap-target')` to find the first enabled vault.
 
 ### Arbitrary-asset selector (`SwapTokenSelector`)
 
@@ -509,9 +509,8 @@ Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all
 | `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from `CF-IPCountry`, emits as response header |
 | `server/middleware/geo-gate.ts` | Server-side sanctioned-country block; fail-closed on unknown country in prod |
 | `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `isAssetBlockedByCountry`, `isAssetRestrictedByCountry`, `getVaultTags`; `AssetLike` type |
-| `composables/useEulerLabels.ts` | Label fetching and parsing, including asset address map + compiled `assetPatternRules` |
-| `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted` |
-| `utils/eulerLabelsState.ts` | Reactive state: `assetBlocks`, `assetRestrictions`, `assetPatternRules`; `CompiledPatternRule` type |
+| `composables/useEulerLabels.ts` | SDK-backed label loading and current label snapshot |
+| `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted`, `getAssetPatternRules` |
 | `server/api/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
 | `server/plugins/warm-cache.ts` | Warms `all/assets.json` once globally plus per-chain label files |
 | `entities/constants.ts` | `SANCTIONED_COUNTRIES`, `COUNTRY_GROUPS` (EU/EEA/EFTA) |

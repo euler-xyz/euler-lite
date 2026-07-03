@@ -4,12 +4,15 @@ FROM node:24.14.1 AS builder
 WORKDIR /usr/src/app
 COPY package.json package-lock.json ./
 RUN npm ci
+
+COPY scripts/install-preview-sdk.sh scripts/install-preview-sdk.sh
+ARG EULER_SDK_BRANCH
+ARG EULER_SDK_PNPM_VERSION=10
+RUN chmod +x scripts/install-preview-sdk.sh && scripts/install-preview-sdk.sh
+
 COPY . .
 
 ENV NODE_OPTIONS=--max-old-space-size=4096
-
-# Sentry source-map upload (build-time only; token never reaches production stage)
-ARG SENTRY_AUTH_TOKEN
 
 RUN npm run build
 

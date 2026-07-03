@@ -131,9 +131,13 @@ const readBrowserSlippageOverride = (): {
   override: SlippageOverride | null
   migratedLegacy: boolean
 } => {
-  const override = parseSlippageOverride(readLocalStorageValue(SLIPPAGE_OVERRIDE_STORAGE_KEY))
+  const storedOverride = readLocalStorageValue(SLIPPAGE_OVERRIDE_STORAGE_KEY)
+  const override = parseSlippageOverride(storedOverride)
   if (override) {
     return { override, migratedLegacy: false }
+  }
+  if (storedOverride !== null) {
+    removeLocalStorageValue(SLIPPAGE_OVERRIDE_STORAGE_KEY)
   }
 
   const legacyOverride = parseLegacySlippageOverride(

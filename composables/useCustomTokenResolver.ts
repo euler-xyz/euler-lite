@@ -1,6 +1,8 @@
+import type { VaultAsset } from '~/types/asset'
 import { isAddress, type Address } from 'viem'
-import { erc20SymbolAbi, erc20DecimalsAbi, erc20NameAbi } from '~/abis/erc20'
-import type { VaultAsset } from '~/entities/vault'
+import { erc20DecimalsAbi } from '~/abis/erc20'
+import { readErc20StringField } from '~/utils/erc20-metadata'
+
 import { createRaceGuard } from '~/utils/race-guard'
 
 export const useCustomTokenResolver = () => {
@@ -26,21 +28,16 @@ export const useCustomTokenResolver = () => {
 
     try {
       const [symbolResult, decimalsResult, nameResult, balance] = await Promise.all([
-        rpcClient.value!.readContract({
-          address,
-          abi: erc20SymbolAbi,
-          functionName: 'symbol',
-        }).catch(() => null),
+        // name()/symbol() may be bytes32 on legacy tokens (e.g. MKR), so read via
+        // the string→bytes32 fallback helper rather than a string-only ABI.
+        readErc20StringField(rpcClient.value!, address, 'symbol'),
         rpcClient.value!.readContract({
           address,
           abi: erc20DecimalsAbi,
           functionName: 'decimals',
+          authorizationList: undefined,
         }).catch(() => null),
-        rpcClient.value!.readContract({
-          address,
-          abi: erc20NameAbi,
-          functionName: 'name',
-        }).catch(() => null),
+        readErc20StringField(rpcClient.value!, address, 'name'),
         fetchSingleBalance(input).catch(() => 0n),
       ])
 
@@ -51,9 +48,9 @@ export const useCustomTokenResolver = () => {
         return
       }
 
-      const symbol = symbolResult as string
-      const decimals = BigInt(decimalsResult as number)
-      const name = (nameResult as string) || symbol
+      const symbol = symbolResult
+      const decimals = decimalsResult as number
+      const name = nameResult || symbol
 
       customToken.value = { address: input, symbol, decimals, name }
       customTokenBalance.value = balance

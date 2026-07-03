@@ -80,6 +80,9 @@ export function createRateLimiter(config: RateLimiterConfig) {
      * In production, throws 403 if the request did not arrive via Cloudflare.
      */
     consume(event: H3Event, cost = 1): void {
+      // Escape hatch for local tooling (e.g. parity capture) that hammers the
+      // app from a single IP. Never set in deployed environments.
+      if (process.env.DISABLE_RATE_LIMIT === 'true') return
       // In production, CF-Connecting-IP must be present. Requests that arrive
       // without it bypassed Cloudflare entirely — reject them fail-closed.
       // Outside production (stg, preview, dev) Cloudflare may not be in the

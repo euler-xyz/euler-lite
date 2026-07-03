@@ -5,15 +5,11 @@ const props = defineProps<{
   align?: 'center' | 'end'
 }>()
 
-const copied = ref(false)
-let timer: ReturnType<typeof setTimeout>
+const { copied, copyToClipboard } = useClipboardCopy()
 
 function onCopy() {
   const numericPart = props.exact.replace(/\s+\S+$/, '').replaceAll(',', '')
-  navigator.clipboard.writeText(numericPart)
-  copied.value = true
-  clearTimeout(timer)
-  timer = setTimeout(() => (copied.value = false), 2000)
+  copyToClipboard(numericPart)
 }
 </script>
 

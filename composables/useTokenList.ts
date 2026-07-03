@@ -1,18 +1,21 @@
 import axios from 'axios'
 import { getAddress, zeroAddress } from 'viem'
-import type { VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
+
 import { logWarn } from '~/utils/errorHandling'
 import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { getChainById } from '~/entities/chainRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
+import { normalizeTokenCategoryTags } from '~/utils/token-categories'
 
-interface TokenListEntry {
+export interface TokenListEntry {
   chainId: number
   address: string
   name: string
   symbol: string
   decimals: number
   logoURI?: string
+  tags?: string[]
 }
 
 // Singleton state
@@ -34,7 +37,16 @@ const filterByChain = (chainId: number) => {
     try {
       const normalized = getAddress(token.address).toLowerCase()
       if (!filtered.has(normalized)) {
-        filtered.set(normalized, token)
+        const tags = normalizeTokenCategoryTags(token.tags)
+        filtered.set(normalized, {
+          chainId: token.chainId,
+          address: token.address,
+          name: token.name,
+          symbol: token.symbol,
+          decimals: token.decimals,
+          ...(token.logoURI ? { logoURI: token.logoURI } : {}),
+          ...(tags.length ? { tags } : {}),
+        })
       }
     }
     catch {
@@ -46,7 +58,7 @@ const filterByChain = (chainId: number) => {
   const nativeSymbol = chain?.nativeCurrency?.symbol
   const wrappedSymbol = nativeSymbol ? `W${nativeSymbol}`.toUpperCase() : null
   const hasWrappedNative = wrappedSymbol
-    && [...filtered.values()].some(t => t.symbol.toUpperCase() === wrappedSymbol)
+    && [...filtered.values()].find(t => t.symbol.toUpperCase() === wrappedSymbol)
 
   if (hasWrappedNative) {
     if (!filtered.has(zeroAddress)) {
@@ -56,6 +68,7 @@ const filterByChain = (chainId: number) => {
         name: chain!.nativeCurrency.name,
         symbol: chain!.nativeCurrency.symbol,
         decimals: chain!.nativeCurrency.decimals,
+        ...(hasWrappedNative.tags?.length ? { tags: hasWrappedNative.tags } : {}),
       })
     }
   }
@@ -145,6 +158,11 @@ const getTokenByAddress = (address: string): TokenListEntry | undefined => {
   }
 }
 
+const getTokenCategoryTags = (address: string): string[] => {
+  const token = getTokenByAddress(address)
+  return normalizeTokenCategoryTags(token?.tags)
+}
+
 const getAllTokens = (): TokenListEntry[] => {
   return [...tokenMap.value.values()]
 }
@@ -153,7 +171,7 @@ const toVaultAsset = (entry: TokenListEntry): VaultAsset => ({
   name: entry.name,
   symbol: entry.symbol,
   address: getAddress(entry.address),
-  decimals: BigInt(entry.decimals),
+  decimals: entry.decimals,
 })
 
 const tokenIconOverrides = new Map(
@@ -177,6 +195,7 @@ export const useTokenList = () => {
     hasToken,
     getAllTokens,
     getTokenByAddress,
+    getTokenCategoryTags,
     toVaultAsset,
     isLoading,
     isLoaded,

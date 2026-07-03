@@ -1,10 +1,25 @@
 import { type Address, getAddress, zeroAddress } from 'viem'
+import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { eulerUtilsLensABI } from '~/entities/euler/abis'
-import { erc20BalanceOfAbi } from '~/abis/erc20'
+import { getEulerSdk } from '~/composables/useEulerSdk'
+import { activeLayerWalletBalancesRef } from '~/composables/useTxBatch'
 import { logWarn } from '~/utils/errorHandling'
-import { getPublicClient } from '~/utils/public-client'
 import { FULL_BALANCES_TTL_MS } from '~/entities/tuning-constants'
+
+// When a simulated batch layer is active, return its stitched wallet balance for
+// a touched token in place of the real balance. No-op for untouched tokens or
+// the base layer (ref empty), so wallet reads stay transparent.
+const applyLayerOverlay = (tokenAddress: string, realBalance: bigint): bigint => {
+  let key: string
+  try {
+    key = getAddress(tokenAddress).toLowerCase()
+  }
+  catch {
+    key = tokenAddress.toLowerCase()
+  }
+  const simulated = activeLayerWalletBalancesRef.value[key]
+  return simulated !== undefined ? simulated : realBalance
+}
 
 // Singleton state
 const balances = shallowRef(new Map<string, bigint>())
@@ -34,9 +49,7 @@ export const useWallets = () => {
   const { loadedChainId } = useVaults()
   const { getByType } = useVaultRegistry()
   const { address, isConnected } = useWagmi()
-  const { eulerLensAddresses } = useEulerAddresses()
   const { chainId } = useEulerAddresses()
-  const { rpcUrl } = useRpcClient()
 
   const { spyAddress, isSpyMode } = useSpyMode()
   const balanceAddress = computed(() =>
@@ -55,31 +68,24 @@ export const useWallets = () => {
     // actually included the full token list (not when the mode flipped mid-flight).
     const currentChainId = chainId.value
     const wasFullMode = fullBalancesRequesters.value > 0
-
-    // Guard: the vault registry must hold vaults for THIS chain. Checking
-    // `isReady` alone is not enough — on chain switch, `eulerLensAddresses`
-    // recomputes to the new chain's lens synchronously, which can trigger
-    // our watcher *before* app.vue's chainId watcher has run
-    // resetVaultsState(). In that window `isReady` is still true (from the
-    // previous chain) and the registry still holds the previous chain's
-    // vaults, which would be sent cross-chain to the new chain's lens.
-    // `loadedChainId` is only set to the actual loaded chain after a
-    // successful loadVaults() and cleared to null on reset, so comparing
-    // it to the current chainId is the reliable gate.
-    if (loadedChainId.value !== currentChainId) {
+    if (!currentChainId) {
       return
     }
 
-    // Guard: need lens address
-    const utilsLensAddress = eulerLensAddresses.value?.utilsLens as Address
-    if (!utilsLensAddress) {
+    // Guard: the vault registry must hold vaults for THIS chain. Checking
+    // `isReady` alone is not enough on chain switch: the registry can still
+    // hold the previous chain's vaults until app.vue clears and reloads it.
+    // `loadedChainId` is only set after a successful loadVaults() and cleared
+    // to null on reset, so comparing it to the current chainId is the reliable
+    // gate before asking the SDK wallet service for balances.
+    if (loadedChainId.value !== currentChainId) {
       return
     }
 
     // Collect unique underlying asset addresses from ALL vaults (evk, earn, securitize)
     // plus external token list tokens for the swap selector
-    // Note: We only fetch underlying token balances, NOT vault share balances
-    // Share balances are fetched separately on individual pages via account lens
+    // Note: We only fetch underlying token balances here, NOT vault share balances.
+    // Share balances are fetched separately on individual pages via the SDK wallet service.
     const addresses = new Set<string>()
     const allVaults = [...getByType('evk'), ...getByType('earn'), ...getByType('securitize')]
     allVaults.forEach((vault) => {
@@ -120,6 +126,9 @@ export const useWallets = () => {
       }
     }
 
+    // Always fetch the native (gas) balance via the SDK (zero address) so
+    // `nativeBalance` is populated alongside the ERC20 balances.
+    addresses.add(zeroAddress)
     const includesNativeCurrency = addresses.delete(zeroAddress)
     const tokenAddresses = [...addresses] as Address[]
     if (!tokenAddresses.length && !includesNativeCurrency) {
@@ -135,77 +144,33 @@ export const useWallets = () => {
     isFetching.value = true
 
     try {
-      const targetAddress = balanceAddress.value as Address
-      const client = getPublicClient(rpcUrl.value)
-      const nativeBalancePromise = includesNativeCurrency
-        ? client.getBalance({ address: targetAddress }).catch((e) => {
-            logWarn('wallets/nativeBalance', e, {
-              data: {
-                chainId: currentChainId,
-                target: targetAddress,
-              },
-            })
-            return 0n
-          })
-        : Promise.resolve<bigint | undefined>(undefined)
-
-      // Fetch balances via lens in chunks to stay within gas limits
-      // All chunks fire concurrently so viem's HTTP transport batches them into fewer requests
-      const LENS_BATCH_SIZE = 250
-      const chunks: Address[][] = []
-      for (let i = 0; i < tokenAddresses.length; i += LENS_BATCH_SIZE) {
-        chunks.push(tokenAddresses.slice(i, i + LENS_BATCH_SIZE))
+      const targetAddress = getAddress(balanceAddress.value as Address)
+      const sdk = await getEulerSdk()
+      const assetsWithSpenders = tokenAddresses.map(asset => ({ asset, spenders: [] }))
+      if (includesNativeCurrency) {
+        assetsWithSpenders.push({ asset: zeroAddress, spenders: [] })
       }
+      const walletFetch = await sdk.walletService.fetchWallet(currentChainId, targetAddress, assetsWithSpenders)
+      if (walletFetch.errors.length) {
+        logWarn('wallets/fetchBalances', 'wallet service returned diagnostics', {
+          data: {
+            chainId: currentChainId,
+            target: targetAddress,
+            errors: walletFetch.errors,
+          },
+        })
+      }
+      const wallet = walletFetch.result
 
-      const [chunkResults, nativeBalance] = await Promise.all([
-        Promise.all(
-          chunks.map(async (batch, chunkIndex) => {
-            try {
-              return await client.readContract({
-                address: utilsLensAddress,
-                abi: eulerUtilsLensABI,
-                functionName: 'tokenBalances',
-                args: [targetAddress, batch],
-              }) as bigint[]
-            }
-            catch (e) {
-              logWarn(
-                'wallets/batchFetch',
-                `Lens tokenBalances failed, using zero fallback`,
-                {
-                  data: {
-                    chainId: currentChainId,
-                    lens: utilsLensAddress,
-                    target: targetAddress,
-                    totalTokens: tokenAddresses.length,
-                    chunkIndex,
-                    chunkCount: chunks.length,
-                    chunkSize: batch.length,
-                    sampleTokens: batch.slice(0, 3),
-                    error: e,
-                  },
-                },
-              )
-              return batch.map(() => 0n)
-            }
-          }),
-        ),
-        nativeBalancePromise,
-      ])
-      const result = chunkResults.flat()
-
-      // Only update if still on same chain
-      if (chainId.value === currentChainId) {
+      // Only update if still on the same chain and account.
+      if (chainId.value === currentChainId && balanceAddress.value && getAddress(balanceAddress.value) === targetAddress) {
         // Merge rather than replace: a vault-only-mode fetch shouldn't drop
         // full-mode balances we fetched earlier (e.g. from a swap page).
         // resetBalances() is called on chain switch and wallet-address
         // change, which is the right boundary to fully clear.
         const merged = new Map(balances.value)
-        result.forEach((balance: bigint, index: number) => {
-          merged.set(tokenAddresses[index], balance)
-        })
-        if (nativeBalance !== undefined) {
-          merged.set(zeroAddress, nativeBalance)
+        for (const asset of wallet.assets) {
+          merged.set(asset.asset, asset.balance)
         }
         balances.value = merged
         lastFetchChainId.value = currentChainId
@@ -240,7 +205,6 @@ export const useWallets = () => {
     return (isConnected.value || isSpyMode.value)
       && loadedChainId.value === chainId.value
       && !!balanceAddress.value
-      && !!eulerLensAddresses.value?.utilsLens
       && (lastFetchChainId.value !== chainId.value || !isLoaded.value || lastFetchAddress.value !== balanceAddress.value)
       && !isFetching.value
   }
@@ -253,7 +217,7 @@ export const useWallets = () => {
   // Retry when dependencies become ready (e.g. vaults load after cold start).
   // Watching loadedChainId (instead of the less-specific isReady) ensures we
   // only fire once the registry is confirmed to hold vaults for the active chain.
-  watch([loadedChainId, () => balanceAddress.value, () => eulerLensAddresses.value?.utilsLens], () => {
+  watch([loadedChainId, () => balanceAddress.value], () => {
     if (needsFetch() && !fetchPromise) {
       fetchPromise = updateBalances()
     }
@@ -271,60 +235,46 @@ export const useWallets = () => {
   }
 
   const getBalance = (tokenAddress: Address): bigint => {
+    let real: bigint
     try {
-      const normalized = getAddress(tokenAddress)
-      return balances.value.get(normalized) || 0n
+      real = balances.value.get(getAddress(tokenAddress)) || 0n
     }
     catch {
-      return balances.value.get(tokenAddress) || 0n
+      real = balances.value.get(tokenAddress) || 0n
     }
+    return applyLayerOverlay(tokenAddress, real)
   }
 
+  // SDK-sourced native (gas) balance, reactive + layer-aware. `updateBalances`
+  // always requests the zero address, so this reflects the connected/spy
+  // wallet's native balance (was previously a separate wagmi `useBalance`).
+  const nativeBalance = computed(() => getBalance(zeroAddress))
+
   /**
-   * Fetch a single token balance directly via balanceOf.
-   * Use this for supply/deposit pages to avoid triggering the full batch query.
+   * Resolve a single token's balance via the SDK wallet service and merge it
+   * into the central wallet entity, so `getBalance(token)` (reactive, layer-
+   * aware) reflects it afterwards. Reserved for arbitrary/custom swap tokens the
+   * routine `updateBalances` sweep doesn't cover — known vault assets and
+   * positions/shares are read from the wallet/account entities directly. Returns
+   * the layer-aware balance.
    */
   const fetchSingleBalance = async (tokenAddress: string): Promise<bigint> => {
     if ((!isConnected.value && !isSpyMode.value) || !balanceAddress.value || !tokenAddress) {
       return 0n
     }
     try {
-      const client = getPublicClient(rpcUrl.value)
       const normalized = getAddress(tokenAddress)
-      if (normalized === zeroAddress) {
-        return await client.getBalance({ address: balanceAddress.value as Address })
-      }
-      const result = await client.readContract({
-        address: normalized as Address,
-        abi: erc20BalanceOfAbi,
-        functionName: 'balanceOf',
-        args: [balanceAddress.value as Address],
-      }) as bigint
-      return result
-    }
-    catch {
-      return 0n
-    }
-  }
-
-  /**
-   * Fetch vault share balance via balanceOf on the vault address.
-   * Use this for savings/deposit positions where user holds vault shares.
-   */
-  const fetchVaultShareBalance = async (vaultAddress: string, subAccount?: string): Promise<bigint> => {
-    if ((!isConnected.value && !isSpyMode.value) || !balanceAddress.value || !vaultAddress) {
-      return 0n
-    }
-    try {
-      const balanceOfAddress = subAccount || balanceAddress.value
-      const client = getPublicClient(rpcUrl.value)
-      const result = await client.readContract({
-        address: getAddress(vaultAddress) as Address,
-        abi: erc20BalanceOfAbi,
-        functionName: 'balanceOf',
-        args: [balanceOfAddress as Address],
-      }) as bigint
-      return result
+      const sdk = await getEulerSdk()
+      if (!chainId.value) return 0n
+      const walletFetch = await sdk.walletService.fetchWallet(chainId.value, balanceAddress.value as Address, [
+        { asset: normalized as Address, spenders: [] },
+      ])
+      const real = walletFetch.result.getBalance(normalized as Address)
+      // Feed the central wallet entity so getBalance() sees this token too.
+      const merged = new Map(balances.value)
+      merged.set(normalized, real)
+      balances.value = merged
+      return applyLayerOverlay(normalized, real)
     }
     catch {
       return 0n
@@ -347,10 +297,10 @@ export const useWallets = () => {
     isLoaded,
     isLoading,
     getBalance,
+    nativeBalance,
     updateBalances,
     resetBalances,
     fetchSingleBalance,
-    fetchVaultShareBalance,
   }
 }
 

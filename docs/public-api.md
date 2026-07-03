@@ -33,7 +33,7 @@ For EVK / Securitize vaults, the same governor check applies to active and depre
 - absence of risk signals (oracle staleness, asset health, liquidity, market conditions)
 - visibility decisions (whether the vault is shown on lend / borrow / explore pages)
 
-The successor backend currently under development will expose these as separate fields (a configuration-safety layer and a risk-context layer). This endpoint deliberately does not encode them, and never will — when the migration happens, `is-known` will continue to mean exactly what it means today. Integrators that need additional signals should consume them from the dedicated endpoints once available.
+This endpoint deliberately does not encode configuration-safety or risk-context signals. Integrators that need those signals should consume dedicated risk or market-data endpoints instead of inferring them from `is-known`.
 
 See [vault-labels-and-verification.md](./vault-labels-and-verification.md) for how the label sources themselves are structured.
 
@@ -163,7 +163,7 @@ interface VaultMetadata {
   portfolioNotice: string | null
   deprecationReason: string | null
   deprecated: boolean                        // true if listed under any product's deprecatedVaults or earn entry has deprecated: true
-  governanceLimited: boolean                 // true when the owning product has isGovernanceLimited: true (governor exists but no active risk management). False for vaults without a product.
+  governanceLimited: boolean                 // true when the owning product has the "governance limited" tag. False for vaults without a product.
   productId: string | null                   // product slug from products.json that owns this vault; null for escrow and for vaults with no product entry
   asset: {
     address: string                          // checksummed
@@ -282,6 +282,6 @@ curl 'https://<host>/api/public/metadata?chainId=1'
 - Handlers: `server/api/public/is-known.get.ts`, `server/api/public/metadata.get.ts`
 - Verified-set builder + cache: `server/utils/verified-vaults.ts`
 - Metadata builder + cache: `server/utils/vault-metadata.ts`
-- Shared verification rule (also used by the client UI): `entities/vault/governor-verification.ts`
+- Shared verification rule (also used by the client UI): `utils/vault/governor-verification.ts`
 - CORS bypass for the `/api/public/` prefix lives in `server/middleware/cors.ts`.
 - Escrow vaults are read via an `eth_call` to `escrowedCollateralPerspective.verifiedArray()`. The perspective address is looked up from `EulerChains.json` (served by `/api/euler-chains`), and the RPC endpoint is taken from `RPC_URL_<chainId>`. Products and earn-vault label files are fetched via internal self-calls to `/api/labels/<file>` to reuse the labels endpoint's own cache and validation. Entity logo URLs are composed from `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` (or the `REPO`/`REPO_BRANCH` fallback) so they match the URL the app itself renders.

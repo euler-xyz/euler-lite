@@ -1,22 +1,27 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue'
-import type { Address } from 'viem'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { collectOracleAdapters, getChecksStatus, OracleAdapterCheckSeverity, type OracleAdapterEntry, type OracleAdapterMeta } from '~/entities/oracle'
-import { getOracleProviderLogo } from '~/entities/oracle-providers'
+import type {
+  SecuritizeCollateralVault,
+  EVault,
+  OracleRouteStep,
+} from '@eulerxyz/euler-v2-sdk'
+import { getRouterRecognition, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
-import { shouldInvertOraclePrice } from '~/utils/oracle-label'
-import { useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
+import { isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
+import { buildOracleAdapterViews, collectOracleRouteSteps } from '~/utils/oracle-adapter-views'
+import type { CSSProperties } from 'vue'
 
 const props = defineProps<{
-  vault?: Vault
-  vaults?: Vault[]
-  collateralVaults?: (Vault | SecuritizeVault)[]
+  vault?: EVault
+  vaults?: EVault[]
+  collateralVaults?: (EVault | SecuritizeCollateralVault)[]
+  defaultOpen?: boolean
 }>()
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
+const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -30,54 +35,15 @@ const sourceVaults = computed(() => {
   return []
 })
 
-const skipERC4626Bases = computed(() => {
-  const bases = new Set<string>()
-  props.collateralVaults?.forEach((vault) => {
-    bases.add(vault.address.toLowerCase())
-  })
-  return bases
-})
-
-const adapters = computed(() => {
-  const entries: OracleAdapterEntry[] = []
-  const deduped = new Map<string, OracleAdapterEntry>()
-
-  sourceVaults.value.forEach((vault) => {
-    entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-      base: vault.asset.address as Address,
-      quote: vault.unitOfAccount as Address,
-      leafOnly: true,
-    }))
-
-    if (props.collateralVaults?.length) {
-      props.collateralVaults.forEach((collateralVault) => {
-        entries.push(...collectOracleAdapters(vault.oracleDetailedInfo, 3, {
-          base: collateralVault.address as Address,
-          quote: vault.unitOfAccount as Address,
-          leafOnly: true,
-          skipERC4626Bases: skipERC4626Bases.value,
-        }))
-      })
-    }
-  })
-
-  entries.forEach((adapter) => {
-    const key = `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
-    if (!deduped.has(key)) {
-      deduped.set(key, adapter)
-    }
-  })
-
-  return [...deduped.values()]
-})
+const routeSteps = computed(() => collectOracleRouteSteps(sourceVaults.value, props.collateralVaults ?? []))
 
 const knownSymbols = computed(() => {
   const map = buildKnownSymbols()
 
   sourceVaults.value.forEach((vault) => {
     map.set(vault.asset.address.toLowerCase(), vault.asset.symbol)
-    if (vault.unitOfAccountSymbol) {
-      map.set(vault.unitOfAccount.toLowerCase(), vault.unitOfAccountSymbol)
+    if (vault.unitOfAccount) {
+      map.set(vault.unitOfAccount.address.toLowerCase(), vault.unitOfAccount.symbol)
     }
   })
 
@@ -88,51 +54,38 @@ const knownSymbols = computed(() => {
   return map
 })
 
-const adapterViews = computed(() => adapters.value.map((adapter) => {
-  const meta: OracleAdapterMeta | undefined = oracleAdapters[adapter.oracle.toLowerCase()]
-  const isERC4626 = adapter.name === 'ERC4626Vault'
-  const provider = meta?.provider || adapter.name
-  const name = meta?.name || adapter.name
-  const checks = meta?.checks
-  const invertPrice = shouldInvertOraclePrice({
-    metaBase: meta?.base,
-    metaQuote: meta?.quote,
-    callerBase: adapter.base,
-    callerQuote: adapter.quote,
-  })
-
-  return {
-    ...adapter,
-    name,
-    provider,
-    methodology: meta?.methodology || (isERC4626 ? 'Exchange Rate' : undefined),
-    logo: getOracleProviderLogo(provider, name),
-    label: meta?.label
-      ? {
-          primary: meta.label.split('(')[0].trimEnd(),
-          suffix: meta.label.includes('(') ? meta.label.slice(meta.label.indexOf('(')).trim() : undefined,
-        }
-      : undefined,
-    invertPrice,
-    checks,
-    checksStatus: getChecksStatus(checks),
-    failedChecks: checks?.filter(c => !c.pass) ?? [],
-  }
-}))
+const adapterViews = computed(() => buildOracleAdapterViews(routeSteps.value, oracleAdapters))
 
 watch(
-  () => adapters.value,
-  async (adapterList) => {
-    if (!chainId.value || !adapterList.length) return
+  () => routeSteps.value,
+  async (stepList) => {
+    if (!chainId.value || !stepList.length) return
 
     await Promise.all(
-      adapterList
-        .filter(a => a.name !== 'ERC4626Vault')
-        .map(a => loadOracleAdapter(chainId.value, a.oracle)),
+      stepList
+        .filter(isOracleAdapterRouteStep)
+        .map(step => loadOracleAdapter(chainId.value, step.oracle)),
     )
   },
   { immediate: true },
 )
+
+watch(
+  chainId,
+  (id) => {
+    if (id) loadRecognizedRouters(id)
+  },
+  { immediate: true },
+)
+
+// LITE-236: flag whether the vault's price oracle (EulerRouter) was deployed by the
+// recognized EulerRouterFactory. Null while the allowlist is still loading for the
+// active chain or unavailable, so we never show a false "unrecognized" warning.
+const routerRecognition = computed(() => {
+  if (recognizedRoutersChainId.value !== chainId.value) return null
+  const routerAddresses = sourceVaults.value.map(vault => vault.oracle?.oracle)
+  return getRouterRecognition(routerAddresses, recognizedRouters.value)
+})
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
@@ -140,23 +93,24 @@ const onCopyClick = (address: string) => {
   navigator.clipboard.writeText(address)
 }
 
-const getAdapterKey = (adapter: OracleAdapterEntry) => `${adapter.oracle.toLowerCase()}:${adapter.base.toLowerCase()}:${adapter.quote.toLowerCase()}`
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
 
 const { prices: adapterPrices, isLoading: isPriceLoading } = useOracleAdapterPrices(
-  adapters,
+  routeSteps,
   sourceVaults,
   computed(() => props.collateralVaults ?? []),
 )
 
-const isAdapterPriceFailed = (adapter: OracleAdapterEntry) => {
-  const key = getAdapterKey(adapter)
+type RouteStepKeyInput = Pick<OracleRouteStep, 'kind' | 'oracle' | 'base' | 'quote'>
+
+const isAdapterPriceFailed = (adapter: RouteStepKeyInput) => {
+  const key = getOracleRouteStepKey(adapter)
   const info = adapterPrices.value.get(key)
   return !info?.success
 }
 
-const formatAdapterPrice = (adapter: OracleAdapterEntry & { invertPrice: boolean }) => {
-  const key = getAdapterKey(adapter)
+const formatAdapterPrice = (adapter: RouteStepKeyInput & { invertPrice: boolean }) => {
+  const key = getOracleRouteStepKey(adapter)
   const info = adapterPrices.value.get(key)
   if (!info?.success) return '-'
   const rate = adapter.invertPrice && info.rate > 0 ? 1 / info.rate : info.rate
@@ -308,10 +262,32 @@ const onTooltipMouseLeave = () => {
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Oracles
-    </p>
+  <VaultOverviewAccordionSection
+    title="Oracles"
+    :default-open="props.defaultOpen ?? true"
+    content-class="flex flex-col gap-24"
+  >
+    <template #actions>
+      <UiHoverPreviewTooltip
+        v-if="routerRecognition === 'unrecognized'"
+        title="Unrecognized oracle router"
+        text="The vault's price oracle was not deployed by the recognized EulerRouterFactory. Verify the oracle configuration before trusting its prices."
+        placement="top-start"
+      >
+        <span
+          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
+          data-id="data-point"
+          data-field="oracle-router-recognition"
+          data-value="unrecognized"
+        >
+          <SvgIcon
+            name="warning"
+            class="!w-12 !h-12"
+          />
+          Unrecognized router
+        </span>
+      </UiHoverPreviewTooltip>
+    </template>
     <div
       v-if="!adapterViews.length"
       class="text-p3 text-content-tertiary"
@@ -324,7 +300,7 @@ const onTooltipMouseLeave = () => {
     >
       <div
         v-for="adapter in adapterViews"
-        :key="getAdapterKey(adapter)"
+        :key="getOracleRouteStepKey(adapter)"
         class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle"
       >
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-8">
@@ -395,7 +371,11 @@ const onTooltipMouseLeave = () => {
           >
             <span class="text-content-tertiary">Checks</span>
             <span
-              v-if="!adapter.checks?.length"
+              v-if="adapter.isCustomAdapter"
+              class="text-content-secondary"
+            >Custom — set by risk manager</span>
+            <span
+              v-else-if="!adapter.checks?.length"
               class="text-content-secondary"
             >N/A</span>
             <span
@@ -467,7 +447,7 @@ const onTooltipMouseLeave = () => {
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 
   <Teleport to="body">
     <template v-if="hoveredChecksAdapter?.checks?.length">
@@ -531,7 +511,7 @@ const onTooltipMouseLeave = () => {
               }"
             >
               <SvgIcon
-                :name="check.pass ? 'check' : 'x'"
+                :name="check.pass ? 'check' : 'close'"
                 class="!w-10 !h-10 text-white"
               />
             </span>

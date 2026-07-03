@@ -1,43 +1,45 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { isAddress, getAddress, zeroAddress, type Address } from 'viem'
-import { getCashLimitedWithdrawAmount, type Vault, type SecuritizeVault, fetchSecuritizeVault } from '~/entities/vault'
-import { isSecuritizeVault } from '~/entities/vault/factory'
-import { getSubAccountAddress } from '~/entities/account'
+import type { SecuritizeCollateralVault, EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeVault } from '~/utils/vault/categories'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
-import type { TxPlan } from '~/entities/txPlan'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
+import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
+import { isCowProvider } from '~/entities/cowswap'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const route = useRoute()
-const { getVault } = useVaults()
-const { address } = useAccount()
+const { getVault, getSecuritizeVault } = useVaults()
+const { address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const { depositPositions } = useEulerAccount()
-const { buildSwapPlan, buildSameAssetSwapPlan } = useEulerOperations()
-const { withIntrinsicSupplyApy } = useIntrinsicApy()
+const { planCollateralChange } = useEulerTx()
+const { account: planAccount } = usePlanAccount()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy } = useRewardsApy()
 
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value
   if (!addr || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(addr, subAccountIndex)
+  return getSubAccountAddress(getAddress(addr), subAccountIndex)
 })
 
 // ── Vaults ───────────────────────────────────────────────────────────────
-const fromVault: Ref<Vault | SecuritizeVault | undefined> = ref()
-const toVault: Ref<Vault | undefined> = ref()
+const fromVault: Ref<EVault | SecuritizeCollateralVault | undefined> = ref()
+const toVault: Ref<EVault | undefined> = ref()
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)))
 
-const fromVaultAsRegular = computed(() => fromVault.value as Vault | undefined)
+const fromVaultAsRegular = computed(() => fromVault.value as EVault | undefined)
 const { collateralOptions, collateralVaults } = useSwapCollateralOptions({ currentVault: fromVaultAsRegular })
 const toVaultOptions = computed(() => collateralVaults.value.filter(vault => !isVaultDeprecated(vault.address)))
 const toVaultOptionAddresses = computed(() => new Set(toVaultOptions.value.map(vault => normalizeAddress(vault.address))))
@@ -57,7 +59,7 @@ const savingPosition = computed(() => {
   const currentAddress = normalizeAddress(fromVault.value.address)
   if (!currentAddress) return null
   return depositPositions.value.find(position =>
-    normalizeAddress(position.vault.address) === currentAddress
+    normalizeAddress(position.vault?.address || '') === currentAddress
     && (!subAccount.value || normalizeAddress(position.subAccount) === normalizeAddress(subAccount.value)),
   ) || null
 })
@@ -71,13 +73,13 @@ const balance = computed(() => getCashLimitedWithdrawAmount(
 // ── Supply APY ───────────────────────────────────────────────────────────
 const fromSupplyApy = computed(() => {
   if (!fromVault.value) return null
-  const base = nanoToValue(fromVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, fromVault.value.asset.address) + getSupplyRewardApy(fromVault.value.address)
+  const base = getVaultSupplyApy(fromVault.value)
+  return withVaultIntrinsicApy(base, fromVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(fromVault.value.address)
 })
 const toSupplyApy = computed(() => {
   if (!toVault.value) return null
-  const base = nanoToValue(toVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, toVault.value.asset.address) + getSupplyRewardApy(toVault.value.address)
+  const base = getVaultSupplyApy(toVault.value)
+  return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(toVault.value.address)
 })
 
 // ── Shared swap logic ────────────────────────────────────────────────────
@@ -92,10 +94,11 @@ const swap = useSwapPageLogic({
   quoteDiffPrefix: '-',
   redirectPath: '/portfolio/saving',
   swapperMode: SwapperMode.EXACT_IN,
+  getPlanAccount: () => planAccount.value,
 
   buildQuoteRequest(amount) {
     if (!fromVault.value || !toVault.value) return null
-    const account = (subAccount.value || effectiveAddress.value || zeroAddress) as Address
+    const account = (subAccount.value ?? effectiveAddress.value ?? zeroAddress) as Address
     return {
       params: {
         tokenIn: fromVault.value.asset.address as Address,
@@ -114,29 +117,25 @@ const swap = useSwapPageLogic({
     }
   },
 
-  async buildPlan(quote?: SwapApiQuote): Promise<TxPlan> {
-    if (isSameAsset.value) {
-      if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
-      const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
-      const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
-      return buildSameAssetSwapPlan({
-        fromVaultAddress: fromVault.value.address,
-        toVaultAddress: toVault.value.address,
-        amount,
-        isMax,
-        maxShares: isMax ? savingPosition.value?.shares : undefined,
-        subAccount: subAccount.value,
-      })
-    }
-    const swapQuote = quote || selectedQuote.value
-    if (!swapQuote) throw new Error('No quote selected')
-    return buildSwapPlan({
-      quote: swapQuote,
+  async buildPlan(quote?: SwapQuote, context?: SwapQuotePlanContext): Promise<TransactionPlan> {
+    if (!fromVault.value || !toVault.value) throw new Error('Vaults not loaded')
+    const amount = valueToNano(fromAmount.value, fromVault.value.asset.decimals)
+    const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+    const swapQuote = quote ?? selectedQuote.value
+    if (!isSameAsset.value && !swapQuote) throw new Error('No quote selected')
+    const positionAccount = subAccount.value ?? effectiveAddress.value
+    if (!positionAccount) throw new Error('Account not loaded')
+    return planCollateralChange({
+      fromVault: fromVault.value.address as Address,
+      toVault: toVault.value.address as Address,
+      amount,
+      positionAccount: positionAccount as Address,
+      toAsset: toVault.value.asset.address as Address,
+      isMax,
+      maxShares: isMax ? savingPosition.value?.shares : undefined,
+      swapQuote: isSameAsset.value ? undefined : swapQuote!,
       swapperMode: SwapperMode.EXACT_IN,
-      isRepay: false,
-      requestedSlippage: slippage.value,
-      targetDebt: 0n,
-      currentDebt: 0n,
+      account: context?.account ?? planAccount.value,
     })
   },
 
@@ -153,10 +152,72 @@ const {
   isSameAsset, sameVaultError, errorText,
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
+  effectiveQuoteFetchedAt,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
+
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+
+// Add this earn-position swap (or same-asset migration) to the batch. CoW
+// orders can't be merged into an EVC batch, so they're excluded.
+const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const canAddToBatch = computed(() => {
+  if (isGeoBlocked.value) return false
+  if (!fromVault.value || !toVault.value || !(+fromAmount.value)) return false
+  if (isSameAsset.value) return true
+  return !!selectedQuote.value && !isCowSwapSelected.value
+})
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: priceImpact,
+  shouldGateUnknown: computed(() =>
+    !isSameAsset.value
+    && selectedQuote.value !== null
+    && priceImpact.value === null,
+  ),
+})
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithAddToBatchPriceImpact(async () => {
+    const from = fromVault.value
+    const to = toVault.value
+    if (!from || !to) return
+    const positionAccount = (subAccount.value ?? effectiveAddress.value) as Address | undefined
+    if (!positionAccount) return
+    const fromAddr = from.address as Address
+    const toAddr = to.address as Address
+    const toAssetAddr = to.asset.address as Address
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+    const maxShares = isMax ? savingPosition.value?.shares : undefined
+    const sameAsset = isSameAsset.value
+    const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    const label = sameAsset
+      ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+      : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+    await addBatchEntry({
+      label,
+      buildPlan: account => planCollateralChange({
+        fromVault: fromAddr,
+        toVault: toAddr,
+        amount,
+        positionAccount,
+        toAsset: toAssetAddr,
+        isMax,
+        maxShares,
+        swapQuote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+      }),
+      subAccount: positionAccount,
+      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
+    })
+    fromAmount.value = ''
+    redirectAfterAdd('/portfolio/saving', { subAccount: positionAccount, vault: toAddr })
+  })
+}
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
@@ -178,7 +239,7 @@ const loadVaults = async () => {
 
     const isFromSecuritize = await isSecuritizeVault(baseAddress)
     if (isFromSecuritize) {
-      fromVault.value = await fetchSecuritizeVault(baseAddress, buildFetchContext())
+      fromVault.value = await getSecuritizeVault(baseAddress)
     }
     else {
       fromVault.value = await getVault(baseAddress)
@@ -188,7 +249,7 @@ const loadVaults = async () => {
       toVault.value = await getVault(targetAddress)
     }
     else if (!isFromSecuritize) {
-      toVault.value = fromVault.value as Vault
+      toVault.value = fromVault.value as EVault
     }
   }
   catch (e) {
@@ -271,28 +332,28 @@ watch([() => route.params.vault, () => route.query.to], () => {
               No asset swap options available
             </div>
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still withdraw existing deposits."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="errorText"
               title="Error"
               variant="error"
               :description="errorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="sameVaultError"
               title="Error"
               variant="error"
               :description="sameVaultError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -300,7 +361,7 @@ watch([() => route.params.vault, () => route.query.to], () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="quoteError"
               title="Swap quote"
               variant="warning"
@@ -360,6 +421,8 @@ watch([() => route.params.vault, () => route.query.to], () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :loading="isSubmitting || isPreparing"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               {{ reviewSwapLabel }}
             </VaultFormSubmit>

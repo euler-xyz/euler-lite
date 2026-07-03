@@ -21,7 +21,7 @@ export type EulerLabelVaultOverride = {
   restricted?: string[]
   notExplorableLend?: boolean
   notExplorableBorrow?: boolean
-  keyring?: boolean
+  tags?: string[]
 }
 
 export type EulerLabelProduct = {
@@ -33,19 +33,19 @@ export type EulerLabelProduct = {
   vaults: string[]
   deprecatedVaults?: string[]
   deprecationReason?: string
-  isGovernanceLimited?: boolean
   notExplorable?: boolean
   block?: string[]
-  recentlyAddedVaults?: string[]
   vaultOverrides?: Record<string, EulerLabelVaultOverride>
-  keyring?: boolean
+  // Freeform classification tags, e.g. 'keyring', 'access control', or
+  // 'governance limited'. Replaces the former bespoke classification booleans.
+  tags?: string[]
 }
 
 export type EulerLabelEarnVaultEntry = {
   address: string
   block?: string[]
   restricted?: string[]
-  recentlyAdded?: boolean
+  tags?: string[]
   deprecated?: boolean
   deprecationReason?: string
   description?: string

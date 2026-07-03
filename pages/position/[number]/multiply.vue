@@ -1,65 +1,55 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { formatUnits, type Address } from 'viem'
-import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
-import { OperationReviewModal, SlippageSettingsModal } from '#components'
-import { useModal } from '~/components/ui/composables/useModal'
-import { useToast } from '~/components/ui/composables/useToast'
-import type { AccountBorrowPosition } from '~/entities/account'
-import type { Vault, VaultAsset } from '~/entities/vault'
-import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/services/pricing/priceProvider'
+import type { VaultAsset } from '~/types/asset'
+import { getNetAPY } from '~/utils/vault/apy'
+import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
-import { type SwapApiQuote, SwapperMode } from '~/entities/swap'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
-import type { TxPlan } from '~/entities/txPlan'
-import { useIntrinsicApy } from '~/composables/useIntrinsicApy'
+import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMaxMultiplier } from '~/utils/multiply-math'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { SlippageSettingsModal, OperationReviewModal } from '#components'
+import { formatUnits, type Address } from 'viem'
+import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
+import { reportClientEvent } from '~/utils/client-observability'
+import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
 const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error } = useToast()
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
-const { buildMultiplyPlan, executeTxPlan } = useEulerOperations()
-const { eulerLensAddresses } = useEulerAddresses()
+const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+const { account: planAccount } = usePlanAccount()
+const { eulerLensAddresses, chainId } = useEulerAddresses()
 const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+const { getTokenCategoryTags } = useTokenList()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const {
-  runSimulation: runMultiplySimulation,
+  runPreparedSimulation: runMultiplySimulation,
   simulationError: multiplySimulationError,
   clearSimulationError: clearMultiplySimulationError,
-} = useTxPlanSimulation()
+} = useTransactionPlanSimulation()
 const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
-
-type MultiplyPlanParamsCommon = {
-  supplyVaultAddress: string
-  supplyAssetAddress: string
-  supplyAmount: bigint
-  supplySharesAmount?: bigint
-  supplyIsSavings?: boolean
-  longVaultAddress: string
-  longAssetAddress: string
-  borrowVaultAddress: string
-  debtAmount: bigint
-  swapperMode: SwapperMode
-  subAccount: string
-}
-type MultiplyPlanParams
-  = | (MultiplyPlanParamsCommon & { quote: SwapApiQuote, requestedSlippage: number })
-    | (MultiplyPlanParamsCommon & { quote?: undefined, requestedSlippage?: never })
 
 const priceInvert = usePriceInvert(
   () => multiplyShortVault.value?.asset.symbol,
@@ -67,22 +57,26 @@ const priceInvert = usePriceInvert(
 )
 
 const positionIndex = usePositionIndex()
-const position: Ref<AccountBorrowPosition | null> = ref(null)
+// Layer-aware: tracks the active batch layer's portfolio so the form reflects
+// simulated debt/collateral (a one-shot ref would freeze at the real state).
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() =>
+  (!isConnected.value && !isSpyMode.value) ? null : (getPositionBySubAccountIndex(+positionIndex) || null),
+)
 
 const isLoading = ref(false)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
-const plan = ref<TxPlan | null>(null)
-const planParams = ref<MultiplyPlanParams | null>(null)
+const plan = ref<TransactionPlan | null>(null)
+const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 
 const multiplier = ref(1)
 const multiplyLongAmount = ref('')
 const multiplyShortAmount = ref('')
-const multiplySupplyVault: Ref<Vault | undefined> = ref()
+const multiplySupplyVault: Ref<EVault | undefined> = ref()
 
 const { slippage: multiplySlippage } = useSlippage({
-  fromSymbol: () => position.value?.borrow.asset.symbol,
-  toSymbol: () => position.value?.collateral.asset.symbol,
+  fromSymbol: () => multiplyShortVault.value?.asset.symbol,
+  toSymbol: () => multiplyLongVault.value?.asset.symbol,
 })
 const {
   sortedQuoteCards: multiplyQuoteCardsSorted,
@@ -101,40 +95,43 @@ const {
 } = useSwapQuotesParallel({
   amountField: 'amountOut',
   compare: 'max',
-  buildTxPlanForQuote: quote => buildIncreasePositionTxPlanForQuote(quote, false),
+  buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
+  getPlanAccount: () => planAccount.value,
+  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
-const multiplyLongVault = computed(() => position.value?.collateral)
-const multiplyShortVault = computed(() => position.value?.borrow)
+const multiplyLongVault = computed<EVault | undefined>(() => {
+  const vault = position.value ? position.value.collateralVault : undefined
+  return vault && isEVault(vault) ? vault : undefined
+})
+const multiplyShortVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+const positionRoeCollateralVaults = computed(() =>
+  resolvePositionRoeCollateralVaults(position.value, multiplyLongVault.value),
+)
+const projectedMultiplyCollateralVaults = computed(() =>
+  mergeRoeCollateralVaults([
+    ...positionRoeCollateralVaults.value.vaults,
+    multiplySupplyVault.value,
+    multiplyLongVault.value,
+  ]),
+)
+const isMultiplyRoeApplicable = computed(() =>
+  positionRoeCollateralVaults.value.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+)
+const correlatedBadgeTitle = computed(() => {
+  const category = getTokenAddressesCorrelationCategoryLabel(
+    [
+      ...projectedMultiplyCollateralVaults.value.map(vault => vault.asset.address),
+      multiplyShortVault.value?.asset.address,
+    ],
+    getTokenCategoryTags,
+  )
+  return category ? `Correlated category: ${category}` : undefined
+})
 
-async function buildIncreasePositionTxPlanForQuote(quote: SwapApiQuote, includePermit2Call: boolean): Promise<TxPlan> {
-  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
-    throw new Error('Vaults not loaded')
-  }
-  const subAccount = multiplySubAccount.value
-  if (!subAccount) {
-    throw new Error('Unable to resolve position')
-  }
-  return buildMultiplyPlan({
-    supplyVaultAddress: multiplySupplyVault.value.address,
-    supplyAssetAddress: multiplySupplyVault.value.asset.address,
-    supplyAmount: 0n,
-    longVaultAddress: multiplyLongVault.value.address,
-    longAssetAddress: multiplyLongVault.value.asset.address,
-    borrowVaultAddress: multiplyShortVault.value.address,
-    debtAmount: multiplyDebtAmountNano.value,
-    quote,
-    requestedSlippage: multiplySlippage.value,
-    swapperMode: SwapperMode.EXACT_IN,
-    subAccount,
-    includePermit2Call,
-    enabledCollaterals: position.value?.collaterals,
-    enabledController: position.value?.borrow.address,
-  })
-}
-
-const pairAssets = computed(() => {
+const pairAssets = computed<VaultAsset[]>(() => {
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
     return []
   }
@@ -168,22 +165,22 @@ const multiplySupplyApy = computed(() => {
   if (!multiplySupplyVault.value) {
     return null
   }
-  const base = nanoToValue(multiplySupplyVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, multiplySupplyVault.value.asset.address) + getSupplyRewardApy(multiplySupplyVault.value.address)
+  const base = getVaultSupplyApy(multiplySupplyVault.value)
+  return withVaultIntrinsicApy(base, multiplySupplyVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(multiplySupplyVault.value.address)
 })
 const multiplyLongApy = computed(() => {
   if (!multiplyLongVault.value) {
     return null
   }
-  const base = nanoToValue(multiplyLongVault.value.interestRateInfo.supplyAPY || 0n, 25)
-  return withIntrinsicSupplyApy(base, multiplyLongVault.value.asset.address) + getSupplyRewardApy(multiplyLongVault.value.address)
+  const base = getVaultSupplyApy(multiplyLongVault.value)
+  return withVaultIntrinsicApy(base, multiplyLongVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(multiplyLongVault.value.address)
 })
 const multiplyBorrowApy = computed(() => {
   if (!multiplyShortVault.value) {
     return null
   }
-  const base = nanoToValue(multiplyShortVault.value.interestRateInfo.borrowAPY || 0n, 25)
-  return withIntrinsicBorrowApy(base, multiplyShortVault.value.asset.address) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+  const base = getVaultBorrowApy(multiplyShortVault.value)
+  return withVaultIntrinsicApy(base, multiplyShortVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
 })
 
 const multiplyDebtAmountNano = computed(() => {
@@ -208,21 +205,19 @@ const multiplyBorrowLtv = computed(() => {
   if (!multiplySupplyVault.value || !multiplyShortVault.value) {
     return 0
   }
-  const match = multiplyShortVault.value.collateralLTVs.find(
-    ltv => normalizeAddress(ltv.collateral) === normalizeAddress(multiplySupplyVault.value?.address),
+  const match = multiplyShortVault.value.collaterals.find(
+    ltv => normalizeAddress(ltv.address) === normalizeAddress(multiplySupplyVault.value?.address),
   )
-  return match ? nanoToValue(match.borrowLTV, 2) : 0
+  return match ? ltvToPercent(match.borrowLTV) : 0
 })
 const multiplyMaxMultiplier = computed(() => computeMaxMultiplier(multiplyBorrowLtv.value))
 const multiplyCurrentMultiple = computed(() => {
   if (!position.value) {
     return 1
   }
-  const ltvPercent = nanoToValue(position.value.userLTV, 18)
-  if (!Number.isFinite(ltvPercent) || ltvPercent <= 0) {
-    return 1
-  }
-  const ltv = ltvPercent / 100
+  const ltvValue = position.value.userLTV ?? position.value.currentLTV
+  if (ltvValue === undefined) return 1
+  const ltv = nanoToValue(ltvValue, 18)
   if (!Number.isFinite(ltv) || ltv <= 0) {
     return 1
   }
@@ -347,20 +342,53 @@ const multiplyRoeAfter = computed(() => {
     multiplyBorrowApy.value,
   )
 })
+const multiplyNetApyBefore = computed(() => {
+  if (
+    currentSupplyValueUsd.value === null
+    || currentBorrowValueUsd.value === null
+    || multiplyLongApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    currentSupplyValueUsd.value,
+    multiplyLongApy.value,
+    currentBorrowValueUsd.value,
+    multiplyBorrowApy.value,
+  )
+})
+const multiplyNetApyAfter = computed(() => {
+  if (
+    nextSupplyValueUsd.value === null
+    || nextBorrowValueUsd.value === null
+    || multiplyWeightedSupplyApy.value === null
+    || multiplyBorrowApy.value === null
+  ) {
+    return null
+  }
+  return getNetAPY(
+    nextSupplyValueUsd.value,
+    multiplyWeightedSupplyApy.value,
+    nextBorrowValueUsd.value,
+    multiplyBorrowApy.value,
+  )
+})
 const multiplyLiquidationLtv = computed(() => {
   if (!multiplySupplyVault.value || !multiplyShortVault.value) {
     return null
   }
-  const match = multiplyShortVault.value.collateralLTVs.find(
-    ltv => normalizeAddress(ltv.collateral) === normalizeAddress(multiplySupplyVault.value?.address),
+  const match = multiplyShortVault.value.collaterals.find(
+    ltv => normalizeAddress(ltv.address) === normalizeAddress(multiplySupplyVault.value?.address),
   )
-  return match ? nanoToValue(match.liquidationLTV, 2) : null
+  return match ? ltvToPercent(match.liquidationLTV) : null
 })
 const multiplyCurrentLtv = computed(() => {
   if (!position.value) {
     return null
   }
-  return nanoToValue(position.value.userLTV, 18)
+  const ltv = position.value.userLTV ?? position.value.currentLTV
+  return ltv === undefined ? null : ltvToPercent(nanoToValue(ltv, 18))
 })
 const multiplyNextLtv = computed(() => {
   if (nextBorrowValueUsd.value === null || nextSupplyValueUsd.value === null) {
@@ -375,7 +403,8 @@ const multiplyCurrentLiquidationLtv = computed(() => {
   if (!position.value) {
     return null
   }
-  return nanoToValue(position.value.liquidationLTV, 2)
+  const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+  return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
 })
 const multiplyNextLiquidationLtv = computed(() => {
   return multiplyLiquidationLtv.value ?? multiplyCurrentLiquidationLtv.value
@@ -384,7 +413,8 @@ const multiplyCurrentHealth = computed(() => {
   if (!position.value) {
     return null
   }
-  return nanoToValue(position.value.health, 18)
+  const health = position.value.healthFactor
+  return health === undefined ? null : nanoToValue(health, 18)
 })
 const multiplyNextHealth = computed(() => {
   if (!multiplyNextLiquidationLtv.value || !multiplyNextLtv.value) {
@@ -443,8 +473,6 @@ const multiplySwapSummary = computed(() => {
   return {
     from: `${formatSmartAmount(amountIn)} ${multiplyShortVault.value.asset.symbol}`,
     to: `${formatSmartAmount(amountOut)} ${multiplyLongVault.value.asset.symbol}`,
-    fromExact: `${amountIn} ${multiplyShortVault.value.asset.symbol}`,
-    toExact: `${amountOut} ${multiplyLongVault.value.asset.symbol}`,
   }
 })
 const multiplyPriceImpact = ref<number | null>(null)
@@ -476,6 +504,11 @@ const multipliedPriceImpact = computed(() =>
 const { guardWithPriceImpact } = usePriceImpactGate({
   directPriceImpact: multiplyPriceImpact,
   multipliedPriceImpact,
+  shouldGateUnknown: computed(() =>
+    !multiplyIsSameAsset.value
+    && multiplyEffectiveQuote.value !== null
+    && multiplyPriceImpact.value === null,
+  ),
 })
 const multiplyRoutedVia = computed(() => {
   if (!multiplySelectedProvider.value) return isMultiplyQuoteLoading.value ? null : 'Not selected'
@@ -486,7 +519,7 @@ const multiplyErrorText = computed(() => {
   if (!multiplyShortVault.value) {
     return null
   }
-  if (multiplyDebtAmountNano.value > 0n && (multiplyShortVault.value.totalCash || 0n) < multiplyDebtAmountNano.value) {
+  if (multiplyDebtAmountNano.value > 0n && multiplyShortVault.value.availableLiquidity < multiplyDebtAmountNano.value) {
     return 'Not enough liquidity in the vault'
   }
   return null
@@ -539,6 +572,97 @@ const onRefreshMultiplyQuotes = () => {
   requestMultiplyQuote()
 }
 
+let multiplySubAccountSnapshotKey: string | null = null
+let multiplySubAccountSnapshotPromise: Promise<boolean> | null = null
+const ensureMultiplySubAccountSnapshot = (subAccount: Address): Promise<boolean> => {
+  const account = planAccount.value
+  if (!account) return Promise.resolve(false)
+  const key = `${account.chainId}:${normalizeAddress(subAccount)}`
+  if (multiplySubAccountSnapshotKey !== key) {
+    multiplySubAccountSnapshotKey = key
+    multiplySubAccountSnapshotPromise = null
+  }
+  if (!multiplySubAccountSnapshotPromise) {
+    multiplySubAccountSnapshotPromise = preloadSubAccountSnapshot(account, subAccount)
+      .then(() => true)
+      .catch((e) => {
+        console.warn('[Multiply] failed to preload sub-account snapshot', e)
+        return false
+      })
+  }
+  return multiplySubAccountSnapshotPromise
+}
+
+async function buildMultiplyPlanFromQuote(quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
+    throw new Error('Multiply vaults not loaded')
+  }
+  const subAccount = multiplySubAccount.value
+  if (!subAccount) throw new Error('Sub-account not resolved')
+  const debtAmount = multiplyDebtAmountNano.value
+  if (debtAmount <= 0n) throw new Error('Debt amount not set')
+  const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address)
+  return planMultiply({
+    collateralVault: multiplySupplyVault.value.address as Address,
+    collateralAmount: 0n,
+    collateralAsset: multiplySupplyVault.value.asset.address as Address,
+    longVault: multiplyLongVault.value.address as Address,
+    liabilityVault: multiplyShortVault.value.address as Address,
+    liabilityAmount: debtAmount,
+    receiver: subAccount as Address,
+    swapQuote: quote,
+    swapperMode: SwapperMode.EXACT_IN,
+    account,
+    subAccountSnapshotApplied,
+  })
+}
+
+// Batch the multiply. subAccountSnapshotApplied: true keeps the layer account
+// authoritative (no on-chain sub-account re-fetch that would clobber a
+// simulated earlier batch step). Same-asset multiply (no swap) routes through
+// planMultiplySameAsset; cross-asset needs a non-CoW quote (CoW can't merge).
+const canAddMultiplyToBatch = computed(() => {
+  if (isGeoBlocked.value || isMultiplyRestricted.value) return false
+  if (multiplyDebtAmountNano.value <= 0n) return false
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value || !multiplySubAccount.value) return false
+  if (multiplyIsSameAsset.value) return true
+  return !!multiplyEffectiveQuote.value
+    && !isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)
+})
+const addToBatch = async () => {
+  if (!canAddMultiplyToBatch.value) return
+  await guardWithPriceImpact(async () => {
+    const sameAsset = multiplyIsSameAsset.value
+    const quote = sameAsset ? undefined : multiplyEffectiveQuote.value ?? undefined
+    const supply = multiplySupplyVault.value!.address as Address
+    const supplyAsset = multiplySupplyVault.value!.asset.address as Address
+    const long = multiplyLongVault.value!.address as Address
+    const short = multiplyShortVault.value!.address as Address
+    const debtAmount = multiplyDebtAmountNano.value
+    const receiver = multiplySubAccount.value as Address
+    await addBatchEntry({
+      label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
+      buildPlan: account => planMultiply({
+        collateralVault: supply,
+        collateralAmount: 0n,
+        collateralAsset: supplyAsset,
+        longVault: long,
+        liabilityVault: short,
+        liabilityAmount: debtAmount,
+        receiver,
+        swapQuote: quote,
+        swapperMode: SwapperMode.EXACT_IN,
+        account,
+        subAccountSnapshotApplied: true,
+      }),
+      subAccount: receiver,
+      multiply: true,
+      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
+    })
+    redirectAfterAdd('/portfolio', { subAccount: receiver })
+  })
+}
+
 const requestMultiplyQuote = useDebounceFn(async () => {
   multiplyQuoteError.value = null
 
@@ -565,6 +689,7 @@ const requestMultiplyQuote = useDebounceFn(async () => {
     multiplyQuoteError.value = 'Unable to resolve position'
     return
   }
+  await ensureMultiplySubAccountSnapshot(subAccount as Address)
 
   setMultiplyAmounts(null, null)
   const requestParams = {
@@ -597,7 +722,7 @@ const submitMultiply = async () => {
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
-      if (isSubmitting.value || !isConnected.value) {
+      if (isSubmitting.value || (!isConnected.value && !isSpyMode.value)) {
         return
       }
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
@@ -622,37 +747,42 @@ const submitMultiply = async () => {
         return
       }
 
-      const baseParams: MultiplyPlanParamsCommon = {
-        supplyVaultAddress: multiplySupplyVault.value.address,
-        supplyAssetAddress: multiplySupplyVault.value.asset.address,
-        supplyAmount: 0n,
-        longVaultAddress: multiplyLongVault.value.address,
-        longAssetAddress: multiplyLongVault.value.asset.address,
-        borrowVaultAddress: multiplyShortVault.value.address,
-        debtAmount,
-        swapperMode: SwapperMode.EXACT_IN,
-        subAccount,
-      }
-      const nextPlanParams: MultiplyPlanParams = quote
-        ? { ...baseParams, quote, requestedSlippage: multiplySlippage.value }
-        : baseParams
-      planParams.value = nextPlanParams
-
       try {
-        plan.value = await buildMultiplyPlan({
-          ...nextPlanParams,
-          includePermit2Call: false,
-          enabledCollaterals: position.value?.collaterals,
-          enabledController: position.value?.borrow.address,
+        const account = planAccount.value
+        const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address)
+        plan.value = await planMultiply({
+          collateralVault: multiplySupplyVault.value.address as Address,
+          collateralAmount: 0n,
+          collateralAsset: multiplySupplyVault.value.asset.address as Address,
+          longVault: multiplyLongVault.value.address as Address,
+          liabilityVault: multiplyShortVault.value.address as Address,
+          liabilityAmount: debtAmount,
+          receiver: subAccount as Address,
+          swapQuote: quote ?? undefined,
+          swapperMode: SwapperMode.EXACT_IN,
+          account,
+          subAccountSnapshotApplied,
         })
+        preparedPlan.value = await prepareTransactionPlan(plan.value, { account })
       }
       catch (e) {
         console.warn('[Multiply] failed to build plan', e)
+        void reportClientEvent({
+          event: 'tx_plan_build_failed',
+          flow: 'multiply',
+          phase: 'build',
+          chainId: chainId.value,
+          operationType: 'multiply',
+          vaultAddress: multiplyLongVault.value.address,
+          assetAddress: multiplyLongVault.value.asset.address,
+          quoteProvider: multiplyRoutedVia.value ?? undefined,
+        }, e)
         plan.value = null
+        preparedPlan.value = null
       }
 
-      if (plan.value) {
-        const ok = await runMultiplySimulation(plan.value)
+      if (preparedPlan.value) {
+        const ok = await runMultiplySimulation(preparedPlan.value)
         if (!ok) {
           return
         }
@@ -668,7 +798,7 @@ const submitMultiply = async () => {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: reviewBorrowAmount,
-          plan: plan.value || undefined,
+          prepared: preparedPlan.value || undefined,
           quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: reviewSwapToAmount,
@@ -688,19 +818,12 @@ const submitMultiply = async () => {
 }
 
 const sendMultiply = async () => {
-  if (!planParams.value) {
+  if (!preparedPlan.value) {
     return
   }
   isSubmitting.value = true
   try {
-    const nextPlan = await buildMultiplyPlan({
-      ...planParams.value,
-      includePermit2Call: true,
-      enabledCollaterals: position.value?.collaterals,
-      enabledController: position.value?.borrow.address,
-    })
-    plan.value = nextPlan
-    await executeTxPlan(nextPlan)
+    await executePreparedPlan(preparedPlan.value)
     modal.close()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
     setTimeout(() => {
@@ -710,6 +833,16 @@ const sendMultiply = async () => {
   catch (e) {
     console.warn(e)
     error('Transaction failed')
+    void reportClientEvent({
+      event: 'tx_execute_failed',
+      flow: 'multiply',
+      phase: 'execute',
+      chainId: chainId.value,
+      operationType: 'multiply',
+      vaultAddress: multiplyLongVault.value?.address,
+      assetAddress: multiplyLongVault.value?.asset.address,
+      quoteProvider: multiplyRoutedVia.value ?? undefined,
+    }, e)
   }
   finally {
     isSubmitting.value = false
@@ -717,7 +850,7 @@ const sendMultiply = async () => {
 }
 
 const isMultiplySubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
     return true
   }
@@ -758,19 +891,15 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 
 const loadPosition = async () => {
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
+  if (!isConnected.value && !isSpyMode.value) return
   isLoading.value = true
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
   if (!position.value) {
     multiplySupplyVault.value = undefined
     resetMultiplyQuoteState()
     isLoading.value = false
     return
   }
-  multiplySupplyVault.value = position.value.collateral as Vault
+  multiplySupplyVault.value = multiplyLongVault.value
   isLoading.value = false
 }
 
@@ -829,6 +958,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Multiply"
@@ -840,10 +970,18 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
       <template v-if="position && multiplySupplyVault && multiplyLongVault && multiplyShortVault">
         <VaultLabelsAndAssets
           :vault="multiplyLongVault"
-          :assets="pairAssets as VaultAsset[]"
+          :assets="pairAssets"
           :assets-label="pairAssetsLabel"
           size="large"
-        />
+        >
+          <template #symbol-trailing>
+            <CorrelatedPairBadge
+              v-if="isMultiplyRoeApplicable"
+              compact
+              :title="correlatedBadgeTitle"
+            />
+          </template>
+        </VaultLabelsAndAssets>
 
         <div class="grid gap-16 laptop:grid-cols-[minmax(0,1fr)_360px] laptop:items-start">
           <div class="flex flex-col gap-16 w-full">
@@ -872,7 +1010,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :desc="multiplyLongProduct.name"
               label="Additional collateral"
               :asset="multiplyLongVault.asset"
-              :vault="(multiplyLongVault as Vault)"
+              :vault="(multiplyLongVault as EVault)"
               :readonly="true"
             />
 
@@ -885,28 +1023,28 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :readonly="true"
             />
 
-            <UiToast
+            <UiAlert
               v-if="isGeoBlocked"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!isGeoBlocked && isMultiplyRestricted"
               title="Asset restricted"
               description="Multiply is not available for this pair in your region."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="multiplyErrorText"
               title="Error"
               variant="error"
               :description="multiplyErrorText || ''"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="multiplySimulationError"
               title="Error"
               variant="error"
@@ -914,7 +1052,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="multiplyQuoteError"
               title="Swap quote"
               variant="warning"
@@ -927,6 +1065,8 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :loading="isSubmitting || isPreparing"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddMultiplyToBatch"
+              @add-to-batch="addToBatch"
             >
               Review Multiply
             </VaultFormSubmit>
@@ -937,10 +1077,23 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
+            <SummaryRow
+              v-if="isMultiplyRoeApplicable"
+              label="ROE"
+            >
               <SummaryValue
                 :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
                 :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
+                suffix="%"
+              />
+            </SummaryRow>
+            <SummaryRow
+              v-else
+              label="Net APY"
+            >
+              <SummaryValue
+                :before="multiplyNetApyBefore !== null ? formatNumber(multiplyNetApyBefore) : undefined"
+                :after="multiplyNetApyAfter !== null && multiplySwapReady ? formatNumber(multiplyNetApyAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>
@@ -988,9 +1141,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             </SummaryRow>
             <SwapDetailsSummary
               :input-display="multiplySwapSummary?.from ?? null"
-              :input-exact-display="multiplySwapSummary?.fromExact ?? null"
               :output-display="multiplySwapSummary?.to ?? null"
-              :output-exact-display="multiplySwapSummary?.toExact ?? null"
               :price-impact="multiplyPriceImpact"
               :slippage="multiplySlippage"
               :routed-via="multiplyRoutedVia"

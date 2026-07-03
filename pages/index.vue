@@ -5,9 +5,14 @@ const { enableEarnPage, enableLendPage, enableExplorePage } = useDeployConfig()
 const defaultPageRoute = getDefaultPageRoute(enableEarnPage, enableLendPage, enableExplorePage)
 
 const route = useRoute()
+const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 navigateTo(
-  { name: defaultPageRoute, query: route.query, hash: route.hash },
+  {
+    name: isOnboardingCompleted.value ? defaultPageRoute : 'onboarding',
+    query: route.query,
+    hash: route.hash,
+  },
   { replace: true },
 )
 </script>

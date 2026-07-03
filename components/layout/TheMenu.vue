@@ -4,6 +4,10 @@ import { type MenuItem, getMenuItems } from '~/entities/menu'
 const { enableEarnPage, enableLendPage, enableExplorePage } = useDeployConfig()
 const menuItems = getMenuItems(enableEarnPage, enableLendPage, enableExplorePage)
 
+// Batch is surfaced as a menu item on small screens (the floating drawer is the
+// laptop affordance). Tapping it opens the full-page batch view (/batch).
+const { entryCount } = useTxBatch()
+
 const route = useRoute()
 
 const getMenuIcon = (item: MenuItem) => {
@@ -39,6 +43,20 @@ const isActive = (item: MenuItem) => {
           v-if="link.sublabel"
           class="leading-tight text-[9px] text-content-tertiary"
         >{{ link.sublabel }}</span>
+      </NuxtLink>
+
+      <!-- Batch entry point (only when the cart has items) → full-page view -->
+      <NuxtLink
+        v-if="entryCount > 0"
+        to="/batch"
+        class="flex flex-col items-center text-center flex-1 text-decoration-none text-[12px] transition-colors"
+        :class="route.path === '/batch' ? 'text-content-primary' : 'text-content-secondary'"
+        data-testid="menu-batch"
+      >
+        <span class="inline-flex items-center justify-center w-20 h-20 mb-4 rounded-full bg-accent-600 text-white text-[11px] font-semibold">
+          {{ entryCount }}
+        </span>
+        <span class="leading-tight">Batch</span>
       </NuxtLink>
     </div>
   </div>

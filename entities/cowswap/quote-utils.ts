@@ -1,4 +1,4 @@
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
 
 const parseBigIntAmount = (value: unknown): bigint | undefined => {
   if (typeof value === 'bigint') {
@@ -64,7 +64,7 @@ const increaseBySlippage = (amount: bigint, slippage = 0): bigint => {
 }
 
 export const getCowSwapQuoteOrderAmounts = (
-  quote?: Pick<SwapApiQuote, 'providerData'> | null,
+  quote?: Pick<SwapQuote, 'providerData'> | null,
   options: CowSwapQuoteOrderAmountOptions = {},
 ): CowSwapQuoteOrderAmounts | undefined => {
   const providerData = quote?.providerData

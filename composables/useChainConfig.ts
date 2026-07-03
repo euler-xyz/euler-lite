@@ -8,14 +8,13 @@
  * This avoids runtimeConfig (which is frozen in production) and works
  * with runtime-injected env vars (e.g. Doppler on Railway).
  */
-import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds, getSubgraphUris, type ChainEnvIssues } from '~/utils/chain-env'
+import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds, type ChainEnvIssues } from '~/utils/chain-env'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
 import { logger } from '~/utils/logger'
 
 interface ChainConfig {
   enabledChainIds: number[]
   deprecatedChainIds: number[]
-  subgraphUris: Record<string, string>
   unsupportedChainIds?: number[]
   chainEnvIssues?: ChainEnvIssues
 }
@@ -72,11 +71,10 @@ function scanEnv(): ChainConfig {
   logChainEnvIssues(chainEnvIssues)
 
   const enabledChainIds = getEnabledChainIds()
-  const subgraphUris = getSubgraphUris()
   const enabledSet = new Set(enabledChainIds)
   const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
 
-  return { enabledChainIds, deprecatedChainIds, subgraphUris, unsupportedChainIds, chainEnvIssues }
+  return { enabledChainIds, deprecatedChainIds, unsupportedChainIds, chainEnvIssues }
 }
 
 export const useChainConfig = (): ChainConfig => {
@@ -91,7 +89,7 @@ export const useChainConfig = (): ChainConfig => {
   /* eslint-enable @typescript-eslint/no-explicit-any */
   }
   else {
-    cached = { enabledChainIds: [], deprecatedChainIds: [], subgraphUris: {} }
+    cached = { enabledChainIds: [], deprecatedChainIds: [] }
   }
 
   return cached!

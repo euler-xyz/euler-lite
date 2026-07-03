@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onClickOutside } from '@vueuse/core'
 import { offset, useFloating } from '@floating-ui/vue'
-import { useAccount } from '@wagmi/vue'
 import {
   WalletDisconnectModal,
   SelectChainModal,
@@ -15,7 +14,7 @@ import { getChainLogoUrl } from '~/utils/chain-logo'
 const { connect } = useWagmi()
 
 // Wagmi account info
-const { address, isConnected } = useAccount()
+const { address, isConnected } = useWagmi()
 const { chainId, allowedChainIds } = useEulerAddresses()
 const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
 const { isSpyMode, spyShortAddress } = useSpyMode()
@@ -38,7 +37,6 @@ const {
   enableExplorePage,
   enablePoweredByEuler,
   enableAppTitle,
-  migrationLegacyAppUrl,
 } = useDeployConfig()
 const menuItems = getMenuItems(
   enableEarnPage,
@@ -153,18 +151,9 @@ onClickOutside(wrapperRef, () => {
           @click.stop
         >
           <div class="flex flex-col gap-4 w-full">
-            <a
-              v-if="migrationLegacyAppUrl"
-              :href="migrationLegacyAppUrl"
-              class="block pb-12 border-b border-line-default text-content-primary hover:text-accent-600 transition-colors"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <span class="text-h6">Go to the legacy app</span>
-            </a>
             <div
               v-if="links.length"
-              class="mb-12 pt-5"
+              class="mb-12"
             >
               <p class="mb-8 text-content-tertiary text-h6 text-left">
                 Resources

@@ -1,0 +1,607 @@
+{
+  "version": 1,
+  "defaults": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "localStorage": {
+      "is-onboarding-completed": "true",
+      "euler_full_render": "1"
+    },
+    "waitFor": [
+      "[data-id]"
+    ],
+    "settleMs": 1000,
+    "rateLimitRetries": 3
+  },
+  "scenarios": [
+    {
+      "id": "full-run-lend-mainnet",
+      "label": "Full run: Mainnet lend list, all vault details, and APY modals",
+      "path": "/lend?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ],
+      "modals": [
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
+        }
+      ],
+      "follow": [
+        {
+          "id": "lend-vault-detail",
+          "label": "Lend vault details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"lend\"]",
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-borrow-mainnet",
+      "label": "Full run: Mainnet borrow list, first 100 pair details, and APY modals",
+      "path": "/borrow?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
+      ],
+      "modals": [
+        {
+          "id": "borrow-apy",
+          "label": "Borrow APY modal",
+          "selector": "css=[data-modal-trigger=\"borrow-apy\"], :is(div, span):has-text(\"Borrow APY\") > svg",
+          "waitFor": [
+            "[data-field=\"borrow-apy-total\"]"
+          ]
+        },
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
+        }
+      ],
+      "follow": [
+        {
+          "id": "borrow-pair-detail",
+          "label": "Borrow pair details",
+          "selector": "[data-id=\"vault-list-item\"][data-list=\"borrow-pair\"]",
+          "maxItems": 100,
+          "captures": [
+            {
+              "id": "pair-tab",
+              "label": "Borrow pair details"
+            },
+            {
+              "id": "collateral-tab",
+              "label": "Borrow pair collateral tab",
+              "actions": [
+                {
+                  "type": "click",
+                  "selector": "[data-id=\"tab\"][data-key=\"collateral\"]",
+                  "waitFor": [
+                    "[data-id=\"data-point\"]"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "borrow-tab",
+              "label": "Borrow pair borrow tab",
+              "actions": [
+                {
+                  "type": "click",
+                  "selector": "[data-id=\"tab\"][data-key=\"borrow\"]",
+                  "waitFor": [
+                    "[data-id=\"data-point\"]"
+                  ]
+                }
+              ]
+            }
+          ],
+          "waitFor": [
+            "[data-id=\"vault-header\"]",
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-portfolio-spy-positions-mainnet",
+      "label": "Full run: Mainnet portfolio spy positions, show all, and position details",
+      "path": "/portfolio?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "waitFor": [
+        "[data-id=\"portfolio-list\"][data-list=\"borrow\"]",
+        "[data-id=\"data-point\"]"
+      ],
+      "modals": [
+        {
+          "id": "borrow-apy",
+          "label": "Borrow APY modal",
+          "selector": "css=[data-modal-trigger=\"borrow-apy\"], :is(div, span):has-text(\"Borrow APY\") > svg",
+          "waitFor": [
+            "[data-field=\"borrow-apy-total\"]"
+          ]
+        },
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "position-information-borrow-card",
+          "label": "Position information modal from borrow card",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"borrow\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ]
+        },
+        {
+          "id": "position-information-collateral-card",
+          "label": "Position information modal from collateral card",
+          "selector": "[data-modal-trigger=\"position-information\"][data-position-section=\"collateral\"]",
+          "waitFor": [
+            "[data-id=\"tab\"]"
+          ]
+        }
+      ],
+      "follow": [
+        {
+          "id": "position-detail",
+          "label": "Portfolio position details",
+          "selector": "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]",
+          "waitFor": [
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-list-mainnet",
+      "label": "Full run: Mainnet explore market list",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "modals": [
+        {
+          "id": "filter-select",
+          "label": "Filter select modal",
+          "selector": "[data-id=\"filter-trigger\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"select-modal\"]"
+          ]
+        },
+        {
+          "id": "custom-filter",
+          "label": "Custom filter modal",
+          "selector": "[data-id=\"custom-filter-trigger\"]",
+          "waitFor": [
+            "[data-id=\"custom-filter-modal\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-graph-mainnet",
+      "label": "Full run: Mainnet explore graph view",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "[data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "[data-id=\"discovery-graph\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-stats-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Stats",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Stats\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"stats\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Stats\")",
+          "waitFor": [
+            "[data-id=\"attribute-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-config-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Configuration",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Configuration\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"config\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Configuration\")",
+          "waitFor": [
+            "[data-id=\"attribute-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-oracles-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Oracles",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Oracles\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"oracle\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Oracles\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-net-apy-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Net APY",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Net APY\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"net-apy\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Net APY\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-roe-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Max ROE",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Max ROE\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"roe\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Max ROE\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-multiplier-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Multiplier",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Multiplier\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"multiplier\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Multiplier\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-borrow-ltv-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Borrow LTV",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Borrow LTV\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"bltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Borrow LTV\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-explore-matrix-liquidation-ltv-mainnet",
+      "label": "Full run: Mainnet explore matrix dropdown: Liquidation LTV",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"]",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+          ],
+          "skipIfPresent": "css=[data-id=\"discovery-market-list-item\"]:first-child [data-id=\"discovery-market-card\"][data-expanded=\"true\"]"
+        },
+        {
+          "type": "click",
+          "selector": "css=button:has-text(\"Matrix\")",
+          "waitFor": [
+            "css=[data-id=\"discovery-market-list-item\"]:first-child .ui-select__field"
+          ]
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-market-list-item\"] .ui-select__field",
+          "waitFor": [
+            "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Liquidation LTV\")"
+          ],
+          "waitForData": false
+        },
+        {
+          "type": "click",
+          "selector": "css=[data-id=\"discovery-matrix-view-option\"][data-field=\"lltv\"], [data-id=\"discovery-market-list-item\"]:first-child .ui-select__field + div button:has-text(\"Liquidation LTV\")",
+          "waitFor": [
+            "[data-id=\"collateral-matrix\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-portfolio-spy-savings-mainnet",
+      "label": "Full run: Mainnet portfolio spy savings, show all",
+      "path": "/portfolio/saving?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "waitFor": [
+        "[data-id=\"portfolio-list\"]",
+        "[data-id=\"data-point\"]"
+      ],
+      "modals": [
+        {
+          "id": "supply-apy",
+          "label": "Supply APY modal",
+          "selector": "css=[data-modal-trigger=\"supply-apy\"], :is(div, span):has-text(\"Supply APY\") > svg",
+          "waitFor": [
+            "[data-field=\"supply-apy-total\"]"
+          ]
+        },
+        {
+          "id": "vault-information",
+          "label": "Vault information modal",
+          "selector": "[data-id=\"portfolio-list-item\"][data-modal-trigger=\"vault-information\"]",
+          "maxItems": 10,
+          "waitFor": [
+            "[data-id=\"data-point\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-run-portfolio-spy-rewards-mainnet",
+      "label": "Full run: Mainnet portfolio spy rewards, show all",
+      "path": "/portfolio/rewards?network=1&showAll=true&spy=0x75cFE4ef963232ae8313aC33e21fC39241338618",
+      "waitFor": [
+        "[data-id=\"reward-unlock-list\"]",
+        "[data-id=\"data-point\"]"
+      ]
+    }
+  ]
+}

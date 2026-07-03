@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { encodeFunctionData } from 'viem'
-import type { Address, Hex } from 'viem'
-import type { Campaign } from '~/entities/brevis'
-import type { VaultAsset } from '~/entities/vault'
-import type { TxPlan } from '~/entities/txPlan'
-import type { SwapperMode } from '~/entities/swap'
-import type { EVCCall } from '~/utils/evc-converter'
-import { applyOperationGuards } from '~/utils/operationGuardRegistry'
-import { buildDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
+import type { VaultAsset } from '~/types/asset'
+import { encodeFunctionData, getAddress, type Address } from 'viem'
+import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
+import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
+import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -22,39 +22,46 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, campaignInfo: _campaignInfo, reulUnlockInfo, amount, onConfirm, plan, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, submittingLabel, quoteFetchedAt } = defineProps<{
-  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel } = defineProps<{
+  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
-  plan?: TxPlan
+  /** Raw plan, used as a fallback when the caller hasn't pre-prepared.
+   *  Migrated callers should pass `prepared` instead. */
+  plan?: TransactionPlan
+  /** Pre-prepared envelope. When set, the modal renders immediately — no
+   *  in-modal plugin/approval-resolution round-trip. */
+  prepared?: TransactionPlanPrepared
   supplyingAssetForBorrow?: VaultAsset
   supplyingAmount?: number | string
+  swapFromAsset?: VaultAsset
+  swapFromAmount?: number | string
   swapToAsset?: VaultAsset
   swapToAmount?: number | string
-  /** Swap mode behind this operation, when one is involved. Drives the
-   *  "Swap to repay" relabel and default estimated leg. */
   swapMode?: SwapperMode
-  /** Display-side override for which swap amount should receive "~". */
   swapEstimatedSide?: 'input' | 'output'
-  campaignInfo?: Campaign
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm: () => void | Promise<void>
+  onConfirm?: () => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
-  /** Known amounts for transferFromMax steps, keyed by vault address (lowercase) */
   transferAmounts?: Record<string, string>
-  /** Label shown on the button while executing */
+  vaultAmounts?: Record<string, string>
   submittingLabel?: string
   /** Milliseconds since epoch when the active swap quote was fetched */
   quoteFetchedAt?: number | null
+  /** Read-only review (e.g. opened from a batch item): hides the execute button. */
+  hideExecute?: boolean
+  /** Overrides the inferred Euler product name for non-product contexts, such as Earn vaults. */
+  marketLabel?: string
 }>()
 
 const { address: walletAddress, chainId: currentChainId } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
 const { getVault } = useVaultRegistry()
-const { buildSimulationStateOverride } = useEulerOperations()
+const { prepareTransactionPlan } = useEulerTx()
 const { eulerCoreAddresses } = useEulerAddresses()
+const { isResolvingStateOverrideHints } = useStateOverrideResolution()
 const {
   isSimulating: isTenderlySimulating,
   simulationError: tenderlyError,
@@ -64,11 +71,22 @@ const {
   fetchEnabled: fetchTenderlyEnabled,
 } = useTenderlySimulation()
 
-const copied = ref(false)
 const tenderlyEnabled = ref(false)
+const { copied, copyToClipboard } = useClipboardCopy()
+const hasCopiedCalldata = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
+// `preparedPlan` is the prepared envelope's plan when the caller passed
+// `prepared`, otherwise it's the result of an on-the-fly prepare for callers
+// still on the legacy raw-plan path. Once every caller migrates, the
+// raw-plan branch below can be deleted.
+const preparedPlan = shallowRef<TransactionPlan | undefined>()
+const prepareError = ref('')
+const tenderlyLocalError = ref('')
+const isPreparingPlan = ref(false)
+const reviewPlan = computed(() => preparedPlan.value)
+let prepareRequestId = 0
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
@@ -86,61 +104,87 @@ onUnmounted(() => {
   }
 })
 
+watch(
+  () => [prepared, plan, walletAddress.value, currentChainId.value] as const,
+  async () => {
+    const requestId = ++prepareRequestId
+    hasCopiedCalldata.value = false
+    prepareError.value = ''
+    preparedPlan.value = undefined
+
+    // Preferred path: caller pre-prepared the envelope. No async work — modal
+    // renders the prepared plan synchronously.
+    if (prepared?.plan?.length) {
+      preparedPlan.value = prepared.plan
+      isPreparingPlan.value = false
+      return
+    }
+
+    if (!plan?.length) {
+      isPreparingPlan.value = false
+      prepareError.value = 'Transaction plan is unavailable. Close this review and try again.'
+      return
+    }
+
+    // Legacy fallback: caller passed only a raw plan. Run prepare here.
+    // Migrated callers should pass `prepared` and bypass this.
+    isPreparingPlan.value = true
+    try {
+      const envelope = await prepareTransactionPlan(plan)
+      if (requestId === prepareRequestId) {
+        preparedPlan.value = envelope.plan
+        prepareError.value = ''
+      }
+    }
+    catch (err) {
+      logWarn('OperationReviewModal/prepareTransactionPlan', err)
+      if (requestId === prepareRequestId) {
+        preparedPlan.value = undefined
+        prepareError.value = 'Transaction preparation failed. Close this review and try again.'
+      }
+    }
+    finally {
+      if (requestId === prepareRequestId) {
+        isPreparingPlan.value = false
+      }
+    }
+  },
+  { immediate: true },
+)
+
 const handleTenderlySimulate = async () => {
-  if (!plan?.steps || !walletAddress.value || !currentChainId.value) return
+  const currentPlan = reviewPlan.value
+  if (!currentPlan || !walletAddress.value) return
+  tenderlyLocalError.value = ''
   clearTenderly()
 
   try {
     const owner = walletAddress.value as Address
-    const guardedPlan = applyOperationGuards(plan)
-    const stateOverrides = await buildSimulationStateOverride(guardedPlan, owner)
-
-    const mainStep = guardedPlan.steps.find(s => s.type === 'evc-batch')
-    if (!mainStep) return
-
-    const batchItems = mainStep.args?.[0] as EVCCall[] | undefined
-    if (!batchItems?.length) return
-
-    const permit2Address = eulerCoreAddresses.value?.permit2 as string | undefined
-
-    const filteredItems = permit2Address
-      ? batchItems.filter(
-          call => call.targetContract.toLowerCase() !== permit2Address.toLowerCase(),
-        )
-      : batchItems
-
-    const data = encodeFunctionData({
-      abi: mainStep.abi,
-      functionName: mainStep.functionName,
-      args: [filteredItems],
-    })
-
-    const url = await tenderlySimulate({
+    const sdk = await getEulerSdk()
+    const payload = await buildTenderlySimulationPayload({
+      plan: currentPlan,
+      owner,
       chainId: currentChainId.value,
-      from: owner,
-      to: mainStep.to,
-      data: data as Hex,
-      value: mainStep.value?.toString() || '0',
-      stateOverrides,
+      sdk,
     })
 
-    if (url) {
+    if (!payload) {
+      tenderlyLocalError.value = 'Tenderly simulation is not available for this transaction plan.'
       return
     }
+
+    await tenderlySimulate(payload)
   }
-  catch {
-    // Error is captured in tenderlyError ref by the composable
+  catch (err) {
+    logWarn('OperationReviewModal/tenderly', err)
   }
 }
 
 const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
-  if (internalSubmitting.value) return
+  if (isConfirmDisabled.value || !onConfirm) return
   const result = onConfirm()
-  // If onConfirm returns a promise, keep the modal open with a loading state
-  // and let the caller close it via modal.close(). Otherwise close immediately
-  // (backwards-compatible with existing sync callbacks).
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
     try {
@@ -156,39 +200,85 @@ const handleConfirm = async () => {
 }
 
 const displaySteps = computed((): DisplayStep[] => {
-  if (!plan?.steps) return []
-
+  const currentPlan = reviewPlan.value
+  if (!currentPlan?.length) return []
   const ctx: StepDecodingContext = {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
-    swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts,
+    swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts,
   }
-
-  return buildDisplaySteps(plan, ctx, getVault, getAssetLogoUrl, hasPermit2Approval.value)
+  return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })
 
-const copyCalldata = () => {
-  if (!plan?.steps) return
+// Batch operation details show this as a muted context line. EVK operations use
+// the label product name(s) of the vaults the op touches, joined with " / " when
+// it spans markets (same shape as the positions list's pair label); Earn
+// operations can pass the Earn vault display name.
+const market = computed<string | undefined>(() => {
+  if (marketLabel) return marketLabel
+  const labels = getCurrentEulerLabelsData()
+  return buildPlanMarketLabel(reviewPlan.value, addr => getEulerLabelProductByVault(labels, addr)?.name)
+})
 
+// "Position N" / "Deposits" tag for the sub-account this operation targets,
+// mirroring the pill in the batch review's operations list. Sub-account 0 is the
+// main account ("Deposits"); numbered borrow positions are "Position N".
+const positionTag = computed<string | undefined>(() => {
+  const ownerAddr = (isSpyMode.value ? spyAddress.value : walletAddress.value) || ''
+  if (!subAccount || !ownerAddr) return undefined
   try {
-    const calldataEntries = plan.steps.map(step => ({
-      to: step.to,
-      data: encodeFunctionData({
-        abi: step.abi,
-        functionName: step.functionName,
-        args: step.args,
-      }),
-      value: step.value?.toString() || '0',
-    }))
+    const idx = getSubAccountId(getAddress(ownerAddr), getAddress(subAccount))
+    return idx === 0 ? 'Deposits' : `Position ${idx}`
+  }
+  catch {
+    return undefined
+  }
+})
 
-    navigator.clipboard.writeText(JSON.stringify(calldataEntries, null, 2))
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
+const copyCalldata = async () => {
+  const currentPlan = reviewPlan.value
+  if (!currentPlan?.length) return
+  try {
+    const sdk = await getEulerSdk()
+    const cid = currentChainId.value
+    const entries: { to: string, data: string, value: string }[] = []
+
+    for (const item of currentPlan) {
+      if (item.type === 'requiredApproval') {
+        for (const r of item.resolved ?? []) {
+          if (r.type === 'approve') {
+            entries.push({ to: r.token, data: r.data, value: '0' })
+          }
+          // permit2 signatures have no calldata until signed; skip
+        }
+        continue
+      }
+      if (item.type === 'evcBatch' && cid) {
+        const items = flattenBatchEntries(item.items)
+        const evcAddress = sdk.deploymentService.getDeployment(cid).addresses.coreAddrs.evc
+        const data = sdk.executionService.encodeBatch(items)
+        const value = items.reduce((sum, it) => sum + it.value, 0n)
+        entries.push({ to: evcAddress, data, value: value.toString() })
+        continue
+      }
+      if (item.type === 'contractCall') {
+        entries.push({
+          to: item.to,
+          data: encodeFunctionData({
+            abi: item.abi,
+            functionName: item.functionName,
+            args: item.args,
+          }),
+          value: item.value.toString(),
+        })
+      }
+    }
+
+    await copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
+    hasCopiedCalldata.value = true
   }
   catch (err) {
-    logWarn('OperationReviewModal/calldataCopy', err)
+    logWarn('OperationReviewModal/copyCalldata', err)
   }
 }
 
@@ -209,11 +299,14 @@ const btnLabel = computed(() => {
       return 'Swap'
     case 'transfer':
       return 'Transfer'
+    case 'refinance':
+      return 'Refinance'
     case 'reul-unlock':
       return 'Unlock'
     case 'reward':
     case 'brevis-reward':
     case 'fuul-reward':
+    case 'turtle-reward':
       return 'Claim'
     case 'disableCollateral':
       return 'Disable collateral'
@@ -221,28 +314,32 @@ const btnLabel = computed(() => {
       return 'Submit'
   }
 })
+
 const reulUnlockDisclaimerText = computed(() => {
   if (type !== 'reul-unlock' || !reulUnlockInfo) return
 
   return `This action will unlock ${formatNumber(reulUnlockInfo.unlockableAmount, 6)} EUL, and ${formatNumber(reulUnlockInfo.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, you must wait for the 6-month vesting period to complete (${reulUnlockInfo.daysUntilMaturity} days remaining, maturity date: ${reulUnlockInfo.maturityDate}).`
 })
+
 const disclaimerText = computed(() => {
-  if (type !== 'reward') return
+  if (type !== 'reward' && type !== 'turtle-reward') return
   const displayAmount = Number(amount) < 0.01 ? '< 0.01' : formatNumber(amount)
+  if (type === 'turtle-reward') {
+    return `You're claiming all ${displayAmount} ${asset.symbol} through Turtle. Part of this amount could have been earned outside of Euler.`
+  }
   return `You're claiming all ${displayAmount} ${asset.symbol} on Merkl. Part of this amount could have been earned outside of Euler.`
 })
 
 const hasPermit2Approval = computed(() => {
-  return plan?.steps?.some(step => step.type === 'permit2-approve') ?? false
+  return hasPermit2TokenApproval(reviewPlan.value, eulerCoreAddresses.value?.permit2)
 })
 
-const usesPermit2 = computed(() => {
-  return plan?.steps?.some(step => step.label?.includes('Permit2')) ?? false
-})
+const usesPermit2 = computed(() => hasPermit2Signature(reviewPlan.value) || hasPermit2Approval.value)
 
 const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
 })
+const tenderlyDisplayError = computed(() => tenderlyLocalError.value || tenderlyError.value)
 
 const isSwapQuoteStale = computed(() => {
   return typeof quoteFetchedAt === 'number'
@@ -250,36 +347,59 @@ const isSwapQuoteStale = computed(() => {
 })
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
+const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || !reviewPlan.value?.length)
+const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
+const confirmLabel = computed(() => {
+  if (isSpyMode.value) return 'Spy mode (read-only)'
+  if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
+  return internalSubmitting.value && submittingLabel ? submittingLabel : btnLabel.value
+})
 </script>
 
 <template>
   <BaseModalWrapper
-    title="Transaction review"
+    :title="hideExecute ? 'Operations' : 'Transaction review'"
     @close="!internalSubmitting && $emit('close')"
   >
     <div class="flex flex-col gap-24">
-      <!-- Transaction Steps -->
-      <div
-        v-if="displaySteps.length"
-        class="flex flex-col gap-8"
-      >
-        <div class="bg-surface-secondary rounded-12 p-12 flex flex-col gap-8">
-          <OperationStepsList :steps="displaySteps" />
+      <!-- Operation context (market + position) grouped tightly above its steps,
+           so the operation reads in the context of the position it acts on. -->
+      <div class="flex flex-col gap-10">
+        <div
+          v-if="hideExecute && (market || positionTag)"
+          class="flex items-center justify-between gap-8 px-12"
+        >
+          <div class="min-w-0 flex-1">
+            <BatchMarketLabel :market="market" />
+          </div>
+          <span
+            v-if="hideExecute && positionTag"
+            class="shrink-0 text-h6 text-content-secondary bg-card py-2 px-8 rounded-8 border border-line-default"
+          >
+            {{ positionTag }}
+          </span>
+        </div>
+        <div
+          v-if="displaySteps.length"
+          class="w-full rounded-8 border border-line-default bg-card px-12 py-10 shadow-xs"
+        >
+          <div class="flex w-full flex-col gap-8">
+            <OperationStepsList :steps="displaySteps" />
+          </div>
         </div>
       </div>
 
-      <!-- Copy calldata & Tenderly simulate -->
       <div
-        v-if="plan?.steps?.length"
+        v-if="reviewPlan?.length && !hideExecute"
         class="flex items-center justify-center gap-16"
       >
         <button
           type="button"
-          class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 text-content-primary hover:border-line-emphasis hover:bg-card-hover transition-colors"
           @click="copyCalldata"
         >
           <SvgIcon
-            name="copy"
+            :name="copied ? 'check' : 'copy'"
             class="!w-16 !h-16"
           />
           {{ copied ? 'Copied!' : 'Copy calldata' }}
@@ -289,10 +409,10 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
           :href="tenderlyUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-6 text-p3 transition-colors"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 transition-colors hover:border-line-emphasis hover:bg-card-hover"
           :class="hasTenderlyFailedSimulation
-            ? 'text-error-500 hover:text-error-600'
-            : 'text-success-500 hover:text-success-600'"
+            ? 'text-error-500 hover:text-error-500'
+            : 'text-success-500 hover:text-success-500'"
         >
           <SvgIcon
             :name="hasTenderlyFailedSimulation ? 'warning-circle' : 'check-circle'"
@@ -308,31 +428,37 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
         <button
           v-else-if="tenderlyEnabled"
           type="button"
-          class="flex items-center gap-6 text-p3 text-content-primary hover:text-content-primary transition-colors"
-          :disabled="isTenderlySimulating"
+          class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 text-content-primary hover:border-line-emphasis hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+          :disabled="isTenderlyPreparing"
           @click="handleTenderlySimulate"
         >
           <SvgIcon
-            :name="isTenderlySimulating ? 'loading' : 'arrow-top-right'"
+            :name="isTenderlyPreparing ? 'loading' : 'arrow-top-right'"
             class="!w-16 !h-16"
-            :class="{ 'animate-spin': isTenderlySimulating }"
+            :class="{ 'animate-spin': isTenderlyPreparing }"
           />
           Simulate on Tenderly
         </button>
       </div>
       <p
-        v-if="usesPermit2"
+        v-if="usesPermit2 && !hideExecute && hasCopiedCalldata"
         class="text-p4 text-content-primary text-center"
       >
         Copied calldata does not contain the permit() call. It is only known after the permit2 message is signed.
       </p>
 
-      <!-- Tenderly error -->
-      <UiToast
-        v-if="tenderlyError && !hasTenderlyFailedSimulation"
+      <UiAlert
+        v-if="tenderlyDisplayError && !hasTenderlyFailedSimulation"
         title="Simulation failed"
         variant="warning"
-        :description="tenderlyError"
+        :description="tenderlyDisplayError"
+        size="compact"
+      />
+      <UiAlert
+        v-if="prepareError"
+        title="Preparation failed"
+        variant="error"
+        :description="prepareError"
         size="compact"
       />
 
@@ -354,22 +480,21 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
         </p>
       </div>
 
-      <!-- Disclaimers -->
-      <UiToast
-        v-if="type === 'reward'"
+      <UiAlert
+        v-if="disclaimerText"
         title="Disclaimer"
         variant="warning"
         :description="disclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="type === 'reul-unlock'"
         title="Important"
         variant="warning"
         :description="reulUnlockDisclaimerText"
         size="compact"
       />
-      <UiToast
+      <UiAlert
         v-if="hasPermit2Approval"
         title="Infinite approval"
         variant="info"
@@ -377,16 +502,18 @@ const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimite
         size="compact"
       />
 
-      <!-- Confirm button -->
       <UiButton
+        v-if="!hideExecute"
+        data-id="operation-review-confirm"
+        :data-operation-type="type"
         variant="primary"
         size="xlarge"
         rounded
-        :disabled="isSpyMode || internalSubmitting"
-        :loading="internalSubmitting"
+        :disabled="isConfirmDisabled"
+        :loading="internalSubmitting || isPreparingPlan || isResolvingStateOverrideHints"
         @click="handleConfirm"
       >
-        {{ isSpyMode ? 'Spy mode (read-only)' : (internalSubmitting && submittingLabel ? submittingLabel : btnLabel) }}
+        {{ confirmLabel }}
       </UiButton>
     </div>
   </BaseModalWrapper>

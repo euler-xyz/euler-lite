@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { DateTime } from 'luxon'
+import type { YieldApyBreakdown } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber } from '~/utils/string-utils'
 import type { RewardCampaign } from '~/entities/reward-campaign'
-import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
+import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignDisplays } from '~/entities/reward-campaign'
 
 const emits = defineEmits(['close'])
 const {
+  apyBreakdown,
   baseSupplyAPY,
   baseBorrowAPY,
   intrinsicSupplyAPY,
@@ -18,7 +19,10 @@ const {
   supplyCampaigns,
   borrowCampaigns,
   loopingCampaigns,
+  inline = false,
+  close = true,
 } = defineProps<{
+  apyBreakdown?: YieldApyBreakdown
   supplyUSD: number
   borrowUSD: number
   baseSupplyAPY: number
@@ -33,6 +37,8 @@ const {
   supplyCampaigns?: RewardCampaign[]
   borrowCampaigns?: RewardCampaign[]
   loopingCampaigns?: RewardCampaign[]
+  inline?: boolean
+  close?: boolean
 }>()
 
 const hasIntrinsicSupply = computed(() => (intrinsicSupplyAPY ?? 0) !== 0)
@@ -42,26 +48,22 @@ const hasBorrowRewards = computed(() => (borrowRewardAPY || 0) > 0)
 const hasLoopingCampaigns = computed(() => loopingRewardsInfo.value.length > 0)
 
 const mapCampaigns = (campaigns: RewardCampaign[] | undefined, side: string) => {
-  if (!campaigns) return []
-  const now = Math.floor(Date.now() / 1000)
-  return campaigns
-    .filter(c => c.endTimestamp > now || c.endTimestamp === 0)
-    .map(c => ({
-      id: `${side}-${c.vault}-${c.provider}-${c.type}-${c.endTimestamp}`,
-      apr: c.apr,
-      endDate: c.endTimestamp > 0 ? DateTime.fromSeconds(c.endTimestamp) : null,
-      rewardToken: c.rewardToken || { symbol: 'Unknown', icon: '' },
-      source: c.provider,
-      sourceUrl: c.sourceUrl,
-      minMultiplier: c.minMultiplier,
-      maxMultiplier: c.maxMultiplier,
-    }))
-    .sort((a, b) => a.rewardToken.symbol.localeCompare(b.rewardToken.symbol))
+  return rewardCampaignDisplays(campaigns, side)
 }
 
 const supplyRewardsInfo = computed(() => mapCampaigns(supplyCampaigns, 'supply'))
 const borrowRewardsInfo = computed(() => mapCampaigns(borrowCampaigns, 'borrow'))
 const loopingRewardsInfo = computed(() => mapCampaigns(loopingCampaigns, 'looping'))
+const allRewardsInfo = computed(() => [
+  ...supplyRewardsInfo.value,
+  ...borrowRewardsInfo.value,
+  ...(loopingEligible === false ? [] : loopingRewardsInfo.value),
+])
+
+const displayNetApy = computed(() => apyBreakdown?.total ?? netAPY)
+const hasIntrinsicContribution = computed(() => Math.abs(apyBreakdown?.intrinsicApy ?? 0) > 0)
+const hasRewardContribution = computed(() => Math.abs(apyBreakdown?.rewards ?? 0) > 0)
+const signedPrefix = (value: number) => value < 0 ? '- ' : '+ '
 
 const handleClose = () => {
   emits('close')
@@ -71,12 +73,142 @@ const handleClose = () => {
 <template>
   <BaseModalWrapper
     title="Net APY"
+    :inline="inline"
+    :close="close"
     @close="handleClose"
   >
     <p class="text-content-primary text-p3 mb-16">
       Net APY estimates the annualized return on your supplied collateral after accounting for borrowing costs and any reward incentives. A positive net APY means the combined yield exceeds the cost of borrowing. A negative net APY means borrowing costs outweigh the yield.
     </p>
-    <div class="mb-24">
+    <div
+      v-if="apyBreakdown"
+      class="mb-24"
+    >
+      <div class="pb-16 mb-16 border-b border-line-default">
+        <div class="flex justify-between items-center">
+          <div>
+            <p class="mb-4 flex items-center gap-4">
+              Supply APY
+              <UiHoverPreviewTooltip
+                title="Supply APY"
+                text="Supply APY is the yield contribution from supplied collateral, shown relative to total supplied value."
+                placement="top-start"
+                icon-class="text-content-tertiary"
+              />
+            </p>
+          </div>
+          <div class="text-h5">
+            {{ signedPrefix(apyBreakdown.lending) }}{{ formatNumber(Math.abs(apyBreakdown.lending)) }}%
+          </div>
+        </div>
+        <div
+          v-if="hasRewardContribution"
+          class="flex justify-between items-center mt-16"
+        >
+          <div>
+            <p class="mb-4 flex items-center gap-4">
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500"
+                name="sparks"
+              />
+              <span>Rewards APY</span>
+              <UiHoverPreviewTooltip
+                title="Rewards APY"
+                text="Rewards APY is the weighted contribution from active eligible reward campaigns for this position."
+                placement="top-start"
+                icon-class="text-content-tertiary"
+              />
+            </p>
+          </div>
+          <div class="text-h5">
+            {{ signedPrefix(apyBreakdown.rewards) }}{{ formatNumber(Math.abs(apyBreakdown.rewards)) }}%
+          </div>
+        </div>
+        <div
+          v-for="reward in allRewardsInfo"
+          :key="reward.id"
+          class="flex justify-between items-center mt-12"
+        >
+          <div class="flex">
+            <img
+              v-if="reward.rewardToken.icon"
+              class="w-20 h-20 rounded-full"
+              :src="reward.rewardToken.icon"
+              alt="Reward token logo"
+            >
+            <p :class="reward.rewardToken.icon ? 'ml-12' : ''">
+              {{ reward.rewardToken.symbol }}
+            </p>
+            <p class="ml-4 text-content-primary">
+              (<a
+                v-if="reward.sourceUrl"
+                :href="reward.sourceUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="underline"
+                @click.stop
+              ><img
+                v-if="PROVIDER_LOGOS[reward.source]"
+                :src="PROVIDER_LOGOS[reward.source]"
+                class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
+                :alt="PROVIDER_LABELS[reward.source]"
+              >{{ PROVIDER_LABELS[reward.source] || reward.source }}</a><template v-else>
+                <img
+                  v-if="PROVIDER_LOGOS[reward.source]"
+                  :src="PROVIDER_LOGOS[reward.source]"
+                  class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
+                  :alt="PROVIDER_LABELS[reward.source]"
+                >{{ PROVIDER_LABELS[reward.source] || reward.source }}
+              </template>{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+            </p>
+          </div>
+          <div class="text-p2">
+            {{ formatNumber(reward.apr) }}%
+          </div>
+        </div>
+        <div
+          v-if="hasIntrinsicContribution"
+          class="flex justify-between items-center mt-16"
+        >
+          <div>
+            <p class="mb-4 flex items-center gap-4">
+              Intrinsic APY
+              <UiHoverPreviewTooltip
+                title="Intrinsic APY"
+                text="Intrinsic APY is the weighted contribution from asset-native yield, when intrinsic APY is enabled."
+                placement="top-start"
+                icon-class="text-content-tertiary"
+              />
+            </p>
+          </div>
+          <div class="text-h5">
+            {{ signedPrefix(apyBreakdown.intrinsicApy) }}{{ formatNumber(Math.abs(apyBreakdown.intrinsicApy)) }}%
+          </div>
+        </div>
+      </div>
+      <div class="pb-16 mb-16 border-b border-line-default">
+        <div class="flex justify-between items-center">
+          <div>
+            <p class="mb-4 flex items-center gap-4">
+              Borrow cost APY
+              <UiHoverPreviewTooltip
+                title="Borrow cost APY"
+                text="Borrow cost APY is weighted by your borrowed value relative to supplied collateral, so it can be lower than the market Borrow APY."
+                placement="top-start"
+                icon-class="text-content-tertiary"
+              />
+            </p>
+          </div>
+          <div class="text-h5">
+            {{ signedPrefix(apyBreakdown.borrowing) }}{{ formatNumber(Math.abs(apyBreakdown.borrowing)) }}%
+          </div>
+        </div>
+      </div>
+    </div>
+    <div
+      v-else
+      class="mb-24"
+    >
       <div class="pb-16 mb-16 border-b border-line-default">
         <div class="flex justify-between items-center">
           <div>
@@ -357,9 +489,9 @@ const handleClose = () => {
       </div>
       <p
         class="text-h4"
-        :class="[netAPY >= 0 ? 'text-accent-600' : 'text-error-500']"
+        :class="[displayNetApy >= 0 ? 'text-accent-600' : 'text-error-500']"
       >
-        = {{ formatNumber(netAPY) }}%
+        = {{ formatNumber(displayNetApy) }}%
       </p>
     </div>
   </BaseModalWrapper>

@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 
-defineProps<{ items: Vault[], type: 'lend' | 'borrow' }>()
+defineProps<{ items: EVault[], type: 'lend' | 'borrow' }>()
 </script>
 
 <template>
   <div
     class="flex flex-col gap-8"
+    data-id="vault-list"
+    :data-list="type"
+    :data-count="items.length"
   >
     <VaultItem
       v-for="(vault, index) in items"

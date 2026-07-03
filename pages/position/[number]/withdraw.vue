@@ -1,26 +1,29 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress, type Address, zeroAddress } from 'viem'
-import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount, type Vault, type VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
-import {
-  getAssetOraclePrice,
-  getCollateralOraclePrice,
-  conservativePriceRatio,
-} from '~/services/pricing/priceProvider'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
+import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
+import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
+import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+
+import { isCowProviderOrQuote } from '~/entities/cowswap'
 
 const positionIndex = usePositionIndex()
-const { address } = useAccount()
-const { buildWithdrawPlan, buildWithdrawAndSwapPlan } = useEulerOperations()
+const { address } = useWagmi()
+const { planWithdraw, planWithdrawAndSwap, planRedeem } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+const { account: cachedAccount } = useFreshAccount()
 const { refreshAllPositions } = useEulerAccount()
 const { eulerLensAddresses } = useEulerAddresses()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
@@ -58,7 +61,9 @@ const form = useCollateralForm({
   },
 
   computeLiquidationPrice: (pos, borrowVault, collateralVault) => {
-    const health = nanoToValue(pos.health || 0n, 18)
+    const healthValue = pos.healthFactor
+    if (healthValue === undefined) return undefined
+    const health = nanoToValue(healthValue, 18)
     if (health < 1) return undefined
     const cp = borrowVault && collateralVault ? getCollateralOraclePrice(borrowVault, collateralVault) : undefined
     const bp = borrowVault ? getAssetOraclePrice(borrowVault) : undefined
@@ -72,7 +77,11 @@ const form = useCollateralForm({
       throw new Error('Not enough liquidity in your position')
     }
     if (!form.position.value) return
-    if (userLtvFixed.gte(FixedPoint.fromValue(form.position.value.liquidationLTV, 2))) {
+    const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(form.position.value)
+    if (effectiveLiquidationLtv === undefined) {
+      throw new Error('Liquidation LTV unavailable')
+    }
+    if (userLtvFixed.gte(FixedPoint.fromValue(decimalLtvToBps(effectiveLiquidationLtv), 2))) {
       throw new Error('Not enough liquidity for the vault, LTV is too large')
     }
     if (cashLimitedCollateralAssets() < amountFixed.value) {
@@ -80,33 +89,36 @@ const form = useCollateralForm({
     }
   },
 
-  buildDirectPlan: async ({ vaultAddress, amountNano, subAccount }) => {
-    const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
-    return buildWithdrawPlan(
-      vaultAddress,
-      amountNano,
-      subAccount,
-      {
-        includePythUpdate: hasBorrows,
-        liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value?.collaterals,
-      },
-    )
+  buildDirectPlan: async ({ vaultAddress, amountNano, subAccount, account }) => {
+    const owner = (subAccount ?? address.value) as Address
+    // Withdrawing the entire collateral balance: redeem ALL shares (maxUint256)
+    // instead of a fixed asset amount. A fixed `withdraw(assets)` leaves dust
+    // behind (share-price rounding + interest accrued since the snapshot).
+    if (isFullCollateralWithdraw(amountNano)) {
+      return planRedeem({
+        vaultAddress: vaultAddress as Address,
+        shares: maxUint256,
+        owner,
+        account: account ?? cachedAccount.value,
+      })
+    }
+    return planWithdraw({
+      vaultAddress: vaultAddress as Address,
+      assets: amountNano,
+      owner,
+      // Skip planner's freshPlanContext fetch; reuse the race-replace snapshot.
+      account: account ?? cachedAccount.value,
+    })
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { vaultAddress, amountNano, slippage, subAccount }) => {
-    const hasBorrows = (form.position.value?.borrowed || 0n) > 0n
-    return buildWithdrawAndSwapPlan({
+  buildSwapPlan: async (quote: SwapQuote, { vaultAddress, amountNano, subAccount, account }) => {
+    const owner = (subAccount ?? address.value) as Address
+    return planWithdrawAndSwap({
+      swapQuote: quote,
       vaultAddress: vaultAddress as Address,
-      assetsAmount: amountNano,
-      quote,
-      requestedSlippage: slippage,
-      subAccount,
-      options: {
-        includePythUpdate: hasBorrows,
-        liabilityVault: form.borrowVault.value?.address,
-        enabledCollaterals: form.position.value?.collaterals,
-      },
+      assets: amountNano,
+      owner,
+      account: account ?? cachedAccount.value,
     })
   },
 
@@ -140,9 +152,77 @@ const form = useCollateralForm({
   onAfterSend: () => {
     refreshAllPositions(eulerLensAddresses.value, address.value as string)
   },
+  usePreparedPipeline: true,
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
+
+// True when the requested amount covers the entire collateral balance. The Max
+// button fills the exact full-precision balance, so this is an exact match when
+// the position isn't cash-limited. A full withdraw must redeem ALL shares
+// (maxUint256) rather than a fixed asset amount — otherwise share-price rounding
+// and interest accrued since the snapshot leave dust behind.
+const isFullCollateralWithdraw = (assetsNano: bigint) => {
+  const full = form.collateralAssets.value
+  return full > 0n && assetsNano >= full
+}
+
+// Add this collateral withdrawal to the batch — direct or non-CoW swap-out.
+const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
+const canAddToBatch = computed(() => {
+  if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return false
+  if (!(+form.amount.value) || !form.collateralVault.value?.address || !form.position.value) return false
+  if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
+  return true
+})
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: form.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    needsSwap.value
+    && form.swapEffectiveQuote.value !== null
+    && form.swapPriceImpact.value === null,
+  ),
+})
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithAddToBatchPriceImpact(async () => {
+    const v = form.collateralVault.value
+    const a = form.asset.value
+    const pos = form.position.value
+    if (!v?.address || !a?.address || !pos) return
+    const vaultAddress = v.address as Address
+    const assets = valueToNano(form.amount.value, a.decimals)
+    const owner = (pos.subAccount ?? address.value) as Address
+    if (needsSwap.value) {
+      const quote = form.swapEffectiveQuote.value
+      if (!quote) return
+      await addBatchEntry({
+        label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
+        buildPlan: account => planWithdrawAndSwap({ swapQuote: quote, vaultAddress, assets, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
+      })
+    }
+    else if (isFullCollateralWithdraw(assets)) {
+      await addBatchEntry({
+        label: `Withdraw ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planRedeem({ vaultAddress, shares: maxUint256, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'withdraw', asset: a, amount: form.amount.value },
+      })
+    }
+    else {
+      await addBatchEntry({
+        label: `Withdraw ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planWithdraw({ vaultAddress, assets, owner, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'withdraw', asset: a, amount: form.amount.value },
+      })
+    }
+    form.amount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
+  })
+}
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
@@ -203,6 +283,7 @@ watch(selectedOutputAsset, () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Withdraw collateral"
@@ -225,7 +306,7 @@ watch(selectedOutputAsset, () => {
               v-model="form.amount.value"
               label="Withdraw amount"
               :asset="form.asset.value"
-              :vault="(form.collateralVault.value as Vault)"
+              :vault="(form.collateralVault.value as EVault)"
               :balance="withdrawableCollateralAssets"
               maxable
             />
@@ -269,9 +350,7 @@ watch(selectedOutputAsset, () => {
               >
                 <SwapDetailsSummary
                   :input-display="form.swapInputDisplay.value"
-                  :input-exact-display="form.swapInputExactDisplay.value"
                   :output-display="form.swapOutputDisplay.value"
-                  :output-exact-display="form.swapOutputExactDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
@@ -279,7 +358,7 @@ watch(selectedOutputAsset, () => {
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="form.swapQuoteError.value"
                 title="Swap quote"
                 variant="warning"
@@ -288,7 +367,7 @@ watch(selectedOutputAsset, () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -296,35 +375,35 @@ watch(selectedOutputAsset, () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="form.isGeoBlocked.value"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!form.isGeoBlocked.value && (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value)"
               title="Asset restricted"
               description="Receiving this asset is not available in your region. Pick a different token."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!form.isGeoBlocked.value && !form.isOutputAssetBlocked.value && !form.isOutputAssetRestricted.value && form.isSwapRestricted.value"
               title="Swap restricted"
               description="Swapping from this vault is not available in your region. You can withdraw the vault's underlying asset directly."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="form.estimatesError.value"
               title="Error"
               variant="error"
               :description="form.estimatesError.value"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="form.simulationError.value"
               title="Error"
               variant="error"
@@ -374,14 +453,14 @@ watch(selectedOutputAsset, () => {
             </SummaryRow>
             <SummaryRow label="LTV">
               <SummaryValue
-                :before="formatNumber(nanoToValue(form.position.value.userLTV, 18))"
+                :before="formatNumber(ltvToPercent(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18)))"
                 :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
-                :before="formatHealthScore(nanoToValue(form.position.value.health, 18))"
+                :before="formatHealthScore(nanoToValue(form.position.value.healthFactor ?? 0n, 18))"
                 :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
               />
             </SummaryRow>
@@ -397,6 +476,8 @@ watch(selectedOutputAsset, () => {
               :loading="form.isSubmitting.value || form.isPreparing.value"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>

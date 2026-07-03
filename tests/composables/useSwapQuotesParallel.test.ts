@@ -1,10 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, nextTick, ref, watch } from 'vue'
-import type { SwapApiQuote } from '~/entities/swap'
+import { SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
-const makeQuote = (amountIn: string, amountOut: string): SwapApiQuote =>
-  ({ amountIn, amountOut }) as SwapApiQuote
+const { getTokenUsdValueMock } = vi.hoisted(() => ({
+  getTokenUsdValueMock: vi.fn(),
+}))
+
+vi.mock('~/utils/sdk-prices', () => ({
+  getTokenUsdValue: getTokenUsdValueMock,
+}))
+
+const makeQuote = (amountIn: string, amountOut: string): SwapQuote =>
+  ({ amountIn, amountOut }) as SwapQuote
+
+const makeUsdcOutQuote = (amountOut: string): SwapQuote =>
+  ({
+    amountIn: '100',
+    amountOut,
+    tokenOut: {
+      address: '0x0000000000000000000000000000000000000002',
+      decimals: 6,
+    },
+  }) as unknown as SwapQuote
 
 const requestParams = {
   tokenIn: '0x0000000000000000000000000000000000000001',
@@ -14,6 +32,11 @@ const requestParams = {
   amount: 100n,
   vaultIn: '0x0000000000000000000000000000000000000005',
   receiver: '0x0000000000000000000000000000000000000006',
+  slippage: 1,
+  swapperMode: SwapperMode.EXACT_IN,
+  isRepay: false,
+  targetDebt: 0n,
+  currentDebt: 0n,
 } as const satisfies Parameters<ReturnType<typeof useSwapQuotesParallel>['requestQuotes']>[0]
 
 const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -25,6 +48,10 @@ describe('useSwapQuotesParallel', () => {
   beforeEach(() => {
     getSwapProviders = vi.fn()
     getSwapQuotes = vi.fn()
+    getTokenUsdValueMock.mockReset()
+    getTokenUsdValueMock.mockImplementation(async (amount: bigint, decimals: number) =>
+      Number(amount) / 10 ** decimals,
+    )
 
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
@@ -39,7 +66,11 @@ describe('useSwapQuotesParallel', () => {
       chain: ref({ nativeCurrency: { decimals: 18 } }),
     }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
-    vi.stubGlobal('useEulerOperations', () => ({ estimateTxPlanGas: vi.fn() }))
+    vi.stubGlobal('usePlanAccount', () => ({ account: ref(undefined) }))
+    vi.stubGlobal('useSpyMode', () => ({
+      isSpyMode: ref(false),
+      spyAddress: ref(null),
+    }))
   })
 
   it('keeps effectiveQuote stable when selecting the current best provider', async () => {
@@ -52,7 +83,7 @@ describe('useSwapQuotesParallel', () => {
     await flushPromises()
     await nextTick()
 
-    const changes: Array<SwapApiQuote | null> = []
+    const changes: Array<SwapQuote | null> = []
     watch(quotes.effectiveQuote, quote => changes.push(quote))
 
     quotes.selectProvider('first')
@@ -76,7 +107,7 @@ describe('useSwapQuotesParallel', () => {
     await flushPromises()
     await nextTick()
 
-    const changes: Array<SwapApiQuote | null> = []
+    const changes: Array<SwapQuote | null> = []
     watch(quotes.effectiveQuote, quote => changes.push(quote))
 
     quotes.selectProvider('other')
@@ -125,5 +156,74 @@ describe('useSwapQuotesParallel', () => {
       accountOut: requestParams.accountOut,
     })
     expect(otherCall.providerExtraData).toBeUndefined()
+  })
+
+  it('scores CoW quotes with zero gas instead of pushing them behind priced routes', async () => {
+    const cowQuote = makeUsdcOutQuote('213000000000')
+    const otherQuote = makeUsdcOutQuote('212900000000')
+    getSwapProviders.mockResolvedValue(['other', 'cow'])
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap: true })
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+
+    expect(quotes.sortedQuoteCards.value[0]).toMatchObject({
+      provider: 'cow',
+      amountUsd: 213000,
+      gasCostUsd: 0,
+      isGasless: true,
+    })
+    expect(quotes.sortedQuoteCards.value[1].provider).toBe('other')
+  })
+
+  it('evaluates callable includeCowSwap for each quote request', async () => {
+    let includeCowSwap = true
+    getSwapProviders.mockResolvedValue([])
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    includeCowSwap = false
+    await quotes.requestQuotes(requestParams)
+
+    expect(getSwapProviders).toHaveBeenNthCalledWith(1, { includeCowSwap: true })
+    expect(getSwapProviders).toHaveBeenNthCalledWith(2, { includeCowSwap: false })
+  })
+
+  it('removes existing CoW quote cards when callable includeCowSwap becomes false', async () => {
+    const includeCowSwap = ref(true)
+    const cowQuote = makeQuote('100', '300')
+    const otherQuote = makeQuote('100', '200')
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+
+    quotes.selectProvider('cow')
+    includeCowSwap.value = false
+    await nextTick()
+
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+    expect(quotes.selectedProvider.value).toBeNull()
   })
 })

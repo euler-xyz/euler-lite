@@ -1,26 +1,28 @@
 <script setup lang="ts">
+import type { MarketGroup } from '~/entities/lend-discovery'
+import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useMarketGroups } from '~/composables/useMarketGroups'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, getUniqueEntitiesByVaults, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault } from '~/entities/vault'
-import { isVaultType, getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
+
+import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/utils/discoveryCalculations'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 defineOptions({
   name: 'ExplorePage',
 })
 
-const { marketGroups, isResolvingTVL } = useMarketGroups()
+const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGroups()
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
-const { isEVKUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
+const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
+const { isLoading: isTokenListLoading } = useTokenList()
 const { entities } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
 
@@ -28,14 +30,16 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
   group.name,
   group.curator?.name,
   ...group.metrics.assetSymbols,
-  ...group.vaults.flatMap((vault) => {
-    const addr = isVaultType(vault) ? vault.address : ''
+  ...[...group.vaults, ...group.externalCollateral].flatMap((vault) => {
+    const addr = getVaultAddress(vault)
     if (!addr) return []
     const product = applyVaultOverrides(getProductByVault(addr), addr)
     return [
+      addr,
+      getVaultAssetAddress(vault),
       product.name,
       product.description,
-      ...getEntitiesByVault(vault as Vault).map(e => e.name),
+      ...getEntitiesByVault(vault).map(e => e.name),
     ]
   }),
 ])
@@ -69,7 +73,10 @@ const {
     { key: 'totalAvailableLiquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
   ],
   (group, metric) => {
-    if (metric === 'bestMaxROE') return getBestMaxROE(group.id).value
+    if (metric === 'bestMaxROE') {
+      const best = getBestMaxROE(group.id)
+      return best.metric === 'max-roe' ? best.value : Number.NaN
+    }
     const val = group.metrics[metric as keyof typeof group.metrics]
     return typeof val === 'number' ? val : 0
   },
@@ -133,14 +140,8 @@ const riskManagerOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
     if (group.source !== 'product') continue
-    const seenInGroup = new Set<string>()
-    for (const vault of group.vaults) {
-      if (!isVaultType(vault)) continue
-      for (const entity of getEntitiesByVault(vault)) {
-        if (seenInGroup.has(entity.name)) continue
-        seenInGroup.add(entity.name)
-        entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
-      }
+    for (const entity of getUniqueEntitiesByVaults(group.vaults)) {
+      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -164,10 +165,7 @@ const matchesAssetFilter = (group: MarketGroup): boolean => {
 
 const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
   if (!selectedRiskManagers.value.length) return true
-  return group.vaults.some((vault) => {
-    if (!isVaultType(vault)) return false
-    return getEntitiesByVault(vault).some(e => selectedRiskManagers.value.includes(e.name))
-  })
+  return getUniqueEntitiesByVaults(group.vaults).some(e => selectedRiskManagers.value.includes(e.name))
 }
 
 const filteredMarkets = computed(() => {
@@ -182,9 +180,12 @@ const filteredMarkets = computed(() => {
 
 const applyRecentlyAddedSort = (sorted: MarketGroup[]): MarketGroup[] => {
   return [...sorted].sort((a, b) => {
-    const af = a.metrics.hasRecentlyAdded ? 1 : 0
-    const bf = b.metrics.hasRecentlyAdded ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedBoost(
+      a.metrics.hasRecentlyAdded,
+      a.metrics.totalAvailableLiquidity,
+      b.metrics.hasRecentlyAdded,
+      b.metrics.totalAvailableLiquidity,
+    )
   })
 }
 
@@ -201,6 +202,30 @@ const applyDeprecatedGroupSort = (sorted: MarketGroup[]): MarketGroup[] => {
     const bd = isGroupDeprecated(b) ? 1 : 0
     return ad - bd
   })
+}
+
+const compareMarketLiquidityDesc = (a: MarketGroup, b: MarketGroup): number =>
+  b.metrics.totalAvailableLiquidity - a.metrics.totalAvailableLiquidity
+
+const compareMarketNameAsc = (a: MarketGroup, b: MarketGroup): number =>
+  (a.name || a.id).localeCompare(b.name || b.id)
+
+const compareMaxRoeMarkets = (a: MarketGroup, b: MarketGroup, direction: 'desc' | 'asc' = 'desc'): number => {
+  const aBest = getBestMaxROE(a.id)
+  const bBest = getBestMaxROE(b.id)
+  const aHasRoe = aBest.metric === 'max-roe'
+  const bHasRoe = bBest.metric === 'max-roe'
+  const directionFactor = direction === 'asc' ? -1 : 1
+
+  if (aHasRoe !== bHasRoe) return aHasRoe ? -1 : 1
+
+  const metricDelta = (bBest.value - aBest.value) * directionFactor
+  if (metricDelta !== 0) return metricDelta
+
+  const liquidityDelta = compareMarketLiquidityDesc(a, b)
+  if (liquidityDelta !== 0) return liquidityDelta
+
+  return compareMarketNameAsc(a, b)
 }
 
 const sortedMarkets = computed(() => {
@@ -235,10 +260,8 @@ const sortedMarkets = computed(() => {
       return applyDeprecatedGroupSort(applyRecentlyAddedSort(scored.map(s => s.group)))
     }
     case 'Max ROE':
-      sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
-        getBestMaxROE(b.id).value - getBestMaxROE(a.id).value,
-      ))
-      break
+      sorted = [...filteredMarkets.value].sort((a, b) => compareMaxRoeMarkets(a, b, sortDir.value))
+      return applyDeprecatedGroupSort(sorted)
     case 'Total Supply':
       sorted = applyRecentlyAddedSort([...filteredMarkets.value].sort((a, b) =>
         b.metrics.totalTVL - a.metrics.totalTVL,
@@ -262,10 +285,34 @@ const sortedMarkets = computed(() => {
 })
 
 const isLoading = computed(() =>
-  isEVKUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
-  || isResolvingTVL.value,
+  isEVaultUpdating.value || isEarnUpdating.value || isSecuritizeUpdating.value || isEscrowUpdating.value
+  || isTokenListLoading.value || !marketGroupsReady.value || isResolvingTVL.value,
 )
 const { isSlow } = useSlowLoading(isLoading)
+
+const hasActiveFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedMarkets.value.length > 0
+  || selectedAssets.value.length > 0
+  || selectedRiskManagers.value.length > 0
+  || customFilters.value.length > 0,
+)
+const hasExploreMarkets = computed(() => marketGroups.value.some(group => group.source === 'product'))
+const showFilteredEmptyState = computed(() => hasActiveFilters.value && hasExploreMarkets.value)
+const emptyStateTitle = computed(() => showFilteredEmptyState.value ? 'No markets found' : 'No markets yet')
+const emptyStateDescription = computed(() =>
+  showFilteredEmptyState.value
+    ? 'Try clearing search or filters to uncover more markets.'
+    : 'No markets are available on this network yet.',
+)
+
+const clearExploreFilters = () => {
+  clearSearch()
+  selectedMarkets.value = []
+  selectedAssets.value = []
+  selectedRiskManagers.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
@@ -354,18 +401,26 @@ const { isSlow } = useSlowLoading(isLoading)
         :markets="sortedMarkets"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-content-tertiary"
+        class="flex-1"
+        icon="nodes"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="showFilteredEmptyState"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearExploreFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>

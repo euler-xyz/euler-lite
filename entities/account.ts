@@ -1,209 +1,151 @@
-import { getAddress, pad, toHex, type Address } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
-import type { EarnVault, SecuritizeVault, Vault } from '~/entities/vault'
-import { logWarn } from '~/utils/errorHandling'
-import type { LensAccountInfo } from '~/utils/accountPositionHelpers'
-import { batchLensCalls } from '~/utils/multicall'
-import { fetchAccountPositions } from '~/utils/subgraph'
+import type { EVault, EVaultCollateral, EVaultCollateralRamping, IHasVaultAddress, PortfolioBorrowPosition } from '@eulerxyz/euler-v2-sdk'
 
-export interface AccountVaultLiquidity {
-  queryFailure: boolean
-  queryFailureReason: string
-  account: string
-  vault: string
-  unitOfAccount: string
-  timeToLiquidation: bigint
-  liabilityValueBorrowing: bigint
-  liabilityValueLiquidation: bigint
-  collateralValueBorrowing: bigint
-  collateralValueLiquidation: bigint
-  collateralValueRaw: bigint
-  collaterals: string[]
-  collateralValuesBorrowing: bigint[]
-  collateralValuesLiquidation: bigint[]
-  collateralValuesRaw: bigint[]
-}
-export interface AccountVault {
-  account: string
-  asset: string
-  assetAllowanceExpirationVaultPermit2: bigint
-  assetAllowancePermit2: bigint
-  assetAllowanceVault: bigint
-  assetAllowanceVaultPermit2: bigint
-  assets: bigint
-  assetsAccount: bigint
-  balanceForwarderEnabled: boolean
-  borrowed: bigint
-  isCollateral: boolean
-  isController: boolean
-  liquidityInfo: AccountVaultLiquidity
-  vault: string
-}
-export interface AccountBorrowPosition {
-  borrow: Vault
-  collateral: Vault | SecuritizeVault
-  collaterals?: string[]
-  subAccount: string
-  health: bigint
+const WAD = 10n ** 18n
+const BPS = 10000n
+
+/** Linear-ramp inputs sufficient to project a forced-liquidation time. */
+export interface PositionRampInput {
+  /** Current user LTV, WAD-scaled (e.g. 60% = 0.6 * 1e18). */
   userLTV: bigint
-  price: bigint
-  supplied: bigint
-  borrowed: bigint
-  borrowLTV: bigint
-  liquidationLTV: bigint
-  liabilityValueBorrowing: bigint
-  liabilityValueLiquidation: bigint
-  timeToLiquidation: bigint
-  collateralValueLiquidation: bigint
-  liquidityQueryFailure?: boolean
-}
-export interface AccountDepositPosition {
-  vault: Vault | SecuritizeVault | EarnVault
-  subAccount: string
-  shares: bigint
-  assets: bigint
+  /** Post-ramp liquidation LTV target, as a decimal fraction (e.g. 0.8 = 80%). */
+  liquidationLTV: number
+  /** Ramp config — absent when the edge is not ramping. */
+  ramping?: EVaultCollateralRamping
 }
 
-export const isPositionEligibleForLiquidation = (position: AccountBorrowPosition | undefined): boolean => {
-  if (!position || position.liabilityValueLiquidation === 0n) return false
-  if (position.liquidityQueryFailure) return false
-  return position.liabilityValueLiquidation > position.collateralValueLiquidation
+export interface PositionRampStatus {
+  isRamping: boolean
+  /** True when the user's LTV would cross the effective LLTV before the ramp ends. */
+  willBeLiquidated: boolean
+  /** Unix seconds at which the effective LLTV crosses below `userLTV`. `null` when not in danger. */
+  forcedLiquidationAt: bigint | null
 }
 
-/**
- * Derives the subaccount index by XORing the owner address with the subaccount address.
- * The subaccount address is created as: ownerAddress XOR index
- * So: index = ownerAddress XOR subAccountAddress
- */
-export const getSubAccountIndex = (ownerAddress: string, subAccountAddress: string): number => {
-  const owner = BigInt(getAddress(ownerAddress))
-  const subAccount = BigInt(getAddress(subAccountAddress))
-  return Number(owner ^ subAccount)
-}
+const toBpsFromDecimal = (decimal: number): bigint =>
+  BigInt(Math.round(decimal * Number(BPS)))
 
-/**
- * Derives the full sub-account address from owner address and sub-account index.
- * Reverse of getSubAccountIndex: address = ownerAddress XOR index
- */
-export const getSubAccountAddress = (ownerAddress: string, index: number): string => {
-  const owner = BigInt(getAddress(ownerAddress))
-  return getAddress(pad(toHex(owner ^ BigInt(index), { size: 20 }), { size: 20 }))
-}
+const toBpsFromWad = (wad: bigint): bigint =>
+  (wad * BPS) / WAD
 
-export const getFreeSubAccounts = (
-  ownerAddress: string,
-  occupiedSubAccounts: readonly string[],
-): string[] => {
-  const address = getAddress(ownerAddress)
-  const occupied = new Set(occupiedSubAccounts.map(subAccount => getAddress(subAccount) as string))
-  const freeSubAccounts: string[] = []
-
-  for (let index = 1; index <= 256; index++) {
-    const subAccountAddress = getSubAccountAddress(address, index)
-    if (!occupied.has(subAccountAddress as string)) {
-      freeSubAccounts.push(subAccountAddress)
-    }
-  }
-
-  return freeSubAccounts
-}
-
-export const isBorrowControllerCompatible = (
-  enabledControllers: readonly string[],
-  borrowVaultAddress: string,
+const isRamping = (
+  ramping: EVaultCollateralRamping | undefined,
+  liquidationLTVdec: number,
+  nowSeconds: bigint,
 ): boolean => {
-  if (!enabledControllers.length) return true
-
-  const borrowVault = getAddress(borrowVaultAddress)
-  return enabledControllers.every(controller => getAddress(controller) === borrowVault)
-}
-
-export const selectBorrowCompatibleSubAccount = (
-  candidates: ReadonlyArray<{ subAccount: string, enabledControllers: readonly string[] }>,
-  borrowVaultAddress: string,
-): string | null => {
-  for (const candidate of candidates) {
-    if (isBorrowControllerCompatible(candidate.enabledControllers, borrowVaultAddress)) {
-      return candidate.subAccount
-    }
-  }
-
-  return null
+  if (!ramping || ramping.rampDuration <= 0n) return false
+  if (BigInt(ramping.targetTimestamp) <= nowSeconds) return false
+  // Ramp DOWN only — target is strictly below initial.
+  return liquidationLTVdec < ramping.initialLiquidationLTV
 }
 
 /**
- * Find a free sub-account for a new position.
+ * Project when (if ever) the user's position would become liquidatable while
+ * the ramp is in progress, assuming `userLTV` stays constant.
  *
- * When `borrowVaultAddress` is provided, the returned sub-account is guaranteed
- * to have no controller or only the target borrow vault as controller. This
- * avoids picking a sub-account whose existing controller would conflict with
- * the new borrow.
+ * Linear interpolation between `initialLiquidationLTV` and `liquidationLTV`
+ * over `[targetTimestamp - rampDuration, targetTimestamp]`. Returns
+ * `forcedLiquidationAt = targetTimestamp` when the crossing only happens at
+ * ramp end. Returns an earlier-than-now timestamp when `userLTV` is already
+ * past the current effective LLTV — callers should treat that as "now".
  */
-export const getNewSubAccount = async (
-  ownerAddress: string,
-  borrowVaultAddress?: string,
-) => {
-  const { SUBGRAPH_URL } = useEulerConfig()
-
-  const { borrows, deposits } = await fetchAccountPositions(SUBGRAPH_URL, ownerAddress)
-  const occupiedSubAccounts = borrowVaultAddress
-    ? [...borrows, ...deposits].map(p => p.subAccount)
-    : borrows.map(b => b.subAccount)
-  const freeSubAccounts = getFreeSubAccounts(ownerAddress, occupiedSubAccounts)
-
-  if (!freeSubAccounts.length) {
-    throw new Error('Free subaccount not found')
+export const getRampStatus = (
+  input: PositionRampInput,
+  nowSeconds?: bigint,
+): PositionRampStatus => {
+  const now = nowSeconds ?? BigInt(Math.floor(Date.now() / 1000))
+  const ramping = input.ramping
+  if (!isRamping(ramping, input.liquidationLTV, now)) {
+    return { isRamping: false, willBeLiquidated: false, forcedLiquidationAt: null }
   }
 
-  if (!borrowVaultAddress) {
-    return freeSubAccounts[0]
+  // Work in BPS bigints. SDK exposes liquidationLTV/initialLiquidationLTV as
+  // decimal numbers; userLTV is WAD bigint.
+  const userLTVbps = toBpsFromWad(input.userLTV)
+  const targetLLTVbps = toBpsFromDecimal(input.liquidationLTV)
+  const initialLLTVbps = toBpsFromDecimal(ramping!.initialLiquidationLTV)
+
+  if (userLTVbps < targetLLTVbps) {
+    return { isRamping: true, willBeLiquidated: false, forcedLiquidationAt: null }
   }
 
-  const { eulerCoreAddresses, eulerLensAddresses } = useEulerAddresses()
-  const { rpcUrl } = useRpcClient()
-  const evcAddress = eulerCoreAddresses.value?.evc
-  const accountLensAddress = eulerLensAddresses.value?.accountLens
-
-  if (!evcAddress || !accountLensAddress) {
-    return freeSubAccounts[0]
+  if (initialLLTVbps <= targetLLTVbps) {
+    // Degenerate ramp (no actual decrease); treat as not in danger.
+    return { isRamping: true, willBeLiquidated: false, forcedLiquidationAt: null }
   }
 
-  const borrowVault = getAddress(borrowVaultAddress) as Address
-  const checkedCandidates: Array<{ subAccount: string, enabledControllers: readonly string[] }> = []
+  // currentEffectiveLLTV(t) = targetLLTV + (initialLLTV - targetLLTV) * (targetTimestamp - t) / rampDuration
+  // Solve for t when currentEffectiveLLTV(t) == userLTV:
+  //   t* = targetTimestamp - (userLTV - targetLLTV) * rampDuration / (initialLLTV - targetLLTV)
+  const numerator = (userLTVbps - targetLLTVbps) * ramping!.rampDuration
+  const denominator = initialLLTVbps - targetLLTVbps
+  const offset = numerator / denominator
+  const forcedLiquidationAt = BigInt(ramping!.targetTimestamp) - offset
 
-  for (let index = 0; index < freeSubAccounts.length; index += 25) {
-    const chunk = freeSubAccounts.slice(index, index + 25)
-    const results = await batchLensCalls<LensAccountInfo>(
-      evcAddress,
-      accountLensAddress,
-      eulerAccountLensABI,
-      chunk.map(subAccount => ({
-        functionName: 'getAccountInfo',
-        args: [subAccount, borrowVault],
-      })),
-      rpcUrl.value,
-    )
+  return { isRamping: true, willBeLiquidated: true, forcedLiquidationAt }
+}
 
-    if (results.some(result => result.transportError)) {
-      logWarn('account/getNewSubAccount', 'Account lens unavailable, falling back to first free sub-account')
-      return freeSubAccounts[0]
-    }
+/** Find the borrow-vault collateral edge matching a portfolio position's primary collateral. */
+export const getPositionCollateralEdge = (
+  borrowVault: EVault | undefined,
+  collateralAddress: string | undefined,
+): EVaultCollateral | undefined => {
+  if (!borrowVault?.collaterals || !collateralAddress) return undefined
+  const lower = collateralAddress.toLowerCase()
+  return borrowVault.collaterals.find(c => c.address.toLowerCase() === lower)
+}
 
-    for (let resultIndex = 0; resultIndex < results.length; resultIndex++) {
-      const result = results[resultIndex]
-      if (!result.success || !result.result) continue
-
-      checkedCandidates.push({
-        subAccount: chunk[resultIndex],
-        enabledControllers: result.result.evcAccountInfo.enabledControllers ?? [],
-      })
-    }
-
-    const compatibleSubAccount = selectBorrowCompatibleSubAccount(checkedCandidates, borrowVault)
-    if (compatibleSubAccount) {
-      return compatibleSubAccount
-    }
+/**
+ * Convenience wrapper: resolve the primary collateral edge for a borrow
+ * position and project its ramp status. Returns a non-ramping status when the
+ * collateral edge isn't found or doesn't ramp.
+ */
+export const getPositionRampStatus = (
+  position: PortfolioBorrowPosition<IHasVaultAddress>,
+  nowSeconds?: bigint,
+): PositionRampStatus => {
+  if (position.userLTV === undefined) {
+    return { isRamping: false, willBeLiquidated: false, forcedLiquidationAt: null }
   }
+  const edge = getPositionCollateralEdge(
+    position.borrowVault as EVault | undefined,
+    position.collateralVault?.address,
+  )
+  if (!edge) {
+    return { isRamping: false, willBeLiquidated: false, forcedLiquidationAt: null }
+  }
+  return getRampStatus({
+    userLTV: position.userLTV,
+    liquidationLTV: edge.liquidationLTV,
+    ramping: edge.ramping,
+  }, nowSeconds)
+}
 
-  throw new Error('Compatible free subaccount not found')
+/** True when the primary collateral edge of a borrow position is currently ramping down. */
+export const isPositionLiquidationLTVRamping = (
+  position: PortfolioBorrowPosition<IHasVaultAddress>,
+  nowSeconds?: bigint,
+): boolean => {
+  const edge = getPositionCollateralEdge(
+    position.borrowVault as EVault | undefined,
+    position.collateralVault?.address,
+  )
+  if (!edge) return false
+  const now = nowSeconds ?? BigInt(Math.floor(Date.now() / 1000))
+  return isRamping(edge.ramping, edge.liquidationLTV, now)
+}
+
+/**
+ * Return the ramp's target timestamp (post-ramp completion time, unix seconds)
+ * for the primary collateral edge of a borrow position, or `null` when not
+ * ramping.
+ */
+export const getPositionRampTargetTimestamp = (
+  position: PortfolioBorrowPosition<IHasVaultAddress>,
+): bigint | null => {
+  const edge = getPositionCollateralEdge(
+    position.borrowVault as EVault | undefined,
+    position.collateralVault?.address,
+  )
+  if (!edge?.ramping) return null
+  return BigInt(edge.ramping.targetTimestamp)
 }

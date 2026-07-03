@@ -1,38 +1,23 @@
 <script setup lang="ts">
-import { Line } from 'vue-chartjs'
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  type ChartOptions,
-  type ChartData,
-} from 'chart.js'
-import annotationPlugin from 'chartjs-plugin-annotation'
-import { formatUnits, zeroAddress, decodeAbiParameters, type Address, type Abi, type Hex } from 'viem'
-import { logWarn } from '~/utils/errorHandling'
-import {
-  INTEREST_RATE_MODEL_TYPE,
-  KINK_IRM_COMPONENTS,
-  ADAPTIVE_CURVE_IRM_COMPONENTS,
-  KINKY_IRM_COMPONENTS,
-} from '~/entities/constants'
-import {
-  type Vault,
-  type SecuritizeVault,
-  type KinkIRMParams,
-  type AdaptiveCurveIRMParams,
-  type KinkyIRMParams,
-  getVaultUtilization,
-  hasCollateralExposure,
-} from '~/entities/vault'
+  adaptiveRateAtTargetToBorrowSPY,
+  type AdaptiveCurveIRMInfo,
+  type EVault,
+  type KinkIRMInfo,
+  type KinkyIRMInfo,
+  type SecuritizeCollateralVault,
+} from '@eulerxyz/euler-v2-sdk'
+import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
+import annotationPlugin from 'chartjs-plugin-annotation'
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler, type ChartData, type ChartOptions } from 'chart.js'
+import { zeroAddress, formatUnits, type Address, type Abi } from 'viem'
+import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
+import { Line } from 'vue-chartjs'
+import { logWarn } from '~/utils/errorHandling'
+import { useModal } from '~/components/ui/composables/useModal'
+import { UiHoverPreviewTooltipModal } from '#components'
 
 // Register Chart.js components
 ChartJS.register(
@@ -47,10 +32,10 @@ ChartJS.register(
   annotationPlugin,
 )
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
-const chartData = ref<ChartData<'line'> | null>(null)
-const chartOptions = ref<ChartOptions<'line'> | null>(null)
+const chartData = shallowRef<ChartData<'line', number[], string> | null>(null)
+const chartOptions = shallowRef<ChartOptions<'line'> | null>(null)
 const isLoading = ref(true)
 const hasError = ref(false)
 
@@ -60,23 +45,26 @@ const { getChartColors, isDark } = useThemeColors()
 const { client: rpcClient } = useRpcClient()
 const { eulerLensAddresses } = useEulerAddresses()
 const { get: registryGet } = useVaultRegistry()
+const modal = useModal()
 
 // Only render the IRM chart for vaults that have live borrow-side exposure —
 // either currently borrowable, or still accruing interest on existing debt
 // while the liquidation LTV ramps down. This mirrors the visibility rule of
-// the "Collateral exposure" block and correctly excludes collateral-only
+// the "Exposure" block and correctly excludes collateral-only
 // vaults that may still carry a non-zero interestRateModelAddress.
 const hasValidIRM = computed(() => {
+  const interestRateModelAddress = vault.interestRateModel.address
   const hasExposure = hasCollateralExposure(
     vault,
-    addr => registryGet(addr)?.vault as Vault | SecuritizeVault | undefined,
+    addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
   )
   return hasExposure
-    && vault.interestRateModelAddress
-    && vault.interestRateModelAddress !== zeroAddress
+    && interestRateModelAddress
+    && interestRateModelAddress !== zeroAddress
 })
 
-const SECONDS_PER_YEAR = 31_557_600 // 365.25 days
+// Gregorian-year seconds (centralised in entities/constants.ts; matches EVK
+// SECONDS_PER_YEAR so APY display rounds-trips with on-chain values).
 const MAX_UINT32 = 4_294_967_295
 
 // Key borrow APY values derived from the chart data (populated in renderChart)
@@ -85,7 +73,7 @@ const chartRateAtKink = ref<number | null>(null)
 const chartRateAtMax = ref<number | null>(null)
 // Adaptive-only: APY bounds on rate-at-target, computed via UtilsLens.computeAPYs
 // so values match exactly what the vault will accrue (APR × year is the wrong
-// conversion — see AdaptiveCurveIRMParams, baseline uses daily compounding).
+// conversion — see AdaptiveCurveIRMInfo, baseline uses daily compounding).
 const adaptiveMinRateAPY = ref<number | null>(null)
 const adaptiveMaxRateAPY = ref<number | null>(null)
 
@@ -99,60 +87,35 @@ const formatWadPercent = (wad: bigint): string => {
   return `${percent.toFixed(2)}%`
 }
 
-const irmModelType = computed(() => Number(vault.irmInfo?.interestRateModelInfo?.interestRateModelType))
+const irmModelType = computed(() => Number(vault.interestRateModel.type))
 
 const irmTypeLabel = computed(() => {
   const type = irmModelType.value
   if (type === INTEREST_RATE_MODEL_TYPE.KINK) return 'Kink'
   if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) return 'Adaptive'
   if (type === INTEREST_RATE_MODEL_TYPE.KINKY) return 'Kinky'
-  if (type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY) return 'Cyclical note'
   return 'Interest Rate Model'
 })
 
 type DecodedIRMParams
-  = ({ type: 'kink' } & KinkIRMParams)
-    | ({ type: 'adaptive' } & AdaptiveCurveIRMParams)
-    | ({ type: 'kinky' } & KinkyIRMParams)
+  = ({ type: 'kink' } & KinkIRMInfo)
+    | ({ type: 'adaptive' } & AdaptiveCurveIRMInfo)
+    | ({ type: 'kinky' } & KinkyIRMInfo)
 
 const decodedIRMParams = computed<DecodedIRMParams | null>(() => {
-  const params = vault.irmInfo?.interestRateModelInfo?.interestRateModelParams
-  if (!params || params === '0x') return null
-
   const type = irmModelType.value
+  const data = vault.interestRateModel.data
+  if (!data) return null
 
   try {
     if (type === INTEREST_RATE_MODEL_TYPE.KINK) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...KINK_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return { type: 'kink', baseRate: decoded.baseRate, slope1: decoded.slope1, slope2: decoded.slope2, kink: decoded.kink }
+      return { type: 'kink', ...data } as DecodedIRMParams
     }
     if (type === INTEREST_RATE_MODEL_TYPE.ADAPTIVE_CURVE) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...ADAPTIVE_CURVE_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return {
-        type: 'adaptive',
-        targetUtilization: decoded.targetUtilization,
-        initialRateAtTarget: decoded.initialRateAtTarget,
-        minRateAtTarget: decoded.minRateAtTarget,
-        maxRateAtTarget: decoded.maxRateAtTarget,
-        curveSteepness: decoded.curveSteepness,
-        adjustmentSpeed: decoded.adjustmentSpeed,
-      }
+      return { type: 'adaptive', ...data } as DecodedIRMParams
     }
     if (type === INTEREST_RATE_MODEL_TYPE.KINKY) {
-      const [decoded] = decodeAbiParameters(
-        [{ type: 'tuple', components: [...KINKY_IRM_COMPONENTS] }],
-        params as Hex,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem decode returns dynamic shape
-      ) as unknown as any[]
-      return { type: 'kinky', baseRate: decoded.baseRate, slope: decoded.slope, shape: decoded.shape, kink: decoded.kink, cutoff: decoded.cutoff }
+      return { type: 'kinky', ...data } as DecodedIRMParams
     }
   }
   catch (e) {
@@ -180,7 +143,7 @@ const irmParamsDisplay = computed<Array<{ label: string, value: string }>>(() =>
       { label: 'Min rate at kink', value: fmtRate(adaptiveMinRateAPY.value) },
       { label: 'Max rate at kink', value: fmtRate(adaptiveMaxRateAPY.value) },
       { label: 'Kink', value: formatWadPercent(decoded.targetUtilization) },
-      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_PER_YEAR).toFixed(1)}x/yr` },
+      { label: 'Adjustment speed', value: `${(Number(formatUnits(decoded.adjustmentSpeed, 18)) * SECONDS_IN_YEAR).toFixed(1)}x/yr` },
     ]
   }
   if (decoded.type === 'kinky') {
@@ -216,6 +179,19 @@ const irmTooltip = computed<{ title: string, text: string } | null>(() => {
   }
   return null
 })
+
+const openIRMInfoModal = (event: MouseEvent | KeyboardEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  const tooltip = irmTooltip.value
+  if (!tooltip) return
+  modal.open(UiHoverPreviewTooltipModal, {
+    props: {
+      modalTitle: tooltip.title,
+      text: tooltip.text,
+    },
+  })
+}
 
 // Generate cash and borrows data points for chart (0-100% utilization).
 // When `kinkFraction` is provided (in 0..1), injects an extra sample at the
@@ -269,9 +245,12 @@ const parseAPY = (apy: bigint): number => {
 // uses, so Min/Max rate cells match on-chain accrual for large rates instead
 // of silently collapsing to APR.
 const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null> => {
+  const borrowSPY = adaptiveRateAtTargetToBorrowSPY(wadPerSec)
+  if (borrowSPY === null) return null
+
   const utilsLens = eulerLensAddresses.value?.utilsLens
-  if (!utilsLens || wadPerSec === 0n) {
-    return wadPerSec === 0n ? 0 : null
+  if (!utilsLens || borrowSPY === 0n) {
+    return borrowSPY === 0n ? 0 : null
   }
   try {
     const client = rpcClient.value!
@@ -279,8 +258,9 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
       address: utilsLens as Address,
       abi: eulerUtilsLensABI as Abi,
       functionName: 'computeAPYs',
+      authorizationList: undefined,
       // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
-      args: [wadPerSec, 1n, 0n, 0n],
+      args: [borrowSPY, 1n, 0n, 0n],
     }) as readonly [bigint, bigint]
     const [borrowAPY] = result
     return Number(formatUnits(borrowAPY, 27)) * 100
@@ -307,6 +287,7 @@ const fetchIRMData = async (kinkFraction: number | null) => {
       address: eulerLensAddresses.value.vaultLens as Address,
       abi: eulerVaultLensABI as Abi,
       functionName: 'getVaultInterestRateModelInfo',
+      authorizationList: undefined,
       args: [vault.address, cashData, borrowsData],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
     }) as Record<string, any>
@@ -400,7 +381,7 @@ const renderChart = async () => {
       : null
 
     // Current utilization
-    const currentUtilization = getVaultUtilization(vault)
+    const currentUtilization = vault.utilization
 
     // Set chart data
     chartData.value = {
@@ -415,7 +396,7 @@ const renderChart = async () => {
           pointRadius: 0,
           pointHoverRadius: 6,
           pointHitRadius: 30,
-          tension: 0.4,
+          tension: 0,
           fill: true,
         },
         {
@@ -427,7 +408,7 @@ const renderChart = async () => {
           pointRadius: 0,
           pointHoverRadius: 6,
           pointHitRadius: 30,
-          tension: 0.4,
+          tension: 0,
           fill: true,
         },
       ],
@@ -631,26 +612,34 @@ watch(isDark, async () => {
 </script>
 
 <template>
-  <div
+  <VaultOverviewAccordionSection
     v-if="hasValidIRM"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-16 p-24 shadow-card"
+    title="Interest rate model"
+    :default-open="defaultOpen"
+    :has-actions="!!irmTooltip"
+    content-class="flex flex-col gap-16"
   >
-    <div class="flex justify-between items-center flex-wrap gap-12">
-      <div class="flex items-center gap-8">
-        <p class="text-h3 text-content-primary">
-          Interest rate model
-        </p>
-        <div class="irm-type-chip inline-flex items-center py-2 px-8 rounded-8 text-[13px] font-medium">
-          {{ irmTypeLabel }}
-        </div>
-        <UiFootnote
-          v-if="irmTooltip"
+    <template #actions>
+      <div
+        v-if="irmTooltip"
+        class="flex shrink-0 items-center gap-8"
+      >
+        <VaultMetadataTag
+          as="button"
+          icon="pulse"
+          :label="irmTypeLabel"
+          tone="accent"
+          title="Interest rate model details"
+          @click="openIRMInfoModal"
+        />
+        <UiHoverPreviewTooltip
           :title="irmTooltip.title"
           :text="irmTooltip.text"
-          class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
+          placement="top-end"
+          icon-class="text-content-muted hover:text-content-secondary"
         />
       </div>
-    </div>
+    </template>
 
     <div class="relative w-full min-h-400">
       <div
@@ -687,17 +676,5 @@ watch(isDark, async () => {
         :value="param.value"
       />
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>
-
-<style scoped lang="scss">
-.irm-type-chip {
-  background-color: rgba(var(--accent-rgb), 0.15);
-  color: var(--accent-600);
-
-  [data-theme="dark"] & {
-    background-color: rgba(var(--accent-rgb), 0.2);
-    color: var(--accent-500);
-  }
-}
-</style>

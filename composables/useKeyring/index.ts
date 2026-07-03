@@ -1,5 +1,5 @@
 import { type Ref, ref, watch, onUnmounted } from 'vue'
-import { useAccount, useChainId } from '@wagmi/vue'
+import { useChainId } from '@wagmi/vue'
 import { zeroAddress, type Address } from 'viem'
 import {
   KeyringConnect,
@@ -10,6 +10,7 @@ import { keyringHookTargetAbi } from '~/abis/keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getPublicClient } from '~/utils/public-client'
 import { logWarn } from '~/utils/errorHandling'
+import { getVaultHookTarget } from '~/utils/vault-hooks'
 
 export { type CredentialData } from '@keyringnetwork/keyring-connect-sdk'
 
@@ -34,6 +35,7 @@ const readHookTargetField = async <T>(
       address: hookTarget,
       abi: keyringHookTargetAbi,
       functionName: functionName as 'policyId' | 'keyring' | 'checkKeyringCredentialOrWildCard',
+      authorizationList: undefined,
     }) as T
   }
   catch (err) {
@@ -44,7 +46,7 @@ const readHookTargetField = async <T>(
 
 export const useKeyring = (vaultAddress: string | Ref<string>) => {
   const addressRef = typeof vaultAddress === 'string' ? ref(vaultAddress) : vaultAddress
-  const { address: userAddress } = useAccount()
+  const { address: userAddress } = useWagmi()
   const chainId = useChainId()
   const { getVault } = useVaultRegistry()
   const { rpcUrl } = useRpcClient()
@@ -67,8 +69,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   const hookTarget = computed((): Address | undefined => {
     if (!isKeyringVault.value) return undefined
     const vault = getVault(addressRef.value)
-    if (!vault || !('hookTarget' in vault)) return undefined
-    const ht = (vault as { hookTarget: string }).hookTarget as Address
+    if (!vault) return undefined
+    const ht = getVaultHookTarget(vault as never) as Address
     return ht !== zeroAddress ? ht : undefined
   })
 
@@ -103,6 +105,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
           address: ht,
           abi: keyringHookTargetAbi,
           functionName: 'checkKeyringCredentialOrWildCard',
+          authorizationList: undefined,
           args: [user],
         }).catch(() => false) as Promise<boolean>,
       ])
@@ -124,6 +127,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
               address: kca,
               abi: kAbi,
               functionName: 'entityExp',
+              authorizationList: undefined,
               args: [BigInt(pid), user],
             })
             expiration.value = exp as bigint
@@ -309,6 +313,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     expiration,
     policyId,
     keyringContractAddress,
+    hookTarget,
     credentialData,
     flowState,
     error,

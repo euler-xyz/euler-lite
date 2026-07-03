@@ -66,6 +66,20 @@ const emit = defineEmits<{
     </p>
   </SummaryRow>
   <SummaryRow
+    v-else-if="(inputDisplay || outputDisplay) && (multipliedPriceImpact === null || multipliedPriceImpact === undefined)"
+    label="Price impact"
+  >
+    <UiHoverPreviewTooltip
+      title="Price impact unavailable"
+      text="USD price unavailable for one of the assets. Double-check the swap in/out amounts before continuing."
+      placement="top-start"
+    >
+      <span class="text-p2 text-error-500">
+        Unavailable
+      </span>
+    </UiHoverPreviewTooltip>
+  </SummaryRow>
+  <SummaryRow
     v-if="multipliedPriceImpact !== null && multipliedPriceImpact !== undefined"
     label="Multiplied price impact"
   >

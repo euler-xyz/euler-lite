@@ -1,13 +1,12 @@
 <script setup lang="ts">
+import type { EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 import { DateTime } from 'luxon'
 import { formatNumber } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import type { LTVRampConfig } from '~/entities/vault/ltv'
 
 const emits = defineEmits(['close'])
-const { liquidationLTV, targetTimestamp } = defineProps<LTVRampConfig>()
+const { liquidationLTV, ramping } = defineProps<EVaultCollateral>()
 
-const rampEndTime = computed(() => DateTime.fromSeconds(Number(targetTimestamp)))
+const rampEndTime = computed(() => DateTime.fromSeconds(ramping?.targetTimestamp ?? 0))
 
 const handleClose = () => {
   emits('close')
@@ -27,7 +26,7 @@ const handleClose = () => {
           </p>
         </div>
         <div class="text-h5">
-          {{ `${formatNumber(nanoToValue(liquidationLTV, 2), 2)}%` }}
+          {{ `${formatNumber(ltvToPercent(liquidationLTV), 2)}%` }}
         </div>
       </div>
       <div class="flex justify-between items-center mt-16">

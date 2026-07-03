@@ -1,29 +1,33 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import {
   areAllUserOpsHooked,
-  decodeHookedOps,
+  getHookedOperationMetas,
+  getVaultHookedOperations,
+  getVaultHookTarget,
   isHookDisabling,
   isOpHooked,
   OP_VAULT_STATUS_CHECK,
 } from '~/utils/vault-hooks'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
-import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { isVaultAccessControlled, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { truncate } from '~/utils/string-utils'
 
 const emits = defineEmits<{ close: [] }>()
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 
 const { chainId } = useEulerAddresses()
 
-// 'full'         — all user-facing ops are explicitly in the bitmap
+const hookedOperations = computed(() => getVaultHookedOperations(vault))
+
+// 'full'         — all user-facing operations are hooked
 // 'status-check' — only the vault-status check is disabled, which the EVC
 //                  calls at the end of every batch → every operation reverts
 // null           — not paused (either fully or at all)
 const pausedKind = computed((): 'full' | 'status-check' | null => {
   if (!isHookDisabling(vault)) return null
-  if (areAllUserOpsHooked(vault.hookedOps)) return 'full'
+  if (areAllUserOpsHooked(hookedOperations.value)) return 'full'
   if (isOpHooked(vault, OP_VAULT_STATUS_CHECK)) return 'status-check'
   return null
 })
@@ -48,16 +52,27 @@ const intro = computed(() => {
   return 'The following operations are routed through a hook contract, which may restrict or modify them.'
 })
 
-const ops = computed(() => decodeHookedOps(vault.hookedOps))
+const ops = computed(() => getHookedOperationMetas(hookedOperations.value))
 
 const hasHookTarget = computed(() => !isHookDisabling(vault))
 
-const hookTargetLink = computed(() => getExplorerLink(vault.hookTarget, chainId.value, true))
+const hookTarget = computed(() => getVaultHookTarget(vault))
+
+const hookTargetLink = computed(() => getExplorerLink(hookTarget.value, chainId.value, true))
 
 const hookTargetLabel = computed(() => {
   if (isVaultKeyring(vault.address)) return 'Keyring (identity verification)'
+  if (isVaultAccessControlled(vault.address)) return 'Access control (allowlist)'
   return 'Third-party hook contract'
 })
+
+// Extra explanation shown for permissioned vaults that gate operations behind
+// an on-chain allowlist (access-control hook target).
+const hookTargetNote = computed(() =>
+  isVaultAccessControlled(vault.address)
+    ? 'This vault is permissioned: the operations below can only be performed by addresses that the vault manager has added to an on-chain allowlist. If your address is not whitelisted, those operations will revert. Access is granted by the manager — there is no self-service verification.'
+    : '',
+)
 
 const onCopyClick = (address: string) => {
   navigator.clipboard.writeText(address).catch(() => {})
@@ -91,13 +106,13 @@ const handleClose = () => {
           rel="noopener noreferrer"
           class="text-accent-600 underline cursor-pointer hover:text-accent-500"
         >
-          {{ getSpecialAddressLabel(vault.hookTarget) || truncate(vault.hookTarget) }}
+          {{ getSpecialAddressLabel(hookTarget) || truncate(hookTarget) }}
         </NuxtLink>
         <button
           type="button"
           aria-label="Copy hook target address"
           class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 focus-visible:rounded"
-          @click="onCopyClick(vault.hookTarget)"
+          @click="onCopyClick(hookTarget)"
         >
           <SvgIcon
             class="!w-18 !h-18"
@@ -105,6 +120,12 @@ const handleClose = () => {
           />
         </button>
       </div>
+      <p
+        v-if="hookTargetNote"
+        class="text-p3 text-content-tertiary"
+      >
+        {{ hookTargetNote }}
+      </p>
     </div>
 
     <div

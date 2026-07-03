@@ -1,56 +1,128 @@
 <script setup lang="ts">
-import { useVaults } from '~/composables/useVaults'
-import { useEulerAddresses } from '~/composables/useEulerAddresses'
-import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getVaultUtilization, isSecuritizeBorrowPair, type AnyBorrowVaultPair, type BorrowVaultPair } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { getAssetUsdValue } from '~/utils/sdk-prices'
+import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { isSecuritizeBorrowPair } from '~/types/borrow-pair'
+import { useVaults } from '~/composables/useVaults'
+import { useEulerAddresses } from '~/composables/useEulerAddresses'
+import { getAssetLogoUrl } from '~/composables/useTokenList'
+import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import {
+  areTokenAddressesCorrelatedByTags,
+  getSupportedTokenCategoryOptions,
+  normalizeTokenCategoryTags,
+  toTokenCategoryFilterValue,
+  tokenAddressMatchesCategoryFilter,
+} from '~/utils/token-categories'
+import { formatCompactUsdValue } from '~/utils/string-utils'
+import { getBorrowPairSearchAddresses } from '~/utils/borrow-pair'
+import type { SelectOption, SelectQuickFilter } from '~/components/ui/modals/select.types'
 
-const { withIntrinsicBorrowApy, withIntrinsicSupplyApy } = useIntrinsicApy()
+type AssetFilterOption = SelectOption
+type AssetFilterOptions = { options: AssetFilterOption[], quickFilters: SelectQuickFilter[] }
+
+const CATEGORY_FILTER_LABELS: Record<string, string> = {
+  eth: 'ETH',
+  btc: 'BTC',
+  usd: 'USD',
+}
+
+const CATEGORY_FILTER_ORDER = ['eth', 'btc', 'usd']
+const getCategoryFilterOrder = (tag: string): number => {
+  const index = CATEGORY_FILTER_ORDER.indexOf(tag)
+  return index === -1 ? CATEGORY_FILTER_ORDER.length : index
+}
+
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy } = useRewardsApy()
+const { getTokenCategoryTags, isLoading: isTokenListLoading } = useTokenList()
 
-const getNetApy = (pair: BorrowVaultPair) => {
-  const baseSupplyApy = nanoToValue(pair.collateral.interestRateInfo?.supplyAPY || 0n, 25)
-  const baseBorrowApy = nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25)
-  const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
-  const borrowApy = withIntrinsicBorrowApy(baseBorrowApy, pair.borrow.asset.address)
+const isCorrelatedPair = (pair: AnyBorrowVaultPair) =>
+  areTokenAddressesCorrelatedByTags(
+    pair.collateral.asset.address,
+    pair.borrow.asset.address,
+    getTokenCategoryTags,
+  )
+
+const getNetApy = (pair: AnyBorrowVaultPair) => {
+  const baseSupplyApy = getVaultSupplyApy(pair.collateral)
+  const baseBorrowApy = getVaultBorrowApy(pair.borrow)
+  const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
+  const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
   const supplyRewards = getSupplyRewardApy(pair.collateral.address)
   const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
   const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
   return (supplyApy + supplyRewards) - (borrowApy - borrowRewards) + loopingRewards
 }
 
-const getSortMaxRoe = (pair: BorrowVaultPair) => {
-  const borrowLTV = nanoToValue(pair.borrowLTV, 2)
+const getSortMaxRoe = (pair: AnyBorrowVaultPair) => {
+  if (!isCorrelatedPair(pair)) return Number.NEGATIVE_INFINITY
+
+  const borrowLTV = ltvToPercent(pair.ltv.borrowLTV)
   const maxMultiplier = Math.max(1, Math.floor(100 / (100 - borrowLTV) * 100) / 100)
-  const baseSupplyApy = nanoToValue(pair.collateral.interestRateInfo?.supplyAPY || 0n, 25)
-  const baseBorrowApy = nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25)
-  const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
-  const borrowApy = withIntrinsicBorrowApy(baseBorrowApy, pair.borrow.asset.address)
+  const baseSupplyApy = getVaultSupplyApy(pair.collateral)
+  const baseBorrowApy = getVaultBorrowApy(pair.borrow)
+  const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
+  const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
   const supplyFinal = supplyApy + getSupplyRewardApy(pair.collateral.address)
   const borrowFinal = borrowApy - getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
   const loopingRewards = getLoopingRewardApy(pair.borrow.address, pair.collateral.address)
   return supplyFinal + (maxMultiplier - 1) * (supplyFinal - borrowFinal) + loopingRewards
 }
 
+const getActiveSortYieldScore = (pair: AnyBorrowVaultPair): number => {
+  const maxRoe = getSortMaxRoe(pair)
+  return Number.isFinite(maxRoe) ? maxRoe : getNetApy(pair)
+}
+
+const compareMaxRoe = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair, direction: 'desc' | 'asc' = 'desc'): number => {
+  const aValue = getSortMaxRoe(a)
+  const bValue = getSortMaxRoe(b)
+  const aFinite = Number.isFinite(aValue)
+  const bFinite = Number.isFinite(bValue)
+  const directionFactor = direction === 'asc' ? -1 : 1
+
+  if (!aFinite && !bFinite) {
+    const netApyDelta = (getNetApy(b) - getNetApy(a)) * directionFactor
+    if (netApyDelta !== 0) return netApyDelta
+
+    const liquidityDelta = comparePairLiquidityDesc(a, b)
+    if (liquidityDelta !== 0) return liquidityDelta
+
+    return comparePairNameAsc(a, b)
+  }
+
+  if (!aFinite) return 1
+  if (!bFinite) return -1
+
+  const roeDelta = (bValue - aValue) * directionFactor
+  if (roeDelta !== 0) return roeDelta
+
+  const liquidityDelta = comparePairLiquidityDesc(a, b)
+  if (liquidityDelta !== 0) return liquidityDelta
+
+  return comparePairNameAsc(a, b)
+}
+
 defineOptions({
   name: 'BorrowPage',
 })
 
-const { borrowList, isEVKUpdating, isEscrowUpdating } = useVaults()
+const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEVKUpdating.value || isEscrowUpdating.value || !isPricesReady.value)
-const { isSlow } = useSlowLoading(isLoading)
+const { entities, isReady: labelsReady } = useEulerLabels()
 const { enableEntityBranding } = useDeployConfig()
-const { entities } = useEulerLabels()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
@@ -58,7 +130,7 @@ const activeBorrowList = computed(() =>
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
-    // Securitize collateral has no hookedOps — only check EVK collateral.
+    // Securitize collateral has no EVault hook flags — only check EVault collateral.
     // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
     // Hide only when BOTH paths are blocked; the form guards the active path.
     if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT) && isOpDisabled(pair.collateral, OP_TRANSFER)) return false
@@ -71,13 +143,14 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaul
   return [
     pair.collateral.asset.symbol,
     pair.collateral.asset.name,
-    pair.collateral.name,
+    pair.collateral.shares.name,
     pair.borrow.asset.symbol,
     pair.borrow.asset.name,
-    pair.borrow.name,
+    pair.borrow.shares.name,
+    ...getBorrowPairSearchAddresses(pair),
     product.name,
     product.description,
-    ...getEntitiesByVault(pair.borrow).map(e => e.name),
+    ...getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).map(e => e.name),
   ]
 })
 
@@ -87,6 +160,16 @@ const selectedMarkets = ref<string[]>([])
 const selectedRiskManagers = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
+const MIN_BORROW_LIQUIDITY_USD = 1000
+const defaultBorrowLiquidityFilter = {
+  id: 'borrow-min-liquidity-usd',
+  metric: 'liquidity',
+  operator: 'gt',
+  value: MIN_BORROW_LIQUIDITY_USD,
+  label: `Avail. liquidity > ${formatCompactUsdValue(MIN_BORROW_LIQUIDITY_USD)}`,
+  tone: 'neutral',
+  includeWhenValueUnavailable: true,
+} as const
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
@@ -105,11 +188,45 @@ watch(sortBy, (newSortBy) => {
 })
 
 // Cache for USD values used in sorting (keyed by pair identifier: collateral+borrow address)
-const pairLiquidityUsd = ref<Map<string, number>>(new Map())
-const pairBorrowedUsd = ref<Map<string, number>>(new Map())
+const pairLiquidityUsd = ref<Map<string, number | undefined>>(new Map())
+const pairBorrowedUsd = ref<Map<string, number | undefined>>(new Map())
+let priceLoadId = 0
 
 // Helper to create a unique key for a borrow pair
 const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${pair.borrow.address}`
+
+const areBorrowPriceValuesReady = computed(() => {
+  if (!isPricesReady.value) return false
+
+  const liquidityValues = pairLiquidityUsd.value
+  const borrowedValues = pairBorrowedUsd.value
+
+  return activeBorrowList.value.every((pair) => {
+    const key = getPairKey(pair)
+    return liquidityValues.has(key) && borrowedValues.has(key)
+  })
+})
+
+const isLoading = computed(() =>
+  isEVaultUpdating.value
+  || isEscrowUpdating.value
+  || isTokenListLoading.value
+  || !labelsReady.value
+  || !areBorrowPriceValuesReady.value,
+)
+const { isSlow } = useSlowLoading(isLoading)
+
+const getPairSortName = (pair: AnyBorrowVaultPair): string =>
+  `${pair.collateral.asset.symbol}/${pair.borrow.asset.symbol}`
+
+const comparePairLiquidityDesc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number =>
+  (pairLiquidityUsd.value.get(getPairKey(b)) ?? 0) - (pairLiquidityUsd.value.get(getPairKey(a)) ?? 0)
+
+const comparePairNameAsc = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number => {
+  const nameDelta = getPairSortName(a).localeCompare(getPairSortName(b))
+  if (nameDelta !== 0) return nameDelta
+  return getPairKey(a).localeCompare(getPairKey(b))
+}
 
 // Fetch USD values for all borrow pairs. Debounced to collapse the
 // bursts of registry updates streamed during loadVaults's RPC refresh
@@ -117,6 +234,7 @@ const getPairKey = (pair: AnyBorrowVaultPair) => `${pair.collateral.address}-${p
 // this is the most expensive price-fetch watcher in the app because
 // pair count is combinatorial in collaterals × borrow vaults.
 const fetchBorrowPrices = useDebounceFn(async () => {
+  const loadId = ++priceLoadId
   const pairs = borrowList.value
   if (!pairs.length) {
     isPricesReady.value = true
@@ -124,24 +242,31 @@ const fetchBorrowPrices = useDebounceFn(async () => {
   }
 
   try {
-    const liquidityValues = new Map<string, number>()
-    const borrowedValues = new Map<string, number>()
+    const liquidityValues = new Map<string, number | undefined>()
+    const borrowedValues = new Map<string, number | undefined>()
     await Promise.all(
       pairs.map(async (pair) => {
         const key = getPairKey(pair)
         const [liquidity, borrowed] = await Promise.all([
-          getAssetUsdValueOrZero(pair.borrow.supply >= pair.borrow.borrow ? pair.borrow.supply - pair.borrow.borrow : 0n, pair.borrow, 'off-chain'),
-          getAssetUsdValueOrZero(pair.borrow.borrow, pair.borrow, 'off-chain'),
+          Promise.resolve()
+            .then(() => getAssetUsdValue(getVaultAvailableLiquidity(pair.borrow), pair.borrow, 'on-chain'))
+            .catch(() => undefined),
+          Promise.resolve()
+            .then(() => getAssetUsdValue(pair.borrow.totalBorrowed, pair.borrow, 'on-chain'))
+            .catch(() => undefined),
         ])
         liquidityValues.set(key, liquidity)
         borrowedValues.set(key, borrowed)
       }),
     )
+    if (loadId !== priceLoadId) return
     pairLiquidityUsd.value = liquidityValues
     pairBorrowedUsd.value = borrowedValues
   }
   finally {
-    isPricesReady.value = true
+    if (loadId === priceLoadId) {
+      isPricesReady.value = true
+    }
   }
 }, DEBOUNCE_LIST_PRICE_FETCH_MS)
 
@@ -166,23 +291,21 @@ watchEffect(() => {
 })
 
 const getPairBorrowApy = (pair: AnyBorrowVaultPair): number => {
-  const baseBorrowApy = nanoToValue(pair.borrow.interestRateInfo.borrowAPY, 25)
-  const borrowApy = withIntrinsicBorrowApy(baseBorrowApy, pair.borrow.asset.address)
+  const baseBorrowApy = getVaultBorrowApy(pair.borrow)
+  const borrowApy = withVaultIntrinsicApy(baseBorrowApy, pair.borrow, enableIntrinsicApy.value)
   const borrowRewards = getBorrowRewardApy(pair.borrow.address, pair.collateral.address)
   return borrowApy - borrowRewards
 }
 
 const getPairSupplyApy = (pair: AnyBorrowVaultPair): number => {
-  const baseSupplyApy = 'interestRateInfo' in pair.collateral
-    ? nanoToValue(pair.collateral.interestRateInfo.supplyAPY, 25)
-    : 0
-  const supplyApy = withIntrinsicSupplyApy(baseSupplyApy, pair.collateral.asset.address)
+  const baseSupplyApy = getVaultSupplyApy(pair.collateral)
+  const supplyApy = withVaultIntrinsicApy(baseSupplyApy, pair.collateral, enableIntrinsicApy.value)
   const supplyRewards = getSupplyRewardApy(pair.collateral.address)
   return supplyApy + supplyRewards
 }
 
 const getPairMaxLtv = (pair: AnyBorrowVaultPair): number => {
-  return nanoToValue(pair.borrowLTV, 2)
+  return ltvToPercent(pair.ltv.borrowLTV)
 }
 
 const getPairMaxMultiplier = (pair: AnyBorrowVaultPair): number => {
@@ -211,18 +334,19 @@ const {
   (pair, metric) => {
     const key = getPairKey(pair)
     switch (metric) {
-      case 'liquidity': return pairLiquidityUsd.value.get(key) ?? 0
-      case 'totalBorrowed': return pairBorrowedUsd.value.get(key) ?? 0
+      case 'liquidity': return pairLiquidityUsd.value.get(key)
+      case 'totalBorrowed': return pairBorrowedUsd.value.get(key)
       case 'supplyApy': return getPairSupplyApy(pair)
       case 'borrowApy': return getPairBorrowApy(pair)
-      case 'netApy': return 'borrowLTV' in pair ? getNetApy(pair as BorrowVaultPair) : 0
-      case 'maxRoe': return 'borrowLTV' in pair ? getSortMaxRoe(pair as BorrowVaultPair) : 0
+      case 'netApy': return getNetApy(pair)
+      case 'maxRoe': return getSortMaxRoe(pair)
       case 'utilization': return getVaultUtilization(pair.borrow)
       case 'maxLtv': return getPairMaxLtv(pair)
       case 'maxMultiplier': return getPairMaxMultiplier(pair)
       default: return 0
     }
   },
+  [defaultBorrowLiquidityFilter],
 )
 
 watch(chainId, (newChainId, oldChainId) => {
@@ -236,30 +360,58 @@ watch(chainId, (newChainId, oldChainId) => {
   }
 })
 
-const collateralAssetOptions = computed(() => {
-  return activeBorrowList.value
-    .filter((item, idx, self) => idx === self.findIndex(t => t.collateral.asset.address === item.collateral.asset.address))
-    .map(pair => ({
-      label: pair.collateral.asset.symbol,
-      value: pair.collateral.asset.address,
-      icon: getAssetLogoUrl(pair.collateral.asset.address, pair.collateral.asset.symbol),
+const buildAssetFilterOptions = (
+  assets: { address: string, symbol: string }[],
+): AssetFilterOptions => {
+  const seenAssets = new Set<string>()
+  const availableCategoryTags = new Set<string>()
+  const assetOptions: AssetFilterOption[] = []
+
+  for (const asset of assets) {
+    const categoryTags = normalizeTokenCategoryTags(getTokenCategoryTags(asset.address))
+
+    for (const tag of categoryTags) {
+      availableCategoryTags.add(tag)
+    }
+
+    if (seenAssets.has(asset.address)) continue
+    seenAssets.add(asset.address)
+    assetOptions.push({
+      label: asset.symbol,
+      value: asset.address,
+      icon: getAssetLogoUrl(asset.address, asset.symbol),
+      quickFilterValues: categoryTags.map(toTokenCategoryFilterValue),
+    })
+  }
+
+  const quickFilters = getSupportedTokenCategoryOptions()
+    .filter(({ tag }) => availableCategoryTags.has(tag))
+    .sort((a, b) => getCategoryFilterOrder(a.tag) - getCategoryFilterOrder(b.tag) || a.label.localeCompare(b.label))
+    .map(({ tag, label }) => ({
+      label: CATEGORY_FILTER_LABELS[tag] ?? label,
+      value: toTokenCategoryFilterValue(tag),
     }))
-    .reduce((prev, curr) =>
-      prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
-    )
+
+  return { options: assetOptions, quickFilters }
+}
+
+const matchesAssetFilterSelection = (
+  assetAddress: string,
+  selected: readonly string[],
+): boolean => {
+  if (!selected.length) return true
+
+  return selected.some(value =>
+    value === assetAddress || tokenAddressMatchesCategoryFilter(assetAddress, value, getTokenCategoryTags),
+  )
+}
+
+const collateralAssetOptions = computed(() => {
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.collateral.asset))
 })
 
 const debtAssetOptions = computed(() => {
-  return activeBorrowList.value
-    .filter((item, idx, self) => idx === self.findIndex(t => t.borrow.asset.address === item.borrow.asset.address))
-    .map(pair => ({
-      label: pair.borrow.asset.symbol,
-      value: pair.borrow.asset.address,
-      icon: getAssetLogoUrl(pair.borrow.asset.address, pair.borrow.asset.symbol),
-    }))
-    .reduce((prev, curr) =>
-      prev.find(vault => vault.value === curr.value) ? prev : [...prev, curr], [] as { label: string, value: string, icon: string }[],
-    )
+  return buildAssetFilterOptions(activeBorrowList.value.map(pair => pair.borrow.asset))
 })
 
 const marketOptions = computed(() => {
@@ -282,7 +434,7 @@ const riskManagerOptions = computed(() => {
   return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
     const pairKey = getPairKey(pair)
     const pairTvl = (pairLiquidityUsd.value.get(pairKey) ?? 0) + (pairBorrowedUsd.value.get(pairKey) ?? 0)
-    return getEntitiesByVault(pair.borrow).map((entity) => {
+    return getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).map((entity) => {
       const dedupKey = `${entity.name}:${pair.borrow.address}`
       const tvl = counted.has(dedupKey) ? 0 : pairTvl
       counted.add(dedupKey)
@@ -296,13 +448,13 @@ const filteredBorrowList = computed(() => {
     .filter(matchesSearch)
     .filter(pair =>
       selectedCollateral.value.length || selectedDebt.value.length
-        ? ((!selectedCollateral.value.length || selectedCollateral.value.includes(pair.collateral.asset.address))
-          && (!selectedDebt.value.length || selectedDebt.value.includes(pair.borrow.asset.address)))
+        ? (matchesAssetFilterSelection(pair.collateral.asset.address, selectedCollateral.value)
+          && matchesAssetFilterSelection(pair.borrow.asset.address, selectedDebt.value))
         : true,
     )
     .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(pair.collateral.address).name) : true)
     .filter(pair => selectedRiskManagers.value.length
-      ? getEntitiesByVault(pair.borrow).some(e => selectedRiskManagers.value.includes(e.name))
+      ? getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).some(e => selectedRiskManagers.value.includes(e.name))
       : true)
     .filter(matchesCustomFilters)
 })
@@ -312,11 +464,17 @@ const isPairRecentlyAdded = (pair: AnyBorrowVaultPair) =>
 
 const applyRecentlyAddedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
-    const af = isPairRecentlyAdded(a) ? 1 : 0
-    const bf = isPairRecentlyAdded(b) ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedPairBoost(a, b)
   })
 }
+
+const compareRecentlyAddedPairBoost = (a: AnyBorrowVaultPair, b: AnyBorrowVaultPair): number =>
+  compareRecentlyAddedBoost(
+    isPairRecentlyAdded(a),
+    pairLiquidityUsd.value.get(getPairKey(a)) ?? 0,
+    isPairRecentlyAdded(b),
+    pairLiquidityUsd.value.get(getPairKey(b)) ?? 0,
+  )
 
 const applyDeprecatedPairSort = (sorted: AnyBorrowVaultPair[]): AnyBorrowVaultPair[] => {
   return [...sorted].sort((a, b) => {
@@ -333,25 +491,35 @@ const sortedBorrowList = computed(() => {
       const list = [...filteredBorrowList.value]
 
       const scores = list.map((pair) => {
-        const maxRoe = 'borrowLTV' in pair ? getSortMaxRoe(pair as BorrowVaultPair) : 0
+        const yieldScore = getActiveSortYieldScore(pair)
         const liquidityUsd = pairLiquidityUsd.value.get(getPairKey(pair)) ?? 0
-        return { pair, maxRoe, liquidityUsd }
+        return { pair, yieldScore, liquidityUsd }
       })
 
-      const maxMaxRoe = Math.max(...scores.map(s => s.maxRoe), 0)
+      const maxYieldScore = Math.max(...scores.map(s => s.yieldScore), 0)
       const maxLiquidity = Math.max(...scores.map(s => s.liquidityUsd), 0)
 
-      const scored = scores.map(({ pair, maxRoe, liquidityUsd }) => {
-        const normalizedRoe = maxMaxRoe === 0 ? 0 : maxRoe / maxMaxRoe
+      const scored = scores.map(({ pair, yieldScore, liquidityUsd }) => {
+        const normalizedYield = maxYieldScore === 0 ? 0 : yieldScore / maxYieldScore
         const normalizedLiquidity = maxLiquidity === 0 ? 0 : liquidityUsd / maxLiquidity
-        const roeBucket = maxRoe >= 0 ? 0 : 1
-        const compositeScore = normalizedRoe * normalizedLiquidity
-        return { pair, roeBucket, compositeScore }
+        const yieldBucket = yieldScore >= 0 ? 0 : 1
+        const compositeScore = normalizedYield * normalizedLiquidity
+        return { pair, yieldBucket, compositeScore }
       })
 
       scored.sort((a, b) => {
-        if (a.roeBucket !== b.roeBucket) return a.roeBucket - b.roeBucket
-        return b.compositeScore - a.compositeScore
+        if (a.yieldBucket !== b.yieldBucket) return a.yieldBucket - b.yieldBucket
+
+        const scoreDelta = b.compositeScore - a.compositeScore
+        if (scoreDelta !== 0) return scoreDelta
+
+        const recentlyAddedDelta = compareRecentlyAddedPairBoost(a.pair, b.pair)
+        if (recentlyAddedDelta !== 0) return recentlyAddedDelta
+
+        const liquidityDelta = comparePairLiquidityDesc(a.pair, b.pair)
+        if (liquidityDelta !== 0) return liquidityDelta
+
+        return comparePairNameAsc(a.pair, b.pair)
       })
 
       // Active sort ignores direction toggle
@@ -366,7 +534,7 @@ const sortedBorrowList = computed(() => {
       break
     case 'Borrow APY':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return Number(a.borrow.interestRateInfo.borrowAPY) - Number(b.borrow.interestRateInfo.borrowAPY)
+        return getPairBorrowApy(a) - getPairBorrowApy(b)
       }))
       break
     case 'Supply APY':
@@ -387,13 +555,13 @@ const sortedBorrowList = computed(() => {
       }))
       break
     case 'Max ROE':
-      sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return getSortMaxRoe(b as BorrowVaultPair) - getSortMaxRoe(a as BorrowVaultPair)
-      }))
-      break
+      sorted = [...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
+        return compareMaxRoe(a, b, sortDir.value)
+      })
+      return applyDeprecatedPairSort(sorted)
     case 'Net APY':
       sorted = applyRecentlyAddedPairSort([...filteredBorrowList.value].sort((a: AnyBorrowVaultPair, b: AnyBorrowVaultPair) => {
-        return getNetApy(b as BorrowVaultPair) - getNetApy(a as BorrowVaultPair)
+        return getNetApy(b) - getNetApy(a)
       }))
       break
     default:
@@ -402,15 +570,44 @@ const sortedBorrowList = computed(() => {
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedPairSort(directed)
 })
+
+const hasDefaultBorrowLiquidityFilter = computed(() =>
+  customFilters.value.some(filter => filter.id === defaultBorrowLiquidityFilter.id),
+)
+const hasClearableFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedCollateral.value.length > 0
+  || selectedDebt.value.length > 0
+  || selectedMarkets.value.length > 0
+  || selectedRiskManagers.value.length > 0
+  || customFilters.value.some(filter => filter.id !== defaultBorrowLiquidityFilter.id),
+)
+const hasBorrowMarkets = computed(() => activeBorrowList.value.length > 0)
+const emptyStateTitle = computed(() => hasClearableFilters.value || hasBorrowMarkets.value ? 'No borrow markets found' : 'No borrow markets yet')
+const emptyStateDescription = computed(() => {
+  if (hasClearableFilters.value) return 'Try clearing search or filters to uncover more borrow pairs.'
+  if (hasDefaultBorrowLiquidityFilter.value && hasBorrowMarkets.value) return 'No borrow pairs match the visible filters.'
+  return 'No borrow markets are available on this network yet.'
+})
+
+const clearBorrowFilters = () => {
+  clearSearch()
+  selectedCollateral.value = []
+  selectedDebt.value = []
+  selectedMarkets.value = []
+  selectedRiskManagers.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
-    <BasePageHeader
-      title="Borrow/Multiply"
-      description="Borrow against your assets in isolated lending markets."
-      class="mb-16"
-    />
+    <div class="mb-16 flex items-start justify-between gap-16 mobile:flex-col">
+      <BasePageHeader
+        title="Borrow/Multiply"
+        description="Borrow against your assets in isolated lending markets."
+      />
+    </div>
 
     <div class="mb-16">
       <div class="flex justify-start items-center w-full gap-8 flex-wrap">
@@ -465,7 +662,8 @@ const sortedBorrowList = computed(() => {
           :key="`collateral-${chainId}`"
           v-model="selectedCollateral"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="collateralAssetOptions"
+          :options="collateralAssetOptions.options"
+          :quick-filters="collateralAssetOptions.quickFilters"
           placeholder="Collateral asset"
           title="Collateral asset"
           modal-input-placeholder="Search asset"
@@ -476,7 +674,8 @@ const sortedBorrowList = computed(() => {
           :key="`debt-${chainId}`"
           v-model="selectedDebt"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="debtAssetOptions"
+          :options="debtAssetOptions.options"
+          :quick-filters="debtAssetOptions.quickFilters"
           placeholder="Debt asset"
           title="Debt asset"
           modal-input-placeholder="Search asset"
@@ -509,18 +708,26 @@ const sortedBorrowList = computed(() => {
         :items="sortedBorrowList"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-neutral-500"
+        class="flex-1"
+        icon="borrow-outline"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="hasClearableFilters"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearBorrowFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>

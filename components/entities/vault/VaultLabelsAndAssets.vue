@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { getAddress } from 'viem'
-import type { EarnVault, SecuritizeVault, Vault, VaultAsset } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getAddress } from 'viem'
 
 const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
-  vault?: Vault | EarnVault | SecuritizeVault
+  vault?: EVault | EulerEarn | SecuritizeCollateralVault
   assets: VaultAsset[]
   size?: 'large'
   assetsLabel?: string
-  pairVault?: Vault
+  pairVault?: EVault
   back?: boolean
   backFallback?: string
 }>()
@@ -24,13 +25,14 @@ const normalizeAddress = (address?: string) => {
 }
 
 const vaultAddress = computed(() => normalizeAddress(vault?.address))
+const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const product = useEulerProductOfVault(vaultAddress)
 const displayName = computed(() => {
   if (!vault) return ''
-  if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') {
+  if (getVaultCategory(vault.address) === 'escrow') {
     return 'Escrowed collateral'
   }
-  return product.name || vault.name
+  return product.name || vault.shares.name
 })
 
 const pairVaultAddress = computed(() => pairVault ? normalizeAddress(pairVault.address) : '')
@@ -54,16 +56,16 @@ const isRestricted = computed(() => {
   return isAnyVaultBlockedByCountry(...addresses)
 })
 
-const getVaultLabel = (v?: Vault | EarnVault | SecuritizeVault) => {
+const getVaultLabel = (v?: EVault | EulerEarn | SecuritizeCollateralVault) => {
   if (!v) return ''
-  if ('vaultCategory' in v && v.vaultCategory === 'escrow') {
+  if (getVaultCategory(v.address) === 'escrow') {
     return 'Escrowed collateral'
   }
   const addr = normalizeAddress(v.address)
   if (addr === vaultAddress.value) {
-    return product.name || vault?.name || v.name
+    return product.name || vault?.shares.name || v.shares.name
   }
-  return pairProduct.name || v.name
+  return pairProduct.name || v.shares.name
 }
 
 const displayLabel = computed(() => {
@@ -90,7 +92,11 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
   <div
     v-if="vault"
     :class="[size === 'large' ? 'gap-16' : 'gap-12']"
-    class="flex items-center"
+    class="flex items-center min-w-0"
+    data-id="vault-header"
+    :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
+    :data-vault-address="vault.address.toLowerCase()"
+    :data-pair-vault-address="pairVault?.address.toLowerCase()"
   >
     <BackButton
       v-if="back"
@@ -102,12 +108,19 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
       :size="size === 'large' ? '46' : '38'"
     />
 
-    <div>
-      <div class="flex items-center gap-8 mb-4">
-        <span class="text-content-tertiary">
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-8 mb-4 min-w-0">
+        <span
+          class="block min-w-0 max-w-full truncate text-content-tertiary"
+          :title="pairVault ? displayLabel : displayName"
+          data-id="data-point"
+          :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
+          data-field="name"
+          :data-value="pairVault ? displayLabel : displayName"
+        >
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
-            :is-unverified="(!!vault && 'verified' in vault && !vault.verified) || !!(pairVault && 'verified' in pairVault && !pairVault.verified)"
+            :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
           />
         </span>
         <span
@@ -120,22 +133,34 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           />
           Deprecated
         </span>
-        <span
+        <UiHoverPreviewTooltip
           v-if="isRestricted"
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          title="This vault is not available in your region"
+          title="Region restricted"
+          text="This vault is not available in your region"
+          placement="top-start"
         >
-          <SvgIcon
-            name="warning"
-            class="!w-14 !h-14"
-          />
-          Restricted
-        </span>
+          <span
+            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
+          >
+            <SvgIcon
+              name="warning"
+              class="!w-14 !h-14"
+            />
+            Restricted
+          </span>
+        </UiHoverPreviewTooltip>
         <slot />
       </div>
 
-      <p class="text-p2 font-semibold text-content-primary">
-        {{ displayAssetsLabel }}
+      <p
+        class="flex flex-wrap items-center gap-8 text-p2 font-semibold text-content-primary min-w-0"
+        data-id="data-point"
+        :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
+        data-field="asset-symbols"
+        :data-value="displayAssetsLabel"
+      >
+        <span class="min-w-0 truncate">{{ displayAssetsLabel }}</span>
+        <slot name="symbol-trailing" />
       </p>
     </div>
   </div>

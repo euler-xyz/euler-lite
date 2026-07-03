@@ -1,30 +1,52 @@
-import { ref, computed } from 'vue'
-import { erc20Abi, type Address, type Hex } from 'viem'
-import { useSignTypedData, useWriteContract } from '@wagmi/vue'
-import { EVC_ABI } from '~/abis/evc'
-import { logWarn } from '~/utils/errorHandling'
-import { getAddressPrefix } from '~/utils/subgraph'
+import { computed, ref } from 'vue'
+import type { Address, Hex } from 'viem'
+import { useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import {
   type CowSwapCancellationMode,
   type CowSwapCancellationStatus,
   type CowSwapExecutionStatus,
   type CowSwapOrderUid,
-  buildEvcPermitTypedData,
-  normalizeCowSignature,
-  computeNonceNamespace,
-  submitCowSwapOrder,
+  type CowSwapPermitCancellation,
+  type CowSwapTransactionPlanExecutionProgress,
+  type CowSwapTransactionPlanExecutionStatus,
   cancelCowSwapOrder,
-  type CowSwapOrderPayload,
+  getCowSwapOrderExplorerUrl,
 } from '~/entities/cowswap'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
+import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
+import { usePortfolioRefresh } from '~/composables/usePortfolioRefresh'
+import { logWarn } from '~/utils/errorHandling'
+
+/** SDK progress status → lite UI status used by the review modal. */
+const SDK_STATUS_TO_LITE: Record<CowSwapTransactionPlanExecutionStatus, CowSwapExecutionStatus> = {
+  approval: 'approving_collateral',
+  prepareInbox: 'fetching_inbox',
+  signPermit: 'signing_permit',
+  signOrder: 'signing_order',
+  submitOrder: 'submitting',
+  cancelPermit: 'cancelling',
+  completed: 'submitted',
+}
+
+export type CowSwapPlanFlow = {
+  plan: TransactionPlan
+  chainId: number
+  /** How a *future* user-initiated cancellation should be performed for this flow. */
+  cancellationMode: CowSwapCancellationMode
+  /** Required when cancellationMode === 'cow-api'. */
+  orderbookUrl?: string
+  /** Required when cancellationMode === 'cow-api'. */
+  settlementContract?: Address
+}
 
 export const useCowSwapExecutionCore = () => {
   const { address } = useWagmi()
-  const { eulerCoreAddresses } = useEulerAddresses()
-  const { client: rpcClient } = useRpcClient()
-  const { writeContractAsync } = useWriteContract()
   const { signTypedDataAsync } = useSignTypedData()
-  const { prepareTokenApproval } = useEulerOperations()
+  const { sendTransactionAsync } = useSendTransaction()
   const { isSpyMode } = useSpyMode()
+  const { triggerPortfolioRefresh } = usePortfolioRefresh()
 
   const status = ref<CowSwapExecutionStatus>('idle')
   const orderUid = ref<CowSwapOrderUid | undefined>()
@@ -32,29 +54,21 @@ export const useCowSwapExecutionCore = () => {
   const error = ref<Error | null>(null)
   const locallyCancelled = ref(false)
   const cancellationStatus = ref<CowSwapCancellationStatus>('none')
-  const permitCancellation = ref<{
-    evcAddress: Address
-    addressPrefix: Hex
-    nonceNamespace: bigint
-    nonce: bigint
-  } | undefined>()
   const cancelMode = ref<CowSwapCancellationMode | undefined>()
+  const permitCancellation = ref<CowSwapPermitCancellation | undefined>()
   const cowApiCancellation = ref<{
-    orderbookUrl: string
-    settlementContract: Address
     chainId: number
+    orderbookUrl?: string
+    settlementContract?: Address
   } | undefined>()
 
   const isPending = computed(() => status.value !== 'idle' && status.value !== 'submitted')
-  const explorerUrl = computed(() => {
-    if (!orderUid.value || !submissionChainId.value) return undefined
-    return `https://explorer.cow.fi/orders/${orderUid.value}`
-  })
+  const explorerUrl = computed(() =>
+    orderUid.value ? getCowSwapOrderExplorerUrl(orderUid.value) : undefined,
+  )
 
   const assertTransactionsEnabled = () => {
-    if (isSpyMode.value) {
-      throw new Error('Transactions are disabled in spy mode')
-    }
+    if (isSpyMode.value) throw new Error('Transactions are disabled in spy mode')
   }
 
   const requireWallet = () => {
@@ -64,183 +78,72 @@ export const useCowSwapExecutionCore = () => {
     return userAddress as Address
   }
 
-  const requireEvc = () => {
-    const evcAddress = eulerCoreAddresses.value?.evc as Address | undefined
-    if (!evcAddress) throw new Error('EVC address not available')
-    return evcAddress
+  const sendTransaction = ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) =>
+    sendTransactionAsync({ to, data, value: value ?? 0n })
+
+  const signTypedData = async (typedData: { domain: Record<string, unknown>, types: Record<string, unknown>, primaryType: string, message: Record<string, unknown> }) => {
+    const sig = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    return sig as Hex
   }
 
-  const requireRpc = () => {
-    const client = rpcClient.value
-    if (!client) throw new Error('RPC client not available')
-    return client
+  const onProgress = (progress: CowSwapTransactionPlanExecutionProgress) => {
+    if (progress.status) {
+      const mapped = SDK_STATUS_TO_LITE[progress.status]
+      if (mapped) status.value = mapped
+    }
+    if (progress.orderUid) {
+      orderUid.value = progress.orderUid
+    }
   }
 
-  /** Execute on-chain approval steps (supports USDT-safe reset pattern). */
-  const safeApprove = async (token: Address, spender: Address, amount: bigint) => {
+  /**
+   * Drive `executeCowSwapTransactionPlan` and surface progress through `status` / `orderUid`.
+   * Captures any `permitCancellation` from the plan items so a later EVC-permit hard cancel
+   * is available.
+   */
+  const executePlan = async (flow: CowSwapPlanFlow): Promise<CowSwapOrderUid> => {
     const userAddress = requireWallet()
-    const client = requireRpc()
+    error.value = null
+    locallyCancelled.value = false
+    cancellationStatus.value = 'none'
+    submissionChainId.value = flow.chainId
+    cancelMode.value = flow.cancellationMode
+    permitCancellation.value = undefined
+    cowApiCancellation.value = flow.cancellationMode === 'cow-api'
+      ? { chainId: flow.chainId, orderbookUrl: flow.orderbookUrl, settlementContract: flow.settlementContract }
+      : undefined
 
-    const { steps } = await prepareTokenApproval({
-      assetAddr: token,
-      spenderAddr: spender,
-      userAddr: userAddress,
-      amount,
-      directApproval: true,
-    })
-
-    for (const step of steps) {
-      const tx = await writeContractAsync({
-        address: step.to as Address,
-        abi: step.abi,
-        functionName: step.functionName,
-        args: step.args as unknown[],
+    try {
+      const sdk = await getEulerSdkFresh()
+      const result = await sdk.executionService.executeCowSwapTransactionPlan({
+        plan: flow.plan,
+        chainId: flow.chainId,
+        account: userAddress,
+        sendTransaction,
+        signTypedData,
+        onProgress,
       })
-      await client.waitForTransactionReceipt({ hash: tx })
+
+      for (const r of result.results) {
+        if (r.permitCancellation) {
+          permitCancellation.value = r.permitCancellation
+        }
+      }
+
+      const uid = result.orderUids[0]
+      if (!uid) throw new Error('CoW order UID missing from execution result')
+
+      orderUid.value = uid
+      status.value = 'submitted'
+      return uid
     }
-
-    const approvedAmount = await client.readContract({
-      address: token,
-      abi: erc20Abi,
-      functionName: 'allowance',
-      args: [userAddress, spender],
-    }) as bigint
-
-    if (approvedAmount < amount) {
-      throw new Error('Approved amount is lower than required for this order. Increase the approval and try again.')
+    catch (err) {
+      const wrapped = err instanceof Error ? err : new Error(String(err))
+      error.value = wrapped
+      status.value = 'idle'
+      logWarn('cowswap/execute', wrapped)
+      throw wrapped
     }
-  }
-
-  const writeContractAndWait = async (params: {
-    address: Address
-    abi: readonly unknown[]
-    functionName: string
-    args?: unknown[]
-  }): Promise<Hex> => {
-    assertTransactionsEnabled()
-    const client = requireRpc()
-    const tx = await writeContractAsync({
-      address: params.address,
-      abi: params.abi,
-      functionName: params.functionName,
-      args: params.args ?? [],
-    })
-    await client.waitForTransactionReceipt({ hash: tx })
-    return tx
-  }
-
-  /** Fetch EVC nonce and call wrapper.encodePermitData(). */
-  const fetchNonceAndPermitData = async (
-    wrapperAddress: Address,
-    wrapperAbi: readonly unknown[],
-    wrapperParams: unknown,
-    flowChainId: number,
-  ) => {
-    const userAddress = requireWallet()
-    const evcAddress = requireEvc()
-    const client = requireRpc()
-
-    const nonceNamespace = computeNonceNamespace(wrapperAddress)
-    const addressPrefix = getAddressPrefix(userAddress) as Hex
-
-    const nonce = await client.readContract({
-      address: evcAddress,
-      abi: EVC_ABI,
-      functionName: 'getNonce',
-      args: [addressPrefix, nonceNamespace],
-    }) as bigint
-
-    const permitCalldata = await client.readContract({
-      address: wrapperAddress,
-      abi: wrapperAbi,
-      functionName: 'encodePermitData',
-      args: [wrapperParams],
-    }) as Hex
-
-    permitCancellation.value = { evcAddress, addressPrefix, nonceNamespace, nonce }
-
-    return { nonce, nonceNamespace, permitCalldata, evcAddress, chainId: flowChainId }
-  }
-
-  /** Sign the EVC permit typed data. */
-  const signEvcPermit = async (params: {
-    permitCalldata: Hex
-    chainId: number
-    evcAddress: Address
-    wrapperAddress: Address
-    nonceNamespace: bigint
-    nonce: bigint
-    deadline: number
-  }): Promise<Hex> => {
-    const userAddress = requireWallet()
-
-    const permitTypedData = buildEvcPermitTypedData({
-      chainId: params.chainId,
-      evcAddress: params.evcAddress,
-      signer: userAddress,
-      sender: params.wrapperAddress,
-      nonceNamespace: params.nonceNamespace,
-      nonce: params.nonce,
-      deadline: params.deadline,
-      data: params.permitCalldata,
-    })
-
-    return await signTypedDataAsync({
-      domain: permitTypedData.domain,
-      types: permitTypedData.types,
-      primaryType: permitTypedData.primaryType,
-      message: permitTypedData.message,
-    }) as Hex
-  }
-
-  /** Sign EIP-712 typed data (for CoW order). */
-  const signOrderTypedData = async (typedData: {
-    domain: Record<string, unknown>
-    types: Record<string, unknown>
-    primaryType: string
-    message: Record<string, unknown>
-  }): Promise<string> => {
-    assertTransactionsEnabled()
-    const signature = await signTypedDataAsync({
-      domain: typedData.domain,
-      types: typedData.types,
-      primaryType: typedData.primaryType,
-      message: typedData.message,
-    }) as string
-
-    return normalizeCowSignature(signature as Hex)
-  }
-
-  /** Submit the order payload to the CoW API. */
-  const submitAndFinalize = async (
-    payload: CowSwapOrderPayload,
-    orderbookUrl: string,
-    flowChainId: number,
-  ): Promise<CowSwapOrderUid> => {
-    assertTransactionsEnabled()
-    const uid = await submitCowSwapOrder(payload, orderbookUrl)
-    orderUid.value = uid
-    submissionChainId.value = flowChainId
-    status.value = 'submitted'
-    return uid
-  }
-
-  const configureCowApiCancellation = (params: {
-    orderbookUrl: string
-    settlementContract: Address
-    chainId: number
-  }) => {
-    cancelMode.value = 'cow-api'
-    cancellationStatus.value = 'none'
-    locallyCancelled.value = false
-    cowApiCancellation.value = params
-  }
-
-  const configurePermitCancellation = () => {
-    cancelMode.value = 'evc-permit'
-    cancellationStatus.value = 'none'
-    locallyCancelled.value = false
-    cowApiCancellation.value = undefined
   }
 
   const cancelOrder = async (): Promise<void> => {
@@ -261,18 +164,10 @@ export const useCowSwapExecutionCore = () => {
 
         await cancelCowSwapOrder({
           orderUid: uid,
+          chainId: config.chainId,
           orderbookUrl: config.orderbookUrl,
           settlementContract: config.settlementContract,
-          chainId: config.chainId,
-          signTypedData: async (params) => {
-            assertTransactionsEnabled()
-            return await signTypedDataAsync({
-              domain: params.domain as Record<string, unknown>,
-              types: params.types as Record<string, unknown>,
-              primaryType: params.primaryType,
-              message: params.message as Record<string, unknown>,
-            }) as Hex
-          },
+          signTypedData,
         })
         cancellationStatus.value = 'soft_submitted'
       }
@@ -280,22 +175,27 @@ export const useCowSwapExecutionCore = () => {
         const permit = permitCancellation.value
         if (!permit) throw new Error('Permit cancellation data not available')
 
-        const client = requireRpc()
-        const currentNonce = await client.readContract({
-          address: permit.evcAddress,
-          abi: EVC_ABI,
-          functionName: 'getNonce',
-          args: [permit.addressPrefix, permit.nonceNamespace],
-        }) as bigint
+        const sdk = await getEulerSdkFresh()
+        const cancelPlan = sdk.executionService.planCancelClosePositionWithCow({
+          chainId: permit.chainId,
+          owner: permit.owner,
+          nonce: permit.nonce,
+          nonceNamespace: permit.nonceNamespace,
+          wrapperAddress: permit.wrapperAddress,
+        })
 
-        if (currentNonce <= permit.nonce) {
-          await writeContractAndWait({
-            address: permit.evcAddress,
-            abi: EVC_ABI,
-            functionName: 'setNonce',
-            args: [permit.addressPrefix, permit.nonceNamespace, permit.nonce + 1n],
-          })
-        }
+        await sdk.executionService.executeCowSwapTransactionPlan({
+          plan: cancelPlan,
+          chainId: permit.chainId,
+          account: requireWallet(),
+          sendTransaction,
+          signTypedData,
+          onProgress,
+        })
+
+        // Post-tx side effects (EVC nonce write touched chain state)
+        void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
+        triggerPortfolioRefresh()
         cancellationStatus.value = 'hard_confirmed'
       }
 
@@ -325,7 +225,6 @@ export const useCowSwapExecutionCore = () => {
   }
 
   return {
-    // State
     status,
     orderUid,
     submissionChainId,
@@ -333,23 +232,11 @@ export const useCowSwapExecutionCore = () => {
     locallyCancelled,
     cancellationStatus,
     cancelMode,
-    // Computed
     isPending,
     explorerUrl,
-    // Lifecycle
+    executePlan,
     cancelOrder,
     reset,
-    // Helpers for flow composables
     requireWallet,
-    requireEvc,
-    requireRpc,
-    safeApprove,
-    writeContractAndWait,
-    fetchNonceAndPermitData,
-    signEvcPermit,
-    signOrderTypedData,
-    submitAndFinalize,
-    configureCowApiCancellation,
-    configurePermitCancellation,
   }
 }

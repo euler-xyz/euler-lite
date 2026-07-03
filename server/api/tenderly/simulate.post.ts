@@ -1,4 +1,5 @@
 import { createError, readBody } from 'h3'
+import { logger } from '~/server/utils/logger'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   resolveTenderlyConfig,
@@ -97,6 +98,7 @@ function getTenderlySimulationErrorMessage(response: TenderlySimulateResponse): 
 export default defineEventHandler(async (event) => {
   const config = resolveTenderlyConfig()
   if (!config) {
+    logger.warn({ ctx: 'tenderly-simulate', reason: 'not-configured' }, 'request rejected')
     throw createError({ statusCode: 503, statusMessage: 'Tenderly not configured' })
   }
 
@@ -107,25 +109,32 @@ export default defineEventHandler(async (event) => {
   }
 
   const { chainId, from, to, data, value, stateOverrides } = body
+  const calldataBytes = typeof data === 'string' && data.startsWith('0x') ? Math.floor((data.length - 2) / 2) : undefined
+  const stateOverrideCount = Array.isArray(stateOverrides) ? stateOverrides.length : 0
 
   if (!Number.isFinite(chainId)) {
+    logger.warn({ ctx: 'tenderly-simulate', reason: 'invalid-chain-id' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
   }
 
   if (!isValidAddress(from) || !isValidAddress(to)) {
+    logger.warn({ ctx: 'tenderly-simulate', chainId, reason: 'invalid-address' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Invalid from or to address' })
   }
 
   if (!isValidHex(data)) {
+    logger.warn({ ctx: 'tenderly-simulate', chainId, reason: 'invalid-calldata' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Invalid calldata' })
   }
 
   // 64 KB of hex chars = 32 KB of actual calldata, well above any normal transaction
   if (data.length > 131072) {
+    logger.warn({ ctx: 'tenderly-simulate', chainId, reason: 'calldata-too-large', calldataBytes }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Calldata too large' })
   }
 
   if (value !== undefined && value !== '' && !isValidValue(value)) {
+    logger.warn({ ctx: 'tenderly-simulate', chainId, reason: 'invalid-value' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Invalid value' })
   }
 
@@ -169,6 +178,10 @@ export default defineEventHandler(async (event) => {
 
     if (!simulateResponse.ok) {
       await simulateResponse.text().catch(() => {})
+      logger.warn(
+        { ctx: 'tenderly-simulate', chainId, status: simulateResponse.status, calldataBytes, stateOverrideCount },
+        'simulation request failed',
+      )
       throw createError({
         statusCode: 502,
         statusMessage: 'Simulation request failed',
@@ -179,6 +192,10 @@ export default defineEventHandler(async (event) => {
     const simulationId = simulateData?.simulation?.id
 
     if (!simulationId) {
+      logger.warn(
+        { ctx: 'tenderly-simulate', chainId, calldataBytes, stateOverrideCount, hasSimulationId: false },
+        'simulation id missing',
+      )
       throw createError({ statusCode: 502, statusMessage: 'No simulation ID returned' })
     }
 
@@ -202,11 +219,19 @@ export default defineEventHandler(async (event) => {
   }
   catch (error: unknown) {
     if (isAbortError(error)) {
+      logger.warn(
+        { ctx: 'tenderly-simulate', chainId, calldataBytes, stateOverrideCount, timeout: true },
+        'Tenderly API timeout',
+      )
       throw createError({ statusCode: 504, statusMessage: 'Tenderly API timeout' })
     }
     if (error && typeof error === 'object' && 'statusCode' in error) {
       throw error
     }
+    logger.warn(
+      { ctx: 'tenderly-simulate', chainId, calldataBytes, stateOverrideCount, err: error },
+      'Tenderly API error',
+    )
     throw createError({ statusCode: 502, statusMessage: 'Tenderly API error' })
   }
   finally {

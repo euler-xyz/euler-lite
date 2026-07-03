@@ -40,6 +40,9 @@ const toggleDir = (e: Event) => {
 <template>
   <div
     class="relative flex items-center gap-6 flex-shrink-0 min-h-36 text-content-secondary py-6 pl-16 pr-8 bg-surface border border-line-default rounded-[100px] cursor-pointer hover:border-line-emphasis hover:bg-surface-secondary transition-all"
+    data-id="sort-trigger"
+    :data-current-sort="model"
+    :data-sort-dir="dir"
     @click="open"
   >
     <UiIcon

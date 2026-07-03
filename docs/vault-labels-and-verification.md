@@ -52,11 +52,9 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
     // Optional fields
     "deprecatedVaults": ["0xold1..."],           // Phased-out vault addresses (still verified, shown as deprecated)
     "deprecationReason": "Migrated to v2",       // Why deprecated — shown in warning banner. Supports URLs.
-    "isGovernanceLimited": true,                 // If true, shows "Limited risk management" in UI
+    "tags": ["keyring", "governance limited"],   // Product classification tags
     "notExplorable": true,                       // If true, hides ALL product vaults from lend/borrow/explore pages
     "block": ["US", "EU"],                       // Country codes/groups to hard-block (see geo-blocking.md)
-    "keyring": true,                               // All vaults require Keyring verification (see keyring-hooks.md)
-    "recentlyAddedVaults": ["0x1234...abcd"],    // Vault addresses to sort to top in discovery tables
     "vaultOverrides": {                          // Per-vault customizations (see below)
       "0x5678...ef01": {
         "description": "Custom description for this vault",
@@ -65,7 +63,8 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
         "block": ["US", "EU", "CH"],
         "restricted": ["JP"],
         "notExplorableLend": true,
-        "notExplorableBorrow": true
+        "notExplorableBorrow": true,
+        "tags": ["recently added"]
       }
     }
   }
@@ -84,12 +83,12 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
 | `vaults` | `string[]` | Yes | Active vault addresses (checksummed). These become "verified" vaults in the app. |
 | `deprecatedVaults` | `string[]` | No | Phased-out vault addresses. Still verified and viewable in portfolio, but hidden from discovery tables and shown with a deprecation warning. |
 | `deprecationReason` | `string` | No | Explanation for deprecation. Shown in a warning banner on vault overview. URLs are auto-linked. Also accepts legacy key `deprecateReason`. |
-| `isGovernanceLimited` | `boolean` | No | If `true`, shows "Limited risk management" text under the Risk Manager section on vault overview. The risk manager entity display is also faded to 20% opacity across all UI components (browse lists, vault overview, explore market cards) to visually convey limited active risk management. |
+| `tags` | `string[]` | No | Product classification tags. `keyring` marks all product vaults as requiring Keyring identity verification; `access control` marks vaults gated by an allowlist hook; `governance limited` shows "Limited risk management" and fades the risk manager entity display; `suppress high utilisation warning` hides the high-utilisation warning while leaving critical utilisation warnings visible; `cyclical note` shows cyclical-note badges, target-utilisation copy, and the cyclical IRM overview. |
 | `notExplorable` | `boolean` | No | If `true`, hides **all** vaults in this product from lend, borrow, and explore discovery pages. Takes precedence over per-vault `notExplorableLend`/`notExplorableBorrow`. Vaults remain accessible via direct URL. |
 | `block` | `string[]` | No | Country codes or group aliases (`EU`, `EEA`, `EFTA`) for hard geo-blocking. See [geo-blocking.md](./geo-blocking.md). |
-| `recentlyAddedVaults` | `string[]` | No | Subset of `vaults` to sort to the top in discovery tables. |
-| `keyring` | `boolean` | No | If `true`, all vaults in this product require Keyring identity verification. See [keyring-hooks.md](./keyring-hooks.md). |
 | `vaultOverrides` | `Record<string, VaultOverride>` | No | Per-vault customizations keyed by checksummed address. See next section. |
+
+Classification markers use `tags`. Product `isGovernanceLimited`, product `recentlyAddedVaults`, and earn-vault `recentlyAdded` are not supported by the current labels contract.
 
 #### Vault Override Fields
 
@@ -104,7 +103,7 @@ Per-vault overrides allow customizing behavior for individual vaults within a pr
 | `restricted` | `string[]` | Soft geo-restriction for this vault only. No product-level fallback. See [geo-blocking.md](./geo-blocking.md). |
 | `notExplorableLend` | `boolean` | If `true`, hides this vault from the **lend** discovery page. Product-level `notExplorable` takes precedence. |
 | `notExplorableBorrow` | `boolean` | If `true`, hides this vault from the **borrow** discovery page — both as a borrow vault and as collateral. Product-level `notExplorable` takes precedence. |
-| `keyring` | `boolean` | If `true`, this specific vault requires Keyring identity verification (overrides product-level). See [keyring-hooks.md](./keyring-hooks.md). |
+| `tags` | `string[]` | Vault classification tags. `keyring`, `access control`, `recently added`, `suppress high utilisation warning`, and `cyclical note` apply to this specific vault. See [keyring-hooks.md](./keyring-hooks.md). |
 
 **Precedence rules**:
 - `block`: vault override replaces product-level (not additive)
@@ -195,7 +194,7 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
     "address": "0xDetailedEarnVault...",          // Vault address (required)
     "block": ["US", "EU"],                        // Hard geo-blocking (country codes/groups)
     "restricted": ["JP"],                         // Soft geo-restriction
-    "recentlyAdded": true,                        // Sort to top in earn discovery table
+    "tags": ["recently added"],                   // Sort to top in earn discovery table
     "deprecated": true,                           // Mark as deprecated
     "deprecationReason": "Migrated to new vault", // Deprecation explanation
     "description": "Custom description",          // Vault description
@@ -211,11 +210,13 @@ Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain add
 | `address` | `string` | Yes | Checksummed vault address |
 | `block` | `string[]` | No | Country codes/groups for hard geo-blocking (same syntax as products.json `block`) |
 | `restricted` | `string[]` | No | Country codes/groups for soft geo-restriction |
-| `recentlyAdded` | `boolean` | No | If `true`, sorts vault to top in earn discovery table |
+| `tags` | `string[]` | No | Earn-vault classification tags. `recently added` sorts the vault to the top in earn discovery. |
 | `deprecated` | `boolean` | No | If `true`, marks vault as deprecated (hidden from discovery, warning banner shown) |
 | `deprecationReason` | `string` | No | Explanation shown in deprecation warning banner |
 | `description` | `string` | No | Custom description displayed on earn vault items and overview pages |
 | `portfolioNotice` | `string` | No | Operational notice shown on portfolio position cards. Supports auto-linked URLs and **bold** formatting. |
+
+Classification markers use a clean-cut tags schema. Earn-vault `recentlyAdded` is not supported by the current labels contract.
 
 ---
 
@@ -244,19 +245,19 @@ Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github
 
 The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
 
-The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `entities/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
 
 ### Ungoverned vaults
 
 Vaults with `governorAdmin = address(0)` are supported via an **artificial entity** convention: declare an `ungoverned` entity in `entities.json` whose `addresses` map contains the zero address, then list ungoverned vaults under a product that declares `entity: ["ungoverned"]`. The shared governor rule then matches the vault's zero `governorAdmin` against the artificial entity, no special-case code path needed. The UI shows the "Ungoverned" governance type chip independently of entity matching (driven by `governorAdmin === zeroAddress` directly).
 
-This keeps the bridge endpoints forward-compatible with the successor backend, which treats ungoverned vaults the same way for verification purposes while sourcing the "ungoverned" presentation signal from the on-chain governor value.
+This keeps the bridge endpoint verification aligned with the UI: label/entity matching proves the vault is governed by the declared entity, while the "Ungoverned" presentation signal comes directly from the on-chain `governorAdmin` value.
 
 ### How `vault.verified` Is Set
 
 | Vault Source | Verification Method |
 |-------------|---------------------|
-| **EVK vaults** | Address appears in `verifiedVaultAddresses` from labels |
+| **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Earn vaults** | Default repo: loaded from `eulerEarnGovernedPerspective` on-chain. Alternative repos: verified if in `earnVaults` from labels |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
@@ -273,7 +274,7 @@ Two on-chain perspective contracts provide additional verification:
 
 ### Categories
 
-Every EVK vault belongs to one of two categories:
+Every EVault belongs to one of two categories:
 
 | Category | Description |
 |----------|-------------|
@@ -290,26 +291,24 @@ The vault type determines how the vault is fetched and displayed:
 | `'earn'` | EulerEarn aggregator vault (yield optimization) |
 | `'securitize'` | Securitize vault (ERC-4626 without borrowing) |
 
-Type is detected via `/api/vault-categories`, which categorizes every vault on the chain using the subgraph's factory field plus an on-chain check against `EscrowedCollateralPerspective`.
+Type is detected through SDK vault metadata and Lite UI categorization helpers in `utils/vault/categories.ts`: `vaultMetaService.fetchVaultType(s)` classifies EVault, EulerEarn, and Securitize vaults, while `eVaultService.fetchVerifiedVaultAddresses(...ESCROW)` provides escrow membership.
 
-### Vault Categorization Endpoint
+### SDK Vault Categorization
 
-Type detection (`entities/vault/factory.ts`) goes through `GET /api/vault-categories?chainId=X`, which returns the full chain's vault set grouped by category:
+The client keeps an in-session categorization cache with this shape:
 
 ```ts
 {
   evk: string[]        // EVK-family vaults; INCLUDES every escrow address
   earn: string[]       // EulerEarn aggregator vaults
   securitize: string[] // Securitize vaults
-  escrow: string[]     // subset of evk that is in EscrowedCollateralPerspective
+  escrow: string[]     // subset of evk from the SDK escrow verified array
 }
 ```
 
-The server pages through the subgraph's `vaults` query (up to 10k addresses per chain) and merges in the escrow perspective via a single RPC call to `verifiedArray()`. Categorization is cached for 5 min; warm-cache keeps it fresh ahead of the TTL so fresh-deployed vaults are picked up within one cycle.
+For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
-For per-address lookups during direct navigation to a not-yet-indexed vault, the endpoint also accepts `&address=0x…` and returns `{ category: 'evk' | 'earn' | 'securitize' | 'escrow' | null }`. The per-address fallback runs a single-address subgraph query; it does NOT include the escrow perspective check (that requires the full refresh), so callers that need escrow precision should rely on the full categorization or a local `isInEscrowPerspective` probe as a safety net.
-
-**Important: labels remain authoritative for which vaults are _shown_.** The categorization endpoint says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
+**Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
 
 ## Discovery Page Filtering
 
@@ -321,7 +320,7 @@ Labels control which vaults appear on each discovery page:
 | Override `notExplorableLend: true` | Hidden | Visible | Visible |
 | Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible |
 | `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
-| `recentlyAddedVaults` / `recentlyAdded` | Sorted to top | Sorted to top | Sorted to top |
+| `recently added` tag | Sorted to top | Sorted to top | Sorted to top |
 
 Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
@@ -360,7 +359,7 @@ Entities are matched to vaults through two mechanisms:
 1. **Labels**: `product.entity` names the owning entity key(s), which are looked up in `entities.json`
 2. **Governor admin**: `vault.governorAdmin` is compared against entity `addresses` keys to identify the governing entity
 
-The governor admin must match an address in one of the product's declared entities for the vault to be considered "governor verified". If `isGovernanceLimited` is set, the vault shows "Limited risk management" text and the entity display is faded to 20% opacity across all UI surfaces (list items, overview pages, explore cards).
+The governor admin must match an address in one of the product's declared entities for the vault to be considered "governor verified". If the product has the `governance limited` tag, the vault shows "Limited risk management" text and the entity display is faded to 20% opacity across all UI surfaces (list items, overview pages, explore cards).
 
 ## Sentinel Address Labels
 
@@ -380,9 +379,8 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | File | Purpose |
 |------|---------|
 | `entities/euler/labels.ts` | TypeScript type definitions for all label types |
-| `utils/eulerLabelsState.ts` | Reactive state stores (products, entities, points, earn vaults) |
-| `utils/eulerLabelsUtils.ts` | Normalization, extraction, lookup, and helper functions |
-| `composables/useEulerLabels.ts` | Label fetching, caching, and reactive composables |
+| `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the current SDK label snapshot |
+| `composables/useEulerLabels.ts` | SDK-backed label loading and reactive composables |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
 | `composables/useGeoBlock.ts` | Geo-blocking logic using label block/restricted fields |
 

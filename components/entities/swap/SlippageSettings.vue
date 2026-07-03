@@ -86,6 +86,10 @@ const onSaveCustom = () => {
 // Reset selection state when override expires or is saved back to a default.
 watchEffect(() => {
   if (isCustomInputVisible.value) return
+  if (isCustomValue.value) {
+    slippageSelection.value = 'custom'
+    return
+  }
   if (!isOverrideActive.value && (presetValues.includes(slippage.value) || slippage.value === defaultSlippage.value)) {
     slippageSelection.value = 'preset'
   }

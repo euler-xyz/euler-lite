@@ -25,16 +25,31 @@ const highestLevel = computed<WarningLevel | null>(() => {
 const sections = computed(() =>
   warnings.value.map(w => ({ title: w.title, text: w.message })),
 )
+
+const hasOnlySuccessToneInfo = computed(() =>
+  warnings.value.length > 0 && warnings.value.every(w => w.level === 'info' && w.tone === 'success'),
+)
+
+const iconClass = computed(() => {
+  switch (highestLevel.value) {
+    case 'critical':
+      return 'text-error-500'
+    case 'info':
+      return hasOnlySuccessToneInfo.value
+        ? 'text-success-500'
+        : 'text-warning-500'
+    default:
+      return 'text-warning-500'
+  }
+})
 </script>
 
 <template>
-  <UiFootnote
+  <UiHoverPreviewTooltip
     v-if="highestLevel"
     :icon="highestLevel === 'info' ? 'info-circle' : 'warning'"
     :sections="sections"
-    :tooltip-placement="tooltipPlacement"
-    :class="highestLevel === 'critical'
-      ? '[--ui-footnote-icon-color:var(--error-500)]'
-      : '[--ui-footnote-icon-color:var(--warning-500)]'"
+    :placement="tooltipPlacement"
+    :icon-class="iconClass"
   />
 </template>

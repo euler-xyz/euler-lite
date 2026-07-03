@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { vaultTypeDescriptions } from '~/entities/vault/descriptions'
+import { vaultTypeDescriptions } from '~/utils/vault/descriptions'
 
 defineEmits(['close'])
 </script>

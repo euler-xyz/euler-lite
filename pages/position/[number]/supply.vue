@@ -1,34 +1,34 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress, type Address, zeroAddress } from 'viem'
-import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
-import { FixedPoint } from '~/utils/fixed-point'
-import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import type { Vault, VaultAsset } from '~/entities/vault'
+import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
-import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio } from '~/services/pricing/priceProvider'
-import { fetchBackendPrice } from '~/services/pricing/backendClient'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getTokenUsdPrice } from '~/utils/sdk-prices'
+import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
+import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { getAddress, type Address, zeroAddress } from 'viem'
+import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
+import { FixedPoint } from '~/utils/fixed-point'
+import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
 
 const positionIndex = usePositionIndex()
-const { isConnected, address } = useAccount()
+const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
-const { fetchSingleBalance } = useWallets()
-const { buildSupplyPlan, buildSwapAndSupplyPlan } = useEulerOperations()
+const { getBalance } = useWallets()
+const { planDeposit, planDepositWithSwap } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
 const { chainId } = useEulerAddresses()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 
 // Supply-specific state
-const balance = ref(0n)
 const selectedAsset = ref<VaultAsset | undefined>()
-const selectedAssetBalance = ref(0n)
 const swapAssetUsdPrice = ref<number | undefined>()
 const isUnknownSwapToken = ref(false)
 
@@ -65,7 +65,9 @@ const form = useCollateralForm({
   },
 
   computeLiquidationPrice: (pos, borrowVault, collateralVault) => {
-    const health = nanoToValue(pos.health || 0n, 18)
+    const healthValue = pos.healthFactor
+    if (healthValue === undefined) return undefined
+    const health = nanoToValue(healthValue, 18)
     if (health < 1) return undefined
     const cp = borrowVault && collateralVault ? getCollateralOraclePrice(borrowVault, collateralVault) : undefined
     const bp = borrowVault ? getAssetOraclePrice(borrowVault) : undefined
@@ -83,20 +85,24 @@ const form = useCollateralForm({
     }
   },
 
-  buildDirectPlan: async ({ vaultAddress, assetAddress, amountNano, subAccount, includePermit2Call }) => {
+  buildDirectPlan: async ({ vaultAddress, assetAddress, amountNano, subAccount, account }) => {
     const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
     if (isNativeWrap.value && !wrappedAddr) {
       throw new Error('Wrapped native token not found')
     }
-    return buildSupplyPlan(vaultAddress, assetAddress, amountNano, subAccount, {
-      includePermit2Call,
+    return planDeposit({
+      vaultAddress: vaultAddress as Address,
+      assetAddress: assetAddress as Address,
+      amount: amountNano,
+      receiver: subAccount as Address,
       wrappedNativeInfo: isNativeWrap.value && wrappedAddr
         ? { wrappedTokenAddress: wrappedAddr, nativeAmount: amountNano }
         : undefined,
+      account,
     })
   },
 
-  buildSwapPlan: async (quote: SwapApiQuote, { slippage, includePermit2Call }) => {
+  buildSwapPlan: async (quote: SwapQuote, { account }) => {
     if (!selectedAsset.value || !form.collateralVault.value) {
       throw new Error('No selected asset or vault')
     }
@@ -106,15 +112,14 @@ const form = useCollateralForm({
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
-    return buildSwapAndSupplyPlan({
-      inputTokenAddress: (wrappedAddress || selectedAsset.value.address) as Address,
-      inputAmount,
-      quote,
-      requestedSlippage: slippage,
-      includePermit2Call,
+    return planDepositWithSwap({
+      swapQuote: quote,
+      amount: inputAmount,
+      tokenIn: (wrappedAddress || selectedAsset.value.address) as Address,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
+      account,
     })
   },
 
@@ -158,7 +163,6 @@ const form = useCollateralForm({
   },
   getSwapToAsset: () => form.asset.value,
 
-  onAfterLoad: () => updateBalance(),
 })
 useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Boolean)))
 
@@ -173,27 +177,74 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 
-const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.decimals || 18))
+const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.asset.decimals || 18))
 const assets = computed(() => [form.asset.value].filter((v): v is VaultAsset => !!v))
 const pairAssetsLabel = usePositionPairLabel(form.position)
 const { name } = useEulerProductOfVault(computed(() => form.collateralVault.value?.address || ''))
 
-// Supply-specific: balance management
-const updateBalance = async () => {
-  if ((!isConnected.value && !isSpyMode.value) || !form.collateralVault.value?.asset.address) {
-    balance.value = 0n
-    return
-  }
-  balance.value = await fetchSingleBalance(form.collateralVault.value.asset.address)
+// Add this collateral supply to the batch. Direct deposit or non-CoW swap
+// deposit; native-wrap goes through the single-tx review path.
+const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
+const canAddToBatch = computed(() => {
+  if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isInputAssetBlocked.value) return false
+  if (!(+form.amount.value) || isNativeWrap.value || !form.collateralVault.value?.address || !form.position.value) return false
+  if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
+  return true
+})
+const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactGate({
+  directPriceImpact: form.swapPriceImpact,
+  shouldGateUnknown: computed(() =>
+    needsSwap.value
+    && form.swapEffectiveQuote.value !== null
+    && form.swapPriceImpact.value === null,
+  ),
+})
+const addToBatch = async () => {
+  if (!canAddToBatch.value) return
+  await guardWithAddToBatchPriceImpact(async () => {
+    const a = form.asset.value
+    const pos = form.position.value
+    if (!a?.address || !pos) return
+    if (needsSwap.value) {
+      const quote = form.swapEffectiveQuote.value
+      const sel = selectedAsset.value
+      if (!quote || !sel) return
+      const isNative = isNativeCurrencyAddress(sel.address)
+      const inputAmount = valueToNano(form.amount.value, sel.decimals)
+      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+      if (isNative && !wrappedAddress) return
+      const tokenIn = (wrappedAddress || sel.address) as Address
+      const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
+      await addBatchEntry({
+        label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
+        buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
+      })
+    }
+    else {
+      const vaultAddress = form.collateralVault.value!.address as Address
+      const assetAddress = a.address as Address
+      const amount = valueToNano(form.amount.value, a.decimals)
+      await addBatchEntry({
+        label: `Supply ${form.amount.value} ${a.symbol}`,
+        buildPlan: account => planDeposit({ vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address, account }),
+        subAccount: pos.subAccount as Address,
+        review: { type: 'supply', asset: a, amount: form.amount.value },
+      })
+    }
+    form.amount.value = ''
+    redirectAfterAdd('/portfolio', { subAccount: pos.subAccount })
+  })
 }
 
-const fetchSelectedAssetBalance = async () => {
-  if (!selectedAsset.value?.address) {
-    selectedAssetBalance.value = 0n
-    return
-  }
-  selectedAssetBalance.value = await fetchSingleBalance(selectedAsset.value.address)
-}
+// Supply-specific: balance management
+// Wallet balances from the central (layer-aware) wallet entity — reactive.
+const balance = computed(() => {
+  const addr = form.collateralVault.value?.asset.address
+  return addr ? getBalance(addr as Address) : 0n
+})
+const selectedAssetBalance = computed(() => selectedAsset.value?.address ? getBalance(selectedAsset.value.address as Address) : 0n)
 
 const onSelectSwapAsset = (newAsset: VaultAsset, meta?: SwapTokenSelectMeta) => {
   selectedAsset.value = newAsset
@@ -211,17 +262,7 @@ const openSwapTokenSelector = () => {
 }
 
 // Supply-specific watchers
-watch(isConnected, () => {
-  updateBalance()
-})
-
-watch(address, () => {
-  updateBalance()
-  fetchSelectedAssetBalance()
-})
-
 watch(selectedAsset, async () => {
-  fetchSelectedAssetBalance()
   if (needsSwap.value && form.amount.value) {
     form.resetSwapQuoteState()
     form.requestSwapQuote()
@@ -230,8 +271,7 @@ watch(selectedAsset, async () => {
     const priceAddr = isNativeCurrencyAddress(selectedAsset.value.address)
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
       : selectedAsset.value.address
-    const priceData = await fetchBackendPrice(priceAddr as Address)
-    swapAssetUsdPrice.value = priceData?.priceUsd
+    swapAssetUsdPrice.value = await getTokenUsdPrice(priceAddr as Address)
   }
   else {
     swapAssetUsdPrice.value = undefined
@@ -246,6 +286,7 @@ watch(selectedAsset, async () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Supply collateral"
@@ -273,7 +314,7 @@ watch(selectedAsset, async () => {
               label="Supply amount"
               :desc="name"
               :asset="(needsSwap || isNativeWrap) && selectedAsset ? selectedAsset : form.asset.value"
-              :vault="(needsSwap || isNativeWrap) ? undefined : (form.collateralVault.value as Vault)"
+              :vault="(needsSwap || isNativeWrap) ? undefined : (form.collateralVault.value as EVault)"
               :price-override="(needsSwap || isNativeWrap) ? swapAssetUsdPrice : undefined"
               :balance="activeBalance"
               maxable
@@ -318,9 +359,7 @@ watch(selectedAsset, async () => {
               >
                 <SwapDetailsSummary
                   :input-display="form.swapInputDisplay.value"
-                  :input-exact-display="form.swapInputExactDisplay.value"
                   :output-display="form.swapOutputDisplay.value"
-                  :output-exact-display="form.swapOutputExactDisplay.value"
                   :price-impact="form.swapPriceImpact.value"
                   :slippage="form.swapSlippage.value"
                   :routed-via="form.swapRoutedVia.value"
@@ -328,7 +367,7 @@ watch(selectedAsset, async () => {
                 />
               </VaultFormInfoBlock>
 
-              <UiToast
+              <UiAlert
                 v-if="form.swapQuoteError.value"
                 title="Swap quote"
                 variant="warning"
@@ -337,7 +376,7 @@ watch(selectedAsset, async () => {
               />
             </template>
 
-            <UiToast
+            <UiAlert
               v-if="isUnknownSwapToken && needsSwap"
               title="Unknown token"
               description="This token is not on any recognized token list. It could be fraudulent or malicious. Verify the contract address before proceeding."
@@ -345,35 +384,35 @@ watch(selectedAsset, async () => {
               size="compact"
             />
 
-            <UiToast
+            <UiAlert
               v-if="form.isGeoBlocked.value"
               title="Region restricted"
               description="This operation is not available in your region. You can still repay existing debt."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!form.isGeoBlocked.value && form.isInputAssetBlocked.value"
               title="Asset restricted"
               description="Paying with this asset is not available in your region. Pick a different token."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="!form.isGeoBlocked.value && !form.isInputAssetBlocked.value && form.isSwapRestricted.value"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
               variant="warning"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-show="form.estimatesError.value"
               title="Error"
               variant="error"
               :description="form.estimatesError.value"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="form.simulationError.value"
               title="Error"
               variant="error"
@@ -422,14 +461,14 @@ watch(selectedAsset, async () => {
             </SummaryRow>
             <SummaryRow label="LTV">
               <SummaryValue
-                :before="formatNumber(nanoToValue(form.position.value.userLTV, 18))"
+                :before="formatNumber(ltvToPercent(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18)))"
                 :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
                 suffix="%"
               />
             </SummaryRow>
             <SummaryRow label="Health score">
               <SummaryValue
-                :before="formatHealthScore(nanoToValue(form.position.value.health, 18))"
+                :before="formatHealthScore(nanoToValue(form.position.value.healthFactor ?? 0n, 18))"
                 :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
               />
             </SummaryRow>
@@ -445,6 +484,8 @@ watch(selectedAsset, async () => {
               :loading="form.isSubmitting.value || form.isPreparing.value"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               {{ form.submitLabel }}
             </VaultFormSubmit>
