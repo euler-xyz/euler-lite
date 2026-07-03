@@ -383,9 +383,9 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     :default-open="defaultOpen"
     content-class="flex flex-col gap-16"
   >
-    <template #actions>
+    <template #actions="{ isOpen }">
       <div
-        v-if="metricOptions.length > 1"
+        v-if="isOpen && metricOptions.length > 1"
         class="relative inline-flex h-32 rounded-8 border border-line-subtle bg-surface transition-colors hover:border-line focus-within:border-accent-500"
       >
         <select
