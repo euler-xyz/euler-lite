@@ -192,7 +192,14 @@ const fetchEVaultsForSnapshot = async (
       errors.push(...(fetched.errors as unknown[]))
     }
     catch (err) {
-      errors.push(err)
+      logger.warn({
+        ctx: 'vaults-cache',
+        chainId,
+        chunkIndex: i / EVAULT_FETCH_CHUNK_SIZE,
+        chunkSize: chunk.length,
+        err,
+      }, 'eVault chunk fetch failed')
+      throw err
     }
 
     if (i + EVAULT_FETCH_CHUNK_SIZE < addresses.length) {
