@@ -1,12 +1,12 @@
 # SDK Integration
 
-This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler Lite, how it is configured, how its query cache is wired into vue-query, and the fast vs fresh instance split that backs UI browsing and transaction planning.
+This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler Lite, how it is configured, how its query cache is wired into vue-query, and the browsing vs fresh entry points that back UI reads and transaction planning.
 
 ## Files at a Glance
 
 | File | Purpose |
 |------|---------|
-| `composables/useEulerSdk.ts` | Two-instance SDK factory (`getEulerSdk`, `getEulerSdkFresh`) with Map-based instance cache |
+| `composables/useEulerSdk.ts` | SDK factory (`getEulerSdk`, `getEulerSdkForChain`, `getEulerSdkFresh`) with Map-based instance cache |
 | `utils/sdk-query-policy.ts` | **Single source of truth** — per-query `staleTimeMs` / `formStaleTimeMs` / `invalidateAfterTx`; derived `STALE_TIMES`, `FORM_STALE_TIMES`, `INVALIDATE_AFTER_TX` |
 | `utils/sdk-query-cache.ts` | Runtime: shared `QueryClient`, `buildQuery` wrappers, `invalidateSdkQueries` |
 | `composables/useEnvConfig.ts` | Resolves env-derived config (incl. `enableV3Backend`) on server and client |
@@ -14,20 +14,22 @@ This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler L
 | `nuxt.config.ts` | Declares the public runtime config keys that mirror env vars |
 | `composables/useEulerTx.ts` | Consumes the fresh SDK for plan construction, simulation, and execution |
 
-## Two Instances: Fast and Fresh
+## SDK Entry Points
 
-The app exposes two SDK instances, both produced by the same factory in `composables/useEulerSdk.ts`:
+The app exposes three SDK entry points, all produced by the same factory in `composables/useEulerSdk.ts`:
 
-- **`getEulerSdk()` — fast / browsing instance.** Adapter chain is picked by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`):
+- **`getEulerSdk()` — default browsing instance.** Adapter chain is picked by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`):
   - `fallback` — V3 primary → onchain secondary. When `enableV3Backend` is false the SDK is built with `disableV3: true` so the chain short-circuits to onchain.
   - `onchain` — direct onchain / direct / subgraph adapters; never touches V3.
   - `v3` — V3 only; SDK build throws if no V3 endpoint is configured.
 
   Cache wrapper is `sdkBuildQuery`, which applies `STALE_TIMES` (the per-query stale times from `SDK_QUERY_POLICY`). UI surfaces — vault lists, portfolio display, prices, rewards — consume this instance.
 
+- **`getEulerSdkForChain(chainId)` — chain-aware browsing instance.** Chains listed in `ONCHAIN_SDK_CHAINS` use the onchain backend regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`; all other chains use the default browsing backend. This keeps the browsing cache policy while avoiding V3-backed account/vault/Earn adapters for the pinned chains (typically deprecated chains whose V3 data is gone). Surfaces with an explicit chain id use this entry point.
+
 - **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Entries that must be live for account discovery, such as `queryAccountVaults`, use `formStaleTimeMs: 0`; plan-critical account/vault reads use shorter form-time windows than browsing reads. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
 
-Both instances share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the fast instance reads from. A subsequent UI render will see the just-refreshed value within its own staleness window.
+All entry points share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the browsing entry points read from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
 ## Initiation Flow
 
@@ -38,7 +40,7 @@ freshness | backend | rpcCacheKey | staticCacheKey
 ```
 
 - `freshness` is `'cached'` or `'fresh'`.
-- `backend` is `'fast'` (env-driven via `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`) or `'onchain'` (forced for the plan-time instance).
+- `backend` is `'fast'` (env-driven via `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`) or `'onchain'` (forced for `ONCHAIN_SDK_CHAINS` browsing reads and the plan-time instance; `freshness` keeps the two apart in the key).
 - `rpcCacheKey` is a stable join of `chainId:rpcUrl` for the chains declared by `useEulerAddresses().allowedChainIds`.
 - `staticCacheKey` is `JSON.stringify(config)` for the rest of the SDK config (URLs, reward toggles, adapter selection).
 
@@ -68,6 +70,10 @@ Two fields drive adapter selection:
 - **`enableV3Backend: boolean`** — set to `!!readV3ApiUrl()` on the server and emitted via `window.__APP_CONFIG__`. The client falls back to `useRuntimeConfig().public.enableV3Backend` (`isTruthy`) for static deploys. When `false` *and* `browserVaultSource === 'fallback'`, the SDK is built with `disableV3: true`.
 - **`browserVaultSource: 'fallback' | 'onchain' | 'v3'`** — pinned by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`). Selects which adapter block (`fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig`) the fast SDK uses. The plan-time SDK ignores this — it's always `onchain`.
 
+Chain-aware browsing calls also read `useChainConfig().onchainSdkChainIds`, injected from `ONCHAIN_SDK_CHAINS`. Listed chains use the onchain backend; all other chains use `browserVaultSource`. The list is independent of `DEPRECATED_CHAINS`, which only controls chain-selector collapsing and warm-cache skipping.
+
+`useChainConfig().eVaultFetchChunkChainIds`, injected from `EVAULT_FETCH_CHUNK_CHAINS`, is a Lite-side throttle for EVault list reads. Configured chains split browser and server-snapshot `sdk.eVaultService.fetchVaults(...)` calls into small sequential chunks; the SDK package itself is still called through its normal service API.
+
 `useEulerSdk` reads only these — no auto-probing, no user toggle. Switching sources requires changing the env / runtime config. A boot-time warning (`utils/api-url-env.ts:warnIfVaultSourceNeedsV3`) fires when `browserVaultSource` ∈ `{fallback, v3}` but no `V3_API_URL` is configured.
 
 The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOURCE` flag — see [server-side caching](./server-side-caching.md).
@@ -88,7 +94,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `accountVaultsSubgraphUrls[chainId]` | `/api/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `vaultTypeSubgraphUrls[chainId]` | `/api/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `rpcUrls[chainId]` | `/api/rpc/{chainId}` | JSON-RPC proxy |
-| Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (fast instance), `onchainAdapterConfig` (plan-time instance) | — |
+| Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (default browsing), `onchainAdapterConfig` (`ONCHAIN_SDK_CHAINS` browsing and plan-time) | — |
 | `disableV3` | `true` only when the resolved fast source is `fallback` and `!enableV3Backend` | — |
 
 Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`) are emitted as `false` only when `useDeployConfig()` disables them.

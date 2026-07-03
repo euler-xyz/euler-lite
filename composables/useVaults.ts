@@ -1,5 +1,6 @@
 import type {
   EulerEarn as EulerEarnClass,
+  DataIssue,
   SecuritizeCollateralVault as SecuritizeCollateralVaultClass,
   EVault as EVaultClass,
   IEulerEarn,
@@ -28,6 +29,7 @@ import {
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { decodeBigints } from '~/utils/snapshot-codec'
 import { buildRegistryMetaService } from '~/utils/sdk-vault-meta-stub'
+import { EVAULT_FETCH_CHUNK_DELAY_MS, EVAULT_FETCH_CHUNK_SIZE } from '~/utils/eVaultFetchChunkConfig'
 import {
   buildSnapshotIndex,
   buildSnapshotIntrinsicApyAdapter,
@@ -75,9 +77,112 @@ interface UpdateEVaultsOptions {
   chainId?: number
 }
 
-const getSdkVaults = async () => {
-  const { getEulerSdk } = useEulerSdk()
-  return await getEulerSdk()
+const getSdkVaults = async (chainId: number) => {
+  const { getEulerSdkForChain } = useEulerSdk()
+  return await getEulerSdkForChain(chainId)
+}
+
+const isDeprecatedChainId = (chainId: number): boolean => {
+  const { deprecatedChainIds } = useChainConfig()
+  return deprecatedChainIds.includes(chainId)
+}
+
+const shouldChunkEVaultFetch = (chainId: number): boolean => {
+  const { eVaultFetchChunkChainIds } = useChainConfig()
+  return eVaultFetchChunkChainIds.includes(chainId)
+}
+
+const waitForEVaultFetchChunkSlot = async () => {
+  await new Promise(resolve => setTimeout(resolve, EVAULT_FETCH_CHUNK_DELAY_MS))
+}
+
+const buildEVaultFetchIssue = (chainId: number, address: Address, err: unknown): DataIssue => ({
+  code: 'SOURCE_UNAVAILABLE',
+  severity: 'error',
+  message: `Failed to fetch eVault ${getAddress(address)}.`,
+  locations: [{
+    owner: { kind: 'vault', chainId, address: getAddress(address) as Address },
+    path: '$',
+  }],
+  source: 'eVaultService',
+  originalValue: err instanceof Error ? err.message : String(err),
+})
+
+const fetchEVaultsResilient = async (
+  sdk: Awaited<ReturnType<typeof getSdkVaults>>,
+  chainId: number,
+  addresses: Address[],
+  options: typeof liteVaultFetchOptions,
+) => {
+  if (shouldChunkEVaultFetch(chainId) && addresses.length > EVAULT_FETCH_CHUNK_SIZE) {
+    const resultByAddress = new Map<string, EVault>()
+    const errors: DataIssue[] = []
+
+    for (let i = 0; i < addresses.length; i += EVAULT_FETCH_CHUNK_SIZE) {
+      const chunk = addresses.slice(i, i + EVAULT_FETCH_CHUNK_SIZE)
+      try {
+        const chunkResult = await sdk.eVaultService.fetchVaults(chainId, chunk, options)
+        errors.push(...chunkResult.errors)
+        for (const vault of chunkResult.result.filter(Boolean) as EVault[]) {
+          resultByAddress.set(vault.address.toLowerCase(), vault)
+        }
+      }
+      catch (err) {
+        errors.push(...chunk.map(address => buildEVaultFetchIssue(chainId, address, err)))
+      }
+
+      if (i + EVAULT_FETCH_CHUNK_SIZE < addresses.length) {
+        await waitForEVaultFetchChunkSlot()
+      }
+    }
+
+    return {
+      result: addresses.map(address => resultByAddress.get(address.toLowerCase())),
+      errors,
+    }
+  }
+
+  const initial = await sdk.eVaultService.fetchVaults(chainId, addresses, options)
+  if (!shouldChunkEVaultFetch(chainId) || addresses.length <= 1 || initial.errors.length === 0) {
+    return initial
+  }
+
+  const found = new Set(
+    initial.result
+      .filter(Boolean)
+      .map(vault => vault.address.toLowerCase()),
+  )
+  const missing = addresses.filter(address => !found.has(address.toLowerCase()))
+  if (!missing.length) return initial
+
+  const retried = []
+  for (const address of missing) {
+    try {
+      retried.push(await sdk.eVaultService.fetchVaults(chainId, [address], options))
+    }
+    catch (err) {
+      retried.push({ result: [], errors: [err] })
+    }
+  }
+
+  const resultByAddress = new Map<string, EVault>()
+  for (const vault of initial.result.filter(Boolean) as EVault[]) {
+    resultByAddress.set(vault.address.toLowerCase(), vault)
+  }
+  for (const retry of retried) {
+    for (const vault of retry.result.filter(Boolean) as EVault[]) {
+      resultByAddress.set(vault.address.toLowerCase(), vault)
+    }
+  }
+
+  return {
+    ...initial,
+    result: [...resultByAddress.values()],
+    errors: [
+      ...initial.errors,
+      ...retried.flatMap(retry => retry.errors),
+    ],
+  }
 }
 
 const showAllLabelEntries = ref(false)
@@ -198,10 +303,11 @@ const updateEVaults = async (vaultAddresses: string[], generation?: number, sile
 
     if (!isCurrentVaultLoad(gen, targetChainId)) return
 
-    const sdk = await getSdkVaults()
+    const sdk = await getSdkVaults(targetChainId)
     if (!isCurrentVaultLoad(gen, targetChainId)) return
 
-    const result = await sdk.eVaultService.fetchVaults(
+    const result = await fetchEVaultsResilient(
+      sdk,
       targetChainId,
       vaultAddresses.map(addr => getAddress(addr) as Address),
       liteVaultFetchOptions,
@@ -255,7 +361,7 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
 
     if (!isCurrentVaultLoad(gen, targetChainId)) return
 
-    const sdk = await getSdkVaults()
+    const sdk = await getSdkVaults(targetChainId)
     if (!isCurrentVaultLoad(gen, targetChainId)) return
 
     const result = await sdk.eulerEarnService.fetchVaults(
@@ -329,10 +435,11 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number, 
     return
   }
 
-  const sdk = await getSdkVaults()
+  const sdk = await getSdkVaults(targetChainId)
   if (!isCurrentVaultLoad(generation, targetChainId)) return
 
-  const result = await sdk.eVaultService.fetchVaults(
+  const result = await fetchEVaultsResilient(
+    sdk,
     targetChainId,
     addresses.map(addr => getAddress(addr) as Address),
     liteVaultFetchOptions,
@@ -440,7 +547,7 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
       isSecuritizeLoading.value = true
     }
 
-    const sdk = await getSdkVaults()
+    const sdk = await getSdkVaults(targetChainId)
     if (!isCurrentVaultLoad(generation, targetChainId)) return
 
     const result = await sdk.securitizeVaultService.fetchVaults(
@@ -627,6 +734,13 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
     const earn = snap.earnVaults.map(instantiateEarn).filter(isHydrated)
     const securitize = snap.securitizeVaults.map(instantiateSecuritize).filter(isHydrated)
     const escrow = snap.escrowVaults.map(instantiateEvk).filter(isHydrated)
+    if (isDeprecatedChainId(targetChainId) && !evk.length && !earn.length && !securitize.length && !escrow.length) {
+      logWarn(
+        'useVaults/hydrateFromServer',
+        'deprecated-chain snapshot was empty; falling back to client-side SDK load',
+      )
+      return false
+    }
 
     const escrowAddrs: string[] = escrow.map(h => h.vault.address)
     setEscrowAddresses(escrowAddrs)

@@ -1,6 +1,6 @@
 import { type Address, getAddress } from 'viem'
 import { fetchErc20SlotHints, type SlotHints, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 
 const pendingStateOverrideHintResolutions = ref(0)
@@ -50,7 +50,7 @@ export const useStateOverrideOptions = () => {
     const cid = chainId.value
     if (!cid) return
     try {
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(cid)
       const permit2Address = sdk.deploymentService.getDeployment(cid).addresses.coreAddrs.permit2 as Address
       // Use any chain-bound provider from the SDK so the slot probes share the
       // same proxy/transport the SDK normally uses (rate-limit and cache lines

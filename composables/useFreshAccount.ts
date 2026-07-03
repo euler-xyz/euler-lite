@@ -1,7 +1,7 @@
 import { computed, ref, shallowRef, watch, type Ref } from 'vue'
 import { getAddress, type Address } from 'viem'
 import type { Account, AccountFetchOptions, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
-import { getEulerSdk, getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 
 /**
@@ -56,7 +56,7 @@ const load = async (owner: Address, chainId: number) => {
 
   const fastTask = (async () => {
     try {
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(chainId)
       const { result } = await sdk.accountService.fetchAccount(chainId, owner, PLAN_ACCOUNT_FETCH_OPTIONS)
       apply(cursor, 'fast', result as Account<IHasVaultAddress>)
     }

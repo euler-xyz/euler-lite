@@ -1,7 +1,7 @@
 import { type Address, getAddress, zeroAddress } from 'viem'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { activeLayerWalletBalancesRef } from '~/composables/useTxBatch'
 import { logWarn } from '~/utils/errorHandling'
 import { FULL_BALANCES_TTL_MS } from '~/entities/tuning-constants'
@@ -145,7 +145,7 @@ export const useWallets = () => {
 
     try {
       const targetAddress = getAddress(balanceAddress.value as Address)
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(currentChainId)
       const assetsWithSpenders = tokenAddresses.map(asset => ({ asset, spenders: [] }))
       if (includesNativeCurrency) {
         assetsWithSpenders.push({ asset: zeroAddress, spenders: [] })
@@ -264,9 +264,12 @@ export const useWallets = () => {
     }
     try {
       const normalized = getAddress(tokenAddress)
-      const sdk = await getEulerSdk()
-      if (!chainId.value) return 0n
-      const walletFetch = await sdk.walletService.fetchWallet(chainId.value, balanceAddress.value as Address, [
+      // Capture the chain id once so the SDK backend selection and the fetch
+      // can't diverge if the user switches chains mid-await.
+      const targetChainId = chainId.value
+      if (!targetChainId) return 0n
+      const sdk = await getEulerSdkForChain(targetChainId)
+      const walletFetch = await sdk.walletService.fetchWallet(targetChainId, balanceAddress.value as Address, [
         { asset: normalized as Address, spenders: [] },
       ])
       const real = walletFetch.result.getBalance(normalized as Address)

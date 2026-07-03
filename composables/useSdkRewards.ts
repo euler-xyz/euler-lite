@@ -39,8 +39,8 @@ export const useSdkRewards = () => {
       throw new Error('Wallet not connected')
     }
 
-    const { getEulerSdk } = useEulerSdk()
-    const sdk = await getEulerSdk()
+    const { getEulerSdkForChain } = useEulerSdk()
+    const sdk = await getEulerSdkForChain(reward.chainId)
     const account = getAddress(walletAddress.value) as Address
 
     return sdk.rewardsService.buildClaimPlan({
