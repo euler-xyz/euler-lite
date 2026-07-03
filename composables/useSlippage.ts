@@ -200,7 +200,7 @@ export const useSlippage = (options?: UseSlippageOptions) => {
   let shouldPersistMigratedLegacy = browserStorage.migratedLegacy
 
   // Reactive clock for expiry detection (ticks every 60s)
-  const now = ref(Date.now())
+  const now = useState<number>('slippage-now', () => Date.now())
   useIntervalFn(() => {
     now.value = Date.now()
   }, 60_000)

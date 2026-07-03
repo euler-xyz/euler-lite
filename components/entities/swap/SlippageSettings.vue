@@ -22,8 +22,9 @@ const customInput = ref('')
 const customInputError = ref('')
 const slippageSelection = useLocalStorage<'preset' | 'custom'>('swap-slippage-selection', 'preset')
 
+const isPresetOrDefault = (value: number) => presetValues.includes(value) || value === defaultSlippage.value
 const isCustomSelected = computed(() => slippageSelection.value === 'custom')
-const isCustomValue = computed(() => !presetValues.includes(slippage.value) && slippage.value !== defaultSlippage.value)
+const isCustomValue = computed(() => !isPresetOrDefault(slippage.value))
 const customChipActive = computed(() => isCustomInputVisible.value || isCustomSelected.value || isCustomValue.value)
 const customChipValue = computed(() => `${formatNumber(slippage.value, 2, 0)}%`)
 
@@ -79,7 +80,7 @@ const onSaveCustom = () => {
   }
   customInputError.value = ''
   setSlippage(parsed)
-  slippageSelection.value = parsed === defaultSlippage.value ? 'preset' : 'custom'
+  slippageSelection.value = isPresetOrDefault(parsed) ? 'preset' : 'custom'
   isCustomInputVisible.value = false
 }
 
@@ -90,13 +91,13 @@ watchEffect(() => {
     slippageSelection.value = 'custom'
     return
   }
-  if (!isOverrideActive.value && (presetValues.includes(slippage.value) || slippage.value === defaultSlippage.value)) {
+  if (!isOverrideActive.value && isPresetOrDefault(slippage.value)) {
     slippageSelection.value = 'preset'
   }
 })
 
 watch(slippage, (value) => {
-  if (slippageSelection.value === 'preset' && !presetValues.includes(value) && value !== defaultSlippage.value) {
+  if (slippageSelection.value === 'preset' && !isPresetOrDefault(value)) {
     slippageSelection.value = 'custom'
   }
 })
@@ -123,7 +124,7 @@ const savePending = (): boolean => {
   }
   customInputError.value = ''
   setSlippage(parsed)
-  slippageSelection.value = parsed === defaultSlippage.value ? 'preset' : 'custom'
+  slippageSelection.value = isPresetOrDefault(parsed) ? 'preset' : 'custom'
   isCustomInputVisible.value = false
   return true
 }

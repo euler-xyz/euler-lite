@@ -123,16 +123,17 @@ describe('useSlippage helpers', () => {
 
   it('uses 0.05% as the default for stablecoin swap pairs', () => {
     const cases = [
-      [{ fromSymbol: 'USDC', toSymbol: 'RLUSD' }, DEFAULT_STABLECOIN_SLIPPAGE],
-      [{ fromSymbol: 'RLUSD', toSymbol: 'USDC' }, DEFAULT_STABLECOIN_SLIPPAGE],
-      [{ fromSymbol: 'WETH', toSymbol: 'RLUSD' }, DEFAULT_SLIPPAGE],
-      [{ fromSymbol: 'USDC', toSymbol: 'WETH' }, DEFAULT_SLIPPAGE],
-      [{ fromSymbol: 'WETH', toSymbol: 'cbBTC' }, DEFAULT_SLIPPAGE],
-      [null, DEFAULT_SLIPPAGE],
+      [{ fromSymbol: 'USDC', toSymbol: 'RLUSD' }, DEFAULT_STABLECOIN_SLIPPAGE, 0.05],
+      [{ fromSymbol: 'RLUSD', toSymbol: 'USDC' }, DEFAULT_STABLECOIN_SLIPPAGE, 0.05],
+      [{ fromSymbol: 'WETH', toSymbol: 'RLUSD' }, DEFAULT_SLIPPAGE, 0.3],
+      [{ fromSymbol: 'USDC', toSymbol: 'WETH' }, DEFAULT_SLIPPAGE, 0.3],
+      [{ fromSymbol: 'WETH', toSymbol: 'cbBTC' }, DEFAULT_SLIPPAGE, 0.3],
+      [null, DEFAULT_SLIPPAGE, 0.3],
     ] as const
 
-    for (const [ctx, expected] of cases) {
+    for (const [ctx, expected, numericExpected] of cases) {
       expect(getDefaultSlippageForContext(ctx)).toBe(expected)
+      expect(getDefaultSlippageForContext(ctx)).toBe(numericExpected)
     }
   })
 
@@ -150,6 +151,14 @@ describe('useSlippage helpers', () => {
       NOW,
       DEFAULT_STABLECOIN_SLIPPAGE,
     )).toBe(true)
+  })
+
+  it('expires high overrides at the exact expiry boundary', () => {
+    expect(isSlippageOverrideActive(
+      makeOverride(3, DEFAULT_STABLECOIN_SLIPPAGE, NOW - SLIPPAGE_EXPIRY_MS),
+      NOW,
+      DEFAULT_STABLECOIN_SLIPPAGE,
+    )).toBe(false)
   })
 
   it('keeps overrides at or below the active pair default', () => {
@@ -241,6 +250,33 @@ describe('useSlippage persisted state', () => {
     }))
 
     scope.stop()
+  })
+
+  it('keeps a contextual override saved from a second settings instance', async () => {
+    installNuxtStorageMocks()
+
+    const stable = await mountSlippage({
+      fromSymbol: () => 'USDC',
+      toSymbol: () => 'RLUSD',
+    })
+    const settings = await mountSlippage()
+
+    vi.setSystemTime(NOW + 5_000)
+    settings.setSlippage(3)
+    await flushSlippageTicks()
+
+    expect(stable.isOverrideActive.value).toBe(true)
+    expect(stable.slippage.value).toBe(3)
+    expect(settings.isOverrideActive.value).toBe(true)
+    expect(settings.slippage.value).toBe(3)
+    expect(storedOverride()).toEqual({
+      value: 3,
+      setAt: NOW + 5_000,
+      defaultSlippageAtSet: DEFAULT_STABLECOIN_SLIPPAGE,
+    })
+
+    settings.scope.stop()
+    stable.scope.stop()
   })
 
   it('uses the active pair default and clears the override when a custom value equals the default', async () => {
