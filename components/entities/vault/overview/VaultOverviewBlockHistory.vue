@@ -98,6 +98,10 @@ const metricOptions = computed<MetricOption[]>(() => {
   ]
 })
 
+const selectedMetricLabel = computed(() =>
+  metricOptions.value.find(option => option.value === selectedMetric.value)?.label ?? 'Metric',
+)
+
 watch(
   metricOptions,
   (options) => {
@@ -374,6 +378,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
 
 <template>
   <VaultOverviewAccordionSection
+    v-if="canLoadHistory"
     title="History"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-16"
@@ -381,11 +386,11 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     <template #actions>
       <div
         v-if="metricOptions.length > 1"
-        class="relative"
+        class="relative inline-flex h-32 rounded-8 border border-line-subtle bg-surface transition-colors hover:border-line focus-within:border-accent-500"
       >
         <select
           v-model="selectedMetric"
-          class="h-32 max-w-[180px] appearance-none rounded-8 border border-line-subtle bg-surface px-10 pr-32 text-p3 text-content-primary outline-none transition-colors hover:border-line focus:border-accent-500"
+          class="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
           aria-label="History metric"
         >
           <option
@@ -396,10 +401,13 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
             {{ option.label }}
           </option>
         </select>
-        <UiIcon
-          name="arrow-down"
-          class="pointer-events-none absolute right-10 top-1/2 h-16 w-16 -translate-y-1/2 text-content-secondary"
-        />
+        <div class="pointer-events-none flex h-full items-center gap-8 px-10 text-p3 text-content-primary">
+          <span class="whitespace-nowrap">{{ selectedMetricLabel }}</span>
+          <UiIcon
+            name="arrow-down"
+            class="h-16 w-16 shrink-0 text-content-secondary"
+          />
+        </div>
       </div>
     </template>
 
@@ -409,7 +417,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     />
 
     <div
-      v-else-if="!canLoadHistory || hasError"
+      v-else-if="hasError"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
       History is unavailable for this vault right now.
