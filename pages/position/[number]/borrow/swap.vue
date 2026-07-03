@@ -24,6 +24,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset } from '~/utils/vault-utils'
+import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
@@ -406,9 +407,32 @@ const collateralSelectionVaults = computed(() => [
   ...collateralTargetVaults.value,
 ])
 
+const refinanceSlippageLegs = computed<RefinanceSlippageLeg[]>(() => {
+  const legs: RefinanceSlippageLeg[] = []
+
+  if (collateralNeedsSwap.value && sourceCollateralEVault.value && targetCollateralVault.value) {
+    legs.push({
+      fromSymbol: sourceCollateralEVault.value.asset.symbol,
+      toSymbol: targetCollateralVault.value.asset.symbol,
+    })
+  }
+
+  if (debtNeedsSwap.value && sourceDebtVault.value && targetDebtVault.value) {
+    legs.push({
+      fromSymbol: targetDebtVault.value.asset.symbol,
+      toSymbol: sourceDebtVault.value.asset.symbol,
+    })
+  }
+
+  return legs
+})
+const refinanceSlippageContext = computed(() =>
+  getRefinanceSlippageContext(refinanceSlippageLegs.value),
+)
+
 const { slippage } = useSlippage({
-  fromSymbol: () => sourceCollateralVault.value?.asset.symbol || sourceDebtVault.value?.asset.symbol,
-  toSymbol: () => targetCollateralVault.value?.asset.symbol || targetDebtVault.value?.asset.symbol,
+  fromSymbol: () => refinanceSlippageContext.value?.fromSymbol,
+  toSymbol: () => refinanceSlippageContext.value?.toSymbol,
 })
 
 const buildRefinanceStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
