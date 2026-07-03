@@ -508,9 +508,12 @@ export const useMarketGroups = () => {
     try {
       const { chainId } = useEulerAddresses()
       const { getEulerSdkForChain } = useEulerSdk()
-      const sdk = await getEulerSdkForChain(chainId.value)
+      // Capture the chain id once so the SDK backend selection and the fetch
+      // can't diverge if the user switches chains mid-await.
+      const targetChainId = chainId.value
+      const sdk = await getEulerSdkForChain(targetChainId)
       const result = await sdk.eVaultService.fetchVaults(
-        chainId.value,
+        targetChainId,
         allAddresses.map(addr => getAddress(addr) as Address),
         liteVaultFetchOptions,
       )

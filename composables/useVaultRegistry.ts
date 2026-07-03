@@ -217,22 +217,25 @@ const size = computed(() => registry.value.size)
 const fetchVaultByType = async (address: string, type: VaultType): Promise<VaultEntity> => {
   const { chainId } = useEulerAddresses()
   const { getEulerSdkForChain } = useEulerSdk()
-  const sdk = await getEulerSdkForChain(chainId.value)
+  // Capture the chain id once so the SDK backend selection and the fetches
+  // can't diverge if the user switches chains mid-await.
+  const targetChainId = chainId.value
+  const sdk = await getEulerSdkForChain(targetChainId)
   const vaultAddress = getAddress(address) as Address
   switch (type) {
     case 'earn': {
-      const { result } = await sdk.eulerEarnService.fetchVault(chainId.value, vaultAddress, liteVaultFetchOptions)
+      const { result } = await sdk.eulerEarnService.fetchVault(targetChainId, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`Earn vault not found for ${address}`)
       return result
     }
     case 'securitize': {
-      const { result } = await sdk.securitizeVaultService.fetchVault(chainId.value, vaultAddress, liteSecuritizeVaultFetchOptions)
+      const { result } = await sdk.securitizeVaultService.fetchVault(targetChainId, vaultAddress, liteSecuritizeVaultFetchOptions)
       if (!result) throw new Error(`Securitize vault not found for ${address}`)
       return result
     }
     case 'evk':
     default: {
-      const { result } = await sdk.eVaultService.fetchVault(chainId.value, vaultAddress, liteVaultFetchOptions)
+      const { result } = await sdk.eVaultService.fetchVault(targetChainId, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`EVault not found for ${address}`)
       return result
     }

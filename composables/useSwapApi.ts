@@ -66,11 +66,14 @@ export const useSwapApi = () => {
   const getSwapProviders = async (
     options?: { includeCowSwap?: boolean },
   ): Promise<string[]> => {
-    if (!chainId.value) return []
+    // Capture the chain id once so the SDK backend selection and the fetch
+    // can't diverge if the user switches chains mid-await.
+    const targetChainId = chainId.value
+    if (!targetChainId) return []
     try {
-      const sdk = await getEulerSdkForChain(chainId.value)
-      const providers = await sdk.swapService.fetchProviders(chainId.value)
-      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(chainId.value)
+      const sdk = await getEulerSdkForChain(targetChainId)
+      const providers = await sdk.swapService.fetchProviders(targetChainId)
+      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(targetChainId)
       return providers.filter((p) => {
         const normalized = p.toLowerCase()
         return !EXCLUDED_SWAP_PROVIDERS.has(normalized)

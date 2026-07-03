@@ -157,11 +157,14 @@ const handleTenderlySimulate = async () => {
 
   try {
     const owner = walletAddress.value as Address
-    const sdk = await getEulerSdkForChain(currentChainId.value)
+    // Capture the chain id once so the SDK backend selection and the payload
+    // can't diverge if the user switches chains mid-await.
+    const targetChainId = currentChainId.value
+    const sdk = await getEulerSdkForChain(targetChainId)
     const payload = await buildTenderlySimulationPayload({
       plan: currentPlan,
       owner,
-      chainId: currentChainId.value,
+      chainId: targetChainId,
       sdk,
     })
 

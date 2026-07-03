@@ -265,9 +265,12 @@ export const useWallets = () => {
     }
     try {
       const normalized = getAddress(tokenAddress)
-      if (!chainId.value) return 0n
-      const sdk = await getEulerSdkForChain(chainId.value)
-      const walletFetch = await sdk.walletService.fetchWallet(chainId.value, balanceAddress.value as Address, [
+      // Capture the chain id once so the SDK backend selection and the fetch
+      // can't diverge if the user switches chains mid-await.
+      const targetChainId = chainId.value
+      if (!targetChainId) return 0n
+      const sdk = await getEulerSdkForChain(targetChainId)
+      const walletFetch = await sdk.walletService.fetchWallet(targetChainId, balanceAddress.value as Address, [
         { asset: normalized as Address, spenders: [] },
       ])
       const real = walletFetch.result.getBalance(normalized as Address)
