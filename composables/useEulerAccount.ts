@@ -129,15 +129,18 @@ export const useEulerAccount = () => {
         return
       }
 
-      const { getEulerSdk, getEulerSdkFresh } = useEulerSdk()
+      const { getEulerSdkForChain, getEulerSdkFresh } = useEulerSdk()
       // Portfolio reads default to the fresh (onchain) instance so positions,
       // balances and health always reflect the latest block. Callers can opt
       // back into the cached V3-backed instance with `source: 'fast'`.
+      // Capture the chain id once so the SDK backend selection and the fetch
+      // can't diverge if the user switches chains mid-await.
+      const targetChainId = chainId.value
       const sdk = refreshOptions.source === 'fast'
-        ? await getEulerSdk()
+        ? await getEulerSdkForChain(targetChainId)
         : await getEulerSdkFresh()
       const fetched = await sdk.portfolioService.fetchPortfolio(
-        chainId.value,
+        targetChainId,
         getAddress(walletAddress) as Address,
       )
       fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))

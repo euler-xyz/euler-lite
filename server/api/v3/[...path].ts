@@ -42,7 +42,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const requestUrl = getRequestURL(event)
-  const pathTemplate = safePathTemplate(getV3ProxyPath(requestUrl))
+  const proxyPath = getV3ProxyPath(requestUrl)
+  const pathTemplate = safePathTemplate(proxyPath)
   const urlValidation = validateV3ProxyUrl(method, requestUrl)
   if (urlValidation.ok === false) {
     logger.warn(
@@ -54,7 +55,7 @@ export default defineEventHandler(async (event) => {
   rateLimiter.consume(event, method === 'POST' ? 5 : 1)
 
   const target = buildV3ProxyTarget(requestUrl)
-  const backoffKey = buildV3ProxyBackoffKey(method, getV3ProxyPath(requestUrl))
+  const backoffKey = buildV3ProxyBackoffKey(method, proxyPath, requestUrl.searchParams)
   const backoffMs = readV3ProxyBackoffMs(backoffKey)
   if (backoffMs > 0) {
     setResponseHeader(event, 'retry-after', Math.ceil(backoffMs / 1_000))

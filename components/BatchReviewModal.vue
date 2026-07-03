@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -284,8 +284,8 @@ const copyCalldata = async () => {
   const plan = preparedPlanRef.value
   if (!plan?.length) return
   try {
-    const sdk = await getEulerSdk()
     const cid = chainId.value
+    const sdk = await getEulerSdkForChain(cid)
     const out: { to: string, data: string, value: string }[] = []
     for (const item of plan) {
       if (item.type === 'requiredApproval') {

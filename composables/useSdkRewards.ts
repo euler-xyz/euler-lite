@@ -20,7 +20,11 @@ let delayedRefreshTimers: ReturnType<typeof setTimeout>[] = []
 export const useSdkRewards = () => {
   const { portfolio, isPositionsLoading, refreshAllPositions } = useEulerAccount()
   const { chainId } = useEulerAddresses()
-  const { address: walletAddress } = useWagmi()
+  const { address: walletAddress, isConnected, isConnecting, isReconnecting } = useWagmi()
+  const { isSpyMode } = useSpyMode()
+  const hasActiveSession = computed(() =>
+    isConnected.value || isConnecting.value || isReconnecting.value || isSpyMode.value,
+  )
 
   const rewards = computed<UserReward[]>(() => {
     const items = portfolio.value?.account.userRewards ?? []
@@ -28,15 +32,15 @@ export const useSdkRewards = () => {
     if (!currentChainId) return []
     return items.filter(reward => reward.chainId === currentChainId)
   })
-  const isRewardsLoading = computed(() => isPositionsLoading.value)
+  const isRewardsLoading = computed(() => hasActiveSession.value && isPositionsLoading.value)
 
   const buildClaimRewardPlan = async (reward: UserReward): Promise<TransactionPlan> => {
     if (!walletAddress.value) {
       throw new Error('Wallet not connected')
     }
 
-    const { getEulerSdk } = useEulerSdk()
-    const sdk = await getEulerSdk()
+    const { getEulerSdkForChain } = useEulerSdk()
+    const sdk = await getEulerSdkForChain(reward.chainId)
     const account = getAddress(walletAddress.value) as Address
 
     return sdk.rewardsService.buildClaimPlan({

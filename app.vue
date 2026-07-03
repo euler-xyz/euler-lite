@@ -94,6 +94,7 @@ watch(route, () => {
   }
 
   nextTick(() => {
+    const currentRouteName = route.name as string
     isMenuVisible.value = ![
       'lend-vault',
       'lend-withdraw',
@@ -103,7 +104,10 @@ watch(route, () => {
       'position-number-supply',
       'position-number-borrow',
       'position-number-withdraw',
-    ].includes(route.name as string)
+      'position-number-multiply',
+      'position-number-borrow-swap',
+      'position-number-collateral-swap',
+    ].includes(currentRouteName)
     isHeaderVisible.value = true
   })
 }, { immediate: true })

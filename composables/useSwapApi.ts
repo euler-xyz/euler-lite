@@ -1,6 +1,6 @@
 import { zeroAddress, type Address } from 'viem'
 import type { SwapProviderExtraData, SwapQuote, SwapQuoteRequest } from '@eulerxyz/euler-v2-sdk'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
 import { COWSWAP_PROVIDER_NAME, isCowSwapSupportedChain } from '~/entities/cowswap'
@@ -55,7 +55,7 @@ export const useSwapApi = () => {
     const request = withDefaults(params, chainId.value, fallbackOrigin)
     if (!request) return []
 
-    const sdk = await getEulerSdk()
+    const sdk = await getEulerSdkForChain(request.chainId)
     return sdk.swapService.fetchSwapQuotes(request)
   }
 
@@ -66,11 +66,14 @@ export const useSwapApi = () => {
   const getSwapProviders = async (
     options?: { includeCowSwap?: boolean },
   ): Promise<string[]> => {
-    if (!chainId.value) return []
+    // Capture the chain id once so the SDK backend selection and the fetch
+    // can't diverge if the user switches chains mid-await.
+    const targetChainId = chainId.value
+    if (!targetChainId) return []
     try {
-      const sdk = await getEulerSdk()
-      const providers = await sdk.swapService.fetchProviders(chainId.value)
-      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(chainId.value)
+      const sdk = await getEulerSdkForChain(targetChainId)
+      const providers = await sdk.swapService.fetchProviders(targetChainId)
+      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(targetChainId)
       return providers.filter((p) => {
         const normalized = p.toLowerCase()
         return !EXCLUDED_SWAP_PROVIDERS.has(normalized)

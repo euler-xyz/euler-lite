@@ -1733,6 +1733,7 @@ function getOperationVaultAddresses(): string[] {
       always-fallback
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="positionDetailsFallback"
       back-always-fallback

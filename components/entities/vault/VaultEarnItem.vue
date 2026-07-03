@@ -235,7 +235,6 @@ const supplyApyModalData = computed(() => ({
     campaigns: settings.value.enableRewardsApy ? getSupplyRewardCampaigns(vault.address) : [],
     totalSupplyAPY: visibleSupplyApy.value,
     rewardVaultAddress: vault.address,
-    baseApyAverageLabel: '1h',
   },
 }))
 </script>
@@ -295,9 +294,6 @@ const supplyApyModalData = computed(() => ({
       <div class="flex flex-col items-end shrink-0 ml-16">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
-            1h
-          </span>
           <UiModalPreviewTrigger
             :component="VaultSupplyApyModal"
             :modal-data="supplyApyModalData"

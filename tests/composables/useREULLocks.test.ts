@@ -22,13 +22,15 @@ const importUseREULLocks = async (wallet: {
   const unlockPlan = { kind: 'reul-unlock', steps: [] }
   const buildUnlockPlan = vi.fn(async () => unlockPlan)
 
+  const sdk = {
+    reulLockService: {
+      fetchLocks,
+      buildUnlockPlan,
+    },
+  }
   vi.doMock('~/composables/useEulerSdk', () => ({
-    getEulerSdk: vi.fn(async () => ({
-      reulLockService: {
-        fetchLocks,
-        buildUnlockPlan,
-      },
-    })),
+    getEulerSdk: vi.fn(async () => sdk),
+    getEulerSdkForChain: vi.fn(async () => sdk),
   }))
 
   vi.stubGlobal('until', () => ({
