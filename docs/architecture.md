@@ -182,8 +182,8 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 ├─────────────────────────────────────────────────────────────────┤
 │              Server-Side Proxy Layer (Nuxt server/)             │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│  │ /api/token  │ │ /api/internal/pyth   │ │ /api/internal/labels │                │
-│  │ -list       │ │ /updates    │ │ /rpc/[chain]│                │
+│  │ /api/internal│ │ /api/internal/pyth   │ │ /api/internal/labels │                │
+│  │ /token-list │ │ /updates    │ │ /rpc/[chain]│                │
 │  └─────────────┘ └─────────────┘ └─────────────┘                │
 ├─────────────────────────────────────────────────────────────────┤
 │                    External Services                            │
