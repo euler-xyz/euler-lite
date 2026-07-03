@@ -428,7 +428,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
           :key="timeframe.value"
           type="button"
           class="h-32 min-w-48 rounded-8 px-10 text-p3 transition-colors"
-          :class="selectedTimeframe === timeframe.value ? 'bg-accent-600 text-white' : 'bg-surface text-content-secondary hover:text-content-primary'"
+          :class="selectedTimeframe === timeframe.value ? 'bg-accent-600 text-black hover:bg-accent-700' : 'bg-surface text-content-secondary hover:text-content-primary'"
           @click="selectedTimeframe = timeframe.value"
         >
           {{ timeframe.label }}
