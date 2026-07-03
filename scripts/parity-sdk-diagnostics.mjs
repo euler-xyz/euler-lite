@@ -381,7 +381,10 @@ function collectVaultAddressGroups(observations) {
 
 function isEarnObservation(observation) {
   const pathVaultAddress = earnVaultAddressFromPath(observation.path)
-  if (pathVaultAddress && pathVaultAddress === observation.vaultAddress) return true
+  const observedVaultAddress = typeof observation.vaultAddress === 'string'
+    ? observation.vaultAddress.toLowerCase()
+    : null
+  if (pathVaultAddress && pathVaultAddress === observedVaultAddress) return true
 
   const text = [
     observation.pageId,
