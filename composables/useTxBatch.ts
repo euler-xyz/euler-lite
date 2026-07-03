@@ -738,6 +738,16 @@ const getEffectiveLiquidationLtv = (collateral: PriceableVaultCollateral | undef
   return typeof current === 'number' && Number.isFinite(current) ? current : collateral?.liquidationLTV
 }
 
+const hasCollateralRiskPrice = (borrowVault: PriceableVault, collateralVault: PriceableVault): boolean => {
+  try {
+    const riskPrice = borrowVault.getCollateralRiskPrice?.(collateralVault)
+    return (riskPrice?.priceBorrowing ?? 0n) > 0n || (riskPrice?.priceLiquidation ?? 0n) > 0n
+  }
+  catch {
+    return false
+  }
+}
+
 const buildCurrentCollateralLiquidityValue = (
   borrow: StitchPosition,
   collateralPosition: StitchPosition | undefined,
@@ -752,6 +762,14 @@ const buildCurrentCollateralLiquidityValue = (
   const collateralVault = collateralPosition?.vault ?? existing?.vault ?? collateralMeta?.vault
   if (!borrowVault || !collateralVault) return cloneLiquidityValue(existing?.value)
 
+  const currentValueUsd = getPositionUsdValue(collateralPosition)
+  const existingValueUsd = existing?.valueUsd
+  const currentMatchesExistingUsd = currentValueUsd === undefined
+    || (
+      existingValueUsd !== undefined
+      && numberToUsdScaledBigint(currentValueUsd) === numberToUsdScaledBigint(existingValueUsd)
+    )
+
   // Prefer the lens-provided risk values. They are denominated in the borrow's
   // unit-of-account scale — the same scale as the (lens-sourced) liability they're
   // measured against — so health/LTV stay consistent. Re-deriving from
@@ -759,15 +777,21 @@ const buildCurrentCollateralLiquidityValue = (
   // 10^(18 - uoaDecimals)); divided against a uoa-decimals liability that inflates
   // the health score and zeroes the LTV on sub-18-decimal markets (e.g. AUSD = 6).
   // Real (non-simulated) positions use the lens values directly; so must we.
-  if ((existing?.value?.oracleMid ?? 0n) > 0n) {
+  // Once the simulated collateral amount changes, however, the lens value is for
+  // the old amount and must be rescaled before it is added to the stitched total.
+  if ((existing?.value?.oracleMid ?? 0n) > 0n && currentMatchesExistingUsd) {
     return cloneLiquidityValue(existing?.value)
+  }
+
+  if ((existing?.value?.oracleMid ?? 0n) <= 0n && !hasCollateralRiskPrice(borrowVault, collateralVault)) {
+    return undefined
   }
 
   // Collateral the borrow's lens read didn't include (e.g. one enabled later in
   // the batch by a collateral swap). Derive its risk value through the liability's
   // own usd<->risk ratio so it lands in the same unit-of-account scale, then
   // risk-adjust by the configured LTVs.
-  const valueUsd = getPositionUsdValue(collateralPosition) ?? existing?.valueUsd
+  const valueUsd = currentValueUsd ?? existingValueUsd
   const oracleMid = usdValueToRiskValue(valueUsd, scale)
   if (oracleMid === undefined) return cloneLiquidityValue(existing?.value)
 

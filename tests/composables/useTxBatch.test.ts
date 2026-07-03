@@ -226,6 +226,9 @@ const stubBatchComposableGlobals = () => {
     executePreparedPlan: vi.fn(),
     estimateGasForPlan: vi.fn(),
   }))
+  vi.stubGlobal('useTokenList', () => ({
+    getTokenByAddress: vi.fn(),
+  }))
 }
 
 beforeEach(() => {
