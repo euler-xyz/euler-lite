@@ -38,6 +38,36 @@ describe('vault history utilities', () => {
     ])
   })
 
+  it('preserves nullable numeric history fields', () => {
+    const points = parseVaultTotalsHistory({
+      data: {
+        history: [
+          {
+            timestamp: '2026-07-01T00:00:00.000Z',
+            totalAssets: '123450000',
+            totalBorrows: '1000000',
+            cash: '122450000',
+            utilization: null,
+            supplyApy: null,
+            borrowApy: null,
+          },
+        ],
+      },
+    }, 6)
+
+    expect(points).toEqual([
+      {
+        timestamp: '2026-07-01T00:00:00.000Z',
+        totalAssets: 123.45,
+        totalBorrows: 1,
+        cash: 122.45,
+        utilization: null,
+        supplyApy: null,
+        borrowApy: null,
+      },
+    ])
+  })
+
   it('builds a bounded totals-history URL', () => {
     expect(buildVaultTotalsHistoryPath(
       1,

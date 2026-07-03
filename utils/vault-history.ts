@@ -49,6 +49,7 @@ const parseAmount = (value: unknown, decimals: number): number | null => {
 }
 
 const parseNumber = (value: unknown): number | null => {
+  if (value == null) return null
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
