@@ -16,6 +16,7 @@ const props = defineProps<{
   vault?: EVault
   vaults?: EVault[]
   collateralVaults?: (EVault | SecuritizeCollateralVault)[]
+  defaultOpen?: boolean
 }>()
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
@@ -261,11 +262,12 @@ const onTooltipMouseLeave = () => {
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <div class="flex flex-wrap items-center gap-8">
-      <p class="text-h3 text-content-primary">
-        Oracles
-      </p>
+  <VaultOverviewAccordionSection
+    title="Oracles"
+    :default-open="props.defaultOpen ?? true"
+    content-class="flex flex-col gap-24"
+  >
+    <template #actions>
       <UiHoverPreviewTooltip
         v-if="routerRecognition === 'unrecognized'"
         title="Unrecognized oracle router"
@@ -285,7 +287,7 @@ const onTooltipMouseLeave = () => {
           Unrecognized router
         </span>
       </UiHoverPreviewTooltip>
-    </div>
+    </template>
     <div
       v-if="!adapterViews.length"
       class="text-p3 text-content-tertiary"
@@ -445,7 +447,7 @@ const onTooltipMouseLeave = () => {
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 
   <Teleport to="body">
     <template v-if="hoveredChecksAdapter?.checks?.length">

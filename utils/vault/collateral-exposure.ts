@@ -1,12 +1,30 @@
 import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import {
+  groupExposureItemsByBackingAsset,
+  type ExposureBackingAssetGroup,
+} from '~/utils/vault/exposure-groups'
 
 /**
  * A collateral pair with live borrow-side exposure to a vault. Matches the
- * fields rendered by the "Collateral exposure" overview block.
+ * fields rendered by the "Exposure" overview block.
  */
 export interface CollateralExposurePair {
   collateral: EVault | SecuritizeCollateralVault
   ltv: EVaultCollateral
+}
+
+export interface CollateralExposureGroup extends ExposureBackingAssetGroup<CollateralExposurePair> {
+  maxBorrowLTV: number
+  maxCurrentLiquidationLTV: number
+  openInterestUsd: number
+}
+
+export interface CollateralExposureBackingAssetSummary {
+  asset: CollateralExposureGroup['asset']
+  groups: CollateralExposureGroup[]
+  openInterestUsd: number
+  vaultCount: number
 }
 
 /**
@@ -15,6 +33,25 @@ export interface CollateralExposurePair {
  */
 export type CollateralVaultResolver
   = (address: string) => EVault | SecuritizeCollateralVault | undefined
+
+const normalizeAddress = (address: string): string => {
+  try {
+    return getAddress(address).toLowerCase()
+  }
+  catch {
+    return address.toLowerCase()
+  }
+}
+
+const readOpenInterestUsd = (
+  openInterestUsdByCollateral: Record<string, number>,
+  collateralAddress: string,
+): number => {
+  const normalizedCollateral = normalizeAddress(collateralAddress)
+  const entry = Object.entries(openInterestUsdByCollateral)
+    .find(([address]) => normalizeAddress(address) === normalizedCollateral)
+  return entry?.[1] ?? 0
+}
 
 /**
  * Internal predicate: is this collateral/LTV combination "live" — i.e. does it
@@ -77,8 +114,68 @@ export const getCollateralExposurePairs = (
   )
 }
 
+export const getCollateralExposureGroups = (
+  pairs: CollateralExposurePair[],
+  openInterestUsdByCollateral: Record<string, number> = {},
+): CollateralExposureGroup[] =>
+  groupExposureItemsByBackingAsset(pairs, pair => pair.collateral.asset)
+    .map(group => ({
+      ...group,
+      items: [...group.items].sort((a, b) =>
+        b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0,
+      ),
+      maxBorrowLTV: Math.max(...group.items.map(pair => pair.ltv.borrowLTV), 0),
+      maxCurrentLiquidationLTV: Math.max(...group.items.map(pair => pair.ltv.currentLiquidationLTV), 0),
+      openInterestUsd: group.items.reduce((sum, pair) =>
+        sum + readOpenInterestUsd(openInterestUsdByCollateral, pair.collateral.address),
+      0),
+    }))
+    .sort((a, b) => {
+      if (b.openInterestUsd !== a.openInterestUsd) {
+        return b.openInterestUsd - a.openInterestUsd
+      }
+      if (b.maxCurrentLiquidationLTV !== a.maxCurrentLiquidationLTV) {
+        return b.maxCurrentLiquidationLTV - a.maxCurrentLiquidationLTV
+      }
+      if (b.maxBorrowLTV !== a.maxBorrowLTV) {
+        return b.maxBorrowLTV - a.maxBorrowLTV
+      }
+      return a.asset.symbol.localeCompare(b.asset.symbol)
+    })
+
+export const mergeCollateralExposureGroupsByBackingAsset = (
+  groups: CollateralExposureGroup[],
+): CollateralExposureBackingAssetSummary[] => {
+  const summaries = new Map<string, CollateralExposureBackingAssetSummary>()
+
+  for (const group of groups) {
+    const key = normalizeAddress(group.asset.address)
+    const existing = summaries.get(key)
+    if (existing) {
+      existing.groups.push(group)
+      existing.openInterestUsd += group.openInterestUsd
+      existing.vaultCount += group.vaultCount
+      continue
+    }
+
+    summaries.set(key, {
+      asset: group.asset,
+      groups: [group],
+      openInterestUsd: group.openInterestUsd,
+      vaultCount: group.vaultCount,
+    })
+  }
+
+  return [...summaries.values()].sort((a, b) => {
+    if (b.openInterestUsd !== a.openInterestUsd) {
+      return b.openInterestUsd - a.openInterestUsd
+    }
+    return a.asset.symbol.localeCompare(b.asset.symbol)
+  })
+}
+
 /**
- * Predicate: does the vault have any live borrow-side collateral exposure?
+ * Predicate: does the vault have any live borrow-side exposure?
  * Mirrors the filter used by {@link getCollateralExposurePairs} but
  * short-circuits on the first match.
  *

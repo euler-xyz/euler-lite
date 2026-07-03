@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type EulerEarnStrategyInfo, type EulerEarn, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
@@ -10,6 +10,17 @@ import { DateTime } from 'luxon'
 import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
+import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import {
+  getCollateralExposureGroups,
+  getCollateralExposurePairs,
+  type CollateralExposureGroup,
+} from '~/utils/vault/collateral-exposure'
+import {
+  buildAllocatedVaultExposureDisplayItems,
+  hasMissingUtilizedExposureSplit,
+  type ExposureValueState,
+} from '~/utils/vault/exposure-display'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -18,9 +29,17 @@ const emits = defineEmits<{
 const onExposureClick = (address: string) => {
   emits('vault-click', address)
 }
-const { vault } = defineProps<{ vault: EulerEarn }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
+const route = useRoute()
 
-const { getOrFetch } = useVaultRegistry()
+const { getOrFetch, get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
+} = useCollateralOpenInterest()
 const { isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -29,6 +48,7 @@ const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRe
 const exposureVaults: Ref<EVault[]> = ref([])
 const isLoading = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
+const unavailableExposureUsdPrices = ref<Set<string>>(new Set())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
@@ -94,19 +114,24 @@ const loadExposureUsdPrices = async () => {
   if (loadId !== priceLoadId) return
 
   const newPrices = new Map<string, number>()
+  const newUnavailablePrices = new Set<string>()
   const newCapPrices = new Map<string, number>()
   results.forEach((result) => {
     if (!result) return
 
     const { exposure, allocationUsd, capUsd } = result
     if (allocationUsd !== undefined) {
-      newPrices.set(exposure.address, allocationUsd)
+      newPrices.set(exposure.address.toLowerCase(), allocationUsd)
+    }
+    else {
+      newUnavailablePrices.add(exposure.address.toLowerCase())
     }
     if (!isUnlimitedCap(exposure) && capUsd !== undefined) {
-      newCapPrices.set(exposure.address, capUsd)
+      newCapPrices.set(exposure.address.toLowerCase(), capUsd)
     }
   })
   exposureUsdPrices.value = newPrices
+  unavailableExposureUsdPrices.value = newUnavailablePrices
   exposureCapUsdPrices.value = newCapPrices
 }
 
@@ -128,9 +153,81 @@ const exposureRows = computed(() => {
   })
 })
 
+const getStrategyCollateralGroups = (strategyVault: EVault | undefined): CollateralExposureGroup[] => {
+  if (!strategyVault) return []
+
+  return getCollateralExposureGroups(
+    getCollateralExposurePairs(
+      strategyVault,
+      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    ),
+    getOpenInterestForVault(strategyVault.address),
+  )
+}
+
+const getStrategyMarketSource = (strategyVault: EVault) => {
+  const marketKey = getProductKeyByVault(strategyVault.address)
+  if (!marketKey) return undefined
+
+  const marketName = getProductByVault(strategyVault.address).name || strategyVault.asset.symbol
+  return {
+    label: marketName,
+    to: {
+      name: 'explore-market',
+      params: { market: marketKey },
+      query: { network: route.query.network },
+    },
+  }
+}
+
+const getStrategyExposureValueState = (strategyVault: EVault | undefined): ExposureValueState => {
+  if (!strategyVault) return 'unavailable'
+  if (!isOpenInterestEnabled.value) return 'unavailable'
+
+  const key = strategyVault.address.toLowerCase()
+  if (hasOpenInterestError.value) return 'unavailable'
+  if (unavailableExposureUsdPrices.value.has(key)) return 'unavailable'
+  if (!isOpenInterestLoaded.value) return 'loading'
+  if (!exposureUsdPrices.value.has(key)) return 'loading'
+  if (hasMissingUtilizedExposureSplit(
+    collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+    strategyVault.utilization,
+  )) {
+    return 'unavailable'
+  }
+  return 'ready'
+}
+
+const collateralExposureGroupsByStrategy = computed(() => {
+  const groupsByStrategy = new Map<string, CollateralExposureGroup[]>()
+  for (const row of exposureRows.value) {
+    if (!row.vault) continue
+    groupsByStrategy.set(getAddress(row.vault.address), getStrategyCollateralGroups(row.vault))
+  }
+  return groupsByStrategy
+})
+
+const getStrategyExposureDisplayItems = (strategyVault: EVault | undefined) => {
+  if (!strategyVault) return []
+  if (getStrategyExposureValueState(strategyVault) !== 'ready') return []
+
+  return buildAllocatedVaultExposureDisplayItems({
+    collateralGroups: collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+    totalExposureUsd: exposureUsdPrices.value.get(strategyVault.address.toLowerCase()) ?? 0,
+    idleAsset: strategyVault.asset,
+    utilization: strategyVault.utilization,
+    idleSource: getStrategyMarketSource(strategyVault),
+  })
+}
+
 watch(isMarketDataResolved, () => {
   if (!exposureVaults.value.length) return
   void loadExposureUsdPrices()
+})
+
+watchEffect(() => {
+  if (!exposureRows.value.length || !isOpenInterestEnabled.value) return
+  void loadOpenInterest()
 })
 
 const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
@@ -155,11 +252,11 @@ const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
 })
 
 const hasExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
-  return exposureUsdPrices.value.has(exposure.address)
+  return exposureUsdPrices.value.has(exposure.address.toLowerCase())
 }
 
 const getExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
-  return exposureUsdPrices.value.get(exposure.address) || 0
+  return exposureUsdPrices.value.get(exposure.address.toLowerCase()) || 0
 }
 
 const getExposureAssetAmount = (exposure: typeof exposureList.value[0]) => {
@@ -171,16 +268,12 @@ load()
 </script>
 
 <template>
-  <div
+  <VaultOverviewAccordionSection
     v-if="exposureList.length"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+    title="Exposure"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-12"
   >
-    <div>
-      <p class="text-h3 text-content-primary mb-12">
-        Exposure
-      </p>
-    </div>
-
     <div
       v-if="isLoading"
       class="flex items-center justify-center py-32"
@@ -195,11 +288,11 @@ load()
       <div
         v-for="row in exposureRows"
         :key="row.exposure.address"
-        class="bg-surface rounded-xl text-content-primary block no-underline cursor-pointer shadow-card hover:shadow-card-hover transition-shadow border border-line-default"
+        class="cursor-pointer rounded-12 border border-line-default bg-surface p-16 text-content-primary shadow-card transition-colors hover:bg-card-hover"
         @click="onExposureClick(row.exposure.address)"
       >
         <div
-          class="px-16 pt-16 pb-12 border-b border-line-subtle flex items-start justify-between gap-12 mobile:flex-wrap"
+          class="flex items-start justify-between gap-12 mobile:flex-wrap"
         >
           <template v-if="row.vault">
             <VaultLabelsAndAssets
@@ -277,13 +370,13 @@ load()
             />
           </div>
         </div>
-        <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
+        <div class="flex flex-col gap-12 pt-12">
           <VaultOverviewLabelValue
-            label="Current allocation"
+            label="Current exposure"
             orientation="horizontal"
             data-list="earn-exposure-strategy"
             :data-key="getAddress(row.exposure.address)"
-            data-field="Current allocation"
+            data-field="Current exposure"
           >
             <template v-if="hasExposureUsdPrice(row.exposure)">
               {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
@@ -297,18 +390,33 @@ load()
             </template>
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
+            v-if="isOpenInterestEnabled"
+            label="Exposure"
             orientation="horizontal"
             data-list="earn-exposure-strategy"
             :data-key="getAddress(row.exposure.address)"
-            data-field="Allocation cap"
+            data-field="Exposure"
+          >
+            <VaultExposureSummary
+              :items="getStrategyExposureDisplayItems(row.vault)"
+              :value-state="getStrategyExposureValueState(row.vault)"
+              :max-visible="5"
+              avatar-size="20"
+            />
+          </VaultOverviewLabelValue>
+          <VaultOverviewLabelValue
+            orientation="horizontal"
+            data-list="earn-exposure-strategy"
+            :data-key="getAddress(row.exposure.address)"
+            data-field="Exposure cap"
           >
             <template #label>
               <span class="flex items-center gap-4">
-                Allocation cap
+                Exposure cap
                 <span @click.stop.prevent>
                   <UiHoverPreviewTooltip
-                    title="Allocation cap"
-                    text="The maximum amount that can be allocated to this strategy."
+                    title="Exposure cap"
+                    text="The maximum amount that can be exposed to this strategy."
                     icon-class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
                   />
                 </span>
@@ -329,8 +437,8 @@ load()
               <template v-if="isUnlimitedCap(row.exposure)">
                 ∞
               </template>
-              <template v-else-if="exposureCapUsdPrices.has(row.exposure.address)">
-                {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address) || 0) }}
+              <template v-else-if="exposureCapUsdPrices.has(row.exposure.address.toLowerCase())">
+                {{ formatCompactUsdValue(exposureCapUsdPrices.get(row.exposure.address.toLowerCase()) || 0) }}
               </template>
               <template v-else>
                 <UiExactAmount :exact="formatExactAmount(row.exposure.allocationCap.current, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
@@ -342,5 +450,27 @@ load()
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>
+
+<style lang="scss" scoped>
+.footnote-info:deep(.ui-footnote__icon) {
+  width: 20px;
+  height: 20px;
+}
+
+.footnote-info {
+  width: 20px;
+  height: 20px;
+}
+
+.footnote-clock:deep(.ui-footnote__icon) {
+  width: 14px;
+  height: 14px;
+}
+
+.footnote-clock {
+  width: 14px;
+  height: 14px;
+}
+</style>

@@ -8,6 +8,8 @@ import {
   setResponseStatus,
 } from 'h3'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
+import { logger } from '~/server/utils/logger'
+import { safePathTemplate, urlHost } from '~/server/utils/observability'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   buildV3ProxyBackoffKey,
@@ -35,12 +37,18 @@ const rateLimiter = createRateLimiter({
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
+    logger.warn({ ctx: 'v3-proxy', method, reason: 'invalid-method' }, 'request rejected')
     throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
   }
 
   const requestUrl = getRequestURL(event)
+  const pathTemplate = safePathTemplate(getV3ProxyPath(requestUrl))
   const urlValidation = validateV3ProxyUrl(method, requestUrl)
   if (urlValidation.ok === false) {
+    logger.warn(
+      { ctx: 'v3-proxy', method, pathTemplate, reason: urlValidation.statusMessage, statusCode: urlValidation.statusCode },
+      'request rejected',
+    )
     throw createError({ statusCode: urlValidation.statusCode, statusMessage: urlValidation.statusMessage })
   }
   rateLimiter.consume(event, method === 'POST' ? 5 : 1)
@@ -55,6 +63,8 @@ export default defineEventHandler(async (event) => {
 
   const headers = buildV3ProxyRequestHeaders(method)
   const body = method === 'POST' ? await readRawBody(event) : undefined
+  const startedAt = Date.now()
+  const upstreamHost = urlHost(target)
 
   let upstream: Response
   try {
@@ -64,7 +74,19 @@ export default defineEventHandler(async (event) => {
       body,
     })
   }
-  catch {
+  catch (err) {
+    logger.warn(
+      {
+        ctx: 'v3-proxy',
+        method,
+        pathTemplate,
+        upstreamHost,
+        bodyBytes: body?.length,
+        durationMs: Date.now() - startedAt,
+        err,
+      },
+      'upstream fetch failed',
+    )
     recordV3ProxyBackoff(backoffKey)
     setResponseHeader(event, 'retry-after', Math.ceil(V3_PROXY_FAILURE_BACKOFF_MS / 1_000))
     throw createError({ statusCode: 503, statusMessage: 'V3 upstream unavailable' })
@@ -82,5 +104,20 @@ export default defineEventHandler(async (event) => {
     return undefined
   }
 
-  return await upstream.text()
+  const text = await upstream.text()
+  if (!upstream.ok) {
+    logger.warn(
+      {
+        ctx: 'v3-proxy',
+        method,
+        pathTemplate,
+        upstreamHost,
+        bodyBytes: body?.length,
+        status: upstream.status,
+        durationMs: Date.now() - startedAt,
+      },
+      'upstream returned non-ok status',
+    )
+  }
+  return text
 })

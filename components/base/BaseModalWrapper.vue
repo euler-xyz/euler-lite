@@ -105,6 +105,12 @@ const dragStyle = computed(() => ({
   transform: dragY.value ? `translateY(${dragY.value}px)` : undefined,
   transition: dragY.value ? 'none' : 'transform 0.3s ease',
 }))
+
+const hasHeaderChrome = computed(() => !inline || Boolean(title || close))
+const bodyTopPaddingClass = computed(() => {
+  if (hasHeaderChrome.value) return ''
+  return compact ? '!pt-12' : 'pt-16'
+})
 </script>
 
 <template>
@@ -121,6 +127,7 @@ const dragStyle = computed(() => ({
   >
     <!-- Drag zone: pill + header, outside the scroll container -->
     <div
+      v-if="hasHeaderChrome"
       class="shrink-0 mobile:pt-0 touch-none select-none"
       :class="compact ? 'px-12 pt-10' : 'px-16 pt-12'"
       @pointerdown="onPointerDown"
@@ -186,6 +193,7 @@ const dragStyle = computed(() => ({
       :class="[
         full ? 'flex-grow min-h-0' : 'overflow-y-auto styled-scrollbar',
         compact ? '!px-12 !pb-12' : '',
+        bodyTopPaddingClass,
       ]"
       @touchstart="onScrollTouchStart"
       @touchmove="onScrollTouchMove"

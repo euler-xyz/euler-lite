@@ -500,6 +500,7 @@ watch([collateralAmount, borrowAmount], async () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Borrow more"

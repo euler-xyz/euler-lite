@@ -20,6 +20,7 @@ import { createInFlightDedup } from './in-flight'
 import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
+import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
@@ -278,7 +279,7 @@ async function buildSnapshot(
 
   for (const issue of [...evk.errors, ...securitize.errors, ...earn.errors]) {
     if (isSdkErrorDiagnostic(issue)) {
-      logger.error({ ctx: 'labels-view', chainId, issue }, 'sdk vault fetch issue')
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk vault fetch issue')
     }
   }
 
@@ -302,7 +303,7 @@ async function buildSnapshot(
     : { result: [], errors: [] }
   for (const issue of fetchedEscrow.errors) {
     if (isSdkErrorDiagnostic(issue)) {
-      logger.error({ ctx: 'labels-view', chainId, issue }, 'sdk escrow fetch issue')
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk escrow fetch issue')
     }
   }
 

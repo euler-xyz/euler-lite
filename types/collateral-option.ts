@@ -14,4 +14,8 @@ export interface CollateralOption {
   showBalance?: boolean
   vault?: VaultEntity
   label?: string
+  compatibilityWarning?: {
+    title: string
+    message: string
+  }
 }

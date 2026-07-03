@@ -8,17 +8,17 @@ defineProps<{ pair: SecuritizeBorrowVaultPair, desktopOverview?: boolean }>()
 <template>
   <div
     class="flex flex-col"
-    :class="[!desktopOverview ? 'gap-12' : '']"
+    :class="[desktopOverview ? 'gap-16' : 'gap-12']"
   >
     <SecuritizeVaultOverviewPairBlockGeneral
       :pair="pair"
-      :class="[desktopOverview ? 'py-16 [&:first-child]:!pt-0 px-0' : '']"
+      :default-open="true"
     />
     <!-- Oracle adapters should always come from the liability (borrow) vault -->
     <VaultOverviewBlockOracleAdapters
       :vault="pair.borrow"
       :collateral-vaults="[pair.collateral as unknown as EVault]"
-      :class="[desktopOverview ? 'py-16 [&:first-child]:!pt-0 px-0' : '']"
+      :default-open="false"
     />
   </div>
 </template>
