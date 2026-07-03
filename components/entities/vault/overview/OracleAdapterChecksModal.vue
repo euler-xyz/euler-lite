@@ -14,6 +14,71 @@ const {
   inline?: boolean
   close?: boolean
 }>()
+
+const addressPattern = /\b0x[a-fA-F0-9]{40}\b/g
+
+type CheckMessagePart = {
+  text: string
+  address?: string
+}
+
+const getAddressCopyKey = (address: string) => `oracle-check-address-${address.toLowerCase()}`
+
+const fallbackCopy = (text: string) => {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
+const writeAddressToClipboard = async (address: string) => {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(address)
+      return
+    }
+    catch {
+      // Fall through to the textarea fallback used by older or restricted browsers.
+    }
+  }
+
+  if (!fallbackCopy(address)) {
+    throw new Error('Unable to copy address')
+  }
+}
+
+const { isCopied, copyToClipboard } = useClipboardCopy({ write: writeAddressToClipboard })
+
+const getCheckMessageParts = (message: string): CheckMessagePart[] => {
+  const parts: CheckMessagePart[] = []
+  let lastIndex = 0
+
+  for (const match of message.matchAll(addressPattern)) {
+    const address = match[0]
+    const index = match.index ?? 0
+    if (index > lastIndex) {
+      parts.push({ text: message.slice(lastIndex, index) })
+    }
+    parts.push({ text: address, address })
+    lastIndex = index + address.length
+  }
+
+  if (lastIndex < message.length) {
+    parts.push({ text: message.slice(lastIndex) })
+  }
+
+  return parts.length ? parts : [{ text: message }]
+}
+
+const copyAddress = (address: string) => {
+  copyToClipboard(address, getAddressCopyKey(address)).catch(() => {})
+}
 </script>
 
 <template>
@@ -48,7 +113,31 @@ const {
             {{ check.id }}
           </p>
           <p class="text-p3 text-content-secondary break-words">
-            {{ check.message }}
+            <template
+              v-for="(part, partIndex) in getCheckMessageParts(check.message)"
+              :key="`${check.id}-${i}-${partIndex}`"
+            >
+              <button
+                v-if="part.address"
+                type="button"
+                class="inline-flex max-w-full items-center gap-4 align-baseline text-accent-600 outline-none hover:text-accent-500 focus-visible:rounded-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                :aria-label="`Copy address ${part.address}`"
+                @pointerdown.stop.prevent="copyAddress(part.address)"
+                @mousedown.stop.prevent
+                @click.stop.prevent="copyAddress(part.address)"
+                @keydown.enter.stop.prevent="copyAddress(part.address)"
+                @keydown.space.stop.prevent="copyAddress(part.address)"
+              >
+                <span class="min-w-0 break-all">{{ part.text }}</span>
+                <SvgIcon
+                  class="!w-12 !h-12 shrink-0"
+                  :name="isCopied(getAddressCopyKey(part.address)) ? 'check' : 'copy'"
+                />
+              </button>
+              <template v-else>
+                {{ part.text }}
+              </template>
+            </template>
           </p>
         </div>
       </div>
