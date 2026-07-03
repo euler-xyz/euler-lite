@@ -68,6 +68,7 @@ const history = shallowRef<VaultHistoryPoint[]>([])
 const isLoading = ref(false)
 const hasError = ref(false)
 let activeRequestId = 0
+let activeHistoryContext: { address: string, chainId: string } | null = null
 
 const RETRYABLE_HISTORY_STATUSES = new Set([429, 500, 502, 503, 504])
 const DEFAULT_HISTORY_RETRY_AFTER_MS = 1_000
@@ -158,12 +159,26 @@ const fetchVaultTotalsHistoryWithCooldownRetry = async (
 
 const loadHistory = async () => {
   const requestId = ++activeRequestId
-  history.value = []
 
   if (!canLoadHistory.value || !chainId.value) {
+    history.value = []
+    activeHistoryContext = null
     isLoading.value = false
     hasError.value = false
     return
+  }
+
+  const requestContext = {
+    address: vault.address.toLowerCase(),
+    chainId: String(chainId.value),
+  }
+  const canPreserveHistory = activeHistoryContext !== null
+    && activeHistoryContext.address === requestContext.address
+    && activeHistoryContext.chainId === requestContext.chainId
+    && history.value.length > 0
+
+  if (!canPreserveHistory) {
+    history.value = []
   }
 
   isLoading.value = true
@@ -177,11 +192,15 @@ const loadHistory = async () => {
     if (requestId !== activeRequestId) return
 
     history.value = parseVaultTotalsHistory(response, decimals.value)
+    activeHistoryContext = requestContext
   }
   catch (error) {
     if (requestId !== activeRequestId) return
 
-    history.value = []
+    if (!canPreserveHistory) {
+      history.value = []
+      activeHistoryContext = null
+    }
     hasError.value = true
     logWarn('VaultOverviewBlockHistory/loadHistory', error)
   }
@@ -412,7 +431,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     </template>
 
     <div
-      v-if="isLoading"
+      v-if="isLoading && !hasChartData"
       class="h-[260px] rounded-12 bg-surface animate-pulse"
     />
 
@@ -431,10 +450,19 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     </div>
 
     <template v-else>
-      <div class="h-[260px] min-w-0">
-        <Line
-          :data="chartData"
-          :options="chartOptions"
+      <div class="relative h-[260px] min-w-0">
+        <div
+          class="h-full transition-opacity duration-150"
+          :class="{ 'opacity-60': isLoading }"
+        >
+          <Line
+            :data="chartData"
+            :options="chartOptions"
+          />
+        </div>
+        <div
+          v-if="isLoading"
+          class="pointer-events-none absolute inset-0 rounded-12 bg-surface/20"
         />
       </div>
 
