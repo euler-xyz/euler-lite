@@ -15,6 +15,7 @@ const {
   ariaLabel = 'Show details',
   placement = 'top',
   clickable = true,
+  popoverWidth = 'default',
 } = defineProps<{
   component: Component
   modalData?: ModalData | (() => ModalData)
@@ -23,6 +24,7 @@ const {
   ariaLabel?: string
   placement?: Placement
   clickable?: boolean
+  popoverWidth?: 'default' | 'wide'
 }>()
 
 const modal = useModal()
@@ -98,6 +100,10 @@ const arrowSide = computed(() =>
 
 const slideDirection = computed(() =>
   resolvedPlacement.value.startsWith('bottom') ? 'slide-down' : 'slide-up',
+)
+
+const popoverWidthClass = computed(() =>
+  popoverWidth === 'wide' ? 'ui-modal-preview-trigger__popover--wide' : undefined,
 )
 
 const clearOpenTimer = () => {
@@ -377,7 +383,10 @@ onBeforeUnmount(() => {
       v-if="isRendered"
       ref="floating"
       class="ui-modal-preview-trigger__popover"
-      :class="{ 'ui-modal-preview-trigger__popover--hover-only': !clickable }"
+      :class="[
+        { 'ui-modal-preview-trigger__popover--hover-only': !clickable },
+        popoverWidthClass,
+      ]"
       :style="floatingStyles"
       @click.stop
       @mouseenter="onPopoverMouseEnter"
@@ -435,6 +444,10 @@ onBeforeUnmount(() => {
 
   &--hover-only {
     width: min(360px, calc(100vw - 24px));
+  }
+
+  &--wide {
+    width: min(520px, calc(100vw - 24px));
   }
 }
 

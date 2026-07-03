@@ -231,6 +231,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
             aria-label="Show oracle adapter checks"
             placement="top-start"
             :clickable="false"
+            popover-width="wide"
           >
             <span class="text-content-tertiary">Checks</span>
             <span class="flex items-center gap-6 cursor-default">
