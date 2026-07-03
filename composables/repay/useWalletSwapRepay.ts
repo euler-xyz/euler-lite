@@ -571,7 +571,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     quotes.reset()
     resetDerivedState()
     const currentDebt = getCurrentDebt()
-    let amountNano = 0n
+    let amountNano: bigint
     try {
       amountNano = valueToNano(debtAmount.value || '0', borrowVault.value?.asset.decimals)
     }

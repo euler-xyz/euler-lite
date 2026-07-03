@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import type { TransactionPlan, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
@@ -41,7 +41,8 @@ useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const { hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 
 const isLoading = ref(false)
 const isSubmitting = ref(false)
@@ -56,6 +57,11 @@ const earnVaultMarketLabel = computed(() => unref(name) || vault.value?.shares.n
 // Wallet balance from the central (layer-aware) wallet entity — reactive, no
 // direct balanceOf.
 const balance = computed(() => asset.value?.address ? getBalance(asset.value.address as Address) : 0n)
+const supplyRewardCampaigns = computed(() => getSupplyRewardCampaigns(vaultAddress))
+const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRewards(vaultAddress))
+const supplyApyBreakdown = computed(() => vault.value ? computeSupplyApyBreakdown(vault.value, viewer.value) : undefined)
+const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
+const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
 
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
@@ -68,6 +74,7 @@ const balance = computed(() => asset.value?.address ? getBalance(asset.value.add
     }
     vault.value = await updateEarnVault(vaultAddress)
     asset.value = vault.value?.asset
+    estimateSupplyAPY.value = supplyApyTotal.value
 
     if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
       modal.open(VaultUnverifiedDisclaimerModal, {
@@ -104,13 +111,9 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   return undefined
 })
-const supplyRewardCampaigns = computed(() => getSupplyRewardCampaigns(vaultAddress))
-const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
-const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
-const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!vault.value) return '0.00'
-  return formatNumber(getVaultSupplyApy(vault.value) + totalRewardsAPY.value)
+  return formatNumber(supplyApyTotal.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
   return formatNumber(estimateSupplyAPY.value)
@@ -209,7 +212,7 @@ const updateEstimates = async () => {
   try {
     vault.value = await updateEarnVault(vault.value.address)
     if (!asset.value?.address) return
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
+    estimateSupplyAPY.value = supplyApyTotal.value
   }
   catch (e) {
     logWarn('earn-supply/estimates', e)
@@ -220,17 +223,15 @@ const updateEstimates = async () => {
 }
 const supplyApyModalData = computed(() => ({
   props: {
-    lendingAPY: getVaultSupplyApy(vault.value),
-    intrinsicAPY: intrinsicApy.value,
+    lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
+    intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
-    campaigns: supplyRewardCampaigns.value,
+    campaigns: settings.value.enableRewardsApy ? supplyRewardCampaigns.value : [],
+    totalSupplyAPY: supplyApyTotal.value,
     rewardVaultAddress: vaultAddress,
     baseApyAverageLabel: '1h',
   },
 }))
-
-// Initialize estimateSupplyAPY after vault is loaded
-estimateSupplyAPY.value = getVaultSupplyApy(vault.value) + totalRewardsAPY.value
 
 watch(amount, () => {
   clearSimulationError()

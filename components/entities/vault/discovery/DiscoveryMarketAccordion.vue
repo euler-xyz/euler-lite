@@ -23,6 +23,7 @@ import {
   type VaultUsdCacheEntry,
   type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
+import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { maxUint256 } from 'viem'
 
@@ -34,6 +35,7 @@ const props = defineProps<{
 const { isMarketDataResolved } = useVaults()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
+const { badDebtByChain, isBadDebtEnabled, isBadDebtLoaded, loadBadDebtForChain } = useVaultBadDebt()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -160,11 +162,15 @@ const loadExpandedVaultUsdValues = async () => {
 const onToggle = (market: MarketGroup) => {
   const wasExpanded = isExpanded(market.id)
   toggleExpand(market.id)
-  if (!wasExpanded) loadVaultUsdValues(market)
+  if (!wasExpanded) {
+    loadVaultUsdValues(market)
+    if (isBadDebtEnabled.value) void loadBadDebtForChain()
+  }
 }
 
-watch([() => props.markets, isMarketDataResolved], () => {
+watch([() => props.markets, isMarketDataResolved, chainId], () => {
   void loadExpandedVaultUsdValues()
+  if (isBadDebtEnabled.value && expandedMarkets.value.size > 0) void loadBadDebtForChain()
 })
 
 // -- Matrix view selector (single dropdown spans Stats, Configuration,
@@ -183,7 +189,7 @@ const getMatrixVariant = (marketId: string): MatrixVariant => {
 
 const getDotMetric = (marketId: string): DotMetric => {
   const view = getMatrixView(marketId)
-  if (isAttributeMatrixView(view)) return 'net-apy' // unused for attribute matrices
+  if (isAttributeMatrixView(view)) return 'net-apy' // unused for non-pair matrices
   return view
 }
 
@@ -246,6 +252,10 @@ const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
     enableRewardsApy: enableRewardsApy.value,
   })
 })
+
+const vaultBadDebtCache = computed<Map<string, VaultBadDebtCacheEntry>>(() =>
+  badDebtByChain.value.get(chainId.value) ?? new Map(),
+)
 
 // -- Cell selection state (matrix view) --
 
@@ -435,6 +445,7 @@ onMounted(() => {
       loadVaultUsdValues(market)
     }
   }
+  if (isBadDebtEnabled.value && expandedMarkets.value.size > 0) void loadBadDebtForChain()
 })
 </script>
 
@@ -658,6 +669,8 @@ onMounted(() => {
               :view="getMatrixView(market.id)"
               :usd-cache="vaultUsdCache"
               :apy-cache="vaultApyCache"
+              :bad-debt-cache="vaultBadDebtCache"
+              :show-bad-debt-column="isBadDebtEnabled && isBadDebtLoaded"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />
@@ -709,9 +722,29 @@ onMounted(() => {
                     </div>
                   </template>
 
-                  <!-- Cell selection: single lend + single borrow card -->
+                  <!-- Cell selection -->
                   <template v-else>
-                    <div class="flex flex-col gap-12">
+                    <!-- Oracle view: dedicated oracle adapters section for the
+                         selected collateral/liability pair (same component as the
+                         borrow page's Oracles block). -->
+                    <template v-if="getMatrixView(market.id) === 'oracle'">
+                      <template
+                        v-for="pair in [getSelectedBorrowPair(market)]"
+                        :key="'oracle-' + (pair ? `${pair.collateral.address}-${pair.borrow.address}` : '')"
+                      >
+                        <VaultOverviewBlockOracleAdapters
+                          v-if="pair"
+                          :vault="pair.borrow"
+                          :collateral-vaults="[pair.collateral]"
+                        />
+                      </template>
+                    </template>
+
+                    <!-- Other metrics: single lend + single borrow card -->
+                    <div
+                      v-else
+                      class="flex flex-col gap-12"
+                    >
                       <template
                         v-for="lendVault in [getSelectedLendVault(market)]"
                         :key="'lend-' + (lendVault ? getVaultAddress(lendVault) : '')"

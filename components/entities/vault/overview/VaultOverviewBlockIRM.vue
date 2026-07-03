@@ -32,7 +32,7 @@ ChartJS.register(
   annotationPlugin,
 )
 
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
 const chartData = shallowRef<ChartData<'line', number[], string> | null>(null)
 const chartOptions = shallowRef<ChartOptions<'line'> | null>(null)
@@ -50,7 +50,7 @@ const modal = useModal()
 // Only render the IRM chart for vaults that have live borrow-side exposure —
 // either currently borrowable, or still accruing interest on existing debt
 // while the liquidation LTV ramps down. This mirrors the visibility rule of
-// the "Collateral exposure" block and correctly excludes collateral-only
+// the "Exposure" block and correctly excludes collateral-only
 // vaults that may still carry a non-zero interestRateModelAddress.
 const hasValidIRM = computed(() => {
   const interestRateModelAddress = vault.interestRateModel.address
@@ -396,7 +396,7 @@ const renderChart = async () => {
           pointRadius: 0,
           pointHoverRadius: 6,
           pointHitRadius: 30,
-          tension: 0.4,
+          tension: 0,
           fill: true,
         },
         {
@@ -408,7 +408,7 @@ const renderChart = async () => {
           pointRadius: 0,
           pointHoverRadius: 6,
           pointHitRadius: 30,
-          tension: 0.4,
+          tension: 0,
           fill: true,
         },
       ],
@@ -612,14 +612,14 @@ watch(isDark, async () => {
 </script>
 
 <template>
-  <div
+  <VaultOverviewAccordionSection
     v-if="hasValidIRM"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-16 p-24 shadow-card"
+    title="Interest rate model"
+    :default-open="defaultOpen"
+    :has-actions="!!irmTooltip"
+    content-class="flex flex-col gap-16"
   >
-    <header class="flex items-center justify-between gap-16">
-      <h2 class="text-h3 text-content-primary">
-        Interest rate model
-      </h2>
+    <template #actions>
       <div
         v-if="irmTooltip"
         class="flex shrink-0 items-center gap-8"
@@ -639,7 +639,7 @@ watch(isDark, async () => {
           icon-class="text-content-muted hover:text-content-secondary"
         />
       </div>
-    </header>
+    </template>
 
     <div class="relative w-full min-h-400">
       <div
@@ -676,5 +676,5 @@ watch(isDark, async () => {
         :value="param.value"
       />
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>

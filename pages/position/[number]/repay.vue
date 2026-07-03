@@ -589,6 +589,7 @@ watch(formTab, () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       :loading="isLoading || isPositionsLoading"
@@ -1070,6 +1071,7 @@ watch(formTab, () => {
                 :asset="savings.sourceVault.value.asset"
                 :vault="savings.sourceVault.value"
                 :collateral-options="savings.savingsOptions.value"
+                collateral-modal-title="Select savings"
                 :selected-source="'vault'"
                 :selected-sub-account="savings.selectedSavingSubAccount.value"
                 :selected-vault-address="savings.sourceVault.value.address"

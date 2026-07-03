@@ -102,7 +102,7 @@ watch(() => props.collateralOptions, (options) => {
     const firstEnabled = options.findIndex(o => !o.disabled)
     if (firstEnabled >= 0) {
       selectedIdx.value = firstEnabled
-      emits('change-collateral', firstEnabled)
+      emits('change-collateral', firstEnabled, options[firstEnabled])
     }
   }
 })
@@ -184,9 +184,9 @@ const openChooseCollateralModal = () => {
       selected: selectedIdx.value,
       title: props.collateralModalTitle,
       apyLabel: props.collateralModalApyLabel,
-      onSave: (selectedIndex: number) => {
+      onSave: (selectedIndex: number, selectedOption: CollateralOption) => {
         selectedIdx.value = selectedIndex
-        emits('change-collateral', selectedIndex)
+        emits('change-collateral', selectedIndex, selectedOption)
         modal.close()
       },
     },

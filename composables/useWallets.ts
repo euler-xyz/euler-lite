@@ -10,7 +10,7 @@ import { FULL_BALANCES_TTL_MS } from '~/entities/tuning-constants'
 // a touched token in place of the real balance. No-op for untouched tokens or
 // the base layer (ref empty), so wallet reads stay transparent.
 const applyLayerOverlay = (tokenAddress: string, realBalance: bigint): bigint => {
-  let key = tokenAddress
+  let key: string
   try {
     key = getAddress(tokenAddress).toLowerCase()
   }
@@ -144,7 +144,7 @@ export const useWallets = () => {
     isFetching.value = true
 
     try {
-      const targetAddress = balanceAddress.value as Address
+      const targetAddress = getAddress(balanceAddress.value as Address)
       const sdk = await getEulerSdk()
       const assetsWithSpenders = tokenAddresses.map(asset => ({ asset, spenders: [] }))
       if (includesNativeCurrency) {

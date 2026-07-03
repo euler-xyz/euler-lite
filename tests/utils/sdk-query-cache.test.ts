@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
+import { clearSdkQueryFailureCacheForTest, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
 import { queryClient } from '~/utils/query-client'
 
 describe('sdkBuildQuery', () => {
   afterEach(() => {
     sdkQueryClient.clear()
+    clearSdkQueryFailureCacheForTest()
+    vi.useRealTimers()
   })
 
-  it('uses a dedicated query client with default retries', () => {
+  it('uses a dedicated query client without default retries', () => {
     expect(sdkQueryClient).not.toBe(queryClient)
-    expect(sdkQueryClient.getDefaultOptions().queries?.retry).toBeUndefined()
+    expect(sdkQueryClient.getDefaultOptions().queries?.retry).toBe(0)
     expect(queryClient.getDefaultOptions().queries?.retry).toBe(0)
   })
 
@@ -61,5 +63,29 @@ describe('sdkBuildQuery', () => {
       'SDK query arguments for queryBatchSimulation are not serializable',
     )
     expect(query).not.toHaveBeenCalled()
+  })
+
+  it('briefly caches failed SDK queries to suppress repeated backend calls', async () => {
+    vi.useFakeTimers()
+    const error = new Error('backend unavailable')
+    const query = vi.fn(async (_arg: { vault: string }) => {
+      throw error
+    })
+    const wrapped = sdkBuildQuery('queryVaultAccountInfo', query, {})
+
+    await expect(wrapped({ vault: '0x0000000000000000000000000000000000000001' })).rejects.toThrow(error)
+    await expect(wrapped({ vault: '0x0000000000000000000000000000000000000001' })).rejects.toThrow(error)
+
+    expect(query).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(4_000)
+    await expect(wrapped({ vault: '0x0000000000000000000000000000000000000001' })).rejects.toThrow(error)
+
+    expect(query).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1_001)
+    await expect(wrapped({ vault: '0x0000000000000000000000000000000000000001' })).rejects.toThrow(error)
+
+    expect(query).toHaveBeenCalledTimes(2)
   })
 })

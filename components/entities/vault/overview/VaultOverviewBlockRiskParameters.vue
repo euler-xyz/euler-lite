@@ -10,7 +10,7 @@ import { isVaultBorrowable } from '~/utils/vault/classification'
 import { formatLiquidationBonusRange } from '~/utils/vault/liquidation'
 import { VaultHooksInfoModal } from '#components'
 
-const { vault } = defineProps<{ vault: EVault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
 const { getVaultCategory } = useVaultRegistry()
 
@@ -24,9 +24,14 @@ const supplyCapPercentageDisplay = computed(() => vault.caps.supplyCapUtilizatio
 const borrowCapPercentageDisplay = computed(() => vault.caps.borrowCapUtilization)
 const hookedOperations = computed(() => getVaultHookedOperations(vault))
 const liquidationBonusRange = computed(() => formatLiquidationBonusRange(vault))
+// The share/asset rate only moves as borrow interest accrues, so it is only
+// meaningful on borrowable vaults. A collateral-only vault can have a non-zero
+// borrowCap configured yet still be non-borrowable (no collateral carries a
+// borrow LTV, for example "Can be borrowed: No"), so gate on actual
+// borrowability rather than the cap. isVaultBorrowable also keeps the rate
+// visible during wind-down via its `totalBorrowed > 0n` branch.
 const showShareTokenExchangeRate = computed(() =>
-  getVaultCategory(vault.address) !== 'escrow'
-  && (vault.caps.borrowCap !== 0n || vault.totalBorrowed > 0n),
+  getVaultCategory(vault.address) !== 'escrow' && isBorrowable.value,
 )
 
 const supplyCapDisplay = ref('-')
@@ -87,113 +92,112 @@ const hooksModalData = computed(() => ({
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Risk parameters
-    </p>
-    <div class="flex flex-col items-start gap-24">
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        :value="liquidationBonusRange"
-        orientation="horizontal"
-      >
-        <template #label>
-          <span class="flex items-center gap-4">
-            Liquidation bonus
-            <UiHoverPreviewTooltip
-              title="Liquidation Bonus"
-              text="The discount a liquidator receives on collateral when liquidating an unhealthy position. The actual bonus scales dynamically from 0% up to this maximum based on how unhealthy the position is. A more unhealthy position offers a larger bonus to incentivise faster liquidation."
-              icon-class="text-content-muted hover:text-content-secondary"
-            />
-          </span>
-        </template>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        label="Supply cap"
-        orientation="horizontal"
-      >
-        <div class="flex gap-4 items-center">
-          <span>
-            {{ supplyCapDisplay }}
-            <span v-if="vault.caps.supplyCap < maxUint256">({{ compactNumber(supplyCapPercentageDisplay, 2) }}%)</span>
-          </span>
-          <UiRadialProgress
-            v-if="vault.caps.supplyCap < maxUint256"
-            :value="supplyCapPercentageDisplay"
-            :max="100"
+  <VaultOverviewAccordionSection
+    title="Risk parameters"
+    :default-open="defaultOpen"
+    content-class="flex flex-col items-start gap-24"
+  >
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      :value="liquidationBonusRange"
+      orientation="horizontal"
+    >
+      <template #label>
+        <span class="flex items-center gap-4">
+          Liquidation bonus
+          <UiHoverPreviewTooltip
+            title="Liquidation Bonus"
+            text="The discount a liquidator receives on collateral when liquidating an unhealthy position. The actual bonus scales dynamically from 0% up to this maximum based on how unhealthy the position is. A more unhealthy position offers a larger bonus to incentivise faster liquidation."
+            icon-class="text-content-muted hover:text-content-secondary"
           />
-        </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        label="Borrow cap"
-        orientation="horizontal"
-      >
-        <div class="flex gap-4 items-center">
-          <span>
-            {{ borrowCapDisplay }}
-            <span v-if="vault.caps.borrowCap < maxUint256">({{ compactNumber(borrowCapPercentageDisplay, 2) }}%)</span>
-          </span>
-          <UiRadialProgress
-            v-if="vault.caps.borrowCap < maxUint256"
-            :value="borrowCapPercentageDisplay"
-            :max="100"
+        </span>
+      </template>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      label="Supply cap"
+      orientation="horizontal"
+    >
+      <div class="flex gap-4 items-center">
+        <span>
+          {{ supplyCapDisplay }}
+          <span v-if="vault.caps.supplyCap < maxUint256">({{ compactNumber(supplyCapPercentageDisplay, 2) }}%)</span>
+        </span>
+        <UiRadialProgress
+          v-if="vault.caps.supplyCap < maxUint256"
+          :value="supplyCapPercentageDisplay"
+          :max="100"
+        />
+      </div>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      label="Borrow cap"
+      orientation="horizontal"
+    >
+      <div class="flex gap-4 items-center">
+        <span>
+          {{ borrowCapDisplay }}
+          <span v-if="vault.caps.borrowCap < maxUint256">({{ compactNumber(borrowCapPercentageDisplay, 2) }}%)</span>
+        </span>
+        <UiRadialProgress
+          v-if="vault.caps.borrowCap < maxUint256"
+          :value="borrowCapPercentageDisplay"
+          :max="100"
+        />
+      </div>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      v-if="showShareTokenExchangeRate"
+      label="Share token exchange rate"
+      orientation="horizontal"
+    >
+      <template v-if="shareTokenExchangeRate !== undefined">
+        {{ formatNumber(nanoToValue(shareTokenExchangeRate, vault.asset.decimals), 6, 2) }}
+      </template>
+      <template v-else>
+        -
+      </template>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      :value="vault.liquidation.socializeDebt ? 'Yes' : 'No'"
+      orientation="horizontal"
+    >
+      <template #label>
+        <span class="flex items-center gap-4">
+          Bad debt socialisation
+          <UiHoverPreviewTooltip
+            title="Bad Debt Socialisation"
+            text="When enabled, if a liquidated position has remaining debt but no collateral left, the loss is spread across all depositors by reducing the share token value. This prevents bad debt from accumulating in the vault. When disabled, bad debt remains in the system indefinitely."
+            icon-class="text-content-muted hover:text-content-secondary"
           />
-        </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="showShareTokenExchangeRate"
-        label="Share token exchange rate"
-        orientation="horizontal"
-      >
-        <template v-if="shareTokenExchangeRate !== undefined">
-          {{ formatNumber(nanoToValue(shareTokenExchangeRate, vault.asset.decimals), 6, 2) }}
-        </template>
-        <template v-else>
-          -
-        </template>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        :value="vault.liquidation.socializeDebt ? 'Yes' : 'No'"
-        orientation="horizontal"
-      >
-        <template #label>
-          <span class="flex items-center gap-4">
-            Bad debt socialisation
-            <UiHoverPreviewTooltip
-              title="Bad Debt Socialisation"
-              text="When enabled, if a liquidated position has remaining debt but no collateral left, the loss is spread across all depositors by reducing the share token value. This prevents bad debt from accumulating in the vault. When disabled, bad debt remains in the system indefinitely."
-              icon-class="text-content-muted hover:text-content-secondary"
+        </span>
+      </template>
+    </VaultOverviewLabelValue>
+    <VaultOverviewLabelValue
+      v-if="isBorrowable"
+      label="Interest fee"
+      :value="`${formatNumber(vault.fees.interestFee * 100)}%`"
+      orientation="horizontal"
+    />
+    <VaultOverviewLabelValue orientation="horizontal">
+      <template #label>
+        <span class="flex items-center gap-4">
+          {{ hooksRowLabel }}
+          <UiModalPreviewTrigger
+            v-if="showHooksInfoIcon"
+            :component="VaultHooksInfoModal"
+            :modal-data="hooksModalData"
+            :aria-label="`${hooksRowLabel} details`"
+          >
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
             />
-          </span>
-        </template>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="isBorrowable"
-        label="Interest fee"
-        :value="`${formatNumber(vault.fees.interestFee * 100)}%`"
-        orientation="horizontal"
-      />
-      <VaultOverviewLabelValue orientation="horizontal">
-        <template #label>
-          <span class="flex items-center gap-4">
-            {{ hooksRowLabel }}
-            <UiModalPreviewTrigger
-              v-if="showHooksInfoIcon"
-              :component="VaultHooksInfoModal"
-              :modal-data="hooksModalData"
-              :aria-label="`${hooksRowLabel} details`"
-            >
-              <SvgIcon
-                class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-                name="info-circle"
-              />
-            </UiModalPreviewTrigger>
-          </span>
-        </template>
-        {{ hooksRowValue }}
-      </VaultOverviewLabelValue>
-    </div>
-  </div>
+          </UiModalPreviewTrigger>
+        </span>
+      </template>
+      {{ hooksRowValue }}
+    </VaultOverviewLabelValue>
+  </VaultOverviewAccordionSection>
 </template>

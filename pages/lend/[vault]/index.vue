@@ -5,7 +5,7 @@ import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
@@ -28,6 +28,7 @@ import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyMod
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import { reportClientEvent } from '~/utils/client-observability'
 import { isCowProviderOrQuote } from '~/entities/cowswap'
 
 // Type definitions for vault display
@@ -350,7 +351,7 @@ const baseSupplyApy = computed(() => {
   if (!eVault.value) return 0
   return getVaultSupplyApy(eVault.value)
 })
-const supplyApyWithIntrinsic = computed(() => baseSupplyApy.value + intrinsicApy.value)
+const supplyApyWithIntrinsic = computed(() => combineApyWithIntrinsic(baseSupplyApy.value, intrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!eVault.value && !securitizeVault.value) return '0.00'
   return formatNumber(supplyApyWithIntrinsic.value + totalRewardsAPY.value)
@@ -382,7 +383,9 @@ const load = async () => {
   isLoading.value = true
   try {
     if (features.value.hasInterestRate && eVault.value) {
-      estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
+      estimateSupplyAPY.value
+        = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+          + totalRewardsAPY.value
     }
     else {
       // For vaults without interest rate info, just use rewards
@@ -471,6 +474,16 @@ const submit = async () => {
       }
       catch (e) {
         console.warn('[OperationReviewModal] failed to build plan', e)
+        void reportClientEvent({
+          event: 'tx_plan_build_failed',
+          flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+          phase: 'build',
+          chainId: chainId.value,
+          operationType: needsSwap.value ? 'swap-supply' : 'supply',
+          vaultAddress,
+          assetAddress: asset.value.address,
+          quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+        }, e)
         plan.value = null
       }
 
@@ -483,6 +496,16 @@ const submit = async () => {
         }
         catch (e) {
           console.warn('[OperationReviewModal] failed to prepare plan', e)
+          void reportClientEvent({
+            event: 'tx_plan_prepare_failed',
+            flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+            phase: 'prepare',
+            chainId: chainId.value,
+            operationType: needsSwap.value ? 'swap-supply' : 'supply',
+            vaultAddress,
+            assetAddress: asset.value.address,
+            quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+          }, e)
           simulationError.value = await getTxErrorMessage(e)
           return
         }
@@ -585,6 +608,16 @@ const send = async () => {
   catch (e) {
     error('Transaction failed')
     console.warn(e)
+    void reportClientEvent({
+      event: 'tx_execute_failed',
+      flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+      phase: 'execute',
+      chainId: chainId.value,
+      operationType: needsSwap.value ? 'swap-supply' : 'supply',
+      vaultAddress,
+      assetAddress: asset.value?.address,
+      quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+    }, e)
   }
   finally {
     isSubmitting.value = false
@@ -605,7 +638,9 @@ const updateEstimates = useDebounceFn(async () => {
 
       if (needsSwap.value && !supplyNano) {
         // No swap quote yet — skip projection, keep current rate
-        estimateSupplyAPY.value = getVaultSupplyApy(eVault.value) + totalRewardsAPY.value + intrinsicApy.value
+        estimateSupplyAPY.value
+          = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+            + totalRewardsAPY.value
       }
       else {
         const projected = await getProjectedRates(
@@ -617,7 +652,9 @@ const updateEstimates = useDebounceFn(async () => {
         )
         if (estimatesGuard.isStale(gen)) return
         const rawAPY = projected ? nanoToValue(projected.supplyAPY, 25) : getVaultSupplyApy(eVault.value)
-        estimateSupplyAPY.value = rawAPY + totalRewardsAPY.value + intrinsicApy.value
+        estimateSupplyAPY.value
+          = combineApyWithIntrinsic(rawAPY, intrinsicApy.value)
+            + totalRewardsAPY.value
       }
     }
     else {

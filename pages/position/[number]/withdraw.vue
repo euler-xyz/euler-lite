@@ -283,6 +283,7 @@ watch(selectedOutputAsset, () => {
       :fallback="`/position/${positionIndex}`"
     />
     <VaultForm
+      page-scroll
       back
       :back-fallback="`/position/${positionIndex}`"
       title="Withdraw collateral"

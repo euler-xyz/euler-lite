@@ -13,6 +13,8 @@ import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
 import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '~/utils/collateralOptions'
 import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidation'
+import { isVaultBorrowable } from '~/utils/vault/classification'
+import { formatBadDebtHint, formatBadDebtUsd, type VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 
 // ============================================================
 // Types & Constants
@@ -644,7 +646,7 @@ export interface AttributeCell {
   display: string
   numeric?: number
   hint?: string
-  kind?: 'text' | 'capProgress' | 'governor' | 'hooks'
+  kind?: 'text' | 'capProgress' | 'governor' | 'hooks' | 'exposure'
   capPercent?: number
   capUncapped?: boolean
   hookable?: boolean
@@ -658,6 +660,8 @@ export interface AttributeRow {
     vault: EVault | SecuritizeCollateralVault,
     usd: VaultUsdCacheEntry | undefined,
     apy: VaultApyCacheEntry | undefined,
+    badDebt: VaultBadDebtCacheEntry | undefined,
+    isBadDebtLoaded: boolean,
   ) => AttributeCell
 }
 
@@ -894,6 +898,33 @@ export const STATS_ROWS: AttributeRow[] = [
     },
   },
   {
+    id: 'exposure',
+    label: 'Exposure',
+    getValue: (vault) => {
+      if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
+      if (!isVaultBorrowable(vault)) return NA_CELL
+      return { display: 'Exposure', kind: 'exposure' }
+    },
+  },
+  {
+    id: 'badDebt',
+    label: 'Bad debt',
+    getValue: (vault, usd, _apy, badDebt, isBadDebtLoaded) => {
+      if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
+      if (!badDebt) {
+        return isBadDebtLoaded
+          ? { display: '$0', numeric: 0, kind: 'text' }
+          : NA_CELL
+      }
+      return {
+        display: formatBadDebtUsd(badDebt),
+        numeric: badDebt.badDebtUsd,
+        hint: formatBadDebtHint(badDebt, usd?.borrowUsd),
+        kind: 'text',
+      }
+    },
+  },
+  {
     id: 'utilization',
     label: 'Utilization',
     getValue: (vault) => {
@@ -1002,14 +1033,24 @@ export const getAttributeMatrix = (
   columns: getAttributeMatrixColumns(market),
 })
 
+export const filterAttributeRowsByBadDebtAvailability = (
+  rows: AttributeRow[],
+  isBadDebtAvailable: boolean,
+): AttributeRow[] =>
+  isBadDebtAvailable ? rows : rows.filter(row => row.id !== 'badDebt')
+
 export const buildAttributeRowCells = (
   row: AttributeRow,
   columns: AttributeMatrixColumn[],
   usdCache: Map<string, VaultUsdCacheEntry>,
   apyCache?: Map<string, VaultApyCacheEntry>,
+  badDebtCache?: Map<string, VaultBadDebtCacheEntry>,
+  isBadDebtLoaded = false,
 ): AttributeCell[] =>
   columns.map(col => row.getValue(
     col.vault,
     usdCache.get(col.address),
     apyCache?.get(col.address),
+    badDebtCache?.get(col.address),
+    isBadDebtLoaded,
   ))
