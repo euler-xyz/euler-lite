@@ -63,7 +63,7 @@ const createMockSdk = (id: string): MockSdk => ({
 const importUseEulerSdk = async (
   chainIds: Ref<number[]>,
   buildEulerSDK: ReturnType<typeof vi.fn>,
-  deprecatedChainIds: number[] = [],
+  onchainSdkChainIds: number[] = [],
 ) => {
   vi.resetModules()
   vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
@@ -83,7 +83,8 @@ const importUseEulerSdk = async (
   }))
   vi.stubGlobal('useChainConfig', () => ({
     enabledChainIds: chainIds.value,
-    deprecatedChainIds,
+    deprecatedChainIds: [],
+    onchainSdkChainIds,
     eVaultFetchChunkChainIds: [],
   }))
   vi.stubGlobal('useVaultRegistry', () => ({
@@ -215,13 +216,13 @@ describe('useEulerSdk', () => {
     })
   })
 
-  it('uses an onchain browsing SDK for deprecated chains', async () => {
+  it('uses an onchain browsing SDK for chains listed in ONCHAIN_SDK_CHAINS', async () => {
     const chainIds = ref([1, 8453])
     const regularSdk = createMockSdk('regular')
-    const deprecatedSdk = createMockSdk('deprecated')
+    const onchainSdk = createMockSdk('onchain')
     const buildEulerSDK = vi.fn()
       .mockResolvedValueOnce(regularSdk)
-      .mockResolvedValueOnce(deprecatedSdk)
+      .mockResolvedValueOnce(onchainSdk)
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
@@ -232,8 +233,8 @@ describe('useEulerSdk', () => {
 
     const { getEulerSdkForChain } = await importUseEulerSdk(chainIds, buildEulerSDK, [8453])
     await expect(getEulerSdkForChain(1)).resolves.toBe(regularSdk)
-    await expect(getEulerSdkForChain(8453)).resolves.toBe(deprecatedSdk)
-    await expect(getEulerSdkForChain(8453)).resolves.toBe(deprecatedSdk)
+    await expect(getEulerSdkForChain(8453)).resolves.toBe(onchainSdk)
+    await expect(getEulerSdkForChain(8453)).resolves.toBe(onchainSdk)
 
     expect(buildEulerSDK).toHaveBeenCalledTimes(2)
     expect((buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions).config).toMatchObject({

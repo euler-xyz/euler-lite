@@ -16,6 +16,7 @@ import { parseEVaultFetchChunkChainIds } from '~/utils/eVaultFetchChunkConfig'
 interface ChainConfig {
   enabledChainIds: number[]
   deprecatedChainIds: number[]
+  onchainSdkChainIds: number[]
   eVaultFetchChunkChainIds: number[]
   unsupportedChainIds?: number[]
   chainEnvIssues?: ChainEnvIssues
@@ -62,9 +63,10 @@ function normalizeChainConfig(config: ChainConfig): ChainConfig {
   const enabledChainIds = config.enabledChainIds.filter(id => !unknownChainIds.includes(id))
   const enabledSet = new Set(enabledChainIds)
   const deprecatedChainIds = config.deprecatedChainIds.filter(id => enabledSet.has(id))
+  const onchainSdkChainIds = (config.onchainSdkChainIds ?? []).filter(id => enabledSet.has(id))
   const eVaultFetchChunkChainIds = (config.eVaultFetchChunkChainIds ?? []).filter(id => enabledSet.has(id))
 
-  return { ...config, enabledChainIds, deprecatedChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
+  return { ...config, enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
 }
 
 function scanEnv(): ChainConfig {
@@ -76,9 +78,10 @@ function scanEnv(): ChainConfig {
   const enabledChainIds = getEnabledChainIds()
   const enabledSet = new Set(enabledChainIds)
   const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
+  const onchainSdkChainIds = parseOnchainSdkChains(process.env.ONCHAIN_SDK_CHAINS, enabledSet)
   const eVaultFetchChunkChainIds = parseEVaultFetchChunkChainIds(process.env, enabledSet)
 
-  return { enabledChainIds, deprecatedChainIds, eVaultFetchChunkChainIds, unsupportedChainIds, chainEnvIssues }
+  return { enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds, chainEnvIssues }
 }
 
 export const useChainConfig = (): ChainConfig => {
@@ -93,7 +96,7 @@ export const useChainConfig = (): ChainConfig => {
   /* eslint-enable @typescript-eslint/no-explicit-any */
   }
   else {
-    cached = { enabledChainIds: [], deprecatedChainIds: [], eVaultFetchChunkChainIds: [] }
+    cached = { enabledChainIds: [], deprecatedChainIds: [], onchainSdkChainIds: [], eVaultFetchChunkChainIds: [] }
   }
 
   return cached!

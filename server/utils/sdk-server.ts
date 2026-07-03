@@ -17,7 +17,7 @@
  *   - `onchain`: pin every service to onchain.
  *   - `v3`: pin to V3; SDK build throws when V3 is not configured.
  *
- * Chains listed in `DEPRECATED_CHAINS` always use the onchain config.
+ * Chains listed in `ONCHAIN_SDK_CHAINS` always use the onchain config.
  */
 import {
   buildEulerSDK,
@@ -31,7 +31,7 @@ import {
   readV3ApiUrl,
   type VaultDataSource,
 } from '~/utils/api-url-env'
-import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
+import { parseOnchainSdkChains } from '~/utils/parseOnchainSdkChains'
 import { resolveRpcUrl } from './rpc'
 import { resolveLabelsBaseUrl } from './labels-base-url'
 
@@ -66,8 +66,8 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
   }
 }
 
-const isDeprecatedChain = (chainId: number): boolean =>
-  parseDeprecatedChains(process.env.DEPRECATED_CHAINS, new Set([chainId])).includes(chainId)
+const isOnchainSdkChain = (chainId: number): boolean =>
+  parseOnchainSdkChains(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
 
 const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   const rpcUrl = resolveRpcUrl(chainId)
@@ -75,7 +75,7 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
 
   const v3ApiUrl = readResolvedV3ApiUrl()
   const v3ApiKey = readV3ApiKey().trim()
-  const source = isDeprecatedChain(chainId) ? 'onchain' : readServerVaultCacheSource()
+  const source = isOnchainSdkChain(chainId) ? 'onchain' : readServerVaultCacheSource()
   const hasV3 = !!readV3ApiUrl()
 
   return {

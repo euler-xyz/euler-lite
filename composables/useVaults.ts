@@ -737,7 +737,7 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
     if (isDeprecatedChainId(targetChainId) && !evk.length && !earn.length && !securitize.length && !escrow.length) {
       logWarn(
         'useVaults/hydrateFromServer',
-        'deprecated-chain snapshot was empty; falling back to onchain SDK load',
+        'deprecated-chain snapshot was empty; falling back to client-side SDK load',
       )
       return false
     }

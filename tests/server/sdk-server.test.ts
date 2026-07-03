@@ -29,10 +29,13 @@ describe('getServerSdk', () => {
     mocks.resolveLabelsBaseUrl.mockReturnValue('https://labels.example')
     process.env.V3_API_URL = 'https://v3.example'
     process.env.SERVER_VAULT_CACHE_SOURCE = 'fallback'
-    process.env.DEPRECATED_CHAINS = '8453'
+    // Routing is driven by ONCHAIN_SDK_CHAINS only; DEPRECATED_CHAINS is a
+    // UI/warm-cache concern and must not affect adapter selection.
+    process.env.DEPRECATED_CHAINS = '1'
+    process.env.ONCHAIN_SDK_CHAINS = '8453'
   })
 
-  it('forces deprecated chains to onchain while regular chains use the configured source', async () => {
+  it('forces ONCHAIN_SDK_CHAINS chains to onchain while other chains use the configured source', async () => {
     const { getServerSdk } = await import('~/server/utils/sdk-server')
 
     await getServerSdk(1)
