@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import annotationPlugin from 'chartjs-plugin-annotation'
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -13,14 +12,12 @@ import {
   type ChartData,
   type ChartOptions,
 } from 'chart.js'
-import { formatUnits } from 'viem'
 import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
 import { compactNumber } from '~/utils/string-utils'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import {
   buildVaultTotalsHistoryPath,
-  hasFiniteCap,
   parseVaultTotalsHistory,
   VAULT_HISTORY_TIMEFRAMES,
   type VaultHistoryMetric,
@@ -37,7 +34,6 @@ ChartJS.register(
   Tooltip,
   Legend,
   Filler,
-  annotationPlugin,
 )
 
 type MetricOption = {
@@ -81,9 +77,19 @@ const canLoadHistory = computed(() =>
   enableV3Backend && Boolean(chainId.value),
 )
 const decimals = computed(() => Number(vault.asset.decimals ?? 18))
+const hasBorrowHistory = computed(() =>
+  history.value.some(point =>
+    (point.totalBorrows ?? 0) > 0
+    || (point.utilization ?? 0) > 0
+    || (point.borrowApy ?? 0) > 0,
+  ),
+)
+const shouldShowBorrowMetrics = computed(() =>
+  isBorrowableEVault.value || hasBorrowHistory.value,
+)
 
 const metricOptions = computed<MetricOption[]>(() => {
-  if (isBorrowableEVault.value) {
+  if (shouldShowBorrowMetrics.value) {
     return [
       { value: 'apy', label: 'APY' },
       { value: 'totalSupply', label: 'Total supply' },
@@ -219,29 +225,6 @@ watch(
   { immediate: true },
 )
 
-const supplyCap = computed(() => {
-  return vault.caps.supplyCap
-})
-const borrowCap = computed(() => vault.caps.borrowCap)
-const capValue = computed(() => {
-  const cap = selectedMetric.value === 'totalSupply'
-    ? supplyCap.value
-    : selectedMetric.value === 'totalBorrows'
-      ? borrowCap.value
-      : null
-  if (!hasFiniteCap(cap)) return null
-
-  const parsed = Number(formatUnits(cap, decimals.value))
-  return Number.isFinite(parsed) ? parsed : null
-})
-const capLabel = computed(() =>
-  selectedMetric.value === 'totalSupply'
-    ? 'Supply cap'
-    : selectedMetric.value === 'totalBorrows'
-      ? 'Borrow cap'
-      : '',
-)
-
 const formatDate = (timestamp: string) =>
   new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(timestamp))
 
@@ -285,7 +268,7 @@ const chartData = computed<ChartData<'line', number[], string>>(() => {
     },
   ]
 
-  if (selectedMetric.value === 'apy' && isBorrowableEVault.value) {
+  if (selectedMetric.value === 'apy' && shouldShowBorrowMetrics.value) {
     datasets.push({
       label: 'Borrow APY',
       data: visiblePoints.value.map(point => point.borrowApy ?? 0),
@@ -310,25 +293,6 @@ const formatValue = (value: number) =>
 const chartOptions = computed<ChartOptions<'line'>>(() => {
   void isDark.value
   const colors = getChartColors()
-  const annotations = capValue.value === null
-    ? {}
-    : {
-        capLine: {
-          type: 'line',
-          yMin: capValue.value,
-          yMax: capValue.value,
-          borderColor: colors.annotationLine || '#737373',
-          borderDash: [6, 6],
-          borderWidth: 1,
-          label: {
-            display: true,
-            content: capLabel.value,
-            backgroundColor: colors.annotationBg || 'rgba(82, 82, 82, 0.85)',
-            color: colors.annotationText || '#ffffff',
-            position: 'end',
-          },
-        },
-      }
 
   return {
     responsive: true,
@@ -357,9 +321,6 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         callbacks: {
           label: context => `${context.dataset.label}: ${formatValue(Number(context.parsed.y))}`,
         },
-      },
-      annotation: {
-        annotations,
       },
     },
     scales: {
