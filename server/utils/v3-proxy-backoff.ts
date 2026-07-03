@@ -18,8 +18,30 @@ const normalizeV3ProxyBackoffPath = (pathname: string) => {
   return pathname
 }
 
-export const buildV3ProxyBackoffKey = (method: string, pathname: string) =>
-  `${method.toUpperCase()} ${normalizeV3ProxyBackoffPath(pathname)}`
+const buildVaultTotalsRangeKey = (
+  pathname: string,
+  searchParams?: URLSearchParams,
+) => {
+  if (!/^\/v3\/evk\/vaults\/[^/]+\/[^/]+\/totals$/.test(pathname) || !searchParams) {
+    return pathname
+  }
+
+  const rangeParams = new URLSearchParams()
+  for (const name of ['resolution', 'from', 'to']) {
+    const value = searchParams.get(name)
+    if (value) rangeParams.set(name, value)
+  }
+
+  const range = rangeParams.toString()
+  return range ? `${pathname}?${range}` : pathname
+}
+
+export const buildV3ProxyBackoffKey = (
+  method: string,
+  pathname: string,
+  searchParams?: URLSearchParams,
+) =>
+  `${method.toUpperCase()} ${buildVaultTotalsRangeKey(normalizeV3ProxyBackoffPath(pathname), searchParams)}`
 
 export const readV3ProxyBackoffMs = (
   key: string,
