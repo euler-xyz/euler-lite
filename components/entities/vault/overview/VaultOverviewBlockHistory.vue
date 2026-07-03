@@ -379,20 +379,28 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     content-class="flex flex-col gap-16"
   >
     <template #actions>
-      <select
+      <div
         v-if="metricOptions.length > 1"
-        v-model="selectedMetric"
-        class="h-32 max-w-[180px] rounded-8 border border-line-subtle bg-surface px-10 text-p3 text-content-primary outline-none transition-colors hover:border-line focus:border-accent-500"
-        aria-label="History metric"
+        class="relative"
       >
-        <option
-          v-for="option in metricOptions"
-          :key="option.value"
-          :value="option.value"
+        <select
+          v-model="selectedMetric"
+          class="h-32 max-w-[180px] appearance-none rounded-8 border border-line-subtle bg-surface px-10 pr-32 text-p3 text-content-primary outline-none transition-colors hover:border-line focus:border-accent-500"
+          aria-label="History metric"
         >
-          {{ option.label }}
-        </option>
-      </select>
+          <option
+            v-for="option in metricOptions"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.label }}
+          </option>
+        </select>
+        <UiIcon
+          name="arrow-down"
+          class="pointer-events-none absolute right-10 top-1/2 h-16 w-16 -translate-y-1/2 text-content-secondary"
+        />
+      </div>
     </template>
 
     <div
