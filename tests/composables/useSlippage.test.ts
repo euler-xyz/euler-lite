@@ -79,8 +79,9 @@ const installNuxtStorageMocks = (storage: Record<string, unknown> = {}) => {
   })
 }
 
-const storageValue = <T>(key: string): T => storageRefs.get(key)?.value as T
 const browserStorageValue = (key: string): string | null => globalThis.localStorage.getItem(key)
+const storedOverride = (): SlippageOverride | null =>
+  JSON.parse(browserStorageValue(SLIPPAGE_OVERRIDE_STORAGE_KEY) ?? 'null') as SlippageOverride | null
 
 const flushSlippageTicks = async () => {
   await nextTick()
@@ -176,6 +177,28 @@ describe('useSlippage helpers', () => {
 })
 
 describe('useSlippage persisted state', () => {
+  it('keeps a global settings override when no pair context is mounted', async () => {
+    installNuxtStorageMocks()
+
+    const { scope, slippage, setSlippage, defaultSlippage, isOverrideActive } = await mountSlippage()
+
+    expect(defaultSlippage.value).toBe(DEFAULT_SLIPPAGE)
+
+    vi.setSystemTime(NOW + 5_000)
+    setSlippage(0.5)
+    await flushSlippageTicks()
+
+    expect(isOverrideActive.value).toBe(true)
+    expect(slippage.value).toBe(0.5)
+    expect(storedOverride()).toEqual({
+      value: 0.5,
+      setAt: NOW + 5_000,
+      defaultSlippageAtSet: DEFAULT_SLIPPAGE,
+    })
+
+    scope.stop()
+  })
+
   it('hydrates a fresh stable pair with the 0.05% default and no override', async () => {
     installNuxtStorageMocks()
 
@@ -187,7 +210,7 @@ describe('useSlippage persisted state', () => {
     expect(defaultSlippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
     expect(isOverrideActive.value).toBe(false)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
@@ -200,19 +223,20 @@ describe('useSlippage persisted state', () => {
       toSymbol: () => 'RLUSD',
     })
 
+    vi.setSystemTime(NOW + 5_000)
     setSlippage(3)
     await flushSlippageTicks()
 
     expect(isOverrideActive.value).toBe(true)
     expect(slippage.value).toBe(3)
-    expect(storageValue<SlippageOverride>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toEqual({
+    expect(storedOverride()).toEqual({
       value: 3,
-      setAt: NOW,
+      setAt: NOW + 5_000,
       defaultSlippageAtSet: DEFAULT_STABLECOIN_SLIPPAGE,
     })
     expect(browserStorageValue(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBe(JSON.stringify({
       value: 3,
-      setAt: NOW,
+      setAt: NOW + 5_000,
       defaultSlippageAtSet: DEFAULT_STABLECOIN_SLIPPAGE,
     }))
 
@@ -236,31 +260,36 @@ describe('useSlippage persisted state', () => {
 
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
 
-  it('clears the in-memory override when persisted override storage is cleared', async () => {
+  it('clears a shared override when a second instance resets to the active default', async () => {
     installNuxtStorageMocks({
       [SLIPPAGE_OVERRIDE_STORAGE_KEY]: makeOverride(3, DEFAULT_STABLECOIN_SLIPPAGE),
     })
 
-    const { scope, slippage, isOverrideActive } = await mountSlippage({
+    const stable = await mountSlippage({
       fromSymbol: () => 'USDC',
       toSymbol: () => 'RLUSD',
     })
+    const settings = await mountSlippage()
 
-    expect(slippage.value).toBe(3)
+    expect(stable.slippage.value).toBe(3)
+    expect(settings.slippage.value).toBe(3)
 
-    storageRefs.get(SLIPPAGE_OVERRIDE_STORAGE_KEY)!.value = null
+    settings.setSlippage(DEFAULT_STABLECOIN_SLIPPAGE)
     await flushSlippageTicks()
 
-    expect(isOverrideActive.value).toBe(false)
-    expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(browserStorageValue(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(stable.isOverrideActive.value).toBe(false)
+    expect(stable.slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
+    expect(settings.isOverrideActive.value).toBe(false)
+    expect(settings.slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
+    expect(storedOverride()).toBeNull()
 
-    scope.stop()
+    settings.scope.stop()
+    stable.scope.stop()
   })
 
   it('does not carry a generic high override into stable pairs', async () => {
@@ -276,7 +305,7 @@ describe('useSlippage persisted state', () => {
     expect(defaultSlippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
@@ -294,7 +323,7 @@ describe('useSlippage persisted state', () => {
     expect(defaultSlippage.value).toBe(DEFAULT_SLIPPAGE)
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
@@ -338,7 +367,7 @@ describe('useSlippage persisted state', () => {
 
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
@@ -355,7 +384,7 @@ describe('useSlippage persisted state', () => {
 
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
@@ -372,7 +401,7 @@ describe('useSlippage persisted state', () => {
 
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
@@ -392,7 +421,7 @@ describe('useSlippage persisted state', () => {
     expect(defaultSlippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
     expect(isOverrideActive.value).toBe(true)
     expect(slippage.value).toBe(3)
-    expect(storageValue<SlippageOverride>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toEqual({
+    expect(storedOverride()).toEqual({
       value: 3,
       setAt: NOW - 1_000,
       defaultSlippageAtSet: DEFAULT_STABLECOIN_SLIPPAGE,
@@ -419,7 +448,7 @@ describe('useSlippage persisted state', () => {
     expect(defaultSlippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })
@@ -437,7 +466,7 @@ describe('useSlippage persisted state', () => {
 
     expect(isOverrideActive.value).toBe(false)
     expect(slippage.value).toBe(DEFAULT_STABLECOIN_SLIPPAGE)
-    expect(storageValue<SlippageOverride | null>(SLIPPAGE_OVERRIDE_STORAGE_KEY)).toBeNull()
+    expect(storedOverride()).toBeNull()
 
     scope.stop()
   })

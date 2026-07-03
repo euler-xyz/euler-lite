@@ -22,11 +22,6 @@ const customInput = ref('')
 const customInputError = ref('')
 const slippageSelection = useLocalStorage<'preset' | 'custom'>('swap-slippage-selection', 'preset')
 
-// Reset selection state when override expires back to a default (preset or stablecoin)
-if (!isOverrideActive.value && (presetValues.includes(slippage.value) || slippage.value === defaultSlippage.value)) {
-  slippageSelection.value = 'preset'
-}
-
 const isCustomSelected = computed(() => slippageSelection.value === 'custom')
 const isCustomValue = computed(() => !presetValues.includes(slippage.value) && slippage.value !== defaultSlippage.value)
 const customChipActive = computed(() => isCustomInputVisible.value || isCustomSelected.value || isCustomValue.value)
@@ -84,9 +79,17 @@ const onSaveCustom = () => {
   }
   customInputError.value = ''
   setSlippage(parsed)
-  slippageSelection.value = 'custom'
+  slippageSelection.value = parsed === defaultSlippage.value ? 'preset' : 'custom'
   isCustomInputVisible.value = false
 }
+
+// Reset selection state when override expires or is saved back to a default.
+watchEffect(() => {
+  if (isCustomInputVisible.value) return
+  if (!isOverrideActive.value && (presetValues.includes(slippage.value) || slippage.value === defaultSlippage.value)) {
+    slippageSelection.value = 'preset'
+  }
+})
 
 watch(slippage, (value) => {
   if (slippageSelection.value === 'preset' && !presetValues.includes(value) && value !== defaultSlippage.value) {
@@ -116,7 +119,7 @@ const savePending = (): boolean => {
   }
   customInputError.value = ''
   setSlippage(parsed)
-  slippageSelection.value = 'custom'
+  slippageSelection.value = parsed === defaultSlippage.value ? 'preset' : 'custom'
   isCustomInputVisible.value = false
   return true
 }

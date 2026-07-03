@@ -145,11 +145,14 @@ describe('useSavingsRepay', () => {
       buildSavingsFullRepayPlan: vi.fn(),
       buildSwapFullRepayPlan: vi.fn(),
       executeTxPlan: vi.fn(),
+      estimateTxPlanGas: vi.fn(),
     }))
     vi.stubGlobal('useEulerAccount', () => ({ refreshAllPositions: vi.fn() }))
-    vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1), eulerLensAddresses: ref({}) }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
+    vi.stubGlobal('useWagmi', () => ({ address: ref(USER), chain: ref({ id: 1 }) }))
     vi.stubGlobal('useSwapApi', () => ({
       getSwapProviders: vi.fn(async () => []),
       getSwapQuotes: vi.fn(async () => []),

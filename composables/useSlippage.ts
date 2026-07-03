@@ -207,16 +207,6 @@ export const useSlippage = (options?: UseSlippageOptions) => {
     })
   })
 
-  watch(persistedOverride, (value) => {
-    const parsed = parseSlippageOverride(value)
-    if (parsed && !slippageOverridesEqual(override.value, parsed)) {
-      override.value = parsed
-    }
-    else if (!parsed && override.value) {
-      override.value = null
-    }
-  }, { immediate: true })
-
   // When caller provides swap context, write it to shared state.
   // Deferred to nextTick so getters can reference variables declared
   // after useSlippage() in the calling scope.
@@ -297,9 +287,12 @@ export const useSlippage = (options?: UseSlippageOptions) => {
       return
     }
 
+    const setAt = Date.now()
+    now.value = setAt
+
     const nextOverride = {
       value: normalized,
-      setAt: Date.now(),
+      setAt,
       defaultSlippageAtSet: defaultSlippage.value,
     }
 
