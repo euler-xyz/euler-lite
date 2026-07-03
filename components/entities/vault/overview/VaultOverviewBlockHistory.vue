@@ -359,7 +359,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
 <template>
   <VaultOverviewAccordionSection
     v-if="canLoadHistory"
-    title="History"
+    title="Performance"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-16"
   >
@@ -371,7 +371,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         <select
           v-model="selectedMetric"
           class="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-          aria-label="History metric"
+          aria-label="Performance metric"
         >
           <option
             v-for="option in metricOptions"
@@ -400,14 +400,14 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
       v-else-if="hasError"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      History is unavailable for this vault right now.
+      Performance is unavailable for this vault right now.
     </div>
 
     <div
       v-else-if="!hasChartData"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      No history is available for the selected range.
+      No performance data is available for the selected range.
     </div>
 
     <template v-else>
