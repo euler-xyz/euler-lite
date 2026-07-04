@@ -119,10 +119,13 @@ watchEffect(async () => {
 
 const supplyCapPercentageDisplay = computed(() => {
   if (!vault.supplyCap || vault.supplyCap >= maxUint256 || vault.supplyCap === 0n) return 0
-  const scale = 10n ** 2n
+  const decimals = 2
+  const scale = 10n ** BigInt(decimals)
   // Compare totalShares to supplyCap (both in shares denomination)
   const fraction = (vault.totalShares * scale * 100n) / vault.supplyCap
-  return parseFloat(`${fraction / scale}.${fraction % scale}`)
+  // Zero-pad the fractional part so e.g. a remainder of 5 renders as ".05" not ".5"
+  const fractional = String(fraction % scale).padStart(decimals, '0')
+  return parseFloat(`${fraction / scale}.${fractional}`)
 })
 </script>
 
