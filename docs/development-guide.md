@@ -41,6 +41,22 @@ npm run lint:fix      # Auto-fix lint errors
 npm run typecheck     # Type-check the project
 ```
 
+## Continuous Integration
+
+Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 (matching the Dockerfile) with npm caching:
+
+- **typecheck** – `npm run typecheck` (blocking)
+- **test** – `npm run test:run` (blocking, 20-minute timeout)
+- **lint** – `npm run lint` (non-blocking for now via `continue-on-error`, because the base branch still has pre-existing violations; remove `continue-on-error` once they are cleared)
+
+Run the same checks locally before opening a PR:
+
+```bash
+npm run lint
+npm run typecheck
+npm run test:run
+```
+
 ## Project configuration
 
 - Nuxt config: `nuxt.config.ts`
