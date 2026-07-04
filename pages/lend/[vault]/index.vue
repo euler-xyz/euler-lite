@@ -24,7 +24,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getAddress, type Address, formatUnits, zeroAddress } from 'viem'
-import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
+import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
@@ -674,6 +674,7 @@ const updateEstimates = useDebounceFn(async () => {
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
@@ -963,7 +964,7 @@ watch(amount, async () => {
               <p class="text-h3 text-content-tertiary flex items-center gap-4">
                 Supply APY
                 <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY breakdown"
                 >
@@ -982,7 +983,7 @@ watch(amount, async () => {
                 />
                 <UiModalPreviewTrigger
                   v-if="hasRewards"
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY rewards breakdown"
                 >

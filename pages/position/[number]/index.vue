@@ -12,7 +12,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/compos
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
 import { DateTime } from 'luxon'
-import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
+import { VaultOverviewModal, OperationReviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -803,6 +803,7 @@ const borrowApyModalData = computed(() => {
   if (!borrowVault.value) return {}
   return {
     props: {
+      mode: 'borrow',
       borrowingAPY: baseBorrowAPY.value,
       intrinsicAPY: intrinsicBorrowAPY.value,
       intrinsicApyInfo: getVaultIntrinsicApyInfo(borrowVault.value, enableIntrinsicApy.value),
@@ -814,6 +815,7 @@ const borrowApyModalData = computed(() => {
 
 const getSupplyApyModalData = (vault: EVault | SecuritizeCollateralVault) => ({
   props: {
+    mode: 'supply',
     lendingAPY: getVaultSupplyApy(vault),
     intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -1105,7 +1107,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Borrow APY
                 <UiModalPreviewTrigger
-                  :component="VaultBorrowApyModal"
+                  :component="VaultApyModal"
                   :modal-data="borrowApyModalData"
                   aria-label="Show borrow APY breakdown"
                 >
@@ -1125,7 +1127,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
               >
                 <UiModalPreviewTrigger
                   v-if="hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                  :component="VaultBorrowApyModal"
+                  :component="VaultApyModal"
                   :modal-data="borrowApyModalData"
                   aria-label="Show borrow APY rewards breakdown"
                 >
@@ -1327,7 +1329,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                   Supply APY
                   <UiModalPreviewTrigger
-                    :component="VaultSupplyApyModal"
+                    :component="VaultApyModal"
                     :modal-data="() => getSupplyApyModalData(asPositionCollateralVault(collateral.vault))"
                     aria-label="Show supply APY breakdown"
                   >
@@ -1347,7 +1349,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 >
                   <UiModalPreviewTrigger
                     v-if="hasSupplyRewards(collateral.vault.address)"
-                    :component="VaultSupplyApyModal"
+                    :component="VaultApyModal"
                     :modal-data="() => getSupplyApyModalData(asPositionCollateralVault(collateral.vault))"
                     aria-label="Show supply APY rewards breakdown"
                   >

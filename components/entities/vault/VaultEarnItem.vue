@@ -9,7 +9,7 @@ import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
@@ -229,6 +229,7 @@ const statsGridCols = computed(() => {
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: visibleLendingApy.value,
     intrinsicAPY: visibleIntrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -295,7 +296,7 @@ const supplyApyModalData = computed(() => ({
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
           <UiModalPreviewTrigger
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
           >
@@ -318,7 +319,7 @@ const supplyApyModalData = computed(() => ({
           </div>
           <UiModalPreviewTrigger
             v-if="hasRewards"
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY rewards breakdown"
           >

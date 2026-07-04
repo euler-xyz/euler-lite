@@ -2,7 +2,7 @@
 import { computeSupplyApyBreakdown, isEVault, type EVault, type EulerEarn, type EulerEarnStrategyInfo, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
@@ -188,6 +188,7 @@ watchEffect(async () => {
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
     intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -244,7 +245,7 @@ const supplyApyModalData = computed(() => ({
       <span class="flex items-center gap-4">
         <UiModalPreviewTrigger
           v-if="hasRewards"
-          :component="VaultSupplyApyModal"
+          :component="VaultApyModal"
           :modal-data="supplyApyModalData"
           aria-label="Show supply APY rewards breakdown"
         >
