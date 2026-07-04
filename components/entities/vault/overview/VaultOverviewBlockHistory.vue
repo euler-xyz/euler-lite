@@ -113,13 +113,13 @@ const metricOptions = computed<MetricOption[]>(() => {
       { value: 'totalSupply', label: 'Total supply' },
       { value: 'totalBorrows', label: 'Total borrowed' },
       { value: 'utilization', label: 'Utilization' },
-      { value: 'cash', label: 'Cash' },
+      { value: 'cash', label: 'Available Liquidity' },
     ]
   }
 
   return [
     { value: 'totalSupply', label: 'Total supply' },
-    { value: 'cash', label: 'Cash' },
+    { value: 'cash', label: 'Available Liquidity' },
   ]
 })
 
