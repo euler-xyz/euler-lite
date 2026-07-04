@@ -4,6 +4,7 @@ import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { getVaultHookTarget } from '~/utils/vault-hooks'
 import { isVaultBorrowable } from '~/utils/vault/classification'
+import { shortenAddress } from '~/utils/string-utils'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
@@ -76,12 +77,10 @@ const vaultAddresesInfo = computed(() => {
   return baseAddresses.filter((item): item is { title: string, address: string } => Boolean(item.address))
 })
 
-const shortenAddress = (address: string) => {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`
-}
+const { copyToClipboard } = useClipboardCopy()
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address)
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
