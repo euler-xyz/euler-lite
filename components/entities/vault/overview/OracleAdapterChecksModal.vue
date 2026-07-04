@@ -120,7 +120,7 @@ const copyAddress = (address: string) => {
               <button
                 v-if="part.address"
                 type="button"
-                class="group inline-flex max-w-full items-center gap-4 rounded-4 bg-surface px-4 py-1 align-baseline font-mono text-p4 text-accent-600 outline-none transition-colors hover:bg-surface-secondary hover:text-accent-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                class="group inline-flex max-w-full items-center gap-4 rounded-4 border border-line-subtle bg-surface-secondary px-5 py-1 align-baseline font-mono text-[13px] leading-[18px] text-accent-600 outline-none transition-colors hover:border-line-default hover:text-accent-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
                 :aria-label="`Copy address ${part.address}`"
                 @pointerdown.stop.prevent="copyAddress(part.address)"
                 @mousedown.stop.prevent

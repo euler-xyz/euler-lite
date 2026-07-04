@@ -447,7 +447,7 @@ onBeforeUnmount(() => {
   }
 
   &--wide {
-    width: min(680px, calc(100vw - 24px));
+    width: min(580px, calc(100vw - 24px));
   }
 }
 
