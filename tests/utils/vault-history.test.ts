@@ -16,11 +16,15 @@ describe('vault history utilities', () => {
           {
             timestamp: '2026-07-01T00:00:00.000Z',
             totalAssets: '123450000',
+            totalAssetsUsd: 123.45,
             totalBorrows: '1000000',
+            totalBorrowsUsd: 1,
             cash: '122450000',
+            cashUsd: 122.45,
             utilization: 0.25,
             supplyApy: 4.5,
             borrowApy: 6.75,
+            sharePrice: 1.01,
           },
         ],
       },
@@ -30,11 +34,15 @@ describe('vault history utilities', () => {
       {
         timestamp: '2026-07-01T00:00:00.000Z',
         totalAssets: 123.45,
+        totalAssetsUsd: 123.45,
         totalBorrows: 1,
+        totalBorrowsUsd: 1,
         cash: 122.45,
+        cashUsd: 122.45,
         utilization: 0.25,
         supplyApy: 4.5,
         borrowApy: 6.75,
+        sharePrice: 1.01,
       },
     ])
   })
@@ -60,11 +68,15 @@ describe('vault history utilities', () => {
       {
         timestamp: '2026-07-01T00:00:00.000Z',
         totalAssets: 123.45,
+        totalAssetsUsd: null,
         totalBorrows: 1,
+        totalBorrowsUsd: null,
         cash: 122.45,
+        cashUsd: null,
         utilization: null,
         supplyApy: null,
         borrowApy: null,
+        sharePrice: null,
       },
     ])
   })

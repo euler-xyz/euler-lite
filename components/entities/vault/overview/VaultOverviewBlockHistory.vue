@@ -14,7 +14,7 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
-import { compactNumber } from '~/utils/string-utils'
+import { compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import {
   buildVaultTotalsHistoryPath,
@@ -42,6 +42,7 @@ type MetricOption = {
   value: VaultHistoryMetric
   label: string
 }
+type DenominationOption = 'asset' | 'usd'
 type FetchErrorLike = {
   status?: number
   statusCode?: number
@@ -61,6 +62,7 @@ const { enableV3Backend } = useEnvConfig()
 const { getChartColors, isDark } = useThemeColors()
 
 const selectedMetric = ref<VaultHistoryMetric>('totalSupply')
+const selectedDenomination = ref<DenominationOption>('asset')
 const selectedTimeframe = ref<VaultHistoryTimeframe>('30d')
 const fetchedHistory = shallowRef<VaultHistoryPoint[]>([])
 const fetchedHistoryEnd = ref<number | null>(null)
@@ -109,11 +111,11 @@ const shouldShowBorrowMetrics = computed(() =>
 const metricOptions = computed<MetricOption[]>(() => {
   if (shouldShowBorrowMetrics.value) {
     return [
-      { value: 'apy', label: 'APY' },
       { value: 'totalSupply', label: 'Total supply' },
       { value: 'totalBorrows', label: 'Total borrowed' },
-      { value: 'utilization', label: 'Utilization' },
       { value: 'cash', label: 'Available Liquidity' },
+      { value: 'utilization', label: 'Utilization' },
+      { value: 'apy', label: 'APY' },
     ]
   }
 
@@ -127,12 +129,44 @@ const selectedMetricLabel = computed(() =>
   metricOptions.value.find(option => option.value === selectedMetric.value)?.label ?? 'Metric',
 )
 
+const isPercentMetric = (metric: VaultHistoryMetric) =>
+  metric === 'apy' || metric === 'utilization'
+
+const pointUsdValue = (point: VaultHistoryPoint, metric: VaultHistoryMetric): number | null => {
+  switch (metric) {
+    case 'totalSupply':
+      return point.totalAssetsUsd
+    case 'totalBorrows':
+      return point.totalBorrowsUsd
+    case 'cash':
+      return point.cashUsd
+    default:
+      return null
+  }
+}
+
+const hasSelectedMetricUsdData = computed(() =>
+  !isPercentMetric(selectedMetric.value)
+  && history.value.some(point => pointUsdValue(point, selectedMetric.value) !== null),
+)
+const canToggleDenomination = computed(() =>
+  !isPercentMetric(selectedMetric.value) && hasSelectedMetricUsdData.value,
+)
+
 watch(
   metricOptions,
   (options) => {
     if (!options.some(option => option.value === selectedMetric.value)) {
       selectedMetric.value = options[0]?.value ?? 'totalSupply'
     }
+  },
+  { immediate: true },
+)
+
+watch(
+  [selectedMetric, canToggleDenomination],
+  () => {
+    if (!canToggleDenomination.value) selectedDenomination.value = 'asset'
   },
   { immediate: true },
 )
@@ -267,8 +301,13 @@ const pointValue = (point: VaultHistoryPoint, metric: VaultHistoryMetric): numbe
   }
 }
 
+const pointChartValue = (point: VaultHistoryPoint, metric: VaultHistoryMetric): number | null =>
+  selectedDenomination.value === 'usd' && canToggleDenomination.value
+    ? pointUsdValue(point, metric)
+    : pointValue(point, metric)
+
 const visiblePoints = computed(() =>
-  history.value.filter(point => pointValue(point, selectedMetric.value) !== null),
+  history.value.filter(point => pointChartValue(point, selectedMetric.value) !== null),
 )
 const hasChartData = computed(() => visiblePoints.value.length > 1)
 
@@ -276,7 +315,7 @@ const chartData = computed<ChartData<'line', number[], string>>(() => {
   void isDark.value
   const colors = getChartColors()
   const labels = visiblePoints.value.map(point => formatDate(point.timestamp))
-  const primaryValues = visiblePoints.value.map(point => pointValue(point, selectedMetric.value) ?? 0)
+  const primaryValues = visiblePoints.value.map(point => pointChartValue(point, selectedMetric.value) ?? 0)
 
   const datasets: ChartData<'line', number[], string>['datasets'] = [
     {
@@ -309,10 +348,11 @@ const chartData = computed<ChartData<'line', number[], string>>(() => {
   return { labels, datasets }
 })
 
-const formatValue = (value: number) =>
-  selectedMetric.value === 'apy' || selectedMetric.value === 'utilization'
-    ? `${compactNumber(value, 2, 0)}%`
-    : `${compactNumber(value, 2, 0)} ${vault.asset.symbol}`
+const formatValue = (value: number, metric: VaultHistoryMetric = selectedMetric.value) => {
+  if (isPercentMetric(metric)) return `${compactNumber(value, 2, 0)}%`
+  if (selectedDenomination.value === 'usd' && canToggleDenomination.value) return formatCompactUsdValue(value)
+  return `${compactNumber(value, 2, 0)} ${vault.asset.symbol}`
+}
 
 const chartOptions = computed<ChartOptions<'line'>>(() => {
   void isDark.value
@@ -343,7 +383,12 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         bodyColor: colors.tooltip.textMuted,
         displayColors: true,
         callbacks: {
-          label: context => `${context.dataset.label}: ${formatValue(Number(context.parsed.y))}`,
+          label: (context) => {
+            const metric = selectedMetric.value === 'apy' && context.dataset.label === 'Borrow APY'
+              ? 'apy'
+              : selectedMetric.value
+            return `${context.dataset.label}: ${formatValue(Number(context.parsed.y), metric)}`
+          },
         },
       },
     },
@@ -389,28 +434,59 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
   >
     <template #actions="{ isOpen }">
       <div
-        v-if="isOpen && metricOptions.length > 1"
-        class="relative inline-flex h-32 rounded-8 border border-line-subtle bg-surface transition-colors hover:border-line focus-within:border-accent-500"
+        v-if="isOpen"
+        class="flex flex-wrap items-center justify-end gap-8"
       >
-        <select
-          v-model="selectedMetric"
-          class="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-          aria-label="Performance metric"
+        <div
+          v-if="canToggleDenomination"
+          class="inline-flex h-32 overflow-hidden rounded-12 border border-line-subtle bg-surface p-2 transition-colors hover:border-line focus-within:border-accent-500"
+          role="group"
+          aria-label="Chart denomination"
         >
-          <option
-            v-for="option in metricOptions"
-            :key="option.value"
-            :value="option.value"
+          <button
+            type="button"
+            class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
+            :class="selectedDenomination === 'asset' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
+            :aria-pressed="selectedDenomination === 'asset'"
+            @click="selectedDenomination = 'asset'"
           >
-            {{ option.label }}
-          </option>
-        </select>
-        <div class="pointer-events-none flex h-full items-center gap-8 px-10 text-p3 text-content-primary">
-          <span class="whitespace-nowrap">{{ selectedMetricLabel }}</span>
-          <UiIcon
-            name="arrow-down"
-            class="h-16 w-16 shrink-0 text-content-secondary"
-          />
+            {{ vault.asset.symbol }}
+          </button>
+          <button
+            type="button"
+            class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
+            :class="selectedDenomination === 'usd' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
+            :aria-pressed="selectedDenomination === 'usd'"
+            @click="selectedDenomination = 'usd'"
+          >
+            USD
+          </button>
+        </div>
+
+        <div
+          v-if="metricOptions.length > 1"
+          class="relative inline-flex h-32 rounded-8 border border-line-subtle bg-surface transition-colors hover:border-line focus-within:border-accent-500"
+        >
+          <select
+            v-model="selectedMetric"
+            class="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+            aria-label="Performance metric"
+          >
+            <option
+              v-for="option in metricOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+          <div class="pointer-events-none flex h-full items-center gap-8 px-10 text-p3 text-content-primary">
+            <span class="whitespace-nowrap">{{ selectedMetricLabel }}</span>
+            <UiIcon
+              name="arrow-down"
+              class="h-16 w-16 shrink-0 text-content-secondary"
+            />
+          </div>
         </div>
       </div>
     </template>
