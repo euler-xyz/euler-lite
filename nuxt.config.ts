@@ -411,6 +411,17 @@ export default defineNuxtConfig({
   },
 
   telemetry: false,
+
+  hooks: {
+    // The /ui component playground is a dev-only UI kit; it must not ship as
+    // a routable page in production builds. Drop the route (and its bundle)
+    // outside dev so it is neither reachable nor included in the output.
+    'pages:extend': (pages) => {
+      if (import.meta.dev) return
+      const index = pages.findIndex(page => page.path === '/ui')
+      if (index !== -1) pages.splice(index, 1)
+    },
+  },
   eslint: { config: { stylistic: true } },
 
   svgSprite: {
