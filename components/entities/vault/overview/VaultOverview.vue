@@ -29,7 +29,7 @@ const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
 
     <VaultOverviewBlockHistory
       :vault="vault"
-      :default-open="false"
+      :default-open="true"
     />
 
     <VaultOverviewBlockRiskParameters
