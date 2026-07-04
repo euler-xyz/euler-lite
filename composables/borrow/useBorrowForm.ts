@@ -92,10 +92,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { error } = useToast()
   const { planBorrow, planSwapAndBorrow, executePlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
-  const { address, isConnected } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
+  const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
-  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),

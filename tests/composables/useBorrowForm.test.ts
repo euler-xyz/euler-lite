@@ -210,6 +210,13 @@ describe('useBorrowForm savings collateral', () => {
     vi.stubGlobal('useSpyMode', () => ({
       isSpyMode: ref(false),
     }))
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(USER),
+      isConnected: ref(true),
+      isSpyMode: ref(false),
+      spyAddress: ref(undefined),
+      effectiveAddress: ref(USER),
+    }))
     vi.stubGlobal('useEulerAddresses', () => ({
       chainId: ref(1),
     }))

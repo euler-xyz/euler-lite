@@ -30,8 +30,7 @@ const reviewBorrowLabel = 'Review Borrow'
 const reviewMultiplyLabel = 'Review Multiply'
 const { getBorrowVaultPair, updateVault } = useVaults()
 const { getTokenCategoryTags } = useTokenList()
-const { address } = useWagmi()
-const { isSpyMode, spyAddress } = useSpyMode()
+const { effectiveAddress: effectiveOwner } = useEffectiveAddress()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
@@ -70,7 +69,6 @@ const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
 let unverifiedDisclaimerShown = false
-const effectiveOwner = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 
 // Load vault pair (non-blocking to avoid Suspense + pageTransition crash on direct navigation)
 const pair: Ref<AnyBorrowVaultPair | undefined> = ref()

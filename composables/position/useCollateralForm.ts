@@ -126,9 +126,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildCollateralStateOverrideOptions = () =>
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
-  const { isConnected, address } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
-  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+  const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
