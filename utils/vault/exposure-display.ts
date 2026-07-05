@@ -184,6 +184,10 @@ export const buildFallbackVaultExposureDisplay = ({
   if (totalSupplyState === 'ready') {
     const utilizedExposureUsd = totalExposureUsd * utilizationFraction
 
+    // Deliberate divergence from buildAllocatedVaultExposureDisplayItems,
+    // which refuses to attribute utilized exposure when every group's
+    // openInterestUsd is 0: with a single live collateral the attribution is
+    // structurally determined, so the zero weight carries no information.
     if (utilizedExposureUsd <= 0 || collateralGroups.length === 1) {
       const collateralItems = utilizedExposureUsd > 0
         ? collateralGroups.map(group => ({

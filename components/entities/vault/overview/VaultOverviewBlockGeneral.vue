@@ -59,6 +59,19 @@ const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
 const hasBorrowSideExposure = computed(() => isVaultBorrowable(vault))
+const totalSupplyUsd = ref(0)
+const totalSupplyState = ref<ExposureValueState>('loading')
+const collateralExposureGroups = computed(() => {
+  if (!hasBorrowSideExposure.value) return []
+
+  return getCollateralExposureGroups(
+    getCollateralExposurePairs(
+      vault,
+      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    ),
+    getOpenInterestForVault(vault.address),
+  )
+})
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
@@ -96,19 +109,6 @@ const exposureDisplay = computed<VaultExposureDisplay>(() => {
   })
 })
 const exposureValueState = computed(() => exposureDisplay.value.valueState)
-const totalSupplyUsd = ref(0)
-const totalSupplyState = ref<ExposureValueState>('loading')
-const collateralExposureGroups = computed(() => {
-  if (!hasBorrowSideExposure.value) return []
-
-  return getCollateralExposureGroups(
-    getCollateralExposurePairs(
-      vault,
-      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
-    ),
-    getOpenInterestForVault(vault.address),
-  )
-})
 const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 const propertyBadgeDetails: Record<VaultPropertyBadge, {
