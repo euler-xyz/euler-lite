@@ -7,6 +7,7 @@ import { getEarnVaultDescription, getProductByVault, getProductKeyByVault, isVau
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
@@ -166,27 +167,45 @@ watchEffect(() => {
 
 watchEffect(async () => {
   const loadId = ++strategyAllocationLoadId
-  const results = await Promise.all(vault.strategies.map(async (strategy) => {
-    const strategyVault = getStrategyVault(strategy)
-    if (!strategyVault) return null
+  try {
+    const results = await Promise.all(vault.strategies.map(async (strategy) => {
+      const strategyVault = getStrategyVault(strategy)
+      if (!strategyVault) return null
 
-    const price = await formatAssetValue(strategy.allocatedAssets, strategyVault, 'off-chain')
-    return {
-      address: strategy.address.toLowerCase(),
-      valueUsd: price.hasPrice ? price.usdValue : 0,
-      valueState: price.hasPrice ? 'ready' : 'unavailable',
-    }
-  }))
-  if (loadId !== strategyAllocationLoadId) return
+      const price = await formatAssetValue(strategy.allocatedAssets, strategyVault, 'off-chain')
+      return {
+        address: strategy.address.toLowerCase(),
+        valueUsd: price.hasPrice ? price.usdValue : 0,
+        valueState: price.hasPrice ? 'ready' : 'unavailable',
+      }
+    }))
+    if (loadId !== strategyAllocationLoadId) return
 
-  strategyAllocationUsdByAddress.value = new Map(
-    results
-      .filter((result): result is { address: string } & StrategyAllocationUsd => Boolean(result))
-      .map(result => [result.address, {
-        valueUsd: result.valueUsd,
-        valueState: result.valueState,
-      }]),
-  )
+    strategyAllocationUsdByAddress.value = new Map(
+      results
+        .filter((result): result is { address: string } & StrategyAllocationUsd => Boolean(result))
+        .map(result => [result.address, {
+          valueUsd: result.valueUsd,
+          valueState: result.valueState,
+        }]),
+    )
+  }
+  catch (e) {
+    if (loadId !== strategyAllocationLoadId) return
+
+    // A rejected price load would otherwise leave the allocation map
+    // unpopulated and the exposure display stuck on `loading` — mark every
+    // strategy unavailable so it degrades like the hasPrice === false path.
+    logWarn('VaultEarnItem/loadStrategyAllocationUsd', e)
+    strategyAllocationUsdByAddress.value = new Map(
+      vault.strategies
+        .filter(strategy => Boolean(getStrategyVault(strategy)))
+        .map(strategy => [strategy.address.toLowerCase(), {
+          valueUsd: 0,
+          valueState: 'unavailable',
+        }]),
+    )
+  }
 })
 
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
