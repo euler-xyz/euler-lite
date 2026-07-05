@@ -14,10 +14,6 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Lint currently reports pre-existing errors on the base branch, so it is
-    # run for visibility but does not block merges yet. Remove continue-on-error
-    # once the existing violations are cleared.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:

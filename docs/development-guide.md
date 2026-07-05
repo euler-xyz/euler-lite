@@ -47,7 +47,7 @@ Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), whic
 
 - **typecheck** – `npm run typecheck` (blocking)
 - **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.
-- **lint** – `npm run lint` (non-blocking for now via `continue-on-error`, because the base branch still has pre-existing violations; remove `continue-on-error` once they are cleared)
+- **lint** – `npm run lint` (blocking)
 
 Run the same checks locally before opening a PR:
 
