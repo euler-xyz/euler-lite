@@ -43,11 +43,8 @@ const modalData = computed(() => ({
 </script>
 
 <template>
-  <!-- Without USD values (qualitative fallback) the per-asset breakdown is
-       all "Unavailable" rows — the avatar stack already conveys the exposure
-       set, so skip the hover preview entirely. -->
   <UiModalPreviewTrigger
-    v-if="sortedItems.length && valueState !== 'unavailable'"
+    v-if="sortedItems.length"
     :component="VaultExposureListModal"
     :modal-data="modalData"
     :placement="placement"
@@ -77,30 +74,6 @@ const modalData = computed(() => ({
       </span>
     </span>
   </UiModalPreviewTrigger>
-  <span
-    v-else-if="sortedItems.length"
-    class="vault-exposure-summary"
-    :class="`vault-exposure-summary--${avatarSize}`"
-    data-id="exposure-summary"
-    :data-value="sortedItems.map(item => item.label ?? item.asset.symbol).join(',')"
-  >
-    <span
-      v-for="item in visibleItems"
-      :key="itemKey(item)"
-      class="vault-exposure-summary__avatar"
-    >
-      <AssetAvatar
-        :asset="item.asset"
-        :size="avatarSize"
-      />
-    </span>
-    <span
-      v-if="hiddenCount"
-      class="vault-exposure-summary__more text-p2 text-content-primary"
-    >
-      +{{ hiddenCount }}
-    </span>
-  </span>
   <span
     v-else
     class="text-p2 text-content-primary"

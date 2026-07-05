@@ -25,9 +25,12 @@ const totalUsd = computed(() =>
   sortedItems.value.reduce((sum, item) => sum + item.valueUsd, 0),
 )
 
+// Qualitative fallback (no USD split) — list the assets without a value
+// column and explain once below, instead of repeating "Unavailable" per row.
+const isQualitative = computed(() => valueState === 'unavailable')
+
 const formatValue = (item: VaultExposureDisplayItem) => {
   if (valueState === 'loading') return 'Loading'
-  if (valueState === 'unavailable') return 'Unavailable'
   return formatCompactUsdValue(item.valueUsd)
 }
 
@@ -91,7 +94,10 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
             {{ item.asset.name }}
           </div>
         </div>
-        <div class="flex shrink-0 items-center gap-8 text-right">
+        <div
+          v-if="!isQualitative"
+          class="flex shrink-0 items-center gap-8 text-right"
+        >
           <div>
             <div class="text-p2 font-semibold text-content-primary">
               {{ formatValue(item) }}
@@ -137,6 +143,12 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
           </template>
         </div>
       </div>
+      <p
+        v-if="isQualitative"
+        class="pt-2 text-p5 text-content-tertiary"
+      >
+        USD breakdown is currently unavailable for this vault.
+      </p>
     </div>
     <div
       v-else
