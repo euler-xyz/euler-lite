@@ -420,8 +420,10 @@ export default defineNuxtConfig({
     // .iconsPath below, because it is registered by the module's own
     // pages:extend hook which runs after this one — filtering here can't
     // remove it reliably.)
+    // NODE_ENV, not import.meta.dev: nuxt.config runs under jiti, where
+    // import.meta.dev is undefined — it would remove the route in dev too.
     'pages:extend': (pages) => {
-      if (import.meta.dev) return
+      if (process.env.NODE_ENV === 'development') return
       const index = pages.findIndex(page => page.path === '/ui')
       if (index !== -1) pages.splice(index, 1)
     },
