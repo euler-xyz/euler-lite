@@ -8,9 +8,11 @@ import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils
 import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import {
   buildAllocatedVaultExposureDisplayItems,
+  buildFallbackVaultExposureDisplay,
+  combineVaultExposureDisplays,
   hasMissingUtilizedExposureSplit,
-  mergeVaultExposureDisplayItems,
   type ExposureValueState,
+  type VaultExposureDisplay,
 } from '~/utils/vault/exposure-display'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -65,14 +67,8 @@ const getStrategyMarketSource = (strategyVault: EVault) => {
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
-const isStrategyAllocationUsdLoaded = computed(() =>
-  vault.strategies.every((strategy) => {
-    const strategyVault = getStrategyVault(strategy)
-    return !strategyVault || strategyAllocationUsdByAddress.value.has(strategy.address.toLowerCase())
-  }),
-)
-const hasUnavailableStrategyAllocationUsd = computed(() =>
-  [...strategyAllocationUsdByAddress.value.values()].some(allocation => allocation.valueState === 'unavailable'),
+const isOpenInterestLoading = computed(() =>
+  isOpenInterestEnabled.value && !hasOpenInterestError.value && !isOpenInterestLoaded.value,
 )
 const getStrategyCollateralGroups = (strategyVault: EVault) =>
   getCollateralExposureGroups(
@@ -82,50 +78,46 @@ const getStrategyCollateralGroups = (strategyVault: EVault) =>
     ),
     getOpenInterestForVault(strategyVault.address),
   )
-const hasUnavailableExposureSplit = computed(() => {
-  if (!hasLiveExposureData.value || !isStrategyAllocationUsdLoaded.value) return false
-
-  return vault.strategies.some((strategy) => {
+const strategyExposureDisplays = computed<VaultExposureDisplay[]>(() =>
+  vault.strategies.flatMap((strategy): VaultExposureDisplay[] => {
     const strategyVault = getStrategyVault(strategy)
-    if (!strategyVault) return false
+    if (!strategyVault) return []
 
     const allocation = strategyAllocationUsdByAddress.value.get(strategy.address.toLowerCase())
-    if (!allocation || allocation.valueState !== 'ready' || allocation.valueUsd <= 0) return false
+    if (!allocation) return [{ valueState: 'loading', items: [] }]
 
-    return hasMissingUtilizedExposureSplit(getStrategyCollateralGroups(strategyVault), strategyVault.utilization)
-  })
-})
-const exposureValueState = computed<ExposureValueState>(() => {
-  if (!isOpenInterestEnabled.value) return 'unavailable'
-  if (!vault.strategies.length) return 'ready'
-  if (!isStrategyAllocationUsdLoaded.value) return 'loading'
-  if (hasOpenInterestError.value) return 'unavailable'
-  if (hasUnavailableStrategyAllocationUsd.value) return 'unavailable'
-  if (hasUnavailableExposureSplit.value) return 'unavailable'
-  if (!isOpenInterestLoaded.value) return 'loading'
-  return 'ready'
-})
-const exposureDisplayItems = computed(() =>
-  exposureValueState.value === 'ready'
-    ? mergeVaultExposureDisplayItems(
-        vault.strategies.flatMap((strategy) => {
-          const strategyVault = getStrategyVault(strategy)
-          if (!strategyVault) return []
+    const groups = getStrategyCollateralGroups(strategyVault)
+    if (hasLiveExposureData.value && !hasMissingUtilizedExposureSplit(groups, strategyVault.utilization)) {
+      if (allocation.valueState !== 'ready') return [{ valueState: allocation.valueState, items: [] }]
 
-          const allocation = strategyAllocationUsdByAddress.value.get(strategy.address.toLowerCase())
-          if (!allocation) return []
-
-          return buildAllocatedVaultExposureDisplayItems({
-            collateralGroups: getStrategyCollateralGroups(strategyVault),
-            totalExposureUsd: allocation.valueUsd,
-            idleAsset: strategyVault.asset,
-            utilization: strategyVault.utilization,
-            idleSource: getStrategyMarketSource(strategyVault),
-          })
+      return [{
+        valueState: 'ready',
+        items: buildAllocatedVaultExposureDisplayItems({
+          collateralGroups: groups,
+          totalExposureUsd: allocation.valueUsd,
+          idleAsset: strategyVault.asset,
+          utilization: strategyVault.utilization,
+          idleSource: getStrategyMarketSource(strategyVault),
         }),
-      )
-    : [],
+      }]
+    }
+    if (isOpenInterestLoading.value) return [{ valueState: 'loading', items: [] }]
+
+    // Open-interest split unknown (v3 disabled for the chain, fetch error, or
+    // missing rows) — degrade to the RPC-derived fallback per strategy.
+    return [buildFallbackVaultExposureDisplay({
+      collateralGroups: groups,
+      totalExposureUsd: allocation.valueUsd,
+      totalSupplyState: allocation.valueState,
+      idleAsset: strategyVault.asset,
+      utilization: strategyVault.utilization,
+      idleSource: getStrategyMarketSource(strategyVault),
+    })]
+  }),
 )
+const exposureDisplay = computed(() => combineVaultExposureDisplays(strategyExposureDisplays.value))
+const exposureValueState = computed(() => exposureDisplay.value.valueState)
+const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 watchEffect(() => {
   if (!vault.strategies.length || !isOpenInterestEnabled.value) return
@@ -224,15 +216,13 @@ const supplyApyModalData = computed(() => ({
         <span class="text-p2 text-content-primary">
           {{ vault.strategies.length }}
         </span>
-        <template v-if="isOpenInterestEnabled">
-          <span class="h-16 w-1 shrink-0 bg-line-subtle" />
-          <VaultExposureSummary
-            :items="exposureDisplayItems"
-            :value-state="exposureValueState"
-            :max-visible="5"
-            avatar-size="20"
-          />
-        </template>
+        <span class="h-16 w-1 shrink-0 bg-line-subtle" />
+        <VaultExposureSummary
+          :items="exposureDisplayItems"
+          :value-state="exposureValueState"
+          :max-visible="5"
+          avatar-size="20"
+        />
       </div>
     </VaultOverviewLabelValue>
     <VaultOverviewLabelValue

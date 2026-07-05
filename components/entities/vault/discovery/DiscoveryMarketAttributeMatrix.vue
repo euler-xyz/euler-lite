@@ -17,7 +17,7 @@ import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { buildAllocatedVaultExposureDisplayItems, buildFallbackVaultExposureDisplay, hasMissingUtilizedExposureSplit, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const props = defineProps<{
   data: AttributeMatrixData
@@ -51,7 +51,6 @@ interface AttributeColumn {
 
 const attributeColumns = computed<AttributeColumn[]>(() =>
   filterAttributeRowsByBadDebtAvailability(props.data.rows, props.showBadDebtColumn)
-    .filter(attribute => isOpenInterestEnabled.value || attribute.id !== 'exposure')
     .map(attribute => ({
       attribute,
       cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache, props.badDebtCache, props.showBadDebtColumn),
@@ -71,31 +70,22 @@ const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.v
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
+const isOpenInterestLoading = computed(() =>
+  isOpenInterestEnabled.value && !hasOpenInterestError.value && !isOpenInterestLoaded.value,
+)
 const exposureValueState = computed<ExposureValueState>(() => {
-  if (!isOpenInterestEnabled.value) return 'unavailable'
+  if (isOpenInterestLoading.value) return 'loading'
   if (hasLiveExposureData.value) return 'ready'
-  if (hasOpenInterestError.value) return 'unavailable'
-  return 'loading'
+  return 'unavailable'
 })
 
-interface MatrixExposureEntry {
-  items: ReturnType<typeof buildAllocatedVaultExposureDisplayItems>
-  valueState: ExposureValueState
-}
-
 const exposureByVault = computed(() => {
-  const result = new Map<string, MatrixExposureEntry>()
+  const result = new Map<string, VaultExposureDisplay>()
   if (props.view !== 'stats') return result
-  if (!hasLiveExposureData.value) return result
 
   for (const column of props.data.columns) {
     if (!isEVault(column.vault)) continue
     const totalExposureUsd = props.usdCache.get(column.address)?.supplyUsd
-    if (totalExposureUsd === undefined) {
-      result.set(column.address, { items: [], valueState: 'unavailable' })
-      continue
-    }
-
     const groups = getCollateralExposureGroups(
       getCollateralExposurePairs(
         column.vault,
@@ -103,20 +93,38 @@ const exposureByVault = computed(() => {
       ),
       getOpenInterestForVault(column.address),
     )
-    if (hasMissingUtilizedExposureSplit(groups, column.vault.utilization)) {
-      result.set(column.address, { items: [], valueState: 'unavailable' })
+
+    if (hasLiveExposureData.value && !hasMissingUtilizedExposureSplit(groups, column.vault.utilization)) {
+      if (totalExposureUsd === undefined) {
+        result.set(column.address, { items: [], valueState: 'unavailable' })
+        continue
+      }
+
+      result.set(column.address, {
+        items: buildAllocatedVaultExposureDisplayItems({
+          collateralGroups: groups,
+          totalExposureUsd,
+          idleAsset: column.vault.asset,
+          utilization: column.vault.utilization,
+        }),
+        valueState: 'ready',
+      })
+      continue
+    }
+    if (isOpenInterestLoading.value) {
+      result.set(column.address, { items: [], valueState: 'loading' })
       continue
     }
 
-    result.set(column.address, {
-      items: buildAllocatedVaultExposureDisplayItems({
-        collateralGroups: groups,
-        totalExposureUsd,
-        idleAsset: column.vault.asset,
-        utilization: column.vault.utilization,
-      }),
-      valueState: 'ready',
-    })
+    // Open-interest split unknown (v3 disabled for the chain, fetch error, or
+    // missing rows) — degrade to the RPC-derived fallback per vault.
+    result.set(column.address, buildFallbackVaultExposureDisplay({
+      collateralGroups: groups,
+      totalExposureUsd: totalExposureUsd ?? 0,
+      totalSupplyState: totalExposureUsd === undefined ? 'unavailable' : 'ready',
+      idleAsset: column.vault.asset,
+      utilization: column.vault.utilization,
+    }))
   }
   return result
 })

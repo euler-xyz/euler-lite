@@ -14,7 +14,7 @@ import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { buildAllocatedVaultExposureDisplayItems, buildFallbackVaultExposureDisplay, hasMissingUtilizedExposureSplit, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -73,25 +73,37 @@ const hasUnavailableExposureSplit = computed(() =>
   && priceValues.value.totalSupplyState === 'ready'
   && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
 )
-const exposureValueState = computed<ExposureValueState>(() => {
-  if (!isOpenInterestEnabled.value) return 'unavailable'
-  if (hasOpenInterestError.value) return 'unavailable'
-  if (priceValues.value.totalSupplyState === 'unavailable') return 'unavailable'
-  if (hasUnavailableExposureSplit.value) return 'unavailable'
-  if (!isOpenInterestLoaded.value) return 'loading'
-  if (priceValues.value.totalSupplyState === 'loading') return 'loading'
-  return 'ready'
-})
-const exposureDisplayItems = computed(() => {
-  if (exposureValueState.value !== 'ready') return []
+const exposureDisplay = computed<VaultExposureDisplay>(() => {
+  const totalSupplyState = priceValues.value.totalSupplyState
+  if (isOpenInterestEnabled.value && !hasOpenInterestError.value && !isOpenInterestLoaded.value) {
+    return { valueState: 'loading', items: [] }
+  }
+  if (hasLiveExposureData.value && !hasUnavailableExposureSplit.value) {
+    if (totalSupplyState !== 'ready') return { valueState: totalSupplyState, items: [] }
 
-  return buildAllocatedVaultExposureDisplayItems({
+    return {
+      valueState: 'ready',
+      items: buildAllocatedVaultExposureDisplayItems({
+        collateralGroups: collateralExposureGroups.value,
+        totalExposureUsd: priceValues.value.totalSupplyUsd,
+        idleAsset: vault.asset,
+        utilization: vault.utilization,
+      }),
+    }
+  }
+
+  // Open-interest split unknown (v3 disabled for the chain, fetch error, or
+  // missing rows) — degrade to the RPC-derived fallback display.
+  return buildFallbackVaultExposureDisplay({
     collateralGroups: collateralExposureGroups.value,
     totalExposureUsd: priceValues.value.totalSupplyUsd,
+    totalSupplyState,
     idleAsset: vault.asset,
     utilization: vault.utilization,
   })
 })
+const exposureValueState = computed(() => exposureDisplay.value.valueState)
+const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 watchEffect(() => {
   if (!isBorrowable.value || !isOpenInterestEnabled.value) return
@@ -127,7 +139,7 @@ const statsGridCols = computed(() => {
   cols.push('1fr') // Total supply
   if (isBorrowable.value) {
     cols.push('1fr') // Available liquidity
-    if (isOpenInterestEnabled.value) cols.push('1fr') // Exposure
+    cols.push('1fr') // Exposure
     cols.push('1fr') // Utilization
   }
   if (isConnected.value) cols.push('1fr') // In wallet
@@ -365,7 +377,7 @@ watchEffect(async () => {
         </div>
       </div>
       <div
-        v-if="isBorrowable && isOpenInterestEnabled"
+        v-if="isBorrowable"
         class="flex flex-col flex-1 mobile:!hidden"
         :class="isConnected ? 'items-center' : 'items-end text-right'"
       >
@@ -467,7 +479,7 @@ watchEffect(async () => {
         </div>
       </div>
       <div
-        v-if="isBorrowable && isOpenInterestEnabled"
+        v-if="isBorrowable"
         class="flex w-full justify-between"
       >
         <div class="flex-1">

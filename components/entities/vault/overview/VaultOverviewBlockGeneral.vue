@@ -14,7 +14,7 @@ import { isVaultBorrowable } from '~/utils/vault/classification'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { buildAllocatedVaultExposureDisplayItems, buildFallbackVaultExposureDisplay, hasMissingUtilizedExposureSplit, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const emit = defineEmits<{
@@ -67,15 +67,35 @@ const hasUnavailableExposureSplit = computed(() =>
   && totalSupplyState.value === 'ready'
   && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
 )
-const exposureValueState = computed<ExposureValueState>(() => {
-  if (!isOpenInterestEnabled.value) return 'unavailable'
-  if (hasOpenInterestError.value) return 'unavailable'
-  if (totalSupplyState.value === 'unavailable') return 'unavailable'
-  if (hasUnavailableExposureSplit.value) return 'unavailable'
-  if (!isOpenInterestLoaded.value) return 'loading'
-  if (totalSupplyState.value === 'loading') return 'loading'
-  return 'ready'
+const exposureDisplay = computed<VaultExposureDisplay>(() => {
+  if (isOpenInterestEnabled.value && !hasOpenInterestError.value && !isOpenInterestLoaded.value) {
+    return { valueState: 'loading', items: [] }
+  }
+  if (hasLiveExposureData.value && !hasUnavailableExposureSplit.value) {
+    if (totalSupplyState.value !== 'ready') return { valueState: totalSupplyState.value, items: [] }
+
+    return {
+      valueState: 'ready',
+      items: buildAllocatedVaultExposureDisplayItems({
+        collateralGroups: collateralExposureGroups.value,
+        totalExposureUsd: totalSupplyUsd.value,
+        idleAsset: vault.asset,
+        utilization: vault.utilization,
+      }),
+    }
+  }
+
+  // Open-interest split unknown (v3 disabled for the chain, fetch error, or
+  // missing rows) — degrade to the RPC-derived fallback display.
+  return buildFallbackVaultExposureDisplay({
+    collateralGroups: collateralExposureGroups.value,
+    totalExposureUsd: totalSupplyUsd.value,
+    totalSupplyState: totalSupplyState.value,
+    idleAsset: vault.asset,
+    utilization: vault.utilization,
+  })
 })
+const exposureValueState = computed(() => exposureDisplay.value.valueState)
 const totalSupplyUsd = ref(0)
 const totalSupplyState = ref<ExposureValueState>('loading')
 const collateralExposureGroups = computed(() => {
@@ -89,16 +109,7 @@ const collateralExposureGroups = computed(() => {
     getOpenInterestForVault(vault.address),
   )
 })
-const exposureDisplayItems = computed(() => {
-  if (exposureValueState.value !== 'ready') return []
-
-  return buildAllocatedVaultExposureDisplayItems({
-    collateralGroups: collateralExposureGroups.value,
-    totalExposureUsd: totalSupplyUsd.value,
-    idleAsset: vault.asset,
-    utilization: vault.utilization,
-  })
-})
+const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 const propertyBadgeDetails: Record<VaultPropertyBadge, {
   component: Component
@@ -270,7 +281,7 @@ watchEffect(() => {
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
-        v-if="hasBorrowSideExposure && isOpenInterestEnabled"
+        v-if="hasBorrowSideExposure"
         label="Exposure"
       >
         <VaultExposureSummary

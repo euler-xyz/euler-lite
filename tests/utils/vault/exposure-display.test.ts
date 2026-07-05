@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildAllocatedVaultExposureDisplayItems,
+  buildFallbackVaultExposureDisplay,
+  combineVaultExposureDisplays,
   mergeVaultExposureDisplayItems,
   sortVaultExposureDisplayItems,
 } from '~/utils/vault/exposure-display'
@@ -121,5 +123,144 @@ describe('sortVaultExposureDisplayItems', () => {
     ])
 
     expect(items.map(item => item.asset.symbol)).toEqual(['cbBTC', 'USDC', 'WETH'])
+  })
+})
+
+describe('buildFallbackVaultExposureDisplay', () => {
+  const idleAsset = { address: '0xweth', symbol: 'WETH' }
+
+  it('resolves an exact ready split for a single-collateral vault', () => {
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0)],
+      totalExposureUsd: 100,
+      totalSupplyState: 'ready',
+      idleAsset,
+      utilization: 90,
+    })
+
+    expect(valueState).toBe('ready')
+    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(90)
+    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(10)
+  })
+
+  it('resolves an exact idle-only split when nothing is utilized', () => {
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
+      totalExposureUsd: 100,
+      totalSupplyState: 'ready',
+      idleAsset,
+      utilization: 0,
+    })
+
+    expect(valueState).toBe('ready')
+    expect(items).toHaveLength(1)
+    expect(items[0].label).toBe('WETH Idle')
+    expect(items[0].valueUsd).toBeCloseTo(100)
+  })
+
+  it('lists backing assets qualitatively when a multi-collateral split is unknown', () => {
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
+      totalExposureUsd: 100,
+      totalSupplyState: 'ready',
+      idleAsset,
+      utilization: 90,
+    })
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(item => item.label ?? item.asset.symbol).sort()).toEqual(['WETH Idle', 'cbBTC', 'wstETH'])
+    expect(items.every(item => item.valueUsd === 0)).toBe(true)
+  })
+
+  it('omits the idle row from the qualitative list at full utilization', () => {
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
+      totalExposureUsd: 100,
+      totalSupplyState: 'ready',
+      idleAsset,
+      utilization: 100,
+    })
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(item => item.asset.symbol).sort()).toEqual(['cbBTC', 'wstETH'])
+  })
+
+  it('stays qualitative when total supply is unavailable', () => {
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0)],
+      totalExposureUsd: 0,
+      totalSupplyState: 'unavailable',
+      idleAsset,
+      utilization: 50,
+    })
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(item => item.label ?? item.asset.symbol).sort()).toEqual(['WETH Idle', 'wstETH'])
+  })
+
+  it('reports loading while total supply is loading', () => {
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0)],
+      totalExposureUsd: 0,
+      totalSupplyState: 'loading',
+      idleAsset,
+      utilization: 50,
+    })
+
+    expect(valueState).toBe('loading')
+    expect(items).toHaveLength(0)
+  })
+
+  it('keeps an empty ready state for vaults with no supply', () => {
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0)],
+      totalExposureUsd: 0,
+      totalSupplyState: 'ready',
+      idleAsset,
+      utilization: 50,
+    })
+
+    expect(valueState).toBe('ready')
+    expect(items).toHaveLength(0)
+  })
+})
+
+describe('combineVaultExposureDisplays', () => {
+  const item = (symbol: string, valueUsd: number) => ({
+    asset: { address: `0x${symbol.toLowerCase().padEnd(40, '0')}`, symbol },
+    valueUsd,
+  })
+
+  it('returns an empty ready display with no inputs', () => {
+    expect(combineVaultExposureDisplays([])).toEqual({ valueState: 'ready', items: [] })
+  })
+
+  it('merges ready displays into a ready total', () => {
+    const { valueState, items } = combineVaultExposureDisplays([
+      { valueState: 'ready', items: [item('wstETH', 60)] },
+      { valueState: 'ready', items: [item('wstETH', 20), item('cbBTC', 20)] },
+    ])
+
+    expect(valueState).toBe('ready')
+    expect(items.find(entry => entry.asset.symbol === 'wstETH')?.valueUsd).toBe(80)
+    expect(items.find(entry => entry.asset.symbol === 'cbBTC')?.valueUsd).toBe(20)
+  })
+
+  it('reports loading while any input is loading', () => {
+    expect(combineVaultExposureDisplays([
+      { valueState: 'ready', items: [item('wstETH', 60)] },
+      { valueState: 'loading', items: [] },
+    ])).toEqual({ valueState: 'loading', items: [] })
+  })
+
+  it('zeroes values when any input lacks a known split', () => {
+    const { valueState, items } = combineVaultExposureDisplays([
+      { valueState: 'ready', items: [item('wstETH', 60)] },
+      { valueState: 'unavailable', items: [item('cbBTC', 0)] },
+    ])
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(entry => entry.asset.symbol).sort()).toEqual(['cbBTC', 'wstETH'])
+    expect(items.every(entry => entry.valueUsd === 0)).toBe(true)
   })
 })

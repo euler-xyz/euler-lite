@@ -130,6 +130,121 @@ export const buildAllocatedVaultExposureDisplayItems = ({
   return mergeVaultExposureDisplayItems([...collateralItems, ...idleItems])
 }
 
+export interface VaultExposureDisplay {
+  valueState: ExposureValueState
+  items: VaultExposureDisplayItem[]
+}
+
+/**
+ * Build the exposure display when the per-collateral open-interest split is
+ * unknown — V3 disabled for the chain, the open-interest fetch failed, or the
+ * backend returned no rows for a utilized vault.
+ *
+ * Everything here is RPC-derived: total supply, utilization, and the set of
+ * live collateral backing assets. Two outcomes:
+ *
+ *  - The split is fully determined without open-interest data when nothing is
+ *    utilized or when a single backing asset backs all utilized exposure →
+ *    exact `ready` items, same shape as the allocated builder.
+ *  - Otherwise → qualitative `unavailable` items listing the backing assets
+ *    (and idle, when utilization leaves room for it) with zero values, so the
+ *    UI shows *what* the vault is exposed to even though the USD split is
+ *    unknown. This mirrors the pre-open-interest collateral list.
+ */
+export const buildFallbackVaultExposureDisplay = ({
+  collateralGroups,
+  totalExposureUsd,
+  totalSupplyState,
+  idleAsset,
+  utilization,
+  idleSource,
+}: {
+  collateralGroups: CollateralExposureGroup[]
+  totalExposureUsd: number
+  totalSupplyState: ExposureValueState
+  idleAsset: ExposureBackingAsset
+  utilization: number
+  idleSource?: VaultExposureDisplaySource
+}): VaultExposureDisplay => {
+  if (totalSupplyState === 'loading') return { valueState: 'loading', items: [] }
+
+  const utilizationFraction = clampPercentFraction(utilization)
+  const buildIdleItem = (valueUsd: number): VaultExposureDisplayItem => ({
+    asset: idleAsset,
+    label: `${idleAsset.symbol} Idle`,
+    valueUsd,
+    vaultCount: idleSource ? undefined : 1,
+    sources: idleSource ? [idleSource] : undefined,
+  })
+
+  if (totalSupplyState === 'ready' && (!Number.isFinite(totalExposureUsd) || totalExposureUsd <= 0)) {
+    return { valueState: 'ready', items: [] }
+  }
+
+  if (totalSupplyState === 'ready') {
+    const utilizedExposureUsd = totalExposureUsd * utilizationFraction
+
+    if (utilizedExposureUsd <= 0 || collateralGroups.length === 1) {
+      const collateralItems = utilizedExposureUsd > 0
+        ? collateralGroups.map(group => ({
+            asset: group.asset,
+            valueUsd: utilizedExposureUsd,
+            vaultCount: group.vaultCount,
+          }))
+        : []
+      const idleExposureUsd = Math.max(0, totalExposureUsd - utilizedExposureUsd)
+      const idleItems = idleExposureUsd > 0 ? [buildIdleItem(idleExposureUsd)] : []
+
+      return {
+        valueState: 'ready',
+        items: mergeVaultExposureDisplayItems([...collateralItems, ...idleItems]),
+      }
+    }
+  }
+
+  const qualitativeItems = mergeVaultExposureDisplayItems([
+    ...collateralGroups.map(group => ({
+      asset: group.asset,
+      valueUsd: 0,
+      vaultCount: group.vaultCount,
+    })),
+    ...(utilizationFraction < 1 ? [buildIdleItem(0)] : []),
+  ])
+
+  return { valueState: 'unavailable', items: qualitativeItems }
+}
+
+/**
+ * Combine per-strategy (or per-vault) exposure displays into one:
+ *
+ *  - any `loading` → `loading` (a strategy's inputs are still resolving)
+ *  - all `ready`   → `ready` with the merged item set
+ *  - otherwise     → `unavailable` with the merged item set and values zeroed,
+ *    so strategies that resolved exact numbers don't masquerade as a complete
+ *    split next to strategies whose split is unknown.
+ */
+export const combineVaultExposureDisplays = (
+  displays: VaultExposureDisplay[],
+): VaultExposureDisplay => {
+  if (!displays.length) return { valueState: 'ready', items: [] }
+  if (displays.some(display => display.valueState === 'loading')) {
+    return { valueState: 'loading', items: [] }
+  }
+  if (displays.every(display => display.valueState === 'ready')) {
+    return {
+      valueState: 'ready',
+      items: mergeVaultExposureDisplayItems(displays.flatMap(display => display.items)),
+    }
+  }
+
+  return {
+    valueState: 'unavailable',
+    items: mergeVaultExposureDisplayItems(
+      displays.flatMap(display => display.items.map(item => ({ ...item, valueUsd: 0 }))),
+    ),
+  }
+}
+
 export const sortVaultExposureDisplayItems = (
   items: VaultExposureDisplayItem[],
 ): VaultExposureDisplayItem[] =>
