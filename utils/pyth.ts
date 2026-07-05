@@ -374,7 +374,7 @@ export const buildPythBatchItemsFromFeeds = async (
     const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
     if (!updateData.length) continue
 
-    let fee = 0n
+    let fee: bigint
     try {
       // The SDK is linked from a workspace and ships its own viem (2.43.x), so
       // its PublicClient is structurally similar but not identical to the app's
