@@ -92,7 +92,7 @@ const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymb
 const { copyToClipboard } = useClipboardCopy()
 
 const onCopyClick = (address: string) => {
-  copyToClipboard(address)
+  copyToClipboard(address).catch(() => {})
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)

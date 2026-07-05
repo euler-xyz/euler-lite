@@ -48,7 +48,7 @@ const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const { copyToClipboard } = useClipboardCopy()
 
 const onCopyClick = (address: string) => {
-  copyToClipboard(address)
+  copyToClipboard(address).catch(() => {})
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)

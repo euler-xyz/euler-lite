@@ -36,7 +36,7 @@ const timelockDisplay = computed(() => {
 })
 
 const onCopyClick = (address: string) => {
-  copyToClipboard(address)
+  copyToClipboard(address).catch(() => {})
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
