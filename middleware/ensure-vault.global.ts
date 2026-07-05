@@ -92,7 +92,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
     return
   }
 
-  let vaultAddress: string | null = null
+  let vaultAddress: string
   try {
     vaultAddress = getAddress(String(normalizeParam(rawVault)))
   }
