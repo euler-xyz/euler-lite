@@ -295,7 +295,7 @@ async function loadLocalEnvFiles() {
   const loaded = []
   for (const envFile of envFiles) {
     const filePath = path.resolve(ROOT_DIR, envFile)
-    let content = ''
+    let content
 
     try {
       content = await fs.readFile(filePath, 'utf8')
@@ -1236,7 +1236,7 @@ async function capturePlanAndFollowPlans({ appDefinition, app: startedApp = null
   if (ownsApp) state.apps = [app]
   const ownsRuntime = !runtime
   const activeRuntime = runtime || await createAppPhaseRuntime(browser, plan.scenario)
-  let pageResult = null
+  let pageResult
 
   try {
     await prepareRuntimeForScenario(activeRuntime, plan.scenario)
@@ -1331,7 +1331,7 @@ async function capturePlanWithModalsSequential({ appDefinition, app: startedApp 
   if (ownsApp) state.apps = [app]
   const ownsRuntime = !runtime
   const activeRuntime = runtime || await createAppPhaseRuntime(browser, plan.scenario)
-  let pageResult = null
+  let pageResult
 
   try {
     await prepareRuntimeForScenario(activeRuntime, plan.scenario)
@@ -1449,7 +1449,7 @@ async function captureModalPlanSequential({ appDefinition, app: startedApp = nul
   if (ownsApp) state.apps = [app]
   const ownsRuntime = !runtime
   const activeRuntime = runtime || await createAppPhaseRuntime(browser, plan.scenario)
-  let pageResult = null
+  let pageResult
 
   try {
     await prepareRuntimeForScenario(activeRuntime, plan.scenario)
@@ -2090,7 +2090,7 @@ async function waitForSelectors(page, selectors = [], timeout = 45_000) {
       await page.waitForSelector(selector, { state: 'attached', timeout })
     }
     catch (error) {
-      throw new Error('Timed out waiting for selector "' + selector + '": ' + (error?.message || String(error)))
+      throw new Error('Timed out waiting for selector "' + selector + '": ' + (error?.message || String(error)), { cause: error })
     }
   }
 }
@@ -2195,7 +2195,7 @@ async function hydrateListPageBeforeScrape(page, pathName) {
   let stableRounds = 0
   let fullRenderRounds = 0
   let previousSignature = ''
-  let lastState = null
+  let lastState
 
   do {
     await scrollListPage(page)
