@@ -36,17 +36,28 @@ const makeEvent = (url: string, headers: Record<string, string | undefined> = {}
 
 const runHandler = (event: TestEvent) => (handler as (e: TestEvent) => unknown)(event)
 
-let originalEnv: string | undefined
+// The only environment knobs the middleware consults. Snapshot and clear
+// every one of them per test so the suite is deterministic regardless of the
+// caller's shell — a stray DEV_GEO_COUNTRY, for example, would otherwise take
+// the dev-country fallback and defeat the fail-closed (undetermined-country)
+// path under test.
+const ENV_KNOBS = ['DOPPLER_ENVIRONMENT', 'DEV_GEO_COUNTRY'] as const
+
+const envSnapshot: Record<string, string | undefined> = {}
 
 beforeEach(() => {
   warn.mockClear()
-  originalEnv = process.env.DOPPLER_ENVIRONMENT
+  for (const key of ENV_KNOBS) {
+    envSnapshot[key] = process.env[key]
+    Reflect.deleteProperty(process.env, key)
+  }
 })
 
 afterEach(() => {
-  if (originalEnv === undefined) delete process.env.DOPPLER_ENVIRONMENT
-  else process.env.DOPPLER_ENVIRONMENT = originalEnv
-  delete process.env.DEV_GEO_COUNTRY
+  for (const key of ENV_KNOBS) {
+    if (envSnapshot[key] === undefined) Reflect.deleteProperty(process.env, key)
+    else process.env[key] = envSnapshot[key]
+  }
 })
 
 describe('geo-gate log hygiene', () => {
