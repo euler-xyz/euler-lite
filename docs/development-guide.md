@@ -46,7 +46,7 @@ npm run typecheck     # Type-check the project
 Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 (matching the Dockerfile) with npm caching:
 
 - **typecheck** – `npm run typecheck` (blocking)
-- **test** – `npm run test:run` (blocking, 20-minute timeout)
+- **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.
 - **lint** – `npm run lint` (non-blocking for now via `continue-on-error`, because the base branch still has pre-existing violations; remove `continue-on-error` once they are cleared)
 
 Run the same checks locally before opening a PR:
@@ -54,7 +54,8 @@ Run the same checks locally before opening a PR:
 ```bash
 npm run lint
 npm run typecheck
-npm run test:run
+npm run build       # required so the logger-bundle test can inspect .output
+CI=true npm run test:run
 ```
 
 ## Project configuration
