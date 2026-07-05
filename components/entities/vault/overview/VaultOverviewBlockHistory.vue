@@ -57,7 +57,7 @@ const { vault, defaultOpen = false } = defineProps<{
 }>()
 
 const { chainId } = useEulerAddresses()
-const { enableV3Backend } = useEnvConfig()
+const { isV3EnabledForChain } = useV3ChainGate()
 const { getChartColors, isDark } = useThemeColors()
 
 const selectedMetric = ref<VaultHistoryMetric>('totalSupply')
@@ -77,7 +77,7 @@ const isBorrowableEVault = computed(() =>
   isVaultBorrowable(vault),
 )
 const canLoadHistory = computed(() =>
-  enableV3Backend && Boolean(chainId.value),
+  isV3EnabledForChain(chainId.value),
 )
 const decimals = computed(() => Number(vault.asset.decimals ?? 18))
 const selectedTimeframeOption = computed(() =>
