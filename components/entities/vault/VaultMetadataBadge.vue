@@ -2,7 +2,7 @@
 import type { Component } from 'vue'
 import { useModal } from '~/components/ui/composables/useModal'
 
-const { size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
+const { modal, size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
   icon: string
   label: string
   title: string
