@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { isEulerEarn, type EVault, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -17,6 +17,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import {
+  buildEarnVaultTotalsHistoryPath,
   buildVaultTotalsHistoryPath,
   getVaultHistoryTimeRange,
   parseVaultTotalsHistory,
@@ -53,7 +54,7 @@ type FetchErrorLike = {
 }
 
 const { vault, defaultOpen = false } = defineProps<{
-  vault: EVault
+  vault: EVault | EulerEarn
   defaultOpen?: boolean
 }>()
 
@@ -75,8 +76,9 @@ const RETRYABLE_HISTORY_STATUSES = new Set([429, 500, 502, 503, 504])
 const DEFAULT_HISTORY_RETRY_AFTER_MS = 1_000
 const MAX_HISTORY_RETRY_AFTER_MS = 10_000
 
+const isEarnVault = computed(() => isEulerEarn(vault))
 const isBorrowableEVault = computed(() =>
-  isVaultBorrowable(vault),
+  !isEarnVault.value && isVaultBorrowable(vault as EVault),
 )
 const canLoadHistory = computed(() =>
   enableV3Backend && Boolean(chainId.value),
@@ -108,7 +110,21 @@ const shouldShowBorrowMetrics = computed(() =>
   isBorrowableEVault.value || hasBorrowHistory.value,
 )
 
+const hasSharePriceHistory = computed(() =>
+  history.value.some(point => point.sharePrice !== null),
+)
+
 const metricOptions = computed<MetricOption[]>(() => {
+  if (isEarnVault.value) {
+    return [
+      { value: 'totalSupply', label: 'Total supply' },
+      { value: 'apy', label: 'APY' },
+      ...(hasSharePriceHistory.value
+        ? [{ value: 'sharePrice', label: 'Share price' } satisfies MetricOption]
+        : []),
+    ]
+  }
+
   if (shouldShowBorrowMetrics.value) {
     return [
       { value: 'totalSupply', label: 'Total supply' },
@@ -245,8 +261,11 @@ const loadHistory = async () => {
   try {
     const requestTime = Date.now()
     const { to } = getVaultHistoryTimeRange(VAULT_HISTORY_FETCH_TIMEFRAME, requestTime)
+    const buildHistoryPath = isEarnVault.value
+      ? buildEarnVaultTotalsHistoryPath
+      : buildVaultTotalsHistoryPath
     const response = await fetchVaultTotalsHistoryWithCooldownRetry(
-      buildVaultTotalsHistoryPath(chainId.value, vault.address, VAULT_HISTORY_FETCH_TIMEFRAME, requestTime),
+      buildHistoryPath(chainId.value, vault.address, VAULT_HISTORY_FETCH_TIMEFRAME, requestTime),
       () => requestId === activeRequestId,
     )
     if (requestId !== activeRequestId) return
@@ -296,6 +315,8 @@ const pointValue = (point: VaultHistoryPoint, metric: VaultHistoryMetric): numbe
       return point.utilization === null ? null : point.utilization * 100
     case 'apy':
       return point.supplyApy
+    case 'sharePrice':
+      return point.sharePrice
   }
 }
 
@@ -317,7 +338,7 @@ const chartData = computed<ChartData<'line', number[], string>>(() => {
 
   const datasets: ChartData<'line', number[], string>['datasets'] = [
     {
-      label: selectedMetric.value === 'apy' ? 'Supply APY' : metricOptions.value.find(option => option.value === selectedMetric.value)?.label ?? 'Value',
+      label: selectedMetric.value === 'apy' && shouldShowBorrowMetrics.value ? 'Supply APY' : metricOptions.value.find(option => option.value === selectedMetric.value)?.label ?? 'Value',
       data: primaryValues,
       borderColor: colors.lineA || '#62ad4f',
       backgroundColor: colors.fillA || 'rgba(98, 173, 79, 0.15)',
@@ -365,7 +386,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
     },
     plugins: {
       legend: {
-        display: selectedMetric.value === 'apy',
+        display: selectedMetric.value === 'apy' && shouldShowBorrowMetrics.value,
         labels: {
           color: colors.textMuted,
           boxWidth: 10,
@@ -406,7 +427,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         },
       },
       y: {
-        beginAtZero: selectedMetric.value !== 'apy',
+        beginAtZero: selectedMetric.value !== 'apy' && selectedMetric.value !== 'sharePrice',
         grid: {
           color: colors.gridLine,
         },
