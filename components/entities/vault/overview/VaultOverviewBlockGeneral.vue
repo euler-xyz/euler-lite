@@ -14,7 +14,7 @@ import { isVaultBorrowable } from '~/utils/vault/classification'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, buildFallbackVaultExposureDisplay, hasMissingUtilizedExposureSplit, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
+import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const emit = defineEmits<{
@@ -59,6 +59,11 @@ const borrowCount = computed(() => {
   return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
 })
 const hasBorrowSideExposure = computed(() => isVaultBorrowable(vault))
+// Only show "Current exposure" when something is currently borrowed against
+// collateral — idle supply is not exposure, so a vault with nothing utilized
+// has no current exposure to show. `utilization` is RPC-derived and always
+// known, so this never flickers on loading.
+const hasCurrentExposure = computed(() => vault.utilization > 0)
 const totalSupplyUsd = ref(0)
 const totalSupplyState = ref<ExposureValueState>('loading')
 const collateralExposureGroups = computed(() => {
@@ -72,42 +77,18 @@ const collateralExposureGroups = computed(() => {
     getOpenInterestForVault(vault.address),
   )
 })
-const hasLiveExposureData = computed(() =>
-  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
-)
-const hasUnavailableExposureSplit = computed(() =>
-  hasLiveExposureData.value
-  && totalSupplyState.value === 'ready'
-  && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
-)
-const exposureDisplay = computed<VaultExposureDisplay>(() => {
-  if (isOpenInterestEnabled.value && !hasOpenInterestError.value && !isOpenInterestLoaded.value) {
-    return { valueState: 'loading', items: [] }
-  }
-  if (hasLiveExposureData.value && !hasUnavailableExposureSplit.value) {
-    if (totalSupplyState.value !== 'ready') return { valueState: totalSupplyState.value, items: [] }
-
-    return {
-      valueState: 'ready',
-      items: buildAllocatedVaultExposureDisplayItems({
-        collateralGroups: collateralExposureGroups.value,
-        totalExposureUsd: totalSupplyUsd.value,
-        idleAsset: vault.asset,
-        utilization: vault.utilization,
-      }),
-    }
-  }
-
-  // Open-interest split unknown (v3 disabled for the chain, fetch error, or
-  // missing rows) — degrade to the RPC-derived fallback display.
-  return buildFallbackVaultExposureDisplay({
-    collateralGroups: collateralExposureGroups.value,
+const exposureDisplay = computed<VaultExposureDisplay>(() =>
+  resolveVaultExposureDisplay({
+    openInterestEnabled: isOpenInterestEnabled.value,
+    openInterestLoaded: isOpenInterestLoaded.value,
+    hasOpenInterestError: hasOpenInterestError.value,
+    getCollateralGroups: () => collateralExposureGroups.value,
     totalExposureUsd: totalSupplyUsd.value,
     totalSupplyState: totalSupplyState.value,
-    idleAsset: vault.asset,
     utilization: vault.utilization,
-  })
-})
+    acceptedCollateralCount: vault.collaterals.length,
+  }),
+)
 const exposureValueState = computed(() => exposureDisplay.value.valueState)
 const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
@@ -281,8 +262,8 @@ watchEffect(() => {
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
-        v-if="hasBorrowSideExposure"
-        label="Exposure"
+        v-if="hasBorrowSideExposure && hasCurrentExposure"
+        label="Current exposure"
       >
         <VaultExposureSummary
           :items="exposureDisplayItems"

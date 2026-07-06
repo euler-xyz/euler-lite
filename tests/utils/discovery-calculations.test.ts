@@ -257,6 +257,7 @@ describe('attribute stats matrix', () => {
     const usd: VaultUsdCacheEntry = {
       supply: '$1K',
       supplyUsd: 1000,
+      supplyHasPrice: true,
       borrow: '$500',
       borrowUsd: 500,
       liquidity: '$500',
@@ -327,6 +328,7 @@ describe('attribute stats matrix', () => {
       [vault.address.toLowerCase(), {
         supply: '$1K',
         supplyUsd: 1000,
+        supplyHasPrice: true,
         borrow: '$500',
         borrowUsd: 500,
         liquidity: '$500',

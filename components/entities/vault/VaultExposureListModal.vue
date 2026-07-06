@@ -8,7 +8,7 @@ import {
 
 const {
   items,
-  title = 'Exposure',
+  title = 'Current exposure',
   valueState = 'ready',
   close = true,
   inline = false,
@@ -47,7 +47,6 @@ const formatPercent = (item: VaultExposureDisplayItem) => {
 
 const vaultCountLabel = (count: number) => `${count} vault${count === 1 ? '' : 's'}`
 const displayLabel = (item: VaultExposureDisplayItem) => item.label ?? item.asset.symbol
-const itemSources = (item: VaultExposureDisplayItem) => item.sources ?? []
 const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${displayLabel(item)}`
 </script>
 
@@ -80,7 +79,7 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
               {{ displayLabel(item) }}
             </span>
             <span
-              v-if="!itemSources(item).length && item.vaultCount && item.vaultCount > 1"
+              v-if="item.vaultCount && item.vaultCount > 1"
               class="shrink-0 rounded-8 bg-neutral-100 px-6 py-2 text-p5 text-content-tertiary"
             >
               {{ vaultCountLabel(item.vaultCount) }}
@@ -111,36 +110,6 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
             :max="100"
             class="shrink-0 [--ui-radial-progress-active-color:var(--accent-600)] [--ui-radial-progress-background-color:var(--neutral-100)]"
           />
-        </div>
-        <div
-          v-if="itemSources(item).length"
-          class="col-span-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-line-subtle pt-6 text-p5 text-content-secondary"
-        >
-          <span class="shrink-0 text-content-tertiary">Markets listed:</span>
-          <template
-            v-for="(source, sourceIdx) in itemSources(item)"
-            :key="`${source.label}:${JSON.stringify(source.to ?? '')}`"
-          >
-            <span class="inline-flex min-w-0 max-w-[220px] shrink items-center">
-              <NuxtLink
-                v-if="source.to"
-                :to="source.to"
-                class="min-w-0 truncate underline transition-colors hover:text-accent-600"
-              >
-                {{ source.label }}
-              </NuxtLink>
-              <span
-                v-else
-                class="min-w-0 truncate"
-              >
-                {{ source.label }}
-              </span>
-              <span
-                v-if="sourceIdx < itemSources(item).length - 1"
-                class="text-content-tertiary"
-              >,</span>
-            </span>
-          </template>
         </div>
       </div>
       <p

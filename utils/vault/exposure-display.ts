@@ -90,15 +90,11 @@ export const hasMissingUtilizedExposureSplit = (
 export const buildAllocatedVaultExposureDisplayItems = ({
   collateralGroups,
   totalExposureUsd,
-  idleAsset,
   utilization,
-  idleSource,
 }: {
   collateralGroups: CollateralExposureGroup[]
   totalExposureUsd: number
-  idleAsset: ExposureBackingAsset
   utilization: number
-  idleSource?: VaultExposureDisplaySource
 }): VaultExposureDisplayItem[] => {
   if (!Number.isFinite(totalExposureUsd) || totalExposureUsd <= 0) return []
 
@@ -110,7 +106,8 @@ export const buildAllocatedVaultExposureDisplayItems = ({
   // supplies the USD weighting. Accepted collaterals with no current open
   // interest still render (at $0) — they remain hypothetical exposure, and
   // dropping them would let backend data decide which accepted collaterals
-  // the user sees.
+  // the user sees. Idle (un-utilized) supply is deliberately excluded: it is
+  // not collateral exposure, so collateral values sum to the utilized amount.
   const collateralItems = collateralGroups.map(group => ({
     asset: group.asset,
     valueUsd: collateralTotalUsd > 0
@@ -119,18 +116,7 @@ export const buildAllocatedVaultExposureDisplayItems = ({
     vaultCount: group.vaultCount,
   }))
 
-  const idleExposureUsd = Math.max(0, totalExposureUsd - utilizedExposureUsd)
-  const idleItems: VaultExposureDisplayItem[] = idleExposureUsd > 0
-    ? [{
-        asset: idleAsset,
-        label: `${idleAsset.symbol} Idle`,
-        valueUsd: idleExposureUsd,
-        vaultCount: idleSource ? undefined : 1,
-        sources: idleSource ? [idleSource] : undefined,
-      }]
-    : []
-
-  return mergeVaultExposureDisplayItems([...collateralItems, ...idleItems])
+  return mergeVaultExposureDisplayItems(collateralItems)
 }
 
 export interface VaultExposureDisplay {
@@ -147,38 +133,32 @@ export interface VaultExposureDisplay {
  * live collateral backing assets. Two outcomes:
  *
  *  - The split is fully determined without open-interest data when nothing is
- *    utilized or when a single backing asset backs all utilized exposure →
- *    exact `ready` items, same shape as the allocated builder.
+ *    utilized, or when the vault accepts a single collateral so all utilized
+ *    exposure structurally belongs to it → exact `ready` items, same shape as
+ *    the allocated builder.
  *  - Otherwise → qualitative `unavailable` items listing the backing assets
- *    (and idle, when utilization leaves room for it) with zero values, so the
- *    UI shows *what* the vault is exposed to even though the USD split is
- *    unknown. This mirrors the pre-open-interest collateral list.
+ *    with zero values, so the UI shows *what* the vault is exposed to even
+ *    though the USD split is unknown. This mirrors the pre-open-interest
+ *    collateral list.
+ *
+ * Idle (un-utilized) supply is never listed: it is not collateral exposure.
  */
 export const buildFallbackVaultExposureDisplay = ({
   collateralGroups,
   totalExposureUsd,
   totalSupplyState,
-  idleAsset,
   utilization,
-  idleSource,
+  acceptedCollateralCount,
 }: {
   collateralGroups: CollateralExposureGroup[]
   totalExposureUsd: number
   totalSupplyState: ExposureValueState
-  idleAsset: ExposureBackingAsset
   utilization: number
-  idleSource?: VaultExposureDisplaySource
+  acceptedCollateralCount: number
 }): VaultExposureDisplay => {
   if (totalSupplyState === 'loading') return { valueState: 'loading', items: [] }
 
   const utilizationFraction = clampPercentFraction(utilization)
-  const buildIdleItem = (valueUsd: number): VaultExposureDisplayItem => ({
-    asset: idleAsset,
-    label: `${idleAsset.symbol} Idle`,
-    valueUsd,
-    vaultCount: idleSource ? undefined : 1,
-    sources: idleSource ? [idleSource] : undefined,
-  })
 
   if (totalSupplyState === 'ready' && (!Number.isFinite(totalExposureUsd) || totalExposureUsd <= 0)) {
     return { valueState: 'ready', items: [] }
@@ -187,11 +167,17 @@ export const buildFallbackVaultExposureDisplay = ({
   if (totalSupplyState === 'ready') {
     const utilizedExposureUsd = totalExposureUsd * utilizationFraction
 
-    // Deliberate divergence from buildAllocatedVaultExposureDisplayItems,
-    // which refuses to attribute utilized exposure when every group's
-    // openInterestUsd is 0: with a single live collateral the attribution is
-    // structurally determined, so the zero weight carries no information.
-    if (utilizedExposureUsd <= 0 || collateralGroups.length === 1) {
+    // The exact split is only knowable without open-interest data when nothing
+    // is utilized, or when the vault *configures* a single collateral so all
+    // utilized exposure structurally belongs to it. We require
+    // `acceptedCollateralCount === 1`, not just a single live group: a
+    // multi-collateral vault can collapse to one live group when another
+    // collateral is dropped from the live set (registry miss, or liquidation
+    // LTV ramped to 0 while debt is still outstanding), and attributing 100% to
+    // the survivor would be wrong. Those degrade to the qualitative list below.
+    const isExactlyKnown = utilizedExposureUsd <= 0
+      || (collateralGroups.length === 1 && acceptedCollateralCount === 1)
+    if (isExactlyKnown) {
       // Accepted collaterals stay listed even with nothing utilized — same
       // base-layer rule as the allocated builder.
       const collateralItems = collateralGroups.map(group => ({
@@ -199,26 +185,86 @@ export const buildFallbackVaultExposureDisplay = ({
         valueUsd: utilizedExposureUsd > 0 ? utilizedExposureUsd : 0,
         vaultCount: group.vaultCount,
       }))
-      const idleExposureUsd = Math.max(0, totalExposureUsd - utilizedExposureUsd)
-      const idleItems = idleExposureUsd > 0 ? [buildIdleItem(idleExposureUsd)] : []
 
       return {
         valueState: 'ready',
-        items: mergeVaultExposureDisplayItems([...collateralItems, ...idleItems]),
+        items: mergeVaultExposureDisplayItems(collateralItems),
       }
     }
   }
 
-  const qualitativeItems = mergeVaultExposureDisplayItems([
-    ...collateralGroups.map(group => ({
+  const qualitativeItems = mergeVaultExposureDisplayItems(
+    collateralGroups.map(group => ({
       asset: group.asset,
       valueUsd: 0,
       vaultCount: group.vaultCount,
     })),
-    ...(utilizationFraction < 1 ? [buildIdleItem(0)] : []),
-  ])
+  )
 
   return { valueState: 'unavailable', items: qualitativeItems }
+}
+
+/**
+ * Resolve the exposure display for a single vault (or earn strategy) from its
+ * open-interest and supply-price states. This is the one decision point shared
+ * by the lend/borrow cards, the vault overview, the earn surfaces, and the
+ * discovery matrix — it chooses between the live allocated split and the
+ * RPC-derived fallback so the branching cannot drift between call sites.
+ *
+ * `getCollateralGroups` is a thunk so the (non-trivial) grouping work is skipped
+ * entirely while open interest is still loading.
+ */
+export const resolveVaultExposureDisplay = ({
+  openInterestEnabled,
+  openInterestLoaded,
+  hasOpenInterestError,
+  getCollateralGroups,
+  totalExposureUsd,
+  totalSupplyState,
+  utilization,
+  acceptedCollateralCount,
+}: {
+  openInterestEnabled: boolean
+  openInterestLoaded: boolean
+  hasOpenInterestError: boolean
+  getCollateralGroups: () => CollateralExposureGroup[]
+  totalExposureUsd: number
+  totalSupplyState: ExposureValueState
+  utilization: number
+  acceptedCollateralCount: number
+}): VaultExposureDisplay => {
+  // Open interest still resolving — show loading before building any groups.
+  if (openInterestEnabled && !hasOpenInterestError && !openInterestLoaded) {
+    return { valueState: 'loading', items: [] }
+  }
+
+  const collateralGroups = getCollateralGroups()
+  const hasLiveExposureData = openInterestEnabled && openInterestLoaded && !hasOpenInterestError
+
+  if (
+    hasLiveExposureData
+    && totalSupplyState === 'ready'
+    && !hasMissingUtilizedExposureSplit(collateralGroups, utilization)
+  ) {
+    return {
+      valueState: 'ready',
+      items: buildAllocatedVaultExposureDisplayItems({
+        collateralGroups,
+        totalExposureUsd,
+        utilization,
+      }),
+    }
+  }
+
+  // Open-interest split unknown (v3 disabled for the chain, fetch error, missing
+  // rows) or the supply price isn't ready — degrade to the RPC-derived fallback.
+  return buildFallbackVaultExposureDisplay({
+    collateralGroups,
+    totalExposureUsd,
+    totalSupplyState,
+    utilization,
+    acceptedCollateralCount,
+  })
 }
 
 /**
