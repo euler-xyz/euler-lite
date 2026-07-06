@@ -152,6 +152,9 @@ const hasSelectedMetricUsdData = computed(() =>
 const canToggleDenomination = computed(() =>
   !isPercentMetric(selectedMetric.value) && hasSelectedMetricUsdData.value,
 )
+const shouldShowHistoryControls = computed(() =>
+  canToggleDenomination.value || metricOptions.value.length > 1,
+)
 
 watch(
   metricOptions,
@@ -434,8 +437,8 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
   >
     <template #actions="{ isOpen }">
       <div
-        v-if="isOpen"
-        class="flex flex-wrap items-center justify-end gap-8"
+        v-if="isOpen && shouldShowHistoryControls"
+        class="flex flex-wrap items-center justify-end gap-8 mobile:hidden"
       >
         <div
           v-if="canToggleDenomination"
@@ -490,6 +493,63 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         </div>
       </div>
     </template>
+
+    <div
+      v-if="shouldShowHistoryControls"
+      class="hidden flex-wrap items-center gap-8 mobile:flex"
+    >
+      <div
+        v-if="canToggleDenomination"
+        class="inline-flex h-32 overflow-hidden rounded-12 border border-line-subtle bg-surface p-2 transition-colors hover:border-line focus-within:border-accent-500"
+        role="group"
+        aria-label="Chart denomination"
+      >
+        <button
+          type="button"
+          class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
+          :class="selectedDenomination === 'asset' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
+          :aria-pressed="selectedDenomination === 'asset'"
+          @click="selectedDenomination = 'asset'"
+        >
+          {{ vault.asset.symbol }}
+        </button>
+        <button
+          type="button"
+          class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
+          :class="selectedDenomination === 'usd' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
+          :aria-pressed="selectedDenomination === 'usd'"
+          @click="selectedDenomination = 'usd'"
+        >
+          USD
+        </button>
+      </div>
+
+      <div
+        v-if="metricOptions.length > 1"
+        class="relative inline-flex h-32 rounded-8 border border-line-subtle bg-surface transition-colors hover:border-line focus-within:border-accent-500"
+      >
+        <select
+          v-model="selectedMetric"
+          class="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+          aria-label="Performance metric"
+        >
+          <option
+            v-for="option in metricOptions"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.label }}
+          </option>
+        </select>
+        <div class="pointer-events-none flex h-full items-center gap-8 px-10 text-p3 text-content-primary">
+          <span class="whitespace-nowrap">{{ selectedMetricLabel }}</span>
+          <UiIcon
+            name="arrow-down"
+            class="h-16 w-16 shrink-0 text-content-secondary"
+          />
+        </div>
+      </div>
+    </div>
 
     <div
       v-if="isLoading && !hasChartData"
