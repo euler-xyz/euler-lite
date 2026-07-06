@@ -4,6 +4,7 @@ import {
   buildFallbackVaultExposureDisplay,
   combineVaultExposureDisplays,
   mergeVaultExposureDisplayItems,
+  resolveVaultExposureDisplay,
   sortVaultExposureDisplayItems,
 } from '~/utils/vault/exposure-display'
 import type { CollateralExposureGroup } from '~/utils/vault/collateral-exposure'
@@ -25,61 +26,55 @@ const group = (
 })
 
 describe('buildAllocatedVaultExposureDisplayItems', () => {
-  it('weights utilized exposure by live open-interest split and keeps only the remainder idle', () => {
+  it('weights utilized exposure by the live open-interest split and excludes idle', () => {
     const items = buildAllocatedVaultExposureDisplayItems({
       collateralGroups: [
         group('wstETH', 80),
         group('cbBTC', 20),
       ],
       totalExposureUsd: 100,
-      idleAsset: { address: '0xweth', symbol: 'WETH' },
       utilization: 90,
     })
 
     expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(72)
     expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBeCloseTo(18)
-    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(10)
+    // Idle (un-utilized) supply is never shown as exposure.
+    expect(items.some(item => item.label?.includes('Idle'))).toBe(false)
   })
 
   it('does not infer collateral exposure when the live split is missing', () => {
     const items = buildAllocatedVaultExposureDisplayItems({
       collateralGroups: [group('wstETH', 0)],
       totalExposureUsd: 100,
-      idleAsset: { address: '0xweth', symbol: 'WETH' },
       utilization: 99,
     })
 
-    expect(items.find(item => item.asset.symbol === 'wstETH')).toBeUndefined()
-    expect(items.find(item => item.label === 'WETH Idle')).toBeUndefined()
     expect(items).toHaveLength(0)
   })
 
-  it('keeps idle exposure when utilization is zero', () => {
+  it('omits collaterals with no current exposure when nothing is utilized', () => {
     const items = buildAllocatedVaultExposureDisplayItems({
       collateralGroups: [group('wstETH', 0)],
       totalExposureUsd: 100,
-      idleAsset: { address: '0xweth', symbol: 'WETH' },
       utilization: 0,
     })
 
-    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(100)
-    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBe(0)
+    expect(items).toHaveLength(0)
   })
 
-  it('keeps accepted collaterals without open interest as zero-value rows', () => {
+  it('omits accepted collaterals with no current open interest from the known split', () => {
     const items = buildAllocatedVaultExposureDisplayItems({
       collateralGroups: [
         group('wstETH', 80),
         group('cbBTC', 0),
       ],
       totalExposureUsd: 100,
-      idleAsset: { address: '0xweth', symbol: 'WETH' },
       utilization: 90,
     })
 
     expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(90)
-    expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBe(0)
-    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(10)
+    expect(items.find(item => item.asset.symbol === 'cbBTC')).toBeUndefined()
+    expect(items.some(item => item.label?.includes('Idle'))).toBe(false)
   })
 })
 
@@ -113,12 +108,12 @@ describe('mergeVaultExposureDisplayItems', () => {
       },
       {
         asset: { address: '0x0000000000000000000000000000000000000001', symbol: 'USDC' },
-        label: 'USDC Idle',
+        label: 'USDC (alt)',
         valueUsd: 10,
       },
     ])
 
-    expect(items.map(item => item.label ?? item.asset.symbol)).toEqual(['USDC', 'USDC Idle'])
+    expect(items.map(item => item.label ?? item.asset.symbol)).toEqual(['USDC', 'USDC (alt)'])
   })
 })
 
@@ -144,35 +139,31 @@ describe('sortVaultExposureDisplayItems', () => {
 })
 
 describe('buildFallbackVaultExposureDisplay', () => {
-  const idleAsset = { address: '0xweth', symbol: 'WETH' }
-
   it('resolves an exact ready split for a single-collateral vault', () => {
     const { valueState, items } = buildFallbackVaultExposureDisplay({
       collateralGroups: [group('wstETH', 0)],
       totalExposureUsd: 100,
       totalSupplyState: 'ready',
-      idleAsset,
       utilization: 90,
+      acceptedCollateralCount: 1,
     })
 
     expect(valueState).toBe('ready')
     expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(90)
-    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(10)
+    expect(items.some(item => item.label?.includes('Idle'))).toBe(false)
   })
 
-  it('resolves an exact split with zero-value collateral rows when nothing is utilized', () => {
+  it('collapses to an empty ready split when nothing is utilized', () => {
     const { valueState, items } = buildFallbackVaultExposureDisplay({
       collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
       totalExposureUsd: 100,
       totalSupplyState: 'ready',
-      idleAsset,
       utilization: 0,
+      acceptedCollateralCount: 2,
     })
 
     expect(valueState).toBe('ready')
-    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(100)
-    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBe(0)
-    expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBe(0)
+    expect(items).toHaveLength(0)
   })
 
   it('lists backing assets qualitatively when a multi-collateral split is unknown', () => {
@@ -180,22 +171,39 @@ describe('buildFallbackVaultExposureDisplay', () => {
       collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
       totalExposureUsd: 100,
       totalSupplyState: 'ready',
-      idleAsset,
       utilization: 90,
+      acceptedCollateralCount: 2,
     })
 
     expect(valueState).toBe('unavailable')
-    expect(items.map(item => item.label ?? item.asset.symbol).sort()).toEqual(['WETH Idle', 'cbBTC', 'wstETH'])
+    expect(items.map(item => item.asset.symbol).sort()).toEqual(['cbBTC', 'wstETH'])
     expect(items.every(item => item.valueUsd === 0)).toBe(true)
   })
 
-  it('omits the idle row from the qualitative list at full utilization', () => {
+  it('stays qualitative when a single live group hides a multi-collateral vault', () => {
+    // A vault that accepts several collaterals but whose live group set collapsed
+    // to one (registry miss, or liquidation LTV ramped to 0 with residual debt)
+    // must not attribute 100% of utilized exposure to the survivor.
+    const { valueState, items } = buildFallbackVaultExposureDisplay({
+      collateralGroups: [group('wstETH', 0)],
+      totalExposureUsd: 100,
+      totalSupplyState: 'ready',
+      utilization: 90,
+      acceptedCollateralCount: 2,
+    })
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(item => item.asset.symbol)).toEqual(['wstETH'])
+    expect(items.every(item => item.valueUsd === 0)).toBe(true)
+  })
+
+  it('lists just the collaterals qualitatively at full utilization', () => {
     const { valueState, items } = buildFallbackVaultExposureDisplay({
       collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
       totalExposureUsd: 100,
       totalSupplyState: 'ready',
-      idleAsset,
       utilization: 100,
+      acceptedCollateralCount: 2,
     })
 
     expect(valueState).toBe('unavailable')
@@ -207,12 +215,12 @@ describe('buildFallbackVaultExposureDisplay', () => {
       collateralGroups: [group('wstETH', 0)],
       totalExposureUsd: 0,
       totalSupplyState: 'unavailable',
-      idleAsset,
       utilization: 50,
+      acceptedCollateralCount: 1,
     })
 
     expect(valueState).toBe('unavailable')
-    expect(items.map(item => item.label ?? item.asset.symbol).sort()).toEqual(['WETH Idle', 'wstETH'])
+    expect(items.map(item => item.asset.symbol)).toEqual(['wstETH'])
   })
 
   it('reports loading while total supply is loading', () => {
@@ -220,8 +228,8 @@ describe('buildFallbackVaultExposureDisplay', () => {
       collateralGroups: [group('wstETH', 0)],
       totalExposureUsd: 0,
       totalSupplyState: 'loading',
-      idleAsset,
       utilization: 50,
+      acceptedCollateralCount: 1,
     })
 
     expect(valueState).toBe('loading')
@@ -233,12 +241,93 @@ describe('buildFallbackVaultExposureDisplay', () => {
       collateralGroups: [group('wstETH', 0)],
       totalExposureUsd: 0,
       totalSupplyState: 'ready',
-      idleAsset,
       utilization: 50,
+      acceptedCollateralCount: 1,
     })
 
     expect(valueState).toBe('ready')
     expect(items).toHaveLength(0)
+  })
+})
+
+describe('resolveVaultExposureDisplay', () => {
+  const base = {
+    getCollateralGroups: () => [group('wstETH', 80), group('cbBTC', 20)],
+    totalExposureUsd: 100,
+    totalSupplyState: 'ready' as const,
+    utilization: 90,
+    acceptedCollateralCount: 2,
+  }
+
+  it('reports loading without building groups while open interest is loading', () => {
+    let built = false
+    const display = resolveVaultExposureDisplay({
+      ...base,
+      openInterestEnabled: true,
+      openInterestLoaded: false,
+      hasOpenInterestError: false,
+      getCollateralGroups: () => {
+        built = true
+        return []
+      },
+    })
+
+    expect(display.valueState).toBe('loading')
+    expect(built).toBe(false)
+  })
+
+  it('uses the live allocated split when open interest is available', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({
+      ...base,
+      openInterestEnabled: true,
+      openInterestLoaded: true,
+      hasOpenInterestError: false,
+    })
+
+    expect(valueState).toBe('ready')
+    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(72)
+    expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBeCloseTo(18)
+  })
+
+  it('degrades to the qualitative list when a utilized vault has no open-interest rows', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({
+      ...base,
+      getCollateralGroups: () => [group('wstETH', 0), group('cbBTC', 0)],
+      openInterestEnabled: true,
+      openInterestLoaded: true,
+      hasOpenInterestError: false,
+    })
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(item => item.asset.symbol).sort()).toEqual(['cbBTC', 'wstETH'])
+  })
+
+  it('falls back to an exact split on a gated chain with a single accepted collateral', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({
+      ...base,
+      getCollateralGroups: () => [group('wstETH', 0)],
+      acceptedCollateralCount: 1,
+      openInterestEnabled: false,
+      openInterestLoaded: false,
+      hasOpenInterestError: false,
+    })
+
+    expect(valueState).toBe('ready')
+    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(90)
+  })
+
+  it('lists assets qualitatively when open interest is live but the supply price is unavailable', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({
+      ...base,
+      openInterestEnabled: true,
+      openInterestLoaded: true,
+      hasOpenInterestError: false,
+      totalSupplyState: 'unavailable',
+      totalExposureUsd: 0,
+    })
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(item => item.asset.symbol).sort()).toEqual(['cbBTC', 'wstETH'])
   })
 })
 

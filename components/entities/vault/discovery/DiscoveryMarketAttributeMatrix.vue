@@ -17,7 +17,7 @@ import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, buildFallbackVaultExposureDisplay, hasMissingUtilizedExposureSplit, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
+import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const props = defineProps<{
   data: AttributeMatrixData
@@ -85,45 +85,34 @@ const exposureByVault = computed(() => {
 
   for (const column of props.data.columns) {
     if (!isEVault(column.vault)) continue
-    const totalExposureUsd = props.usdCache.get(column.address)?.supplyUsd
-    const groups = getCollateralExposureGroups(
-      getCollateralExposurePairs(
-        column.vault,
-        addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    const columnVault = column.vault
+
+    // Distinguish "USD not loaded yet" (loading) from "priced out" (unavailable)
+    // from "priced" (ready): the cache omits an entry until its async load
+    // resolves, and stores supplyHasPrice=false for a vault with no oracle
+    // price. Collapsing these made a priced-out vault render as "-" and a
+    // still-loading vault flash "Unavailable".
+    const entry = props.usdCache.get(column.address)
+    const totalSupplyState: ExposureValueState = !entry
+      ? 'loading'
+      : entry.supplyHasPrice ? 'ready' : 'unavailable'
+    const totalExposureUsd = entry?.supplyHasPrice ? entry.supplyUsd : 0
+
+    result.set(column.address, resolveVaultExposureDisplay({
+      openInterestEnabled: isOpenInterestEnabled.value,
+      openInterestLoaded: isOpenInterestLoaded.value,
+      hasOpenInterestError: hasOpenInterestError.value,
+      getCollateralGroups: () => getCollateralExposureGroups(
+        getCollateralExposurePairs(
+          columnVault,
+          addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+        ),
+        getOpenInterestForVault(column.address),
       ),
-      getOpenInterestForVault(column.address),
-    )
-
-    if (hasLiveExposureData.value && !hasMissingUtilizedExposureSplit(groups, column.vault.utilization)) {
-      if (totalExposureUsd === undefined) {
-        result.set(column.address, { items: [], valueState: 'unavailable' })
-        continue
-      }
-
-      result.set(column.address, {
-        items: buildAllocatedVaultExposureDisplayItems({
-          collateralGroups: groups,
-          totalExposureUsd,
-          idleAsset: column.vault.asset,
-          utilization: column.vault.utilization,
-        }),
-        valueState: 'ready',
-      })
-      continue
-    }
-    if (isOpenInterestLoading.value) {
-      result.set(column.address, { items: [], valueState: 'loading' })
-      continue
-    }
-
-    // Open-interest split unknown (v3 disabled for the chain, fetch error, or
-    // missing rows) — degrade to the RPC-derived fallback per vault.
-    result.set(column.address, buildFallbackVaultExposureDisplay({
-      collateralGroups: groups,
-      totalExposureUsd: totalExposureUsd ?? 0,
-      totalSupplyState: totalExposureUsd === undefined ? 'unavailable' : 'ready',
-      idleAsset: column.vault.asset,
-      utilization: column.vault.utilization,
+      totalExposureUsd,
+      totalSupplyState,
+      utilization: columnVault.utilization,
+      acceptedCollateralCount: columnVault.collaterals.length,
     }))
   }
   return result

@@ -14,7 +14,7 @@ import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, buildFallbackVaultExposureDisplay, hasMissingUtilizedExposureSplit, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
+import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -65,43 +65,18 @@ const collateralExposureGroups = computed(() => {
     getOpenInterestForVault(vault.address),
   )
 })
-const hasLiveExposureData = computed(() =>
-  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
-)
-const hasUnavailableExposureSplit = computed(() =>
-  hasLiveExposureData.value
-  && priceValues.value.totalSupplyState === 'ready'
-  && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
-)
-const exposureDisplay = computed<VaultExposureDisplay>(() => {
-  const totalSupplyState = priceValues.value.totalSupplyState
-  if (isOpenInterestEnabled.value && !hasOpenInterestError.value && !isOpenInterestLoaded.value) {
-    return { valueState: 'loading', items: [] }
-  }
-  if (hasLiveExposureData.value && !hasUnavailableExposureSplit.value) {
-    if (totalSupplyState !== 'ready') return { valueState: totalSupplyState, items: [] }
-
-    return {
-      valueState: 'ready',
-      items: buildAllocatedVaultExposureDisplayItems({
-        collateralGroups: collateralExposureGroups.value,
-        totalExposureUsd: priceValues.value.totalSupplyUsd,
-        idleAsset: vault.asset,
-        utilization: vault.utilization,
-      }),
-    }
-  }
-
-  // Open-interest split unknown (v3 disabled for the chain, fetch error, or
-  // missing rows) — degrade to the RPC-derived fallback display.
-  return buildFallbackVaultExposureDisplay({
-    collateralGroups: collateralExposureGroups.value,
+const exposureDisplay = computed<VaultExposureDisplay>(() =>
+  resolveVaultExposureDisplay({
+    openInterestEnabled: isOpenInterestEnabled.value,
+    openInterestLoaded: isOpenInterestLoaded.value,
+    hasOpenInterestError: hasOpenInterestError.value,
+    getCollateralGroups: () => collateralExposureGroups.value,
     totalExposureUsd: priceValues.value.totalSupplyUsd,
-    totalSupplyState,
-    idleAsset: vault.asset,
+    totalSupplyState: priceValues.value.totalSupplyState,
     utilization: vault.utilization,
-  })
-})
+    acceptedCollateralCount: vault.collaterals.length,
+  }),
+)
 const exposureValueState = computed(() => exposureDisplay.value.valueState)
 const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
@@ -139,8 +114,8 @@ const statsGridCols = computed(() => {
   cols.push('1fr') // Total supply
   if (isBorrowable.value) {
     cols.push('1fr') // Available liquidity
-    cols.push('1fr') // Exposure
     cols.push('1fr') // Utilization
+    cols.push('1fr') // Current exposure
   }
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
@@ -379,29 +354,6 @@ watchEffect(async () => {
       <div
         v-if="isBorrowable"
         class="flex flex-col flex-1 mobile:!hidden"
-        :class="isConnected ? 'items-center' : 'items-end text-right'"
-      >
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-          Exposure
-        </div>
-        <div
-          class="flex min-w-0 items-center justify-end"
-          data-id="data-point"
-          :data-key="vault.address.toLowerCase()"
-          data-field="exposure"
-          :data-value="exposureDisplayItems.map(item => item.label ?? item.asset.symbol).join(',')"
-        >
-          <VaultExposureSummary
-            :items="exposureDisplayItems"
-            :value-state="exposureValueState"
-            :max-visible="5"
-            avatar-size="20"
-          />
-        </div>
-      </div>
-      <div
-        v-if="isBorrowable"
-        class="flex flex-col flex-1 mobile:!hidden"
         :class="
           isConnected ? 'justify-center items-center' : 'items-end text-right'
         "
@@ -424,6 +376,29 @@ watchEffect(async () => {
           >
             {{ utilizationDisplay }}%
           </div>
+        </div>
+      </div>
+      <div
+        v-if="isBorrowable"
+        class="flex flex-col flex-1 mobile:!hidden"
+        :class="isConnected ? 'items-center' : 'items-end text-right'"
+      >
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+          Current exposure
+        </div>
+        <div
+          class="flex min-w-0 items-center justify-end"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="current-exposure"
+          :data-value="exposureDisplayItems.map(item => item.label ?? item.asset.symbol).join(',')"
+        >
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+          />
         </div>
       </div>
       <div
@@ -484,25 +459,6 @@ watchEffect(async () => {
       >
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
-            Exposure
-          </div>
-        </div>
-        <div class="flex min-w-0 flex-1 justify-end text-right">
-          <VaultExposureSummary
-            :items="exposureDisplayItems"
-            :value-state="exposureValueState"
-            :max-visible="5"
-            avatar-size="20"
-            placement="top-start"
-          />
-        </div>
-      </div>
-      <div
-        v-if="isBorrowable"
-        class="flex w-full justify-between"
-      >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3 flex items-center gap-4">
             Utilization
             <VaultWarningIcon :warning="utilisationWarning" />
           </div>
@@ -515,6 +471,25 @@ watchEffect(async () => {
           <div class="text-p2 text-content-primary">
             {{ utilizationDisplay }}%
           </div>
+        </div>
+      </div>
+      <div
+        v-if="isBorrowable"
+        class="flex w-full justify-between"
+      >
+        <div class="flex-1">
+          <div class="text-content-tertiary text-p3 flex items-center gap-4">
+            Current exposure
+          </div>
+        </div>
+        <div class="flex min-w-0 flex-1 justify-end text-right">
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+            placement="top-start"
+          />
         </div>
       </div>
       <div
