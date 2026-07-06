@@ -63,6 +63,23 @@ describe('buildAllocatedVaultExposureDisplayItems', () => {
     })
 
     expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(100)
+    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBe(0)
+  })
+
+  it('keeps accepted collaterals without open interest as zero-value rows', () => {
+    const items = buildAllocatedVaultExposureDisplayItems({
+      collateralGroups: [
+        group('wstETH', 80),
+        group('cbBTC', 0),
+      ],
+      totalExposureUsd: 100,
+      idleAsset: { address: '0xweth', symbol: 'WETH' },
+      utilization: 90,
+    })
+
+    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(90)
+    expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBe(0)
+    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(10)
   })
 })
 
@@ -143,7 +160,7 @@ describe('buildFallbackVaultExposureDisplay', () => {
     expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(10)
   })
 
-  it('resolves an exact idle-only split when nothing is utilized', () => {
+  it('resolves an exact split with zero-value collateral rows when nothing is utilized', () => {
     const { valueState, items } = buildFallbackVaultExposureDisplay({
       collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
       totalExposureUsd: 100,
@@ -153,9 +170,9 @@ describe('buildFallbackVaultExposureDisplay', () => {
     })
 
     expect(valueState).toBe('ready')
-    expect(items).toHaveLength(1)
-    expect(items[0].label).toBe('WETH Idle')
-    expect(items[0].valueUsd).toBeCloseTo(100)
+    expect(items.find(item => item.label === 'WETH Idle')?.valueUsd).toBeCloseTo(100)
+    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBe(0)
+    expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBe(0)
   })
 
   it('lists backing assets qualitatively when a multi-collateral split is unknown', () => {

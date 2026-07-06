@@ -106,15 +106,18 @@ export const buildAllocatedVaultExposureDisplayItems = ({
   const utilizedExposureUsd = totalExposureUsd * clampPercentFraction(utilization)
   if (collateralTotalUsd <= 0 && utilizedExposureUsd > 0) return []
 
-  const collateralItems = collateralTotalUsd > 0
-    ? collateralGroups
-        .filter(group => group.openInterestUsd > 0)
-        .map(group => ({
-          asset: group.asset,
-          valueUsd: utilizedExposureUsd * group.openInterestUsd / collateralTotalUsd,
-          vaultCount: group.vaultCount,
-        }))
-    : []
+  // The accepted-collateral list is the base layer; open interest only
+  // supplies the USD weighting. Accepted collaterals with no current open
+  // interest still render (at $0) — they remain hypothetical exposure, and
+  // dropping them would let backend data decide which accepted collaterals
+  // the user sees.
+  const collateralItems = collateralGroups.map(group => ({
+    asset: group.asset,
+    valueUsd: collateralTotalUsd > 0
+      ? utilizedExposureUsd * group.openInterestUsd / collateralTotalUsd
+      : 0,
+    vaultCount: group.vaultCount,
+  }))
 
   const idleExposureUsd = Math.max(0, totalExposureUsd - utilizedExposureUsd)
   const idleItems: VaultExposureDisplayItem[] = idleExposureUsd > 0
@@ -189,13 +192,13 @@ export const buildFallbackVaultExposureDisplay = ({
     // openInterestUsd is 0: with a single live collateral the attribution is
     // structurally determined, so the zero weight carries no information.
     if (utilizedExposureUsd <= 0 || collateralGroups.length === 1) {
-      const collateralItems = utilizedExposureUsd > 0
-        ? collateralGroups.map(group => ({
-            asset: group.asset,
-            valueUsd: utilizedExposureUsd,
-            vaultCount: group.vaultCount,
-          }))
-        : []
+      // Accepted collaterals stay listed even with nothing utilized — same
+      // base-layer rule as the allocated builder.
+      const collateralItems = collateralGroups.map(group => ({
+        asset: group.asset,
+        valueUsd: utilizedExposureUsd > 0 ? utilizedExposureUsd : 0,
+        vaultCount: group.vaultCount,
+      }))
       const idleExposureUsd = Math.max(0, totalExposureUsd - utilizedExposureUsd)
       const idleItems = idleExposureUsd > 0 ? [buildIdleItem(idleExposureUsd)] : []
 
