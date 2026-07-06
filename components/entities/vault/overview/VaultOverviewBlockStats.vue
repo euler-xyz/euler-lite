@@ -108,7 +108,7 @@ const badDebtDisplay = computed(() => {
     />
     <VaultOverviewLabelValue
       v-if="badDebtDisplay"
-      label="Bad debt"
+      label="Pending bad debt"
       :value="badDebtDisplay"
       orientation="horizontal"
     />

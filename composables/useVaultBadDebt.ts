@@ -66,13 +66,14 @@ const fetchBadDebtRows = async (
 export const useVaultBadDebt = () => {
   const { chainId } = useEulerAddresses()
   const envConfig = useEnvConfig()
-  const isBadDebtEnabled = computed(() => envConfig.enableV3Backend)
+  const { isV3EnabledForChain } = useV3ChainGate()
+  const isBadDebtEnabled = computed(() => isV3EnabledForChain(chainId.value))
 
   const loadBadDebtForChain = async (
     targetChainId = chainId.value,
     { force = false }: { force?: boolean } = {},
   ) => {
-    if (!isBadDebtEnabled.value) {
+    if (!isV3EnabledForChain(targetChainId)) {
       setChainLoading(targetChainId, false)
       setChainError(targetChainId, null)
       return
