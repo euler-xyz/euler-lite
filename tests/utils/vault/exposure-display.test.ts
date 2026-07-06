@@ -52,18 +52,17 @@ describe('buildAllocatedVaultExposureDisplayItems', () => {
     expect(items).toHaveLength(0)
   })
 
-  it('renders accepted collaterals at $0 when nothing is utilized', () => {
+  it('omits collaterals with no current exposure when nothing is utilized', () => {
     const items = buildAllocatedVaultExposureDisplayItems({
       collateralGroups: [group('wstETH', 0)],
       totalExposureUsd: 100,
       utilization: 0,
     })
 
-    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBe(0)
-    expect(items.some(item => item.label?.includes('Idle'))).toBe(false)
+    expect(items).toHaveLength(0)
   })
 
-  it('keeps accepted collaterals without open interest as zero-value rows', () => {
+  it('omits accepted collaterals with no current open interest from the known split', () => {
     const items = buildAllocatedVaultExposureDisplayItems({
       collateralGroups: [
         group('wstETH', 80),
@@ -74,7 +73,7 @@ describe('buildAllocatedVaultExposureDisplayItems', () => {
     })
 
     expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBeCloseTo(90)
-    expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBe(0)
+    expect(items.find(item => item.asset.symbol === 'cbBTC')).toBeUndefined()
     expect(items.some(item => item.label?.includes('Idle'))).toBe(false)
   })
 })
@@ -154,7 +153,7 @@ describe('buildFallbackVaultExposureDisplay', () => {
     expect(items.some(item => item.label?.includes('Idle'))).toBe(false)
   })
 
-  it('resolves an exact split with zero-value collateral rows when nothing is utilized', () => {
+  it('collapses to an empty ready split when nothing is utilized', () => {
     const { valueState, items } = buildFallbackVaultExposureDisplay({
       collateralGroups: [group('wstETH', 0), group('cbBTC', 0)],
       totalExposureUsd: 100,
@@ -164,9 +163,7 @@ describe('buildFallbackVaultExposureDisplay', () => {
     })
 
     expect(valueState).toBe('ready')
-    expect(items.find(item => item.asset.symbol === 'wstETH')?.valueUsd).toBe(0)
-    expect(items.find(item => item.asset.symbol === 'cbBTC')?.valueUsd).toBe(0)
-    expect(items.some(item => item.label?.includes('Idle'))).toBe(false)
+    expect(items).toHaveLength(0)
   })
 
   it('lists backing assets qualitatively when a multi-collateral split is unknown', () => {

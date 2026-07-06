@@ -359,24 +359,6 @@ load()
         </div>
         <div class="flex flex-col gap-12 pt-12">
           <VaultOverviewLabelValue
-            label="Exposure amount"
-            orientation="horizontal"
-            data-list="earn-exposure-strategy"
-            :data-key="getAddress(row.exposure.address)"
-            data-field="Exposure amount"
-          >
-            <template v-if="hasExposureUsdPrice(row.exposure)">
-              {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
-              <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
-            </template>
-            <template v-else>
-              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
-                {{ getExposureAssetAmount(row.exposure) }}
-              </UiExactAmount>
-              <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
-            </template>
-          </VaultOverviewLabelValue>
-          <VaultOverviewLabelValue
             orientation="horizontal"
             data-list="earn-exposure-strategy"
             :data-key="getAddress(row.exposure.address)"
@@ -400,6 +382,24 @@ load()
               :max-visible="5"
               avatar-size="20"
             />
+          </VaultOverviewLabelValue>
+          <VaultOverviewLabelValue
+            label="Exposure amount"
+            orientation="horizontal"
+            data-list="earn-exposure-strategy"
+            :data-key="getAddress(row.exposure.address)"
+            data-field="Exposure amount"
+          >
+            <template v-if="hasExposureUsdPrice(row.exposure)">
+              {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
+              <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
+            </template>
+            <template v-else>
+              <UiExactAmount :exact="formatExactAmount(row.exposure.allocatedAssets, row.vault?.asset.decimals ?? 18, row.vault?.asset.symbol)">
+                {{ getExposureAssetAmount(row.exposure) }}
+              </UiExactAmount>
+              <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
+            </template>
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             orientation="horizontal"

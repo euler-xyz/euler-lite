@@ -102,19 +102,21 @@ export const buildAllocatedVaultExposureDisplayItems = ({
   const utilizedExposureUsd = totalExposureUsd * clampPercentFraction(utilization)
   if (collateralTotalUsd <= 0 && utilizedExposureUsd > 0) return []
 
-  // The accepted-collateral list is the base layer; open interest only
-  // supplies the USD weighting. Accepted collaterals with no current open
-  // interest still render (at $0) — they remain hypothetical exposure, and
-  // dropping them would let backend data decide which accepted collaterals
-  // the user sees. Idle (un-utilized) supply is deliberately excluded: it is
+  // Open interest supplies the USD weighting. Because the split is known here,
+  // collaterals with no current exposure ($0) are omitted — they are accepted
+  // but not currently backing any borrows, so listing them as $0 rows is noise.
+  // (The qualitative fallback, where the split is unknown, still lists every
+  // accepted collateral.) Idle (un-utilized) supply is likewise excluded: it is
   // not collateral exposure, so collateral values sum to the utilized amount.
-  const collateralItems = collateralGroups.map(group => ({
-    asset: group.asset,
-    valueUsd: collateralTotalUsd > 0
-      ? utilizedExposureUsd * group.openInterestUsd / collateralTotalUsd
-      : 0,
-    vaultCount: group.vaultCount,
-  }))
+  const collateralItems = collateralGroups
+    .map(group => ({
+      asset: group.asset,
+      valueUsd: collateralTotalUsd > 0
+        ? utilizedExposureUsd * group.openInterestUsd / collateralTotalUsd
+        : 0,
+      vaultCount: group.vaultCount,
+    }))
+    .filter(item => item.valueUsd > 0)
 
   return mergeVaultExposureDisplayItems(collateralItems)
 }
@@ -135,7 +137,8 @@ export interface VaultExposureDisplay {
  *  - The split is fully determined without open-interest data when nothing is
  *    utilized, or when the vault accepts a single collateral so all utilized
  *    exposure structurally belongs to it → exact `ready` items, same shape as
- *    the allocated builder.
+ *    the allocated builder (collaterals with no current exposure omitted, so a
+ *    nothing-utilized vault collapses to an empty list).
  *  - Otherwise → qualitative `unavailable` items listing the backing assets
  *    with zero values, so the UI shows *what* the vault is exposed to even
  *    though the USD split is unknown. This mirrors the pre-open-interest
@@ -178,13 +181,16 @@ export const buildFallbackVaultExposureDisplay = ({
     const isExactlyKnown = utilizedExposureUsd <= 0
       || (collateralGroups.length === 1 && acceptedCollateralCount === 1)
     if (isExactlyKnown) {
-      // Accepted collaterals stay listed even with nothing utilized — same
-      // base-layer rule as the allocated builder.
-      const collateralItems = collateralGroups.map(group => ({
-        asset: group.asset,
-        valueUsd: utilizedExposureUsd > 0 ? utilizedExposureUsd : 0,
-        vaultCount: group.vaultCount,
-      }))
+      // The split is known, so drop collaterals with no current exposure ($0) —
+      // same rule as the allocated builder. When nothing is utilized every
+      // collateral is $0, so this collapses to an empty ready split ("-").
+      const collateralItems = collateralGroups
+        .map(group => ({
+          asset: group.asset,
+          valueUsd: utilizedExposureUsd > 0 ? utilizedExposureUsd : 0,
+          vaultCount: group.vaultCount,
+        }))
+        .filter(item => item.valueUsd > 0)
 
       return {
         valueState: 'ready',
