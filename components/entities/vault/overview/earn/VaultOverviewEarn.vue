@@ -24,7 +24,7 @@ const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
 
     <VaultOverviewBlockHistory
       :vault="vault"
-      :default-open="false"
+      :default-open="true"
     />
 
     <VaultOverviewEarnBlockExposure
