@@ -62,8 +62,25 @@ if ! pnpm -C packages/euler-v2-sdk run build; then
   pnpm -C packages/euler-v2-sdk run build
 fi
 
+node - <<'NODE'
+const fs = require('node:fs')
+
+const packageJsonPath = 'packages/euler-v2-sdk/package.json'
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+
+if (!packageJson.name) {
+  throw new Error(`${packageJsonPath} is missing a package name`)
+}
+
+if (!packageJson.version) {
+  packageJson.version = process.env.EULER_SDK_PREVIEW_VERSION || '0.0.0-preview.0'
+  fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+  console.log(`Injected preview package version ${packageJson.version} into ${packageJsonPath}.`)
+}
+NODE
+
 mkdir -p "$SDK_PACK_DIR"
-npm pack ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
+npm pack --ignore-scripts ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
 
 cd /usr/src/app
 npm install --no-save --package-lock=false --ignore-scripts "$SDK_PACK_DIR"/*.tgz
