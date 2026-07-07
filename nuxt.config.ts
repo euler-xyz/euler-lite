@@ -291,19 +291,73 @@ export default defineNuxtConfig({
         },
       },
 
-      // Keep public bridge endpoints edge-cacheable. Internal endpoints are
-      // intentionally no-store at the CDN so the origin-side first-party
-      // boundary is evaluated on every request.
+      // SWR-friendly API endpoints. Each handler already sets the browser
+      // Cache-Control policy. The catch-all below would otherwise stamp
+      // CDN-Cache-Control: no-store, so these explicit rules let Cloudflare
+      // collapse the same public payload across users while handlers still
+      // drive browser caching.
+      '/api/internal/vaults': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
       '/api/public/**': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/internal/**': {
+      '/api/internal/labels/**': {
         headers: {
-          'CDN-Cache-Control': 'no-store',
-          'Cloudflare-CDN-Cache-Control': 'no-store',
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/euler-chains': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/merkl/opportunities': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/fuul/incentives': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/intrinsic-apy-overrides': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
+      // Token lists change infrequently — 5 min edge cache, 10 min SWR.
+      '/api/internal/token-list': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
+      // TOS changes very rarely — cache aggressively. Browser gets a
+      // 5 min window; edge can serve for an hour and SWR for a day.
+      '/api/internal/tos': {
+        headers: {
+          'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+          'CDN-Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
         },
       },
 
