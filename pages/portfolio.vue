@@ -23,11 +23,10 @@ const {
 const { refresh: refreshFreshAccount } = useFreshAccount()
 const { rewards } = useSdkRewards()
 const { locks, refreshLocks } = useREULLocks()
-const { isConnected, address } = useWagmi()
+const { isConnected, address, spyAddress, effectiveAddress } = useEffectiveAddress()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
-const { isSpyMode, spyAddress } = useSpyMode()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
@@ -94,7 +93,7 @@ const netAssetValueDisplay = computed(() => {
 const updatePositions = async (
   options: { portfolioSource?: 'fast' | 'fresh', preemptPortfolio?: boolean } = {},
 ) => {
-  const targetAddress = isSpyMode.value ? spyAddress.value : address.value
+  const targetAddress = effectiveAddress.value
   if (!targetAddress) return
   // Refresh the rich portfolio snapshot (drives the UI on this page) and the
   // plan-time Account snapshot in parallel. The two write into disjoint stores,

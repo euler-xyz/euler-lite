@@ -45,13 +45,13 @@ const {
   dismissExecutionError,
 } = useTxBatch()
 
-const { isSpyMode, spyAddress } = useSpyMode()
-const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
+const { isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { chainId: wagmiChainId } = useWagmi()
 const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
-const owner = computed(() => (isSpyMode.value ? spyAddress.value : walletAddress.value) || '')
+const owner = computed(() => effectiveAddress.value || '')
 const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
 const ownerSubAccountKey = computed(() => {
   try {

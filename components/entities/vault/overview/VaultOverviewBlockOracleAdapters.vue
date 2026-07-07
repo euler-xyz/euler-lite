@@ -89,8 +89,10 @@ const routerRecognition = computed(() => {
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
 
+const { copyToClipboard } = useClipboardCopy()
+
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address).catch(() => {})
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)

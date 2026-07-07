@@ -3,6 +3,7 @@ import { isEVault, type SecuritizeCollateralVault, type EVault } from '@eulerxyz
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { formatCompactUsdValue } from '~/utils/string-utils'
 import { formatAssetValue } from '~/utils/sdk-prices'
+import { logWarn } from '~/utils/errorHandling'
 import {
   getVaultAddress,
   getMiniDiagram,
@@ -127,26 +128,49 @@ const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { forc
       const supplyCapHasPrice = supplyCapRaw > 0n && supplyCapRaw < maxUint256
       const borrowCapHasPrice = borrowCapRaw > 0n && borrowCapRaw < maxUint256
 
-      const [supplyPrice, borrowPrice, liquidityPrice, supplyCapPrice, borrowCapPrice] = await Promise.all([
-        formatAssetValue(totalAssets, vault, 'off-chain'),
-        formatAssetValue(borrow, vault, 'off-chain'),
-        formatAssetValue(liquidity, vault, 'off-chain'),
-        supplyCapHasPrice ? formatAssetValue(supplyCapRaw, vault, 'off-chain') : null,
-        borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
-      ])
+      try {
+        const [supplyPrice, borrowPrice, liquidityPrice, supplyCapPrice, borrowCapPrice] = await Promise.all([
+          formatAssetValue(totalAssets, vault, 'off-chain'),
+          formatAssetValue(borrow, vault, 'off-chain'),
+          formatAssetValue(liquidity, vault, 'off-chain'),
+          supplyCapHasPrice ? formatAssetValue(supplyCapRaw, vault, 'off-chain') : null,
+          borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
+        ])
 
-      marketEntries.set(addr, {
-        supply: formatUsdOrDisplay(supplyPrice),
-        supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
-        borrow: formatUsdOrDisplay(borrowPrice),
-        borrowUsd: borrowPrice.hasPrice ? borrowPrice.usdValue : 0,
-        liquidity: formatUsdOrDisplay(liquidityPrice),
-        liquidityUsd: liquidityPrice.hasPrice ? liquidityPrice.usdValue : 0,
-        supplyCap: formatCapDisplay(supplyCapRaw, supplyCapPrice ? formatUsdOrDisplay(supplyCapPrice) : null).display,
-        supplyCapUsd: supplyCapPrice?.hasPrice ? supplyCapPrice.usdValue : undefined,
-        borrowCap: formatCapDisplay(borrowCapRaw, borrowCapPrice ? formatUsdOrDisplay(borrowCapPrice) : null).display,
-        borrowCapUsd: borrowCapPrice?.hasPrice ? borrowCapPrice.usdValue : undefined,
-      })
+        marketEntries.set(addr, {
+          supply: formatUsdOrDisplay(supplyPrice),
+          supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
+          supplyHasPrice: supplyPrice.hasPrice,
+          borrow: formatUsdOrDisplay(borrowPrice),
+          borrowUsd: borrowPrice.hasPrice ? borrowPrice.usdValue : 0,
+          liquidity: formatUsdOrDisplay(liquidityPrice),
+          liquidityUsd: liquidityPrice.hasPrice ? liquidityPrice.usdValue : 0,
+          supplyCap: formatCapDisplay(supplyCapRaw, supplyCapPrice ? formatUsdOrDisplay(supplyCapPrice) : null).display,
+          supplyCapUsd: supplyCapPrice?.hasPrice ? supplyCapPrice.usdValue : undefined,
+          borrowCap: formatCapDisplay(borrowCapRaw, borrowCapPrice ? formatUsdOrDisplay(borrowCapPrice) : null).display,
+          borrowCapUsd: borrowCapPrice?.hasPrice ? borrowCapPrice.usdValue : undefined,
+        })
+      }
+      catch (e) {
+        // A rejected price fetch must not blank the whole market: leaving the
+        // entry absent reads as a perpetual "loading" exposure cell. Record it
+        // as priced-out (supplyHasPrice: false) so exposure degrades to the
+        // qualitative/unavailable state instead of spinning forever.
+        logWarn('DiscoveryMarketAccordion/loadVaultUsdValues', e)
+        marketEntries.set(addr, {
+          supply: '-',
+          supplyUsd: 0,
+          supplyHasPrice: false,
+          borrow: '-',
+          borrowUsd: 0,
+          liquidity: '-',
+          liquidityUsd: 0,
+          supplyCap: '-',
+          supplyCapUsd: undefined,
+          borrowCap: '-',
+          borrowCapUsd: undefined,
+        })
+      }
     }),
   )
 

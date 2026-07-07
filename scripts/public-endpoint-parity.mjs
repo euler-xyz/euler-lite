@@ -511,7 +511,7 @@ async function loadLocalEnvFiles() {
   const loaded = []
   for (const envFile of envFiles) {
     const filePath = path.resolve(ROOT_DIR, envFile)
-    let content = ''
+    let content
     try {
       content = await fs.readFile(filePath, 'utf8')
     }

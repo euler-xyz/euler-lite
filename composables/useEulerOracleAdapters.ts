@@ -37,6 +37,13 @@ const normalizeOracleAdapterMap = (
 const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return
 
+  // The dataset is fetched whole per chain, so once it's loaded a lookup miss
+  // means the adapter genuinely isn't in it — reloading cannot surface it and
+  // would replace oracleAdaptersRef with a fresh object, re-triggering every
+  // subscriber (see the loadOracleAdapter miss path, which lands here on each
+  // call for an unlisted adapter).
+  if (oracleAdaptersChainId.value === chainId) return
+
   const inflight = pendingOracleAdapterLoads.get(chainId)
   if (inflight) {
     await inflight
@@ -78,8 +85,17 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
   await Promise.all(addresses.map(addr => loadOracleAdapter(chainId, addr)))
 }
 
+// Module-level singleton: toReactive() wraps the computed in reactive(), whose
+// isReadonly() probe reads a property through the proxy — a reactive read of
+// the computed at construction time. Built per-call inside useEulerOracleAdapters,
+// that read would subscribe whatever effect is currently running (e.g. a computed
+// that reaches useEulerLabels() mid-evaluation) to oracleAdaptersRef, coupling
+// unrelated reactive state to oracle-adapter loads. Constructing it once at
+// module init (no active effect) keeps the subscription surface to actual readers.
+const oracleAdapters = toReactive(computed(() => oracleAdaptersRef.value))
+
 export const useEulerOracleAdapters = () => ({
-  oracleAdapters: toReactive(computed(() => oracleAdaptersRef.value)),
+  oracleAdapters,
   loadOracleAdapter,
   loadOracleAdapters,
   loadAllOracleAdapters,

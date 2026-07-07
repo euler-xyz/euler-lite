@@ -48,13 +48,8 @@ let lastFullFetchAt = 0
 export const useWallets = () => {
   const { loadedChainId } = useVaults()
   const { getByType } = useVaultRegistry()
-  const { address, isConnected } = useWagmi()
+  const { isConnected, isSpyMode, effectiveAddress: balanceAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
-
-  const { spyAddress, isSpyMode } = useSpyMode()
-  const balanceAddress = computed(() =>
-    isSpyMode.value ? spyAddress.value : address.value,
-  )
 
   const updateBalances = async () => {
     // Guard: must be connected or in spy mode
@@ -325,14 +320,13 @@ export const useWallets = () => {
 export const useFullBalances = (): void => {
   const { updateBalances } = useWallets()
   const { chainId } = useEulerAddresses()
-  const { address } = useWagmi()
-  const { spyAddress, isSpyMode } = useSpyMode()
+  const { effectiveAddress } = useEffectiveAddress()
 
   onMounted(() => {
     fullBalancesRequesters.value++
     if (fullBalancesRequesters.value !== 1) return // not the first requester, data already in-flight / present
 
-    const activeAddress = (isSpyMode.value ? spyAddress.value : address.value) ?? ''
+    const activeAddress = effectiveAddress.value ?? ''
     const expectedKey = `${chainId.value}:${activeAddress.toLowerCase()}`
     const isFresh = lastFullFetchKey === expectedKey && (Date.now() - lastFullFetchAt) < FULL_BALANCES_TTL_MS
 

@@ -1385,12 +1385,12 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 }
 
 export const useTxBatch = () => {
-  const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
+  const { chainId: wagmiChainId } = useWagmi()
+  const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
 
   const owner = computed(
-    () => (isSpyMode.value ? spyAddress.value : walletAddress.value) as Address | undefined,
+    () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
   const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan } = useEulerTx()

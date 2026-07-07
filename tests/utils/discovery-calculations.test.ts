@@ -17,6 +17,7 @@ import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 
 vi.mock('~/entities/euler/labels', () => ({
   getEulerLabelEntityLogo: (logo: string) => `/entities/${logo}`,
@@ -257,6 +258,7 @@ describe('attribute stats matrix', () => {
     const usd: VaultUsdCacheEntry = {
       supply: '$1K',
       supplyUsd: 1000,
+      supplyHasPrice: true,
       borrow: '$500',
       borrowUsd: 500,
       liquidity: '$500',
@@ -327,6 +329,7 @@ describe('attribute stats matrix', () => {
       [vault.address.toLowerCase(), {
         supply: '$1K',
         supplyUsd: 1000,
+        supplyHasPrice: true,
         borrow: '$500',
         borrowUsd: 500,
         liquidity: '$500',
@@ -409,7 +412,7 @@ describe('attribute config matrix', () => {
         socializeDebt: true,
       },
       interestRateModel: {
-        type: 0,
+        type: INTEREST_RATE_MODEL_TYPE.KINK,
         address: '0xIrm',
       },
     } as unknown as EVault
@@ -422,6 +425,8 @@ describe('attribute config matrix', () => {
 
     expect(byRow.get('interestFee')!.display).toBe('10.00%')
     expect(byRow.get('maxLiqDiscount')!.display).toBe('15%')
+    expect(byRow.get('irmType')!.display).toBe('Kink')
+    expect(byRow.get('irmType')!.hint).toBeUndefined()
   })
 })
 

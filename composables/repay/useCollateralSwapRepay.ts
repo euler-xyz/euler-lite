@@ -74,9 +74,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const router = useRouter()
   const modal = useModal()
   const { error } = useToast()
-  const { isConnected, address } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
-  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+  const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
