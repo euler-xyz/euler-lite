@@ -14,6 +14,7 @@ export type VaultHistoryMetric
     | 'totalBorrows'
     | 'utilization'
     | 'cash'
+    | 'sharePrice'
 export type VaultHistoryPoint = {
   timestamp: string
   totalAssets: number | null
@@ -109,11 +110,12 @@ export const getVaultHistoryTimeRange = (
   return { from, to }
 }
 
-export const buildVaultTotalsHistoryPath = (
+const buildTotalsHistoryPath = (
+  vaultKind: 'evk' | 'earn',
   chainId: string | number,
   address: string,
   timeframe: VaultHistoryTimeframe,
-  nowMs = Date.now(),
+  nowMs: number,
 ): string => {
   const { from, to } = getVaultHistoryTimeRange(timeframe, nowMs)
   const params = new URLSearchParams({
@@ -122,8 +124,22 @@ export const buildVaultTotalsHistoryPath = (
     to: String(to),
   })
 
-  return `/api/v3/evk/vaults/${encodeURIComponent(String(chainId))}/${encodeURIComponent(address)}/totals?${params.toString()}`
+  return `/api/v3/${vaultKind}/vaults/${encodeURIComponent(String(chainId))}/${encodeURIComponent(address)}/totals?${params.toString()}`
 }
+
+export const buildVaultTotalsHistoryPath = (
+  chainId: string | number,
+  address: string,
+  timeframe: VaultHistoryTimeframe,
+  nowMs = Date.now(),
+): string => buildTotalsHistoryPath('evk', chainId, address, timeframe, nowMs)
+
+export const buildEarnVaultTotalsHistoryPath = (
+  chainId: string | number,
+  address: string,
+  timeframe: VaultHistoryTimeframe,
+  nowMs = Date.now(),
+): string => buildTotalsHistoryPath('earn', chainId, address, timeframe, nowMs)
 
 export const hasFiniteCap = (cap: bigint | null | undefined): cap is bigint =>
   typeof cap === 'bigint' && cap > 0n && cap < maxUint256
