@@ -1,5 +1,6 @@
 import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
+import { INTERNAL_API_BASE } from '~/utils/api-url-env'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
@@ -89,7 +90,7 @@ const buildAppApiPath = (path: string) => {
 }
 
 // The SDK appends `/v3/...` paths, so the same-origin base is `/api/internal`.
-const buildV3ProxyApiPath = () => buildAppApiPath('/api/internal')
+const buildV3ProxyApiPath = () => buildAppApiPath(INTERNAL_API_BASE)
 // Per-host proxies wrap the SDK's direct upstream calls so they (1) share
 // one server-side TTL cache across browser tabs, (2) take the cold-TLS
 // hit once at proxy startup rather than on every user, and (3) keep

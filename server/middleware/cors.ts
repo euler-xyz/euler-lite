@@ -1,5 +1,5 @@
 import type { H3Event } from 'h3'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createError, getCookie, getRequestURL, setCookie, setResponseHeader, sendNoContent } from 'h3'
 import { logger } from '~/server/utils/logger'
 import { isInternalRequest } from '~/server/utils/internal-headers'
@@ -41,18 +41,42 @@ function parseAllowedOrigins(): Set<string> {
 
 let allowedOrigins: Set<string> | null = null
 const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
-const FIRST_PARTY_COOKIE_VALUE = randomBytes(32).toString('base64url')
+
+// The cookie is an advisory first-party marker, not a security boundary:
+// anyone can obtain it from `GET /`, and the internal sentinel
+// (see server/utils/internal-headers.ts) bypasses this check entirely.
+// Its job is to let same-origin browser GETs (which carry no Origin
+// header) through the no-Origin rejection below.
+//
+// Derive the value from FIRST_PARTY_COOKIE_SECRET when configured so
+// every replica and every deploy agrees on it — a per-process random
+// value would 403 all open tabs after a restart and flap behind a
+// load balancer. Without the secret, fall back to per-process random;
+// the cookie re-issue on the 403 path below still lets browser tabs
+// self-heal on their next request.
+const FIRST_PARTY_COOKIE_SECRET = process.env.FIRST_PARTY_COOKIE_SECRET?.trim()
+const FIRST_PARTY_COOKIE_VALUE = FIRST_PARTY_COOKIE_SECRET
+  ? createHash('sha256').update(`euler-lite-first-party:${FIRST_PARTY_COOKIE_SECRET}`).digest('base64url')
+  : randomBytes(32).toString('base64url')
+const FIRST_PARTY_COOKIE_BUFFER = Buffer.from(FIRST_PARTY_COOKIE_VALUE)
 
 function getSingleHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value
 }
 
 function matchesFirstPartyCookie(value: string | undefined): boolean {
-  if (!value || value.length !== FIRST_PARTY_COOKIE_VALUE.length) {
+  if (!value) {
     return false
   }
 
-  return timingSafeEqual(Buffer.from(value), Buffer.from(FIRST_PARTY_COOKIE_VALUE))
+  // Compare byte lengths, not string lengths: a multibyte cookie value can
+  // match the character count while timingSafeEqual throws on unequal buffers.
+  const provided = Buffer.from(value)
+  if (provided.length !== FIRST_PARTY_COOKIE_BUFFER.length) {
+    return false
+  }
+
+  return timingSafeEqual(provided, FIRST_PARTY_COOKIE_BUFFER)
 }
 
 function isFirstPartyRequest(event: H3Event): boolean {
@@ -149,6 +173,12 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 403, statusMessage: 'Origin not allowed' })
   }
   else if (!origin && !isFirstPartyRequest(event) && !isInternalRequest(event) && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
+    // Re-issue the cookie on the rejection so a browser tab holding a stale
+    // or expired cookie (redeploy, 12h maxAge) recovers on its next request
+    // instead of being broken until a hard reload. Error responses are
+    // forced no-store (see cache-error-responses), so this never reaches a
+    // shared CDN cache.
+    setFirstPartyCookie(event, url)
     logger.warn({ ctx: 'cors', path: url.pathname }, 'rejected internal endpoint call without Origin')
     throw createError({
       statusCode: 403,

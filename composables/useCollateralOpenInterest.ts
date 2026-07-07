@@ -1,3 +1,4 @@
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 import {
   findOpenInterestMapForVault,
   type OpenInterestCollateralMapResponse,
@@ -39,7 +40,7 @@ export const useCollateralOpenInterest = () => {
     hasError.value = false
     pendingChainId = chainIdToLoad
     const loadPromise = $fetch<OpenInterestCollateralMapResponse>(
-      `/api/internal/v3/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
+      `${V3_API_PROXY_URL}/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
     )
       .then((response) => {
         if (requestId !== activeRequestId || currentChainId.value !== chainIdToLoad) return

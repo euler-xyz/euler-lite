@@ -1,5 +1,6 @@
 export const DEFAULT_V3_API_URL = 'https://v3.euler.finance'
-export const V3_API_PROXY_URL = '/api/internal/v3'
+export const INTERNAL_API_BASE = '/api/internal'
+export const V3_API_PROXY_URL = `${INTERNAL_API_BASE}/v3`
 
 const V3_API_ENV_KEYS = [
   'V3_API_URL',

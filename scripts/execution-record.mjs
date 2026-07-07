@@ -512,7 +512,13 @@ async function preflightV3Proxy({ appUrl, fixture }) {
     try {
       response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          // Internal sentinel (see server/utils/internal-headers.ts) so the
+          // no-Origin rejection in server/middleware/cors.ts doesn't 403 this
+          // preflight against non-dev servers.
+          'cf-connecting-ip': '127.0.0.1',
+        },
         body: JSON.stringify({
           chainId: Number(fixture.chainId),
           addresses: [address],

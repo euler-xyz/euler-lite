@@ -130,6 +130,71 @@ describe('cors internal API boundary', () => {
     }
   })
 
+  it('rejects a malformed multibyte cookie value with 403 instead of crashing', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+    // Same character count as the expected value (43) but more bytes —
+    // must not reach timingSafeEqual with unequal buffer lengths.
+    const malformed = `é${'a'.repeat(42)}`
+
+    try {
+      handler(makeEvent('/api/internal/token-list', {}, 'GET', { euler_lite_first_party: malformed }))
+      throw new Error('Expected internal API call to be rejected')
+    }
+    catch (err) {
+      expect(err).toMatchObject({
+        statusCode: 403,
+        statusMessage: 'Forbidden',
+      })
+    }
+  })
+
+  it('re-issues the first-party cookie on the no-Origin rejection so browsers can recover', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+    const rejected = makeEvent('/api/internal/token-list')
+
+    try {
+      handler(rejected)
+      throw new Error('Expected internal API call to be rejected')
+    }
+    catch (err) {
+      expect(err).toMatchObject({ statusCode: 403 })
+    }
+
+    expect(Object.keys(rejected.cookies)).toHaveLength(1)
+
+    const retried = makeEvent('/api/internal/token-list', {}, 'GET', rejected.cookies)
+    expect(handler(retried)).toBeUndefined()
+  })
+
+  it('derives a stable first-party cookie value across processes when the secret is set', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('FIRST_PARTY_COOKIE_SECRET', 'stable-secret')
+    const first = getFirstPartyCookies(await loadHandler())
+    const second = getFirstPartyCookies(await loadHandler())
+
+    expect(first).toEqual(second)
+  })
+
+  it('accepts a cookie minted by another instance sharing the same secret', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('FIRST_PARTY_COOKIE_SECRET', 'stable-secret')
+    const cookiesFromInstanceA = getFirstPartyCookies(await loadHandler())
+    const handlerB = await loadHandler()
+    const event = makeEvent('/api/internal/token-list', {}, 'GET', cookiesFromInstanceA)
+
+    expect(handlerB(event)).toBeUndefined()
+  })
+
+  it('falls back to per-process cookie values without the secret', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const first = getFirstPartyCookies(await loadHandler())
+    const second = getFirstPartyCookies(await loadHandler())
+
+    expect(first).not.toEqual(second)
+  })
+
   it('rejects spoofed same-origin fetch metadata without a first-party cookie', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     const handler = await loadHandler()
