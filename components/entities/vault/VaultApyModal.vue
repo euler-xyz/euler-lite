@@ -6,8 +6,10 @@ import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignAprPercent, rewardCampai
 import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
 
 const emits = defineEmits(['close'])
-const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, totalSupplyAPY, baseApyAverageLabel, rewardVaultAddress, inline = false, close = true } = defineProps<{
-  lendingAPY: number
+const { mode, borrowingAPY, lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, totalSupplyAPY, baseApyAverageLabel, rewardVaultAddress, inline = false, close = true } = defineProps<{
+  mode: 'borrow' | 'supply'
+  borrowingAPY?: number
+  lendingAPY?: number
   intrinsicAPY?: number
   intrinsicApyInfo?: IntrinsicApyInfo
   campaigns?: RewardCampaign[]
@@ -18,6 +20,10 @@ const { lendingAPY, intrinsicAPY, intrinsicApyInfo, campaigns, totalSupplyAPY, b
   close?: boolean
 }>()
 
+const isBorrow = computed(() => mode === 'borrow')
+const prefix = computed(() => (isBorrow.value ? 'borrow' : 'supply'))
+const baseAPY = computed(() => (isBorrow.value ? borrowingAPY ?? 0 : lendingAPY ?? 0))
+
 const rewardsTotalAPY = computed(() => {
   if (!campaigns || campaigns.length === 0) return null
   const total = campaigns.reduce((sum, c) => sum + rewardCampaignAprPercent(c), 0)
@@ -26,10 +32,15 @@ const rewardsTotalAPY = computed(() => {
 
 const intrinsicApyValue = computed(() => intrinsicAPY ?? 0)
 const hasIntrinsicApy = computed(() => intrinsicApyValue.value > 0)
-const totalSupplyApy = computed(() => totalSupplyAPY ?? combineApyWithIntrinsic(lendingAPY, intrinsicApyValue.value) + (rewardsTotalAPY.value || 0))
+const totalApy = computed(() => {
+  if (isBorrow.value) {
+    return combineApyWithIntrinsic(baseAPY.value, intrinsicApyValue.value) - (rewardsTotalAPY.value || 0)
+  }
+  return totalSupplyAPY ?? combineApyWithIntrinsic(baseAPY.value, intrinsicApyValue.value) + (rewardsTotalAPY.value || 0)
+})
 
 const rewardsInfo = computed(() => {
-  return rewardCampaignDisplays(campaigns, 'supply', rewardVaultAddress)
+  return rewardCampaignDisplays(campaigns, mode, rewardVaultAddress)
 })
 
 const handleClose = () => {
@@ -39,7 +50,7 @@ const handleClose = () => {
 
 <template>
   <BaseModalWrapper
-    title="Supply APY"
+    :title="isBorrow ? 'Borrow APY' : 'Supply APY'"
     :inline="inline"
     :close="close"
     @close="handleClose"
@@ -50,7 +61,16 @@ const handleClose = () => {
       >
         <div class="flex justify-between items-center">
           <div>
-            <p class="mb-4 flex items-center gap-6">
+            <p
+              v-if="isBorrow"
+              class="mb-4"
+            >
+              Borrowing APY
+            </p>
+            <p
+              v-else
+              class="mb-4 flex items-center gap-6"
+            >
               Lending APY
               <span
                 v-if="baseApyAverageLabel"
@@ -63,16 +83,16 @@ const handleClose = () => {
               </span>
             </p>
             <p class="text-content-primary">
-              Yield from lending on Euler
+              {{ isBorrow ? 'Cost of borrowing on Euler' : 'Yield from lending on Euler' }}
             </p>
           </div>
           <div
             class="text-h5"
             data-id="data-point"
-            data-field="supply-apy-base"
-            :data-value="lendingAPY"
+            :data-field="`${prefix}-apy-base`"
+            :data-value="baseAPY"
           >
-            {{ formatNumber(lendingAPY) }}%
+            {{ formatNumber(baseAPY) }}%
           </div>
         </div>
         <div
@@ -84,12 +104,14 @@ const handleClose = () => {
               Intrinsic APY<span
                 v-if="intrinsicApyInfo?.provider"
                 data-id="data-point"
-                data-field="supply-apy-intrinsic-provider"
+                :data-field="`${prefix}-apy-intrinsic-provider`"
                 :data-value="intrinsicApyInfo.provider"
               > ({{ intrinsicApyInfo.provider }})</span>
             </p>
             <p class="text-content-primary">
-              Yield intrinsic to the supplied asset, such as staking yield or external rewards, might be compounded with lending yield
+              {{ isBorrow
+                ? 'Yield intrinsic to the borrowed asset, such as staking yield, which increases effective borrowing cost'
+                : 'Yield intrinsic to the supplied asset, such as staking yield or external rewards, might be compounded with lending yield' }}
             </p>
             <a
               v-if="intrinsicApyInfo?.source"
@@ -98,7 +120,7 @@ const handleClose = () => {
               rel="noopener noreferrer"
               class="text-sm text-content-primary underline mt-4 inline-block"
               data-id="data-point"
-              data-field="supply-apy-intrinsic-source"
+              :data-field="`${prefix}-apy-intrinsic-source`"
               :data-value="intrinsicApyInfo.source"
             >
               Source
@@ -107,7 +129,7 @@ const handleClose = () => {
           <div
             class="text-h5 shrink-0"
             data-id="data-point"
-            data-field="supply-apy-intrinsic"
+            :data-field="`${prefix}-apy-intrinsic`"
             :data-value="intrinsicApyValue"
           >
             {{ formatNumber(intrinsicApyValue) }}%
@@ -133,16 +155,16 @@ const handleClose = () => {
         <div
           class="text-h5"
           data-id="data-point"
-          data-field="supply-apy-rewards-total"
+          :data-field="`${prefix}-apy-rewards-total`"
           :data-value="rewardsTotalAPY"
         >
-          + {{ formatNumber(rewardsTotalAPY) }}%
+          {{ isBorrow ? '-' : '+' }} {{ formatNumber(rewardsTotalAPY) }}%
         </div>
       </div>
       <div
         v-if="rewardsInfo.length > 0"
-        data-id="supply-apy-reward-campaigns"
-        data-list="supply-apy-reward-campaigns"
+        :data-id="`${prefix}-apy-reward-campaigns`"
+        :data-list="`${prefix}-apy-reward-campaigns`"
         :data-count="rewardsInfo.length"
         :data-rendered-count="rewardsInfo.length"
       >
@@ -150,14 +172,15 @@ const handleClose = () => {
           v-for="reward in rewardsInfo"
           :key="reward.id"
           class="flex justify-between items-center mb-16"
-          data-id="supply-apy-reward-campaign"
-          data-list="supply-apy-reward-campaigns"
+          :data-id="`${prefix}-apy-reward-campaign`"
+          :data-list="`${prefix}-apy-reward-campaigns`"
           :data-key="reward.parityKey"
         >
           <div class="flex">
             <img
               v-if="reward.rewardToken.icon"
-              class="w-20 h-20 rounded-full"
+              class="w-20 h-20"
+              :class="{ 'rounded-full': !isBorrow }"
               :src="reward.rewardToken.icon"
               alt="Reward token logo"
             >
@@ -165,7 +188,7 @@ const handleClose = () => {
               class="ml-12"
               data-id="data-point"
               :data-key="reward.parityKey"
-              data-field="supply-apy-reward-token"
+              :data-field="`${prefix}-apy-reward-token`"
               :data-value="reward.rewardToken.symbol"
             >
               {{ reward.rewardToken.symbol }}
@@ -179,7 +202,7 @@ const handleClose = () => {
                 class="underline"
                 data-id="data-point"
                 :data-key="reward.parityKey"
-                data-field="supply-apy-reward-provider"
+                :data-field="`${prefix}-apy-reward-provider`"
                 :data-value="PROVIDER_LABELS[reward.source] || reward.source"
                 @click.stop
               ><img
@@ -191,7 +214,7 @@ const handleClose = () => {
                 v-else
                 data-id="data-point"
                 :data-key="reward.parityKey"
-                data-field="supply-apy-reward-provider"
+                :data-field="`${prefix}-apy-reward-provider`"
                 :data-value="PROVIDER_LABELS[reward.source] || reward.source"
               >
                 <img
@@ -201,10 +224,16 @@ const handleClose = () => {
                   :alt="PROVIDER_LABELS[reward.source]"
                 >{{ PROVIDER_LABELS[reward.source] || reward.source }}
               </span><span
+                v-if="isBorrow && reward.isCollateralSpecific"
+                data-id="data-point"
+                :data-key="reward.parityKey"
+                data-field="borrow-apy-reward-type"
+                data-value="collateral bonus"
+              >, collateral bonus</span><span
                 v-if="reward.endDate"
                 data-id="data-point"
                 :data-key="reward.parityKey"
-                data-field="supply-apy-reward-end-date"
+                :data-field="`${prefix}-apy-reward-end-date`"
                 :data-value="reward.endDate.toFormat('MMMM dd, yyyy')"
               >, ends {{ reward.endDate.toFormat('MMMM dd, yyyy') }}</span>)
             </p>
@@ -213,7 +242,7 @@ const handleClose = () => {
             class="text-p2"
             data-id="data-point"
             :data-key="reward.parityKey"
-            data-field="supply-apy-reward-apr"
+            :data-field="`${prefix}-apy-reward-apr`"
             :data-value="reward.apr"
           >
             {{ formatNumber(reward.apr) }}%
@@ -222,14 +251,14 @@ const handleClose = () => {
       </div>
     </div>
     <div class="bg-surface-secondary rounded-12 p-16 flex justify-between items-center">
-      <p>Total supply APY</p>
+      <p>{{ isBorrow ? 'Total borrow APY' : 'Total supply APY' }}</p>
       <p
         class="text-h4"
         data-id="data-point"
-        data-field="supply-apy-total"
-        :data-value="totalSupplyApy"
+        :data-field="`${prefix}-apy-total`"
+        :data-value="totalApy"
       >
-        {{ formatNumber(totalSupplyApy) }}%
+        {{ formatNumber(totalApy) }}%
       </p>
     </div>
   </BaseModalWrapper>

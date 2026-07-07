@@ -10,7 +10,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
@@ -135,6 +135,7 @@ const deprecationReason = computed(() =>
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: lendingAPY.value,
     intrinsicAPY: intrinsicAPY.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -235,7 +236,7 @@ watchEffect(async () => {
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
           <UiModalPreviewTrigger
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
           >
@@ -259,7 +260,7 @@ watchEffect(async () => {
           >
             <UiModalPreviewTrigger
               v-if="hasRewards"
-              :component="VaultSupplyApyModal"
+              :component="VaultApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY rewards breakdown"
             >

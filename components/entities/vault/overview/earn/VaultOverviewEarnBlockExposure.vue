@@ -4,7 +4,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 import { DateTime } from 'luxon'
 import { getAddress } from 'viem'
@@ -230,6 +230,7 @@ const getStrategySupplyApy = (strategyVault: EVault) => {
 
 const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
   props: {
+    mode: 'supply',
     lendingAPY: getVaultSupplyApy(strategyVault),
     intrinsicAPY: getVaultIntrinsicApy(strategyVault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(strategyVault, enableIntrinsicApy.value),
@@ -324,7 +325,7 @@ load()
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Supply APY
                 <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="getStrategySupplyApyModalData(row.vault)"
                   aria-label="Show supply APY breakdown"
                 >
@@ -337,7 +338,7 @@ load()
               <div class="text-p2 flex items-center text-accent-600 font-semibold">
                 <UiModalPreviewTrigger
                   v-if="hasSupplyRewards(row.vault.address)"
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="getStrategySupplyApyModalData(row.vault)"
                   aria-label="Show supply APY rewards breakdown"
                 >

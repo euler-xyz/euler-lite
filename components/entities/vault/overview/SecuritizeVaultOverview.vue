@@ -11,7 +11,7 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { formatMarketAvailability } from '~/utils/vault-display'
-import { VaultSupplyApyModal } from '#components'
+import { VaultApyModal } from '#components'
 import { getAddress, maxUint256 } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
@@ -65,6 +65,7 @@ const supplyApyWithRewards = computed(() => intrinsicApy.value + rewardSupplyAPY
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: 0, // Securitize vaults don't have interest rates
     intrinsicAPY: intrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -261,7 +262,7 @@ const supplyCapPercentageDisplay = computed(() => {
         <span class="flex items-center gap-4">
           <UiModalPreviewTrigger
             v-if="hasSupplyRewards(vault.address)"
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY rewards breakdown"
           >
