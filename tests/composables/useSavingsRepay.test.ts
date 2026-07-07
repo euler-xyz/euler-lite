@@ -221,6 +221,13 @@ describe('useSavingsRepay', () => {
       isSpyMode: ref(false),
       spyAddress: ref(null),
     }))
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(USER),
+      isConnected: ref(true),
+      isSpyMode: ref(false),
+      spyAddress: ref(null),
+      effectiveAddress: ref(USER),
+    }))
   })
 
   afterEach(() => {

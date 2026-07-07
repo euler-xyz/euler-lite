@@ -83,10 +83,8 @@ const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPlugi
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
-const { isConnected, address } = useWagmi()
-const { isSpyMode, spyAddress } = useSpyMode()
+const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId } = useEulerAddresses()
-const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 

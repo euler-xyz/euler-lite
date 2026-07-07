@@ -56,8 +56,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   marketLabel?: string
 }>()
 
-const { address: walletAddress, chainId: currentChainId } = useWagmi()
-const { isSpyMode, spyAddress } = useSpyMode()
+const { address: walletAddress, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { chainId: currentChainId } = useWagmi()
 const { getVault } = useVaultRegistry()
 const { prepareTransactionPlan } = useEulerTx()
 const { eulerCoreAddresses } = useEulerAddresses()
@@ -227,7 +227,7 @@ const market = computed<string | undefined>(() => {
 // mirroring the pill in the batch review's operations list. Sub-account 0 is the
 // main account ("Deposits"); numbered borrow positions are "Position N".
 const positionTag = computed<string | undefined>(() => {
-  const ownerAddr = (isSpyMode.value ? spyAddress.value : walletAddress.value) || ''
+  const ownerAddr = effectiveAddress.value || ''
   if (!subAccount || !ownerAddr) return undefined
   try {
     const idx = getSubAccountId(getAddress(ownerAddr), getAddress(subAccount))
