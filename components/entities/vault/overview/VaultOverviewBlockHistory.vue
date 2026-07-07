@@ -62,7 +62,7 @@ const { enableV3Backend } = useEnvConfig()
 const { getChartColors, isDark } = useThemeColors()
 
 const selectedMetric = ref<VaultHistoryMetric>('totalSupply')
-const selectedDenomination = ref<DenominationOption>('asset')
+const selectedDenomination = ref<DenominationOption>('usd')
 const selectedTimeframe = ref<VaultHistoryTimeframe>('30d')
 const fetchedHistory = shallowRef<VaultHistoryPoint[]>([])
 const fetchedHistoryEnd = ref<number | null>(null)
@@ -149,11 +149,14 @@ const hasSelectedMetricUsdData = computed(() =>
   !isPercentMetric(selectedMetric.value)
   && history.value.some(point => pointUsdValue(point, selectedMetric.value) !== null),
 )
+// While the toggle is hidden (percent metrics, missing USD data) the chart
+// falls back to asset values via the canToggleDenomination guards, but the
+// selection itself is kept so returning to a USD-capable metric restores it.
 const canToggleDenomination = computed(() =>
   !isPercentMetric(selectedMetric.value) && hasSelectedMetricUsdData.value,
 )
 const shouldShowHistoryControls = computed(() =>
-  canToggleDenomination.value || metricOptions.value.length > 1,
+  metricOptions.value.length > 1,
 )
 
 watch(
@@ -162,14 +165,6 @@ watch(
     if (!options.some(option => option.value === selectedMetric.value)) {
       selectedMetric.value = options[0]?.value ?? 'totalSupply'
     }
-  },
-  { immediate: true },
-)
-
-watch(
-  [selectedMetric, canToggleDenomination],
-  () => {
-    if (!canToggleDenomination.value) selectedDenomination.value = 'asset'
   },
   { immediate: true },
 )
@@ -441,33 +436,6 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         class="flex flex-wrap items-center justify-end gap-8 mobile:hidden"
       >
         <div
-          v-if="canToggleDenomination"
-          class="inline-flex h-32 overflow-hidden rounded-12 border border-line-subtle bg-surface p-2 transition-colors hover:border-line focus-within:border-accent-500"
-          role="group"
-          aria-label="Chart denomination"
-        >
-          <button
-            type="button"
-            class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
-            :class="selectedDenomination === 'asset' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
-            :aria-pressed="selectedDenomination === 'asset'"
-            @click="selectedDenomination = 'asset'"
-          >
-            {{ vault.asset.symbol }}
-          </button>
-          <button
-            type="button"
-            class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
-            :class="selectedDenomination === 'usd' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
-            :aria-pressed="selectedDenomination === 'usd'"
-            @click="selectedDenomination = 'usd'"
-          >
-            USD
-          </button>
-        </div>
-
-        <div
-          v-if="metricOptions.length > 1"
           class="relative inline-flex h-32 rounded-8 border border-line-subtle bg-surface transition-colors hover:border-line focus-within:border-accent-500"
         >
           <select
@@ -499,33 +467,6 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
       class="hidden flex-wrap items-center gap-8 mobile:flex"
     >
       <div
-        v-if="canToggleDenomination"
-        class="inline-flex h-32 overflow-hidden rounded-12 border border-line-subtle bg-surface p-2 transition-colors hover:border-line focus-within:border-accent-500"
-        role="group"
-        aria-label="Chart denomination"
-      >
-        <button
-          type="button"
-          class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
-          :class="selectedDenomination === 'asset' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
-          :aria-pressed="selectedDenomination === 'asset'"
-          @click="selectedDenomination = 'asset'"
-        >
-          {{ vault.asset.symbol }}
-        </button>
-        <button
-          type="button"
-          class="h-full min-w-48 cursor-pointer rounded-8 px-8 text-p3 transition-colors focus-visible:outline-none"
-          :class="selectedDenomination === 'usd' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'text-content-secondary hover:bg-card-hover hover:text-content-primary'"
-          :aria-pressed="selectedDenomination === 'usd'"
-          @click="selectedDenomination = 'usd'"
-        >
-          USD
-        </button>
-      </div>
-
-      <div
-        v-if="metricOptions.length > 1"
         class="relative inline-flex h-32 rounded-8 border border-line-subtle bg-surface transition-colors hover:border-line focus-within:border-accent-500"
       >
         <select
@@ -598,6 +539,38 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
         >
           {{ timeframe.label }}
         </button>
+
+        <div
+          v-if="canToggleDenomination"
+          class="h-20 w-[1px] shrink-0 bg-line-subtle"
+          aria-hidden="true"
+        />
+
+        <div
+          v-if="canToggleDenomination"
+          class="contents"
+          role="group"
+          aria-label="Chart denomination"
+        >
+          <button
+            type="button"
+            class="h-32 min-w-48 rounded-8 px-10 text-p3 transition-colors"
+            :class="selectedDenomination === 'usd' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'bg-surface text-content-secondary hover:text-content-primary'"
+            :aria-pressed="selectedDenomination === 'usd'"
+            @click="selectedDenomination = 'usd'"
+          >
+            USD
+          </button>
+          <button
+            type="button"
+            class="h-32 min-w-48 rounded-8 px-10 text-p3 transition-colors"
+            :class="selectedDenomination === 'asset' ? 'bg-accent-600 text-black hover:bg-accent-700' : 'bg-surface text-content-secondary hover:text-content-primary'"
+            :aria-pressed="selectedDenomination === 'asset'"
+            @click="selectedDenomination = 'asset'"
+          >
+            {{ vault.asset.symbol }}
+          </button>
+        </div>
       </div>
     </template>
   </VaultOverviewAccordionSection>
