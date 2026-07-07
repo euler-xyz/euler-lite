@@ -803,7 +803,7 @@ export const CONFIG_ROWS: AttributeRow[] = [
       const label = isVaultCyclicalNote(vault.address)
         ? 'Cyclical note'
         : getIrmTypeLabel(typeof t === 'number' ? t : undefined)
-      return { display: label, kind: 'text', hint: vault.interestRateModel.address }
+      return { display: label, kind: 'text' }
     },
   },
   {
