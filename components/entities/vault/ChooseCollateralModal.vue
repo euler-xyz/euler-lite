@@ -4,7 +4,7 @@ import { getAddress } from 'viem'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 
-import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
 
 const emits = defineEmits(['close'])
 const { productName, symbol, collateralOptions, selected = 0, title = 'Select collateral', apyLabel = 'Supply APY', onSave } = defineProps<{
@@ -39,7 +39,6 @@ const getOptionType = (option: CollateralOption) => {
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'escrow'
   return option.type
 }
-const shortenAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`
 const getSubAccountLabel = (option: CollateralOption) => {
   if (!option.subAccount) return ''
   if (!ownerAddress.value) return shortenAddress(option.subAccount)

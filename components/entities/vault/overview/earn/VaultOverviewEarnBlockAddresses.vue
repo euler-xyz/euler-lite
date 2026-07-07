@@ -2,6 +2,7 @@
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
+import { shortenAddress } from '~/utils/string-utils'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
 const { chainId } = useEulerAddresses()
@@ -21,12 +22,10 @@ const vaultAddresesInfo = computed(() => ([
   },
 ]))
 
-const shortenAddress = (address: string) => {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`
-}
+const { copyToClipboard } = useClipboardCopy()
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address).catch(() => {})
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)

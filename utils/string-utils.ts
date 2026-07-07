@@ -2,6 +2,12 @@ export const truncate = (string = '', length = 6) => {
   return string.slice(0, length) + '...' + string.slice(string.length - 4, string.length)
 }
 
+/**
+ * Shorten an address for display, e.g. "0x1234...cdef".
+ * Thin wrapper over `truncate` so address call sites read intent-first.
+ */
+export const shortenAddress = (address = '') => truncate(address, 6)
+
 // Truncate address to first 19 bytes (0x + 38 hex chars) for subgraph optimization
 export const truncateAddressForSubgraph = (address: string): string => {
   return address.toLowerCase().slice(0, 40)
