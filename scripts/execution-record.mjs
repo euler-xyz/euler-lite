@@ -795,7 +795,7 @@ async function installVaultSnapshotRoute(context, vaultSnapshot) {
   if (!vaultSnapshot) return
   const chainId = String(vaultSnapshot.chainId)
 
-  await context.route(/\/api\/vaults(?:\?|$)/, (route) => {
+  await context.route(/\/api\/internal\/vaults(?:\?|$)/, (route) => {
     const url = new URL(route.request().url())
     if (url.searchParams.get('chainId') !== chainId) {
       return route.fallback()
@@ -821,7 +821,7 @@ async function installV3VaultResolveRoute(context, vaultSnapshot) {
   const chainId = String(vaultSnapshot.chainId)
   const vaultIndex = buildV3VaultResolveIndex(vaultSnapshot)
 
-  await context.route(/\/api\/v3\/v3\/resolve\/vaults(?:\?|$)/, async (route) => {
+  await context.route(/\/api\/internal\/v3\/resolve\/vaults(?:\?|$)/, async (route) => {
     const request = route.request()
     if (request.method().toUpperCase() === 'OPTIONS') {
       return route.fulfill({
@@ -968,7 +968,7 @@ async function installSwapApiRoute(context, swapApiUrl) {
 }
 
 async function installScenarioSubgraphDiscoveryRoute(context, fixture, getScenario) {
-  await context.route(/\/api\/proxy\/subgraph\/\d+(?:\?|$)/, async (route) => {
+  await context.route(/\/api\/internal\/proxy\/subgraph\/\d+(?:\?|$)/, async (route) => {
     const scenarioState = getScenario()
     const scenario = scenarioState?.scenario ?? scenarioState
     if (!isScenarioSubgraphDiscoveryActive(scenarioState)) {
@@ -996,7 +996,7 @@ async function installScenarioSubgraphDiscoveryRoute(context, fixture, getScenar
     }
 
     const url = new URL(request.url())
-    const chainId = Number(url.pathname.match(/\/api\/proxy\/subgraph\/(\d+)/)?.[1])
+    const chainId = Number(url.pathname.match(/\/api\/internal\/proxy\/subgraph\/(\d+)/)?.[1])
     if (!Number.isInteger(chainId)) {
       return route.fallback()
     }

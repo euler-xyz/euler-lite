@@ -72,6 +72,7 @@ describe('cors internal API boundary', () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
+    vi.stubEnv('NUXT_PUBLIC_APP_URL', 'https://app.example')
   })
 
   it('allows public API endpoints from any origin', async () => {
@@ -187,12 +188,12 @@ describe('cors internal API boundary', () => {
     expect(handlerB(event)).toBeUndefined()
   })
 
-  it('falls back to per-process cookie values without the secret', async () => {
+  it('derives a stable first-party cookie value from the app URL when the secret is absent', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     const first = getFirstPartyCookies(await loadHandler())
     const second = getFirstPartyCookies(await loadHandler())
 
-    expect(first).not.toEqual(second)
+    expect(first).toEqual(second)
   })
 
   it('rejects spoofed same-origin fetch metadata without a first-party cookie', async () => {

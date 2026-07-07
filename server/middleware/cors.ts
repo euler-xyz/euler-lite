@@ -49,15 +49,19 @@ const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
 // header) through the no-Origin rejection below.
 //
 // Derive the value from FIRST_PARTY_COOKIE_SECRET when configured so
-// every replica and every deploy agrees on it — a per-process random
-// value would 403 all open tabs after a restart and flap behind a
-// load balancer. Without the secret, fall back to per-process random;
-// the cookie re-issue on the 403 path below still lets browser tabs
-// self-heal on their next request.
+// every replica and every deploy agrees on it. Without the secret, use
+// the configured app/deployment origin as a stable non-secret seed; this
+// keeps the advisory marker consistent behind a load balancer while
+// preserving the existing dev fallback for ad-hoc local hosts.
 const FIRST_PARTY_COOKIE_SECRET = process.env.FIRST_PARTY_COOKIE_SECRET?.trim()
-const FIRST_PARTY_COOKIE_VALUE = FIRST_PARTY_COOKIE_SECRET
-  ? createHash('sha256').update(`euler-lite-first-party:${FIRST_PARTY_COOKIE_SECRET}`).digest('base64url')
-  : randomBytes(32).toString('base64url')
+const FIRST_PARTY_COOKIE_DEPLOYMENT_SEED
+  = process.env.NUXT_PUBLIC_APP_URL?.trim()
+    || process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
+const FIRST_PARTY_COOKIE_VALUE = createHash('sha256')
+  .update(FIRST_PARTY_COOKIE_SECRET
+    ? `euler-lite-first-party-secret:${FIRST_PARTY_COOKIE_SECRET}`
+    : `euler-lite-first-party-deployment:${FIRST_PARTY_COOKIE_DEPLOYMENT_SEED || randomBytes(32).toString('base64url')}`)
+  .digest('base64url')
 const FIRST_PARTY_COOKIE_BUFFER = Buffer.from(FIRST_PARTY_COOKIE_VALUE)
 
 function getSingleHeader(value: string | string[] | undefined): string | undefined {
