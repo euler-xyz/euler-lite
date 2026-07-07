@@ -42,6 +42,16 @@ describe('assertAllowedGraphqlRequest', () => {
     expect(assertAllowedGraphqlRequest(body, JSON_CT, { allowedOperations: MORPHO_OPS })).toBe(body)
   })
 
+  it('accepts every operation in a multi-operation allowlist (markets + positions)', () => {
+    const ops = ['EulerMigrationMorphoMarkets', 'LiteMorphoMigrationPositions'] as const
+    const positionsBody = JSON.stringify({
+      query: '#graphql\nquery LiteMorphoMigrationPositions($chainId: Int!, $address: String!) {\n  userByAddress { marketPositions { market { id } } }\n}',
+      variables: { chainId: 1, address: '0x0000000000000000000000000000000000000001' },
+    })
+    expect(assertAllowedGraphqlRequest(morphoBody(), JSON_CT, { allowedOperations: ops })).toBe(morphoBody())
+    expect(assertAllowedGraphqlRequest(positionsBody, JSON_CT, { allowedOperations: ops })).toBe(positionsBody)
+  })
+
   it('rejects a non-JSON content-type (415)', () => {
     rejectsWith(415, () => assertAllowedGraphqlRequest(morphoBody(), 'text/plain', { allowedOperations: MORPHO_OPS }))
   })

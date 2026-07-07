@@ -19,7 +19,9 @@ export type UserReward = Omit<SdkUserReward, 'provider'> & {
   provider: RewardSource
   streamId?: string
   streamAddress?: Address
-  timestamp?: string
+  // Matches the SDK's `UserReward.timestamp` (ISO string or Unix seconds), so
+  // SDK `userRewards` are assignable without narrowing.
+  timestamp?: string | number
 }
 
 export interface RewardCampaignDisplay {

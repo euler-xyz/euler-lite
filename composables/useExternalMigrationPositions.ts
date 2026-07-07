@@ -839,7 +839,7 @@ export const useExternalMigrationPositions = (options: {
 
   const fetchMorphoMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<(MorphoMigrationCandidate | MetamorphoMigrationCandidate)[]> => {
     try {
-      const res = await fetch('/api/proxy/morpho', {
+      const res = await fetch('/api/internal/proxy/morpho', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

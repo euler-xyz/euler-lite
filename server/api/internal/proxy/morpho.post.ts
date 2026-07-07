@@ -25,8 +25,13 @@ import { assertAllowedGraphqlRequest } from '~/server/utils/graphql-proxy-guard'
 const MORPHO_GRAPHQL_URL = 'https://api.morpho.org/graphql'
 const BROWSER_CACHE_CONTROL = 'no-store'
 
-// The only operation Lite's Morpho migration connector sends to this proxy.
-const MORPHO_ALLOWED_OPERATIONS = ['EulerMigrationMorphoMarkets'] as const
+// The operations Lite's Morpho migration flow sends to this proxy:
+//  - EulerMigrationMorphoMarkets: target-market discovery (SDK connector)
+//  - LiteMorphoMigrationPositions: user position discovery (useExternalMigrationPositions)
+const MORPHO_ALLOWED_OPERATIONS = [
+  'EulerMigrationMorphoMarkets',
+  'LiteMorphoMigrationPositions',
+] as const
 
 const cache = createProxyCache(0)
 const inFlight = createProxyInFlight()

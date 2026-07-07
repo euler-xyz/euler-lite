@@ -180,6 +180,9 @@ const migrationDisabledReason = computed(() => {
   if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return 'This position is not available in your region'
   if (hasQueryFailure.value) return 'Position data is incomplete'
   if (!collateralVault.value || isSecuritizeCollateralVault(collateralVault.value)) return 'Migration requires standard Euler collateral'
+  // buildMigrationRoute only carries the primary collateral, so a multi-collateral
+  // position can't be represented as a single whole-position migration.
+  if (collateralCount.value > 1) return 'Multi-collateral positions can\'t be migrated yet'
   return ''
 })
 
