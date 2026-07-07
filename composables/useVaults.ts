@@ -71,6 +71,7 @@ const isMarketDataResolved = ref(false)
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
 const loadGeneration = ref(0)
+const EARN_VAULT_REGISTRY_WAIT_MS = 10_000
 
 interface UpdateEVaultsOptions {
   verifiedAddresses?: ReadonlySet<string>
@@ -979,16 +980,22 @@ const getEarnVault = async (address: string): Promise<EulerEarn> => {
   const normalizedAddress = getAddress(address)
   const { earnVaults } = useEulerLabels()
 
-  if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
-    await until(computed(() => Boolean(registryGetVault(normalizedAddress)))).toMatch(Boolean)
-  }
-  else {
+  const fetchAndStoreEarnVault = async () => {
     const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'earn') as EulerEarn
     registrySet(normalizedAddress, vault, 'earn')
     return vault
   }
 
-  return registryGetVault(normalizedAddress) as EulerEarn
+  if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
+    await Promise.race([
+      until(computed(() => Boolean(registryGetVault(normalizedAddress)))).toMatch(Boolean),
+      new Promise<void>(resolve => setTimeout(resolve, EARN_VAULT_REGISTRY_WAIT_MS)),
+    ])
+    const cachedVault = registryGetVault(normalizedAddress)
+    return cachedVault ? cachedVault as EulerEarn : await fetchAndStoreEarnVault()
+  }
+
+  return await fetchAndStoreEarnVault()
 }
 const updateVault = async (vaultAddress: string): Promise<EVault | SecuritizeCollateralVault> => {
   const { set: registrySet, isKnownEscrowAddress, getType } = useVaultRegistry()
