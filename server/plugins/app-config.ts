@@ -58,7 +58,7 @@ function readAppConfig() {
     appUrl: env('NUXT_PUBLIC_APP_URL'),
     v3ApiUrl: V3_API_PROXY_URL,
     // The client uses this to decide whether the SDK's "fast" instance routes
-    // reads via /api/v3 (v3 adapters) or falls back to direct on-chain reads.
+    // reads via /api/internal/v3 (v3 adapters) or falls back to direct on-chain reads.
     enableV3Backend: !!readV3ApiUrl(),
     // Adapter chain pinned for the browser's "fast" SDK instance. See
     // utils/api-url-env.ts:readBrowserVaultSource.

@@ -2,7 +2,7 @@
  * Server-side proxy for Turtle stream reward proofs.
  *
  * Lite calls:
- *   `/api/proxy/turtle/streams/merkle_proofs?wallet=0x…&streamIds=…`
+ *   `/api/internal/proxy/turtle/streams/merkle_proofs?wallet=0x…&streamIds=…`
  *
  * The handler forwards to Turtle Earn (`TURTLE_EARN_API_URL`, default
  * `https://earn.turtle.xyz/v1`) while keeping the browser same-origin and
@@ -25,7 +25,7 @@ import {
 } from '~/server/utils/external-proxy'
 import { isAllowedTurtleProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
 
-const PROXY_PREFIX = '/api/proxy/turtle/'
+const PROXY_PREFIX = '/api/internal/proxy/turtle/'
 
 const DEFAULT_TURTLE_EARN_API_URL = 'https://earn.turtle.xyz/v1'
 

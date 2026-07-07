@@ -30,7 +30,7 @@ vi.mock('@eulerxyz/euler-v2-sdk', () => ({
   },
 }))
 
-vi.mock('~/server/api/labels/[file].get', () => ({
+vi.mock('~/server/api/internal/labels/[file].get', () => ({
   LABEL_FILES: [],
   refreshLabelFile: mocks.refreshLabelFile,
 }))

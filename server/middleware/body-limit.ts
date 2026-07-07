@@ -9,9 +9,9 @@ const TENDERLY_LIMIT = 2 * 1024 * 1024
 const DEFAULT_LIMIT = 1 * 1024 * 1024
 
 function getLimit(pathname: string): number {
-  if (pathname === '/api/client-error') return CLIENT_ERROR_LIMIT
-  if (pathname.startsWith('/api/tenderly/')) return TENDERLY_LIMIT
-  if (pathname.startsWith('/api/rpc/')) return RPC_LIMIT
+  if (pathname === '/api/internal/client-error') return CLIENT_ERROR_LIMIT
+  if (pathname.startsWith('/api/internal/tenderly/')) return TENDERLY_LIMIT
+  if (pathname.startsWith('/api/internal/rpc/')) return RPC_LIMIT
   return DEFAULT_LIMIT
 }
 

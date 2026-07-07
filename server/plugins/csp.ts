@@ -66,7 +66,7 @@ function scanDynamicEnvUrls(): string[] {
     if (!value) continue
     // RPC_URL_<chainId> — wagmi uses these directly on the client.
     // Subgraph URLs are intentionally absent: all subgraph traffic is
-    // same-origin via /api/proxy/subgraph/{chainId}, so no connect-src is
+    // same-origin via /api/internal/proxy/subgraph/{chainId}, so no connect-src is
     // needed for the upstream.
     if (/^RPC_URL_\d+$/.test(key)) {
       urls.push(value)
@@ -77,7 +77,7 @@ function scanDynamicEnvUrls(): string[] {
 
 /**
  * Derive connect-src origins for each enabled chain's default public RPC URL.
- * Wagmi uses these as a fallback when /api/rpc/{chainId} is unavailable
+ * Wagmi uses these as a fallback when /api/internal/rpc/{chainId} is unavailable
  * (configured explicitly in plugins/00.wagmi.ts). Auto-deriving from the chain
  * definition means new chains "just work" without a CSP update.
  */
@@ -104,7 +104,7 @@ function parseEnvOrigins(): { connect: string[] } {
   // endpoints, so their origins are not needed in connect-src.
   const connectVars = [
     env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
-    // Pyth Hermes is proxied through /api/pyth/updates — no external origin needed
+    // Pyth Hermes is proxied through /api/internal/pyth/updates — no external origin needed
     // Dynamic per-chain URLs (RPC for wagmi, subgraph for GraphQL)
     ...scanDynamicEnvUrls(),
   ]

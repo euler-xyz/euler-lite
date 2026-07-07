@@ -5,7 +5,7 @@
  *   - `server/utils/labels-view.ts` (public labels endpoint surface)
  *   - `server/utils/vaults-cache.ts` (vault snapshot refresh, warmed every
  *     5 min by the warm-cache plugin and as the cold-path fallback for
- *     `/api/vaults?chainId=N`)
+ *     `/api/internal/vaults?chainId=N`)
  *
  * Each chain gets one SDK instance, cached at module scope; the promise is
  * cleared on build failure so the next call retries instead of poisoning

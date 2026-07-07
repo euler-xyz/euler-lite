@@ -9,7 +9,7 @@
  *
  * The per-chain subgraph URL (`SUBGRAPH_URL_<chainId>`, legacy
  * `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`) is resolved server-side only, inside
- * `server/api/proxy/subgraph/[chainId].post.ts`; it is never shipped to the
+ * `server/api/internal/proxy/subgraph/[chainId].post.ts`; it is never shipped to the
  * client, so there is no scanner for it here.
  */
 import { getKnownChainIds } from '~/entities/chainRegistry'

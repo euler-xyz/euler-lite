@@ -20,7 +20,7 @@ export async function getTosData(): Promise<TosData> {
 
   const { tosUrl } = useDeployConfig()
 
-  fetchPromise = fetch('/api/tos')
+  fetchPromise = fetch('/api/internal/tos')
     .then((response) => {
       if (!response.ok) {
         throw new Error(`Failed to fetch ToS: ${response.status} ${response.statusText}`)

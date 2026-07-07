@@ -19,7 +19,7 @@ import { buildMerklProxyRequestHeaders } from '~/server/utils/merkl-proxy'
  * directly from the browser. api.merkl.xyz doesn't set permissive CORS
  * headers, so direct fetches from the lite origin fail with `ERR_FAILED`.
  *
- * Configure the SDK with `directAdapterConfig.merklApiUrl = '/api/proxy/merkl'`
+ * Configure the SDK with `directAdapterConfig.merklApiUrl = '/api/internal/proxy/merkl'`
  * and this handler rewrites the path to `https://api.merkl.xyz/v4/<path>`
  * plus the original query string, forwards the response, and tags the
  * response with permissive caching headers so the browser can reuse it.
@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
   // Nuxt strips the catch-all prefix into `event.context.params.path` as an
   // array OR string; recompute from the URL pathname to handle both shapes
   // and to keep nested slashes intact.
-  const prefix = '/api/proxy/merkl/'
+  const prefix = '/api/internal/proxy/merkl/'
   const idx = requestUrl.pathname.indexOf(prefix)
   if (idx < 0) {
     logger.warn({ ctx: 'merkl-proxy', method, reason: 'invalid-path' }, 'request rejected')

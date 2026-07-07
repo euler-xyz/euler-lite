@@ -1,3 +1,4 @@
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 import {
   buildBadDebtCache,
   parseBadDebtResponse,
@@ -29,7 +30,7 @@ const setChainError = (chainId: number, error: Error | null) => {
 }
 
 const buildBadDebtUrl = (baseUrl: string, chainId: number, offset: number, limit: number): string => {
-  const base = baseUrl.replace(/\/+$/, '') || '/api/v3'
+  const base = baseUrl.replace(/\/+$/, '') || V3_API_PROXY_URL
   const params = new URLSearchParams({
     chainId: String(chainId),
     minBadDebtUsd: '0',

@@ -1,5 +1,5 @@
 /**
- * Read-only `/api/vaults?chainId=N` endpoint.
+ * Read-only `/api/internal/vaults?chainId=N` endpoint.
  *
  * Steady state: the warm-cache plugin rewrites each chain's entry every
  * 5 min via direct `refreshChainVaults()` call. Hits always land in a

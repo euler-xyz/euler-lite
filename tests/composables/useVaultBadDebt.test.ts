@@ -16,7 +16,7 @@ describe('useVaultBadDebt', () => {
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
     vi.stubGlobal('useEnvConfig', () => ({
       enableV3Backend: false,
-      v3ApiUrl: '/api/v3',
+      v3ApiUrl: '/api/internal/v3',
     }))
     vi.stubGlobal('useV3ChainGate', () => ({ isV3EnabledForChain: () => false }))
     vi.stubGlobal('fetch', fetchMock)
@@ -43,7 +43,7 @@ describe('useVaultBadDebt', () => {
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
     vi.stubGlobal('useEnvConfig', () => ({
       enableV3Backend: true,
-      v3ApiUrl: '/api/v3',
+      v3ApiUrl: '/api/internal/v3',
     }))
     vi.stubGlobal('useV3ChainGate', () => ({
       isV3EnabledForChain: (id: number) => id !== onchainChainId,

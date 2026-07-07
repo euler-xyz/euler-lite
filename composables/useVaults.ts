@@ -690,7 +690,7 @@ const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generati
 }
 
 /**
- * Two-pass hydrate from the server snapshot at /api/vaults?chainId=N.
+ * Two-pass hydrate from the server snapshot at /api/internal/vaults?chainId=N.
  *
  * Pass 1: instantiate every vault as its SDK class and write to the
  *         registry. Class methods are restored via the constructor; data
@@ -709,7 +709,7 @@ const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generati
 const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
   const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
   try {
-    const wire = await $fetch<SerialisedSnapshot>('/api/vaults', { query: { chainId: targetChainId } })
+    const wire = await $fetch<SerialisedSnapshot>('/api/internal/vaults', { query: { chainId: targetChainId } })
     if (loadGeneration.value !== generation) return false
 
     const snap = decodeBigints(wire) as SerialisedSnapshot
@@ -778,7 +778,7 @@ const loadVaults = async () => {
   const generation = loadGeneration.value
   const startChainId = chainId.value
 
-  // Phase 0: try to hydrate from the warm snapshot at /api/vaults. On
+  // Phase 0: try to hydrate from the warm snapshot at /api/internal/vaults. On
   // success the registry is populated and the UI renders immediately;
   // the subsequent RPC pipeline runs in *silent* mode so the per-category
   // loading/updating flags stay false. On failure (stale, malformed, or

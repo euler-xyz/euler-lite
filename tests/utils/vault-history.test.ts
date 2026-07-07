@@ -120,7 +120,7 @@ describe('vault history utilities', () => {
       '0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9',
       '7d',
       1_782_984_800_000,
-    )).toBe('/api/v3/evk/vaults/1/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/totals?resolution=1d&from=1782345600&to=1782950400')
+    )).toBe('/api/internal/v3/evk/vaults/1/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/totals?resolution=1d&from=1782345600&to=1782950400')
   })
 
   it('builds a bounded earn totals-history URL', () => {
@@ -129,7 +129,7 @@ describe('vault history utilities', () => {
       '0x018b86A893F57a632F90c4A8308353Ac938adc01',
       '7d',
       1_782_984_800_000,
-    )).toBe('/api/v3/earn/vaults/1/0x018b86A893F57a632F90c4A8308353Ac938adc01/totals?resolution=1d&from=1782345600&to=1782950400')
+    )).toBe('/api/internal/v3/earn/vaults/1/0x018b86A893F57a632F90c4A8308353Ac938adc01/totals?resolution=1d&from=1782345600&to=1782950400')
   })
 
   it('returns the same bounded range used by the totals-history URL', () => {

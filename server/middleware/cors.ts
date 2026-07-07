@@ -1,5 +1,8 @@
-import { createError, getRequestURL, setResponseHeader, sendNoContent } from 'h3'
+import type { H3Event } from 'h3'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createError, getCookie, getRequestURL, setCookie, setResponseHeader, sendNoContent } from 'h3'
 import { logger } from '~/server/utils/logger'
+import { isInternalRequest } from '~/server/utils/internal-headers'
 
 function parseAllowedOrigins(): Set<string> {
   // CORS_ALLOWED_ORIGINS is the dedicated CORS var (comma-separated).
@@ -37,6 +40,71 @@ function parseAllowedOrigins(): Set<string> {
 }
 
 let allowedOrigins: Set<string> | null = null
+const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
+
+// The cookie is an advisory first-party marker, not a security boundary:
+// anyone can obtain it from `GET /`, and the internal sentinel
+// (see server/utils/internal-headers.ts) bypasses this check entirely.
+// Its job is to let same-origin browser GETs (which carry no Origin
+// header) through the no-Origin rejection below.
+//
+// Derive the value from FIRST_PARTY_COOKIE_SECRET when configured so
+// every replica and every deploy agrees on it. Without the secret, use
+// the configured app/deployment origin as a stable non-secret seed; this
+// keeps the advisory marker consistent behind a load balancer while
+// preserving the existing dev fallback for ad-hoc local hosts.
+const FIRST_PARTY_COOKIE_SECRET = process.env.FIRST_PARTY_COOKIE_SECRET?.trim()
+const FIRST_PARTY_COOKIE_DEPLOYMENT_SEED
+  = process.env.NUXT_PUBLIC_APP_URL?.trim()
+    || process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
+const FIRST_PARTY_COOKIE_VALUE = createHash('sha256')
+  .update(FIRST_PARTY_COOKIE_SECRET
+    ? `euler-lite-first-party-secret:${FIRST_PARTY_COOKIE_SECRET}`
+    : `euler-lite-first-party-deployment:${FIRST_PARTY_COOKIE_DEPLOYMENT_SEED || randomBytes(32).toString('base64url')}`)
+  .digest('base64url')
+const FIRST_PARTY_COOKIE_BUFFER = Buffer.from(FIRST_PARTY_COOKIE_VALUE)
+
+function getSingleHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function matchesFirstPartyCookie(value: string | undefined): boolean {
+  if (!value) {
+    return false
+  }
+
+  // Compare byte lengths, not string lengths: a multibyte cookie value can
+  // match the character count while timingSafeEqual throws on unequal buffers.
+  const provided = Buffer.from(value)
+  if (provided.length !== FIRST_PARTY_COOKIE_BUFFER.length) {
+    return false
+  }
+
+  return timingSafeEqual(provided, FIRST_PARTY_COOKIE_BUFFER)
+}
+
+function isFirstPartyRequest(event: H3Event): boolean {
+  return matchesFirstPartyCookie(getCookie(event, FIRST_PARTY_COOKIE_NAME))
+}
+
+function isSecureRequest(event: H3Event, url: URL): boolean {
+  const forwardedProto = getSingleHeader(event.node.req.headers['x-forwarded-proto'])?.toLowerCase()
+  return url.protocol === 'https:' || forwardedProto === 'https'
+}
+
+function shouldSetFirstPartyCookie(url: URL): boolean {
+  return !url.pathname.startsWith('/_nuxt/') && !/\.[a-z0-9]+$/i.test(url.pathname)
+}
+
+function setFirstPartyCookie(event: H3Event, url: URL): void {
+  setCookie(event, FIRST_PARTY_COOKIE_NAME, FIRST_PARTY_COOKIE_VALUE, {
+    httpOnly: true,
+    maxAge: 60 * 60 * 12,
+    path: '/',
+    sameSite: 'lax',
+    secure: isSecureRequest(event, url),
+  })
+}
 
 export default defineEventHandler((event) => {
   if (!allowedOrigins) {
@@ -73,6 +141,9 @@ export default defineEventHandler((event) => {
   const url = getRequestURL(event)
 
   if (!url.pathname.startsWith('/api/')) {
+    if (shouldSetFirstPartyCookie(url)) {
+      setFirstPartyCookie(event, url)
+    }
     return
   }
 
@@ -92,6 +163,8 @@ export default defineEventHandler((event) => {
     return
   }
 
+  setResponseHeader(event, 'X-API-Stability', 'internal; may-break-without-notice')
+
   const origin = event.node.req.headers.origin
 
   if (origin && allowedOrigins.has(origin)) {
@@ -103,8 +176,24 @@ export default defineEventHandler((event) => {
     }
     throw createError({ statusCode: 403, statusMessage: 'Origin not allowed' })
   }
+  else if (!origin && !isFirstPartyRequest(event) && !isInternalRequest(event) && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
+    // Re-issue the cookie on the rejection so a browser tab holding a stale
+    // or expired cookie (redeploy, 12h maxAge) recovers on its next request
+    // instead of being broken until a hard reload. Error responses are
+    // forced no-store (see cache-error-responses), so this never reaches a
+    // shared CDN cache.
+    setFirstPartyCookie(event, url)
+    logger.warn({ ctx: 'cors', path: url.pathname }, 'rejected internal endpoint call without Origin')
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Forbidden',
+      data: {
+        message: '/api/internal/* is not a public contract. See docs/public-api.md.',
+      },
+    })
+  }
 
-  setResponseHeader(event, 'Access-Control-Allow-Methods', 'POST, OPTIONS')
+  setResponseHeader(event, 'Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   setResponseHeader(event, 'Access-Control-Allow-Headers', 'Content-Type')
 
   if (event.node.req.method === 'OPTIONS') {

@@ -106,8 +106,8 @@ describe('useCollateralOpenInterest', () => {
     const chainTwoLoad = openInterest.load()
 
     expect(requests.map(request => request.url)).toEqual([
-      '/api/v3/evk/vaults/open-interest/by-collateral?chainId=1',
-      '/api/v3/evk/vaults/open-interest/by-collateral?chainId=2',
+      '/api/internal/v3/evk/vaults/open-interest/by-collateral?chainId=1',
+      '/api/internal/v3/evk/vaults/open-interest/by-collateral?chainId=2',
     ])
 
     requests[0].deferred.resolve({

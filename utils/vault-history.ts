@@ -1,4 +1,5 @@
 import { formatUnits, maxUint256 } from 'viem'
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 
 export const VAULT_HISTORY_TIMEFRAMES = [
   { value: '7d', label: '7D', days: 7 },
@@ -124,7 +125,7 @@ const buildTotalsHistoryPath = (
     to: String(to),
   })
 
-  return `/api/v3/${vaultKind}/vaults/${encodeURIComponent(String(chainId))}/${encodeURIComponent(address)}/totals?${params.toString()}`
+  return `${V3_API_PROXY_URL}/${vaultKind}/vaults/${encodeURIComponent(String(chainId))}/${encodeURIComponent(address)}/totals?${params.toString()}`
 }
 
 export const buildVaultTotalsHistoryPath = (

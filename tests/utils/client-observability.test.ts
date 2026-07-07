@@ -20,7 +20,7 @@ describe('client observability payloads', () => {
       chainId: 42161,
       vaultAddress: VAULT,
       assetAddress: ASSET,
-    }, new Error('HTTP request failed. URL: /api/rpc/42161 Request body: 0xdeadbeef'))
+    }, new Error('HTTP request failed. URL: /api/internal/rpc/42161 Request body: 0xdeadbeef'))
 
     expect(payload).toMatchObject({
       source: 'client',

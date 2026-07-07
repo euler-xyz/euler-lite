@@ -1,7 +1,7 @@
 /**
  * Pre-populates the in-memory TTL caches for every proxy that serves
  * static/low-churn data (labels, token-list, euler-chains) and for the
- * per-chain vault snapshot served at /api/vaults.
+ * per-chain vault snapshot served at /api/internal/vaults.
  *
  * Nitro's node-server preset calls `server.listen()` synchronously right
  * after firing plugins and does NOT await plugin promises, so warming
@@ -14,11 +14,11 @@
  *
  * Two timers, each with its own cadence:
  *
- *   • Global cycle (5 min): /api/euler-chains once, cross-chain
+ *   • Global cycle (5 min): /api/internal/euler-chains once, cross-chain
  *     `all/assets.json` once, then per-chain labels + token-list,
  *     serialized across chains.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
- *     /api/vaults per chain, serialized.
+ *     /api/internal/vaults per chain, serialized.
  *
  * Serializing chains avoids a cold-start thundering herd (~250
  * simultaneous HTTPS requests across all chains × all providers) that
@@ -32,12 +32,12 @@
  * is still served — the first visitor to a deprecated chain pays a
  * cold-upstream fetch, cached from then on under normal TTL behavior.
  *
- * Merkl's /tokens/reward payload is fetched transitively by /api/token-list
+ * Merkl's /tokens/reward payload is fetched transitively by /api/internal/token-list
  * (one of its sources).
  */
-import { LABEL_FILES, refreshLabelFile } from '../api/labels/[file].get'
-import { refreshEulerChains } from '../api/euler-chains.get'
-import { refreshTokenList } from '../api/token-list.get'
+import { LABEL_FILES, refreshLabelFile } from '../api/internal/labels/[file].get'
+import { refreshEulerChains } from '../api/internal/euler-chains.get'
+import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import {
   readDisableServerVaultCache,
@@ -99,7 +99,7 @@ const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
 
 // Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
-// upstream. The /api/labels/assets.json handler unions this with the
+// upstream. The /api/internal/labels/assets.json handler unions this with the
 // per-chain file; warm it once so the first chain-scoped request doesn't
 // pay the cold-upstream cost.
 const warmGlobalAssets = () =>
@@ -115,7 +115,7 @@ const warmLabels = (chainId: number): Promise<unknown>[] =>
 const warmTokenList = (chainId: number) =>
   reportWarm(`token-list chain=${chainId}`, refreshTokenList(chainId))
 
-// Per-chain consolidated vault snapshot served at /api/vaults?chainId=N.
+// Per-chain consolidated vault snapshot served at /api/internal/vaults?chainId=N.
 // Warmed so the first user navigation to /lend hydrates instantly from
 // cache instead of paying the full lens-multicall + intrinsic-APY fan-out.
 const warmVaults = (chainId: number) =>
@@ -189,7 +189,7 @@ export default defineNitroPlugin(() => {
   globalInterval.unref()
 
   // Vault snapshot cycle is opt-out via DISABLE_SERVER_VAULT_CACHE. When
-  // disabled, /api/vaults responds 503 and the browser falls through to
+  // disabled, /api/internal/vaults responds 503 and the browser falls through to
   // its normal RPC pipeline — useful when the host can't afford the
   // outbound V3/RPC fan-out the snapshot builder needs, or when running
   // behind aggressive bot-management (CF) that throttles bursty

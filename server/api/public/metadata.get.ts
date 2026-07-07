@@ -59,10 +59,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 
-  // Matches other public endpoints (/api/vaults, /api/labels/*). CDN /
-  // browser can absorb short-burst traffic; the warm-cache plugin keeps
-  // the upstream metadata map continuously fresh so a stale CDN entry is
-  // never more than ~30s behind the server cache.
+  // Public bridge responses are CDN/browser cacheable for short bursts.
+  // The warm-cache plugin keeps the upstream metadata map continuously fresh
+  // so a stale CDN entry is never more than ~30s behind the server cache.
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
   const matchesProduct = (m: VaultMetadata): boolean =>

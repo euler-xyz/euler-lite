@@ -14,14 +14,14 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | File | Purpose |
 |------|---------|
 | `server/utils/external-proxy.ts` | Shared forwarder: TTL cache, in-flight dedup, stale-on-error fallback. One helper used by all per-host proxies. |
-| `server/api/proxy/merkl/[...path].ts` | Proxies Merkl v4 (`api.merkl.xyz/v4`) |
-| `server/api/proxy/fuul/[...path].ts` | Proxies Fuul (`api.fuul.xyz/api/v1`) |
-| `server/api/proxy/incentra/[...path].ts` | Proxies Incentra / Brevis (`incentra-prd.brevis.network`) |
-| `server/api/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
-| `server/api/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
-| `server/api/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
-| `server/api/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/v3/...` → `v3.euler.finance/v3/...`) |
-| `server/api/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
+| `server/api/internal/proxy/merkl/[...path].ts` | Proxies Merkl v4 (`api.merkl.xyz/v4`) |
+| `server/api/internal/proxy/fuul/[...path].ts` | Proxies Fuul (`api.fuul.xyz/api/v1`) |
+| `server/api/internal/proxy/incentra/[...path].ts` | Proxies Incentra / Brevis (`incentra-prd.brevis.network`) |
+| `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
+| `server/api/internal/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
+| `server/api/internal/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
+| `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
+| `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
 | `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
 | `server/plugins/warm-cache.ts` | Boot + interval warm cycles for labels, token-list, vault snapshot |
@@ -54,10 +54,10 @@ Cache key is `sha1(method + '\0' + target + '\0' + body)`. Concurrent misses sha
 
 | Endpoint | Upstream | Env override | Allowlist | Methods | Browser cache hint |
 |---|---|---|---|---|---|
-| `/api/proxy/fuul/{...}` | `api.fuul.xyz/api/v1` | `FUUL_API_URL` / `NUXT_PUBLIC_FUUL_API_URL` | `incentives`, `totals`, `claim-checks`, `rewards` | GET, HEAD, POST | `public, max-age=30, swr=30` |
-| `/api/proxy/incentra/{...}` | `incentra-prd.brevis.network` | `INCENTRA_API_URL` / `NUXT_PUBLIC_INCENTRA_API_URL` | `sdk/v1/`, `v1/` | GET, HEAD, POST | `public, max-age=30, swr=30` |
-| `/api/proxy/subgraph/{chainId}` | per-chain Goldsky URL | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | (POST only — chain-level guard) | POST | `public, max-age=30, swr=30` |
-| `/api/proxy/merkl/{...}` | `api.merkl.xyz/v4` | (none) | `opportunities`, `users`, `campaigns` | GET, HEAD | `public, max-age=60` |
+| `/api/internal/proxy/fuul/{...}` | `api.fuul.xyz/api/v1` | `FUUL_API_URL` / `NUXT_PUBLIC_FUUL_API_URL` | `incentives`, `totals`, `claim-checks`, `rewards` | GET, HEAD, POST | `public, max-age=30, swr=30` |
+| `/api/internal/proxy/incentra/{...}` | `incentra-prd.brevis.network` | `INCENTRA_API_URL` / `NUXT_PUBLIC_INCENTRA_API_URL` | `sdk/v1/`, `v1/` | GET, HEAD, POST | `public, max-age=30, swr=30` |
+| `/api/internal/proxy/subgraph/{chainId}` | per-chain Goldsky URL | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | (POST only — chain-level guard) | POST | `public, max-age=30, swr=30` |
+| `/api/internal/proxy/merkl/{...}` | `api.merkl.xyz/v4` | (none) | `opportunities`, `users`, `campaigns` | GET, HEAD | `public, max-age=60` |
 
 Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disallowed methods, 404 for paths outside the allowlist, 502 on upstream errors when no stale entry exists. The `x-cache: hit | miss | stale-fallback` response header reports the cache state for observability.
 
@@ -71,14 +71,14 @@ Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disa
 
 Two endpoints, same `refreshLabelFile` engine:
 
-- **`/api/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
-- **`/api/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/labels`, default templates land here.
+- **`/api/internal/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
+- **`/api/internal/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/internal/labels`, default templates land here.
 
 Both endpoints share the same in-memory TTL cache. Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
 
 ### V3 proxy
 
-`/api/v3/{...path}` forwards only the SDK browser endpoints Lite needs. It accepts `GET` for token, price, APY, reward, account-position, and vault-read endpoints, and `POST` for the SDK vault batch and vault resolve endpoints. The route consumes a local rate-limit budget before forwarding (`GET` costs 1, `POST` costs 5), injects the server-side V3 API key when configured, and forwards only fixed JSON headers to upstream. Query strings and JSON bodies are left for V3 to validate.
+`/api/internal/v3/{...path}` forwards only the SDK browser endpoints Lite needs. It accepts `GET` for token, price, APY, reward, account-position, and vault-read endpoints, and `POST` for the SDK vault batch and vault resolve endpoints. The route consumes a local rate-limit budget before forwarding (`GET` costs 1, `POST` costs 5), injects the server-side V3 API key when configured, and forwards only fixed JSON headers to upstream. Query strings and JSON bodies are left for V3 to validate.
 
 ## Vault Snapshot Pipeline
 
@@ -89,7 +89,7 @@ The largest win in this layer. The server pre-computes a consolidated snapshot o
 `server/utils/vaults-cache.ts:refreshChainVaults(chainId)` is the single refresh path. Used by:
 
 - **`server/plugins/warm-cache.ts`**: every minute (V3 configured) or every 5 minutes (V3 off), per-chain.
-- **`server/api/vaults.get.ts`**: cold-path fallback when the cache is genuinely empty (process just started, before the first warm cycle completed). Steady-state, the handler is a pure read.
+- **`server/api/internal/vaults.get.ts`**: cold-path fallback when the cache is genuinely empty (process just started, before the first warm cycle completed). Steady-state, the handler is a pure read.
 
 Pipeline:
 
@@ -141,7 +141,7 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 Set `DISABLE_SERVER_VAULT_CACHE=true` to:
 
 - Skip the vault warm-cache cycle in `warm-cache.ts` (the labels / token-list / chains cycle still runs).
-- Make `/api/vaults?chainId=N` respond `503 Vault snapshot disabled`.
+- Make `/api/internal/vaults?chainId=N` respond `503 Vault snapshot disabled`.
 
 The browser's snapshot hydrate (`hydrateFromServer`) treats the 503 as a hydrate failure and falls through to the normal RPC pipeline — visually identical to the cold-snapshot path, just always taken. Useful when the host can't afford the snapshot's outbound V3/RPC fan-out, or when bot-management throttles bursty origin traffic.
 
@@ -160,7 +160,7 @@ The encoder walks class instances (vault entities are classes — `EVault`, `Eul
 
 ### Endpoint
 
-`GET /api/vaults?chainId=N`:
+`GET /api/internal/vaults?chainId=N`:
 
 - Returns the cached snapshot (5-min TTL with V3 off, 2-min TTL with V3 on). Stale ceiling 30 min.
 - `vaultsCache.get(...) ?? vaultsCache.getStale(...)` — handler never triggers a refresh on its own.
@@ -173,7 +173,7 @@ The encoder walks class instances (vault entities are classes — `EVault`, `Eul
 
 ```text
 Phase 0: hydrateFromServer(chainId, generation)
-  - $fetch('/api/vaults?chainId=N')
+  - $fetch('/api/internal/vaults?chainId=N')
   - decodeBigints(wire)
   - reject if older than MAX_HYDRATION_AGE_MS (6 min)
   - Pass 1: instantiate every kind into its SDK class
@@ -225,11 +225,11 @@ The pipeline always succeeds eventually — the snapshot is the *fast path*, not
 ```text
 Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 ─────────────────────                  ──────────────────────────────────────
-- /api/euler-chains                    - refreshChainVaults(chain) for each
+- /api/internal/euler-chains                    - refreshChainVaults(chain) for each
 - labels/all/assets.json                 enabled non-deprecated chain,
 - per-chain:                             sequential (lets cross-chain V3
     labels/{file}.json (×5)              upstreams dedupe via in-flight)
-    /api/token-list
+    /api/internal/token-list
 ```
 
 Vault snapshot has its own faster timer because V3-backed refreshes are cheap — one batched POST per chain hitting V3's own cache. Pulling a fresh snapshot every minute keeps it tight without hammering upstream. Without V3, the snapshot is built from heavier onchain lens multicalls, so it falls back to the global 5-min cadence.
@@ -279,7 +279,7 @@ The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=tru
 | `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains shown collapsed in the chain selector and skipped by per-chain warm-cache work. |
 | `ONCHAIN_SDK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains pinned to onchain adapters in chain-aware browser SDK reads and server snapshot builds. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |
-| `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/vaults` returns 503, browser falls through to RPC pipeline. |
+| `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/internal/vaults` returns 503, browser falls through to RPC pipeline. |
 | `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured. |
 
 ## Verification
