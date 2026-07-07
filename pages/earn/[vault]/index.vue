@@ -22,7 +22,7 @@ const { planDeposit, executePlan } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
-const { updateEarnVault } = useVaults()
+const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
@@ -63,6 +63,22 @@ const supplyApyBreakdown = computed(() => vault.value ? computeSupplyApyBreakdow
 const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
 const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
 
+const applyLoadedVault = (loadedVault: EulerEarn) => {
+  vault.value = loadedVault
+  asset.value = loadedVault.asset
+  estimateSupplyAPY.value = supplyApyTotal.value
+}
+
+const refreshEarnVault = async (address: string, silent = false) => {
+  try {
+    applyLoadedVault(await updateEarnVault(address))
+  }
+  catch (e) {
+    if (!silent) throw e
+    logWarn('[earn] failed to refresh vault', e)
+  }
+}
+
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
   try {
@@ -72,9 +88,7 @@ const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 
     if (!isLabelsReady.value) {
       await until(isLabelsReady).toBe(true)
     }
-    vault.value = await updateEarnVault(vaultAddress)
-    asset.value = vault.value?.asset
-    estimateSupplyAPY.value = supplyApyTotal.value
+    applyLoadedVault(await getEarnVault(vaultAddress))
 
     if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
       modal.open(VaultUnverifiedDisclaimerModal, {
@@ -86,6 +100,8 @@ const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 
         },
       })
     }
+
+    void refreshEarnVault(vault.value.address, true)
   }
   catch (e) {
     showError('Unable to load Vault')
@@ -210,9 +226,7 @@ const send = async () => {
 const updateEstimates = async () => {
   if (!vault.value) return
   try {
-    vault.value = await updateEarnVault(vault.value.address)
-    if (!asset.value?.address) return
-    estimateSupplyAPY.value = supplyApyTotal.value
+    await refreshEarnVault(vault.value.address)
   }
   catch (e) {
     logWarn('earn-supply/estimates', e)
