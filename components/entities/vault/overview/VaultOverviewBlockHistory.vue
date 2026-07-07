@@ -14,7 +14,7 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
-import { compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
+import { compactNumber, formatCompactUsdValue, formatNumber } from '~/utils/string-utils'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import {
   buildEarnVaultTotalsHistoryPath,
@@ -370,6 +370,7 @@ const chartData = computed<ChartData<'line', number[], string>>(() => {
 const formatValue = (value: number, metric: VaultHistoryMetric = selectedMetric.value) => {
   if (isPercentMetric(metric)) return `${compactNumber(value, 2, 0)}%`
   if (selectedDenomination.value === 'usd' && canToggleDenomination.value) return formatCompactUsdValue(value)
+  if (metric === 'sharePrice') return `${formatNumber(value, 5, 0)} ${vault.asset.symbol}`
   return `${compactNumber(value, 2, 0)} ${vault.asset.symbol}`
 }
 
