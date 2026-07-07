@@ -1867,18 +1867,16 @@ function getOperationVaultAddresses(): string[] {
               size="compact"
             />
 
-            <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-              <VaultFormSubmit
-                :disabled="reviewRefinanceDisabled"
-                :loading="isSubmitting || isPreparing"
-                :disabled-reason="disabledReasonInfo?.message"
-                :disabled-reason-variant="disabledReasonInfo?.variant"
-                :can-add-to-batch="canAddToBatch"
-                @add-to-batch="addToBatch"
-              >
-                {{ reviewRefinanceLabel }}
-              </VaultFormSubmit>
-            </div>
+            <FormSubmitFooter
+              :submit-disabled="reviewRefinanceDisabled"
+              :submit-loading="isSubmitting || isPreparing"
+              :disabled-reason="disabledReasonInfo?.message"
+              :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
+            >
+              {{ reviewRefinanceLabel }}
+            </FormSubmitFooter>
           </div>
 
           <VaultFormInfoBlock
