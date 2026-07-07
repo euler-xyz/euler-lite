@@ -8,6 +8,7 @@
 import {
   createError,
   getMethod,
+  getRequestHeader,
   readRawBody,
   setResponseHeaders,
   setResponseStatus,
@@ -19,9 +20,13 @@ import {
   createProxyInFlight,
   forwardProxied,
 } from '~/server/utils/external-proxy'
+import { assertAllowedGraphqlRequest } from '~/server/utils/graphql-proxy-guard'
 
 const AAVE_GRAPHQL_URL = 'https://api.v3.aave.com/graphql'
 const BROWSER_CACHE_CONTROL = 'no-store'
+
+// The only operation Lite's Aave migration connector sends to this proxy.
+const AAVE_ALLOWED_OPERATIONS = ['AaveMigrationMarkets'] as const
 
 const cache = createProxyCache(0)
 const inFlight = createProxyInFlight()
@@ -38,10 +43,11 @@ export default defineEventHandler(async (event) => {
   }
   await rateLimiter.consume(event)
 
-  const body = (await readRawBody(event))?.toString() ?? ''
-  if (!body) {
-    throw createError({ statusCode: 400, statusMessage: 'Empty GraphQL body' })
-  }
+  const body = assertAllowedGraphqlRequest(
+    (await readRawBody(event))?.toString() ?? '',
+    getRequestHeader(event, 'content-type') ?? '',
+    { allowedOperations: AAVE_ALLOWED_OPERATIONS },
+  )
 
   try {
     const res = await forwardProxied({

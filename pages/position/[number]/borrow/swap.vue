@@ -335,7 +335,11 @@ const subAccount = computed<Address>(() =>
 const cowSwapOwner = computed<Address>(() =>
   (address.value || (isSpyMode.value ? spyAddress.value : undefined) || zeroAddress) as Address,
 )
-const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
+// Migration authorization must be signed by a real connected wallet. Spy mode
+// stays read-only (discovery/preview) and cannot sign, so it must not satisfy
+// the review/execute gate — otherwise a spy-only user passes "Connect wallet to
+// migrate" and fails later at signing.
+const hasConnectedWallet = computed(() => isConnected.value)
 
 const hasDebtChange = computed(() =>
   isExternalSourceRoute.value ? !!targetDebtVault.value && !!externalDebtAsset.value : !!targetDebtVault.value && !!sourceDebtVault.value,
@@ -2001,7 +2005,7 @@ const effectiveQuoteFetchedAt = computed(() => {
 
 const inboundMigrationDisabledReason = computed(() => {
   if (!isExternalSourceRoute.value) return null
-  if (!hasActiveSession.value) return 'Connect wallet to migrate'
+  if (!hasConnectedWallet.value) return 'Connect wallet to migrate'
   if (isExternalPositionsLoading.value) return 'Loading external position'
   if (externalPositionsError.value && !externalPosition.value) return externalPositionsError.value
   if (!externalPosition.value) return 'External position not found'
