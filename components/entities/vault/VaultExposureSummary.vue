@@ -12,7 +12,7 @@ const {
   valueState = 'ready',
   maxVisible = 5,
   avatarSize = '20',
-  title = 'Exposure',
+  title = 'Current exposure',
   placement = 'top-end',
 } = defineProps<{
   items: VaultExposureDisplayItem[]

@@ -58,7 +58,7 @@ export const useTenderlySimulation = () => {
     isSimulating.value = true
 
     try {
-      const response = await $fetch<TenderlySimulateResponse>('/api/tenderly/simulate', {
+      const response = await $fetch<TenderlySimulateResponse>('/api/internal/tenderly/simulate', {
         method: 'POST',
         body: params,
       })
@@ -78,7 +78,7 @@ export const useTenderlySimulation = () => {
 
   const fetchEnabled = async (): Promise<boolean> => {
     try {
-      const { enabled } = await $fetch<{ enabled: boolean }>('/api/tenderly/status')
+      const { enabled } = await $fetch<{ enabled: boolean }>('/api/internal/tenderly/status')
       return enabled
     }
     catch {

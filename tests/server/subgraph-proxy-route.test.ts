@@ -49,7 +49,7 @@ type TestEvent = H3Event & {
   }
 }
 
-const handler = (await import('~/server/api/proxy/subgraph/[chainId].post')).default
+const handler = (await import('~/server/api/internal/proxy/subgraph/[chainId].post')).default
 
 const makeEvent = (chainId: string, body = '{"query":"{ vaults { id } }"}'): TestEvent => ({
   method: 'POST',
@@ -67,7 +67,7 @@ const makeEvent = (chainId: string, body = '{"query":"{ vaults { id } }"}'): Tes
   },
 } as unknown as TestEvent)
 
-describe('/api/proxy/subgraph route', () => {
+describe('/api/internal/proxy/subgraph route', () => {
   afterEach(() => {
     delete process.env.SUBGRAPH_URL_1
     delete process.env.NUXT_PUBLIC_SUBGRAPH_URI_1

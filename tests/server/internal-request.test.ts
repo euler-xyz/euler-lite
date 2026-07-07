@@ -11,7 +11,7 @@
  * If this contract breaks — the sentinel stops being set, the helper
  * stops recognising it, or a middleware forgets to consult the helper —
  * every internal API→API call 502s/451s in prod. One such regression
- * already shipped once (internal `/api/vaults` → `/api/euler-chains`
+ * already shipped once (internal `/api/internal/vaults` → `/api/internal/euler-chains`
  * 451'd by geo-gate). Lock it down.
  */
 import { describe, it, expect } from 'vitest'

@@ -227,6 +227,13 @@ describe('useMultiplyForm cap validation', () => {
       isSpyMode: ref(true),
       spyAddress: ref(USER),
     }))
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(USER),
+      isConnected: ref(true),
+      isSpyMode: ref(true),
+      spyAddress: ref(USER),
+      effectiveAddress: ref(USER),
+    }))
     vi.stubGlobal('useEulerAccount', () => ({
       depositPositions: ref([]),
     }))

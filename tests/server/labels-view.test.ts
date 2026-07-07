@@ -18,7 +18,7 @@ describe('fetchTokenList', () => {
     await expect(fetchTokenList(1)).resolves.toEqual([
       { address: '0x1111111111111111111111111111111111111111', logoURI: 'https://cdn.example/token.png' },
     ])
-    expect(fetch).toHaveBeenCalledWith('/api/token-list', {
+    expect(fetch).toHaveBeenCalledWith('/api/internal/token-list', {
       query: { chainId: 1 },
       headers: INTERNAL_FETCH_HEADERS,
     })

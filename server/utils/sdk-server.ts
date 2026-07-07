@@ -5,17 +5,19 @@
  *   - `server/utils/labels-view.ts` (public labels endpoint surface)
  *   - `server/utils/vaults-cache.ts` (vault snapshot refresh, warmed every
  *     5 min by the warm-cache plugin and as the cold-path fallback for
- *     `/api/vaults?chainId=N`)
+ *     `/api/internal/vaults?chainId=N`)
  *
  * Each chain gets one SDK instance, cached at module scope; the promise is
  * cleared on build failure so the next call retries instead of poisoning
  * the entry.
  *
- * The adapter chain is selected by `SERVER_VAULT_CACHE_SOURCE`:
- *   - `fallback` (default): V3 primary → onchain secondary. With no V3
+ * Regular chains use `SERVER_VAULT_CACHE_SOURCE`:
+ *   - `fallback` (default): V3 primary, onchain secondary. With no V3
  *     configured the SDK degrades to onchain via `disableV3: true`.
- *   - `onchain`: pin every service to onchain — bypasses V3 entirely.
+ *   - `onchain`: pin every service to onchain.
  *   - `v3`: pin to V3; SDK build throws when V3 is not configured.
+ *
+ * Chains listed in `ONCHAIN_SDK_CHAINS` always use the onchain config.
  */
 import {
   buildEulerSDK,
@@ -29,6 +31,7 @@ import {
   readV3ApiUrl,
   type VaultDataSource,
 } from '~/utils/api-url-env'
+import { parseChainIds } from '~/utils/parseChainIds'
 import { resolveRpcUrl } from './rpc'
 import { resolveLabelsBaseUrl } from './labels-base-url'
 
@@ -63,13 +66,16 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
   }
 }
 
+const isOnchainSdkChain = (chainId: number): boolean =>
+  parseChainIds(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
+
 const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   const rpcUrl = resolveRpcUrl(chainId)
   if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
   const v3ApiUrl = readResolvedV3ApiUrl()
   const v3ApiKey = readV3ApiKey().trim()
-  const source = readServerVaultCacheSource()
+  const source = isOnchainSdkChain(chainId) ? 'onchain' : readServerVaultCacheSource()
   const hasV3 = !!readV3ApiUrl()
 
   return {

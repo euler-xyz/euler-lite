@@ -69,9 +69,9 @@ const mapVaultType = (type: unknown): Exclude<VaultCategory, 'escrow'> | null =>
   }
 }
 
-const getSdk = async () => {
-  const { getEulerSdk } = useEulerSdk()
-  return await getEulerSdk()
+const getSdk = async (chainId: number) => {
+  const { getEulerSdkForChain } = useEulerSdk()
+  return await getEulerSdkForChain(chainId)
 }
 
 const fetchEscrowAddressSet = async (chainId: number): Promise<Set<string>> => {
@@ -81,7 +81,7 @@ const fetchEscrowAddressSet = async (chainId: number): Promise<Set<string>> => {
   const existing = escrowAddressInFlight.get(chainId)
   if (existing) return existing
 
-  const promise = getSdk()
+  const promise = getSdk(chainId)
     .then(sdk => sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW]))
     .then(addresses => new Set(uniqueAddresses(addresses).map(address => address.toLowerCase())))
     .then((set) => {
@@ -153,7 +153,7 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
     let types: Partial<Record<Address, unknown>> = {}
     if (addresses.length > 0) {
       try {
-        types = await (await getSdk()).vaultMetaService.fetchVaultTypes(chainId, addresses)
+        types = await (await getSdk(chainId)).vaultMetaService.fetchVaultTypes(chainId, addresses)
       }
       catch (err) {
         logger.warn({ ctx: 'fetchChainVaultCategories/types', chainId, err }, 'failed to fetch sdk vault types')
@@ -217,7 +217,7 @@ export const fetchVaultCategory = async (address: string): Promise<VaultCategory
       return 'escrow' satisfies VaultCategory
     }
 
-    const type = await (await getSdk()).vaultMetaService.fetchVaultType(chainId, normalized)
+    const type = await (await getSdk(chainId)).vaultMetaService.fetchVaultType(chainId, normalized)
     const category = mapVaultType(type)
     if (category) {
       perAddressCache.set(key, category)

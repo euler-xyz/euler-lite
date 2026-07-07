@@ -57,7 +57,7 @@ const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000002'
 const VAULT = '0x0000000000000000000000000000000000000003'
 const OTHER_VAULT = '0x0000000000000000000000000000000000000004'
 
-const handler = (await import('~/server/api/v3/[...path]')).default
+const handler = (await import('~/server/api/internal/v3/[...path]')).default
 const { resetV3ProxyBackoffsForTest } = await import('~/server/utils/v3-proxy-backoff')
 
 const makeEvent = (method: string, url: string, body?: string): TestEvent => ({
@@ -76,7 +76,7 @@ const makeEvent = (method: string, url: string, body?: string): TestEvent => ({
   },
 } as unknown as TestEvent)
 
-describe('/api/v3 proxy route', () => {
+describe('/api/internal/v3 proxy route', () => {
   afterEach(() => {
     delete process.env.EULER_SDK_V3_API_KEY
     resetV3ProxyBackoffsForTest()
@@ -104,7 +104,7 @@ describe('/api/v3 proxy route', () => {
     }
     const event = makeEvent(
       'POST',
-      'https://app.example/api/v3/evk/vaults/batch',
+      'https://app.example/api/internal/v3/evk/vaults/batch',
       JSON.stringify(requestBody),
     )
 
@@ -124,7 +124,7 @@ describe('/api/v3 proxy route', () => {
   it('rejects disallowed paths before consuming rate-limit budget', async () => {
     const event = makeEvent(
       'GET',
-      `https://app.example/api/v3/admin?chainId=1&account=${ACCOUNT}`,
+      `https://app.example/api/internal/v3/admin?chainId=1&account=${ACCOUNT}`,
     )
 
     await expect(handler(event)).rejects.toMatchObject({
@@ -141,8 +141,8 @@ describe('/api/v3 proxy route', () => {
       statusText: 'Bad Gateway',
       headers: { 'content-type': 'application/json' },
     }))
-    const first = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
-    const second = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    const first = makeEvent('POST', 'https://app.example/api/internal/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    const second = makeEvent('POST', 'https://app.example/api/internal/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
 
     await expect(handler(first)).resolves.toBe('{"error":true}')
     await expect(handler(second)).rejects.toMatchObject({
@@ -156,6 +156,82 @@ describe('/api/v3 proxy route', () => {
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps vault totals history cooldowns scoped to the requested range', async () => {
+    mocks.fetchWithTimeout
+      .mockResolvedValueOnce(new Response('{"error":true}', {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response('{"ok":true}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+
+    const failedRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1775209911&to=1782985911`,
+    )
+    const otherRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`,
+    )
+    const repeatedFailedRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1775209911&to=1782985911`,
+    )
+
+    await expect(handler(failedRange)).resolves.toBe('{"error":true}')
+    await expect(handler(otherRange)).resolves.toBe('{"ok":true}')
+    await expect(handler(repeatedFailedRange)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
+    expect(failedRange.context.status).toBe(502)
+    expect(failedRange.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(repeatedFailedRange.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps earn vault totals history cooldowns scoped to the requested range', async () => {
+    mocks.fetchWithTimeout
+      .mockResolvedValueOnce(new Response('{"error":true}', {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response('{"ok":true}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+
+    const failedRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}/totals?resolution=1d&from=1775209911&to=1782985911`,
+    )
+    const otherRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`,
+    )
+    const repeatedFailedRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}/totals?resolution=1d&from=1775209911&to=1782985911`,
+    )
+
+    await expect(handler(failedRange)).resolves.toBe('{"error":true}')
+    await expect(handler(otherRange)).resolves.toBe('{"ok":true}')
+    await expect(handler(repeatedFailedRange)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
+    expect(failedRange.context.status).toBe(502)
+    expect(failedRange.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(repeatedFailedRange.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps cooldown when an overlapping success returns after a retryable failure', async () => {
     let resolveRetryable: (response: Response) => void = () => {}
     let resolveSuccess: (response: Response) => void = () => {}
@@ -167,8 +243,8 @@ describe('/api/v3 proxy route', () => {
         resolveSuccess = resolve
       }))
 
-    const retryable = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
-    const success = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    const retryable = makeEvent('POST', 'https://app.example/api/internal/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    const success = makeEvent('POST', 'https://app.example/api/internal/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
 
     const retryableResult = handler(retryable)
     const successResult = handler(success)
@@ -190,7 +266,7 @@ describe('/api/v3 proxy route', () => {
     }))
     await expect(successResult).resolves.toBe('{"ok":true}')
 
-    const blocked = makeEvent('POST', 'https://app.example/api/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
+    const blocked = makeEvent('POST', 'https://app.example/api/internal/v3/resolve/vaults', '{"chainId":1,"addresses":[]}')
     await expect(handler(blocked)).rejects.toMatchObject({
       statusCode: 503,
       statusMessage: 'V3 upstream cooling down',
@@ -202,8 +278,8 @@ describe('/api/v3 proxy route', () => {
 
   it('backs off after transport failures instead of surfacing a generic 500', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('timeout'))
-    const first = makeEvent('GET', `https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1`)
-    const second = makeEvent('GET', `https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1`)
+    const first = makeEvent('GET', `https://app.example/api/internal/v3/accounts/${ACCOUNT}/positions?chainId=1`)
+    const second = makeEvent('GET', `https://app.example/api/internal/v3/accounts/${ACCOUNT}/positions?chainId=1`)
 
     await expect(handler(first)).rejects.toMatchObject({
       statusCode: 503,
@@ -221,8 +297,8 @@ describe('/api/v3 proxy route', () => {
 
   it('shares cooldown across dynamic account position paths', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('timeout'))
-    const first = makeEvent('GET', `https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1`)
-    const second = makeEvent('GET', `https://app.example/api/v3/accounts/${OTHER_ACCOUNT}/positions?chainId=1`)
+    const first = makeEvent('GET', `https://app.example/api/internal/v3/accounts/${ACCOUNT}/positions?chainId=1`)
+    const second = makeEvent('GET', `https://app.example/api/internal/v3/accounts/${OTHER_ACCOUNT}/positions?chainId=1`)
 
     await expect(handler(first)).rejects.toMatchObject({
       statusCode: 503,
@@ -242,8 +318,8 @@ describe('/api/v3 proxy route', () => {
       statusText: 'Bad Gateway',
       headers: { 'content-type': 'application/json' },
     }))
-    const first = makeEvent('GET', `https://app.example/api/v3/earn/vaults/1/${VAULT}`)
-    const second = makeEvent('GET', `https://app.example/api/v3/earn/vaults/1/${OTHER_VAULT}`)
+    const first = makeEvent('GET', `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}`)
+    const second = makeEvent('GET', `https://app.example/api/internal/v3/earn/vaults/1/${OTHER_VAULT}`)
 
     await expect(handler(first)).resolves.toBe('{"error":true}')
     await expect(handler(second)).rejects.toMatchObject({

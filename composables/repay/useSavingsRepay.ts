@@ -70,9 +70,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { isConnected, address } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
-  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+  const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { getVault: registryGetVault } = useVaultRegistry()

@@ -18,7 +18,6 @@ const updateSize = (el: HTMLElement) => {
       currentFontSize++
       if (isOverflowed(el)) {
         el.style.fontSize = (currentFontSize - 1) + 'px'
-        currentFontSize--
         return
       }
     }

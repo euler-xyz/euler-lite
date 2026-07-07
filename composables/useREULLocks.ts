@@ -1,7 +1,7 @@
 import type { Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { REULLock } from '~/entities/reul'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -46,7 +46,7 @@ export const useREULLocks = () => {
         isLocksLoading.value = true
       }
 
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(chainId)
       const nextLocks = await sdk.reulLockService.fetchLocks({
         chainId,
         account: userAddress as Address,
@@ -137,7 +137,7 @@ export const useREULLocks = () => {
       throw new Error('Chain not connected')
     }
 
-    const sdk = await getEulerSdk()
+    const sdk = await getEulerSdkForChain(chainId)
     return sdk.reulLockService.buildUnlockPlan({
       chainId,
       account: wagmiAddress.value as Address,

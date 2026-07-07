@@ -12,14 +12,14 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 
 | File | Server endpoint | Empty shape |
 |------|-----------------|-------------|
-| `products.json` | `GET /api/labels/products.json?chainId=X` | `{}` |
-| `entities.json` | `GET /api/labels/entities.json?chainId=X` | `{}` |
-| `points.json` | `GET /api/labels/points.json?chainId=X` | `[]` |
-| `earn-vaults.json` | `GET /api/labels/earn-vaults.json?chainId=X` | `[]` |
+| `products.json` | `GET /api/internal/labels/products.json?chainId=X` | `{}` |
+| `entities.json` | `GET /api/internal/labels/entities.json?chainId=X` | `{}` |
+| `points.json` | `GET /api/internal/labels/points.json?chainId=X` | `[]` |
+| `earn-vaults.json` | `GET /api/internal/labels/earn-vaults.json?chainId=X` | `[]` |
 
 All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are logged once per refresh so genuine outages stay visible.
 
-Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/oracle-adapter?chainId=X&address=0x...`.
+Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/internal/oracle-adapter?chainId=X&address=0x...`.
 
 **Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels and `{baseUrl}/{chainId}/adapters/{address}.json` for oracle adapters.
 

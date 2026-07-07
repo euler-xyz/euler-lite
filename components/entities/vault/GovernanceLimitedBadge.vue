@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useModal } from '~/components/ui/composables/useModal'
 import { GovernanceLimitedInfoModal } from '#components'
 
 const { size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
@@ -8,26 +7,17 @@ const { size = 'small', block = false, as = 'span', nudge = false } = defineProp
   as?: 'button' | 'span'
   nudge?: boolean
 }>()
-
-const modal = useModal()
-
-const openInfoModal = (event: MouseEvent | KeyboardEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(GovernanceLimitedInfoModal)
-}
 </script>
 
 <template>
-  <VaultMetadataTag
-    :as="as"
+  <VaultMetadataBadge
     icon="pulse"
     label="Limited"
-    tone="accent"
+    title="This vault has limited risk management"
+    :modal="GovernanceLimitedInfoModal"
     :size="size"
     :block="block"
+    :as="as"
     :nudge="nudge"
-    title="This vault has limited risk management"
-    @click="openInfoModal"
   />
 </template>

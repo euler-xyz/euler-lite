@@ -49,7 +49,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 🧩 [SDK Integration](./sdk-integration.md)
 
-- Two-instance SDK split (`getEulerSdk` fast / `getEulerSdkFresh` plan-time)
+- SDK entry points (`getEulerSdk`, `getEulerSdkForChain`, `getEulerSdkFresh`)
 - Backend selection via `enableV3Backend` (V3 adapters vs onchain/subgraph/direct)
 - Unified `SDK_QUERY_POLICY` — `staleTimeMs` / `formStaleTimeMs` / `invalidateAfterTx`
 - Post-tx portfolio refresh through the fresh SDK path
@@ -58,7 +58,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🗄️ [Server-Side Caching](./server-side-caching.md)
 
 - Per-host external proxies (Merkl, Fuul, Incentra, Goldsky subgraph) with TTL + in-flight dedup
-- Vault snapshot pipeline (`/api/vaults`) with two-pass client hydration
+- Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
 - Bigint wire codec and adversary-safe wrapper tag
 

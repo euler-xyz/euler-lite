@@ -72,7 +72,10 @@ onMounted(async () => {
         class="relative z-20 shrink-0"
         @click.stop
       >
-        <slot name="actions" />
+        <slot
+          name="actions"
+          :is-open="isOpen"
+        />
       </div>
       <SvgIcon
         name="arrow-down"

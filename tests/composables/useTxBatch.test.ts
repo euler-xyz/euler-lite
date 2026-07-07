@@ -233,6 +233,13 @@ const accountWithPositions = (
 const stubBatchComposableGlobals = () => {
   vi.stubGlobal('useWagmi', () => ({ address: ref(owner), chainId: ref(1) }))
   vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
+  vi.stubGlobal('useEffectiveAddress', () => ({
+    address: ref(owner),
+    isConnected: ref(true),
+    isSpyMode: ref(false),
+    spyAddress: ref(undefined),
+    effectiveAddress: ref(owner),
+  }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useEulerTx', () => eulerTxMocks)
   vi.stubGlobal('useExternalMigrationRefresh', () => ({ scheduleExternalMigrationRefreshes }))

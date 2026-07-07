@@ -1,5 +1,5 @@
 /**
- * Wire shape for the `/api/vaults?chainId=N` snapshot. Lives in `utils/`
+ * Wire shape for the `/api/internal/vaults?chainId=N` snapshot. Lives in `utils/`
  * (not `server/utils/`) so client-side hydration (`composables/useVaults.ts`)
  * can import the types without dragging server-side modules into the
  * browser bundle.

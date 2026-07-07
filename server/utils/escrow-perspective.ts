@@ -21,7 +21,7 @@ interface EulerChainConfig {
 }
 
 async function fetchEulerChains(): Promise<EulerChainConfig[]> {
-  const data = await $fetch<unknown>('/api/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
+  const data = await $fetch<unknown>('/api/internal/euler-chains', { headers: INTERNAL_FETCH_HEADERS })
   return Array.isArray(data) ? data as EulerChainConfig[] : []
 }
 

@@ -4,22 +4,21 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { formatNumber, compactNumber, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { getStrategyHookWarning } from '~/composables/useVaultWarnings'
 import { DateTime } from 'luxon'
 import { getAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
-import { getProductByVault, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
 import {
-  buildAllocatedVaultExposureDisplayItems,
-  hasMissingUtilizedExposureSplit,
+  resolveVaultExposureDisplay,
   type ExposureValueState,
+  type VaultExposureDisplay,
 } from '~/utils/vault/exposure-display'
 
 const emits = defineEmits<{
@@ -30,7 +29,6 @@ const onExposureClick = (address: string) => {
   emits('vault-click', address)
 }
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
-const route = useRoute()
 
 const { getOrFetch, get: registryGet } = useVaultRegistry()
 const {
@@ -165,39 +163,6 @@ const getStrategyCollateralGroups = (strategyVault: EVault | undefined): Collate
   )
 }
 
-const getStrategyMarketSource = (strategyVault: EVault) => {
-  const marketKey = getProductKeyByVault(strategyVault.address)
-  if (!marketKey) return undefined
-
-  const marketName = getProductByVault(strategyVault.address).name || strategyVault.asset.symbol
-  return {
-    label: marketName,
-    to: {
-      name: 'explore-market',
-      params: { market: marketKey },
-      query: { network: route.query.network },
-    },
-  }
-}
-
-const getStrategyExposureValueState = (strategyVault: EVault | undefined): ExposureValueState => {
-  if (!strategyVault) return 'unavailable'
-  if (!isOpenInterestEnabled.value) return 'unavailable'
-
-  const key = strategyVault.address.toLowerCase()
-  if (hasOpenInterestError.value) return 'unavailable'
-  if (unavailableExposureUsdPrices.value.has(key)) return 'unavailable'
-  if (!isOpenInterestLoaded.value) return 'loading'
-  if (!exposureUsdPrices.value.has(key)) return 'loading'
-  if (hasMissingUtilizedExposureSplit(
-    collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
-    strategyVault.utilization,
-  )) {
-    return 'unavailable'
-  }
-  return 'ready'
-}
-
 const collateralExposureGroupsByStrategy = computed(() => {
   const groupsByStrategy = new Map<string, CollateralExposureGroup[]>()
   for (const row of exposureRows.value) {
@@ -207,18 +172,40 @@ const collateralExposureGroupsByStrategy = computed(() => {
   return groupsByStrategy
 })
 
-const getStrategyExposureDisplayItems = (strategyVault: EVault | undefined) => {
-  if (!strategyVault) return []
-  if (getStrategyExposureValueState(strategyVault) !== 'ready') return []
+// Per-strategy exposure display. Mirrors the lend/earn cards: when open interest
+// isn't available for the chain (or errors / returns no rows) it degrades to the
+// RPC-derived fallback instead of hiding, so the row stays populated on chains
+// pinned to on-chain reads. `totalSupplyState` tracks the strategy's allocation
+// price: ready once priced, unavailable when the price is missing, loading until
+// the price load resolves.
+const strategyExposureDisplayByAddress = computed(() => {
+  const result = new Map<string, VaultExposureDisplay>()
+  for (const row of exposureRows.value) {
+    const strategyVault = row.vault
+    if (!strategyVault) continue
 
-  return buildAllocatedVaultExposureDisplayItems({
-    collateralGroups: collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
-    totalExposureUsd: exposureUsdPrices.value.get(strategyVault.address.toLowerCase()) ?? 0,
-    idleAsset: strategyVault.asset,
-    utilization: strategyVault.utilization,
-    idleSource: getStrategyMarketSource(strategyVault),
-  })
-}
+    const key = strategyVault.address.toLowerCase()
+    const totalSupplyState: ExposureValueState = exposureUsdPrices.value.has(key)
+      ? 'ready'
+      : unavailableExposureUsdPrices.value.has(key) ? 'unavailable' : 'loading'
+
+    result.set(key, resolveVaultExposureDisplay({
+      openInterestEnabled: isOpenInterestEnabled.value,
+      openInterestLoaded: isOpenInterestLoaded.value,
+      hasOpenInterestError: hasOpenInterestError.value,
+      getCollateralGroups: () => collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+      totalExposureUsd: exposureUsdPrices.value.get(key) ?? 0,
+      totalSupplyState,
+      utilization: strategyVault.utilization,
+      acceptedCollateralCount: strategyVault.collaterals.length,
+    }))
+  }
+  return result
+})
+
+const getStrategyExposureDisplay = (strategyVault: EVault | undefined): VaultExposureDisplay =>
+  (strategyVault && strategyExposureDisplayByAddress.value.get(strategyVault.address.toLowerCase()))
+  || { valueState: 'unavailable', items: [] }
 
 watch(isMarketDataResolved, () => {
   if (!exposureVaults.value.length) return
@@ -243,6 +230,7 @@ const getStrategySupplyApy = (strategyVault: EVault) => {
 
 const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
   props: {
+    mode: 'supply',
     lendingAPY: getVaultSupplyApy(strategyVault),
     intrinsicAPY: getVaultIntrinsicApy(strategyVault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(strategyVault, enableIntrinsicApy.value),
@@ -337,7 +325,7 @@ load()
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Supply APY
                 <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="getStrategySupplyApyModalData(row.vault)"
                   aria-label="Show supply APY breakdown"
                 >
@@ -350,7 +338,7 @@ load()
               <div class="text-p2 flex items-center text-accent-600 font-semibold">
                 <UiModalPreviewTrigger
                   v-if="hasSupplyRewards(row.vault.address)"
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="getStrategySupplyApyModalData(row.vault)"
                   aria-label="Show supply APY rewards breakdown"
                 >
@@ -372,11 +360,36 @@ load()
         </div>
         <div class="flex flex-col gap-12 pt-12">
           <VaultOverviewLabelValue
-            label="Current exposure"
             orientation="horizontal"
             data-list="earn-exposure-strategy"
             :data-key="getAddress(row.exposure.address)"
             data-field="Current exposure"
+          >
+            <template #label>
+              <span class="flex items-center gap-4">
+                Current exposure
+                <span @click.stop.prevent>
+                  <UiHoverPreviewTooltip
+                    title="Current exposure"
+                    text="The collateral assets currently backing borrows in this strategy."
+                    icon-class="!w-20 !h-20 text-content-muted hover:text-content-secondary"
+                  />
+                </span>
+              </span>
+            </template>
+            <VaultExposureSummary
+              :items="getStrategyExposureDisplay(row.vault).items"
+              :value-state="getStrategyExposureDisplay(row.vault).valueState"
+              :max-visible="5"
+              avatar-size="20"
+            />
+          </VaultOverviewLabelValue>
+          <VaultOverviewLabelValue
+            label="Exposure amount"
+            orientation="horizontal"
+            data-list="earn-exposure-strategy"
+            :data-key="getAddress(row.exposure.address)"
+            data-field="Exposure amount"
           >
             <template v-if="hasExposureUsdPrice(row.exposure)">
               {{ formatCompactUsdValue(getExposureUsdPrice(row.exposure)) }}
@@ -388,21 +401,6 @@ load()
               </UiExactAmount>
               <span class="text-content-secondary">({{ compactNumber(getAllocationPercentage(row.exposure), 2) }}%)</span>
             </template>
-          </VaultOverviewLabelValue>
-          <VaultOverviewLabelValue
-            v-if="isOpenInterestEnabled"
-            label="Exposure"
-            orientation="horizontal"
-            data-list="earn-exposure-strategy"
-            :data-key="getAddress(row.exposure.address)"
-            data-field="Exposure"
-          >
-            <VaultExposureSummary
-              :items="getStrategyExposureDisplayItems(row.vault)"
-              :value-state="getStrategyExposureValueState(row.vault)"
-              :max-visible="5"
-              avatar-size="20"
-            />
           </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             orientation="horizontal"

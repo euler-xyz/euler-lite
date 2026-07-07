@@ -2,7 +2,7 @@ import { logWarn } from '~/utils/errorHandling'
 
 // Recognized EulerRouter addresses (deployed by the recognized EulerRouterFactory)
 // are published per chain at `{oracle-checks}/{chainId}/routers/all.json` as a flat
-// array of addresses. We proxy + cache them through `/api/oracle-routers` and keep a
+// array of addresses. We proxy + cache them through `/api/internal/oracle-routers` and keep a
 // lowercased Set per chain so router-recognition lookups are O(1).
 const recognizedRoutersRef = shallowRef<Set<string>>(new Set())
 const recognizedRoutersChainId = ref<number | null>(null)
@@ -35,7 +35,7 @@ const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
   if (inflight) return inflight
 
   const promise = (async () => {
-    const data = await $fetch('/api/oracle-routers', { query: { chainId } })
+    const data = await $fetch('/api/internal/oracle-routers', { query: { chainId } })
     const set = toRecognizedSet(data)
     recognizedRoutersByChain.set(chainId, set)
     if (recognizedRoutersChainId.value === chainId) {
