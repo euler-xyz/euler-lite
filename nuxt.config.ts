@@ -411,9 +411,31 @@ export default defineNuxtConfig({
   },
 
   telemetry: false,
+
+  hooks: {
+    // The /ui component playground is a dev-only UI kit; it must not ship as
+    // a routable page in production builds. Drop the route (and its bundle)
+    // outside dev so it is neither reachable nor included in the output.
+    // (The /_icons svg-sprite gallery is disabled separately via svgSprite
+    // .iconsPath below, because it is registered by the module's own
+    // pages:extend hook which runs after this one — filtering here can't
+    // remove it reliably.)
+    // NODE_ENV, not import.meta.dev: nuxt.config runs under jiti, where
+    // import.meta.dev is undefined — it would remove the route in dev too.
+    'pages:extend': (pages) => {
+      if (process.env.NODE_ENV === 'development') return
+      const index = pages.findIndex(page => page.path === '/ui')
+      if (index !== -1) pages.splice(index, 1)
+    },
+  },
   eslint: { config: { stylistic: true } },
 
   svgSprite: {
     elementClass: 'icon',
+    // The module registers a dev-only /_icons sprite-gallery page from
+    // iconsPath. It is not linked anywhere in the app, so disable the route
+    // outside dev (empty iconsPath is falsy and skips the module's page
+    // registration, matching the module's `if (options.iconsPath)` guard).
+    ...(process.env.NODE_ENV === 'development' ? {} : { iconsPath: '' }),
   },
 })
