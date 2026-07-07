@@ -12,7 +12,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
-import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
+import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
@@ -223,13 +223,13 @@ const updateEstimates = async () => {
 }
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
     intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: settings.value.enableRewardsApy ? supplyRewardCampaigns.value : [],
     totalSupplyAPY: supplyApyTotal.value,
     rewardVaultAddress: vaultAddress,
-    baseApyAverageLabel: '1h',
   },
 }))
 
@@ -293,11 +293,8 @@ watch(amount, () => {
             >
               <p class="text-h3 text-content-tertiary flex items-center gap-4">
                 Supply APY
-                <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
-                  1h
-                </span>
                 <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY breakdown"
                 >
@@ -314,7 +311,7 @@ watch(amount, () => {
                 />
                 <UiModalPreviewTrigger
                   v-if="hasRewards"
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY rewards breakdown"
                 >

@@ -63,6 +63,7 @@ const createMockSdk = (id: string): MockSdk => ({
 const importUseEulerSdk = async (
   chainIds: Ref<number[]>,
   buildEulerSDK: ReturnType<typeof vi.fn>,
+  onchainSdkChainIds: number[] = [],
 ) => {
   vi.resetModules()
   vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
@@ -79,6 +80,12 @@ const importUseEulerSdk = async (
   vi.stubGlobal('useEulerAddresses', () => ({
     allowedChainIds: chainIds,
     chainId: computed(() => chainIds.value[0] ?? 1),
+  }))
+  vi.stubGlobal('useChainConfig', () => ({
+    enabledChainIds: chainIds.value,
+    deprecatedChainIds: [],
+    onchainSdkChainIds,
+    eVaultFetchChunkChainIds: [],
   }))
   vi.stubGlobal('useVaultRegistry', () => ({
     getAll: () => [],
@@ -205,6 +212,43 @@ describe('useEulerSdk', () => {
       eVaultServiceAdapter: 'fallback',
       eulerEarnServiceAdapter: 'fallback',
       vaultTypeAdapter: 'fallback',
+      rewardsServiceAdapter: 'fallback',
+    })
+  })
+
+  it('uses an onchain browsing SDK for chains listed in ONCHAIN_SDK_CHAINS', async () => {
+    const chainIds = ref([1, 8453])
+    const regularSdk = createMockSdk('regular')
+    const onchainSdk = createMockSdk('onchain')
+    const buildEulerSDK = vi.fn()
+      .mockResolvedValueOnce(regularSdk)
+      .mockResolvedValueOnce(onchainSdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {
+        configEulerChainsUrl: '',
+        configLabelsBaseUrl: '',
+        configOracleChecksBaseUrl: '',
+      },
+    }))
+
+    const { getEulerSdkForChain } = await importUseEulerSdk(chainIds, buildEulerSDK, [8453])
+    await expect(getEulerSdkForChain(1)).resolves.toBe(regularSdk)
+    await expect(getEulerSdkForChain(8453)).resolves.toBe(onchainSdk)
+    await expect(getEulerSdkForChain(8453)).resolves.toBe(onchainSdk)
+
+    expect(buildEulerSDK).toHaveBeenCalledTimes(2)
+    expect((buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions).config).toMatchObject({
+      accountServiceAdapter: 'fallback',
+      eVaultServiceAdapter: 'fallback',
+      eulerEarnServiceAdapter: 'fallback',
+      vaultTypeAdapter: 'fallback',
+      rewardsServiceAdapter: 'fallback',
+    })
+    expect((buildEulerSDK.mock.calls[1]?.[0] as BuildEulerSDKOptions).config).toMatchObject({
+      accountServiceAdapter: 'onchain',
+      eVaultServiceAdapter: 'onchain',
+      eulerEarnServiceAdapter: 'onchain',
+      vaultTypeAdapter: 'subgraph',
       rewardsServiceAdapter: 'fallback',
     })
   })

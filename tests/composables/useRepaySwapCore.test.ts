@@ -105,6 +105,13 @@ describe('useRepaySwapCore', () => {
       isSpyMode: ref(false),
       spyAddress: ref(undefined),
     }))
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(USER),
+      isConnected: ref(false),
+      isSpyMode: ref(false),
+      spyAddress: ref(undefined),
+      effectiveAddress: ref(USER),
+    }))
     vi.stubGlobal('useEulerAddresses', () => ({
       chainId: ref(999_999),
     }))

@@ -33,7 +33,7 @@ import type {
 } from '@eulerxyz/euler-v2-sdk'
 import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import { getAccount } from '@wagmi/vue/actions'
-import { getEulerSdk, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
@@ -1042,7 +1042,7 @@ export const useEulerTx = () => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
       const owner = requireOwner()
       const cid = requireChainId()
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(cid)
       return sdk.executionService.prepareTransactionPlan({
         plan,
         chainId: cid,
@@ -1059,7 +1059,7 @@ export const useEulerTx = () => {
   const estimateGasForPlan = async (plan: TransactionPlan): Promise<bigint> => {
     const owner = requireOwner()
     const cid = requireChainId()
-    const sdk = await getEulerSdk()
+    const sdk = await getEulerSdkForChain(cid)
     return sdk.executionService.estimateGasForTransactionPlan(cid, owner, plan)
   }
 
@@ -1075,7 +1075,7 @@ export const useEulerTx = () => {
     return profAsync('sdk', 'prefetchPluginData', async () => {
       const owner = requireOwner()
       const cid = requireChainId()
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(cid)
       return sdk.executionService.prefetchPluginDataForPlan(
         plan,
         options?.account ?? owner,
@@ -1086,7 +1086,7 @@ export const useEulerTx = () => {
 
   const simulatePreparedPlan = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
     return profAsync('sdk', 'simulatePreparedTransactionPlan', async () => {
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(prepared.chainId)
       return sdk.executionService.simulatePreparedTransactionPlan(prepared, {
         stateOverrides: true,
         stateOverrideOptions,

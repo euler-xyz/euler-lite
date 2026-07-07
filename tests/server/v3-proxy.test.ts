@@ -36,6 +36,7 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/bad-debt')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/batch')).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/totals`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest/by-collateral')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/prices')).toBe(true)
@@ -65,6 +66,10 @@ describe('v3 proxy utilities', () => {
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=1`),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',

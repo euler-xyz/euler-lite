@@ -4,7 +4,7 @@ import { encodeFunctionData, getAddress, type Address } from 'viem'
 import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
@@ -56,8 +56,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   marketLabel?: string
 }>()
 
-const { address: walletAddress, chainId: currentChainId } = useWagmi()
-const { isSpyMode, spyAddress } = useSpyMode()
+const { address: walletAddress, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { chainId: currentChainId } = useWagmi()
 const { getVault } = useVaultRegistry()
 const { prepareTransactionPlan } = useEulerTx()
 const { eulerCoreAddresses } = useEulerAddresses()
@@ -160,11 +160,14 @@ const handleTenderlySimulate = async () => {
 
   try {
     const owner = walletAddress.value as Address
-    const sdk = await getEulerSdk()
+    // Capture the chain id once so the SDK backend selection and the payload
+    // can't diverge if the user switches chains mid-await.
+    const targetChainId = currentChainId.value
+    const sdk = await getEulerSdkForChain(targetChainId)
     const payload = await buildTenderlySimulationPayload({
       plan: currentPlan,
       owner,
-      chainId: currentChainId.value,
+      chainId: targetChainId,
       sdk,
     })
 
@@ -224,7 +227,7 @@ const market = computed<string | undefined>(() => {
 // mirroring the pill in the batch review's operations list. Sub-account 0 is the
 // main account ("Deposits"); numbered borrow positions are "Position N".
 const positionTag = computed<string | undefined>(() => {
-  const ownerAddr = (isSpyMode.value ? spyAddress.value : walletAddress.value) || ''
+  const ownerAddr = effectiveAddress.value || ''
   if (!subAccount || !ownerAddr) return undefined
   try {
     const idx = getSubAccountId(getAddress(ownerAddr), getAddress(subAccount))
@@ -239,8 +242,8 @@ const copyCalldata = async () => {
   const currentPlan = reviewPlan.value
   if (!currentPlan?.length) return
   try {
-    const sdk = await getEulerSdk()
     const cid = currentChainId.value
+    const sdk = await getEulerSdkForChain(cid)
     const entries: { to: string, data: string, value: string }[] = []
 
     for (const item of currentPlan) {

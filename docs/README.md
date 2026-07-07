@@ -49,7 +49,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 🧩 [SDK Integration](./sdk-integration.md)
 
-- Two-instance SDK split (`getEulerSdk` fast / `getEulerSdkFresh` plan-time)
+- SDK entry points (`getEulerSdk`, `getEulerSdkForChain`, `getEulerSdkFresh`)
 - Backend selection via `enableV3Backend` (V3 adapters vs onchain/subgraph/direct)
 - Unified `SDK_QUERY_POLICY` — `staleTimeMs` / `formStaleTimeMs` / `invalidateAfterTx`
 - Post-tx portfolio refresh through the fresh SDK path

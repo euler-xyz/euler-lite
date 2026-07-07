@@ -54,9 +54,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     getQuoteAccounts,
     onQuoteReceived,
   } = options
-  const { address } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
-  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+  const { effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
   const shouldIncludeCowSwap = () =>
     typeof options.includeCowSwap === 'function'

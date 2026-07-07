@@ -16,7 +16,7 @@ import {
   getPairRampConfig,
 } from '~/utils/borrow-pair'
 import { getVaultAvailableLiquidity } from '~/utils/vault-display'
-import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultNetApyPairModal, VaultMaxRoeModal, VaultRampDownModal, VaultApyModal, UiModalPreviewTrigger } from '#components'
 
 const { pair, defaultOpen = true } = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, defaultOpen?: boolean }>()
 
@@ -117,6 +117,7 @@ watchEffect(async () => {
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicSupplyApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(collateralVault.value, enableIntrinsicApy.value),
@@ -127,6 +128,7 @@ const supplyApyModalData = computed(() => ({
 
 const borrowApyModalData = computed(() => ({
   props: {
+    mode: 'borrow',
     borrowingAPY: baseBorrowApy.value,
     intrinsicAPY: intrinsicBorrowApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(borrowVault.value, enableIntrinsicApy.value),
@@ -322,7 +324,7 @@ const rampDownModalData = computed(() => ({
                 <span class="flex items-center gap-4">
                   Supply APY
                   <UiModalPreviewTrigger
-                    :component="VaultSupplyApyModal"
+                    :component="VaultApyModal"
                     :modal-data="supplyApyModalData"
                     aria-label="Show supply APY breakdown"
                   >
@@ -338,7 +340,7 @@ const rampDownModalData = computed(() => ({
                 <VaultPoints :vault="collateralVault" />
                 <UiModalPreviewTrigger
                   v-if="hasSupplyRewards(collateralVault.address)"
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY rewards breakdown"
                 >
@@ -357,7 +359,7 @@ const rampDownModalData = computed(() => ({
                 <span class="flex items-center gap-4">
                   Borrow APY
                   <UiModalPreviewTrigger
-                    :component="VaultBorrowApyModal"
+                    :component="VaultApyModal"
                     :modal-data="borrowApyModalData"
                     aria-label="Show borrow APY breakdown"
                   >
@@ -372,7 +374,7 @@ const rampDownModalData = computed(() => ({
               <span class="flex items-center gap-4">
                 <UiModalPreviewTrigger
                   v-if="hasBorrowRewards(borrowVault.address, collateralVault.address)"
-                  :component="VaultBorrowApyModal"
+                  :component="VaultApyModal"
                   :modal-data="borrowApyModalData"
                   aria-label="Show borrow APY rewards breakdown"
                 >

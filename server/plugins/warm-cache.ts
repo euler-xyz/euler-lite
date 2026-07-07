@@ -45,7 +45,7 @@ import {
   warnIfVaultSourceNeedsV3,
 } from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
-import { parseDeprecatedChains } from '~/utils/parseDeprecatedChains'
+import { parseChainIds } from '~/utils/parseChainIds'
 import { reportStatus } from '../utils/log'
 import { logger } from '~/server/utils/logger'
 
@@ -143,7 +143,7 @@ export default defineNitroPlugin(() => {
 
   const enabledChainIds = getEnabledChainIds()
   const deprecatedChainIds = new Set(
-    parseDeprecatedChains(process.env.DEPRECATED_CHAINS, new Set(enabledChainIds)),
+    parseChainIds(process.env.DEPRECATED_CHAINS, new Set(enabledChainIds)),
   )
   const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return

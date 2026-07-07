@@ -90,6 +90,8 @@ Request → cors.ts (strip client x-country-code, set response x-country-code fr
                 └─ prod env → HTTP 451 (fail-closed)
 ```
 
+When the gate blocks a request or flags VPN/proxy usage it logs the request path. Because some `/api/*` routes embed a wallet address in the path (e.g. `/api/internal/proxy/merkl/users/0x.../rewards`), the path is first run through `safePathTemplate` (`server/utils/observability.ts`), which replaces address and numeric segments with `:address`/`:number` placeholders. This keeps wallet addresses (PII) out of the log sink while preserving the route shape for observability. Routing and matching still operate on the real path.
+
 ## Blocking Rules
 
 **File**: `composables/useGeoBlock.ts`

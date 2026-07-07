@@ -17,9 +17,7 @@ import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 
 const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
-const { address } = useWagmi()
-const { isSpyMode, spyAddress } = useSpyMode()
-const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+const { effectiveAddress } = useEffectiveAddress()
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
 const { account: planAccount } = usePlanAccount()

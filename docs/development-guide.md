@@ -41,6 +41,23 @@ npm run lint:fix      # Auto-fix lint errors
 npm run typecheck     # Type-check the project
 ```
 
+## Continuous Integration
+
+Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 (matching the Dockerfile) with npm caching:
+
+- **typecheck** – `npm run typecheck` (blocking)
+- **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.
+- **lint** – `npm run lint` (blocking)
+
+Run the same checks locally before opening a PR:
+
+```bash
+npm run lint
+npm run typecheck
+npm run build       # required so the logger-bundle test can inspect .output
+CI=true npm run test:run
+```
+
 ## Project configuration
 
 - Nuxt config: `nuxt.config.ts`
