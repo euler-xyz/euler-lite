@@ -22,7 +22,7 @@ const buildVaultTotalsRangeKey = (
   pathname: string,
   searchParams?: URLSearchParams,
 ) => {
-  if (!/^\/v3\/evk\/vaults\/[^/]+\/[^/]+\/totals$/.test(pathname) || !searchParams) {
+  if (!/^\/v3\/(?:evk|earn)\/vaults\/[^/]+\/[^/]+\/totals$/.test(pathname) || !searchParams) {
     return pathname
   }
 

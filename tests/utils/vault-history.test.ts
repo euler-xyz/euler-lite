@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildEarnVaultTotalsHistoryPath,
   buildVaultTotalsHistoryPath,
   getVaultHistoryTimeRange,
   hasFiniteCap,
@@ -81,6 +82,38 @@ describe('vault history utilities', () => {
     ])
   })
 
+  it('parses earn totals history points into display units', () => {
+    const points = parseVaultTotalsHistory({
+      data: {
+        history: [
+          {
+            timestamp: '2026-07-01T00:00:00.000Z',
+            totalAssets: '123450000',
+            totalAssetsUsd: 123.4,
+            sharePrice: 1.02,
+            apy: 11.3,
+          },
+        ],
+      },
+    }, 6)
+
+    expect(points).toEqual([
+      {
+        timestamp: '2026-07-01T00:00:00.000Z',
+        totalAssets: 123.45,
+        totalAssetsUsd: 123.4,
+        totalBorrows: null,
+        totalBorrowsUsd: null,
+        cash: null,
+        cashUsd: null,
+        utilization: null,
+        supplyApy: 11.3,
+        borrowApy: null,
+        sharePrice: 1.02,
+      },
+    ])
+  })
+
   it('builds a bounded totals-history URL', () => {
     expect(buildVaultTotalsHistoryPath(
       1,
@@ -88,6 +121,15 @@ describe('vault history utilities', () => {
       '7d',
       1_782_984_800_000,
     )).toBe('/api/internal/v3/evk/vaults/1/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/totals?resolution=1d&from=1782345600&to=1782950400')
+  })
+
+  it('builds a bounded earn totals-history URL', () => {
+    expect(buildEarnVaultTotalsHistoryPath(
+      1,
+      '0x018b86A893F57a632F90c4A8308353Ac938adc01',
+      '7d',
+      1_782_984_800_000,
+    )).toBe('/api/internal/v3/earn/vaults/1/0x018b86A893F57a632F90c4A8308353Ac938adc01/totals?resolution=1d&from=1782345600&to=1782950400')
   })
 
   it('returns the same bounded range used by the totals-history URL', () => {

@@ -194,6 +194,44 @@ describe('/api/internal/v3 proxy route', () => {
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps earn vault totals history cooldowns scoped to the requested range', async () => {
+    mocks.fetchWithTimeout
+      .mockResolvedValueOnce(new Response('{"error":true}', {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response('{"ok":true}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+
+    const failedRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}/totals?resolution=1d&from=1775209911&to=1782985911`,
+    )
+    const otherRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`,
+    )
+    const repeatedFailedRange = makeEvent(
+      'GET',
+      `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}/totals?resolution=1d&from=1775209911&to=1782985911`,
+    )
+
+    await expect(handler(failedRange)).resolves.toBe('{"error":true}')
+    await expect(handler(otherRange)).resolves.toBe('{"ok":true}')
+    await expect(handler(repeatedFailedRange)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream cooling down',
+    })
+
+    expect(failedRange.context.status).toBe(502)
+    expect(failedRange.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(repeatedFailedRange.context.responseHeaders?.['retry-after']).toBe('10')
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps cooldown when an overlapping success returns after a retryable failure', async () => {
     let resolveRetryable: (response: Response) => void = () => {}
     let resolveSuccess: (response: Response) => void = () => {}
