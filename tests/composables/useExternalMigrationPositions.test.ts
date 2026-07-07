@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref, type Ref } from 'vue'
 import { getAddress, parseUnits, type Address } from 'viem'
-import { isExternalMigrationDustPosition, useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
+import { isExternalMigrationDustPosition, useExternalMigrationPositions, type ExternalMigrationCandidate, type MetamorphoMigrationCandidate } from '~/composables/useExternalMigrationPositions'
 
 const eulerSdkMock = vi.hoisted(() => ({
   fetchAssetUsdPriceByAddress: vi.fn(),
@@ -68,6 +68,34 @@ const aaveSupplyCandidate = (amountUsd: number | null): ExternalMigrationCandida
     variableDebt: 0n,
     stableDebt: 0n,
   },
+})
+
+const METAMORPHO_V1_VAULT = getAddress('0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB')
+const METAMORPHO_V2_VAULT = getAddress('0x0229dB3921dE71CFa43Cfe9fb6A87b403647A9ae')
+const METAMORPHO_EMPTY_VAULT = getAddress('0x8eB67A509616cd6A7c1B3c8C21D48FF57df3d458')
+
+const metamorphoCandidate = (amountUsd: number | null): MetamorphoMigrationCandidate => ({
+  connectorId: 'metamorpho',
+  protocol: 'Morpho Vaults',
+  id: `metamorpho:${METAMORPHO_V1_VAULT}:supply`,
+  chainId: 8453,
+  owner: OWNER,
+  ref: {
+    vault: METAMORPHO_V1_VAULT,
+    version: 'v1',
+  },
+  debt: null,
+  collateral: {
+    address: USDC,
+    symbol: 'USDC',
+    decimals: 6,
+    amount: 1n,
+    amountUsd,
+  },
+  borrowApy: null,
+  lltv: null,
+  vaultName: 'Steakhouse USDC',
+  shares: 1n,
 })
 
 const morphoBorrowCandidate = (collateralUsd: number | null, debtUsd: number | null): ExternalMigrationCandidate => ({
@@ -320,6 +348,39 @@ describe('useExternalMigrationPositions', () => {
     })
   })
 
+  it('surfaces an error when an Aave balance read fails instead of hiding the position', async () => {
+    aaveUserConfiguration = 6n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: getAddress('0x0000000000000000000000000000000000000020'),
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_VARIABLE_DEBT_USDC, 1_000_000n)
+    const baseReadContract = readContract.getMockImplementation() as (
+      call: { address: Address, functionName: string, args?: readonly unknown[] },
+    ) => Promise<unknown>
+    readContract.mockImplementation(async (call: { address: Address, functionName: string, args?: readonly unknown[] }) => {
+      if (call.functionName === 'balanceOf' && getAddress(call.address) === AAVE_WETH) {
+        throw new Error('rpc blip')
+      }
+      return baseReadContract(call)
+    })
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value).toEqual([])
+    expect(result.error.value).toContain('Aave discovery read failed')
+  })
+
   it('discovers Aave V3 supply-only positions when the wallet has collateral and no debt', async () => {
     aaveUserConfiguration = 2n
     aaveReserves = [WETH, USDC]
@@ -422,5 +483,96 @@ describe('useExternalMigrationPositions', () => {
     expect(isExternalMigrationDustPosition(aaveSupplyCandidate(null))).toBe(false)
     expect(isExternalMigrationDustPosition(morphoBorrowCandidate(0.01, 0.009))).toBe(true)
     expect(isExternalMigrationDustPosition(morphoBorrowCandidate(100, 99.995))).toBe(false)
+    expect(isExternalMigrationDustPosition(metamorphoCandidate(0.01))).toBe(true)
+    expect(isExternalMigrationDustPosition(metamorphoCandidate(250))).toBe(false)
+  })
+
+  it('discovers Metamorpho v1 and v2 vault positions and skips empty ones', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [],
+          vaultPositions: [
+            {
+              vault: {
+                address: METAMORPHO_V1_VAULT,
+                name: 'Steakhouse USDC',
+                symbol: 'steakUSDC',
+                asset: { address: USDC, symbol: 'USDC', decimals: 6 },
+              },
+              state: {
+                shares: '95000000000000000000',
+                assets: '100000000',
+                assetsUsd: 100.02,
+              },
+            },
+            {
+              vault: {
+                address: METAMORPHO_EMPTY_VAULT,
+                name: 'Gauntlet USDC Core',
+                symbol: 'gtUSDCcore',
+                asset: { address: USDC, symbol: 'USDC', decimals: 6 },
+              },
+              state: { shares: 0, assets: 0, assetsUsd: 0 },
+            },
+          ],
+          vaultV2Positions: [
+            {
+              vault: {
+                address: METAMORPHO_V2_VAULT,
+                name: 'Hyperithm USDC Core',
+                symbol: 'hyperUSDCc',
+                asset: { address: USDC, symbol: 'USDC', decimals: 6 },
+              },
+              shares: '4000000000000000000',
+              assets: '4200000',
+              assetsUsd: 4.2,
+            },
+          ],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value).toHaveLength(2)
+    expect(result.positions.value[0]).toMatchObject({
+      connectorId: 'metamorpho',
+      protocol: 'Morpho Vaults',
+      id: `metamorpho:${METAMORPHO_V1_VAULT}:supply`,
+      owner: OWNER,
+      ref: {
+        vault: METAMORPHO_V1_VAULT,
+        version: 'v1',
+      },
+      debt: null,
+      collateral: expect.objectContaining({
+        address: USDC,
+        symbol: 'USDC',
+        decimals: 6,
+        amount: 100_000_000n,
+        amountUsd: 100.02,
+      }),
+      vaultName: 'Steakhouse USDC',
+      shares: 95_000_000_000_000_000_000n,
+    })
+    expect(result.positions.value[1]).toMatchObject({
+      connectorId: 'metamorpho',
+      id: `metamorpho:${METAMORPHO_V2_VAULT}:supply`,
+      ref: {
+        vault: METAMORPHO_V2_VAULT,
+        version: 'v2',
+      },
+      debt: null,
+      collateral: expect.objectContaining({
+        amount: 4_200_000n,
+        amountUsd: 4.2,
+      }),
+      vaultName: 'Hyperithm USDC Core',
+    })
   })
 })

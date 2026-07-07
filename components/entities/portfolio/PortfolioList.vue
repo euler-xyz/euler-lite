@@ -1,39 +1,12 @@
 <script setup lang="ts">
 import type { PortfolioBorrowPosition, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { UserReward } from '~/entities/reward-campaign'
-import { isRenderablePortfolioBorrowPosition } from '~/utils/portfolioBorrowPosition'
 import { getAddress } from 'viem'
 
-const props = defineProps<{
+defineProps<{
   type: 'lend' | 'borrow' | 'earn' | 'sdk-rewards'
   items: unknown[]
 }>()
-
-// TEMP DIAGNOSTIC (remove): log borrow positions that fall back to the
-// "Unknown collateral" unsupported renderer, to see whether the collateral
-// vault is missing entirely or present-but-unresolved.
-watch(() => props.items, (items) => {
-  if (props.type !== 'borrow') return
-  for (const p of items as PortfolioBorrowPosition<VaultEntity>[]) {
-    if (isRenderablePortfolioBorrowPosition(p)) continue
-    const collateralVault = p.collateralVault as { address?: string } | undefined
-    // eslint-disable-next-line no-console
-    console.log('[UNSUPPORTED-BORROW]', JSON.stringify({
-      subAccount: p.subAccount,
-      borrowVault: p.borrowVault?.address,
-      borrowAsset: p.borrowVault?.asset?.symbol,
-      collateralVaultMissing: !collateralVault,
-      collateralVaultAddress: collateralVault?.address,
-      collateralVaults: p.collateralVaults,
-      collaterals: (p.collaterals ?? []).map(c => ({
-        vaultAddress: c.vaultAddress,
-        hasVaultInstance: !!c.vault,
-        vaultInstanceAddress: c.vault?.address,
-        assets: String(c.assets),
-      })),
-    }, null, 2))
-  }
-}, { immediate: true })
 
 const { removedKeys } = useTxBatch()
 

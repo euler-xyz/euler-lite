@@ -174,9 +174,13 @@ const onBlur = () => {
   }
 }
 const showAssetSelectorAsset = computed(() => props.assetSelectorSelected !== false)
-const showAssetSelectorArrow = computed(() =>
-  props.swappable || props.collateralModalForceOpen || (props.collateralOptions?.length ?? 0) > 1,
-)
+const canOpenCollateralModal = computed(() => {
+  const optionsCount = props.collateralOptions?.length ?? 0
+  return props.collateralModalForceOpen ? optionsCount > 0 : optionsCount >= 2
+})
+// The arrow must mirror canOpenCollateralModal, or the pill looks clickable
+// while openChooseCollateralModal() immediately returns.
+const showAssetSelectorArrow = computed(() => props.swappable || canOpenCollateralModal.value)
 
 onBeforeUnmount(() => {
   if (emitInputTimeout.value) {
@@ -185,9 +189,7 @@ onBeforeUnmount(() => {
   }
 })
 const openChooseCollateralModal = () => {
-  const optionsCount = props.collateralOptions?.length ?? 0
-  const canOpen = props.collateralModalForceOpen ? optionsCount > 0 : optionsCount >= 2
-  if (!canOpen) {
+  if (!canOpenCollateralModal.value) {
     return
   }
   modal.open(ChooseCollateralModal, {

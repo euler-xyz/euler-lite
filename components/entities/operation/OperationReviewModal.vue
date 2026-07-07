@@ -104,8 +104,10 @@ const isPreparingPlan = ref(false)
 const reviewPlan = computed(() => preparedPlan.value)
 const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
 const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
-const calldataPlan = computed(() => reviewPlan.value ?? calldataPrepared?.plan)
-const calldataChainId = computed(() => prepared?.chainId ?? calldataPrepared?.chainId ?? currentChainId.value)
+// calldataPrepared is the dedicated copy-calldata plan (e.g. carrying
+// placeholder signatures) — it must win over the review plan when both exist.
+const calldataPlan = computed(() => calldataPrepared?.plan ?? reviewPlan.value)
+const calldataChainId = computed(() => calldataPrepared?.chainId ?? prepared?.chainId ?? currentChainId.value)
 const displayReviewPlan = computed(() => displayPlan ?? reviewPlan.value ?? calldataPrepared?.plan ?? tenderlyPrepared?.plan ?? tenderlyPlan)
 const canCopyCalldata = computed(() => !!calldataPlan.value?.length)
 let prepareRequestId = 0
@@ -262,9 +264,10 @@ const positionTag = computed<string | undefined>(() => {
 })
 
 const displaySteps = computed((): DisplayStep[] => {
-  const steps = providedSignatureSteps?.length
-    ? rawDisplaySteps.value
-    : rawDisplaySteps.value.filter(step => !isWalletSignatureStep(step))
+  // Wallet-signature rows always render in the signature section, never among
+  // the transaction steps — also when the caller provides its own signature
+  // rows (a raw permit2 row would otherwise appear in both sections).
+  const steps = rawDisplaySteps.value.filter(step => !isWalletSignatureStep(step))
   return steps.map((step, idx) => ({ ...step, index: idx + 1 }))
 })
 
@@ -425,7 +428,7 @@ const confirmLabel = computed(() => {
         </div>
         <div
           v-if="signatureSteps.length || displaySteps.length"
-          class="w-full rounded-8 border border-line-default bg-card px-12 py-10 shadow-xs"
+          class="w-full rounded-8 bg-card p-12"
         >
           <div class="flex w-full flex-col gap-8">
             <OperationStepsList

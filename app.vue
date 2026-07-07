@@ -109,7 +109,6 @@ watch(route, () => {
       'position-number-borrow-swap',
       'position-number-withdraw',
       'position-number-multiply',
-      'position-number-borrow-swap',
       'position-number-collateral-swap',
     ].includes(currentRouteName)
     isHeaderVisible.value = true

@@ -60,7 +60,7 @@ const tabsModel = computed<string>({
   get: () => route.name as string,
   set: (value) => {
     if (route.name !== value) {
-      router.replace({ name: value })
+      router.replace({ name: value, query: route.query })
     }
   },
 })

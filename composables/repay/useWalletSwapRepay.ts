@@ -317,7 +317,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value && !isSpyMode.value) return false
+    if (!isConnected.value && !isSpyMode.value) return true
     if (findBlockingDisabledOp(walletSwapRepayPlannedOps.value)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
     if (direction.value === SwapperMode.TARGET_DEBT && !(+debtAmount.value)) return true

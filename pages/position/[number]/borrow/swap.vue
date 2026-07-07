@@ -2,9 +2,12 @@
 import {
   type Account,
   type IHasVaultAddress,
+  isEulerEarn,
+  isEVault,
   isSecuritizeCollateralVault,
   SwapperMode,
   type EVault,
+  type EulerEarn,
   type EulerMigrationTarget,
   type MigrationAuthorizationRequest,
   type MigrationPosition,
@@ -19,7 +22,7 @@ import {
 import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type StateOverride } from 'viem'
 import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
+import { AAVE_CONNECTOR_ID, METAMORPHO_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { useSwapQuotesParallel, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
@@ -28,7 +31,7 @@ import type { PlanRefinancePositionInput } from '~/composables/useEulerTx'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
-import { useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
+import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS, useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -40,7 +43,7 @@ import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros, formatUsdValue } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
-import { getVaultProductName, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -103,7 +106,7 @@ const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { viewer } = useApyVisibility()
 const { getTokenCategoryTags } = useTokenList()
 const { borrowList } = useVaults()
-const { getVaultCategory, getVault, getVerifiedEVaults } = useVaultRegistry()
+const { getVaultCategory, getVault, getVerifiedEVaults, getEarnVaults } = useVaultRegistry()
 const showAllLabelEntries = useShowAllLabelEntries()
 const cowSwapExecution = useCowSwapCollateralSwapExecution()
 const cowSwapOrderStatus = useCowSwapOrderStatus(
@@ -117,11 +120,19 @@ const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
 const positionIndex = usePositionIndex()
 const externalSourceId = computed(() => typeof route.query.source === 'string' ? route.query.source : '')
 const isExternalSourceRoute = computed(() => positionIndex === 'external' && !!externalSourceId.value)
-const refinanceBackFallback = computed(() => {
-  if (!isExternalSourceRoute.value) return positionDetailsFallback.value
+const migrateDiscoveryPath = computed(() => {
   const network = typeof route.query.network === 'string' ? route.query.network : ''
   return network ? `/portfolio/migrate?network=${network}` : '/portfolio/migrate'
 })
+const refinanceBackFallback = computed(() =>
+  isExternalSourceRoute.value ? migrateDiscoveryPath.value : positionDetailsFallback.value,
+)
+// A direct link to the external route without a source id has no position to
+// render — fail closed to migration discovery instead of showing an empty
+// refinance shell (mirrors usePositionIndex's redirect for invalid indices).
+if (positionIndex === 'external' && !externalSourceId.value) {
+  void router.replace(migrateDiscoveryPath.value)
+}
 const {
   positions: externalPositions,
   owner: inboundExternalOwner,
@@ -129,7 +140,6 @@ const {
   error: externalPositionsError,
   load: loadExternalPositions,
 } = useExternalMigrationPositions()
-const POST_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
 const inboundExternalEulerAccount = shallowRef<Address | null>(null)
 const inboundExternalEulerAccountKey = ref('')
 
@@ -267,15 +277,24 @@ const sourceCollateralEVault = computed<EVault | undefined>(() => {
   if (!vault || isSecuritizeCollateralVault(vault)) return undefined
   return vault as EVault
 })
+/** Collateral targets selectable on the external supply-only route — lend EVKs plus EulerEarn vaults. */
+type SupplyTargetVault = EVault | EulerEarn
+
 const targetDebtVault = ref<EVault | undefined>()
-const targetCollateralVault = ref<EVault | undefined>()
+const targetCollateralVault = ref<SupplyTargetVault | undefined>()
+/** Narrows the target collateral to an EVault for the EVK-only code paths (refinance, CoW swap, caps/hooks). */
+const targetCollateralEVault = computed<EVault | undefined>(() =>
+  isEVault(targetCollateralVault.value) ? targetCollateralVault.value : undefined,
+)
 
 const effectiveDebtVault = computed<EVault | undefined>(() => targetDebtVault.value || sourceDebtVault.value)
-const effectiveCollateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
+const effectiveCollateralVault = computed<EVault | EulerEarn | SecuritizeCollateralVault | undefined>(() =>
   targetCollateralVault.value || sourceCollateralVault.value,
 )
+// Debt/collateral option lists never pair with an EulerEarn collateral (Earn
+// targets exist only on the supply-only route), so narrow to the EVault here.
 const effectiveCollateralEVaultForOptions = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
-  targetCollateralVault.value || sourceCollateralVault.value,
+  targetCollateralEVault.value || sourceCollateralVault.value,
 )
 
 useOperationGuard(computed(() => [
@@ -442,7 +461,7 @@ const {
   liabilityVault: computed(() => effectiveDebtVault.value),
 })
 
-const uniqueVaults = <TVault extends EVault | SecuritizeCollateralVault>(vaults: TVault[]): TVault[] => {
+const uniqueVaults = <TVault extends EVault | EulerEarn | SecuritizeCollateralVault>(vaults: TVault[]): TVault[] => {
   const seen = new Set<string>()
   const result: TVault[] = []
   for (const vault of vaults) {
@@ -454,7 +473,7 @@ const uniqueVaults = <TVault extends EVault | SecuritizeCollateralVault>(vaults:
   return result
 }
 
-const filterOptionsByVaults = (options: CollateralOption[], vaults: Array<EVault | SecuritizeCollateralVault>) => {
+const filterOptionsByVaults = (options: CollateralOption[], vaults: Array<EVault | EulerEarn | SecuritizeCollateralVault>) => {
   const byAddress = new Map(
     options
       .filter(option => option.vaultAddress)
@@ -470,7 +489,7 @@ const withCompatibilityWarning = (
   warning: CollateralOption['compatibilityWarning'],
 ) => options.map(option => ({ ...option, compatibilityWarning: warning }))
 
-const prioritizeVaultsByAsset = <TVault extends EVault | SecuritizeCollateralVault>(
+const prioritizeVaultsByAsset = <TVault extends EVault | EulerEarn | SecuritizeCollateralVault>(
   vaults: TVault[],
   asset?: { address?: string } | null,
   enabled = true,
@@ -482,16 +501,22 @@ const prioritizeVaultsByAsset = <TVault extends EVault | SecuritizeCollateralVau
   )
 }
 
-const externalSupplyOnlyTargetVaults = computed(() => {
+const externalSupplyOnlyTargetVaults = computed<SupplyTargetVault[]>(() => {
   if (!externalIsSupplyOnly.value) return []
   const borrowableAddresses = new Set(
     borrowList.value.map(pair => normalizeVaultAddress(pair.borrow.address)),
   )
-  return getVerifiedEVaults(showAllLabelEntries.value).filter(vault =>
+  const lendVaults = getVerifiedEVaults(showAllLabelEntries.value).filter(vault =>
     (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
     && borrowableAddresses.has(normalizeVaultAddress(vault.address))
     && !isOpDisabled(vault, OP_DEPOSIT),
   )
+  // Earn vaults have no hook-based op gating; geo/deprecation restrictions are
+  // applied per option via getVaultTags in buildCollateralOption.
+  const earnVaults = getEarnVaults().filter(vault =>
+    showAllLabelEntries.value || !isEarnVaultNotExplorable(vault.address),
+  )
+  return [...lendVaults, ...earnVaults]
 })
 
 const externalSupplyOnlyTargetOptions = useReactiveMap(
@@ -529,13 +554,13 @@ const externalInitialTargetPairs = computed(() => {
       )
     : externalSupplyOnlyTargetVaults.value
   if (!debtAsset) {
-    return collateralVaults.map(collateral => ({ collateral, debt: null as EVault | null }))
+    return collateralVaults.map(collateral => ({ collateral: collateral as SupplyTargetVault, debt: null as EVault | null }))
   }
 
   const debtVaults = rawAllDebtTargetVaults.value.filter(vault =>
     sameAssetAddress(vault.asset.address, debtAsset.address),
   )
-  const pairs: Array<{ debt: EVault, collateral: EVault }> = []
+  const pairs: Array<{ debt: EVault, collateral: SupplyTargetVault }> = []
   for (const debt of debtVaults) {
     for (const collateral of collateralVaults) {
       if (isDebtCollateralCompatible(debt, collateral)) {
@@ -1187,14 +1212,25 @@ const requestExternalCollateralQuotes = useDebounceFn(async () => {
     return
   }
   const eulerAccount = await resolveInboundExternalEulerAccount()
+  // EulerEarn targets have no `skim`, so the swap output must be routed to the
+  // SwapVerifier (transferOutputToReceiver) where the migration batch deposits
+  // it via `verifyAmountMinAndDeposit` (collateralSwapVerification: 'deposit').
+  const isEarnTarget = isEulerEarn(targetVault)
+  const swapVerifier = eulerPeripheryAddresses.value?.swapVerifier
+  if (isEarnTarget && !swapVerifier) {
+    resetExternalCollateralQuotes()
+    return
+  }
   await requestExternalCollateralQuotesNow({
     tokenIn: sourceAsset.address as Address,
     tokenOut: targetVault.asset.address as Address,
     accountIn: zeroAddress as Address,
-    accountOut: eulerAccount,
+    // The swap API requires accountOut to be the zero address for
+    // transferOutputToReceiver quotes (TransferMin verification).
+    accountOut: isEarnTarget ? zeroAddress as Address : eulerAccount,
     amount,
     vaultIn: zeroAddress as Address,
-    receiver: targetVault.address as Address,
+    receiver: (isEarnTarget ? swapVerifier : targetVault.address) as Address,
     origin: externalQuoteOwner.value,
     slippage: slippage.value,
     swapperMode: SwapperMode.EXACT_IN,
@@ -1202,6 +1238,7 @@ const requestExternalCollateralQuotes = useDebounceFn(async () => {
     targetDebt: 0n,
     currentDebt: 0n,
     unusedInputReceiver: externalQuoteOwner.value,
+    ...(isEarnTarget ? { transferOutputToReceiver: true } : {}),
   })
 }, 500)
 
@@ -1363,7 +1400,7 @@ const toBorrowApy = computed(() => {
 const effectiveDebtProduct = useEulerProductOfVault(computed(() => effectiveDebtVault.value?.address || ''))
 const effectiveCollateralProduct = useEulerProductOfVault(computed(() => effectiveCollateralVault.value?.address || ''))
 
-type RefinanceCollateralVault = EVault | SecuritizeCollateralVault
+type RefinanceCollateralVault = EVault | EulerEarn | SecuritizeCollateralVault
 
 interface RefinanceCollateralLeg {
   vault: RefinanceCollateralVault
@@ -1682,20 +1719,22 @@ onUnmounted(() => {
 const plannedOps = computed<PlannedOp[]>(() => {
   const steps: PlannedOp[] = []
   if (isExternalSourceRoute.value) {
-    if (targetCollateralVault.value) {
-      steps.push({ vault: targetCollateralVault.value, op: OP_DEPOSIT })
+    // Hook-based op gating only applies to EVaults; EulerEarn deposit limits
+    // are enforced on-chain and surface through the plan simulation.
+    if (targetCollateralEVault.value) {
+      steps.push({ vault: targetCollateralEVault.value, op: OP_DEPOSIT })
     }
     if (targetDebtVault.value) {
       steps.push({ vault: targetDebtVault.value, op: OP_BORROW })
     }
     return steps
   }
-  if (hasCollateralChange.value && sourceCollateralEVault.value && targetCollateralVault.value) {
+  if (hasCollateralChange.value && sourceCollateralEVault.value && targetCollateralEVault.value) {
     steps.push({
       vault: sourceCollateralEVault.value,
       op: isSameCollateralAsset.value ? OP_REDEEM : OP_WITHDRAW,
     })
-    steps.push({ vault: targetCollateralVault.value, op: OP_SKIM })
+    steps.push({ vault: targetCollateralEVault.value, op: OP_SKIM })
   }
   if (hasDebtChange.value && sourceDebtVault.value && targetDebtVault.value) {
     steps.push({ vault: targetDebtVault.value, op: OP_BORROW })
@@ -1725,6 +1764,9 @@ const collateralSupplyCapError = computed(() => {
   const vault = targetCollateralVault.value
   const amount = nextCollateralAmountNano.value
   if (!hasCollateralChange.value || !vault || amount === null) return null
+  // EulerEarn vaults have no EVault-style caps; their deposit limits are
+  // enforced on-chain and surface through the plan simulation.
+  if (!isEVault(vault)) return null
   if (vault.caps.supplyCap > 0n && vault.caps.supplyCap < maxUint256 && vault.totalAssets + amount > vault.caps.supplyCap) {
     return 'Supply cap would be exceeded on the target collateral vault'
   }
@@ -2101,6 +2143,11 @@ const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigr
     eulerAccount,
     collateralVault: targetCollateralVault.value.address as Address,
   }
+  if (collateralSwapQuote && isEulerEarn(targetCollateralVault.value)) {
+    // EulerEarn has no `skim` — credit the swapped collateral through the
+    // SwapVerifier's deposit-verified path instead.
+    eulerTarget.collateralSwapVerification = 'deposit'
+  }
   if (source.debt && targetDebtVault.value) {
     eulerTarget.borrowVault = targetDebtVault.value.address as Address
     eulerTarget.borrowAmount = debtSwapQuote
@@ -2469,7 +2516,7 @@ watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
   if (loaded) void loadPosition()
 }, { immediate: true })
 
-const resolveSelectedVault = <T extends EVault | SecuritizeCollateralVault>(
+const resolveSelectedVault = <T extends EVault | EulerEarn | SecuritizeCollateralVault>(
   vaults: T[],
   selectedIndex: number,
   selectedOption?: CollateralOption,
@@ -2505,7 +2552,7 @@ const onCollateralVaultChange = (selectedIndex: number, selectedOption?: Collate
   if (!selected) return
   if (isExternalSourceRoute.value) {
     if (!isSecuritizeCollateralVault(selected)) {
-      targetCollateralVault.value = selected as EVault
+      targetCollateralVault.value = selected as SupplyTargetVault
     }
     return
   }
@@ -2515,7 +2562,8 @@ const onCollateralVaultChange = (selectedIndex: number, selectedOption?: Collate
     targetCollateralVault.value = undefined
     return
   }
-  if (!isSecuritizeCollateralVault(selected)) {
+  // EulerEarn vaults are only offered on the external route.
+  if (!isSecuritizeCollateralVault(selected) && !isEulerEarn(selected)) {
     targetCollateralVault.value = selected as EVault
   }
 }
@@ -2539,7 +2587,7 @@ const openSlippageSettings = () => {
 }
 
 const submitCowSwapCollateralSwap = async () => {
-  if (!sourceCollateralEVault.value || !targetCollateralVault.value || !selectedCollateralQuote.value || !address.value) return
+  if (!sourceCollateralEVault.value || !targetCollateralEVault.value || !selectedCollateralQuote.value || !address.value) return
   if (validationError.value) return
 
   cowSwapExecution.reset()
@@ -2600,7 +2648,7 @@ const submitCowSwapCollateralSwap = async () => {
   }
 
   const fromVault = sourceCollateralEVault.value
-  const toVault = targetCollateralVault.value
+  const toVault = targetCollateralEVault.value
   const fromAsset = fromVault.asset
   const toAsset = toVault.asset
   const fromShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(fromAsset.decimals)))
@@ -2680,7 +2728,7 @@ const submitCowSwapCollateralSwap = async () => {
 function schedulePostMigrationRefreshes() {
   const refreshAddress = address.value || inboundExternalOwner.value || ''
   scheduleExternalMigrationRefreshes()
-  for (const delay of POST_MIGRATION_REFRESH_DELAYS_MS) {
+  for (const delay of POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS) {
     setTimeout(() => {
       if (refreshAddress) {
         void refreshAllPositions(undefined, refreshAddress)
@@ -3002,7 +3050,7 @@ function sameAssetAddress(a?: string, b?: string): boolean {
 
 function isDebtCollateralCompatible(
   debtVault: EVault,
-  collateralVault: EVault | SecuritizeCollateralVault,
+  collateralVault: EVault | EulerEarn | SecuritizeCollateralVault,
 ): boolean {
   const collateralAddress = normalizeVaultAddress(collateralVault.address)
   return debtVault.collaterals.some(
@@ -3011,7 +3059,7 @@ function isDebtCollateralCompatible(
 }
 
 function makeVaultOption(
-  vault: EVault | SecuritizeCollateralVault,
+  vault: EVault | EulerEarn | SecuritizeCollateralVault,
   apy: number | undefined,
   label: string,
 ): CollateralOption {
@@ -3030,7 +3078,7 @@ function makeVaultOption(
   }
 }
 
-function formatVaultAmount(amount: bigint | null | undefined, vault?: EVault | SecuritizeCollateralVault): string {
+function formatVaultAmount(amount: bigint | null | undefined, vault?: EVault | EulerEarn | SecuritizeCollateralVault): string {
   if (amount === null || amount === undefined || !vault) return ''
   return trimTrailingZeros(formatUnits(amount, Number(vault.asset.decimals)))
 }
@@ -3053,12 +3101,12 @@ function formatExternalAssetUsd(asset?: ExternalMigrationCandidate['collateral']
   return formatUsdValue(asset.amountUsd)
 }
 
-function getVaultDisplayName(vault?: EVault | SecuritizeCollateralVault): string {
+function getVaultDisplayName(vault?: EVault | EulerEarn | SecuritizeCollateralVault): string {
   if (!vault) return 'Select Euler vault'
   return getVaultProductName(vault.address) || vault.shares.name || vault.asset.symbol
 }
 
-function getVaultMarketAssetLabel(vault?: EVault | SecuritizeCollateralVault): string {
+function getVaultMarketAssetLabel(vault?: EVault | EulerEarn | SecuritizeCollateralVault): string {
   if (!vault) return '-'
   return `${getVaultDisplayName(vault)} · ${vault.asset.symbol}`
 }
@@ -3080,8 +3128,8 @@ const parseCowProviderAmount = parseUnsignedIntegerAmount
 
 function buildQuoteSummary(
   quote: SwapQuote,
-  inputVault: EVault,
-  outputVault: EVault,
+  inputVault: EVault | EulerEarn,
+  outputVault: EVault | EulerEarn,
   inputField: 'amountIn' | 'amountOut',
   outputField: 'amountIn' | 'amountOut',
 ) {
@@ -3172,6 +3220,16 @@ function buildInboundExternalMigrationSignatureSteps(authorizationRequest: Migra
         : 'Signature: enable Morpho authorization',
       isSeparateTx: false,
     }))
+  }
+  if (inboundExternalAuthorizationConnector.value === METAMORPHO_CONNECTOR_ID) {
+    // The permit value is denominated in vault shares, so display the
+    // underlying position amount as an estimate instead.
+    return [{
+      index: 1,
+      label: 'Signature: Morpho vault permit',
+      isSeparateTx: false,
+      assetInfo: migrationStepAssetInfo(sourceCollateral, sourceCollateral.amount, true),
+    }]
   }
   return []
 }

@@ -26,6 +26,7 @@ const oracle = '0x0000000000000000000000000000000000000033' as Address
 const irm = '0x0000000000000000000000000000000000000034' as Address
 const aToken = '0x0000000000000000000000000000000000000035' as Address
 const variableDebtToken = '0x0000000000000000000000000000000000000036' as Address
+const metamorphoVault = '0x0000000000000000000000000000000000000037' as Address
 const bytes32Zero = `0x${'00'.repeat(32)}` as Hex
 const genericHandler = '0x47656e6572696300000000000000000000000000000000000000000000000000' as Hex
 const wbtcAsset = '0x0000000000000000000000000000000000000026' as Address
@@ -521,6 +522,18 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
   })
 })
 
+describe('buildTransactionPlanDisplaySteps generic-handler redeem outside migrations', () => {
+  it('labels a wrapped ERC4626 redeem as a plain withdrawal', () => {
+    const steps = buildSteps(genericSwap(daiVault, daiAsset, daiAsset, encodeFunctionData({
+      abi: vaultAbi,
+      functionName: 'redeem',
+      args: [1n, account, account],
+    })))
+
+    expect(steps[0]?.label).toBe('Withdraw')
+  })
+})
+
 describe('buildTransactionPlanDisplaySteps migration rows', () => {
   const collateralAmount = 1_771_920_000_000_000n
   const debtBorrowAmount = 1_010_849n
@@ -685,7 +698,7 @@ describe('buildTransactionPlanDisplaySteps migration rows', () => {
         assetInfo: { symbol: 'wstETH', address: wstEthAsset, amount: '0.00277192' },
         toAssetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.0015' },
       },
-      { label: 'Supply collateral to Euler', assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00142823' } },
+      { label: 'Verify min received and supply to Euler', assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00142823' } },
       { label: 'Disable Morpho authorization', assetInfo: undefined },
     ])
   })
@@ -847,6 +860,80 @@ describe('buildTransactionPlanDisplaySteps migration rows', () => {
       { label: 'Repay Aave debt', assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1.000841' } },
       { label: 'Transfer Aave collateral', assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00177192' } },
       { label: 'Supply collateral to Euler', assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00177192' } },
+    ])
+  })
+
+  it('shows the underlying position amount as an estimate on Metamorpho share permit and transfer steps', () => {
+    const shareBalance = 1_400_000_000_000_000_000n
+    const steps = migrationSteps([
+      batchItem(encodeFunctionData({
+        abi: aaveAuthAbi,
+        functionName: 'permit',
+        args: [account, verifier, shareBalance, 123n, 27, bytes32Zero, bytes32Zero],
+      }), metamorphoVault),
+      batchItem(encodeFunctionData({
+        abi: swapVerifierAbi,
+        functionName: 'transferBalanceFromSender',
+        args: [metamorphoVault, shareBalance, swapper],
+      })),
+      batchItem(swapperMulticall([
+        genericSwap(metamorphoVault, metamorphoVault, usdcAsset, encodeFunctionData({
+          abi: vaultAbi,
+          functionName: 'redeem',
+          args: [shareBalance, verifier, swapper],
+        })),
+      ]), swapper),
+      batchItem(encodeFunctionData({
+        abi: swapVerifierAbi,
+        functionName: 'verifyAmountMinAndDeposit',
+        args: [usdcVault, account, 1_500_405n, 123n],
+      })),
+    ], { ...migrationCtx, amount: '1.500405' })
+
+    expect(steps).toMatchObject([
+      { label: 'Apply Morpho vault permit', assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1.500405', estimated: true } },
+      { label: 'Transfer Morpho vault shares', assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1.500405', estimated: true } },
+      { label: 'Supply collateral to Euler', assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1.500405' } },
+    ])
+  })
+
+  it('keeps the share transfer estimate when a Metamorpho migration swaps into the target collateral', () => {
+    const shareBalance = 1_400_000_000_000_000_000n
+    const steps = migrationSteps([
+      batchItem(encodeFunctionData({
+        abi: aaveAuthAbi,
+        functionName: 'permit',
+        args: [account, verifier, shareBalance, 123n, 27, bytes32Zero, bytes32Zero],
+      }), metamorphoVault),
+      batchItem(encodeFunctionData({
+        abi: swapVerifierAbi,
+        functionName: 'transferBalanceFromSender',
+        args: [metamorphoVault, shareBalance, swapper],
+      })),
+      batchItem(swapperMulticall([
+        genericSwap(metamorphoVault, metamorphoVault, usdcAsset, encodeFunctionData({
+          abi: vaultAbi,
+          functionName: 'redeem',
+          args: [shareBalance, swapper, swapper],
+        })),
+        tokenSwap(usdcAsset, wethAsset),
+      ]), swapper),
+      batchItem(encodeFunctionData({
+        abi: swapVerifierAbi,
+        functionName: 'verifyAmountMinAndDeposit',
+        args: [wethVault, account, 377_740_000_000_000n, 123n],
+      })),
+    ], { ...migrationCtx, amount: '1.500405' })
+
+    expect(steps).toMatchObject([
+      { label: 'Apply Morpho vault permit', assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1.500405', estimated: true } },
+      { label: 'Transfer Morpho vault shares', assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1.500405', estimated: true } },
+      {
+        label: 'Swap',
+        assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1.500405', estimated: true },
+        toAssetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00037774' },
+      },
+      { label: 'Verify min received and supply to Euler', assetInfo: { symbol: 'WETH', address: wethAsset, amount: '0.00037774' } },
     ])
   })
 

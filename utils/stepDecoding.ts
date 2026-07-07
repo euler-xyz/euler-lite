@@ -519,6 +519,9 @@ const PROTOCOL_ACTION_SELECTOR_LABELS: Record<string, string> = {
   [toFunctionSelector('function repay(address,uint256,uint256,address)')]: 'Repay Aave debt',
   [toFunctionSelector('function supply(address,uint256,address,uint16)')]: 'Supply collateral to Aave',
   [toFunctionSelector('function withdraw(address,uint256,address)')]: 'Withdraw Aave collateral',
+  // Metamorpho (Morpho vault) migrations redeem the source vault shares
+  // through the generic handler; only that flow wraps redeem this way.
+  [toFunctionSelector('function redeem(uint256,address,address)')]: 'Withdraw from Morpho vault',
 }
 const SWAP_OUTPUT_CONSUMER_LABELS = new Set([
   'Repay Morpho debt',
@@ -1100,6 +1103,27 @@ const resolveBatchItemAssetInfo = (
  * OperationStepsList. Walks SDK plan items (`requiredApproval`, `evcBatch`,
  * `contractCall`) and applies display conventions for the review modal.
  */
+/**
+ * Share-token (vault) addresses of Morpho vaults redeemed within the plan.
+ * Their presence identifies a Metamorpho migration, so the ERC-2612 permit
+ * and wallet-transfer steps can be labeled for Morpho vault shares instead
+ * of the Aave defaults.
+ */
+const collectMorphoVaultShareTokens = (plan: TransactionPlan): Set<string> => {
+  const tokens = new Set<string>()
+  for (const item of plan) {
+    if (item.type !== 'evcBatch') continue
+    for (const batchItem of flattenBatchEntries(item.items)) {
+      for (const action of expandBatchItemActions(batchItem)) {
+        if (action.label !== 'Withdraw from Morpho vault') continue
+        const key = normalizeAddressKey(action.targetContract)
+        if (key) tokens.add(key)
+      }
+    }
+  }
+  return tokens
+}
+
 export function buildTransactionPlanDisplaySteps(
   plan: TransactionPlan,
   ctx: StepDecodingContext,
@@ -1108,6 +1132,11 @@ export function buildTransactionPlanDisplaySteps(
 ): DisplayStep[] {
   const steps: DisplayStep[] = []
   const knownAssets = buildPlanAssetMap(plan, ctx, getVault)
+  const morphoVaultShareTokens = collectMorphoVaultShareTokens(plan)
+  const isMorphoVaultShareToken = (address: string | undefined) => {
+    const key = normalizeAddressKey(address ?? '')
+    return !!key && morphoVaultShareTokens.has(key)
+  }
   let index = 0
   let lastWithdrawAmount: string | undefined
   let previousLabel = ''
@@ -1198,6 +1227,12 @@ export function buildTransactionPlanDisplaySteps(
           if (label === 'Transfer to account') {
             displayLabel = 'Transfer'
           }
+          // The generic-handler redeem mapping exists for Metamorpho
+          // migrations; outside a migration a wrapped ERC4626 redeem is just a
+          // withdrawal and must not claim to touch a Morpho vault.
+          else if (ctx.type !== 'migration' && label === 'Withdraw from Morpho vault') {
+            displayLabel = 'Withdraw'
+          }
           else if (label === 'Wrap native currency') {
             displayLabel = 'Wrap'
           }
@@ -1222,7 +1257,12 @@ export function buildTransactionPlanDisplaySteps(
           else if (ctx.type === 'migration'
             && label === 'Verify min received'
             && action.data.slice(0, 10).toLowerCase() === VERIFY_AMOUNT_MIN_AND_DEPOSIT_SELECTOR) {
-            displayLabel = 'Supply collateral to Euler'
+            // After a swap the deposit-verified amount is the quote's minimum,
+            // not the expected output shown on the Swap row — say so instead
+            // of presenting the minimum as the supplied amount.
+            displayLabel = pendingSwapStep
+              ? 'Verify min received and supply to Euler'
+              : 'Supply collateral to Euler'
           }
           else if (label === 'Migration deposit') {
             displayLabel = 'Deposit'
@@ -1243,13 +1283,25 @@ export function buildTransactionPlanDisplaySteps(
             displayLabel = 'Transfer'
           }
           else if (ctx.type === 'migration' && label === 'Transfer from wallet') {
-            displayLabel = 'Transfer Aave collateral'
+            displayLabel = isMorphoVaultShareToken(decodeSwapVerifierAssetAmount(action.data)?.asset)
+              ? 'Transfer Morpho vault shares'
+              : 'Transfer Aave collateral'
+          }
+          else if (ctx.type === 'migration' && label === 'Apply Aave permit' && isMorphoVaultShareToken(action.targetContract)) {
+            displayLabel = 'Apply Morpho vault permit'
           }
           else if (ctx.type === 'migration' && label === 'Disable controller') {
             displayLabel = 'Disable Euler controller'
           }
           else if (ctx.type === 'migration' && label === 'Disable collateral') {
             displayLabel = 'Disable Euler collateral'
+          }
+          if (displayLabel === 'Apply Morpho vault permit' || displayLabel === 'Transfer Morpho vault shares') {
+            // Both amounts are denominated in Morpho vault shares, which the
+            // vault registry cannot resolve to a displayable asset. Show the
+            // migrated underlying amount as an estimate instead, matching the
+            // signature step's convention.
+            assetInfo = { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount, estimated: true }
           }
           const isWrapTransfer = label === 'Transfer' && previousLabel === 'Wrap native currency'
           const labelSuffix = label === 'Transfer to account'
@@ -1258,7 +1310,7 @@ export function buildTransactionPlanDisplaySteps(
               ? 'to wallet'
               : undefined
           const hideMigrationSourceCollateralStep = ctx.type === 'migration'
-            && label === 'Withdraw Aave collateral'
+            && (label === 'Withdraw Aave collateral' || label === 'Withdraw from Morpho vault')
           if (hideMigrationSourceCollateralStep) {
             if (assetInfo && (assetInfo.amount !== undefined || !inferredSwapInput)) {
               inferredSwapInput = { ...assetInfo }
@@ -1280,7 +1332,8 @@ export function buildTransactionPlanDisplaySteps(
           if (ctx.type === 'migration' && label === 'Withdraw' && isSharesAmountSelector(action.data)) {
             pendingShareWithdrawStep = step
           }
-          else if (ctx.type === 'migration' && label === 'Transfer from wallet' && displayLabel === 'Transfer Aave collateral') {
+          else if (ctx.type === 'migration' && label === 'Transfer from wallet'
+            && (displayLabel === 'Transfer Aave collateral' || displayLabel === 'Transfer Morpho vault shares')) {
             pendingAaveCollateralTransferStep = step
           }
           else if ((label === 'Supply collateral to Aave' || label === 'Supply collateral to Morpho')
@@ -1300,6 +1353,7 @@ export function buildTransactionPlanDisplaySteps(
           }
           if (label === 'Withdraw' || label === 'Borrow'
             || label === 'Withdraw Aave collateral' || label === 'Withdraw Morpho collateral'
+            || label === 'Withdraw from Morpho vault'
             || label === 'Borrow on Aave' || label === 'Borrow on Morpho'
             || label === 'Transfer from wallet') {
             inferredSwapInput = assetInfo ? { ...assetInfo } : undefined

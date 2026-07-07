@@ -1,7 +1,7 @@
 import { readonly, ref, type Ref } from 'vue'
 import { erc20Abi, getAddress, type Address } from 'viem'
 import { getEulerSdk } from '~/composables/useEulerSdk'
-import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
+import { AAVE_CONNECTOR_ID, METAMORPHO_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -54,6 +54,13 @@ export type AavePositionRef = {
   pool: Address
 }
 
+export type MetamorphoVaultVersion = 'v1' | 'v2'
+
+export type MetamorphoPositionRef = {
+  vault: Address
+  version: MetamorphoVaultVersion
+}
+
 export type MorphoMigrationCandidate = BaseMigrationCandidate<typeof MORPHO_CONNECTOR_ID, 'Morpho', MorphoMarketParams>
 export type AaveMigrationCandidate = BaseMigrationCandidate<typeof AAVE_CONNECTOR_ID, 'Aave V3', AavePositionRef, ExternalMigrationAssetAmount | null> & {
   raw: {
@@ -61,7 +68,11 @@ export type AaveMigrationCandidate = BaseMigrationCandidate<typeof AAVE_CONNECTO
     stableDebt: bigint
   }
 }
-export type ExternalMigrationCandidate = MorphoMigrationCandidate | AaveMigrationCandidate
+export type MetamorphoMigrationCandidate = BaseMigrationCandidate<typeof METAMORPHO_CONNECTOR_ID, 'Morpho Vaults', MetamorphoPositionRef, null> & {
+  vaultName: string
+  shares: bigint
+}
+export type ExternalMigrationCandidate = MorphoMigrationCandidate | AaveMigrationCandidate | MetamorphoMigrationCandidate
 
 export const EXTERNAL_MIGRATION_DUST_USD = 0.01
 export const POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
@@ -153,6 +164,28 @@ interface MorphoApiMarketPosition {
   } | null
 }
 
+interface MorphoApiVault {
+  address?: string
+  name?: string | null
+  symbol?: string | null
+  asset?: MorphoApiAsset | null
+}
+
+interface MorphoApiVaultAmounts {
+  shares?: string | number | null
+  assets?: string | number | null
+  assetsUsd?: string | number | null
+}
+
+interface MorphoApiVaultPosition {
+  vault?: MorphoApiVault | null
+  state?: MorphoApiVaultAmounts | null
+}
+
+interface MorphoApiVaultV2Position extends MorphoApiVaultAmounts {
+  vault?: MorphoApiVault | null
+}
+
 const MORPHO_USER_POSITIONS_QUERY = `#graphql
 query LiteMorphoMigrationPositions($chainId: Int!, $address: String!) {
   userByAddress(chainId: $chainId, address: $address) {
@@ -173,6 +206,30 @@ query LiteMorphoMigrationPositions($chainId: Int!, $address: String!) {
         borrowAssets
         borrowAssetsUsd
       }
+    }
+    vaultPositions {
+      vault {
+        address
+        name
+        symbol
+        asset { address symbol decimals }
+      }
+      state {
+        shares
+        assets
+        assetsUsd
+      }
+    }
+    vaultV2Positions {
+      vault {
+        address
+        name
+        symbol
+        asset { address symbol decimals }
+      }
+      shares
+      assets
+      assetsUsd
     }
   }
 }
@@ -346,8 +403,14 @@ const readContractsAllowFailure = async (
   }
 }
 
-const getReadResult = (result: ContractReadResult | undefined): unknown | undefined =>
-  result?.status === 'success' ? result.result : undefined
+// Failed reads must reject the whole Aave fetch (mirroring the Morpho fetch)
+// rather than decode as "no balance" — otherwise an RPC blip silently makes a
+// real position disappear from discovery with zero observability.
+const requireReadResult = (result: ContractReadResult | undefined, label: string): unknown => {
+  if (result?.status === 'success') return result.result
+  const cause = result?.status === 'failure' ? result.error : undefined
+  throw new Error(`Aave discovery read failed: ${label}`, cause instanceof Error ? { cause } : undefined)
+}
 
 const getAavePositionId = (positionRef: AavePositionRef): string =>
   positionRef.debtAsset
@@ -503,6 +566,50 @@ const toMorphoCandidate = (
   }
 }
 
+const getMetamorphoPositionId = (vault: Address): string =>
+  [METAMORPHO_CONNECTOR_ID, getAddress(vault), 'supply'].join(':')
+
+const toMetamorphoCandidate = (
+  chainId: number,
+  owner: Address,
+  vault: MorphoApiVault | null | undefined,
+  amounts: MorphoApiVaultAmounts | null | undefined,
+  version: MetamorphoVaultVersion,
+): MetamorphoMigrationCandidate | null => {
+  const underlying = parseAsset(vault?.asset)
+  if (!vault?.address || !underlying) return null
+
+  const assets = parseBigIntAmount(amounts?.assets)
+  const shares = parseBigIntAmount(amounts?.shares)
+  if (assets <= 0n || shares <= 0n) return null
+
+  const vaultAddress = getAddress(vault.address)
+  const vaultName = (typeof vault.name === 'string' && vault.name)
+    || (typeof vault.symbol === 'string' && vault.symbol)
+    || `${underlying.symbol} vault`
+  return {
+    connectorId: METAMORPHO_CONNECTOR_ID,
+    protocol: 'Morpho Vaults',
+    id: getMetamorphoPositionId(vaultAddress),
+    chainId,
+    owner,
+    ref: {
+      vault: vaultAddress,
+      version,
+    },
+    debt: null,
+    collateral: {
+      ...underlying,
+      amount: assets,
+      amountUsd: parseNumberOrNull(amounts?.assetsUsd),
+    },
+    borrowApy: null,
+    lltv: null,
+    vaultName,
+    shares,
+  }
+}
+
 export const useExternalMigrationPositions = (options: {
   enabled?: Readonly<Ref<boolean>>
 } = {}) => {
@@ -549,8 +656,8 @@ export const useExternalMigrationPositions = (options: {
       },
     ], 'externalMigration/aaveDiscoveryRootMulticall')
 
-    const userConfiguration = parseAaveUserConfigurationData(getReadResult(configurationResult))
-    const reservesRaw = getReadResult(reservesResult)
+    const userConfiguration = parseAaveUserConfigurationData(requireReadResult(configurationResult, 'getUserConfiguration'))
+    const reservesRaw = requireReadResult(reservesResult, 'getReservesList')
     const reserves = Array.isArray(reservesRaw)
       ? reservesRaw.flatMap((asset) => {
           try {
@@ -582,7 +689,7 @@ export const useExternalMigrationPositions = (options: {
     )
     const reserveTokensByAsset = new Map<Address, AaveReserveTokens>()
     activeAssets.forEach((asset, index) => {
-      const tokens = parseAaveReserveTokens(getReadResult(reserveDataResults[index]))
+      const tokens = parseAaveReserveTokens(requireReadResult(reserveDataResults[index], `getReserveData(${asset})`))
       if (tokens) reserveTokensByAsset.set(asset, tokens)
     })
 
@@ -606,8 +713,8 @@ export const useExternalMigrationPositions = (options: {
     activeAssets.forEach((asset, index) => {
       assetsByAddress.set(asset, parseAaveAsset(
         asset,
-        getReadResult(metadataResults[index * 2]),
-        getReadResult(metadataResults[index * 2 + 1]),
+        requireReadResult(metadataResults[index * 2], `symbol(${asset})`),
+        requireReadResult(metadataResults[index * 2 + 1], `decimals(${asset})`),
       ))
     })
 
@@ -643,7 +750,7 @@ export const useExternalMigrationPositions = (options: {
     const debtAmounts = new Map<Address, { variableDebt: bigint, stableDebt: bigint }>()
     for (const entry of balanceReadEntries) {
       if (!reserveTokensByAsset.has(entry.asset)) continue
-      const amount = parseBigIntAmount(getReadResult(balanceResults[resultIndex]))
+      const amount = parseBigIntAmount(requireReadResult(balanceResults[resultIndex], `balanceOf(${entry.kind}:${entry.asset})`))
       resultIndex += 1
       if (entry.kind === 'collateral') {
         collateralAmounts.set(entry.asset, amount)
@@ -730,7 +837,7 @@ export const useExternalMigrationPositions = (options: {
     return candidates
   }
 
-  const fetchMorphoMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<MorphoMigrationCandidate[]> => {
+  const fetchMorphoMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<(MorphoMigrationCandidate | MetamorphoMigrationCandidate)[]> => {
     try {
       const res = await fetch('/api/proxy/morpho', {
         method: 'POST',
@@ -743,10 +850,15 @@ export const useExternalMigrationPositions = (options: {
       if (!res.ok) throw new Error(`Morpho API request failed: ${res.status}`)
       const body = await res.json()
       if (body.errors?.length) throw new Error(body.errors[0]?.message || 'Morpho API returned an error')
-      const rows = (body.data?.userByAddress?.marketPositions ?? []) as MorphoApiMarketPosition[]
-      return rows
-        .map((row: MorphoApiMarketPosition) => toMorphoCandidate(targetChainId, targetOwner, row))
-        .filter((row: MorphoMigrationCandidate | null): row is MorphoMigrationCandidate => !!row)
+      const user = body.data?.userByAddress
+      const marketRows = (user?.marketPositions ?? []) as MorphoApiMarketPosition[]
+      const vaultRows = (user?.vaultPositions ?? []) as MorphoApiVaultPosition[]
+      const vaultV2Rows = (user?.vaultV2Positions ?? []) as MorphoApiVaultV2Position[]
+      return [
+        ...marketRows.map((row: MorphoApiMarketPosition) => toMorphoCandidate(targetChainId, targetOwner, row)),
+        ...vaultRows.map((row: MorphoApiVaultPosition) => toMetamorphoCandidate(targetChainId, targetOwner, row.vault, row.state, 'v1')),
+        ...vaultV2Rows.map((row: MorphoApiVaultV2Position) => toMetamorphoCandidate(targetChainId, targetOwner, row.vault, row, 'v2')),
+      ].filter((row): row is MorphoMigrationCandidate | MetamorphoMigrationCandidate => !!row)
     }
     catch (err) {
       logWarn('externalMigration/morphoIndexedPositions', err)

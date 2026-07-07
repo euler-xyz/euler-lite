@@ -44,7 +44,9 @@ const netAssetValueDisplay = computed(() => {
 const pairLabel = computed(() => {
   const collateral = collateralAssets.value.map(asset => asset.symbol).join(', ')
   const debt = debtAssets.value.map(asset => asset.symbol).join(', ')
-  return debt ? `${collateral}/${debt}` : collateral
+  if (debt) return `${collateral}/${debt}`
+  if ('vaultName' in props.position && props.position.vaultName) return props.position.vaultName
+  return collateral
 })
 
 // Header avatar: overlap collateral + debt for borrow positions, single mark for supply.

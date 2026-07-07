@@ -2,6 +2,7 @@
 import {
   type Account,
   type IHasVaultAddress,
+  isEVault,
   isSecuritizeCollateralVault,
   type AaveMigrationTargetExtraData,
   type AaveMigrationTargetRaw,
@@ -23,12 +24,13 @@ import {
 import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
 import { OperationReviewModal } from '#components'
 import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
+import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS } from '~/composables/useExternalMigrationPositions'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { formatCompactUsdValue, formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { MODAL_CLOSE_REDIRECT_DELAY_MS } from '~/entities/tuning-constants'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
-import { OP_REDEEM, OP_REPAY, type PlannedOp } from '~/utils/vault-hooks'
+import { OP_REDEEM, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -381,10 +383,27 @@ const targetHealth = (target: OutgoingMigrationTarget) => {
 }
 const plannedOps = computed<PlannedOp[]>(() => {
   if (!sourceDebtVault.value || !sourceCollateralEVault.value) return []
-  return [
+  const steps: PlannedOp[] = [
     { vault: sourceCollateralEVault.value, op: OP_REDEEM },
     { vault: sourceDebtVault.value, op: OP_REPAY },
   ]
+  // The outgoing plan always runs the Euler cleanup pass: when the position
+  // lives on a sub-account, every other enabled collateral with residual
+  // shares is swept back to the owner via transferFromMax, so a vault with
+  // hooked share transfers blocks the whole migration.
+  const subAccountAddress = migrationAccount.value
+  const owner = migrationOwner.value
+  const account = planAccount.value
+  if (!subAccountAddress || !owner || !account || sameAssetAddress(subAccountAddress, owner)) return steps
+  const subAccount = account.getSubAccount(subAccountAddress)
+  for (const collateral of subAccount?.enabledCollaterals ?? []) {
+    if (sameAssetAddress(collateral, sourceCollateralEVault.value.address)) continue
+    const collateralPosition = subAccount?.positions.find(entry => sameAssetAddress(entry.vaultAddress, collateral))
+    if (collateralPosition && collateralPosition.shares > 0n && isEVault(collateralPosition.vault)) {
+      steps.push({ vault: collateralPosition.vault, op: OP_TRANSFER })
+    }
+  }
+  return steps
 })
 const hookWarning = computed(() => getPlanHookDisabledWarning(plannedOps.value))
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(
@@ -838,7 +857,7 @@ async function sendMigration(target: OutgoingMigrationTarget) {
     }, MODAL_CLOSE_REDIRECT_DELAY_MS)
   }
   catch (err) {
-    showError('Migration failed')
+    showError(err instanceof Error ? err.message : 'Migration failed')
     logWarn('positionMigration/send', err)
   }
   finally {
@@ -980,7 +999,7 @@ function targetActionAriaLabel(target: OutgoingMigrationTarget, action: 'migrate
 function schedulePostMigrationRefreshes() {
   const refreshAddress = address.value || ''
   scheduleExternalMigrationRefreshes()
-  for (const delay of [0, 5_000, 15_000, 30_000]) {
+  for (const delay of POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS) {
     setTimeout(() => {
       if (refreshAddress) {
         void refreshAllPositions(undefined, refreshAddress)

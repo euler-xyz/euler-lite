@@ -49,6 +49,10 @@ const migrate = async (position: ExternalMigrationCandidate) => {
 }
 
 onActivated(() => {
+  // The page is kept alive: returning from the migration flow restores this
+  // instance, so clear the pending state or the clicked row spins forever
+  // (and the guard in migrate() blocks every other row).
+  migratingPositionId.value = ''
   if (hasLoaded.value) void load({ force: true })
 })
 </script>
