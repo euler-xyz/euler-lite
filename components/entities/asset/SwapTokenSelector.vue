@@ -138,8 +138,8 @@ const isUnknownAddress = computed(() => {
   return isAddress(q) && !knownAddresses.value.has(q.toLowerCase())
 })
 
-// Output ("Receive as") shows the full list with relevant tokens bubbled to the
-// top (see sortSelectableTokens); input ("Pay with") narrows to held tokens.
+// Show the full list with relevant tokens bubbled to the top (see
+// sortSelectableTokens). Picker mode still controls geo restriction semantics.
 const filteredOptions = computed(() => filterSelectableTokens(tokenOptions.value, mode, searchQuery.value))
 
 // Incrementally render rows — and therefore token-icon requests — instead of

@@ -21,8 +21,8 @@ const spam = tok({ source: 'tokenList', asset: { symbol: 'SPROUT', name: 'Sprout
 const all = [vaultAsset, held, spam]
 
 describe('filterSelectableTokens', () => {
-  it('input mode without search shows only tokens the user holds', () => {
-    expect(filterSelectableTokens(all, 'input', '')).toEqual([held])
+  it('input mode without search shows the full list (nothing hidden)', () => {
+    expect(filterSelectableTokens(all, 'input', '')).toEqual(all)
   })
 
   it('output mode without search shows the full list (nothing hidden)', () => {
