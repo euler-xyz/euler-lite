@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
-import { BatchAnnouncementModal } from '#components'
+import { AnnouncementModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 
 const route = useRoute()
 const router = useRouter()
-const { enableBatchAnnouncement, batchAnnouncementUrl } = useDeployConfig()
+const { announcement } = useDeployConfig()
 const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
-const batchAnnouncementSeen = useLocalStorage('batch-announcement-seen', false)
+const announcementSeenToken = useLocalStorage('announcement-seen-token', '')
 const modal = useModal()
-let isBatchAnnouncementOpen = false
+let isAnnouncementOpen = false
 
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
@@ -115,29 +115,33 @@ watch(route, () => {
   })
 }, { immediate: true })
 
-const checkBatchAnnouncement = () => {
-  if (!enableBatchAnnouncement || batchAnnouncementSeen.value) return
-  if (isBatchAnnouncementOpen || route.name === 'onboarding') return
+const checkAnnouncement = () => {
+  if (!announcement.enabled || !announcement.token) return
+  if (announcementSeenToken.value === announcement.token) return
+  if (isAnnouncementOpen || route.name === 'onboarding') return
   if (!getIsOnboardingCompleted()) return
 
-  isBatchAnnouncementOpen = true
-  modal.open(BatchAnnouncementModal, {
+  isAnnouncementOpen = true
+  modal.open(AnnouncementModal, {
     isNotClosable: true,
     onClose: () => {
-      batchAnnouncementSeen.value = true
-      isBatchAnnouncementOpen = false
+      announcementSeenToken.value = announcement.token
+      isAnnouncementOpen = false
     },
     props: {
-      announcementUrl: batchAnnouncementUrl,
+      title: announcement.title,
+      body: announcement.body,
+      items: announcement.items,
+      announcementUrl: announcement.url,
     },
   })
 }
 
 checkOnboarding()
 void loadEulerConfig()
-onMounted(checkBatchAnnouncement)
+onMounted(checkAnnouncement)
 watch(() => route.name, () => {
-  nextTick(checkBatchAnnouncement)
+  nextTick(checkAnnouncement)
 })
 
 watch([chainId, showAllLabelEntries], () => {
