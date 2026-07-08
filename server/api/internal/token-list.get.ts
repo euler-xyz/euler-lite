@@ -25,6 +25,7 @@ type QueryTokenList = (url: string) => Promise<TokenListItem[]>
 type ConfigurableTokenlistService = EulerSDK['tokenlistService'] & {
   setQueryTokenList?: (fn: QueryTokenList) => void
 }
+type TokenListItemWithTags = TokenListItem & { tags?: string[] }
 
 const rateLimiter = createRateLimiter({
   max: 1000,
@@ -115,15 +116,18 @@ const getSdk = () => {
   return sdkPromise
 }
 
-const toTokenEntry = (token: TokenListItem): TokenEntry => ({
-  chainId: token.chainId,
-  address: token.address,
-  name: token.name,
-  symbol: token.symbol,
-  decimals: token.decimals,
-  logoURI: token.logoURI || undefined,
-  ...(token.tags?.length ? { tags: token.tags } : {}),
-})
+const toTokenEntry = (token: TokenListItem): TokenEntry => {
+  const tags = (token as TokenListItemWithTags).tags
+  return {
+    chainId: token.chainId,
+    address: token.address,
+    name: token.name,
+    symbol: token.symbol,
+    decimals: token.decimals,
+    logoURI: token.logoURI || undefined,
+    ...(tags?.length ? { tags } : {}),
+  }
+}
 
 const stripUntrustedTokenTags = (token: TokenEntry): TokenEntry => ({
   chainId: token.chainId,

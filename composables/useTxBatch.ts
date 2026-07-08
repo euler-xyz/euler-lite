@@ -1,6 +1,6 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address } from 'viem'
-import { Account, fetchErc20SlotHints, getEulerLabelProductByVault } from '@eulerxyz/euler-v2-sdk'
+import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
+import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
   Portfolio,
@@ -25,6 +25,11 @@ export interface BatchWalletChange {
   symbol: string
   decimals: number
   delta: bigint
+}
+
+export interface BatchClosedPosition {
+  subAccount: Address
+  vault: Address
 }
 
 /**
@@ -56,6 +61,10 @@ export interface BatchEntry {
   label: string
   /** Fixed transaction payload captured when the user added this entry. */
   plan: TransactionPlan
+  /** Optional real execution payload builder for entries whose preview plan uses simulation-only state. */
+  buildExecutionPlan?: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+  /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
+  stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
    *  add-time so the batch can show the same review the form would — minus the
    *  execute button. The contextual plan is supplied from the simulation. */
@@ -67,6 +76,9 @@ export interface BatchEntry {
   /** Additional sub-accounts intentionally modified by this entry. Used when a
    *  position-scoped operation also moves balances to the owner account. */
   affectedSubAccounts?: Address[]
+  /** Euler positions this operation intentionally closes. Used when a simulated
+   *  layer omits a zeroed position instead of returning an explicit zero row. */
+  closedPositions?: BatchClosedPosition[]
   /** Multiply flows set this. A multiply is a borrow(+swap) at the plan level, so
    *  it can't be told apart from a plain borrow or a borrow-with-collateral-swap
    *  by the plan alone (and same-asset multiply has no swap step at all). This
@@ -78,8 +90,15 @@ export interface BatchEntry {
    *  Wallet-swap repay also uses this to name the debt asset while the review keeps
    *  the wallet input asset for step decoding. */
   nameOverride?: string
+  /** Refresh external protocol positions after this entry executes in a batch. */
+  refreshExternalMigrationPositions?: boolean
   /** Stable claim identifier for reward rows already queued in the batch. */
   rewardClaimKey?: string
+}
+
+type BatchEntryBuildResult = TransactionPlan | {
+  plan: TransactionPlan
+  stateOverrides?: StateOverride
 }
 
 type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
@@ -87,11 +106,11 @@ type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
 export type BatchEntryInput = BatchEntryInputBase & (
   {
     /** Builds this entry once, at add-time, against the current batch end-state. */
-    buildPlan: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+    buildPlan: (account: Account<IHasVaultAddress>) => Promise<BatchEntryBuildResult>
     requiresPlanningAccount?: true
   } | {
     /** Builds this entry once, at add-time, without a simulated account snapshot. */
-    buildPlan: () => Promise<TransactionPlan>
+    buildPlan: () => Promise<BatchEntryBuildResult>
     /** Set false for standalone plans that do not need the current simulated account. */
     requiresPlanningAccount: false
   }
@@ -399,6 +418,23 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
   }
 }
 
+const redirectAfterBatchExecution = async () => {
+  try {
+    const router = useRouter()
+    const route = useRoute()
+    const query: Record<string, string> = {}
+    const network = route.query.network
+    if (typeof network === 'string') query.network = network
+    else if (Array.isArray(network) && typeof network[0] === 'string') query.network = network[0]
+    await router.replace({ path: '/portfolio', query })
+  }
+  catch (error) {
+    // The transaction has already mined. Navigation is best-effort and should
+    // never turn a successful batch execution into an execution failure.
+    logWarn('useTxBatch/redirectAfterBatchExecution', error)
+  }
+}
+
 export const buildWalletChanges = (
   current: Record<string, bigint> | undefined,
   base: Record<string, bigint> | undefined,
@@ -437,6 +473,10 @@ export const buildWalletBalanceLayers = (
     }
     return out
   })
+}
+
+type BatchSimulationWalletBalances = {
+  simulatedWalletBalances?: Record<string, bigint>[]
 }
 
 const syncOverlay = () => {
@@ -1033,6 +1073,64 @@ const emptyModifiedPositionKeySets = (): ModifiedPositionKeySets => ({
 const positionModifiedKey = (subAccount: Address, vault: Address): string =>
   `${subAccount.toLowerCase()}:${vault.toLowerCase()}`
 
+const buildClosedPositionMap = (
+  closedPositions: BatchClosedPosition[],
+): Map<string, Set<string>> => {
+  const bySubAccount = new Map<string, Set<string>>()
+  for (const position of closedPositions) {
+    const subAccount = getAddress(position.subAccount).toLowerCase()
+    const vault = getAddress(position.vault).toLowerCase()
+    const vaults = bySubAccount.get(subAccount) ?? new Set<string>()
+    vaults.add(vault)
+    bySubAccount.set(subAccount, vaults)
+  }
+  return bySubAccount
+}
+
+const applyClosedPositions = (
+  account: Account<IHasVaultAddress>,
+  closedPositions: BatchClosedPosition[],
+): Account<IHasVaultAddress> => {
+  if (!closedPositions.length) return account
+
+  const closedBySubAccount = buildClosedPositionMap(closedPositions)
+  const subAccounts: Record<string, StitchSubAccount> = {}
+  let changed = false
+
+  for (const [addr, sa] of Object.entries(account.subAccounts)) {
+    if (!sa) continue
+    const subAccount = subAccountMapKey(addr)
+    const closedVaults = closedBySubAccount.get(subAccount.toLowerCase())
+    const positions = sa.positions
+      .filter((position) => {
+        if (!closedVaults?.size) return true
+        return !closedVaults.has(getAddress(position.vaultAddress).toLowerCase())
+      })
+      .map(position => clonePosition(position as StitchPosition))
+
+    if (positions.length !== sa.positions.length) changed = true
+    subAccounts[subAccount] = {
+      ...sa,
+      positions: hydrateStitchedPositions(positions, sa.enabledCollaterals, sa.enabledCollaterals),
+    }
+  }
+
+  if (!changed) return account
+
+  const next = new Account({
+    chainId: account.chainId,
+    owner: account.owner,
+    isLockdownMode: account.isLockdownMode,
+    isPermitDisabledMode: account.isPermitDisabledMode,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    subAccounts: subAccounts as any,
+    populated: account.populated,
+  }) as Account<IHasVaultAddress>
+  next.userRewards = account.userRewards
+  next.populated.userRewards = account.populated.userRewards
+  return next
+}
+
 const getAccountSubAccount = (
   account: Account<IHasVaultAddress>,
   subAccount: Address,
@@ -1388,6 +1486,7 @@ export const useTxBatch = () => {
   const { chainId: wagmiChainId } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
+  const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
 
   const owner = computed(
     () => effectiveAddress.value as Address | undefined,
@@ -1442,6 +1541,9 @@ export const useTxBatch = () => {
       baseAccountSnapshot = baseAccount
 
       const plans = entries.value.map(entry => entry.plan)
+      const extraStateOverrides = mergeStateOverrides(
+        entries.value.flatMap(entry => entry.stateOverrides ?? []),
+      )
 
       // One simulation, all layers. The SDK interleaves lens reads per
       // operation and returns simulatedAccounts = [base, afterOp0, afterOp1, …]
@@ -1455,6 +1557,7 @@ export const useTxBatch = () => {
         {
           stateOverrides: true,
           stateOverrideOptions: { slotHints: batchSlotHints },
+          extraStateOverrides,
           // Populate the simulated vaults with reward campaigns + intrinsic
           // (e.g. staking) APY, exactly as the base account is via populateAll —
           // so the simulated portfolio's net APY / ROE and per-position
@@ -1496,7 +1599,10 @@ export const useTxBatch = () => {
       // layer 0 is the full real account; each subsequent layer overlays that
       // layer's touched positions onto the previous full account. This preserves
       // the user's existing positions in vaults the batch never touched.
-      const simAccounts = (sim.simulatedAccounts ?? []) as Account<IHasVaultAddress>[]
+      const rawSimAccounts = (sim.simulatedAccounts ?? []) as Account<IHasVaultAddress>[]
+      const simAccounts = rawSimAccounts.length === plans.length
+        ? [baseAccount, ...rawSimAccounts]
+        : rawSimAccounts
       // A healthy sim returns exactly one account per operation on top of the
       // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1. Anything
       // else is the smoking gun for the "not loaded" symptom (getCurrentFinalLayer
@@ -1506,6 +1612,7 @@ export const useTxBatch = () => {
         'resimulate:sim-resolved',
         {
           token,
+          rawSimAccounts: rawSimAccounts.length,
           simAccounts: simAccounts.length,
           plans: plans.length,
           expectedLayers: plans.length + 1,
@@ -1518,8 +1625,9 @@ export const useTxBatch = () => {
       )
       // Version guard: the builder needs one simulated account per operation on
       // top of the pre-batch snapshot (the layered simulation API). An SDK build
-      // without it (e.g. the published 0.2.16-beta, which returns only the final
-      // account) would otherwise silently render the real state forever.
+      // without it would otherwise silently render the real state forever. The
+      // final-only shape is still enough for one operation, so normalize that
+      // case into [base, afterOp0].
       if (!simError.value && simAccounts.length < plans.length + 1) {
         logBatchDiag('resimulate:version-guard-tripped', {
           token,
@@ -1529,8 +1637,13 @@ export const useTxBatch = () => {
         simError.value = 'Batch simulation did not return per-operation state layers — the installed @eulerxyz/euler-v2-sdk build does not support the batch builder.'
       }
       const fullLayers: Account<IHasVaultAddress>[] = [baseAccount]
+      const cumulativeClosedPositions: BatchClosedPosition[] = []
       for (let i = 1; i < simAccounts.length; i++) {
-        fullLayers.push(stitchAccount(fullLayers[i - 1]!, simAccounts[i]!))
+        const entry = entries.value[i - 1]
+        if (entry?.closedPositions?.length) cumulativeClosedPositions.push(...entry.closedPositions)
+        const stitched = stitchAccount(fullLayers[i - 1]!, simAccounts[i]!)
+        const closed = applyClosedPositions(stitched, cumulativeClosedPositions)
+        fullLayers.push(closed)
       }
 
       // Wallet balances: same stitch as the account. The real wallet (from the
@@ -1552,7 +1665,7 @@ export const useTxBatch = () => {
         }
         return out
       }
-      const simWb = ((sim.simulatedWalletBalances ?? []) as Record<string, bigint>[]).map(normalizeWalletBalances)
+      const simWb = ((sim as BatchSimulationWalletBalances).simulatedWalletBalances ?? []).map(normalizeWalletBalances)
       const touchedTokens = collectWalletBalanceTokens(simWb)
       const realWallet: Record<string, bigint> = {}
       if (touchedTokens.length) {
@@ -1608,7 +1721,8 @@ export const useTxBatch = () => {
       const failureMessage = describeFailure(sim)
       const failedEntries = new Map<number, string>()
       for (const f of sim.failedBatchItems ?? []) {
-        if (typeof f.operationIndex === 'number') failedEntries.set(f.operationIndex, failureMessage)
+        const failedIndex = 'operationIndex' in f && typeof f.operationIndex === 'number' ? f.operationIndex : f.index
+        if (typeof failedIndex === 'number') failedEntries.set(failedIndex, failureMessage)
       }
       const planTargets = plans.map(collectPlanTargets)
       for (const e of sim.vaultStatusErrors ?? []) {
@@ -1778,16 +1892,23 @@ export const useTxBatch = () => {
         subAccount: entry.subAccount,
         requiresPlanningAccount: entry.requiresPlanningAccount !== false,
       })
-      const plan = entry.requiresPlanningAccount === false
+      const buildResult = entry.requiresPlanningAccount === false
         ? await entry.buildPlan()
         : await entry.buildPlan(await getEntryPlanningAccount())
+      const plan = Array.isArray(buildResult) ? buildResult : buildResult.plan
+      const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
         await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))
       }
       const { buildPlan: _buildPlan, requiresPlanningAccount: _requiresPlanningAccount, ...fixedEntry } = entry
       registerReviewAssetMeta(fixedEntry.review)
-      entries.value = [...entries.value, { ...fixedEntry, plan, id: `entry-${++idSeq}` }]
+      entries.value = [...entries.value, {
+        ...fixedEntry,
+        ...(builtStateOverrides ? { stateOverrides: builtStateOverrides } : {}),
+        plan,
+        id: `entry-${++idSeq}`,
+      }]
       logBatchDiag('addEntry:added', { label: entry.label, newEntryCount: entries.value.length })
     }
 
@@ -1867,11 +1988,10 @@ export const useTxBatch = () => {
   }
 
   /**
-   * Run the whole batch through Tenderly: the exact merged plan executeBatch
-   * would send, encoded as one EVC `batch` call with the SDK's derived state
-   * overrides (so approvals/permits don't make it revert). Returns a dashboard
-   * URL surfaced via `tenderlyUrl`. Works in spy mode too — it's a read-only
-   * simulation, no signature required.
+   * Run the whole batch through Tenderly using the preview plan and the SDK's
+   * derived state overrides (so approvals/permits don't make it revert). Returns
+   * a dashboard URL surfaced via `tenderlyUrl`. Works in spy mode too — it's a
+   * read-only simulation, no signature required.
    */
   const simulateOnTenderly = async (): Promise<void> => {
     if (!lastMerged) return
@@ -1881,11 +2001,15 @@ export const useTxBatch = () => {
     tenderly.clearSimulation()
     try {
       const sdk = await getEulerSdkFresh()
+      const extraStateOverrides = mergeStateOverrides(
+        entries.value.flatMap(entry => entry.stateOverrides ?? []),
+      )
       const payload = await buildTenderlySimulationPayload({
         plan: lastMerged,
         owner: getAddress(o),
         chainId: cid,
         sdk,
+        extraStateOverrides,
       })
       if (!payload) {
         tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
@@ -1899,8 +2023,8 @@ export const useTxBatch = () => {
     }
   }
 
-  /** The exact merged plan executeBatch would send (null until a successful
-   *  simulation). The review modal prepares & decodes this to surface approvals. */
+  /** The latest merged preview plan (null until a successful simulation).
+   *  The review modal prepares & decodes this to surface approvals. */
   const getMergedPlan = (): TransactionPlan | null => lastMerged
 
   /** Resolve approvals/permits/plugins for the merged batch plan, so the review
@@ -1910,12 +2034,44 @@ export const useTxBatch = () => {
     return prepareTransactionPlan(lastMerged)
   }
 
+  const getExecutionPlanningAccount = async (entryIndex: number): Promise<Account<IHasVaultAddress>> => {
+    const getLayerAccount = () => layers.value[entryIndex]?.account
+
+    const layerAccount = getLayerAccount()
+    if (layerAccount) return layerAccount
+
+    if (entries.value.length > 0) {
+      await (resimulatePromise ?? runResimulate())
+      const refreshedLayerAccount = getLayerAccount()
+      if (refreshedLayerAccount) return refreshedLayerAccount
+      throw new Error(simError.value ?? 'Batch simulation not loaded')
+    }
+
+    if (baseAccountSnapshot) return baseAccountSnapshot
+
+    const o = owner.value
+    const cid = chainId.value
+    if (!o || !cid) throw new Error('Account not loaded')
+    const sdk = await getEulerSdkFresh()
+    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, getAddress(o))
+    return baseAccountSnapshot
+  }
+
+  const buildMergedExecutionPlan = async (): Promise<TransactionPlan> => {
+    const sdk = await getEulerSdkFresh()
+    const plans: TransactionPlan[] = []
+    for (const [index, entry] of entries.value.entries()) {
+      plans.push(entry.buildExecutionPlan
+        ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
+        : entry.plan)
+    }
+    return sdk.executionService.mergePlans(plans)
+  }
+
   /**
-   * Execute the whole batch as one atomic transaction: the exact merged plan
-   * that was simulated (all entries combined via mergePlans), prepared once
-   * (approvals/permits/plugins) and sent as a single EVC batch. On success the
-   * cart is cleared (executePreparedPlan triggers the portfolio refresh). In
-   * spy mode executePreparedPlan refuses to sign, surfaced via execError.
+   * Execute the whole batch as one atomic transaction. Entries normally reuse
+   * the preview plan; entries with simulation-only preview state can rebuild a
+   * signed execution plan before the merged batch is prepared and sent.
    */
   const executeBatch = async () => {
     if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
@@ -1929,10 +2085,14 @@ export const useTxBatch = () => {
       // Final on-chain gas estimate before asking the user to sign. If the batch
       // would revert (against the current chain state, which may have moved since
       // the last simulation), surface the decoded reason and don't send.
-      await estimateGasForPlan(lastMerged)
-      const prepared = await prepareTransactionPlan(lastMerged)
+      const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
+      const executionPlan = await buildMergedExecutionPlan()
+      await estimateGasForPlan(executionPlan)
+      const prepared = await prepareTransactionPlan(executionPlan)
       await executePreparedPlan(prepared)
       clearBatch()
+      if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+      await redirectAfterBatchExecution()
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)

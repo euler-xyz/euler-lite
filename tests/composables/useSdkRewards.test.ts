@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import type { Address } from 'viem'
-import type { UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { UserReward } from '~/entities/reward-campaign'
 
 const owner = '0x1000000000000000000000000000000000000000' as Address
 

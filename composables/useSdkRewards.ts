@@ -1,5 +1,6 @@
 import { getAddress, type Address } from 'viem'
-import type { EulerSDKQueryName, TransactionPlan, UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { EulerSDKQueryName, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { UserReward } from '~/entities/reward-campaign'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 
 const USER_REWARD_QUERY_NAMES: EulerSDKQueryName[] = [
@@ -44,7 +45,7 @@ export const useSdkRewards = () => {
     const account = getAddress(walletAddress.value) as Address
 
     return sdk.rewardsService.buildClaimPlan({
-      reward,
+      reward: reward as never,
       account,
     })
   }

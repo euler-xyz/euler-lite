@@ -28,7 +28,7 @@ import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import { resolveComponent, type Component } from 'vue'
 
-const { position } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity> }>()
+const { position, clickable = true } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity>, clickable?: boolean }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 
 const { address } = useWagmi()
@@ -75,7 +75,8 @@ const isSimulatedModified = computed(() => {
     v => modifiedKeys.value.has(`${sub}:${getAddress(v).toLowerCase()}`),
   )
 })
-const positionRoot = computed<string | Component>(() => isSimulatedRemoved.value ? 'div' : resolveComponent('NuxtLink'))
+const isPositionClickable = computed(() => clickable && !isSimulatedRemoved.value)
+const positionRoot = computed<string | Component>(() => isPositionClickable.value ? resolveComponent('NuxtLink') : 'div')
 const supplied = computed(() => position.supplied)
 const borrowed = computed(() => position.borrowed)
 const health = computed(() => position.healthFactor)
@@ -355,12 +356,12 @@ const openPositionInformationModal = () => {
 <template>
   <component
     :is="positionRoot"
-    :to="isSimulatedRemoved ? undefined : { path: `/position/${subAccountIndex}`, query: { network: $route.query.network } }"
+    :to="isPositionClickable ? { path: `/position/${subAccountIndex}`, query: { network: $route.query.network } } : undefined"
     class="relative block overflow-hidden no-underline bg-surface rounded-xl border border-line-subtle shadow-card transition-all duration-default ease-default"
     :class="[
       isSimulatedRemoved
         ? '!border !border-dashed !border-line-emphasis'
-        : 'hover:shadow-card-hover hover:border-line-emphasis',
+        : isPositionClickable ? 'hover:shadow-card-hover hover:border-line-emphasis' : '',
       { '!border !border-dashed !border-accent-600': isSimulatedModified },
     ]"
     data-id="portfolio-list-item"

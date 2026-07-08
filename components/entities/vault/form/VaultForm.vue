@@ -1,16 +1,29 @@
 <script setup lang="ts">
-const props = defineProps<{ title?: string, description?: string, loading?: boolean, back?: boolean, backFallback?: string, backAlwaysFallback?: boolean, pageScroll?: boolean }>()
+const props = withDefaults(defineProps<{
+  title?: string
+  description?: string
+  loading?: boolean
+  back?: boolean
+  backFallback?: string
+  backAlwaysFallback?: boolean
+  scrollMode?: 'contained' | 'page'
+  pageScroll?: boolean
+}>(), {
+  scrollMode: 'contained',
+})
+
+const isPageScroll = computed(() => props.scrollMode === 'page' || props.pageScroll)
 
 const formClasses = computed(() => [
   'flex flex-col mobile:min-h-[calc(100dvh-100px)] laptop:px-16',
-  props.pageScroll
+  isPageScroll.value
     ? 'vault-form--page-scroll'
     : 'laptop:max-h-[calc(100dvh-88px)] laptop:overflow-clip',
 ])
 
 const contentClasses = computed(() => [
   'flex flex-col gap-16 laptop:-mx-16 laptop:px-16 [&>*]:shrink-0',
-  props.pageScroll ? '' : 'laptop:overflow-y-auto laptop:min-h-0',
+  isPageScroll.value ? '' : 'laptop:overflow-y-auto laptop:min-h-0',
 ])
 </script>
 

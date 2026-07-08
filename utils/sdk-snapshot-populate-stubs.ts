@@ -55,6 +55,10 @@ const notImplemented = (method: string) => () => {
     `snapshot populate stub: ${method}() not supported — this method should not be reached during snapshot hydrate`,
   )
 }
+type RewardsServiceWithStreamStubs = IRewardsService & Record<
+  'fetchRewardStreams' | 'buildRewardStreamClaimPlan',
+  ReturnType<typeof notImplemented>
+>
 
 /**
  * IPriceService stub. Only the two `*WithDiagnostics` methods exercised by
@@ -138,7 +142,7 @@ export const buildSnapshotRewardsService = (
   buildClaimPlans: notImplemented('buildClaimPlans'),
   buildClaimAllPlan: notImplemented('buildClaimAllPlan'),
   buildRewardStreamClaimPlan: notImplemented('buildRewardStreamClaimPlan'),
-})
+} as RewardsServiceWithStreamStubs)
 
 /**
  * IIntrinsicApyAdapter stub used by `IntrinsicApyService.populateIntrinsicApy`.

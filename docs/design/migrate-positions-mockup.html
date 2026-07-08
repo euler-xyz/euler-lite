@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Euler — Migrate tab (mockup)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/tabler-icons.min.css" />
+<style>
+  :root{
+    --bg:#0A0E14; --card:#0F1620; --border:rgba(255,255,255,0.06);
+    --text:#E6EAF0; --muted:#8A94A3; --dim:#727C8A;
+    --green:#5CCB9C; --green-text:#4ADE9E;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,-apple-system,sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;padding:32px 24px 80px;}
+  .nav{display:flex;align-items:center;gap:24px;font-size:14px;color:var(--dim);padding-bottom:24px;}
+  .nav .brand{font-weight:600;color:var(--text);margin-right:8px;}
+  .nav .on{color:var(--text);}
+  h1{font-size:24px;font-weight:600;margin:0 0 20px;}
+  .summary{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;}
+  .panel{background:var(--card);border:0.5px solid var(--border);border-radius:14px;padding:18px 20px;}
+  .panel h3{font-size:15px;font-weight:500;margin:0 0 14px;}
+  .row{display:flex;justify-content:space-between;font-size:14px;padding:5px 0;}
+  .row .lbl{color:var(--muted);} .row .pos{color:var(--green-text);}
+  .tabs{display:flex;gap:8px;border-bottom:0.5px solid rgba(255,255,255,0.08);margin-bottom:22px;}
+  .tab{padding:11px 4px;margin-right:20px;font-size:14px;color:var(--dim);display:flex;align-items:center;gap:6px;}
+  .tab.active{color:var(--text);border-bottom:2px solid var(--green-text);}
+  .badge{background:#1A2230;color:#9AA4B2;font-size:11px;padding:1px 8px;border-radius:20px;margin-left:5px;}
+  .badge.accent{background:rgba(94,203,156,0.15);color:#5FD0A0;}
+  .mtitle{font-size:17px;font-weight:500;color:#F2F5F8;margin-bottom:4px;}
+  .msub{font-size:13px;color:var(--muted);margin:0 0 18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .rescan{color:var(--dim);display:inline-flex;align-items:center;gap:4px;}
+  .grid{display:grid;grid-template-columns:140px 1fr 1fr 110px;gap:14px;align-items:center;}
+  .colhead{padding:0 6px 8px;font-size:11px;color:#6B7482;}
+  .mrow{background:var(--card);border:0.5px solid var(--border);border-radius:11px;padding:13px 16px;margin-bottom:9px;}
+  .src{display:flex;align-items:center;gap:8px;font-size:13px;color:#C5CDD8;}
+  .dot{width:18px;height:18px;border-radius:50%;display:inline-block;}
+  .asset{display:flex;align-items:center;gap:9px;}
+  .tok{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;}
+  .amt{font-size:13px;} .usd{font-size:11px;color:var(--dim);}
+  .none{font-size:13px;color:#5A636F;}
+  .btn-migrate{background:var(--green);color:#08291C;border:none;border-radius:8px;padding:9px 0;width:100%;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;}
+  @media(max-width:720px){.summary{grid-template-columns:1fr;}.grid{grid-template-columns:1fr 1fr;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="nav"><span class="brand">Euler</span><span class="on">Portfolio</span><span>Explore</span><span>Earn</span><span>Lend</span><span>Borrow</span></div>
+
+  <h1>Your Portfolio</h1>
+
+  <div class="summary">
+    <div class="panel">
+      <h3>Portfolio performance</h3>
+      <div class="row"><span class="lbl">Net APY</span><span class="pos">2.27%</span></div>
+      <div class="row"><span class="lbl">ROE</span><span class="pos">4.52%</span></div>
+    </div>
+    <div class="panel">
+      <h3>Portfolio value</h3>
+      <div class="row"><span class="lbl">Total supplied</span><span>$165.32</span></div>
+      <div class="row"><span class="lbl">Total borrowed</span><span>$82.41</span></div>
+      <div class="row"><span class="lbl">Net asset value</span><span>$82.91</span></div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <span class="tab">Positions <span class="badge">15</span></span>
+    <span class="tab">Deposits <span class="badge">8</span></span>
+    <span class="tab">Rewards <span class="badge">2</span></span>
+    <span class="tab active"><i class="ti ti-arrow-bar-to-down" style="color:var(--green)"></i>Migrate <span class="badge accent">3</span></span>
+  </div>
+
+  <div class="mtitle">Migrate to Euler</div>
+  <p class="msub">Positions found on Aave &amp; Morpho. Move collateral and debt in one transaction.
+    <span class="rescan"><i class="ti ti-refresh" style="font-size:12px;"></i>Rescan</span>
+  </p>
+
+  <div class="grid colhead"><div>Source</div><div>Collateral</div><div>Debt</div><div></div></div>
+
+  <div class="mrow grid">
+    <div class="src"><span class="dot" style="background:#B6509E"></span>Aave v3</div>
+    <div class="asset"><span class="tok" style="background:#3A7BD5">w</span><div><div class="amt">4.20 wstETH</div><div class="usd">$15,180</div></div></div>
+    <div class="asset"><span class="tok" style="background:#2775CA">$</span><div><div class="amt">7,500 USDC</div><div class="usd">$7,510</div></div></div>
+    <button class="btn-migrate">Migrate</button>
+  </div>
+
+  <div class="mrow grid">
+    <div class="src"><span class="dot" style="background:#2C5BE0"></span>Morpho</div>
+    <div class="asset"><span class="tok" style="background:#F7931A">B</span><div><div class="amt">0.12 WBTC</div><div class="usd">$11,400</div></div></div>
+    <div class="asset"><span class="tok" style="background:#2775CA">$</span><div><div class="amt">4,200 USDC</div><div class="usd">$4,205</div></div></div>
+    <button class="btn-migrate">Migrate</button>
+  </div>
+
+  <div class="mrow grid">
+    <div class="src"><span class="dot" style="background:#B6509E"></span>Aave v3</div>
+    <div class="asset"><span class="tok" style="background:#2775CA">$</span><div><div class="amt">10,000 USDC</div><div class="usd">$10,002</div></div></div>
+    <div class="none">— Supply only</div>
+    <button class="btn-migrate">Migrate</button>
+  </div>
+
+</div>
+</body>
+</html>

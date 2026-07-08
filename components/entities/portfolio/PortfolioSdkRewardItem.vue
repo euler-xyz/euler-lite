@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { OperationReviewModal } from '#components'
 import { formatUnits } from 'viem'
-import type { TransactionPlan, UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { UserReward } from '~/entities/reward-campaign'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
