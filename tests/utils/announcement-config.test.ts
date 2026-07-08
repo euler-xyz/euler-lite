@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildAnnouncementConfig,
+  buildAnnouncementToken,
   isAnnouncementEnabled,
   parseAnnouncementItems,
 } from '~/utils/announcement-config'
@@ -34,6 +35,7 @@ describe('announcement-config', () => {
     })).toMatchObject({
       enabled: false,
       id: '',
+      token: '',
     })
 
     expect(buildAnnouncementConfig({
@@ -43,6 +45,7 @@ describe('announcement-config', () => {
     })).toMatchObject({
       enabled: false,
       id: 'migrations-v1',
+      token: '',
     })
   })
 
@@ -57,10 +60,36 @@ describe('announcement-config', () => {
     })).toEqual({
       enabled: true,
       id: 'migrations-v1',
+      token: JSON.stringify({
+        id: 'migrations-v1',
+        title: 'Migrate positions',
+        body: 'Move positions between protocols.',
+        items: ['One', 'Two'],
+        url: 'https://example.com',
+      }),
       title: 'Migrate positions',
       body: 'Move positions between protocols.',
       items: ['One', 'Two'],
       url: 'https://example.com',
     })
+  })
+
+  it('changes the token when announcement content changes', () => {
+    const base = {
+      id: 'migrations-v1',
+      title: 'Migrate positions',
+      body: 'Move positions between protocols.',
+      items: ['One', 'Two'],
+      url: '',
+    }
+
+    expect(buildAnnouncementToken(base)).not.toBe(buildAnnouncementToken({
+      ...base,
+      body: 'Move positions between Euler, Aave v3, and Morpho.',
+    }))
+    expect(buildAnnouncementToken(base)).not.toBe(buildAnnouncementToken({
+      ...base,
+      items: ['One', 'Two', 'Three'],
+    }))
   })
 })

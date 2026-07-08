@@ -7,7 +7,7 @@ const route = useRoute()
 const router = useRouter()
 const { announcement } = useDeployConfig()
 const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
-const announcementSeenId = useLocalStorage('announcement-seen-id', '')
+const announcementSeenToken = useLocalStorage('announcement-seen-token', '')
 const modal = useModal()
 let isAnnouncementOpen = false
 
@@ -116,8 +116,8 @@ watch(route, () => {
 }, { immediate: true })
 
 const checkAnnouncement = () => {
-  if (!announcement.enabled || !announcement.id) return
-  if (announcementSeenId.value === announcement.id) return
+  if (!announcement.enabled || !announcement.token) return
+  if (announcementSeenToken.value === announcement.token) return
   if (isAnnouncementOpen || route.name === 'onboarding') return
   if (!getIsOnboardingCompleted()) return
 
@@ -125,7 +125,7 @@ const checkAnnouncement = () => {
   modal.open(AnnouncementModal, {
     isNotClosable: true,
     onClose: () => {
-      announcementSeenId.value = announcement.id
+      announcementSeenToken.value = announcement.token
       isAnnouncementOpen = false
     },
     props: {

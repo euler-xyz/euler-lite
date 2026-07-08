@@ -1,6 +1,7 @@
 export interface AnnouncementConfig {
   enabled: boolean
   id: string
+  token: string
   title: string
   body: string
   items: string[]
@@ -10,6 +11,7 @@ export interface AnnouncementConfig {
 export const EMPTY_ANNOUNCEMENT_CONFIG: AnnouncementConfig = {
   enabled: false,
   id: '',
+  token: '',
   title: '',
   body: '',
   items: [],
@@ -62,18 +64,32 @@ export const parseAnnouncementItems = (value: unknown): string[] => {
     .filter(Boolean)
 }
 
+export const buildAnnouncementToken = (config: Omit<AnnouncementConfig, 'enabled' | 'token'>): string =>
+  JSON.stringify({
+    id: config.id,
+    title: config.title,
+    body: config.body,
+    items: config.items,
+    url: config.url,
+  })
+
 export const buildAnnouncementConfig = (input: AnnouncementConfigInput): AnnouncementConfig => {
   const id = asString(input.id)
   const enabled = isAnnouncementEnabled(input.enabled) && !!id
 
   if (!enabled) return { ...EMPTY_ANNOUNCEMENT_CONFIG, id }
 
-  return {
-    enabled,
+  const config = {
     id,
     title: asString(input.title),
     body: asString(input.body),
     items: parseAnnouncementItems(input.items),
     url: asString(input.url),
+  }
+
+  return {
+    enabled,
+    token: buildAnnouncementToken(config),
+    ...config,
   }
 }
