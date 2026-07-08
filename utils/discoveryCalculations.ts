@@ -903,16 +903,16 @@ export const STATS_ROWS: AttributeRow[] = [
   },
   {
     id: 'exposure',
-    label: 'Exposure',
+    label: 'Current exposure',
     getValue: (vault) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
       if (!isVaultBorrowable(vault)) return NA_CELL
-      return { display: 'Exposure', kind: 'exposure' }
+      return { display: 'Current exposure', kind: 'exposure' }
     },
   },
   {
     id: 'badDebt',
-    label: 'Bad debt',
+    label: 'Pending bad debt',
     getValue: (vault, usd, _apy, badDebt, isBadDebtLoaded) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
       if (!badDebt) {
