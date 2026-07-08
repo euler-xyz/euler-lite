@@ -183,7 +183,7 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
               data-list="attribute-matrix-column"
               :data-key="col.attribute.id"
               :data-field="col.attribute.id"
-              :class="isAttributeColumnHighlighted(col.attribute.id) ? '!bg-white/[0.06] text-content-primary' : ''"
+              :class="isAttributeColumnHighlighted(col.attribute.id) ? 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]' : ''"
             >
               <span class="inline-flex items-center justify-center gap-4">
                 <span>{{ col.attribute.label }}</span>
@@ -215,12 +215,12 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
               :class="
                 selectedHeader?.address === vault.address
                   && selectedHeader?.axis === 'row'
-                  ? 'text-accent-500 !bg-accent-500/10'
+                  ? 'text-accent-500 shadow-[inset_0_0_0_9999px_rgba(var(--accent-rgb),0.10)]'
                   : isVaultRowHighlighted(vault.address)
-                    ? (vault.isExternal ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    ? (vault.isExternal ? 'text-content-tertiary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]' : 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]')
                     : (vault.isExternal
-                      ? 'text-content-tertiary hover:bg-white/[0.04]'
-                      : 'text-content-primary hover:bg-white/[0.04]')
+                      ? 'text-content-tertiary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]'
+                      : 'text-content-primary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]')
               "
               @click.stop="$emit('selectHeader', vault.address, 'row')"
             >
