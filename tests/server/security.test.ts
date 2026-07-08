@@ -66,6 +66,14 @@ describe('buildCsp', () => {
       .find(d => d.startsWith('connect-src'))
     expect(connectSrc).toContain('https://api.4byte.sourcify.dev')
   })
+
+  it('allows Freshdesk support widget traffic', () => {
+    const connectSrc = csp
+      .split(';')
+      .map(d => d.trim())
+      .find(d => d.startsWith('connect-src'))
+    expect(connectSrc).toContain('https://euler.freshdesk.com')
+  })
 })
 
 describe('applySecurityHeaders', () => {

@@ -115,6 +115,15 @@ watch(route, () => {
   })
 }, { immediate: true })
 
+// Keep the Freshdesk support widget off the onboarding (connect wallet)
+// screen. The widget container mounts asynchronously after window load, so
+// visibility is toggled via a root class (styled in assets/styles/main.scss)
+// rather than on the container element itself.
+watch(() => route.name, (name) => {
+  if (!import.meta.client) return
+  document.documentElement.classList.toggle('support-widget-hidden', name === 'onboarding')
+}, { immediate: true })
+
 const checkAnnouncement = () => {
   if (!announcement.enabled || !announcement.token) return
   if (announcementSeenToken.value === announcement.token) return

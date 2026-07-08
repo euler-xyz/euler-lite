@@ -4,6 +4,11 @@ import { lstatSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorage.getItem("theme")==="light"?"light":"dark"}catch(e){}document.documentElement.setAttribute("data-theme",theme);document.documentElement.style.colorScheme=theme})()'
+// Freshdesk support widget loader (official embed snippet) + init call.
+// Defers the widget.js download until window load. Executes under CSP via the
+// per-request nonce injected by server/plugins/csp.ts; 'strict-dynamic' then
+// trusts the widget script it inserts.
+const freshdeskWidgetScript = '(function(){function initFreshdesk(){window.fdWidget.init({token:"01KX0V6EFZFYTKVGZG1A774JD8",host:"https://euler.freshdesk.com",widgetId:"01KX0V6GZE7R415HA349C50NPX"})}function initialize(i,t){var e;i.getElementById(t)?initFreshdesk():((e=i.createElement("script")).id=t,e.async=!0,e.src="https://euler.freshdesk.com/webchat/js/widget.js",e.onload=initFreshdesk,i.head.appendChild(e))}function initiateCall(){initialize(document,"Freshdesk-js-sdk")}window.addEventListener?window.addEventListener("load",initiateCall,!1):window.attachEvent("load",initiateCall,!1)})()'
 const eulerSdkPackage = '@eulerxyz/euler-v2-sdk'
 const isLinkedEulerSdk = (() => {
   try {
@@ -52,6 +57,11 @@ export default defineNuxtConfig({
           innerHTML: themeBootstrapScript,
           tagPosition: 'head',
           tagPriority: 'critical',
+        },
+        {
+          id: 'freshdesk-widget',
+          innerHTML: freshdeskWidgetScript,
+          tagPosition: 'bodyClose',
         },
       ],
       meta: [
