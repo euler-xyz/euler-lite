@@ -325,8 +325,11 @@ const pointChartValue = (point: VaultHistoryPoint, metric: VaultHistoryMetric): 
     ? pointUsdValue(point, metric)
     : pointValue(point, metric)
 
+const isChartableValue = (value: number | null): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
 const visiblePoints = computed(() =>
-  history.value.filter(point => pointChartValue(point, selectedMetric.value) !== null),
+  history.value.filter(point => isChartableValue(pointChartValue(point, selectedMetric.value))),
 )
 const hasChartData = computed(() => visiblePoints.value.length > 1)
 

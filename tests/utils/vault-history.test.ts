@@ -82,6 +82,43 @@ describe('vault history utilities', () => {
     ])
   })
 
+  it('preserves zero totals as chartable values', () => {
+    const points = parseVaultTotalsHistory({
+      data: {
+        history: [
+          {
+            timestamp: '2026-07-01T00:00:00.000Z',
+            totalAssets: '0',
+            totalAssetsUsd: 0,
+            totalBorrows: '0',
+            totalBorrowsUsd: 0,
+            cash: '0',
+            cashUsd: 0,
+            utilization: 0,
+            supplyApy: 0,
+            borrowApy: 0,
+          },
+        ],
+      },
+    }, 6)
+
+    expect(points).toEqual([
+      {
+        timestamp: '2026-07-01T00:00:00.000Z',
+        totalAssets: 0,
+        totalAssetsUsd: 0,
+        totalBorrows: 0,
+        totalBorrowsUsd: 0,
+        cash: 0,
+        cashUsd: 0,
+        utilization: 0,
+        supplyApy: 0,
+        borrowApy: 0,
+        sharePrice: null,
+      },
+    ])
+  })
+
   it('parses earn totals history points into display units', () => {
     const points = parseVaultTotalsHistory({
       data: {
