@@ -29,6 +29,8 @@ describe('announcement-config', () => {
     expect(parseAnnouncementUrl('javascript:alert(1)')).toBe('')
     expect(parseAnnouncementUrl('data:text/html,<script>alert(1)</script>')).toBe('')
     expect(parseAnnouncementUrl('//example.com/docs')).toBe('')
+    expect(parseAnnouncementUrl('/\\evil.com')).toBe('')
+    expect(parseAnnouncementUrl('/\\\\evil.com')).toBe('')
     expect(parseAnnouncementUrl('docs')).toBe('')
     expect(parseAnnouncementUrl('not a url')).toBe('')
   })
