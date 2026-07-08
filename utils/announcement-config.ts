@@ -55,6 +55,23 @@ export const parseAnnouncementItems = (value: unknown): string[] => {
     .filter(Boolean)
 }
 
+export const parseAnnouncementUrl = (value: unknown): string => {
+  const raw = asString(value)
+  if (!raw) return ''
+
+  if (raw.startsWith('/')) {
+    return raw.startsWith('//') ? '' : raw
+  }
+
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? raw : ''
+  }
+  catch {
+    return ''
+  }
+}
+
 export const buildAnnouncementToken = (config: Omit<AnnouncementConfig, 'enabled' | 'token'>): string =>
   JSON.stringify({
     title: config.title,
@@ -68,7 +85,7 @@ export const buildAnnouncementConfig = (input: AnnouncementConfigInput): Announc
     title: asString(input.title),
     body: asString(input.body),
     items: parseAnnouncementItems(input.items),
-    url: asString(input.url),
+    url: parseAnnouncementUrl(input.url),
   }
   const enabled = !!(config.title || config.body || config.items.length || config.url)
 

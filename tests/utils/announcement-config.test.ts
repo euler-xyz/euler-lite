@@ -3,6 +3,7 @@ import {
   buildAnnouncementConfig,
   buildAnnouncementToken,
   parseAnnouncementItems,
+  parseAnnouncementUrl,
 } from '~/utils/announcement-config'
 
 describe('announcement-config', () => {
@@ -16,6 +17,20 @@ describe('announcement-config', () => {
 
   it('ignores malformed JSON array item config', () => {
     expect(parseAnnouncementItems('["First",')).toEqual([])
+  })
+
+  it('keeps only safe announcement URL config', () => {
+    expect(parseAnnouncementUrl(' https://example.com/docs ')).toBe('https://example.com/docs')
+    expect(parseAnnouncementUrl('http://example.com/docs')).toBe('http://example.com/docs')
+    expect(parseAnnouncementUrl('/portfolio/migrate')).toBe('/portfolio/migrate')
+  })
+
+  it('rejects unsafe announcement URL config', () => {
+    expect(parseAnnouncementUrl('javascript:alert(1)')).toBe('')
+    expect(parseAnnouncementUrl('data:text/html,<script>alert(1)</script>')).toBe('')
+    expect(parseAnnouncementUrl('//example.com/docs')).toBe('')
+    expect(parseAnnouncementUrl('docs')).toBe('')
+    expect(parseAnnouncementUrl('not a url')).toBe('')
   })
 
   it('disables empty announcement config', () => {
@@ -34,6 +49,17 @@ describe('announcement-config', () => {
     expect(buildAnnouncementConfig({ body: 'Hello' }).enabled).toBe(true)
     expect(buildAnnouncementConfig({ items: 'Hello' }).enabled).toBe(true)
     expect(buildAnnouncementConfig({ url: 'https://example.com' }).enabled).toBe(true)
+  })
+
+  it('does not enable announcement config from a rejected URL alone', () => {
+    expect(buildAnnouncementConfig({ url: 'javascript:alert(1)' })).toEqual({
+      enabled: false,
+      token: '',
+      title: '',
+      body: '',
+      items: [],
+      url: '',
+    })
   })
 
   it('normalizes enabled announcement content', () => {
