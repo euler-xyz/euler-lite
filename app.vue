@@ -115,6 +115,15 @@ watch(route, () => {
   })
 }, { immediate: true })
 
+// Keep the HelpScout Beacon launcher off the onboarding (connect wallet)
+// screen. The Beacon container mounts asynchronously after window load, so
+// visibility is toggled via a root class (styled in assets/styles/main.scss)
+// rather than on the container element itself.
+watch(() => route.name, (name) => {
+  if (!import.meta.client) return
+  document.documentElement.classList.toggle('beacon-hidden', name === 'onboarding')
+}, { immediate: true })
+
 const checkBatchAnnouncement = () => {
   if (!enableBatchAnnouncement || batchAnnouncementSeen.value) return
   if (isBatchAnnouncementOpen || route.name === 'onboarding') return
