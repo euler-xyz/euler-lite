@@ -36,7 +36,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
-import { isSameUnderlyingAsset } from '~/utils/vault-utils'
+import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
@@ -3113,12 +3113,6 @@ function getVaultDisplayName(vault?: EVault | EulerEarn | SecuritizeCollateralVa
 function getVaultMarketAssetLabel(vault?: EVault | EulerEarn | SecuritizeCollateralVault): string {
   if (!vault) return '-'
   return `${getVaultDisplayName(vault)} · ${vault.asset.symbol}`
-}
-
-function convertVaultSharesToAssets(vault: EVault, sharesAmount: bigint): bigint {
-  if (sharesAmount <= 0n) return 0n
-  if (vault.totalShares <= 0n) return sharesAmount
-  return (sharesAmount * vault.totalAssets) / vault.totalShares
 }
 
 function parseUnsignedIntegerAmount(value: unknown): bigint | undefined {

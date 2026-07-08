@@ -305,6 +305,8 @@ const targetProtocolDisplay = (target: OutgoingMigrationTarget) => {
 const targetLltv = (target: OutgoingMigrationTarget | undefined): number | null =>
   isMorphoTarget(target) ? target.raw?.lltv ?? null : null
 
+// Only called from the non-Aave (`v-else`) template branch; Aave targets render
+// their per-asset links via `aaveAssetExternalLink` instead. Handles Morpho only.
 const targetExternalLinks = (target: OutgoingMigrationTarget): TargetExternalLink[] => {
   if (isMorphoTarget(target)) {
     const chainSlug = MORPHO_APP_CHAIN_SLUGS[target.chainId]
@@ -313,28 +315,6 @@ const targetExternalLinks = (target: OutgoingMigrationTarget): TargetExternalLin
       href: `https://app.morpho.org/${chainSlug}/market/${target.raw.marketId}`,
       label: `Open Morpho ${targetPairLabel(target)} market`,
     }]
-  }
-
-  if (isAaveTarget(target)) {
-    const marketName = targetMarketName(target)
-    const marketSlug = marketName
-      ? AAVE_APP_MARKET_SLUGS[marketName]
-      : AAVE_DEFAULT_MARKET_SLUGS_BY_CHAIN[target.chainId]
-    if (!marketSlug) return []
-
-    return [
-      {
-        asset: target.collateral.asset,
-        symbol: targetAssetSymbol(target, 'collateral'),
-      },
-      {
-        asset: target.debt.asset,
-        symbol: targetAssetSymbol(target, 'debt'),
-      },
-    ].map(({ asset, symbol }) => ({
-      href: `https://app.aave.com/reserve-overview/?underlyingAsset=${getAddress(asset).toLowerCase()}&marketName=${marketSlug}`,
-      label: `Open Aave ${targetMarketLabel(target) || 'market'} ${symbol || 'asset'} pool`,
-    }))
   }
 
   return []

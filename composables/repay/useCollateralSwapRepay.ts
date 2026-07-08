@@ -6,6 +6,7 @@ import type { Ref, ComputedRef } from 'vue'
 import { formatUnits, zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { cowSwapInboxExists } from '~/utils/cowswap-inbox'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -523,9 +524,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const sourceAsset = source.asset
     const borrowAsset = borrowVault.value.asset
     const transferredShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(source.shares.decimals)))
-    const transferredAssets = source.totalShares > 0n
-      ? (sellAmount * source.totalAssets) / source.totalShares
-      : sellAmount
+    const transferredAssets = convertVaultSharesToAssets(source, sellAmount)
     const transferredAssetAmount = nanoToValue(transferredAssets, sourceAsset.decimals)
     const transferLabelSuffix = `(Selling max ${formatNumber(transferredAssetAmount, 8, 0)} ${sourceAsset.symbol})`
 
