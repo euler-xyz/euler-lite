@@ -1,7 +1,7 @@
 import { readonly, ref, type Ref } from 'vue'
 import { erc20Abi, getAddress, type Address } from 'viem'
 import { getEulerSdk } from '~/composables/useEulerSdk'
-import { AAVE_CONNECTOR_ID, METAMORPHO_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
+import { AAVE_CONNECTOR_ID, METAMORPHO_CONNECTOR_ID, MORPHO_CONNECTOR_ID, MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS } from '~/entities/migration/constants'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { logWarn } from '~/utils/errorHandling'
 
@@ -838,6 +838,10 @@ export const useExternalMigrationPositions = (options: {
   }
 
   const fetchMorphoMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<(MorphoMigrationCandidate | MetamorphoMigrationCandidate)[]> => {
+    // Morpho's indexer only covers a fixed set of chains. Querying an unindexed
+    // chain (e.g. BSC) returns an "unsupported chainId" error that would surface
+    // as a scan failure, so treat those chains as "nothing to migrate" instead.
+    if (!MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS.has(targetChainId)) return []
     try {
       const res = await fetch('/api/internal/proxy/morpho', {
         method: 'POST',

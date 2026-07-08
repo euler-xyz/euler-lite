@@ -243,6 +243,25 @@ describe('useExternalMigrationPositions', () => {
     expect(result.isLoading.value).toBe(false)
   })
 
+  it('skips Morpho discovery on chains its indexer does not support', async () => {
+    // BNB Smart Chain (56) is not indexed by api.morpho.org, and no Aave pool is
+    // registered there either — so the scan must resolve to an empty list rather
+    // than surfacing the API's "unsupported chainId" error.
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(56) }))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    const morphoQueried = fetchMock.mock.calls.some(([, init]) =>
+      String((init as RequestInit | undefined)?.body ?? '').includes('LiteMorphoMigrationPositions'),
+    )
+    expect(morphoQueried).toBe(false)
+    expect(result.positions.value).toEqual([])
+    expect(result.error.value).toBe('')
+  })
+
   it('discovers Morpho positions from indexed market positions', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({
       data: {
