@@ -2874,6 +2874,17 @@ const addInboundExternalMigrationToBatch = async () => {
     await addBatchEntry({
       ...batchEntry,
       buildPlan: async (account: Account<IHasVaultAddress>) => {
+        // The preview was warmed against the fresh owner account. For the first
+        // batch entry the planning account is that same account, so reuse the
+        // prewarmed plan instead of re-running the full cross-protocol migration
+        // simulation. Only re-simulate when the batch already has entries, where
+        // the planning account is a later layer the prewarm didn't account for.
+        if (!isBatchActive.value) {
+          return {
+            plan: preview.tenderlySimulation.plan,
+            stateOverrides: preview.tenderlySimulation.stateOverrides,
+          }
+        }
         const simulationResult = await buildInboundExternalMigrationSimulationResult(input, preview.authorizationRequest, account)
         return {
           plan: simulationResult.plan,
