@@ -161,9 +161,7 @@ export default defineNuxtConfig({
       configEnableIncentra: '',
       configEnableFuul: '',
       configEnableTurtle: '',
-      // Announcement modal: set enable + id to show a one-time modal.
-      configEnableAnnouncement: '',
-      configAnnouncementId: '',
+      // Announcement modal: populate any content field to show a one-time modal.
       configAnnouncementTitle: '',
       configAnnouncementBody: '',
       configAnnouncementItems: '',

@@ -2,19 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildAnnouncementConfig,
   buildAnnouncementToken,
-  isAnnouncementEnabled,
   parseAnnouncementItems,
 } from '~/utils/announcement-config'
 
 describe('announcement-config', () => {
-  it('enables only explicit truthy values', () => {
-    expect(isAnnouncementEnabled('true')).toBe(true)
-    expect(isAnnouncementEnabled('1')).toBe(true)
-    expect(isAnnouncementEnabled('yes')).toBe(true)
-    expect(isAnnouncementEnabled('false')).toBe(false)
-    expect(isAnnouncementEnabled('')).toBe(false)
-  })
-
   it('parses JSON array item config', () => {
     expect(parseAnnouncementItems('["First"," Second ","",42]')).toEqual(['First', 'Second'])
   })
@@ -27,41 +18,33 @@ describe('announcement-config', () => {
     expect(parseAnnouncementItems('["First",')).toEqual([])
   })
 
-  it('requires an enabled flag and id before showing', () => {
-    expect(buildAnnouncementConfig({
-      enabled: 'true',
-      id: '',
-      title: 'Hello',
-    })).toMatchObject({
+  it('disables empty announcement config', () => {
+    expect(buildAnnouncementConfig({})).toEqual({
       enabled: false,
-      id: '',
       token: '',
+      title: '',
+      body: '',
+      items: [],
+      url: '',
     })
+  })
 
-    expect(buildAnnouncementConfig({
-      enabled: 'false',
-      id: 'migrations-v1',
-      title: 'Hello',
-    })).toMatchObject({
-      enabled: false,
-      id: 'migrations-v1',
-      token: '',
-    })
+  it('enables announcement config when any content field is populated', () => {
+    expect(buildAnnouncementConfig({ title: 'Hello' }).enabled).toBe(true)
+    expect(buildAnnouncementConfig({ body: 'Hello' }).enabled).toBe(true)
+    expect(buildAnnouncementConfig({ items: 'Hello' }).enabled).toBe(true)
+    expect(buildAnnouncementConfig({ url: 'https://example.com' }).enabled).toBe(true)
   })
 
   it('normalizes enabled announcement content', () => {
     expect(buildAnnouncementConfig({
-      enabled: 'true',
-      id: ' migrations-v1 ',
       title: ' Migrate positions ',
       body: ' Move positions between protocols. ',
       items: 'One\nTwo',
       url: ' https://example.com ',
     })).toEqual({
       enabled: true,
-      id: 'migrations-v1',
       token: JSON.stringify({
-        id: 'migrations-v1',
         title: 'Migrate positions',
         body: 'Move positions between protocols.',
         items: ['One', 'Two'],
@@ -76,7 +59,6 @@ describe('announcement-config', () => {
 
   it('changes the token when announcement content changes', () => {
     const base = {
-      id: 'migrations-v1',
       title: 'Migrate positions',
       body: 'Move positions between protocols.',
       items: ['One', 'Two'],
