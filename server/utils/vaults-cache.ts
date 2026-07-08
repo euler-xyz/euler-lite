@@ -4,7 +4,7 @@
  * Single refresh path (`refreshChainVaults`) used by:
  *   - `server/plugins/warm-cache.ts` — every 5 min, force-refreshes each
  *     enabled chain's entry so steady-state reads always hit fresh cache.
- *   - `server/api/vaults.get.ts` — cold-path fallback when the cache is
+ *   - `server/api/internal/vaults.get.ts` — cold-path fallback when the cache is
  *     empty (before the first warm cycle completes). Steady state: the
  *     handler is a pure read.
  *
@@ -38,7 +38,7 @@ import {
   LABEL_FILES,
   refreshLabelFile,
   type LabelFile,
-} from '~/server/api/labels/[file].get'
+} from '~/server/api/internal/labels/[file].get'
 import { encodeBigints } from '~/utils/snapshot-codec'
 import { readV3ApiUrl } from '~/utils/api-url-env'
 import {

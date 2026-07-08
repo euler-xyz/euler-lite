@@ -17,7 +17,7 @@ import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const props = defineProps<{
   data: AttributeMatrixData
@@ -51,7 +51,6 @@ interface AttributeColumn {
 
 const attributeColumns = computed<AttributeColumn[]>(() =>
   filterAttributeRowsByBadDebtAvailability(props.data.rows, props.showBadDebtColumn)
-    .filter(attribute => isOpenInterestEnabled.value || attribute.id !== 'exposure')
     .map(attribute => ({
       attribute,
       cells: buildAttributeRowCells(attribute, props.data.columns, props.usdCache, props.apyCache, props.badDebtCache, props.showBadDebtColumn),
@@ -71,52 +70,50 @@ const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.v
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
+const isOpenInterestLoading = computed(() =>
+  isOpenInterestEnabled.value && !hasOpenInterestError.value && !isOpenInterestLoaded.value,
+)
 const exposureValueState = computed<ExposureValueState>(() => {
-  if (!isOpenInterestEnabled.value) return 'unavailable'
+  if (isOpenInterestLoading.value) return 'loading'
   if (hasLiveExposureData.value) return 'ready'
-  if (hasOpenInterestError.value) return 'unavailable'
-  return 'loading'
+  return 'unavailable'
 })
 
-interface MatrixExposureEntry {
-  items: ReturnType<typeof buildAllocatedVaultExposureDisplayItems>
-  valueState: ExposureValueState
-}
-
 const exposureByVault = computed(() => {
-  const result = new Map<string, MatrixExposureEntry>()
+  const result = new Map<string, VaultExposureDisplay>()
   if (props.view !== 'stats') return result
-  if (!hasLiveExposureData.value) return result
 
   for (const column of props.data.columns) {
     if (!isEVault(column.vault)) continue
-    const totalExposureUsd = props.usdCache.get(column.address)?.supplyUsd
-    if (totalExposureUsd === undefined) {
-      result.set(column.address, { items: [], valueState: 'unavailable' })
-      continue
-    }
+    const columnVault = column.vault
 
-    const groups = getCollateralExposureGroups(
-      getCollateralExposurePairs(
-        column.vault,
-        addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    // Distinguish "USD not loaded yet" (loading) from "priced out" (unavailable)
+    // from "priced" (ready): the cache omits an entry until its async load
+    // resolves, and stores supplyHasPrice=false for a vault with no oracle
+    // price. Collapsing these made a priced-out vault render as "-" and a
+    // still-loading vault flash "Unavailable".
+    const entry = props.usdCache.get(column.address)
+    const totalSupplyState: ExposureValueState = !entry
+      ? 'loading'
+      : entry.supplyHasPrice ? 'ready' : 'unavailable'
+    const totalExposureUsd = entry?.supplyHasPrice ? entry.supplyUsd : 0
+
+    result.set(column.address, resolveVaultExposureDisplay({
+      openInterestEnabled: isOpenInterestEnabled.value,
+      openInterestLoaded: isOpenInterestLoaded.value,
+      hasOpenInterestError: hasOpenInterestError.value,
+      getCollateralGroups: () => getCollateralExposureGroups(
+        getCollateralExposurePairs(
+          columnVault,
+          addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+        ),
+        getOpenInterestForVault(column.address),
       ),
-      getOpenInterestForVault(column.address),
-    )
-    if (hasMissingUtilizedExposureSplit(groups, column.vault.utilization)) {
-      result.set(column.address, { items: [], valueState: 'unavailable' })
-      continue
-    }
-
-    result.set(column.address, {
-      items: buildAllocatedVaultExposureDisplayItems({
-        collateralGroups: groups,
-        totalExposureUsd,
-        idleAsset: column.vault.asset,
-        utilization: column.vault.utilization,
-      }),
-      valueState: 'ready',
-    })
+      totalExposureUsd,
+      totalSupplyState,
+      utilization: columnVault.utilization,
+      acceptedCollateralCount: columnVault.collaterals.length,
+    }))
   }
   return result
 })
@@ -186,7 +183,7 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
               data-list="attribute-matrix-column"
               :data-key="col.attribute.id"
               :data-field="col.attribute.id"
-              :class="isAttributeColumnHighlighted(col.attribute.id) ? '!bg-white/[0.06] text-content-primary' : ''"
+              :class="isAttributeColumnHighlighted(col.attribute.id) ? 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]' : ''"
             >
               <span class="inline-flex items-center justify-center gap-4">
                 <span>{{ col.attribute.label }}</span>
@@ -218,12 +215,12 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
               :class="
                 selectedHeader?.address === vault.address
                   && selectedHeader?.axis === 'row'
-                  ? 'text-accent-500 !bg-accent-500/10'
+                  ? 'text-accent-500 shadow-[inset_0_0_0_9999px_rgba(var(--accent-rgb),0.10)]'
                   : isVaultRowHighlighted(vault.address)
-                    ? (vault.isExternal ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    ? (vault.isExternal ? 'text-content-tertiary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]' : 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]')
                     : (vault.isExternal
-                      ? 'text-content-tertiary hover:bg-white/[0.04]'
-                      : 'text-content-primary hover:bg-white/[0.04]')
+                      ? 'text-content-tertiary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]'
+                      : 'text-content-primary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]')
               "
               @click.stop="$emit('selectHeader', vault.address, 'row')"
             >

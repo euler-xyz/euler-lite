@@ -1,4 +1,5 @@
 import { formatUnits, maxUint256 } from 'viem'
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 
 export const VAULT_HISTORY_TIMEFRAMES = [
   { value: '7d', label: '7D', days: 7 },
@@ -8,25 +9,41 @@ export const VAULT_HISTORY_TIMEFRAMES = [
 
 export type VaultHistoryTimeframe = typeof VAULT_HISTORY_TIMEFRAMES[number]['value']
 export const VAULT_HISTORY_FETCH_TIMEFRAME: VaultHistoryTimeframe = '90d'
-export type VaultHistoryMetric = 'apy' | 'totalSupply' | 'totalBorrows' | 'utilization' | 'cash'
+export type VaultHistoryMetric
+  = | 'apy'
+    | 'totalSupply'
+    | 'totalBorrows'
+    | 'utilization'
+    | 'cash'
+    | 'sharePrice'
 export type VaultHistoryPoint = {
   timestamp: string
   totalAssets: number | null
+  totalAssetsUsd: number | null
   totalBorrows: number | null
+  totalBorrowsUsd: number | null
   cash: number | null
+  cashUsd: number | null
   utilization: number | null
   supplyApy: number | null
   borrowApy: number | null
+  sharePrice: number | null
 }
 
 type RawVaultHistoryPoint = {
   timestamp?: unknown
   totalAssets?: unknown
+  totalAssetsUsd?: unknown
+  totalSupplyUsd?: unknown
   totalBorrows?: unknown
+  totalBorrowsUsd?: unknown
   cash?: unknown
+  cashUsd?: unknown
   utilization?: unknown
   supplyApy?: unknown
   borrowApy?: unknown
+  apy?: unknown
+  sharePrice?: unknown
 }
 
 export type VaultTotalsHistoryResponse = {
@@ -68,11 +85,15 @@ export const parseVaultTotalsHistory = (
       return {
         timestamp: point.timestamp,
         totalAssets: parseAmount(point.totalAssets, decimals),
+        totalAssetsUsd: parseNumber(point.totalAssetsUsd ?? point.totalSupplyUsd),
         totalBorrows: parseAmount(point.totalBorrows, decimals),
+        totalBorrowsUsd: parseNumber(point.totalBorrowsUsd),
         cash: parseAmount(point.cash, decimals),
+        cashUsd: parseNumber(point.cashUsd),
         utilization: parseNumber(point.utilization),
-        supplyApy: parseNumber(point.supplyApy),
+        supplyApy: parseNumber(point.supplyApy ?? point.apy),
         borrowApy: parseNumber(point.borrowApy),
+        sharePrice: parseNumber(point.sharePrice),
       }
     })
     .filter((point): point is VaultHistoryPoint => point !== null)
@@ -90,11 +111,12 @@ export const getVaultHistoryTimeRange = (
   return { from, to }
 }
 
-export const buildVaultTotalsHistoryPath = (
+const buildTotalsHistoryPath = (
+  vaultKind: 'evk' | 'earn',
   chainId: string | number,
   address: string,
   timeframe: VaultHistoryTimeframe,
-  nowMs = Date.now(),
+  nowMs: number,
 ): string => {
   const { from, to } = getVaultHistoryTimeRange(timeframe, nowMs)
   const params = new URLSearchParams({
@@ -103,8 +125,22 @@ export const buildVaultTotalsHistoryPath = (
     to: String(to),
   })
 
-  return `/api/v3/evk/vaults/${encodeURIComponent(String(chainId))}/${encodeURIComponent(address)}/totals?${params.toString()}`
+  return `${V3_API_PROXY_URL}/${vaultKind}/vaults/${encodeURIComponent(String(chainId))}/${encodeURIComponent(address)}/totals?${params.toString()}`
 }
+
+export const buildVaultTotalsHistoryPath = (
+  chainId: string | number,
+  address: string,
+  timeframe: VaultHistoryTimeframe,
+  nowMs = Date.now(),
+): string => buildTotalsHistoryPath('evk', chainId, address, timeframe, nowMs)
+
+export const buildEarnVaultTotalsHistoryPath = (
+  chainId: string | number,
+  address: string,
+  timeframe: VaultHistoryTimeframe,
+  nowMs = Date.now(),
+): string => buildTotalsHistoryPath('earn', chainId, address, timeframe, nowMs)
 
 export const hasFiniteCap = (cap: bigint | null | undefined): cap is bigint =>
   typeof cap === 'bigint' && cap > 0n && cap < maxUint256

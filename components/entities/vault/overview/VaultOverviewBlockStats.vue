@@ -4,7 +4,7 @@ import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { formatBadDebtOverviewValue } from '~/utils/vault-bad-debt'
-import { VaultSupplyApyModal, VaultBorrowApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 
@@ -33,6 +33,7 @@ const borrowRewardInfo = computed(() => getBorrowRewardCampaigns(vault.address))
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: getVaultSupplyApy(vault),
     intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -43,6 +44,7 @@ const supplyApyModalData = computed(() => ({
 
 const borrowApyModalData = computed(() => ({
   props: {
+    mode: 'borrow',
     borrowingAPY: getVaultBorrowApy(vault),
     intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -108,7 +110,7 @@ const badDebtDisplay = computed(() => {
     />
     <VaultOverviewLabelValue
       v-if="badDebtDisplay"
-      label="Bad debt"
+      label="Pending bad debt"
       :value="badDebtDisplay"
       orientation="horizontal"
     />
@@ -125,7 +127,7 @@ const badDebtDisplay = computed(() => {
         <span class="flex items-center gap-4">
           Supply APY
           <UiModalPreviewTrigger
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
           >
@@ -140,7 +142,7 @@ const badDebtDisplay = computed(() => {
       <span class="flex items-center gap-4">
         <UiModalPreviewTrigger
           v-if="hasSupplyRewards(vault.address)"
-          :component="VaultSupplyApyModal"
+          :component="VaultApyModal"
           :modal-data="supplyApyModalData"
           aria-label="Show supply APY rewards breakdown"
         >
@@ -161,7 +163,7 @@ const badDebtDisplay = computed(() => {
         <span class="flex items-center gap-4">
           Borrow APY
           <UiModalPreviewTrigger
-            :component="VaultBorrowApyModal"
+            :component="VaultApyModal"
             :modal-data="borrowApyModalData"
             aria-label="Show borrow APY breakdown"
           >
@@ -176,7 +178,7 @@ const badDebtDisplay = computed(() => {
       <span class="flex items-center gap-4">
         <UiModalPreviewTrigger
           v-if="hasBorrowRewards(vault.address)"
-          :component="VaultBorrowApyModal"
+          :component="VaultApyModal"
           :modal-data="borrowApyModalData"
           aria-label="Show borrow APY rewards breakdown"
         >

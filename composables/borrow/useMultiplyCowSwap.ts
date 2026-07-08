@@ -16,14 +16,9 @@ import { useCowSwapOpenPositionExecution, useCowSwapOrderStatus, openCowSwapRevi
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { trimTrailingZeros } from '~/utils/string-utils'
+import { convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { prepareMooolerSound, playMooolerSound } from '~/utils/moooler-sound'
-
-const convertVaultSharesToAssets = (vault: EVault, sharesAmount: bigint): bigint => {
-  if (sharesAmount <= 0n) return 0n
-  if (vault.totalShares <= 0n) return sharesAmount
-  return (sharesAmount * vault.totalAssets) / vault.totalShares
-}
 
 interface UseMultiplyCowSwapOptions {
   multiplySelectedProvider: ComputedRef<string | null>

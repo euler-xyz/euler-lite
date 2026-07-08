@@ -71,12 +71,10 @@ const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollatera
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
-const sectionTitle = computed(() =>
-  isOpenInterestEnabled.value ? 'Exposure' : 'Collateral exposure',
-)
+const sectionTitle = 'Collateral exposure'
 const sectionDescription = computed(() =>
   isOpenInterestEnabled.value
-    ? 'Review live borrow exposure and configured collateral vaults before supplying.'
+    ? 'Review current borrow exposure and configured collateral vaults before supplying.'
     : 'Review configured collateral vaults and LTVs before supplying.',
 )
 const formatExposurePercent = (valueUsd: number) =>
@@ -120,9 +118,20 @@ watchEffect(() => {
         <div class="mt-12 grid grid-cols-1 gap-12">
           <VaultOverviewLabelValue
             v-if="isOpenInterestEnabled"
-            label="Live exposure"
             orientation="horizontal"
           >
+            <template #label>
+              <span class="flex items-center gap-4">
+                Current exposure
+                <span @click.stop.prevent>
+                  <UiHoverPreviewTooltip
+                    title="Current exposure"
+                    text="The amount currently borrowed against this collateral."
+                    icon-class="text-content-muted hover:text-content-secondary"
+                  />
+                </span>
+              </span>
+            </template>
             <span class="flex items-center gap-4">
               {{ formatLiveExposureUsd(getPairOpenInterestUsd(pair)) }}
               <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>

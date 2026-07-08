@@ -11,18 +11,18 @@ const ACCOUNT = '0x0000000000000000000000000000000000000001'
 const VAULT = '0x0000000000000000000000000000000000000002'
 
 describe('v3 proxy utilities', () => {
-  it('maps /api/v3 requests to the configured upstream', () => {
+  it('maps /api/internal/v3 requests to the configured upstream', () => {
     const target = buildV3ProxyTarget(
-      new URL('https://app.example/api/v3/evk/vaults/batch?chainId=1'),
+      new URL('https://app.example/api/internal/v3/evk/vaults/batch?chainId=1'),
       { V3_API_URL: 'https://v3.example/base/' },
     )
 
     expect(target).toBe('https://v3.example/base/v3/evk/vaults/batch?chainId=1')
   })
 
-  it('keeps legacy /api/v3/v3 requests mapped to the same upstream', () => {
+  it('keeps legacy /api/internal/v3/v3 requests mapped to the same upstream', () => {
     const target = buildV3ProxyTarget(
-      new URL('https://app.example/api/v3/v3/evk/vaults/batch?chainId=1'),
+      new URL('https://app.example/api/internal/v3/v3/evk/vaults/batch?chainId=1'),
       { V3_API_URL: 'https://v3.example/base/' },
     )
 
@@ -34,6 +34,7 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/apys/intrinsic')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/apys/rewards')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}`)).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}/totals`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/bad-debt')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/batch')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/totals`)).toBe(true)
@@ -57,42 +58,46 @@ describe('v3 proxy utilities', () => {
   it('allows query strings on SDK-owned endpoints for V3 to validate', () => {
     expect(validateV3ProxyUrl(
       'GET',
-      new URL(`https://app.example/api/v3/accounts/${ACCOUNT}/positions?chainId=1&offset=0&limit=100`),
+      new URL(`https://app.example/api/internal/v3/accounts/${ACCOUNT}/positions?chainId=1&offset=0&limit=100`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
-      new URL(`https://app.example/api/v3/prices?chainId=1&assets=${ACCOUNT},${VAULT}&limit=100`),
+      new URL(`https://app.example/api/internal/v3/prices?chainId=1&assets=${ACCOUNT},${VAULT}&limit=100`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
-      new URL(`https://app.example/api/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=1`),
+      new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=1`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
-      new URL(`https://app.example/api/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
+      new URL(`https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
-      new URL('https://app.example/api/v3/evk/vaults/open-interest/by-collateral?chainId=1'),
+      new URL(`https://app.example/api/internal/v3/earn/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
-      new URL('https://app.example/api/v3/tokens?chainId=1&limit=500&type=base'),
+      new URL('https://app.example/api/internal/v3/evk/vaults/open-interest/by-collateral?chainId=1'),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
-      new URL(`https://app.example/api/v3/prices?chainId=1&assets=${ACCOUNT}&limit=100&debug=true`),
+      new URL('https://app.example/api/internal/v3/tokens?chainId=1&limit=500&type=base'),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/prices?chainId=1&assets=${ACCOUNT}&limit=100&debug=true`),
     )).toEqual({ ok: true })
   })
 
   it('rejects unknown paths and wrong methods', () => {
     expect(validateV3ProxyUrl(
       'GET',
-      new URL('https://app.example/api/v3/admin?chainId=1'),
+      new URL('https://app.example/api/internal/v3/admin?chainId=1'),
     )).toMatchObject({ ok: false, statusCode: 404 })
     expect(validateV3ProxyUrl(
       'POST',
-      new URL('https://app.example/api/v3/prices'),
+      new URL('https://app.example/api/internal/v3/prices'),
     )).toMatchObject({ ok: false, statusCode: 405 })
   })
 

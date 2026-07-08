@@ -296,7 +296,7 @@ export default defineNuxtConfig({
       // CDN-Cache-Control: no-store, so these explicit rules let Cloudflare
       // collapse the same public payload across users while handlers still
       // drive browser caching.
-      '/api/vaults': {
+      '/api/internal/vaults': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
@@ -308,44 +308,44 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/labels/**': {
+      '/api/internal/labels/**': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/euler-chains': {
+      '/api/internal/euler-chains': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/proxy/merkl/opportunities': {
+      '/api/internal/proxy/merkl/opportunities': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
         },
       },
-      '/api/proxy/fuul/incentives': {
+      '/api/internal/proxy/fuul/incentives': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/proxy/incentra/sdk/v1/eulerCampaigns': {
+      '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/proxy/intrinsic-apy-overrides': {
+      '/api/internal/proxy/intrinsic-apy-overrides': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
         },
       },
       // Token lists change infrequently — 5 min edge cache, 10 min SWR.
-      '/api/token-list': {
+      '/api/internal/token-list': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
@@ -353,7 +353,7 @@ export default defineNuxtConfig({
       },
       // TOS changes very rarely — cache aggressively. Browser gets a
       // 5 min window; edge can serve for an hour and SWR for a day.
-      '/api/tos': {
+      '/api/internal/tos': {
         headers: {
           'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
           'CDN-Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
@@ -365,10 +365,11 @@ export default defineNuxtConfig({
       // S3 retention of old chunks mitigates the original stale-HTML
       // failure mode for non-HTML routes, but HTML itself must always
       // resolve to the latest build's chunk hashes. Sensitive/live APIs
-      // such as /api/pyth/updates, /api/proxy/subgraph/*,
-      // /api/proxy/turtle/*, user-specific reward/proof proxy paths,
-      // /api/rpc/*, /api/tenderly/*, and /api/screen-address also stay
-      // on this strict fallback.
+      // such as /api/internal/pyth/updates,
+      // /api/internal/proxy/subgraph/*, /api/internal/proxy/turtle/*,
+      // user-specific reward/proof proxy paths, /api/internal/rpc/*,
+      // /api/internal/tenderly/*, and /api/internal/screen-address also
+      // stay on this strict fallback.
       '/**': {
         headers: {
           'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -411,9 +412,31 @@ export default defineNuxtConfig({
   },
 
   telemetry: false,
+
+  hooks: {
+    // The /ui component playground is a dev-only UI kit; it must not ship as
+    // a routable page in production builds. Drop the route (and its bundle)
+    // outside dev so it is neither reachable nor included in the output.
+    // (The /_icons svg-sprite gallery is disabled separately via svgSprite
+    // .iconsPath below, because it is registered by the module's own
+    // pages:extend hook which runs after this one — filtering here can't
+    // remove it reliably.)
+    // NODE_ENV, not import.meta.dev: nuxt.config runs under jiti, where
+    // import.meta.dev is undefined — it would remove the route in dev too.
+    'pages:extend': (pages) => {
+      if (process.env.NODE_ENV === 'development') return
+      const index = pages.findIndex(page => page.path === '/ui')
+      if (index !== -1) pages.splice(index, 1)
+    },
+  },
   eslint: { config: { stylistic: true } },
 
   svgSprite: {
     elementClass: 'icon',
+    // The module registers a dev-only /_icons sprite-gallery page from
+    // iconsPath. It is not linked anywhere in the app, so disable the route
+    // outside dev (empty iconsPath is falsy and skips the module's page
+    // registration, matching the module's `if (options.iconsPath)` guard).
+    ...(process.env.NODE_ENV === 'development' ? {} : { iconsPath: '' }),
   },
 })

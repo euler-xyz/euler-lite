@@ -71,6 +71,7 @@ const isMarketDataResolved = ref(false)
 // Incremented in resetVaultsState(); any async operation capturing an older generation
 // must stop registering vaults.
 const loadGeneration = ref(0)
+const EARN_VAULT_REGISTRY_WAIT_MS = 10_000
 
 interface UpdateEVaultsOptions {
   verifiedAddresses?: ReadonlySet<string>
@@ -689,7 +690,7 @@ const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generati
 }
 
 /**
- * Two-pass hydrate from the server snapshot at /api/vaults?chainId=N.
+ * Two-pass hydrate from the server snapshot at /api/internal/vaults?chainId=N.
  *
  * Pass 1: instantiate every vault as its SDK class and write to the
  *         registry. Class methods are restored via the constructor; data
@@ -708,7 +709,7 @@ const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generati
 const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
   const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
   try {
-    const wire = await $fetch<SerialisedSnapshot>('/api/vaults', { query: { chainId: targetChainId } })
+    const wire = await $fetch<SerialisedSnapshot>('/api/internal/vaults', { query: { chainId: targetChainId } })
     if (loadGeneration.value !== generation) return false
 
     const snap = decodeBigints(wire) as SerialisedSnapshot
@@ -777,7 +778,7 @@ const loadVaults = async () => {
   const generation = loadGeneration.value
   const startChainId = chainId.value
 
-  // Phase 0: try to hydrate from the warm snapshot at /api/vaults. On
+  // Phase 0: try to hydrate from the warm snapshot at /api/internal/vaults. On
   // success the registry is populated and the UI renders immediately;
   // the subsequent RPC pipeline runs in *silent* mode so the per-category
   // loading/updating flags stay false. On failure (stale, malformed, or
@@ -979,16 +980,22 @@ const getEarnVault = async (address: string): Promise<EulerEarn> => {
   const normalizedAddress = getAddress(address)
   const { earnVaults } = useEulerLabels()
 
-  if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
-    await until(computed(() => Boolean(registryGetVault(normalizedAddress)))).toMatch(Boolean)
-  }
-  else {
+  const fetchAndStoreEarnVault = async () => {
     const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'earn') as EulerEarn
     registrySet(normalizedAddress, vault, 'earn')
     return vault
   }
 
-  return registryGetVault(normalizedAddress) as EulerEarn
+  if (earnVaults.value.includes(normalizedAddress) && !isEarnVaultNotExplorable(normalizedAddress)) {
+    await Promise.race([
+      until(computed(() => Boolean(registryGetVault(normalizedAddress)))).toMatch(Boolean),
+      new Promise<void>(resolve => setTimeout(resolve, EARN_VAULT_REGISTRY_WAIT_MS)),
+    ])
+    const cachedVault = registryGetVault(normalizedAddress)
+    return cachedVault ? cachedVault as EulerEarn : await fetchAndStoreEarnVault()
+  }
+
+  return await fetchAndStoreEarnVault()
 }
 const updateVault = async (vaultAddress: string): Promise<EVault | SecuritizeCollateralVault> => {
   const { set: registrySet, isKnownEscrowAddress, getType } = useVaultRegistry()

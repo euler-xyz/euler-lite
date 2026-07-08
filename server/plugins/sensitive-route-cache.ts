@@ -2,20 +2,20 @@ import type { H3Event } from 'h3'
 import { getRequestURL } from 'h3'
 import { forceNoStoreCacheHeaders } from '~/server/utils/cache-headers'
 
-const USER_REWARD_PATH_RE = /^\/api\/proxy\/merkl\/users\/0x[a-fA-F0-9]{40}\/rewards$/
+const USER_REWARD_PATH_RE = /^\/api\/internal\/proxy\/merkl\/users\/0x[a-fA-F0-9]{40}\/rewards$/
 
 const alwaysNoStorePrefixes = [
-  '/api/proxy/subgraph',
-  '/api/proxy/turtle',
-  '/api/rpc',
-  '/api/tenderly',
+  '/api/internal/proxy/subgraph',
+  '/api/internal/proxy/turtle',
+  '/api/internal/rpc',
+  '/api/internal/tenderly',
 ] as const
 
 const alwaysNoStorePaths = new Set([
-  '/api/pyth/updates',
-  '/api/proxy/fuul/claimable-rewards',
-  '/api/proxy/incentra/v1/getMerkleProofsBatch',
-  '/api/screen-address',
+  '/api/internal/pyth/updates',
+  '/api/internal/proxy/fuul/claimable-rewards',
+  '/api/internal/proxy/incentra/v1/getMerkleProofsBatch',
+  '/api/internal/screen-address',
 ])
 
 const normalizePathname = (pathname: string): string =>

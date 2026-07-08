@@ -8,7 +8,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
-import { VaultOverviewModal, VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultOverviewModal, VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 
@@ -94,6 +94,7 @@ const assetAmount = computed(() => {
 // total always matches the displayed figure instead of being recomputed.
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
     intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
@@ -204,7 +205,7 @@ const onClick = () => {
             <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
               Supply APY
               <UiModalPreviewTrigger
-                :component="VaultSupplyApyModal"
+                :component="VaultApyModal"
                 :modal-data="supplyApyModalData"
                 aria-label="Show supply APY breakdown"
               >
@@ -224,7 +225,7 @@ const onClick = () => {
             >
               <UiModalPreviewTrigger
                 v-if="rewardsExist"
-                :component="VaultSupplyApyModal"
+                :component="VaultApyModal"
                 :modal-data="supplyApyModalData"
                 aria-label="Show supply APY rewards breakdown"
               >
@@ -383,7 +384,7 @@ const onClick = () => {
             <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
               Supply APY
               <UiModalPreviewTrigger
-                :component="VaultSupplyApyModal"
+                :component="VaultApyModal"
                 :modal-data="supplyApyModalData"
                 aria-label="Show supply APY breakdown"
               >
@@ -403,7 +404,7 @@ const onClick = () => {
             >
               <UiModalPreviewTrigger
                 v-if="rewardsExist"
-                :component="VaultSupplyApyModal"
+                :component="VaultApyModal"
                 :modal-data="supplyApyModalData"
                 aria-label="Show supply APY rewards breakdown"
               >

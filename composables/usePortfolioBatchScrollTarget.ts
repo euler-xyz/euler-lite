@@ -1,6 +1,11 @@
 import { getAddress } from 'viem'
 import { nextTick, onBeforeUnmount, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import { BATCH_SCROLL_SUB_ACCOUNT_QUERY, BATCH_SCROLL_VAULT_QUERY } from '~/composables/useBatchRedirect'
+import {
+  BATCH_SCROLL_COLLATERAL_QUERY,
+  BATCH_SCROLL_REMOVED_QUERY,
+  BATCH_SCROLL_SUB_ACCOUNT_QUERY,
+  BATCH_SCROLL_VAULT_QUERY,
+} from '~/composables/useBatchRedirect'
 
 // Generous retry budget: some targets only render once the batch resimulation
 // finishes (e.g. the owner deposit a position-close moves collateral into).
@@ -35,6 +40,8 @@ export const usePortfolioBatchScrollTarget = (renderKey: MaybeRefOrGetter<unknow
     const {
       [BATCH_SCROLL_SUB_ACCOUNT_QUERY]: _target,
       [BATCH_SCROLL_VAULT_QUERY]: _vault,
+      [BATCH_SCROLL_COLLATERAL_QUERY]: _collateral,
+      [BATCH_SCROLL_REMOVED_QUERY]: _removed,
       ...query
     } = route.query
     router.replace({ query })
@@ -51,13 +58,24 @@ export const usePortfolioBatchScrollTarget = (renderKey: MaybeRefOrGetter<unknow
       return
     }
     const vault = getTargetAddress(route.query[BATCH_SCROLL_VAULT_QUERY])
-    const target = `${subAccount}:${vault ?? ''}`
+    const collateral = getTargetAddress(route.query[BATCH_SCROLL_COLLATERAL_QUERY])
+    const removed = route.query[BATCH_SCROLL_REMOVED_QUERY] === 'true'
+    const target = `${subAccount}:${vault ?? ''}:${collateral ?? ''}:${removed ? 'removed' : 'active'}`
     if (target === lastScrolledTarget) return
 
     await nextTick()
-    const vaultSelector = vault ? `[data-vault-address="${vault}"]` : ''
+    const baseSelector = `[data-id="portfolio-list-item"][data-sub-account="${subAccount}"]`
+    const removedSelector = removed ? '[data-simulated-removed="true"]' : ''
+    const selector = vault && collateral
+      ? [
+          `${baseSelector}[data-borrow-address="${vault}"][data-collateral-address="${collateral}"]${removedSelector}`,
+          removed ? `${baseSelector}[data-borrow-address="${vault}"]${removedSelector}` : '',
+        ].filter(Boolean).join(', ')
+      : vault
+        ? `${baseSelector}[data-vault-address="${vault}"]${removedSelector}, ${baseSelector}[data-borrow-address="${vault}"]${removedSelector}`
+        : `${baseSelector}${removedSelector}`
     const el = document.querySelector<HTMLElement>(
-      `[data-id="portfolio-list-item"][data-sub-account="${subAccount}"]${vaultSelector}`,
+      selector,
     )
 
     if (el) {
@@ -80,6 +98,8 @@ export const usePortfolioBatchScrollTarget = (renderKey: MaybeRefOrGetter<unknow
     () => [
       route.query[BATCH_SCROLL_SUB_ACCOUNT_QUERY],
       route.query[BATCH_SCROLL_VAULT_QUERY],
+      route.query[BATCH_SCROLL_COLLATERAL_QUERY],
+      route.query[BATCH_SCROLL_REMOVED_QUERY],
       toValue(renderKey),
     ],
     () => {

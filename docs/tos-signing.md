@@ -11,7 +11,7 @@ Users must sign the Terms of Use on-chain before executing operations. The signa
 
 ## How the signed message is constructed
 
-1. The app fetches the TOS markdown from `/api/tos` (which proxies `NUXT_PUBLIC_CONFIG_TOS_MD_URL` with a 5-min cache).
+1. The app fetches the TOS markdown from `/api/internal/tos` (which proxies `NUXT_PUBLIC_CONFIG_TOS_MD_URL` with a 5-min cache).
 
 2. A content hash is computed:
    ```
@@ -77,7 +77,7 @@ See: `composables/guards/useTosGuard.ts`
 
 ## Failure handling
 
-- If `/api/tos` is unreachable and no cached content exists, `tosLoadFailed` is set to `true`. The app **fails closed** — operations are blocked with "Unable to load Terms of Use".
+- If `/api/internal/tos` is unreachable and no cached content exists, `tosLoadFailed` is set to `true`. The app **fails closed** — operations are blocked with "Unable to load Terms of Use".
 - If the `TermsOfUseSigner` contract read fails, `hasSigned` is set to `false` and the modal will show.
 
 ## Key files
@@ -88,7 +88,7 @@ See: `composables/guards/useTosGuard.ts`
 | `composables/guards/useTosGuard.ts` | Guard logic, on-chain signature check, blocker/guard registration |
 | `utils/tos-injection.ts` | Prepends `signTermsOfUse` call to EVC batch |
 | `utils/operationGuardRegistry.ts` | Generic guard registry (TOS guard registers here) |
-| `server/api/tos.get.ts` | Server proxy for TOS markdown with caching |
+| `server/api/internal/tos.get.ts` | Server proxy for TOS markdown with caching |
 | `abis/tos.ts` | `TermsOfUseSigner` contract ABIs |
 | `components/entities/operation/AcknowledgeTermsModal.vue` | Acceptance modal UI |
 | `components/entities/vault/form/VaultFormSubmit.vue` | Submit button that triggers the modal |

@@ -5,7 +5,7 @@
  *   - `server/utils/labels-view.ts` (public labels endpoint surface)
  *   - `server/utils/vaults-cache.ts` (vault snapshot refresh, warmed every
  *     5 min by the warm-cache plugin and as the cold-path fallback for
- *     `/api/vaults?chainId=N`)
+ *     `/api/internal/vaults?chainId=N`)
  *
  * Each chain gets one SDK instance, cached at module scope; the promise is
  * cleared on build failure so the next call retries instead of poisoning
@@ -31,7 +31,7 @@ import {
   readV3ApiUrl,
   type VaultDataSource,
 } from '~/utils/api-url-env'
-import { parseOnchainSdkChains } from '~/utils/parseOnchainSdkChains'
+import { parseChainIds } from '~/utils/parseChainIds'
 import { resolveRpcUrl } from './rpc'
 import { resolveLabelsBaseUrl } from './labels-base-url'
 
@@ -67,7 +67,7 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
 }
 
 const isOnchainSdkChain = (chainId: number): boolean =>
-  parseOnchainSdkChains(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
+  parseChainIds(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
 
 const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   const rpcUrl = resolveRpcUrl(chainId)

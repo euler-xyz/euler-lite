@@ -103,13 +103,12 @@ const reset = () => {
  * `freshPlanContext`.
  */
 export const useFreshAccount = () => {
-  const { address } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
+  const { effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
   const { portfolioRefreshCounter } = usePortfolioRefresh()
 
   const effectiveOwner = computed<Address | undefined>(() => {
-    const raw = isSpyMode.value ? spyAddress.value : address.value
+    const raw = effectiveAddress.value
     if (!raw) return undefined
     try {
       return getAddress(raw as string)

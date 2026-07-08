@@ -12,7 +12,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/compos
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
 import { DateTime } from 'luxon'
-import { VaultOverviewModal, OperationReviewModal, VaultSupplyApyModal, VaultBorrowApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
+import { VaultOverviewModal, OperationReviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -31,6 +31,7 @@ const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = 
 const { viewer, visibleBreakdown } = useApyVisibility()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
 const { planTransfer, executePlan } = useEulerTx()
@@ -62,7 +63,7 @@ const isPreparing = ref(false)
 const collateralItems = ref<PositionCollateral[]>([])
 const isCollateralsLoading = ref(false)
 const disableCollateralErrorVault = ref<string | null>(null)
-const { activeLayerData, entries: batchEntries, modifiedBalanceKeys, modifiedDebtKeys } = useTxBatch()
+const { activeLayerData, modifiedBalanceKeys, modifiedDebtKeys } = useTxBatch()
 let loadSequence = 0
 
 const { isReady: isVaultsReady } = useVaults()
@@ -74,6 +75,14 @@ const borrowVault = computed<EVault | undefined>(() => position.value ? position
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const positionCollateralAddresses = computed(() => position.value ? position.value.collateralVaults : [])
 const primaryCollateralAddress = computed(() => collateralVault.value ? getAddress(collateralVault.value.address) : '')
+const buildMigrationRoute = computed(() => {
+  const query: Record<string, string> = {}
+  const network = _route.query.network
+  if (typeof network === 'string') query.network = network
+  else if (Array.isArray(network) && network[0]) query.network = network[0]
+  if (primaryCollateralAddress.value) query.collateral = primaryCollateralAddress.value
+  return { path: `/position/${positionIndex}/migrate`, query }
+})
 const collateralCount = computed(() => positionCollateralAddresses.value.length || collateralItems.value.length)
 const collateralSymbolLabel = computed(() => {
   if (!position.value) {
@@ -96,27 +105,9 @@ const batchPositionKey = (vaultAddress: string) => {
   if (!position.value) return ''
   return `${position.value.subAccount.toLowerCase()}:${getAddress(vaultAddress).toLowerCase()}`
 }
-const isSamePositionBatchEntry = (entrySubAccount?: string) => {
-  if (!position.value || !entrySubAccount) return false
-  try {
-    return getAddress(entrySubAccount).toLowerCase() === getAddress(position.value.subAccount).toLowerCase()
-  }
-  catch {
-    return false
-  }
-}
-const isDebtChangingBatchEntry = (entry: { subAccount?: string, multiply?: boolean, review?: Record<string, unknown> }) => {
-  if (!isSamePositionBatchEntry(entry.subAccount)) return false
-  if (entry.multiply === true) return true
-  const type = entry.review?.type
-  if (type === 'borrow' || type === 'repay') return true
-  if (type === 'refinance') return entry.review?.debtChanged === true
-  return false
-}
-const hasDebtChangingBatchEntry = computed(() => batchEntries.value.some(isDebtChangingBatchEntry))
 const isBorrowSimulatedModified = computed(() =>
   borrowVault.value
-    ? hasDebtChangingBatchEntry.value && modifiedDebtKeys.value.has(batchPositionKey(borrowVault.value.address))
+    ? modifiedDebtKeys.value.has(batchPositionKey(borrowVault.value.address))
     : false,
 )
 const isCollateralSimulatedModified = (vault: EVault | SecuritizeCollateralVault) =>
@@ -182,6 +173,17 @@ const isPairFullyRestricted = computed(() => {
   return !!borrowVault.value && !!collateralVault.value
     && isVaultRestrictedByCountry(borrowVault.value.address)
     && isVaultRestrictedByCountry(collateralVault.value.address)
+})
+const migrationDisabledReason = computed(() => {
+  if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
+  if (hasNoBorrow.value) return 'This position has no debt to migrate out'
+  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return 'This position is not available in your region'
+  if (hasQueryFailure.value) return 'Position data is incomplete'
+  if (!collateralVault.value || isSecuritizeCollateralVault(collateralVault.value)) return 'Migration requires standard Euler collateral'
+  // buildMigrationRoute only carries the primary collateral, so a multi-collateral
+  // position can't be represented as a single whole-position migration.
+  if (collateralCount.value > 1) return 'Multi-collateral positions can\'t be migrated yet'
+  return ''
 })
 
 const borrowVaultNotice = computed(() => {
@@ -803,6 +805,7 @@ const borrowApyModalData = computed(() => {
   if (!borrowVault.value) return {}
   return {
     props: {
+      mode: 'borrow',
       borrowingAPY: baseBorrowAPY.value,
       intrinsicAPY: intrinsicBorrowAPY.value,
       intrinsicApyInfo: getVaultIntrinsicApyInfo(borrowVault.value, enableIntrinsicApy.value),
@@ -814,6 +817,7 @@ const borrowApyModalData = computed(() => {
 
 const getSupplyApyModalData = (vault: EVault | SecuritizeCollateralVault) => ({
   props: {
+    mode: 'supply',
     lendingAPY: getVaultSupplyApy(vault),
     intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -1105,7 +1109,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
               <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                 Borrow APY
                 <UiModalPreviewTrigger
-                  :component="VaultBorrowApyModal"
+                  :component="VaultApyModal"
                   :modal-data="borrowApyModalData"
                   aria-label="Show borrow APY breakdown"
                 >
@@ -1125,7 +1129,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
               >
                 <UiModalPreviewTrigger
                   v-if="hasBorrowRewards(borrowVault?.address || '', collateralVault?.address || '')"
-                  :component="VaultBorrowApyModal"
+                  :component="VaultApyModal"
                   :modal-data="borrowApyModalData"
                   aria-label="Show borrow APY rewards breakdown"
                 >
@@ -1327,7 +1331,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
                   Supply APY
                   <UiModalPreviewTrigger
-                    :component="VaultSupplyApyModal"
+                    :component="VaultApyModal"
                     :modal-data="() => getSupplyApyModalData(asPositionCollateralVault(collateral.vault))"
                     aria-label="Show supply APY breakdown"
                   >
@@ -1347,7 +1351,7 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
                 >
                   <UiModalPreviewTrigger
                     v-if="hasSupplyRewards(collateral.vault.address)"
-                    :component="VaultSupplyApyModal"
+                    :component="VaultApyModal"
                     :modal-data="() => getSupplyApyModalData(asPositionCollateralVault(collateral.vault))"
                     aria-label="Show supply APY rewards breakdown"
                   >
@@ -1564,6 +1568,16 @@ watch([isConnected, isSpyMode, address, activeLayerData], () => {
       </div>
 
       <div class="mt-auto flex flex-col gap-8">
+        <UiButton
+          v-if="enableExternalMigrations"
+          size="large"
+          variant="primary"
+          :disabled="!!migrationDisabledReason"
+          :to="migrationDisabledReason ? undefined : buildMigrationRoute"
+          :title="migrationDisabledReason || undefined"
+        >
+          Migrate from Euler
+        </UiButton>
         <UiButton
           size="large"
           variant="primary-stroke"

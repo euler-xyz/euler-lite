@@ -80,9 +80,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId } = useEulerAddresses()
-  const { isConnected, address } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
-  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+  const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -317,7 +315,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
-    if (!isConnected.value && !isSpyMode.value) return false
+    if (!isConnected.value && !isSpyMode.value) return true
     if (findBlockingDisabledOp(walletSwapRepayPlannedOps.value)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
     if (direction.value === SwapperMode.TARGET_DEBT && !(+debtAmount.value)) return true

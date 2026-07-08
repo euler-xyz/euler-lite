@@ -4,16 +4,32 @@ import { getAddress } from 'viem'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getVaultProductName } from '~/utils/eulerLabelsUtils'
 
-import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatNumber, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
 
 const emits = defineEmits(['close'])
-const { productName, symbol, collateralOptions, selected = 0, title = 'Select collateral', apyLabel = 'Supply APY', onSave } = defineProps<{
+const {
+  productName,
+  symbol,
+  collateralOptions,
+  selected = 0,
+  title = 'Select collateral',
+  apyLabel = 'Supply APY',
+  compatibleLabel = 'Compatible',
+  incompatibleLabel = 'Requires migration',
+  compatibleEmptyMessage = 'No compatible vaults found',
+  compatibleNote: compatibleNoteProp,
+  onSave,
+} = defineProps<{
   productName: string
   symbol: string
   collateralOptions: CollateralOption[]
   selected?: number
   title?: string
   apyLabel?: string
+  compatibleLabel?: string
+  incompatibleLabel?: string
+  compatibleEmptyMessage?: string
+  compatibleNote?: string
   onSave: (selectedIndex: number, selectedOption: CollateralOption) => void
 }>()
 
@@ -39,7 +55,6 @@ const getOptionType = (option: CollateralOption) => {
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'escrow'
   return option.type
 }
-const shortenAddress = (value: string) => `${value.slice(0, 6)}...${value.slice(-4)}`
 const getSubAccountLabel = (option: CollateralOption) => {
   if (!option.subAccount) return ''
   if (!ownerAddress.value) return shortenAddress(option.subAccount)
@@ -71,7 +86,7 @@ const filteredOptions = computed(() => {
 
 type FilteredCollateralOption = { option: CollateralOption, idx: number }
 type GroupedRow
-  = | { kind: 'header', key: string, label: string, note?: string }
+  = | { kind: 'header', key: string, label: string, note?: string, tone: 'compatible' | 'incompatible' }
     | { kind: 'empty', key: string, message: string }
     | { kind: 'option', key: string, option: CollateralOption, idx: number }
 
@@ -90,6 +105,7 @@ const incompatibleNote = computed(() =>
   incompatibleOptions.value[0]?.option.compatibilityWarning?.message ?? '',
 )
 const compatibleNote = computed(() => {
+  if (compatibleNoteProp !== undefined) return compatibleNoteProp
   return title.toLowerCase().includes('debt')
     ? 'Debt vaults accepting your current collateral'
     : 'Collateral vaults accepted by your current debt'
@@ -118,8 +134,9 @@ const groupedRows = computed<GroupedRow[]>(() => {
   rows.push({
     kind: 'header',
     key: 'hdr-compatible',
-    label: 'Compatible',
+    label: compatibleLabel,
     note: compatibleNote.value,
+    tone: 'compatible',
   })
   if (compatibleOptions.value.length) {
     pushOptions(compatibleOptions.value)
@@ -128,15 +145,16 @@ const groupedRows = computed<GroupedRow[]>(() => {
     rows.push({
       kind: 'empty',
       key: 'empty-compatible',
-      message: 'No compatible vaults found',
+      message: compatibleEmptyMessage,
     })
   }
 
   rows.push({
     kind: 'header',
     key: 'hdr-incompatible',
-    label: 'Requires migration',
+    label: incompatibleLabel,
     note: incompatibleNote.value,
+    tone: 'incompatible',
   })
   pushOptions(incompatibleOptions.value)
 
@@ -173,9 +191,9 @@ const handleClose = () => {
         >
           <div class="flex items-center gap-6">
             <SvgIcon
-              :name="row.label === 'Compatible' ? 'check-circle' : 'warning'"
+              :name="row.tone === 'compatible' ? 'check-circle' : 'warning'"
               class="!w-14 !h-14"
-              :class="row.label === 'Compatible' ? 'text-accent-600' : 'text-warning-500'"
+              :class="row.tone === 'compatible' ? 'text-accent-600' : 'text-warning-500'"
             />
             <span class="text-[12px] font-semibold uppercase tracking-[0.04em] text-content-tertiary">
               {{ row.label }}

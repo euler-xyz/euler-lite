@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { PortfolioBorrowPosition, PortfolioSavingsPosition, UserReward, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { isRenderablePortfolioBorrowPosition } from '~/utils/portfolioBorrowPosition'
+import type { PortfolioBorrowPosition, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { UserReward } from '~/entities/reward-campaign'
 import { getAddress } from 'viem'
 
 defineProps<{

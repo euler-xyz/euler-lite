@@ -1,5 +1,6 @@
 export const DEFAULT_V3_API_URL = 'https://v3.euler.finance'
-export const V3_API_PROXY_URL = '/api/v3'
+export const INTERNAL_API_BASE = '/api/internal'
+export const V3_API_PROXY_URL = `${INTERNAL_API_BASE}/v3`
 
 const V3_API_ENV_KEYS = [
   'V3_API_URL',
@@ -83,7 +84,7 @@ export function readV3ApiKey(env: NodeJS.ProcessEnv = process.env): string {
 
 /**
  * Server-only Merkl API key. Merkl works anonymously (10 req/sec), but all of
- * Lite's Merkl traffic egresses from the single `/api/proxy/merkl` origin, so
+ * Lite's Merkl traffic egresses from the single `/api/internal/proxy/merkl` origin, so
  * that shared anonymous quota is the binding limit. When set, the proxy sends
  * it as `X-API-Key` for a higher quota. Never read from a public/`NUXT_PUBLIC_`
  * variable — the key must not reach the browser.
@@ -108,7 +109,7 @@ export function readBrowserVaultSource(env: NodeJS.ProcessEnv = process.env): Va
 
 /**
  * When set, the warm-cache plugin skips the vault snapshot cycle and the
- * `/api/vaults` endpoint short-circuits with 503. The browser's snapshot
+ * `/api/internal/vaults` endpoint short-circuits with 503. The browser's snapshot
  * hydrate falls through to the normal RPC pipeline.
  */
 export function readDisableServerVaultCache(env: NodeJS.ProcessEnv = process.env): boolean {

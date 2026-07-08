@@ -46,10 +46,10 @@ freshness | backend | rpcCacheKey | staticCacheKey
 
 On a cache miss, `buildInstance({ backend, buildQuery })` does:
 
-1. Resolves `rpcUrls` from `useEulerAddresses()`. RPC routes through `/api/rpc/<chainId>`, absolute on the server and relative on the client.
+1. Resolves `rpcUrls` from `useEulerAddresses()`. RPC routes through `/api/internal/rpc/<chainId>`, absolute on the server and relative on the client.
 2. Builds the static config (see below). For `backend === 'fast'` it picks one of `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` from `browserVaultSource`; for `backend === 'onchain'` it forces `onchainAdapterConfig`.
 3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()] })`.
-4. Wires app-side proxy callbacks via `configureAppProxies` — currently `oracleAdapterService.setQueryOracleAdapters` for `/api/oracle-adapters`. The proxy callback is wrapped in `buildQuery('queryOracleAdapters', …)` so its results land in the same shared cache as native SDK queries.
+4. Wires app-side proxy callbacks via `configureAppProxies` — currently `oracleAdapterService.setQueryOracleAdapters` for `/api/internal/oracle-adapters`. The proxy callback is wrapped in `buildQuery('queryOracleAdapters', …)` so its results land in the same shared cache as native SDK queries.
 
 If `buildEulerSDK` rejects, the map entry is cleared so the next caller retries instead of being stuck on a poisoned promise.
 
@@ -72,6 +72,8 @@ Two fields drive adapter selection:
 
 Chain-aware browsing calls also read `useChainConfig().onchainSdkChainIds`, injected from `ONCHAIN_SDK_CHAINS`. Listed chains use the onchain backend; all other chains use `browserVaultSource`. The list is independent of `DEPRECATED_CHAINS`, which only controls chain-selector collapsing and warm-cache skipping.
 
+The same list also gates the direct (non-SDK) V3 fetches via `composables/useV3ChainGate.ts`: collateral open interest / exposure (`useCollateralOpenInterest`), bad debt (`useVaultBadDebt`), and vault history charts (`VaultOverviewBlockHistory.vue`). `isV3EnabledForChain(chainId)` requires `enableV3Backend` *and* the chain not being in `ONCHAIN_SDK_CHAINS`. This mirrors only the per-chain `ONCHAIN_SDK_CHAINS` override; a global `NUXT_PUBLIC_BROWSER_VAULT_SOURCE=onchain` pin is intentionally not gated, since the V3-only endpoints have no on-chain equivalent to fall back to. Bad debt and history sections hide when gated (V3-only data, no RPC equivalent). Exposure instead degrades to an RPC-derived fallback. Every exposure surface (lend/borrow cards, vault overview, earn surfaces, discovery matrix) routes its state through the shared `resolveVaultExposureDisplay` (in `utils/vault/exposure-display.ts`), which picks the live allocated split when open interest is available and otherwise `buildFallbackVaultExposureDisplay`: vaults where the split is fully determined without open-interest data (nothing utilized, or a vault that accepts a single collateral) show exact values; anything else — including a multi-collateral vault that collapses to one live group because another collateral is missing or ramped out — shows the qualitative backing-asset list rather than misattributing the full amount, with the hover breakdown listing the assets without a value column and a single "USD breakdown unavailable" note. When the split is known (live open interest, or an exact RPC fallback), only collaterals with actual current exposure are listed — accepted collaterals currently backing no borrows are omitted rather than shown as $0 rows, and a vault with nothing utilized collapses to an empty "-". When the split is unknown, the qualitative fallback still lists every accepted collateral (values hidden) so the user sees what the vault *can* be exposed to. Idle (un-utilized) supply is never shown as exposure. (The separate "Collateral exposure" overview/modal section is a configured-collateral list and still shows every collateral with its LTVs and per-collateral current exposure, including $0.) The same fallback covers V3 fetch errors and utilized vaults the indexer returns no rows for, so a lagging indexer degrades the display instead of blanking it.
+
 `useChainConfig().eVaultFetchChunkChainIds`, injected from `EVAULT_FETCH_CHUNK_CHAINS`, is a Lite-side throttle for EVault list reads. Configured chains split browser and server-snapshot `sdk.eVaultService.fetchVaults(...)` calls into small sequential chunks; the SDK package itself is still called through its normal service API.
 
 `useEulerSdk` reads only these — no auto-probing, no user toggle. Switching sources requires changing the env / runtime config. A boot-time warning (`utils/api-url-env.ts:warnIfVaultSourceNeedsV3`) fires when `browserVaultSource` ∈ `{fallback, v3}` but no `V3_API_URL` is configured.
@@ -84,16 +86,16 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 
 | SDK field | Value | Backing endpoint |
 |-----------|-------|-----------------|
-| `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/v3/[...path].ts`) |
-| `deploymentsUrl` | `/api/euler-chains` | Local proxy |
-| `eulerLabelsBaseUrl` | `/api/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
-| `rewardsMerklApiUrl` | `/api/proxy/merkl` | Merkl proxy |
-| `rewardsFuulApiUrl` | `/api/proxy/fuul` | Fuul proxy |
-| `rewardsBrevisApiUrl` | `/api/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
-| `rewardsBrevisProofsApiUrl` | `/api/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
-| `accountVaultsSubgraphUrls[chainId]` | `/api/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
-| `vaultTypeSubgraphUrls[chainId]` | `/api/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
-| `rpcUrls[chainId]` | `/api/rpc/{chainId}` | JSON-RPC proxy |
+| `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/internal` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/internal/v3/[...path].ts`) |
+| `deploymentsUrl` | `/api/internal/euler-chains` | Local proxy |
+| `eulerLabelsBaseUrl` | `/api/internal/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
+| `rewardsMerklApiUrl` | `/api/internal/proxy/merkl` | Merkl proxy |
+| `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
+| `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
+| `rewardsBrevisProofsApiUrl` | `/api/internal/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
+| `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
+| `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
+| `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
 | Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (default browsing), `onchainAdapterConfig` (`ONCHAIN_SDK_CHAINS` browsing and plan-time) | — |
 | `disableV3` | `true` only when the resolved fast source is `fallback` and `!enableV3Backend` | — |
 
@@ -220,5 +222,5 @@ The fresh `Account` snapshot gives planners correct entity math at the moment of
 | A new SDK config field | `buildSdkStaticConfig` in `composables/useEulerSdk.ts` (it folds into the existing cache key automatically) |
 | A new stale-time policy for an existing query | One row in `SDK_QUERY_POLICY` (`utils/sdk-query-policy.ts`). Derived exports re-compute automatically. |
 | A new plan-critical query | Same row, add `formStaleTimeMs: 0` and/or `invalidateAfterTx: true`. |
-| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. See [server-side caching](./server-side-caching.md) for the shared `external-proxy.ts` helper. |
+| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. See [server-side caching](./server-side-caching.md) for the shared `external-proxy.ts` helper. |
 | A new planner | Add the wrapper in `composables/useEulerTx.ts` using `freshPlanContext()` to get a fresh SDK + `Account` |

@@ -55,7 +55,7 @@ export const useDeployConfig = () => {
     // Batch announcement (opt-in: enable flag shows the modal once per browser)
     batchAnnouncementUrl: rc.configBatchAnnouncementUrl || '',
 
-    // External token lists (defaults in server/api/token-list.get.ts)
+    // External token lists (defaults in server/api/internal/token-list.get.ts)
     uniswapTokenListUrl: rc.configUniswapTokenListUrl || '',
     defillamaTokenListUrl: rc.configDefillamaTokenListUrl || '',
 

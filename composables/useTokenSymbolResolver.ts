@@ -2,6 +2,7 @@ import type { Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { USD_ADDRESS, EUR_ADDRESS, BTC_ADDRESS, ETH_ADDRESS } from '~/entities/constants'
 import { readErc20StringField } from '~/utils/erc20-metadata'
+import { shortenAddress } from '~/utils/string-utils'
 
 const resolvedSymbols: Ref<Map<string, string>> = shallowRef(new Map())
 const pendingAddresses = new Set<string>()
@@ -38,8 +39,6 @@ export const useTokenSymbolResolver = () => {
 
     return map
   }
-
-  const shortenAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`
 
   const lazyResolveSymbol = (address: string) => {
     const key = address.toLowerCase()

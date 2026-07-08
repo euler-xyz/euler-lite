@@ -1,4 +1,4 @@
-import type { EVault, IHasVaultAddress, RewardCampaign, YieldApyBreakdown } from '@eulerxyz/euler-v2-sdk'
+import type { EulerEarn, EVault, IHasVaultAddress, RewardCampaign, YieldApyBreakdown } from '@eulerxyz/euler-v2-sdk'
 import { computeSupplyApyBreakdown } from '@eulerxyz/euler-v2-sdk'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import type { CollateralOption } from '~/types/collateral-option'
@@ -116,7 +116,7 @@ export function sumLoopingRewardApr(
 }
 
 export async function buildCollateralOption(params: {
-  vault: EVault
+  vault: EVault | EulerEarn
   type: string
   amount: number
   priceAmount: number

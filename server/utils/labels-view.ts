@@ -133,7 +133,7 @@ function overrideHasTag(
 const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
 export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
-  const data = await $fetch<TokenListResponse>('/api/token-list', {
+  const data = await $fetch<TokenListResponse>('/api/internal/token-list', {
     query: { chainId },
     headers: INTERNAL_FETCH_HEADERS,
   })

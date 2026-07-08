@@ -77,8 +77,8 @@ function scanEnv(): ChainConfig {
 
   const enabledChainIds = getEnabledChainIds()
   const enabledSet = new Set(enabledChainIds)
-  const deprecatedChainIds = parseDeprecatedChains(process.env.DEPRECATED_CHAINS, enabledSet)
-  const onchainSdkChainIds = parseOnchainSdkChains(process.env.ONCHAIN_SDK_CHAINS, enabledSet)
+  const deprecatedChainIds = parseChainIds(process.env.DEPRECATED_CHAINS, enabledSet)
+  const onchainSdkChainIds = parseChainIds(process.env.ONCHAIN_SDK_CHAINS, enabledSet)
   const eVaultFetchChunkChainIds = parseEVaultFetchChunkChainIds(process.env, enabledSet)
 
   return { enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds, chainEnvIssues }

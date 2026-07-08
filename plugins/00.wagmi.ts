@@ -56,7 +56,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     const publicHttp = network.rpcUrls?.default?.http ?? []
     transports[chainId] = fallback(
       [
-        http(`/api/rpc/${chainId}`, batchConfig),
+        http(`/api/internal/rpc/${chainId}`, batchConfig),
         // Public fallback gets the same batch config so a proxy outage doesn't
         // explode into 50-100× more individual requests to the public endpoint.
         ...publicHttp.map(url => http(url, batchConfig)),
