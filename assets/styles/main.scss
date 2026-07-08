@@ -77,3 +77,11 @@ body {
 html.support-widget-hidden #fd_frame {
   display: none;
 }
+
+// The page declares color-scheme: dark while the Freshdesk iframe's document
+// declares none, and browsers paint an opaque white canvas behind cross-origin
+// iframes on a color-scheme mismatch. Declaring the iframe light restores its
+// transparency, removing the white box around the launcher.
+#fd_frame iframe {
+  color-scheme: light;
+}
