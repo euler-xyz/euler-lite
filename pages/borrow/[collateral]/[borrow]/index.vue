@@ -529,6 +529,18 @@ watch(effectiveOwner, () => {
 watch(formTab, () => {
   borrow.resetOnTabSwitch()
   multiply.resetOnTabSwitch()
+
+  const currentRouteTab = formTabFromQuery(route.query.tab) ?? 'borrow'
+  if (formTab.value === currentRouteTab) return
+
+  const query = { ...route.query }
+  if (formTab.value === 'borrow') {
+    delete query.tab
+  }
+  else {
+    query.tab = formTab.value
+  }
+  void router.replace({ query })
 })
 
 watch(

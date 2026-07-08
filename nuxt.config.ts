@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 
 const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorage.getItem("theme")==="light"?"light":"dark"}catch(e){}document.documentElement.setAttribute("data-theme",theme);document.documentElement.style.colorScheme=theme})()'
 const eulerSdkPackage = '@eulerxyz/euler-v2-sdk'
+const chartPackages = ['chart.js', 'chartjs-plugin-annotation']
 const isLinkedEulerSdk = (() => {
   try {
     return lstatSync(resolve(process.cwd(), 'node_modules', ...eulerSdkPackage.split('/'))).isSymbolicLink()
@@ -161,9 +162,11 @@ export default defineNuxtConfig({
       configEnableIncentra: '',
       configEnableFuul: '',
       configEnableTurtle: '',
-      // Batch announcement: set to 'true' to show a one-time modal.
-      configEnableBatchAnnouncement: '',
-      configBatchAnnouncementUrl: '',
+      // Announcement modal: populate any content field to show a one-time modal.
+      configAnnouncementTitle: '',
+      configAnnouncementBody: '',
+      configAnnouncementItems: '',
+      configAnnouncementUrl: '',
       // External token list URLs for swap token selector
       configUniswapTokenListUrl: '',
       configDefillamaTokenListUrl: '',
@@ -396,7 +399,7 @@ export default defineNuxtConfig({
     optimizeDeps: {
       // Linked SDK builds should be loaded directly so Vite does not keep
       // serving stale optimized bundles after rebuilding the sibling package.
-      include: isLinkedEulerSdk ? [] : [eulerSdkPackage],
+      include: isLinkedEulerSdk ? chartPackages : [eulerSdkPackage, ...chartPackages],
       exclude: isLinkedEulerSdk ? [eulerSdkPackage] : [],
       esbuildOptions: { target: 'esnext' },
     },

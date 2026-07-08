@@ -37,8 +37,7 @@ export function sortSelectableTokens<T extends SelectableToken>(options: T[]): T
 
 // Narrows the list for the picker:
 // - any mode + search: match symbol / name / address.
-// - input ("Pay with") + no search: only tokens the user holds (you can only pay
-//   with what you have).
+// - input ("Pay with") + no search: only tokens the user holds.
 // - output ("Receive as") + no search: the full list, unchanged — relevant
 //   tokens are bubbled to the top by sortSelectableTokens, nothing is hidden.
 export function filterSelectableTokens<T extends SelectableToken>(

@@ -9,7 +9,7 @@ import { ChooseCollateralModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { formatUnits } from 'viem'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   label?: string
   desc?: string
   maxable?: boolean
@@ -35,7 +35,9 @@ const props = defineProps<{
   selectedSubAccount?: string // Disambiguates between multiple savings positions on different sub-accounts
   selectedVaultAddress?: string // Disambiguates same sub-account positions across different vaults (e.g. wallet rows)
   maxHandler?: () => void // When provided, replaces the default "Max" button behavior
-}>()
+}>(), {
+  assetSelectorSelected: true,
+})
 const emits = defineEmits(['input', 'change-collateral', 'click-asset'])
 const model = defineModel<string>({ default: '' })
 
@@ -178,9 +180,10 @@ const canOpenCollateralModal = computed(() => {
   const optionsCount = props.collateralOptions?.length ?? 0
   return props.collateralModalForceOpen ? optionsCount > 0 : optionsCount >= 2
 })
+const canSelectAsset = computed(() => props.swappable || canOpenCollateralModal.value)
 // The arrow must mirror canOpenCollateralModal, or the pill looks clickable
 // while openChooseCollateralModal() immediately returns.
-const showAssetSelectorArrow = computed(() => props.swappable || canOpenCollateralModal.value)
+const showAssetSelectorArrow = computed(() => canSelectAsset.value)
 
 onBeforeUnmount(() => {
   if (emitInputTimeout.value) {
@@ -211,6 +214,14 @@ const openChooseCollateralModal = () => {
       },
     },
   })
+}
+const onAssetSelectorClick = () => {
+  if (!canSelectAsset.value) return
+  if (props.swappable) {
+    emits('click-asset')
+    return
+  }
+  openChooseCollateralModal()
 }
 </script>
 
@@ -279,8 +290,10 @@ const openChooseCollateralModal = () => {
         :data-asset-symbol="asset.symbol"
         :data-asset-address="asset.address"
         :data-swappable="swappable ? 'true' : 'false'"
-        class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap cursor-pointer shrink-0"
-        @click="swappable ? emits('click-asset') : openChooseCollateralModal()"
+        :data-selectable="canSelectAsset ? 'true' : 'false'"
+        class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap shrink-0"
+        :class="canSelectAsset ? 'cursor-pointer' : 'cursor-default'"
+        @click="onAssetSelectorClick"
       >
         <template v-if="showAssetSelectorAsset">
           <AssetAvatar
