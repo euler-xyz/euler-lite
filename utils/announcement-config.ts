@@ -60,7 +60,7 @@ export const parseAnnouncementUrl = (value: unknown): string => {
   if (!raw) return ''
 
   if (raw.startsWith('/')) {
-    return raw.startsWith('//') ? '' : raw
+    return /^\/[\\/]/.test(raw) ? '' : raw
   }
 
   try {
