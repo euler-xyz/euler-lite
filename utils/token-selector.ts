@@ -37,14 +37,14 @@ export function sortSelectableTokens<T extends SelectableToken>(options: T[]): T
 
 // Narrows the list for the picker:
 // - any mode + search: match symbol / name / address.
-// - no search: the full sorted list, unchanged — relevant tokens are bubbled to
-//   the top by sortSelectableTokens, nothing is hidden.
+// - input ("Pay with") + no search: only tokens the user holds.
+// - output ("Receive as") + no search: the full list, unchanged — relevant
+//   tokens are bubbled to the top by sortSelectableTokens, nothing is hidden.
 export function filterSelectableTokens<T extends SelectableToken>(
   options: T[],
   mode: 'input' | 'output',
   searchQuery: string,
 ): T[] {
-  void mode
   const query = searchQuery.trim().toLowerCase()
   if (query) {
     return options.filter(opt =>
@@ -52,6 +52,9 @@ export function filterSelectableTokens<T extends SelectableToken>(
       || opt.asset.name.toLowerCase().includes(query)
       || opt.asset.address.toLowerCase().includes(query),
     )
+  }
+  if (mode === 'input') {
+    return options.filter(opt => opt.balance > 0n)
   }
   return options
 }
