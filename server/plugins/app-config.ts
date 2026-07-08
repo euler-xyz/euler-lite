@@ -13,6 +13,7 @@ import {
   readV3ApiUrl,
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
+import { buildAnnouncementConfig } from '~/utils/announcement-config'
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -64,6 +65,14 @@ function readAppConfig() {
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
+    announcement: buildAnnouncementConfig({
+      enabled: env('CONFIG_ENABLE_ANNOUNCEMENT', 'NUXT_PUBLIC_CONFIG_ENABLE_ANNOUNCEMENT'),
+      id: env('CONFIG_ANNOUNCEMENT_ID', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ID'),
+      title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
+      body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),
+      items: env('CONFIG_ANNOUNCEMENT_ITEMS', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS'),
+      url: env('CONFIG_ANNOUNCEMENT_URL', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_URL'),
+    }),
   }
 }
 

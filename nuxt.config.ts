@@ -161,9 +161,13 @@ export default defineNuxtConfig({
       configEnableIncentra: '',
       configEnableFuul: '',
       configEnableTurtle: '',
-      // Batch announcement: set to 'true' to show a one-time modal.
-      configEnableBatchAnnouncement: '',
-      configBatchAnnouncementUrl: '',
+      // Announcement modal: set enable + id to show a one-time modal.
+      configEnableAnnouncement: '',
+      configAnnouncementId: '',
+      configAnnouncementTitle: '',
+      configAnnouncementBody: '',
+      configAnnouncementItems: '',
+      configAnnouncementUrl: '',
       // External token list URLs for swap token selector
       configUniswapTokenListUrl: '',
       configDefillamaTokenListUrl: '',
