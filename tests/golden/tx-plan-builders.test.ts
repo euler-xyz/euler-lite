@@ -1,79 +1,29 @@
 /**
- * Golden tests for the legacy → SDK plan-builder migration.
+ * Golden tests for the SDK plan builders.
  *
- * For each operation type covered by `composables/useEulerTx.ts` we:
- *   1. Run the legacy `useEulerOperations` builder (resolved from the parallel
- *      worktree at ../euler-lite-sdk-exec-legacy via the `~` alias in
- *      vitest.golden.config.ts).
- *   2. Run the SDK planner and resolve approvals against a Wallet entity that
- *      reports a maxUint256 allowance — matching the "no on-chain approval
- *      needed" path the legacy `prepareTokenApproval` takes when its allowance
- *      probes report sufficient balance.
- *   3. Reduce both plans to a canonical [{to, data, value, evcBatch}] tx list
- *      and assert byte-for-byte equality.
+ * For each operation type covered by `composables/useEulerTx.ts` we run the SDK
+ * planner, resolve approvals against a Wallet entity that reports a maxUint256
+ * allowance (the "no on-chain approval needed" path), reduce the plan to a
+ * canonical [{to, data, value, evcBatch}] tx list, and assert it byte-for-byte
+ * against a committed golden fixture under `plans/`.
  *
- * Scenarios are tuned to bypass external dependencies that the test harness
- * doesn't mock: Pyth feed fetch (no controllers / no liability vault), swap
+ * The fixtures are the reviewed calldata baseline — regenerate them from the
+ * current SDK output with `npm run test:golden:update` and review the diff.
+ *
+ * Scenarios are tuned to bypass external dependencies the planners would
+ * otherwise touch: Pyth feed fetch (no controllers / no liability vault), swap
  * verifier RPC (deterministic SwapApiQuote fixtures with `SkipMin` verify
- * type), and on-chain previewWithdraw (the rpc stub returns shares == assets).
+ * type), and previewWithdraw (shares == assets in the seeded account).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { decodeFunctionData, getAddress, toFunctionSelector, type Address } from 'viem'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { decodeFunctionData, getAddress, maxUint256, toFunctionSelector, type Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
-import { createVaultBuilders } from '~/composables/useEulerOperations/vault'
-import { createRepayBuilders } from '~/composables/useEulerOperations/repay'
-import { createSameAssetSwapBuilders } from '~/composables/useEulerOperations/swaps/same-asset'
-import { createCrossAssetSwapBuilders } from '~/composables/useEulerOperations/swaps/cross-asset'
-import { createSupplyBorrowSwapBuilders } from '~/composables/useEulerOperations/swaps/supply-borrow'
-import { createPermit2Helpers } from '~/composables/useEulerOperations/permit2'
-import { createAllowanceHelpers } from '~/composables/useEulerOperations/allowance'
-import { createOperationHelpers } from '~/composables/useEulerOperations/helpers'
-
-import { ADDR, CHAIN_ID, buildLegacyContext, buildSdkAccount, buildSdkExecutionService } from '@golden/harness'
-import { normalizeLegacyPlan, normalizeSdkPlan, type CanonicalTx } from '@golden/normalize'
-import { loadSwapFixture } from '@golden/load-fixture'
-
-const goldenMocks = vi.hoisted(() => ({
-  accountPositions: {
-    borrows: [] as Array<{ subAccount: Address, vault: Address }>,
-    deposits: [] as Array<{ subAccount: Address, vault: Address }>,
-  },
-  evcAccountInfo: {
-    enabledControllers: [] as Address[],
-    enabledCollaterals: [] as Address[],
-  },
-}))
-
-// Stub the SDK accessor the legacy helpers reach for via Nuxt auto-import.
-// They use it only to fetch wallet allowances; throwing forces them onto the
-// `ctx.rpcProvider.readContract(allowance)` fallback path which our harness
-// returns maxUint256 from.
-vi.mock('~/composables/useEulerSdk', () => ({
-  getEulerSdk: async () => { throw new Error('stub: golden tests use rpc allowance fallback') },
-}))
-
-vi.mock('~/utils/public-client', () => ({
-  getPublicClient: () => ({
-    readContract: async (args: { functionName: string, args: readonly unknown[] }) => {
-      if (args.functionName === 'getEVCAccountInfo') return goldenMocks.evcAccountInfo
-      if (args.functionName === 'previewWithdraw') return args.args[0] as bigint
-      if (args.functionName === 'allowance') return 2n ** 256n - 1n
-      throw new Error(`Unmocked public-client readContract: ${args.functionName}`)
-    },
-  }),
-}))
-
-vi.mock('~/utils/subgraph', () => ({
-  fetchAccountPositions: async () => goldenMocks.accountPositions,
-  waitForSubgraphBlock: async () => false,
-}))
-
-beforeEach(() => {
-  goldenMocks.accountPositions = { borrows: [], deposits: [] }
-  goldenMocks.evcAccountInfo = { enabledControllers: [], enabledCollaterals: [] }
-})
+import { ADDR, CHAIN_ID, buildSdkAccount, buildSdkExecutionService } from './harness'
+import { normalizeSdkPlan, type CanonicalTx } from './normalize'
+import { loadSwapFixture } from './load-fixture'
+import { expectPlanMatchesGolden } from './plan-fixture'
 
 const normalizeResolvedSdkPlan = async (
   sdkPlan: TransactionPlan,
@@ -89,29 +39,14 @@ const normalizeResolvedSdkPlan = async (
   return normalizeSdkPlan(resolved, ADDR.evc)
 }
 
-const expectPlansEqual = async (
-  legacyTxs: ReturnType<typeof normalizeLegacyPlan>,
+// Reduce an SDK plan to canonical txs and assert it against the named fixture.
+const expectGoldenPlan = async (
+  name: string,
   sdkPlan: TransactionPlan,
   owner: Address = ADDR.user,
 ) => {
   const sdkTxs = await normalizeResolvedSdkPlan(sdkPlan, owner)
-  expect(sdkTxs).toEqual(legacyTxs)
-}
-
-const setupLegacy = (overrides?: Parameters<typeof buildLegacyContext>[0]) => {
-  const ctx = buildLegacyContext(overrides)
-  const permit2 = createPermit2Helpers(ctx as never)
-  const allowance = createAllowanceHelpers(ctx as never, permit2)
-  const helpers = createOperationHelpers(ctx as never, permit2, allowance)
-  return {
-    ctx,
-    helpers,
-    vault: createVaultBuilders(ctx as never, helpers, permit2, allowance),
-    repay: createRepayBuilders(ctx as never, helpers),
-    sameAsset: createSameAssetSwapBuilders(ctx as never, helpers),
-    crossAsset: createCrossAssetSwapBuilders(ctx as never, helpers),
-    supplyBorrow: createSupplyBorrowSwapBuilders(ctx as never, helpers),
-  }
+  expectPlanMatchesGolden(name, sdkTxs)
 }
 
 const evcDisableCollateralAbi = [{
@@ -263,10 +198,6 @@ describe('golden tx-plan parity: vault.deposit', () => {
 
   it('basic deposit to own account', async () => {
     const amount = 1_000_000n
-    const { vault } = setupLegacy()
-    const legacy = await vault.buildSupplyPlan(ADDR.vaultUsdc, ADDR.assetUsdc, amount)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planDeposit({
       account: buildSdkAccount(),
@@ -275,15 +206,11 @@ describe('golden tx-plan parity: vault.deposit', () => {
       amount,
       receiver: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('deposit-own-account', plan)
   })
 
   it('deposit to sub-account', async () => {
     const amount = 2_500_000n
-    const { vault } = setupLegacy()
-    const legacy = await vault.buildSupplyPlan(ADDR.vaultUsdc, ADDR.assetUsdc, amount, ADDR.subAccount1)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planDeposit({
       account: buildSdkAccount(),
@@ -292,17 +219,13 @@ describe('golden tx-plan parity: vault.deposit', () => {
       amount,
       receiver: ADDR.subAccount1,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('deposit-sub-account', plan)
   })
 })
 
 describe('golden tx-plan parity: vault.withdraw', () => {
   it('partial withdraw from own account', async () => {
     const amount = 500_000n
-    const { vault } = setupLegacy()
-    const legacy = await vault.buildWithdrawPlan(ADDR.vaultUsdc, amount)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planWithdraw({
       account: buildSdkAccount(),
@@ -311,15 +234,11 @@ describe('golden tx-plan parity: vault.withdraw', () => {
       owner: ADDR.user,
       receiver: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('withdraw-own-account', plan)
   })
 
   it('partial withdraw from sub-account', async () => {
     const amount = 750_000n
-    const { vault } = setupLegacy()
-    const legacy = await vault.buildWithdrawPlan(ADDR.vaultUsdc, amount, ADDR.subAccount1)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planWithdraw({
       account: buildSdkAccount(),
@@ -328,19 +247,13 @@ describe('golden tx-plan parity: vault.withdraw', () => {
       owner: ADDR.subAccount1,
       receiver: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('withdraw-sub-account', plan)
   })
 })
 
 describe('golden tx-plan parity: vault.redeem', () => {
   it('partial redeem from sub-account', async () => {
-    // The legacy harness stub returns shares == assets from previewWithdraw,
-    // so the SDK plan (which takes shares) is given that same value.
     const amount = 1_234_567n
-    const { vault } = setupLegacy()
-    const legacy = await vault.buildRedeemPlan(ADDR.vaultUsdc, amount, undefined, false, ADDR.subAccount1)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planRedeem({
       account: buildSdkAccount(),
@@ -349,15 +262,11 @@ describe('golden tx-plan parity: vault.redeem', () => {
       owner: ADDR.subAccount1,
       receiver: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('redeem-sub-account', plan)
   })
 
   it('full redeem (isMax) with explicit maxShares', async () => {
     const maxShares = 9_999_999n
-    const { vault } = setupLegacy()
-    const legacy = await vault.buildRedeemPlan(ADDR.vaultUsdc, 0n, maxShares, true, ADDR.subAccount1)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planRedeem({
       account: buildSdkAccount(),
@@ -366,7 +275,7 @@ describe('golden tx-plan parity: vault.redeem', () => {
       owner: ADDR.subAccount1,
       receiver: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('redeem-max', plan)
   })
 })
 
@@ -375,10 +284,6 @@ describe('golden tx-plan parity: repay.fromWallet', () => {
 
   it('partial repay against own account', async () => {
     const amount = 500_000n
-    const { repay } = setupLegacy()
-    const legacy = await repay.buildRepayPlan(ADDR.vaultUsdc, ADDR.assetUsdc, amount, ADDR.user)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planRepayFromWallet({
       account: buildSdkAccount({
@@ -388,15 +293,11 @@ describe('golden tx-plan parity: repay.fromWallet', () => {
       liabilityAmount: amount,
       receiver: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('repay-wallet-own-account', plan)
   })
 
   it('partial repay against sub-account', async () => {
     const amount = 800_000n
-    const { repay } = setupLegacy()
-    const legacy = await repay.buildRepayPlan(ADDR.vaultUsdc, ADDR.assetUsdc, amount, ADDR.subAccount1)
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planRepayFromWallet({
       account: buildSdkAccount({
@@ -406,27 +307,45 @@ describe('golden tx-plan parity: repay.fromWallet', () => {
       liabilityAmount: amount,
       receiver: ADDR.subAccount1,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('repay-wallet-sub-account', plan)
   })
 
-  // Full-repay cleanup is documented as intentionally divergent — the legacy
-  // builder calls `adjustForInterest(maxUint256)` which overflows (a latent bug
-  // never triggered in production because callers always pass a finite
-  // position.borrowed), and emits a different cleanup batch shape. The SDK's
-  // `cleanupOnMax: true` uses `position.borrowed` for the approval cushion and
-  // appends cleanup via `appendMaxRepayCleanup`. See useEulerTx.planRepayFromWallet.
-  it.skip('full repay (cleanup) – legacy/SDK divergent shape, not byte-equal', () => {})
+  it('full repay (max) with cleanup', async () => {
+    // maxUint256 amount drives the SDK's isMax path: the approval cushion uses
+    // position.borrowed and `cleanupOnMax` appends disableController + collateral
+    // cleanup via appendMaxRepayCleanup.
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planRepayFromWallet({
+      account: buildSdkAccount({
+        positions: [
+          { subAccount: ADDR.subAccount1, vault: ADDR.vaultUsdc, asset: ADDR.assetUsdc, borrowed, isController: true },
+          { subAccount: ADDR.subAccount1, vault: ADDR.vaultDai, asset: ADDR.assetDai, shares: 2_000_000n, assets: 2_000_000n, isCollateral: true },
+        ],
+      }),
+      liabilityVault: ADDR.vaultUsdc,
+      liabilityAmount: maxUint256,
+      receiver: ADDR.subAccount1,
+      cleanupOnMax: true,
+    })
+    await expectGoldenPlan('repay-wallet-max-cleanup', plan)
+  })
 })
 
 describe('golden tx-plan parity: vault.borrow (wallet collateral)', () => {
-  // Intentional batch reordering in the SDK migration: SDK's encodeBorrow
-  // wraps the collateral deposit via encodeDeposit which emits
-  // enableCollateral(receiver, vault) BEFORE the deposit. Legacy emits the
-  // deposit first, then enableController, then enableCollateral.
-  //
-  // Both batches are functionally equivalent at the EVC level (status-check
-  // happens at the end of the batch), but byte-different.
-  it.skip('borrow against fresh sub-account, wallet collateral (reordered)', () => {})
+  it('borrow against a fresh sub-account using wallet collateral', async () => {
+    // Fresh sub-account: the batch enables the collateral + controller, deposits
+    // the wallet collateral, and borrows to the owner.
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planBorrow({
+      account: buildSdkAccount(),
+      vault: ADDR.vaultUsdt,
+      amount: 100_000n,
+      borrowAccount: ADDR.subAccount1,
+      receiver: ADDR.user,
+      collateral: { vault: ADDR.vaultWeth, amount: 1_000_000n, asset: ADDR.assetWeth },
+    })
+    await expectGoldenPlan('borrow-wallet-collateral', plan)
+  })
 
   it('opens a new borrow for current 0xcfe state and cleans up the selected stale controller', async () => {
     const collateralAmount = 1_000_000n
@@ -460,9 +379,24 @@ describe('golden tx-plan parity: vault.borrow (wallet collateral)', () => {
 })
 
 describe('golden tx-plan parity: vault.borrowBySaving', () => {
-  // Same divergence as above: SDK emits enableCollateral before enableController;
-  // legacy in the opposite order.
-  it.skip('borrow using existing savings as collateral (reordered)', () => {})
+  it('borrow using an existing savings deposit as collateral', async () => {
+    // Savings collateral: the existing deposit at `from` is used as collateral
+    // (share source) rather than a fresh wallet deposit.
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planBorrow({
+      account: buildSdkAccount({
+        positions: [
+          { subAccount: ADDR.subAccount1, vault: ADDR.vaultWeth, asset: ADDR.assetWeth, shares: 1_000_000n, assets: 1_000_000n, isCollateral: true },
+        ],
+      }),
+      vault: ADDR.vaultUsdt,
+      amount: 100_000n,
+      borrowAccount: ADDR.subAccount1,
+      receiver: ADDR.user,
+      collateral: { vault: ADDR.vaultWeth, amount: 1_000_000n, source: 'savings', from: ADDR.subAccount1 },
+    })
+    await expectGoldenPlan('borrow-savings-collateral', plan)
+  })
 })
 
 describe('golden tx-plan parity: repay.fromDeposit (savings)', () => {
@@ -470,16 +404,6 @@ describe('golden tx-plan parity: repay.fromDeposit (savings)', () => {
   const savingsAmount = 1_000_000n
 
   it('partial savings repay – same vault', async () => {
-    const { repay } = setupLegacy()
-    const legacy = await repay.buildSavingsRepayPlan({
-      savingsVaultAddress: ADDR.vaultUsdc,
-      borrowVaultAddress: ADDR.vaultUsdc,
-      amount: savingsAmount,
-      savingsSubAccount: ADDR.user,
-      borrowSubAccount: ADDR.subAccount1,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planRepayFromDeposit({
       account: buildSdkAccount({
@@ -494,25 +418,13 @@ describe('golden tx-plan parity: repay.fromDeposit (savings)', () => {
       fromVault: ADDR.vaultUsdc,
       fromAccount: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('repay-from-deposit-same-vault', plan)
   })
 })
 
 describe('golden tx-plan parity: same-asset migrations', () => {
   it('migrate collateral between same-asset vaults (partial, no enable/disable)', async () => {
     const amount = 600_000n
-    const { sameAsset } = setupLegacy()
-    const legacy = await sameAsset.buildSameAssetSwapPlan({
-      fromVaultAddress: ADDR.vaultUsdc,
-      toVaultAddress: ADDR.vaultDai,
-      amount,
-      isMax: false,
-      subAccount: ADDR.subAccount1,
-      enableCollateral: false,
-      disableCollateral: false,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planMigrateSameAssetCollateral({
       account: buildSdkAccount({
@@ -531,7 +443,7 @@ describe('golden tx-plan parity: same-asset migrations', () => {
       isMax: false,
       maxShares: amount,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('migrate-same-asset-collateral', plan)
   })
 
   it('merged refinance plan enables target collateral before target debt controller', async () => {
@@ -595,33 +507,16 @@ describe('golden tx-plan parity: same-asset migrations', () => {
 describe('golden tx-plan parity: swap-quote operations', () => {
   it('planSwapCollateral / buildSwapPlan (cross-asset)', async () => {
     const { quote } = loadSwapFixture('swap-collateral-usdc-to-dai')
-    const { crossAsset } = setupLegacy()
-    const legacy = await crossAsset.buildSwapPlan({
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-      enableCollateral: true,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planSwapCollateral({
       account: buildSdkAccount(),
       swapQuote: quote,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('swap-collateral', plan)
   })
 
   it('planRepayWithSwap / buildSwapPlan (isRepay collateral→debt)', async () => {
     const { request, quote } = loadSwapFixture<{ currentDebt: bigint }>('swap-repay-partial-usdc-to-dai')
-    const { crossAsset } = setupLegacy()
-    const legacy = await crossAsset.buildSwapPlan({
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-      isRepay: true,
-      currentDebt: request.currentDebt,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planRepayWithSwap({
       account: buildSdkAccount({
@@ -632,21 +527,11 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       }),
       swapQuote: quote,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('repay-with-swap', plan)
   })
 
   it('planDepositWithSwapFromWallet / buildSwapAndSupplyPlan', async () => {
     const { quote } = loadSwapFixture('swap-wallet-deposit-usdc-to-dai')
-    const { supplyBorrow } = setupLegacy()
-    const legacy = await supplyBorrow.buildSwapAndSupplyPlan({
-      inputTokenAddress: quote.tokenIn.address,
-      inputAmount: BigInt(quote.amountIn),
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-      includePermit2Call: false,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planDepositWithSwapFromWallet({
       account: buildSdkAccount(),
@@ -657,21 +542,11 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       // handles deposit and the SkimMin verify covers the receiver vault.
       enableCollateral: false,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('deposit-with-swap-from-wallet', plan)
   })
 
   it('planWithdrawAndSwap / buildWithdrawAndSwapPlan', async () => {
     const { quote } = loadSwapFixture('swap-withdraw-and-swap-usdc-to-dai')
-    const { supplyBorrow } = setupLegacy()
-    const legacy = await supplyBorrow.buildWithdrawAndSwapPlan({
-      vaultAddress: quote.vaultIn,
-      assetsAmount: BigInt(quote.amountIn),
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-      subAccount: quote.accountIn,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planWithdrawAndSwap({
       account: buildSdkAccount(),
@@ -680,24 +555,11 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       owner: quote.accountIn,
       swapQuote: quote,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('withdraw-and-swap', plan)
   })
 
   it('planSwapAndRepayFromWallet / buildSwapAndRepayPlan (partial)', async () => {
     const { request, quote } = loadSwapFixture<{ currentDebt: bigint }>('swap-wallet-repay-usdc-to-dai')
-    const { supplyBorrow } = setupLegacy()
-    const legacy = await supplyBorrow.buildSwapAndRepayPlan({
-      inputTokenAddress: quote.tokenIn.address,
-      inputAmount: BigInt(quote.amountIn),
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-      borrowVaultAddress: quote.receiver,
-      subAccount: quote.accountOut,
-      currentDebt: request.currentDebt,
-      includePermit2Call: false,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planSwapAndRepayFromWallet({
       account: buildSdkAccount({
@@ -709,26 +571,16 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       amount: BigInt(quote.amountIn),
       tokenIn: quote.tokenIn.address,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('swap-and-repay-from-wallet', plan)
   })
 
   it('planRedeemAndSwap / buildRedeemAndSwapPlan', async () => {
     // Reuses the withdraw-and-swap fixture — same TransferMin verifier, only
     // the source-vault call (withdraw vs redeem) differs in selector + decimals
-    // semantics. Legacy stub returns shares == assets via the rpcProvider
-    // previewWithdraw stub, so passing the same `amountIn` works.
+    // semantics. The seeded account returns shares == assets, so passing the
+    // same `amountIn` as shares works.
     const { quote } = loadSwapFixture('swap-withdraw-and-swap-usdc-to-dai')
     const shares = BigInt(quote.amountIn)
-    const { supplyBorrow } = setupLegacy()
-    const legacy = await supplyBorrow.buildRedeemAndSwapPlan({
-      vaultAddress: quote.vaultIn,
-      sharesAmount: shares,
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-      subAccount: quote.accountIn,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planRedeemAndSwap({
       account: buildSdkAccount(),
@@ -737,26 +589,12 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       owner: quote.accountIn,
       swapQuote: quote,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('redeem-and-swap', plan)
   })
 
   it('planSwapAndBorrowFromWallet / buildSwapAndBorrowPlan', async () => {
     const { quote } = loadSwapFixture('swap-and-borrow-usdc-to-dai')
     const borrowAmount = 100_000n
-    const { supplyBorrow } = setupLegacy()
-    const legacy = await supplyBorrow.buildSwapAndBorrowPlan({
-      inputTokenAddress: quote.tokenIn.address,
-      inputAmount: BigInt(quote.amountIn),
-      collateralVaultAddress: quote.receiver,
-      borrowVaultAddress: ADDR.vaultUsdt,
-      borrowAmount,
-      swapQuote: quote as never,
-      requestedSlippage: quote.slippage,
-      subAccount: quote.accountOut,
-      includePermit2Call: false,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planSwapAndBorrowFromWallet({
       account: buildSdkAccount(),
@@ -769,25 +607,14 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       collateralVault: quote.receiver,
       receiver: ADDR.user,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('swap-and-borrow-from-wallet', plan)
   })
 
   it('planMigrateSameAssetDebt / buildSameAssetDebtSwapPlan', async () => {
-    // Same-asset debt migration — no swap quote required. Legacy uses
-    // `adjustForInterest(amount)` cushion; SDK encodes the same cushion in
-    // `encodeMigrateSameAssetDebt`. Both sub-account routes call
+    // Same-asset debt migration — no swap quote required. The cushion is
+    // encoded in `encodeMigrateSameAssetDebt`. Both sub-account routes call
     // transferFromMax at the end when the sub-account != owner.
     const amount = 1_000_000n
-    const { sameAsset } = setupLegacy()
-    const legacy = await sameAsset.buildSameAssetDebtSwapPlan({
-      oldVaultAddress: ADDR.vaultUsdc,
-      newVaultAddress: ADDR.vaultUsdt,
-      amount,
-      subAccount: ADDR.subAccount1,
-      enabledCollaterals: [ADDR.vaultDai],
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planMigrateSameAssetDebt({
       account: buildSdkAccount({
@@ -801,13 +628,9 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       liabilityAmount: amount,
       oldLiabilityAsset: ADDR.assetUsdc,
       newLiabilityAsset: ADDR.assetUsdc, // same asset, different vault
-      // Legacy queries balanceOf on the old vault to decide whether to
-      // sweep — our rpc stub throws on balanceOf so the catch returns true,
-      // meaning legacy treats this as "pre-existing deposit" and skips the
-      // sweep. Match SDK by opting out.
       sweepExcess: false,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('migrate-same-asset-debt', plan)
   })
 
   it('planSwapDebt / buildSwapPlan (cross-asset debt swap)', async () => {
@@ -819,16 +642,6 @@ describe('golden tx-plan parity: swap-quote operations', () => {
     // position whose borrowed value is below the quote's amountOutMin so the
     // SDK's `borrowed <= amountOutMin` check resolves isMax=true.
     const { quote } = loadSwapFixture('swap-debt-usdc-to-dai')
-    const { crossAsset } = setupLegacy()
-    const legacy = await crossAsset.buildSwapPlan({
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-      isRepay: true,
-      isDebtSwap: true,
-      currentDebt: 1n,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planSwapDebt({
       account: buildSdkAccount({
@@ -839,32 +652,14 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       }),
       swapQuote: quote,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('swap-debt', plan)
   })
 
   it('planMultiplyWithSwap / buildMultiplyPlan (swap branch, no initial collateral)', async () => {
-    // No initial collateral deposit: legacy skips the deposit step + we
-    // pre-mark supplyVault as enabled to skip enableSupplyCollateral, leaving
-    // both implementations with the same enableController → borrow(swapper) →
-    // swap → verify → enableLongCollateral sequence.
+    // No initial collateral deposit; supplyVault pre-marked as enabled so the
+    // SDK skips enableCollateral, leaving the enableController → borrow(swapper)
+    // → swap → verify → enableLongCollateral sequence.
     const { quote } = loadSwapFixture('swap-multiply-usdc-to-dai')
-    const { vault } = setupLegacy()
-    const legacy = await vault.buildMultiplyPlan({
-      supplyVaultAddress: quote.vaultIn, // unused since supplyAmount=0
-      supplyAssetAddress: quote.tokenIn.address,
-      supplyAmount: 0n,
-      longVaultAddress: quote.receiver,
-      longAssetAddress: quote.tokenOut.address,
-      borrowVaultAddress: quote.vaultIn,
-      debtAmount: 0n, // ignored in swap path; the borrow uses quote.amountIn
-      subAccount: quote.accountIn,
-      includePermit2Call: false,
-      enabledCollaterals: [quote.vaultIn], // skip enableSupplyCollateral
-      quote: quote as never,
-      requestedSlippage: quote.slippage,
-    })
-    const legacyTxs = normalizeLegacyPlan(legacy, ADDR.evc)
-
     const sdk = buildSdkExecutionService()
     const plan = sdk.planMultiplyWithSwap({
       account: buildSdkAccount({
@@ -879,13 +674,24 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       swapQuote: quote,
       skipCleanup: true,
     })
-    await expectPlansEqual(legacyTxs, plan)
+    await expectGoldenPlan('multiply-with-swap', plan)
   })
 
-  // Same-asset multiply — divergent batch shape.
-  // Legacy: borrow(amount, user) → user holds tokens → longVault.deposit(amount, subAccount)
-  // SDK:    borrow(amount, longVault) → longVault.skim(amount, subAccount)
-  // Functionally equivalent (both end with `amount` shares minted to subAccount)
-  // but different selectors. Flagged for migration sign-off.
-  it.skip('planMultiplySameAsset / buildMultiplyPlan (no-swap branch) — divergent borrow→skim vs borrow→deposit shape', () => {})
+  it('planMultiplySameAsset (no-swap branch, deposit collateral)', async () => {
+    // Same-asset loop: deposit collateral, borrow the same asset, and skim the
+    // borrowed amount into the long vault (borrow→skim, no swap).
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planMultiplySameAsset({
+      account: buildSdkAccount(),
+      collateralVault: ADDR.vaultUsdc,
+      collateralAmount: 1_000_000n,
+      collateralAsset: ADDR.assetUsdc,
+      longVault: ADDR.vaultUsdc,
+      liabilityVault: ADDR.vaultUsdc,
+      liabilityAmount: 500_000n,
+      receiver: ADDR.subAccount1,
+      skipCleanup: true,
+    })
+    await expectGoldenPlan('multiply-same-asset', plan)
+  })
 })
