@@ -160,9 +160,11 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
 
       const state = await KeyringConnect.getExtensionState()
       const cred = state?.credentialData
+      // The extension echoes the trader address in its own casing — compare
+      // case-insensitively so a casing difference doesn't force a re-auth.
       if (
         cred
-        && cred.trader === userAddress.value
+        && cred.trader?.toLowerCase() === userAddress.value?.toLowerCase()
         && cred.policyId === policyId.value
         && cred.chainId === chainId.value
       ) {

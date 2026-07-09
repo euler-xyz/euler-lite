@@ -341,7 +341,7 @@ The poll interval awaits `updateBalances()` before `refreshVaults()` to ensure w
 
 After each fetch, `updateBalances()` schedules a follow-up run if its inputs (chain, address, registry readiness) changed mid-flight. Two safeguards keep this from looping:
 
-- Address identity is compared **case-insensitively**. Connector-reported addresses are not guaranteed to be EIP-55 checksummed (WalletConnect wallets commonly report lowercase, injected wallets checksum), while the last-fetched address is stored checksummed. A cased compare here once kept the follow-up condition true forever, refetching in an unbounded loop that hung the tab.
+- Address identity is compared **case-insensitively**. Connector-reported addresses are not guaranteed to be EIP-55 checksummed (WalletConnect wallets commonly report lowercase, injected wallets checksum), while the last-fetched address is stored checksummed. A cased compare here once kept the follow-up condition true forever, refetching in an unbounded loop that hung the tab. `useWagmi().address` now normalizes the connector value to checksummed form at the source, so consumers always see canonical casing — the case-insensitive compare stays as defense-in-depth.
 - Consecutive follow-up runs are capped (`MAX_CONSECUTIVE_AUTO_REFETCHES`); hitting the cap logs a warning instead of spinning, since legitimate mid-flight changes settle within a couple of rounds.
 
 ## Related Documentation
