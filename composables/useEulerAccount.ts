@@ -28,6 +28,10 @@ const isPositionsLoaded = ref(false)
 const isDepositsLoading = ref(true)
 const isDepositsLoaded = ref(false)
 const isShowAllPositions = ref(false)
+// True when the most recent portfolio fetch threw, as opposed to succeeding
+// with partial per-asset pricing issues. Surfaced to the UI so a failed load
+// renders an error state instead of formatted zeros — see `hasPortfolioLoadError`.
+const hasPositionsFetchError = ref(false)
 
 // Transparent layer overlay: when a non-zero batch layer is active, the
 // simulated portfolio is served for both the visible and all-positions views,
@@ -101,6 +105,7 @@ export const useEulerAccount = () => {
     visiblePortfolio.value = undefined
     allPortfolio.value = undefined
     portfolioDiagnostics.value = []
+    hasPositionsFetchError.value = false
     isPositionsLoaded.value = false
     isPositionsLoading.value = true
     isDepositsLoaded.value = false
@@ -121,6 +126,7 @@ export const useEulerAccount = () => {
     const gen = positionGuard.current()
 
     try {
+      hasPositionsFetchError.value = false
       if (!walletAddress) {
         visiblePortfolio.value = undefined
         allPortfolio.value = undefined
@@ -162,6 +168,7 @@ export const useEulerAccount = () => {
     catch (error) {
       if (positionGuard.isStale(gen)) return
       logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
+      hasPositionsFetchError.value = true
       portfolioDiagnostics.value = [{
         code: 'SOURCE_UNAVAILABLE',
         severity: 'error',
@@ -227,6 +234,12 @@ export const useEulerAccount = () => {
   startWatchers()
   onScopeDispose(releaseWatchers)
 
+  // A portfolio fetch failed AND we have no (stale) portfolio to fall back on.
+  // Gating on the absence of data means a transient background-refresh failure
+  // keeps the last-good figures on screen, while a genuine cold-load failure
+  // lets the UI show an error instead of misleading $0.00 totals.
+  const hasPortfolioLoadError = computed(() => hasPositionsFetchError.value && !portfolio.value)
+
   const portfolioRoe = computed(() => portfolio.value?.roe ?? 0)
   const portfolioNetApy = computed(() => portfolio.value?.netApy ?? 0)
   const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedValueUsd))
@@ -276,6 +289,7 @@ export const useEulerAccount = () => {
   return {
     portfolio,
     portfolioDiagnostics,
+    hasPortfolioLoadError,
     borrowPositions,
     depositPositions,
     removedBorrowPositions,
