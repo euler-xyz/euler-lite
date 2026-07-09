@@ -714,4 +714,48 @@ describe('golden tx-plan parity: swap-quote operations', () => {
     })
     await expectGoldenPlan('multiply-same-asset', plan)
   })
+
+  it('planSwapFromWallet (plain wallet swap, no deposit/borrow)', async () => {
+    const { quote } = loadSwapFixture('swap-wallet-usdc-to-dai')
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planSwapFromWallet({
+      account: buildSdkAccount(),
+      swapQuote: quote,
+      amount: BigInt(quote.amountIn),
+      tokenIn: quote.tokenIn.address,
+    })
+    await expectGoldenPlan('swap-from-wallet', plan)
+  })
+})
+
+describe('golden tx-plan parity: transfer & cleanup', () => {
+  it('planTransfer moves collateral shares between sub-accounts', async () => {
+    const amount = 1_000_000n
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planTransfer({
+      account: buildSdkAccount({
+        positions: [
+          { subAccount: ADDR.subAccount1, vault: ADDR.vaultUsdc, asset: ADDR.assetUsdc, shares: amount, assets: amount, isCollateral: true },
+        ],
+      }),
+      vault: ADDR.vaultUsdc,
+      from: ADDR.subAccount1,
+      to: ADDR.user,
+      amount,
+      enableCollateralTo: true,
+      disableCollateralFrom: true,
+    })
+    await expectGoldenPlan('transfer-collateral', plan)
+  })
+
+  it('planCleanup disables the stale controller and collaterals on a sub-account', async () => {
+    // Reuse the current 0xcfe state, whose selected sub-account carries a stale
+    // controller + collaterals that cleanup should disable.
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planCleanup({
+      account: buildCurrentStateSdkAccount(),
+      subAccount: CURRENT_STATE_SELECTED_SUB_ACCOUNT,
+    })
+    await expectGoldenPlan('cleanup-stale-subaccount', plan, CURRENT_STATE_OWNER)
+  })
 })

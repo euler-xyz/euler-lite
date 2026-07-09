@@ -1,6 +1,15 @@
 # Golden tests: SDK tx-plan builders
 
-For each operation type exposed by `composables/useEulerTx.ts`, these tests:
+These cover the SDK `executionService.plan*` builders that produce the on-chain
+EVC transaction plan behind `composables/useEulerTx.ts` — deposit, withdraw,
+redeem, borrow, repay (wallet/deposit), same-asset collateral/debt migration,
+multiply, transfer, cleanup, and the swap-quote operations. `useEulerTx`'s
+combined/branching wrappers (e.g. `planMultiply`, `planCollateralChange`,
+`planRefinancePosition`) delegate to these builders, so they're covered
+transitively. Cross-protocol (Aave/Morpho) migration goes through a separate
+service and is out of scope here.
+
+For each, these tests:
 
 1. Run the SDK `executionService.plan*` method against deterministic args, then
    `resolveRequiredApprovals` to expand approval intents into concrete approve
