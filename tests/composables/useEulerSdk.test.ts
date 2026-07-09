@@ -63,6 +63,7 @@ const createMockSdk = (id: string): MockSdk => ({
 const importUseEulerSdk = async (
   chainIds: Ref<number[]>,
   buildEulerSDK: ReturnType<typeof vi.fn>,
+  onchainSdkChainIds: number[] = [],
 ) => {
   vi.resetModules()
   vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
@@ -79,6 +80,12 @@ const importUseEulerSdk = async (
   vi.stubGlobal('useEulerAddresses', () => ({
     allowedChainIds: chainIds,
     chainId: computed(() => chainIds.value[0] ?? 1),
+  }))
+  vi.stubGlobal('useChainConfig', () => ({
+    enabledChainIds: chainIds.value,
+    deprecatedChainIds: [],
+    onchainSdkChainIds,
+    eVaultFetchChunkChainIds: [],
   }))
   vi.stubGlobal('useVaultRegistry', () => ({
     getAll: () => [],
@@ -150,13 +157,13 @@ describe('useEulerSdk', () => {
     const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
     expect(options.config).toMatchObject({
       rpcUrls: {
-        1: '/api/rpc/1',
-        8453: '/api/rpc/8453',
+        1: '/api/internal/rpc/1',
+        8453: '/api/internal/rpc/8453',
       },
-      v3ApiUrl: '/api',
-      tokenlistApiBaseUrl: '/api',
-      deploymentsUrl: '/api/euler-chains',
-      eulerLabelsBaseUrl: '/api/labels',
+      v3ApiUrl: '/api/internal',
+      tokenlistApiBaseUrl: '/api/internal',
+      deploymentsUrl: '/api/internal/euler-chains',
+      eulerLabelsBaseUrl: '/api/internal/labels',
       oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
     })
     expect(options.rpcUrls).toBeUndefined()
@@ -183,28 +190,65 @@ describe('useEulerSdk', () => {
     const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
     expect(options.config).toMatchObject({
       rpcUrls: {
-        1: '/api/rpc/1',
+        1: '/api/internal/rpc/1',
       },
-      v3ApiUrl: '/api',
-      tokenlistApiBaseUrl: '/api',
-      intrinsicApyV3ApiUrl: '/api',
-      deploymentsUrl: '/api/euler-chains',
-      eulerLabelsBaseUrl: '/api/labels',
-      rewardsMerklApiUrl: '/api/proxy/merkl',
-      rewardsBrevisApiUrl: '/api/proxy/incentra/sdk/v1/eulerCampaigns',
-      rewardsBrevisProofsApiUrl: '/api/proxy/incentra/v1/getMerkleProofsBatch',
-      rewardsFuulApiUrl: '/api/proxy/fuul',
-      rewardsTurtleApiUrl: '/api/proxy/turtle',
+      v3ApiUrl: '/api/internal',
+      tokenlistApiBaseUrl: '/api/internal',
+      intrinsicApyV3ApiUrl: '/api/internal',
+      deploymentsUrl: '/api/internal/euler-chains',
+      eulerLabelsBaseUrl: '/api/internal/labels',
+      rewardsMerklApiUrl: '/api/internal/proxy/merkl',
+      rewardsBrevisApiUrl: '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns',
+      rewardsBrevisProofsApiUrl: '/api/internal/proxy/incentra/v1/getMerkleProofsBatch',
+      rewardsFuulApiUrl: '/api/internal/proxy/fuul',
+      rewardsTurtleApiUrl: '/api/internal/proxy/turtle',
       accountVaultsSubgraphUrls: {
-        1: '/api/proxy/subgraph/1',
+        1: '/api/internal/proxy/subgraph/1',
       },
       vaultTypeSubgraphUrls: {
-        1: '/api/proxy/subgraph/1',
+        1: '/api/internal/proxy/subgraph/1',
       },
       accountServiceAdapter: 'fallback',
       eVaultServiceAdapter: 'fallback',
       eulerEarnServiceAdapter: 'fallback',
       vaultTypeAdapter: 'fallback',
+      rewardsServiceAdapter: 'fallback',
+    })
+  })
+
+  it('uses an onchain browsing SDK for chains listed in ONCHAIN_SDK_CHAINS', async () => {
+    const chainIds = ref([1, 8453])
+    const regularSdk = createMockSdk('regular')
+    const onchainSdk = createMockSdk('onchain')
+    const buildEulerSDK = vi.fn()
+      .mockResolvedValueOnce(regularSdk)
+      .mockResolvedValueOnce(onchainSdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {
+        configEulerChainsUrl: '',
+        configLabelsBaseUrl: '',
+        configOracleChecksBaseUrl: '',
+      },
+    }))
+
+    const { getEulerSdkForChain } = await importUseEulerSdk(chainIds, buildEulerSDK, [8453])
+    await expect(getEulerSdkForChain(1)).resolves.toBe(regularSdk)
+    await expect(getEulerSdkForChain(8453)).resolves.toBe(onchainSdk)
+    await expect(getEulerSdkForChain(8453)).resolves.toBe(onchainSdk)
+
+    expect(buildEulerSDK).toHaveBeenCalledTimes(2)
+    expect((buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions).config).toMatchObject({
+      accountServiceAdapter: 'fallback',
+      eVaultServiceAdapter: 'fallback',
+      eulerEarnServiceAdapter: 'fallback',
+      vaultTypeAdapter: 'fallback',
+      rewardsServiceAdapter: 'fallback',
+    })
+    expect((buildEulerSDK.mock.calls[1]?.[0] as BuildEulerSDKOptions).config).toMatchObject({
+      accountServiceAdapter: 'onchain',
+      eVaultServiceAdapter: 'onchain',
+      eulerEarnServiceAdapter: 'onchain',
+      vaultTypeAdapter: 'subgraph',
       rewardsServiceAdapter: 'fallback',
     })
   })
@@ -231,8 +275,8 @@ describe('useEulerSdk', () => {
       eulerEarnServiceAdapter: 'onchain',
       vaultTypeAdapter: 'subgraph',
       rewardsServiceAdapter: 'fallback',
-      rewardsTurtleApiUrl: '/api/proxy/turtle',
-      v3ApiUrl: '/api',
+      rewardsTurtleApiUrl: '/api/internal/proxy/turtle',
+      v3ApiUrl: '/api/internal',
     })
   })
 

@@ -1,7 +1,28 @@
 import { DateTime } from 'luxon'
-import type { RewardCampaign } from '@eulerxyz/euler-v2-sdk'
+import type { Address } from 'viem'
+import type {
+  RewardAction,
+  RewardCampaign as SdkRewardCampaign,
+  RewardSource as SdkRewardSource,
+  UserReward as SdkUserReward,
+} from '@eulerxyz/euler-v2-sdk'
 
-export type { RewardAction, RewardCampaign, RewardSource } from '@eulerxyz/euler-v2-sdk'
+export type { RewardAction }
+
+export type RewardSource = SdkRewardSource | 'turtle'
+
+export type RewardCampaign = Omit<SdkRewardCampaign, 'source'> & {
+  source: RewardSource
+}
+
+export type UserReward = Omit<SdkUserReward, 'provider'> & {
+  provider: RewardSource
+  streamId?: string
+  streamAddress?: Address
+  // Matches the SDK's `UserReward.timestamp` (ISO string or Unix seconds), so
+  // SDK `userRewards` are assignable without narrowing.
+  timestamp?: string | number
+}
 
 export interface RewardCampaignDisplay {
   id: string

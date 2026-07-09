@@ -20,8 +20,18 @@ const sortedBorrowPositions = computed(() => {
   })
 })
 
+const borrowPositionScrollRenderKey = computed(() =>
+  sortedBorrowPositions.value.map(position => [
+    position.subAccount,
+    position.borrow?.vaultAddress,
+    position.collateral?.vaultAddress,
+    position.collateralVault?.address,
+    ...(position.collateralVaults ?? []),
+  ].filter(Boolean).join(':')).join('|'),
+)
+
 usePortfolioBatchScrollTarget(computed(() =>
-  sortedBorrowPositions.value.map(position => position.subAccount).join('|'),
+  borrowPositionScrollRenderKey.value,
 ))
 </script>
 

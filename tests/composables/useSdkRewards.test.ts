@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import type { Address } from 'viem'
-import type { UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { UserReward } from '~/entities/reward-campaign'
 
 const owner = '0x1000000000000000000000000000000000000000' as Address
 
@@ -73,10 +73,12 @@ const importUseSdkRewards = async (
   vi.stubGlobal('useSpyMode', () => ({
     isSpyMode: ref(options.isSpyMode ?? false),
   }))
+  const sdk = {
+    rewardsService: { buildClaimPlan },
+  }
   vi.stubGlobal('useEulerSdk', () => ({
-    getEulerSdk: vi.fn(async () => ({
-      rewardsService: { buildClaimPlan },
-    })),
+    getEulerSdk: vi.fn(async () => sdk),
+    getEulerSdkForChain: vi.fn(async () => sdk),
   }))
 
   const module = await import('~/composables/useSdkRewards')

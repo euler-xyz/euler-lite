@@ -624,6 +624,10 @@ export const isMatrixCompatibleVault = (v: AnyVault): v is EVault | SecuritizeCo
 export interface VaultUsdCacheEntry {
   supply: string
   supplyUsd: number
+  // Whether the supply had a resolvable oracle price. A missing cache entry
+  // means "not loaded yet"; `supplyHasPrice: false` means loaded-but-priceless,
+  // so exposure rendering can tell loading apart from unavailable.
+  supplyHasPrice: boolean
   borrow: string
   borrowUsd: number
   liquidity: string
@@ -799,7 +803,7 @@ export const CONFIG_ROWS: AttributeRow[] = [
       const label = isVaultCyclicalNote(vault.address)
         ? 'Cyclical note'
         : getIrmTypeLabel(typeof t === 'number' ? t : undefined)
-      return { display: label, kind: 'text', hint: vault.interestRateModel.address }
+      return { display: label, kind: 'text' }
     },
   },
   {
@@ -899,16 +903,16 @@ export const STATS_ROWS: AttributeRow[] = [
   },
   {
     id: 'exposure',
-    label: 'Exposure',
+    label: 'Current exposure',
     getValue: (vault) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
       if (!isVaultBorrowable(vault)) return NA_CELL
-      return { display: 'Exposure', kind: 'exposure' }
+      return { display: 'Current exposure', kind: 'exposure' }
     },
   },
   {
     id: 'badDebt',
-    label: 'Bad debt',
+    label: 'Pending bad debt',
     getValue: (vault, usd, _apy, badDebt, isBadDebtLoaded) => {
       if (!isEVault(vault) || isEscrow(vault)) return NA_CELL
       if (!badDebt) {

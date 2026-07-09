@@ -4,8 +4,6 @@ import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenS
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getTokenUsdPrice } from '~/utils/sdk-prices'
 import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
-import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
-import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -384,112 +382,36 @@ watch(selectedAsset, async () => {
               size="compact"
             />
 
-            <UiAlert
-              v-if="form.isGeoBlocked.value"
-              title="Region restricted"
-              description="This operation is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
-            />
-            <UiAlert
-              v-if="!form.isGeoBlocked.value && form.isInputAssetBlocked.value"
-              title="Asset restricted"
-              description="Paying with this asset is not available in your region. Pick a different token."
-              variant="warning"
-              size="compact"
-            />
-            <UiAlert
-              v-if="!form.isGeoBlocked.value && !form.isInputAssetBlocked.value && form.isSwapRestricted.value"
-              title="Swap restricted"
-              description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
-              variant="warning"
-              size="compact"
-            />
-            <UiAlert
-              v-show="form.estimatesError.value"
-              title="Error"
-              variant="error"
-              :description="form.estimatesError.value"
-              size="compact"
-            />
-            <UiAlert
-              v-if="form.simulationError.value"
-              title="Error"
-              variant="error"
-              :description="form.simulationError.value"
-              size="compact"
+            <FormAlertStack
+              :is-geo-blocked="form.isGeoBlocked.value"
+              :asset-restricted="!form.isGeoBlocked.value && form.isInputAssetBlocked.value"
+              asset-restricted-description="Paying with this asset is not available in your region. Pick a different token."
+              :swap-restricted="!form.isGeoBlocked.value && !form.isInputAssetBlocked.value && form.isSwapRestricted.value"
+              swap-restricted-description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
+              :estimates-error="form.estimatesError.value"
+              :simulation-error="form.simulationError.value"
             />
             <VaultWarningBanner :warnings="[form.hookWarning.value]" />
           </div>
 
-          <VaultFormInfoBlock
-            v-if="form.position.value"
-            :loading="form.isEstimatesLoading.value"
-            variant="card"
-            class="w-full laptop:max-w-[360px]"
-          >
-            <SummaryRow label="Net APY">
-              <SummaryValue
-                :before="formatNumber(form.netAPY.value)"
-                :after="formatNumber(form.estimateNetAPY.value)"
-                suffix="%"
-              />
-            </SummaryRow>
-            <SummaryRow label="Oracle price">
-              <SummaryPriceValue
-                :value="!form.priceFixed.value.isZero() ? formatSmartAmount(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat())) : undefined"
-                :symbol="form.priceInvert.displaySymbol"
-                invertible
-                @invert="form.priceInvert.toggle"
-              />
-            </SummaryRow>
-            <SummaryRow label="Liq. price">
-              <SummaryPriceValue
-                :before="form.liquidationPrice.value != null && form.liquidationPrice.value !== Infinity ? formatSmartAmount(form.priceInvert.invertValue(form.liquidationPrice.value)!) : undefined"
-                :after="form.estimateLiquidationPrice.value != null ? formatSmartAmount(form.priceInvert.invertValue(form.estimateLiquidationPrice.value)!) : undefined"
-                :symbol="form.priceInvert.displaySymbol"
-                invertible
-                @invert="form.priceInvert.toggle"
-              />
-            </SummaryRow>
-            <SummaryRow label="Liq. buffer">
-              <SummaryValue
-                :before="formatLiqBuffer(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat()), form.priceInvert.invertValue(form.liquidationPrice.value))"
-                :after="formatLiqBuffer(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat()), form.priceInvert.invertValue(form.estimateLiquidationPrice.value))"
-                suffix="%"
-              />
-            </SummaryRow>
-            <SummaryRow label="LTV">
-              <SummaryValue
-                :before="formatNumber(ltvToPercent(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18)))"
-                :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
-                suffix="%"
-              />
-            </SummaryRow>
-            <SummaryRow label="Health score">
-              <SummaryValue
-                :before="formatHealthScore(nanoToValue(form.position.value.healthFactor ?? 0n, 18))"
-                :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
-              />
-            </SummaryRow>
-          </VaultFormInfoBlock>
+          <PositionSummaryBlock
+            :form="form"
+            :visible="!!form.position.value"
+            exclude-infinite-liq-price
+          />
 
-          <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-            <VaultFormInfoButton
-              :disabled="form.isLoading.value || form.isSubmitting.value"
-              :vault="form.collateralVault.value"
-            />
-            <VaultFormSubmit
-              :disabled="form.submitDisabled.value"
-              :loading="form.isSubmitting.value || form.isPreparing.value"
-              :disabled-reason="disabledReasonInfo?.message"
-              :disabled-reason-variant="disabledReasonInfo?.variant"
-              :can-add-to-batch="canAddToBatch"
-              @add-to-batch="addToBatch"
-            >
-              {{ form.submitLabel }}
-            </VaultFormSubmit>
-          </div>
+          <FormSubmitFooter
+            :info-vault="form.collateralVault.value"
+            :info-disabled="form.isLoading.value || form.isSubmitting.value"
+            :submit-disabled="form.submitDisabled.value"
+            :submit-loading="form.isSubmitting.value || form.isPreparing.value"
+            :disabled-reason="disabledReasonInfo?.message"
+            :disabled-reason-variant="disabledReasonInfo?.variant"
+            :can-add-to-batch="canAddToBatch"
+            @add-to-batch="addToBatch"
+          >
+            {{ form.submitLabel }}
+          </FormSubmitFooter>
         </div>
       </template>
     </VaultForm>

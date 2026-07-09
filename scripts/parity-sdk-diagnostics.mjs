@@ -47,7 +47,8 @@ const apiKey = process.env.EULER_SDK_V3_API_KEY
   || process.env.VITE_EULER_V3_API_KEY
 const rpcUrls = collectRpcUrls()
 const observations = collectObservations(diff)
-const vaultAddresses = [...new Set(observations.map(obs => obs.vaultAddress).filter(Boolean))]
+const vaultAddressGroups = collectVaultAddressGroups(observations)
+const vaultAddresses = [...new Set([...vaultAddressGroups.evault, ...vaultAddressGroups.earn])]
 
 if (!vaultAddresses.length) {
   throw new Error(`No vault-scoped observations found in ${diffPath}`)
@@ -75,6 +76,7 @@ const report = {
   endpoint,
   rpcChainIds: Object.keys(rpcUrls).map(Number).sort((a, b) => a - b),
   fetchOptions: FETCH_OPTIONS,
+  vaultAddressGroups,
   summary,
   sourceRule: 'If onchain matches the baseline while v3 differs, the V3 source or V3 adapter interpretation is the suspect.',
   observations: rows,
@@ -199,22 +201,39 @@ async function buildSdk(adapter) {
 
 async function fetchSnapshot(adapter, vaultAddresses) {
   const sdk = await buildSdk(adapter)
-  const normalized = vaultAddresses.map(addr => getAddress(addr))
-  const result = await sdk.eVaultService.fetchVaults(1, normalized, FETCH_OPTIONS)
+  const evaultAddresses = vaultAddresses.evault.map(addr => getAddress(addr))
+  const earnAddresses = vaultAddresses.earn.map(addr => getAddress(addr))
   const vaults = {}
-  result.result.forEach((vault, index) => {
-    const address = normalized[index].toLowerCase()
-    vaults[address] = vault ? summarizeVault(vault) : null
-  })
+  const errors = []
+
+  if (evaultAddresses.length) {
+    const result = await sdk.eVaultService.fetchVaults(1, evaultAddresses, FETCH_OPTIONS)
+    result.result.forEach((vault, index) => {
+      const address = evaultAddresses[index].toLowerCase()
+      vaults[address] = vault ? summarizeVault(vault) : null
+    })
+    errors.push(...(result.errors || []))
+  }
+
+  if (earnAddresses.length) {
+    const result = await sdk.eulerEarnService.fetchVaults(1, earnAddresses, FETCH_OPTIONS)
+    result.result.forEach((vault, index) => {
+      const address = earnAddresses[index].toLowerCase()
+      vaults[address] = vault ? summarizeEarnVault(vault) : null
+    })
+    errors.push(...(result.errors || []))
+  }
+
   return {
     adapter,
     vaults,
-    errors: (result.errors || []).map(summarizeDataIssue),
+    errors: errors.map(summarizeDataIssue),
   }
 }
 
 function summarizeVault(vault) {
   return {
+    kind: 'evault',
     address: vault.address.toLowerCase(),
     asset: summarizeToken(vault.asset),
     shares: summarizeToken(vault.shares),
@@ -245,6 +264,20 @@ function summarizeVault(vault) {
       includeInAppExposure: collateral.borrowLTV > 0 && collateral.currentLiquidationLTV > 0,
     })),
     appCollateralDisplayAssets: computeAppCollateralDisplayAssets(vault),
+  }
+}
+
+function summarizeEarnVault(vault) {
+  return {
+    kind: 'earn',
+    address: vault.address.toLowerCase(),
+    asset: summarizeToken(vault.asset),
+    shares: summarizeToken(vault.shares),
+    totalAssets: vault.totalAssets,
+    availableLiquidity: vault.availableLiquidity,
+    supplyApy: Number.isFinite(vault.supplyApy) ? vault.supplyApy : null,
+    rewards: summarizeRewards(vault.rewards),
+    intrinsicApy: vault.intrinsicApy ?? null,
   }
 }
 
@@ -315,6 +348,7 @@ function collectObservations(report) {
       if (!vaultAddress) continue
       observations.push({
         pageId: page.pageId,
+        path: page.path,
         label: page.label,
         status: diff.status,
         field,
@@ -328,6 +362,52 @@ function collectObservations(report) {
     }
   }
   return observations
+}
+
+function collectVaultAddressGroups(observations) {
+  const groups = {
+    evault: new Set(),
+    earn: new Set(),
+  }
+  for (const observation of observations) {
+    const target = isEarnObservation(observation) ? groups.earn : groups.evault
+    target.add(observation.vaultAddress)
+  }
+  return {
+    evault: [...groups.evault],
+    earn: [...groups.earn],
+  }
+}
+
+function isEarnObservation(observation) {
+  const pathVaultAddress = earnVaultAddressFromPath(observation.path)
+  const observedVaultAddress = typeof observation.vaultAddress === 'string'
+    ? observation.vaultAddress.toLowerCase()
+    : null
+  if (pathVaultAddress && pathVaultAddress === observedVaultAddress) return true
+
+  const text = [
+    observation.pageId,
+    observation.path,
+    observation.label,
+    observation.key,
+    observation.baseKey,
+    observation.baseline?.key,
+    observation.candidate?.key,
+  ].filter(Boolean).join('\n').toLowerCase()
+
+  if (text.includes('data-list="earn"')
+    || text.includes('data-list=\'earn\'')
+  ) return true
+
+  return normalizeField(observation.field, observation) === 'supply-apy'
+    && /\bearn\b/.test(text)
+}
+
+function earnVaultAddressFromPath(pathname) {
+  if (typeof pathname !== 'string') return null
+  const match = pathname.match(/\/earn\/(?:\d+\/)?(0x[a-fA-F0-9]{40})(?:[/?#]|$)/)
+  return match?.[1]?.toLowerCase() ?? null
 }
 
 function fieldFromBaseKey(baseKey) {
@@ -422,6 +502,18 @@ function readField(vault, field, observation) {
   if (!vault) return { comparable: null, raw: null }
   switch (field) {
     case 'supply-apy':
+      if (vault.kind === 'earn') {
+        const supplyApy = vault.supplyApy
+        return {
+          comparable: supplyApy == null ? null : supplyApy + vault.rewards.supplyApr,
+          raw: {
+            baseSupplyAPY: supplyApy,
+            supplyRewardApr: vault.rewards.supplyApr,
+            finalSupplyAPY: supplyApy == null ? null : supplyApy + vault.rewards.supplyApr,
+            intrinsicApy: vault.intrinsicApy,
+          },
+        }
+      }
       return {
         comparable: vault.interestRates.supplyAPY + vault.rewards.supplyApr,
         raw: {

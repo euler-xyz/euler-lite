@@ -1,3 +1,4 @@
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 import {
   findOpenInterestMapForVault,
   type OpenInterestCollateralMapResponse,
@@ -9,13 +10,13 @@ let activeRequestId = 0
 
 export const useCollateralOpenInterest = () => {
   const { chainId } = useEulerAddresses()
-  const { enableV3Backend } = useEnvConfig()
+  const { isV3EnabledForChain } = useV3ChainGate()
   const data = useState<Record<string, Record<string, number>>>('collateral-open-interest:data', () => ({}))
   const loadedChainId = useState<string | null>('collateral-open-interest:chain-id', () => null)
   const isLoading = useState('collateral-open-interest:is-loading', () => false)
   const hasError = useState('collateral-open-interest:has-error', () => false)
   const currentChainId = computed(() => chainId.value ? String(chainId.value) : '')
-  const isOpenInterestEnabled = computed(() => enableV3Backend)
+  const isOpenInterestEnabled = computed(() => isV3EnabledForChain(chainId.value))
   const isLoaded = computed(() =>
     isOpenInterestEnabled.value
     && !!currentChainId.value
@@ -39,7 +40,7 @@ export const useCollateralOpenInterest = () => {
     hasError.value = false
     pendingChainId = chainIdToLoad
     const loadPromise = $fetch<OpenInterestCollateralMapResponse>(
-      `/api/v3/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
+      `${V3_API_PROXY_URL}/evk/vaults/open-interest/by-collateral?chainId=${encodeURIComponent(chainIdToLoad)}`,
     )
       .then((response) => {
         if (requestId !== activeRequestId || currentChainId.value !== chainIdToLoad) return

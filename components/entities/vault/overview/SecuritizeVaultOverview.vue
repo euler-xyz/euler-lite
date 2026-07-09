@@ -8,10 +8,10 @@ import { autoLink } from '~/utils/autoLink'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/utils/sdk-prices'
-import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue, shortenAddress } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { formatMarketAvailability } from '~/utils/vault-display'
-import { VaultSupplyApyModal } from '#components'
+import { VaultApyModal } from '#components'
 import { getAddress, maxUint256 } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
@@ -45,12 +45,10 @@ const isDeprecated = computed(() => {
 const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 
-const shortenAddress = (address: string) => {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`
-}
+const { copyToClipboard } = useClipboardCopy()
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address).catch(() => {})
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
@@ -65,6 +63,7 @@ const supplyApyWithRewards = computed(() => intrinsicApy.value + rewardSupplyAPY
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: 0, // Securitize vaults don't have interest rates
     intrinsicAPY: intrinsicApy.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -119,10 +118,13 @@ watchEffect(async () => {
 
 const supplyCapPercentageDisplay = computed(() => {
   if (!vault.supplyCap || vault.supplyCap >= maxUint256 || vault.supplyCap === 0n) return 0
-  const scale = 10n ** 2n
+  const decimals = 2
+  const scale = 10n ** BigInt(decimals)
   // Compare totalShares to supplyCap (both in shares denomination)
   const fraction = (vault.totalShares * scale * 100n) / vault.supplyCap
-  return parseFloat(`${fraction / scale}.${fraction % scale}`)
+  // Zero-pad the fractional part so e.g. a remainder of 5 renders as ".05" not ".5"
+  const fractional = String(fraction % scale).padStart(decimals, '0')
+  return parseFloat(`${fraction / scale}.${fractional}`)
 })
 </script>
 
@@ -261,7 +263,7 @@ const supplyCapPercentageDisplay = computed(() => {
         <span class="flex items-center gap-4">
           <UiModalPreviewTrigger
             v-if="hasSupplyRewards(vault.address)"
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY rewards breakdown"
           >

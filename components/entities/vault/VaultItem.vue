@@ -10,11 +10,11 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
-import { buildAllocatedVaultExposureDisplayItems, hasMissingUtilizedExposureSplit, type ExposureValueState } from '~/utils/vault/exposure-display'
+import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -65,33 +65,20 @@ const collateralExposureGroups = computed(() => {
     getOpenInterestForVault(vault.address),
   )
 })
-const hasLiveExposureData = computed(() =>
-  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
-)
-const hasUnavailableExposureSplit = computed(() =>
-  hasLiveExposureData.value
-  && priceValues.value.totalSupplyState === 'ready'
-  && hasMissingUtilizedExposureSplit(collateralExposureGroups.value, vault.utilization),
-)
-const exposureValueState = computed<ExposureValueState>(() => {
-  if (!isOpenInterestEnabled.value) return 'unavailable'
-  if (hasOpenInterestError.value) return 'unavailable'
-  if (priceValues.value.totalSupplyState === 'unavailable') return 'unavailable'
-  if (hasUnavailableExposureSplit.value) return 'unavailable'
-  if (!isOpenInterestLoaded.value) return 'loading'
-  if (priceValues.value.totalSupplyState === 'loading') return 'loading'
-  return 'ready'
-})
-const exposureDisplayItems = computed(() => {
-  if (exposureValueState.value !== 'ready') return []
-
-  return buildAllocatedVaultExposureDisplayItems({
-    collateralGroups: collateralExposureGroups.value,
+const exposureDisplay = computed<VaultExposureDisplay>(() =>
+  resolveVaultExposureDisplay({
+    openInterestEnabled: isOpenInterestEnabled.value,
+    openInterestLoaded: isOpenInterestLoaded.value,
+    hasOpenInterestError: hasOpenInterestError.value,
+    getCollateralGroups: () => collateralExposureGroups.value,
     totalExposureUsd: priceValues.value.totalSupplyUsd,
-    idleAsset: vault.asset,
+    totalSupplyState: priceValues.value.totalSupplyState,
     utilization: vault.utilization,
-  })
-})
+    acceptedCollateralCount: vault.collaterals.length,
+  }),
+)
+const exposureValueState = computed(() => exposureDisplay.value.valueState)
+const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 watchEffect(() => {
   if (!isBorrowable.value || !isOpenInterestEnabled.value) return
@@ -127,8 +114,8 @@ const statsGridCols = computed(() => {
   cols.push('1fr') // Total supply
   if (isBorrowable.value) {
     cols.push('1fr') // Available liquidity
-    if (isOpenInterestEnabled.value) cols.push('1fr') // Exposure
     cols.push('1fr') // Utilization
+    cols.push('1fr') // Current exposure
   }
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
@@ -148,6 +135,7 @@ const deprecationReason = computed(() =>
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: lendingAPY.value,
     intrinsicAPY: intrinsicAPY.value,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -248,7 +236,7 @@ watchEffect(async () => {
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
           <UiModalPreviewTrigger
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
           >
@@ -272,7 +260,7 @@ watchEffect(async () => {
           >
             <UiModalPreviewTrigger
               v-if="hasRewards"
-              :component="VaultSupplyApyModal"
+              :component="VaultApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY rewards breakdown"
             >
@@ -365,29 +353,6 @@ watchEffect(async () => {
         </div>
       </div>
       <div
-        v-if="isBorrowable && isOpenInterestEnabled"
-        class="flex flex-col flex-1 mobile:!hidden"
-        :class="isConnected ? 'items-center' : 'items-end text-right'"
-      >
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-          Exposure
-        </div>
-        <div
-          class="flex min-w-0 items-center justify-end"
-          data-id="data-point"
-          :data-key="vault.address.toLowerCase()"
-          data-field="exposure"
-          :data-value="exposureDisplayItems.map(item => item.label ?? item.asset.symbol).join(',')"
-        >
-          <VaultExposureSummary
-            :items="exposureDisplayItems"
-            :value-state="exposureValueState"
-            :max-visible="5"
-            avatar-size="20"
-          />
-        </div>
-      </div>
-      <div
         v-if="isBorrowable"
         class="flex flex-col flex-1 mobile:!hidden"
         :class="
@@ -412,6 +377,29 @@ watchEffect(async () => {
           >
             {{ utilizationDisplay }}%
           </div>
+        </div>
+      </div>
+      <div
+        v-if="isBorrowable"
+        class="flex flex-col flex-1 mobile:!hidden"
+        :class="isConnected ? 'items-center' : 'items-end text-right'"
+      >
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+          Current exposure
+        </div>
+        <div
+          class="flex min-w-0 items-center justify-end"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="current-exposure"
+          :data-value="exposureDisplayItems.map(item => item.label ?? item.asset.symbol).join(',')"
+        >
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+          />
         </div>
       </div>
       <div
@@ -467,25 +455,6 @@ watchEffect(async () => {
         </div>
       </div>
       <div
-        v-if="isBorrowable && isOpenInterestEnabled"
-        class="flex w-full justify-between"
-      >
-        <div class="flex-1">
-          <div class="text-content-tertiary text-p3 flex items-center gap-4">
-            Exposure
-          </div>
-        </div>
-        <div class="flex min-w-0 flex-1 justify-end text-right">
-          <VaultExposureSummary
-            :items="exposureDisplayItems"
-            :value-state="exposureValueState"
-            :max-visible="5"
-            avatar-size="20"
-            placement="top-start"
-          />
-        </div>
-      </div>
-      <div
         v-if="isBorrowable"
         class="flex w-full justify-between"
       >
@@ -503,6 +472,25 @@ watchEffect(async () => {
           <div class="text-p2 text-content-primary">
             {{ utilizationDisplay }}%
           </div>
+        </div>
+      </div>
+      <div
+        v-if="isBorrowable"
+        class="flex w-full justify-between"
+      >
+        <div class="flex-1">
+          <div class="text-content-tertiary text-p3 flex items-center gap-4">
+            Current exposure
+          </div>
+        </div>
+        <div class="flex min-w-0 flex-1 justify-end text-right">
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+            placement="top-start"
+          />
         </div>
       </div>
       <div

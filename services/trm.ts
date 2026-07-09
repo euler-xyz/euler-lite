@@ -10,7 +10,7 @@ export async function screenAddress(
   const timeout = setTimeout(() => controller.abort(), WALLET_SCREENING_TIMEOUT_MS)
 
   try {
-    const resp = await fetch('/api/screen-address', {
+    const resp = await fetch('/api/internal/screen-address', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address, vpnIsUsed }),

@@ -62,6 +62,13 @@ const importUseEulerAccount = async () => {
   vi.stubGlobal('useSpyMode', () => ({
     spyAddress: ref(''),
   }))
+  vi.stubGlobal('useEffectiveAddress', () => ({
+    address: ref(owner),
+    isConnected: ref(true),
+    isSpyMode: ref(false),
+    spyAddress: ref(''),
+    effectiveAddress: ref(owner),
+  }))
   vi.stubGlobal('useEulerSdk', () => ({
     getEulerSdk: vi.fn(async () => sdk),
     getEulerSdkFresh: vi.fn(async () => sdk),

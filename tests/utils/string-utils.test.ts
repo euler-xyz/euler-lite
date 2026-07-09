@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   truncate,
+  shortenAddress,
   truncateAddressForSubgraph,
   formatNumber,
   formatUsdValue,
@@ -28,6 +29,21 @@ describe('truncate', () => {
 
   it('handles short strings', () => {
     expect(truncate('abcd')).toBe('abcd...abcd')
+  })
+})
+
+describe('shortenAddress', () => {
+  it('shortens a full address to first 6 and last 4 chars', () => {
+    expect(shortenAddress('0x1234567890abcdef1234567890abcdef12345678')).toBe('0x1234...5678')
+  })
+
+  it('matches truncate(addr, 6) exactly', () => {
+    const addr = '0xabcdef0123456789abcdef0123456789abcdef01'
+    expect(shortenAddress(addr)).toBe(truncate(addr, 6))
+  })
+
+  it('defaults to an empty string', () => {
+    expect(shortenAddress()).toBe('...')
   })
 })
 

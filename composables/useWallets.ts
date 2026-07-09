@@ -1,7 +1,7 @@
 import { type Address, getAddress, zeroAddress } from 'viem'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { activeLayerWalletBalancesRef } from '~/composables/useTxBatch'
 import { logWarn } from '~/utils/errorHandling'
 import { FULL_BALANCES_TTL_MS } from '~/entities/tuning-constants'
@@ -48,13 +48,8 @@ let lastFullFetchAt = 0
 export const useWallets = () => {
   const { loadedChainId } = useVaults()
   const { getByType } = useVaultRegistry()
-  const { address, isConnected } = useWagmi()
+  const { isConnected, isSpyMode, effectiveAddress: balanceAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
-
-  const { spyAddress, isSpyMode } = useSpyMode()
-  const balanceAddress = computed(() =>
-    isSpyMode.value ? spyAddress.value : address.value,
-  )
 
   const updateBalances = async () => {
     // Guard: must be connected or in spy mode
@@ -145,7 +140,7 @@ export const useWallets = () => {
 
     try {
       const targetAddress = getAddress(balanceAddress.value as Address)
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(currentChainId)
       const assetsWithSpenders = tokenAddresses.map(asset => ({ asset, spenders: [] }))
       if (includesNativeCurrency) {
         assetsWithSpenders.push({ asset: zeroAddress, spenders: [] })
@@ -264,9 +259,12 @@ export const useWallets = () => {
     }
     try {
       const normalized = getAddress(tokenAddress)
-      const sdk = await getEulerSdk()
-      if (!chainId.value) return 0n
-      const walletFetch = await sdk.walletService.fetchWallet(chainId.value, balanceAddress.value as Address, [
+      // Capture the chain id once so the SDK backend selection and the fetch
+      // can't diverge if the user switches chains mid-await.
+      const targetChainId = chainId.value
+      if (!targetChainId) return 0n
+      const sdk = await getEulerSdkForChain(targetChainId)
+      const walletFetch = await sdk.walletService.fetchWallet(targetChainId, balanceAddress.value as Address, [
         { asset: normalized as Address, spenders: [] },
       ])
       const real = walletFetch.result.getBalance(normalized as Address)
@@ -322,14 +320,13 @@ export const useWallets = () => {
 export const useFullBalances = (): void => {
   const { updateBalances } = useWallets()
   const { chainId } = useEulerAddresses()
-  const { address } = useWagmi()
-  const { spyAddress, isSpyMode } = useSpyMode()
+  const { effectiveAddress } = useEffectiveAddress()
 
   onMounted(() => {
     fullBalancesRequesters.value++
     if (fullBalancesRequesters.value !== 1) return // not the first requester, data already in-flight / present
 
-    const activeAddress = (isSpyMode.value ? spyAddress.value : address.value) ?? ''
+    const activeAddress = effectiveAddress.value ?? ''
     const expectedKey = `${chainId.value}:${activeAddress.toLowerCase()}`
     const isFresh = lastFullFetchKey === expectedKey && (Date.now() - lastFullFetchAt) < FULL_BALANCES_TTL_MS
 

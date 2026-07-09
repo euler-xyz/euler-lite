@@ -41,7 +41,7 @@ COPY --from=builder /usr/src/app/doppler ./doppler
 EXPOSE ${APP_PORT}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/nodejs/bin/node", "-e", "fetch('http://localhost:'+process.env.PORT+'/api/tenderly/status').then(r=>{if(!r.ok)throw r.status}).catch(()=>process.exit(1))"]
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://localhost:'+process.env.PORT+'/api/internal/tenderly/status',{headers:{'cf-connecting-ip':'127.0.0.1'}}).then(r=>{if(!r.ok)throw r.status}).catch(()=>process.exit(1))"]
 
 # Doppler injects all secrets at runtime via DOPPLER_TOKEN, DOPPLER_PROJECT, DOPPLER_CONFIG env vars.
 # server/plugins/chain-config.ts scans env vars and injects chain config via render:html hook.

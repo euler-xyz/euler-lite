@@ -24,14 +24,14 @@ describe('useCollateralOpenInterest', () => {
     vi.unstubAllGlobals()
   })
 
-  it('does not request open interest when v3 is disabled', async () => {
+  it('does not request open interest when v3 is disabled for the chain', async () => {
     const chainId = ref(1)
     const states = new Map<string, Ref<unknown>>()
     const fetchMock = vi.fn()
 
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
-    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: false }))
+    vi.stubGlobal('useV3ChainGate', () => ({ isV3EnabledForChain: () => false }))
     vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
       if (!states.has(key)) states.set(key, ref(init()))
       return states.get(key) as Ref<T>
@@ -56,7 +56,7 @@ describe('useCollateralOpenInterest', () => {
 
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
-    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: true }))
+    vi.stubGlobal('useV3ChainGate', () => ({ isV3EnabledForChain: () => true }))
     vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
       if (!states.has(key)) states.set(key, ref(init()))
       return states.get(key) as Ref<T>
@@ -84,7 +84,7 @@ describe('useCollateralOpenInterest', () => {
 
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
-    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: true }))
+    vi.stubGlobal('useV3ChainGate', () => ({ isV3EnabledForChain: () => true }))
     vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
       if (!states.has(key)) states.set(key, ref(init()))
       return states.get(key) as Ref<T>
@@ -106,8 +106,8 @@ describe('useCollateralOpenInterest', () => {
     const chainTwoLoad = openInterest.load()
 
     expect(requests.map(request => request.url)).toEqual([
-      '/api/v3/evk/vaults/open-interest/by-collateral?chainId=1',
-      '/api/v3/evk/vaults/open-interest/by-collateral?chainId=2',
+      '/api/internal/v3/evk/vaults/open-interest/by-collateral?chainId=1',
+      '/api/internal/v3/evk/vaults/open-interest/by-collateral?chainId=2',
     ])
 
     requests[0].deferred.resolve({

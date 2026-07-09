@@ -24,6 +24,8 @@ const GET_ONLY_PATHS = new Set([
 const GET_ONLY_PATH_PATTERNS = [
   /^\/v3\/accounts\/[^/]+\/positions$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+$/,
+  /^\/v3\/earn\/vaults\/[^/]+\/[^/]+\/totals$/,
+  /^\/v3\/evk\/vaults\/[^/]+\/[^/]+\/totals$/,
 ]
 
 const POST_ONLY_PATHS = new Set([

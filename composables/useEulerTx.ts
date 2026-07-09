@@ -22,6 +22,15 @@ import type {
   PlanWithdrawArgs,
   PlanMigrateSameAssetCollateralArgs,
   PlanMigrateSameAssetDebtArgs,
+  GetMigrationAuthorizationArgs,
+  GetMigrationPositionArgs,
+  ListMigrationTargetsArgs,
+  MigrationAuthorizationRequest,
+  MigrationPosition,
+  MigrationTarget,
+  PlanMigrationArgs,
+  PlanMigrationSimulationResult,
+  SignedMigrationAuthorization,
   PlanMultiplyWithSwapArgs,
   PlanMultiplySameAssetArgs,
   PlanTransferArgs,
@@ -33,7 +42,7 @@ import type {
 } from '@eulerxyz/euler-v2-sdk'
 import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import { getAccount } from '@wagmi/vue/actions'
-import { getEulerSdk, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
@@ -42,6 +51,7 @@ import { profAsync } from '~/utils/profiler'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
+const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
   populateMarketPrices: false,
@@ -956,6 +966,65 @@ export const useEulerTx = () => {
     return sdk.executionService.mergePlans(plans)
   }
 
+  const getMigrationAuthorization = async (input: GetMigrationAuthorizationArgs): Promise<MigrationAuthorizationRequest | undefined> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.getAuthorization(input)
+  }
+
+  const getMigrationPosition = async (input: GetMigrationPositionArgs): Promise<MigrationPosition> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.getPosition(input)
+  }
+
+  const listMigrationTargets = async (input: ListMigrationTargetsArgs): Promise<MigrationTarget[]> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.listTargets(input)
+  }
+
+  const signMigrationAuthorization = async (
+    request: MigrationAuthorizationRequest,
+  ): Promise<SignedMigrationAuthorization> => {
+    if (isSpyMode.value) {
+      throw new Error('Authorization signatures are disabled in spy mode')
+    }
+    if (request.kind !== 'typedData') {
+      throw new Error('Transaction-based migration authorization is not supported in this flow')
+    }
+    const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    const postMigrationAuthorization = request.postMigrationAuthorization
+      ? await signMigrationAuthorization(request.postMigrationAuthorization)
+      : undefined
+    return {
+      request,
+      signature: signature as Hex,
+      ...(postMigrationAuthorization ? { postMigrationAuthorization } : {}),
+    }
+  }
+
+  const buildPlaceholderMigrationAuthorization = (
+    request: MigrationAuthorizationRequest,
+  ): SignedMigrationAuthorization => {
+    const postMigrationAuthorization = request.postMigrationAuthorization
+      ? buildPlaceholderMigrationAuthorization(request.postMigrationAuthorization)
+      : undefined
+
+    return {
+      request,
+      signature: PLACEHOLDER_AUTHORIZATION_SIGNATURE,
+      ...(postMigrationAuthorization ? { postMigrationAuthorization } : {}),
+    }
+  }
+
+  const planCrossProtocolMigration = async (input: PlanMigrationArgs): Promise<TransactionPlan> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.planMigration(input)
+  }
+
+  const planCrossProtocolMigrationSimulation = async (input: PlanMigrationArgs): Promise<PlanMigrationSimulationResult> => {
+    const sdk = await getEulerSdkFresh()
+    return sdk.positionMigrationService.planMigrationSimulation(input)
+  }
+
   const planWithdrawOrRedeem = (input: PlanWithdrawOrRedeemInput): Promise<TransactionPlan> => {
     if (input.isMax) {
       if (input.shares === undefined) {
@@ -1036,13 +1105,14 @@ export const useEulerTx = () => {
     plan: TransactionPlan,
     options?: {
       account?: PrefetchPluginAccount
+      chainId?: number
       prefetch?: PluginPrefetchData
     },
   ): Promise<TransactionPlanPrepared> => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
       const owner = requireOwner()
-      const cid = requireChainId()
-      const sdk = await getEulerSdk()
+      const cid = options?.chainId ?? requireChainId()
+      const sdk = await getEulerSdkForChain(cid)
       return sdk.executionService.prepareTransactionPlan({
         plan,
         chainId: cid,
@@ -1059,7 +1129,7 @@ export const useEulerTx = () => {
   const estimateGasForPlan = async (plan: TransactionPlan): Promise<bigint> => {
     const owner = requireOwner()
     const cid = requireChainId()
-    const sdk = await getEulerSdk()
+    const sdk = await getEulerSdkForChain(cid)
     return sdk.executionService.estimateGasForTransactionPlan(cid, owner, plan)
   }
 
@@ -1075,7 +1145,7 @@ export const useEulerTx = () => {
     return profAsync('sdk', 'prefetchPluginData', async () => {
       const owner = requireOwner()
       const cid = requireChainId()
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(cid)
       return sdk.executionService.prefetchPluginDataForPlan(
         plan,
         options?.account ?? owner,
@@ -1086,7 +1156,7 @@ export const useEulerTx = () => {
 
   const simulatePreparedPlan = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
     return profAsync('sdk', 'simulatePreparedTransactionPlan', async () => {
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(prepared.chainId)
       return sdk.executionService.simulatePreparedTransactionPlan(prepared, {
         stateOverrides: true,
         stateOverrideOptions,
@@ -1242,6 +1312,13 @@ export const useEulerTx = () => {
     planCollateralChange,
     planDebtChange,
     planRefinancePosition,
+    getMigrationPosition,
+    listMigrationTargets,
+    getMigrationAuthorization,
+    signMigrationAuthorization,
+    buildPlaceholderMigrationAuthorization,
+    planCrossProtocolMigration,
+    planCrossProtocolMigrationSimulation,
     planWithdrawOrRedeem,
     simulatePlan,
     prepareTransactionPlan,

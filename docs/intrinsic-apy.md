@@ -32,7 +32,7 @@ The SDK's `intrinsicApyService` is what actually pulls the data from V3 (`/v3/ap
 │   sdk.intrinsicApyService.fetchChainIntrinsicApys(chainId)          │
 └───────────────────────────────────┬───────────────────────────────┘
                                     │ V3 batched/paginated reads via
-                                    │  /api/v3/apys/intrinsic
+                                    │  /api/internal/v3/apys/intrinsic
                                     ▼
                               euler v3 backend
                        (DefiLlama, Pendle, Securitize, …)
@@ -88,7 +88,7 @@ The SDK exposes an equivalent on its side: `computeSupplyApyBreakdown(vault)` re
 
 ## Borrow-side display
 
-Borrow views call the same helper path, but the UI copy treats intrinsic APY as cost-side yield. `VaultBorrowItem.vue` passes `getVaultIntrinsicApyInfo()` into `VaultBorrowApyModal.vue`; that modal describes intrinsic APY as "yield intrinsic to the borrowed asset ... which increases effective borrowing cost".
+Borrow views call the same helper path, but the UI copy treats intrinsic APY as cost-side yield. `VaultBorrowItem.vue` passes `getVaultIntrinsicApyInfo()` into `VaultApyModal.vue` (with `mode: 'borrow'`); in borrow mode that modal describes intrinsic APY as "yield intrinsic to the borrowed asset ... which increases effective borrowing cost".
 
 The borrow APY modal uses the same compounded intrinsic helper as supply-side displays, then subtracts borrow rewards:
 

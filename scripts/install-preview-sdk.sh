@@ -62,9 +62,42 @@ if ! pnpm -C packages/euler-v2-sdk run build; then
   pnpm -C packages/euler-v2-sdk run build
 fi
 
+node - <<'NODE'
+const fs = require('node:fs')
+
+const packageJsonPath = 'packages/euler-v2-sdk/package.json'
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+
+if (!packageJson.name) {
+  throw new Error(`${packageJsonPath} is missing a package name`)
+}
+
+if (!packageJson.version) {
+  packageJson.version = process.env.EULER_SDK_PREVIEW_VERSION || '0.0.0-preview.0'
+  fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+  console.log(`Injected preview package version ${packageJson.version} into ${packageJsonPath}.`)
+}
+NODE
+
 mkdir -p "$SDK_PACK_DIR"
-npm pack ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
+npm pack --ignore-scripts ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
 
 cd /usr/src/app
 npm install --no-save --package-lock=false --ignore-scripts "$SDK_PACK_DIR"/*.tgz
-npm ls @eulerxyz/euler-v2-sdk --depth=0
+if ! npm ls @eulerxyz/euler-v2-sdk --depth=0; then
+  echo "npm ls reported a version mismatch for the preview SDK tarball; validating runtime exports instead."
+fi
+
+node --input-type=module - <<'NODE'
+import { buildEulerSDK, PositionMigrationService } from '@eulerxyz/euler-v2-sdk'
+
+const missing = []
+if (typeof buildEulerSDK !== 'function') missing.push('buildEulerSDK')
+if (typeof PositionMigrationService !== 'function') missing.push('PositionMigrationService')
+
+if (missing.length > 0) {
+  throw new Error(`Preview SDK is missing expected exports: ${missing.join(', ')}`)
+}
+
+console.log('Preview @eulerxyz/euler-v2-sdk migration exports are available.')
+NODE

@@ -1,3 +1,4 @@
+import { V3_API_PROXY_URL } from '~/utils/api-url-env'
 import {
   buildBadDebtCache,
   parseBadDebtResponse,
@@ -29,7 +30,7 @@ const setChainError = (chainId: number, error: Error | null) => {
 }
 
 const buildBadDebtUrl = (baseUrl: string, chainId: number, offset: number, limit: number): string => {
-  const base = baseUrl.replace(/\/+$/, '') || '/api/v3'
+  const base = baseUrl.replace(/\/+$/, '') || V3_API_PROXY_URL
   const params = new URLSearchParams({
     chainId: String(chainId),
     minBadDebtUsd: '0',
@@ -66,13 +67,14 @@ const fetchBadDebtRows = async (
 export const useVaultBadDebt = () => {
   const { chainId } = useEulerAddresses()
   const envConfig = useEnvConfig()
-  const isBadDebtEnabled = computed(() => envConfig.enableV3Backend)
+  const { isV3EnabledForChain } = useV3ChainGate()
+  const isBadDebtEnabled = computed(() => isV3EnabledForChain(chainId.value))
 
   const loadBadDebtForChain = async (
     targetChainId = chainId.value,
     { force = false }: { force?: boolean } = {},
   ) => {
-    if (!isBadDebtEnabled.value) {
+    if (!isV3EnabledForChain(targetChainId)) {
       setChainLoading(targetChainId, false)
       setChainError(targetChainId, null)
       return

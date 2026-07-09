@@ -7,7 +7,11 @@ type UserSettings = {
 }
 
 const SETTINGS_KEY = 'user-settings'
-const defaults: UserSettings = { enableIntrinsicApy: true, enableRewardsApy: true, enableAdvancedMode: false }
+const defaults: UserSettings = {
+  enableIntrinsicApy: true,
+  enableRewardsApy: true,
+  enableAdvancedMode: false,
+}
 
 type StoredUserSettings = Partial<UserSettings> & {
   enableBatchTransactions?: boolean

@@ -74,8 +74,10 @@ const hookTargetNote = computed(() =>
     : '',
 )
 
+const { copyToClipboard } = useClipboardCopy()
+
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address).catch(() => {})
+  copyToClipboard(address).catch(() => {})
 }
 
 const handleClose = () => {

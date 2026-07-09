@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isExternalMigrationDustPosition } from '~/composables/useExternalMigrationPositions'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 
@@ -23,14 +24,29 @@ const {
 const { refresh: refreshFreshAccount } = useFreshAccount()
 const { rewards } = useSdkRewards()
 const { locks, refreshLocks } = useREULLocks()
-const { isConnected, address } = useWagmi()
+const { isConnected, address, spyAddress, effectiveAddress, isSpyMode } = useEffectiveAddress()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
-const { isSpyMode, spyAddress } = useSpyMode()
 const showAllLabelEntries = useShowAllLabelEntries()
+const {
+  positions: migrationPositions,
+  isLoading: isMigrationLoading,
+  error: migrationError,
+  hasLoaded: hasMigrationLoaded,
+} = useExternalMigrationPositions()
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
+const hasShownMigrationTab = ref(false)
+type PortfolioTab = {
+  label: string
+  value: string
+  badge?: number | null
+  icon?: string
+  badgeLoading?: boolean
+  badgeVariant?: 'neutral' | 'accent'
+  ariaLabel?: string
+}
 
 // Drive the tab selection directly off the route so there is no stored state
 // to drift out of sync with the URL while PortfolioPage is kept-alive.
@@ -43,28 +59,79 @@ const tabsModel = computed<string>({
   get: () => route.name as string,
   set: (value) => {
     if (route.name !== value) {
-      router.replace({ name: value })
+      router.replace({ name: value, query: route.query })
     }
   },
 })
 
-const tabs = computed(() => [
-  {
-    label: 'Positions',
-    value: 'portfolio',
-    badge: borrowPositions.value.length || null,
-  },
-  {
-    label: 'Deposits',
-    value: 'portfolio-saving',
-    badge: depositPositions.value.length || null,
-  },
-  {
-    label: 'Rewards',
-    value: 'portfolio-rewards',
-    badge: rewards.value.length + locks.value.length || null,
-  },
-])
+const hasActiveMigrationSession = computed(() => isConnected.value || isSpyMode.value)
+const visibleMigrationPositions = computed(() =>
+  migrationPositions.value.filter(position => !isExternalMigrationDustPosition(position)),
+)
+const visibleMigrationPositionCount = computed(() => visibleMigrationPositions.value.length)
+const hasMigrationTabSignal = computed(() =>
+  hasActiveMigrationSession.value && (visibleMigrationPositionCount.value > 0 || isMigrationLoading.value),
+)
+watch(hasMigrationTabSignal, (value) => {
+  if (value) hasShownMigrationTab.value = true
+}, { immediate: true })
+watch(hasActiveMigrationSession, (value) => {
+  if (!value) hasShownMigrationTab.value = false
+})
+
+const showMigrationTab = computed(() =>
+  hasActiveMigrationSession.value
+  && (
+    visibleMigrationPositionCount.value > 0
+    || isMigrationLoading.value
+    || (!!migrationError.value && hasShownMigrationTab.value)
+  ),
+)
+
+const tabs = computed(() => {
+  const items: PortfolioTab[] = [
+    {
+      label: 'Positions',
+      value: 'portfolio',
+      badge: borrowPositions.value.length || null,
+    },
+    {
+      label: 'Deposits',
+      value: 'portfolio-saving',
+      badge: depositPositions.value.length || null,
+    },
+    {
+      label: 'Rewards',
+      value: 'portfolio-rewards',
+      badge: rewards.value.length + locks.value.length || null,
+    },
+  ]
+
+  if (showMigrationTab.value) {
+    items.push({
+      label: 'Migrate',
+      value: 'portfolio-migrate',
+      badge: visibleMigrationPositionCount.value || null,
+      badgeVariant: 'accent',
+      ariaLabel: isMigrationLoading.value
+        ? 'Migrate, scanning positions available'
+        : `Migrate, ${visibleMigrationPositionCount.value} positions available`,
+    })
+  }
+
+  return items
+})
+
+watch([() => route.name, showMigrationTab, hasMigrationLoaded, isMigrationLoading], () => {
+  if (
+    route.name === 'portfolio-migrate'
+    && !showMigrationTab.value
+    && hasMigrationLoaded.value
+    && !isMigrationLoading.value
+  ) {
+    router.replace({ name: 'portfolio', query: route.query })
+  }
+})
 
 const portfolioNetApyDisplay = computed(() =>
   Number.isFinite(portfolioNetApy.value) ? `${formatNumber(portfolioNetApy.value)}%` : '-',
@@ -94,7 +161,7 @@ const netAssetValueDisplay = computed(() => {
 const updatePositions = async (
   options: { portfolioSource?: 'fast' | 'fresh', preemptPortfolio?: boolean } = {},
 ) => {
-  const targetAddress = isSpyMode.value ? spyAddress.value : address.value
+  const targetAddress = effectiveAddress.value
   if (!targetAddress) return
   // Refresh the rich portfolio snapshot (drives the UI on this page) and the
   // plan-time Account snapshot in parallel. The two write into disjoint stores,

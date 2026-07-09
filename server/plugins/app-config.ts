@@ -13,6 +13,7 @@ import {
   readV3ApiUrl,
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
+import { buildAnnouncementConfig } from '~/utils/announcement-config'
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -26,6 +27,18 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+}
+
+// JSON.stringify does not escape `<`, so a config value containing `</script>`
+// would break out of the inline script context. Escaping `<` (and the U+2028 /
+// U+2029 line separators, which are invalid in JS string literals) as unicode
+// escapes keeps the payload inside the script tag while preserving identical
+// JSON/JS semantics — `<` parses back to `<` inside string values.
+export function escapeScriptJson(json: string): string {
+  return json
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 }
 
 function env(key: string, ...fallbackKeys: string[]): string {
@@ -46,12 +59,18 @@ function readAppConfig() {
     appUrl: env('NUXT_PUBLIC_APP_URL'),
     v3ApiUrl: V3_API_PROXY_URL,
     // The client uses this to decide whether the SDK's "fast" instance routes
-    // reads via /api/v3 (v3 adapters) or falls back to direct on-chain reads.
+    // reads via /api/internal/v3 (v3 adapters) or falls back to direct on-chain reads.
     enableV3Backend: !!readV3ApiUrl(),
     // Adapter chain pinned for the browser's "fast" SDK instance. See
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
+    announcement: buildAnnouncementConfig({
+      title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
+      body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),
+      items: env('CONFIG_ANNOUNCEMENT_ITEMS', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS'),
+      url: env('CONFIG_ANNOUNCEMENT_URL', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_URL'),
+    }),
   }
 }
 
@@ -107,7 +126,7 @@ function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
 
 export default defineNitroPlugin((nitroApp) => {
   const appConfig = readAppConfig()
-  const scriptTag = `<script>window.__APP_CONFIG__=${JSON.stringify(appConfig)}</script>`
+  const scriptTag = `<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(appConfig))}</script>`
 
   nitroApp.hooks.hook('render:html', (html) => {
     html.head.push(scriptTag)

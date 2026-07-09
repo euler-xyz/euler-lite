@@ -1,5 +1,6 @@
 import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
+import { INTERNAL_API_BASE } from '~/utils/api-url-env'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
@@ -22,14 +23,14 @@ type ConfigurableOracleAdapterService = EulerSDK['oracleAdapterService'] & {
 
 // Browser CSP blocks hermes.pyth.network. The SDK's Pyth plugin issues
 // `GET <hermesUrl>/v2/updates/price/latest?ids[]=…` — rewrite that request to
-// our same-origin proxy at `/api/pyth/updates`, which forwards to Hermes
+// our same-origin proxy at `/api/internal/pyth/updates`, which forwards to Hermes
 // server-side. Non-Pyth/non-browser callers fall through to the native fetch.
 const pythProxyFetch: typeof fetch = (input, init) => {
   if (typeof window === 'undefined') return fetch(input, init)
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
   if (url && /\/v2\/updates\/price\/latest(\?|$)/.test(url)) {
     const incoming = new URL(url, window.location.origin)
-    const proxied = new URL('/api/pyth/updates', window.location.origin)
+    const proxied = new URL('/api/internal/pyth/updates', window.location.origin)
     incoming.searchParams.forEach((v, k) => proxied.searchParams.append(k, v))
     return fetch(proxied.toString(), init)
   }
@@ -37,7 +38,7 @@ const pythProxyFetch: typeof fetch = (input, init) => {
 }
 
 /**
- * Two SDK instances are exposed:
+ * Three SDK entry points are exposed:
  *
  *   - `getEulerSdk()`  — "fast" / browsing instance. Adapter chain is picked
  *     by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`):
@@ -48,6 +49,11 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     Uses the default `sdkBuildQuery` cache policy (sub-minute stale times
  *     for hot reads, longer for catalogue data). Consumed by UI surfaces:
  *     vault lists, portfolio display, prices, rewards.
+ *
+ *   - `getEulerSdkForChain(chainId)` — same browsing cache policy as
+ *     `getEulerSdk()`, but chains listed in `ONCHAIN_SDK_CHAINS` are routed to
+ *     the onchain adapter config so their fast reads do not use V3-backed
+ *     account/vault/Earn adapters.
  *
  *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Account and vault
  *     adapters are pinned to on-chain/subgraph reads regardless of the browser
@@ -83,27 +89,29 @@ const buildAppApiPath = (path: string) => {
   return `${requestUrl?.origin ?? ''}${path}`
 }
 
-// The SDK appends `/v3/...` paths, so the same-origin base is `/api`.
-const buildV3ProxyApiPath = () => buildAppApiPath('/api')
+// The SDK appends `/v3/...` paths, so the same-origin base is `/api/internal`.
+const buildV3ProxyApiPath = () => buildAppApiPath(INTERNAL_API_BASE)
 // Per-host proxies wrap the SDK's direct upstream calls so they (1) share
 // one server-side TTL cache across browser tabs, (2) take the cold-TLS
 // hit once at proxy startup rather than on every user, and (3) keep
 // upstream URLs (and any auth) server-only. See
-// `server/api/proxy/{merkl,fuul,incentra,subgraph}/[...path].ts` and
-// `server/api/labels/[chainId]/[file].get.ts`.
-const buildMerklProxyApiPath = () => buildAppApiPath('/api/proxy/merkl')
+// `server/api/internal/proxy/{merkl,fuul,incentra,subgraph}/[...path].ts` and
+// `server/api/internal/labels/[chainId]/[file].get.ts`.
+const buildMerklProxyApiPath = () => buildAppApiPath('/api/internal/proxy/merkl')
 const buildFuulProxyApiPath = (path = '') =>
-  buildAppApiPath(`/api/proxy/fuul${path ? `/${path.replace(/^\/+/, '')}` : ''}`)
+  buildAppApiPath(`/api/internal/proxy/fuul${path ? `/${path.replace(/^\/+/, '')}` : ''}`)
 const buildIncentraProxyApiPath = (path: string) =>
-  buildAppApiPath(`/api/proxy/incentra/${path.replace(/^\/+/, '')}`)
-const buildTurtleProxyApiPath = () => buildAppApiPath('/api/proxy/turtle')
+  buildAppApiPath(`/api/internal/proxy/incentra/${path.replace(/^\/+/, '')}`)
+const buildTurtleProxyApiPath = () => buildAppApiPath('/api/internal/proxy/turtle')
 // Exported so post-tx subgraph polling (useEulerTx) hits the exact same
 // endpoint the SDK's account/vault-type adapters read through. Polling the
 // upstream Goldsky URL directly would measure a different indexer head than
 // the one actually serving queryAccountVaults.
 export const buildSubgraphProxyApiPath = (chainId: number) =>
-  buildAppApiPath(`/api/proxy/subgraph/${chainId}`)
-const buildLabelsProxyApiPath = () => buildAppApiPath('/api/labels')
+  buildAppApiPath(`/api/internal/proxy/subgraph/${chainId}`)
+const buildLabelsProxyApiPath = () => buildAppApiPath('/api/internal/labels')
+const buildMorphoProxyApiPath = () => buildAppApiPath('/api/internal/proxy/morpho')
+const buildAaveProxyApiPath = () => buildAppApiPath('/api/internal/proxy/aave')
 
 type SdkBackend = 'fast' | 'onchain'
 
@@ -161,10 +169,10 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   const labelsProxyUrl = buildLabelsProxyApiPath()
   const subgraphUrls = buildSubgraphUrlMap()
   const { enableV3Backend, browserVaultSource } = useEnvConfig()
-  // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins. The
-  // plan-time / 'onchain' instance is forced to onchain regardless — it
-  // exists specifically so the planner sees fresh chain state, not
-  // V3-cached data, even when fast reads can tolerate stale.
+  // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins.
+  // 'onchain' covers both ONCHAIN_SDK_CHAINS fast reads and the plan-time
+  // instance, which exists specifically so the planner sees fresh chain
+  // state, not V3-cached data, even when fast reads can tolerate stale.
   const fastSource = backend === 'fast' ? browserVaultSource : 'onchain'
   const config: EulerSDKConfig = {
     // The proxy path is wired regardless of `backend` so that the SDK can still
@@ -172,8 +180,8 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // back to v3 internally are encountered. The per-service adapter flags are
     // what actually steer reads through the fallback chain vs straight onchain.
     ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl, intrinsicApyV3ApiUrl: v3ApiUrl } : {}),
-    deploymentsUrl: buildAppApiPath('/api/euler-chains'),
-    // Labels always go through the local /api/labels proxy. Server-side env
+    deploymentsUrl: buildAppApiPath('/api/internal/euler-chains'),
+    // Labels always go through the local /api/internal/labels proxy. Server-side env
     // (`NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`/`*_REPO`) controls where the proxy
     // fetches upstream, so callers see a single internal hostname. Same
     // pattern as `tokenlistApiBaseUrl` above.
@@ -201,7 +209,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
           rewardsTurtleApiUrl: buildTurtleProxyApiPath(),
         }
       : { rewardsEnableTurtle: false }),
-    // Goldsky subgraph: route every chain through `/api/proxy/subgraph/{id}`
+    // Goldsky subgraph: route every chain through `/api/internal/proxy/subgraph/{id}`
     // so the browser never sees the upstream URL or hits api.goldsky.com
     // directly.
     accountVaultsSubgraphUrls: subgraphUrls,
@@ -228,7 +236,7 @@ const buildRpcUrls = (): Record<number, string> => {
   return Object.fromEntries(
     allowedChainIds.value.map(chainId => [
       chainId,
-      import.meta.server ? `${origin}/api/rpc/${chainId}` : `/api/rpc/${chainId}`,
+      import.meta.server ? `${origin}/api/internal/rpc/${chainId}` : `/api/internal/rpc/${chainId}`,
     ]),
   )
 }
@@ -244,7 +252,7 @@ const configureAppProxies = (sdk: EulerSDK, buildQuery: BuildQueryFn) => {
   oracleAdapterService.setQueryOracleAdapters?.(buildQuery(
     'queryOracleAdapters',
     async (chainId: number) => {
-      const response = await fetch(`${buildAppApiPath('/api/oracle-adapters')}?chainId=${encodeURIComponent(String(chainId))}`)
+      const response = await fetch(`${buildAppApiPath('/api/internal/oracle-adapters')}?chainId=${encodeURIComponent(String(chainId))}`)
       if (!response.ok) {
         throw new Error(`Oracle adapters request failed: ${response.status} ${response.statusText}`)
       }
@@ -272,12 +280,16 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
         buildQuery,
       ),
     ),
-    buildAppApiPath('/api/proxy/intrinsic-apy-overrides'),
+    buildAppApiPath('/api/internal/proxy/intrinsic-apy-overrides'),
   )
 
   const sdk = await buildEulerSDK({
     config,
     buildQuery,
+    positionMigrationConnectorConfig: {
+      morpho: { morphoGraphqlUrl: buildMorphoProxyApiPath() },
+      aave: { graphqlEndpoint: buildAaveProxyApiPath() },
+    },
     servicesOverrides: { intrinsicApyService },
     plugins: [
       createPythPlugin({ buildQuery, fetchFn: pythProxyFetch }),
@@ -325,6 +337,13 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
   return sdk
 }
 
+export const getEulerSdkForChain = async (chainId: number): Promise<EulerSDK> => {
+  const { onchainSdkChainIds } = useChainConfig()
+  const backend: SdkBackend = onchainSdkChainIds.includes(chainId) ? 'onchain' : 'fast'
+  const { sdk } = await lookupInstance('cached', backend, sdkBuildQuery)
+  return sdk
+}
+
 /** "Slow"/plan-time instance: account and vault adapters stay onchain/subgraph
  *  regardless of browser source, with zero stale-time on plan-critical queries.
  *  Rewards use fallback so claim planning can combine V3 rows with direct
@@ -337,5 +356,6 @@ export const getEulerSdkFresh = async (): Promise<EulerSDK> => {
 
 export const useEulerSdk = () => ({
   getEulerSdk,
+  getEulerSdkForChain,
   getEulerSdkFresh,
 })
