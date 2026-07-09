@@ -843,15 +843,6 @@ const applyLtv = (value: bigint, ltv: number | undefined): bigint | undefined =>
   return ltvWad === undefined ? undefined : (value * ltvWad) / WAD
 }
 
-const tokenAmountToRiskValue = (
-  amount: bigint | undefined,
-  decimals: number | undefined,
-  price: bigint | undefined,
-): bigint | undefined => {
-  if (amount === undefined || decimals === undefined || price === undefined) return undefined
-  return (amount * price) / (10n ** BigInt(decimals))
-}
-
 const USD_SCALE = 1_000_000_000n
 
 const numberToUsdScaledBigint = (value: number | undefined): bigint | undefined => {
@@ -898,13 +889,15 @@ const getEffectiveLiquidationLtv = (collateral: PriceableVaultCollateral | undef
   return typeof current === 'number' && Number.isFinite(current) ? current : collateral?.liquidationLTV
 }
 
-const liquidityRatio = (value: bigint | undefined, oracleMid: bigint | undefined): bigint | undefined => {
-  if (value === undefined || oracleMid === undefined || oracleMid === 0n) return undefined
-  return (value * WAD) / oracleMid
+const hasCollateralRiskPrice = (borrowVault: PriceableVault, collateralVault: PriceableVault): boolean => {
+  try {
+    const riskPrice = borrowVault.getCollateralRiskPrice?.(collateralVault)
+    return (riskPrice?.priceBorrowing ?? 0n) > 0n || (riskPrice?.priceLiquidation ?? 0n) > 0n
+  }
+  catch {
+    return false
+  }
 }
-
-const applyRatio = (value: bigint, ratio: bigint | undefined): bigint | undefined =>
-  ratio === undefined ? undefined : (value * ratio) / WAD
 
 const buildCurrentCollateralLiquidityValue = (
   borrow: StitchPosition,
@@ -920,21 +913,48 @@ const buildCurrentCollateralLiquidityValue = (
   const collateralVault = collateralPosition?.vault ?? existing?.vault ?? collateralMeta?.vault
   if (!borrowVault || !collateralVault) return cloneLiquidityValue(existing?.value)
 
-  const riskPrice = borrowVault.getCollateralRiskPrice?.(collateralVault)
-  const decimals = vaultAssetDecimals(collateralVault)
-  const valueUsd = getPositionUsdValue(collateralPosition) ?? existing?.valueUsd
-  const oracleMid = tokenAmountToRiskValue(collateralPosition?.assets, decimals, riskPrice?.priceLiquidation)
-    ?? (existing ? usdValueToRiskValue(valueUsd, scale) : undefined)
+  const currentValueUsd = getPositionUsdValue(collateralPosition)
+  const existingValueUsd = existing?.valueUsd
+  const currentMatchesExistingUsd = currentValueUsd === undefined
+    || (
+      existingValueUsd !== undefined
+      && numberToUsdScaledBigint(currentValueUsd) === numberToUsdScaledBigint(existingValueUsd)
+    )
+
+  // Prefer the lens-provided risk values. They are denominated in the borrow's
+  // unit-of-account scale — the same scale as the (lens-sourced) liability they're
+  // measured against — so health/LTV stay consistent. Re-deriving from
+  // getCollateralRiskPrice instead lands in WAD (it scales the oracle price by
+  // 10^(18 - uoaDecimals)); divided against a uoa-decimals liability that inflates
+  // the health score and zeroes the LTV on sub-18-decimal markets (e.g. AUSD = 6).
+  // Real (non-simulated) positions use the lens values directly; so must we.
+  // Once the simulated collateral amount changes, however, the lens value is for
+  // the old amount and must be rescaled before it is added to the stitched total.
+  if ((existing?.value?.oracleMid ?? 0n) > 0n && currentMatchesExistingUsd) {
+    return cloneLiquidityValue(existing?.value)
+  }
+
+  if ((existing?.value?.oracleMid ?? 0n) <= 0n && !hasCollateralRiskPrice(borrowVault, collateralVault)) {
+    return undefined
+  }
+
+  // Collateral the borrow's lens read didn't include (e.g. one enabled later in
+  // the batch by a collateral swap). Derive its risk value through the liability's
+  // own usd<->risk ratio so it lands in the same unit-of-account scale, then
+  // risk-adjust by the configured LTVs.
+  const valueUsd = currentValueUsd ?? existingValueUsd
+  const oracleMid = usdValueToRiskValue(valueUsd, scale)
   if (oracleMid === undefined) return cloneLiquidityValue(existing?.value)
 
-  const borrowingBase = tokenAmountToRiskValue(collateralPosition?.assets, decimals, riskPrice?.priceBorrowing) ?? oracleMid
-  const borrowingRatio = ltvToWad(collateralMeta?.borrowLTV)
-    ?? liquidityRatio(existing?.value?.borrowing, existing?.value?.oracleMid)
-  const liquidationRatio = ltvToWad(getEffectiveLiquidationLtv(collateralMeta))
-    ?? liquidityRatio(existing?.value?.liquidation, existing?.value?.oracleMid)
+  // Collateral the borrow vault doesn't accept (no meta) contributes zero
+  // risk-adjusted value — not the full oracle price. Otherwise leftover
+  // EVC-enabled collateral the controller won't credit would inflate the
+  // simulated health/LTV. Likewise an unconfigured LTV defaults to zero.
+  if (!collateralMeta) return cloneLiquidityValue(existing?.value)
+
   return {
-    borrowing: applyRatio(borrowingBase, borrowingRatio) ?? applyLtv(borrowingBase, collateralMeta?.borrowLTV) ?? existing?.value?.borrowing ?? oracleMid,
-    liquidation: applyRatio(oracleMid, liquidationRatio) ?? applyLtv(oracleMid, getEffectiveLiquidationLtv(collateralMeta)) ?? existing?.value?.liquidation ?? oracleMid,
+    borrowing: applyLtv(oracleMid, collateralMeta.borrowLTV) ?? 0n,
+    liquidation: applyLtv(oracleMid, getEffectiveLiquidationLtv(collateralMeta)) ?? 0n,
     oracleMid,
   }
 }
@@ -1493,6 +1513,7 @@ export const useTxBatch = () => {
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
   const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan } = useEulerTx()
+  const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
     try {
       return owner.value ? getAddress(owner.value).toLowerCase() : undefined
@@ -1696,6 +1717,17 @@ export const useTxBatch = () => {
             symbol: asset.symbol ?? '',
             decimals: Number(asset.decimals ?? 18),
           }
+        }
+      }
+      // Touched wallet tokens that aren't a simulated vault's underlying — e.g. a
+      // swap output received straight into the wallet — get their symbol/decimals
+      // from the token list, so the wallet-changes summary renders the real token
+      // and amount instead of a raw "Token +0" (unknown symbol, default 18 dp).
+      for (const token of touchedTokens) {
+        if (walletAssetMeta[token]) continue
+        const entry = getTokenByAddress(token)
+        if (entry) {
+          walletAssetMeta[token] = { symbol: entry.symbol, decimals: entry.decimals }
         }
       }
       const walletLayers = buildWalletBalanceLayers(simWb, realWallet)

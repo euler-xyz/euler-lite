@@ -43,6 +43,12 @@ const {
 } = useTransactionPlanSimulation()
 
 const positionIndex = usePositionIndex()
+const getCurrentRoutePositionIndex = () => {
+  const raw = _route.params.number
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw) && raw[0]) return raw[0]
+  return positionIndex
+}
 const buildRefinanceRoute = (collateralAddress?: string) => {
   const query: Record<string, string> = {}
   if (collateralAddress) query.collateral = collateralAddress
@@ -63,7 +69,7 @@ const isPreparing = ref(false)
 const collateralItems = ref<PositionCollateral[]>([])
 const isCollateralsLoading = ref(false)
 const disableCollateralErrorVault = ref<string | null>(null)
-const { activeLayerData, modifiedBalanceKeys, modifiedDebtKeys } = useTxBatch()
+const { activeLayerData, modifiedBalanceKeys, modifiedDebtKeys, isSimulating } = useTxBatch()
 let loadSequence = 0
 
 const { isReady: isVaultsReady } = useVaults()
@@ -777,7 +783,7 @@ const load = async () => {
   try {
     await until(isPositionsLoaded).toBe(true)
     if (sequence !== loadSequence) return
-    position.value = getPositionBySubAccountIndex(+positionIndex)
+    position.value = getPositionBySubAccountIndex(+getCurrentRoutePositionIndex())
     if (position.value) {
       const initialCollateralVault = collateralVault.value
       collateralItems.value = initialCollateralVault
@@ -801,6 +807,37 @@ const load = async () => {
     console.warn(e)
   }
 }
+// A simulated-only position (e.g. a freshly-added multiply) stops existing the
+// moment simulation is disabled or the batch changes. Rather than stranding the
+// user on a "Position not found" screen, send them back to the portfolio once a
+// position they were viewing disappears — but only after the account and any
+// in-flight resimulation have settled, so we don't redirect on a transient gap.
+// A position that never existed (e.g. a bad URL) keeps the "not found" screen.
+//
+// Keyed to the live route param, not a plain boolean: the page component is
+// reused across /position/:number changes (no NuxtPage key), so a boolean would
+// persist and wrongly redirect an invalid index instead of showing "not found".
+const shownPositionIndex = ref<string | null>(null)
+watch(
+  [position, isPositionsLoading, isSimulating, isConnected, isSpyMode, () => _route.params.number],
+  () => {
+    const currentIndex = String(_route.params.number ?? '')
+    if (position.value) {
+      shownPositionIndex.value = currentIndex
+      return
+    }
+    if (
+      shownPositionIndex.value !== currentIndex
+      || !isPositionsLoaded.value
+      || isPositionsLoading.value
+      || isSimulating.value
+      || !(isConnected.value || isSpyMode.value)
+    ) return
+    shownPositionIndex.value = null
+    router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+  },
+  { immediate: true },
+)
 const borrowApyModalData = computed(() => {
   if (!borrowVault.value) return {}
   return {
@@ -850,7 +887,7 @@ const openRampDownModal = () => {
     props: rampCollateralEdge.value,
   })
 }
-watch([isConnected, isSpyMode, address, activeLayerData], () => {
+watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.number], () => {
   load()
 }, { immediate: true })
 </script>

@@ -262,8 +262,20 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   // --- FixedPoint computeds ---
+  // In swap-supply mode `amount` is denominated in the user-selected "pay
+  // with" token, so parsing it with collateral decimals would treat e.g.
+  // "100" (USDC) as 100 WETH. The collateral delta is the quoted swap output
+  // instead — 0 while no quote is available, so estimates show no change
+  // until quotes arrive. `null` means "amount is collateral-denominated"
+  // (direct supply, native wrap, all withdraw flows).
+  const swapCollateralDeltaNano = computed<bigint | null>(() => {
+    if (options.mode !== 'supply' || !options.needsSwap.value) return null
+    if (!swapEffectiveQuote.value) return 0n
+    const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
+    return amountOut > 0n ? amountOut : 0n
+  })
   const amountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(amount.value || '0', collateralVault.value?.asset.decimals),
+    swapCollateralDeltaNano.value ?? valueToNano(amount.value || '0', collateralVault.value?.asset.decimals),
     Number(collateralVault.value?.asset.decimals),
   ))
   const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
@@ -414,7 +426,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    const inputAmountNano = valueToNano(amount.value || '0', asset.value.decimals)
+    // `amount` is denominated in `effectiveAsset` (the pay-with token in
+    // swap-supply mode) — parse with its decimals, not the collateral's.
+    const inputAmountNano = valueToNano(amount.value || '0', options.effectiveAsset.value?.decimals ?? asset.value.decimals)
     if (inputAmountNano <= 0n) {
       resetSwapQuoteState()
       return
@@ -607,7 +621,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     try {
       if (!isEVault(collateralVault.value)) return
       const evault = collateralVault.value
-      const amountNano = valueToNano(amount.value, evault.asset.decimals)
+      const amountNano = swapCollateralDeltaNano.value ?? valueToNano(amount.value, evault.asset.decimals)
       const cashDelta = options.mode === 'supply' ? amountNano : -amountNano
 
       const [projected, collateralUsd, borrowedUsd] = await Promise.all([
@@ -889,15 +903,31 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   watch(amount, async () => {
     if (!collateralVault.value) return
+    // Reset quotes before computing estimates: in swap-supply mode the
+    // collateral delta derives from the effective quote, and the previous
+    // amount's quote must not leak into the new amount's estimates.
+    if (options.needsSwap.value) {
+      resetSwapQuoteState()
+      requestSwapQuote()
+    }
     updateSyncEstimates()
     if (!isEstimatesLoading.value) {
       isEstimatesLoading.value = true
     }
     updateAsyncEstimates()
-    if (options.needsSwap.value) {
-      resetSwapQuoteState()
-      requestSwapQuote()
+  })
+
+  // Swap-supply estimates derive from the quoted output — recompute when the
+  // effective quote (and thus the collateral delta) changes, e.g. when quotes
+  // arrive after the debounced fetch or the user picks a different provider.
+  watch(swapCollateralDeltaNano, (val, old) => {
+    if (val === null || old === null || val === old) return
+    if (!collateralVault.value) return
+    updateSyncEstimates()
+    if (!isEstimatesLoading.value) {
+      isEstimatesLoading.value = true
     }
+    updateAsyncEstimates()
   })
 
   watch(swapSlippage, () => {
