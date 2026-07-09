@@ -6,7 +6,7 @@ import {
   computeNextHealth,
   computeLiquidationPrice,
 } from '~/utils/repayUtils'
-import { getRoe } from '~/entities/vault'
+import { getRoe } from '~/utils/vault/apy'
 
 describe('amountToPercent', () => {
   it('returns 0 when totalDebt is zero', () => {

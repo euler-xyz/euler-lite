@@ -1,7 +1,10 @@
 <script setup lang="ts">
 const emits = defineEmits(['close'])
+
+type SortOption = { label: string, icon?: string }
+
 const { options, selected, onSave } = defineProps<{
-  options: { label: string, icon?: string }[]
+  options: SortOption[]
   selected?: string
   title?: string
   onSave: (selected: string) => void
@@ -16,6 +19,7 @@ const handleClose = () => {
 
 <template>
   <BaseModalWrapper
+    data-id="sort-modal"
     :title="title"
     @close="handleClose"
   >
@@ -23,6 +27,10 @@ const handleClose = () => {
       v-for="(option, idx) in options"
       :key="`options-${idx}`"
       class="flex items-center gap-12 py-12 px-16 cursor-pointer rounded-16"
+      data-id="sort-option"
+      :data-key="option.label"
+      data-field="sort-option"
+      :data-value="option.label"
       :class="[selectedIdx === idx ? 'bg-card-hover' : '']"
       @click="onSave(option.label)"
     >

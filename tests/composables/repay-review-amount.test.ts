@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { SwapApiQuote } from '~/entities/swap'
-import { SwapperMode } from '~/entities/swap'
+import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 
-const makeQuote = (overrides: Partial<SwapApiQuote> = {}): SwapApiQuote => ({
+const makeQuote = (overrides: Partial<SwapQuote> = {}): SwapQuote => ({
   amountIn: '1234567',
   amountInMax: '1240000',
   amountOut: '5000000',
   amountOutMin: '4990000',
   ...overrides,
-}) as SwapApiQuote
+}) as SwapQuote
 
 describe('getRepaySwapReviewInputAmount', () => {
   it('uses quote-derived source input limit for target-debt swaps', () => {

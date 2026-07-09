@@ -51,10 +51,6 @@ const handlePreventClose = (value: boolean) => {
 onMounted(() => {
   isComponentVisible.value = true
 })
-
-onBeforeUnmount(() => {
-  isComponentVisible.value = false
-})
 </script>
 
 <template>

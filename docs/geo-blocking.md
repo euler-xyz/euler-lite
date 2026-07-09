@@ -90,6 +90,8 @@ Request → cors.ts (strip client x-country-code, set response x-country-code fr
                 └─ prod env → HTTP 451 (fail-closed)
 ```
 
+When the gate blocks a request or flags VPN/proxy usage it logs the request path. Because some `/api/*` routes embed a wallet address in the path (e.g. `/api/internal/proxy/merkl/users/0x.../rewards`), the path is first run through `safePathTemplate` (`server/utils/observability.ts`), which replaces address and numeric segments with `:address`/`:number` placeholders. This keeps wallet addresses (PII) out of the log sink while preserving the route shape for observability. Routing and matching still operate on the real path.
+
 ## Blocking Rules
 
 **File**: `composables/useGeoBlock.ts`
@@ -198,7 +200,7 @@ euler-labels/
 └── all/assets.json        ← cross-chain rules (usually patterns)
 ```
 
-The `/api/labels/assets.json?chainId=N` proxy transparently **unions** the per-chain file with `all/assets.json` before returning — the client sees a single merged list. If either file is absent upstream the proxy serves only the present side (empty-shape fallback on 404, matching every other label file). Both files accept both shapes; conventionally addresses live per-chain and patterns live in `all/`, but nothing enforces that split.
+The `/api/internal/labels/assets.json?chainId=N` proxy transparently **unions** the per-chain file with `all/assets.json` before returning — the client sees a single merged list. If either file is absent upstream the proxy serves only the present side (empty-shape fallback on 404, matching every other label file). Both files accept both shapes; conventionally addresses live per-chain and patterns live in `all/`, but nothing enforces that split.
 
 The global file is warmed once on server boot in `warm-cache.ts` alongside the per-chain entries.
 
@@ -350,7 +352,7 @@ For soft-restricted vaults, the behavior depends on the context:
 
 **Default selection**: `AssetInput.vue` watches the collateral options list and auto-advances past disabled options. If the first option is blocked/restricted/deprecated, the first enabled option is selected instead. This prevents a disabled vault from being pre-selected when a modal opens or a page loads.
 
-The three swap pages (`/lend/[vault]/swap`, `/position/[number]/collateral/swap`, `/position/[number]/borrow/swap`) also skip disabled vaults in their `syncToVault` fallback logic, using `getVaultTags(address, 'swap-target')` to find the first enabled vault.
+The swap/refinance pages (`/lend/[vault]/swap`, `/position/[number]/borrow/swap`) also skip disabled vaults in their `syncToVault` fallback logic, using `getVaultTags(address, 'swap-target')` to find the first enabled vault.
 
 ### Arbitrary-asset selector (`SwapTokenSelector`)
 
@@ -509,10 +511,9 @@ Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all
 | `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from `CF-IPCountry`, emits as response header |
 | `server/middleware/geo-gate.ts` | Server-side sanctioned-country block; fail-closed on unknown country in prod |
 | `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `isAssetBlockedByCountry`, `isAssetRestrictedByCountry`, `getVaultTags`; `AssetLike` type |
-| `composables/useEulerLabels.ts` | Label fetching and parsing, including asset address map + compiled `assetPatternRules` |
-| `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted` |
-| `utils/eulerLabelsState.ts` | Reactive state: `assetBlocks`, `assetRestrictions`, `assetPatternRules`; `CompiledPatternRule` type |
-| `server/api/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
+| `composables/useEulerLabels.ts` | SDK-backed label loading and current label snapshot |
+| `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted`, `getAssetPatternRules` |
+| `server/api/internal/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
 | `server/plugins/warm-cache.ts` | Warms `all/assets.json` once globally plus per-chain label files |
 | `entities/constants.ts` | `SANCTIONED_COUNTRIES`, `COUNTRY_GROUPS` (EU/EEA/EFTA) |
 | `entities/euler/labels.ts` | TypeScript types (`EulerLabelProduct`, `EulerLabelVaultOverride`, `EulerLabelAssetEntry` union with address + pattern fields) |

@@ -27,7 +27,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - 3-layer pricing architecture (oracle → USD → values)
 - On-chain vs off-chain price sources
 - Pyth oracle simulation for price reads
-- Intrinsic APY for yield-bearing assets (DefiLlama + Pendle)
+- SDK/V3-populated intrinsic APY for yield-bearing assets
 
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
 
@@ -43,9 +43,24 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 🔧 [Transaction Building](./transaction-building.md)
 
-- TxPlan architecture and composite operations
+- SDK TransactionPlan architecture and composite operations
 - EVC batching and Permit2 integration
 - Sub-accounts and position isolation
+
+### 🧩 [SDK Integration](./sdk-integration.md)
+
+- SDK entry points (`getEulerSdk`, `getEulerSdkForChain`, `getEulerSdkFresh`)
+- Backend selection via `enableV3Backend` (V3 adapters vs onchain/subgraph/direct)
+- Unified `SDK_QUERY_POLICY` — `staleTimeMs` / `formStaleTimeMs` / `invalidateAfterTx`
+- Post-tx portfolio refresh through the fresh SDK path
+- Same-origin proxies wired into SDK config (labels, Merkl, Fuul, Incentra, subgraph)
+
+### 🗄️ [Server-Side Caching](./server-side-caching.md)
+
+- Per-host external proxies (Merkl, Fuul, Incentra, Goldsky subgraph) with TTL + in-flight dedup
+- Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
+- V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
+- Bigint wire codec and adversary-safe wrapper tag
 
 ### 🔮 [Pyth Oracle Handling](./pyth-oracle-handling.md)
 
@@ -55,8 +70,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 📈 [Intrinsic APY](./intrinsic-apy.md)
 
-- Multi-provider architecture (DefiLlama + Pendle)
-- Address-based lookup with TTL caching
+- SDK/V3 provider architecture
+- Vault-entity intrinsic APY fields and refresh cadence
 - Source attribution in APY modals
 - Adding new providers and tokens
 
@@ -64,12 +79,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - Keyring identity verification for private vaults
 - On-chain credential checking and extension flow
-- Operation guard registry for automatic TxPlan injection
+- Operation guard registry for automatic SDK TransactionPlan injection
 - UI components (badges, alerts, verification flow)
 
 ### 🪙 [Token List](./token-list.md)
 
-- Three-source token list (Euler API, DefiLlama, Uniswap)
+- Four-source token list (Euler SDK, DefiLlama, Uniswap, Merkl reward tokens)
 - Parallel fetch via `Promise.allSettled` with per-source stale fallback
 - Pre-populated at server startup by `warm-cache.ts`
 - CSP considerations for logo URLs
@@ -85,7 +100,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🌐 [Public API](./public-api.md)
 
 - Publicly reachable endpoints under `/api/public/` (CORS `*`)
-- `GET /api/public/is-known` — verified-vault lookup by address
+- `GET /api/public/is-known` — verified-vault lookup by address (or list mode)
+- `GET /api/public/metadata` — uniform vault display metadata (name / description / governing entity / asset) across EVK, Securitize, and Earn
 - Request/response shape, caching, rate limits, and examples
 
 ## 🎯 Project Overview

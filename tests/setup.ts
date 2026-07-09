@@ -6,7 +6,7 @@
  * server/ module that calls one of these globals at module top level.
  */
 
-import { computed, reactive, ref, shallowReactive, shallowRef, watch, watchEffect } from 'vue'
+import { computed, reactive, readonly, ref, shallowReactive, shallowRef, watch, watchEffect, type Ref } from 'vue'
 
 type AnyFn = (...args: unknown[]) => unknown
 
@@ -20,16 +20,29 @@ if (!g.defineNitroPlugin) {
 }
 
 // Vue reactivity primitives Nuxt auto-imports. Required by any app/ module
-// loaded from a test (composables, entities, utils/eulerLabelsState, etc.)
+// loaded from a test (composables, entities, utils, etc.)
 const vueGlobals: Record<string, unknown> = {
   ref,
   shallowRef,
   reactive,
   shallowReactive,
+  readonly,
   computed,
   watch,
   watchEffect,
 }
 for (const [key, value] of Object.entries(vueGlobals)) {
   if (g[key] === undefined) g[key] = value
+}
+
+if (!g.useState) {
+  const state = new Map<string, Ref<unknown>>()
+  g.useState = (key: string, init: () => unknown) => {
+    let entry = state.get(key)
+    if (!entry) {
+      entry = ref(init())
+      state.set(key, entry)
+    }
+    return entry
+  }
 }

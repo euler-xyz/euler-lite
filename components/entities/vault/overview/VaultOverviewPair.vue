@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { AnyBorrowVaultPair, SecuritizeVault, Vault } from '~/entities/vault'
-import type { AccountBorrowPosition } from '~/entities/account'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getPairBorrowVault, getPairCollateralVault } from '~/utils/borrow-pair'
 
-defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition, desktopOverview?: boolean, collateralVaults?: (Vault | SecuritizeVault)[] }>()
+defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, desktopOverview?: boolean, collateralVaults?: (EVault | SecuritizeCollateralVault)[] }>()
 </script>
 
 <template>
@@ -12,11 +13,17 @@ defineProps<{ pair: AnyBorrowVaultPair | AccountBorrowPosition, desktopOverview?
   >
     <VaultOverviewPairBlockGeneral
       :pair="pair"
+      :default-open="true"
+    />
+    <VaultOverviewPairBlockTypes
+      :pair="pair"
+      :default-open="false"
     />
     <!-- Oracle adapters should always come from the liability (borrow) vault -->
     <VaultOverviewBlockOracleAdapters
-      :vault="pair.borrow"
-      :collateral-vaults="collateralVaults?.length ? collateralVaults : [pair.collateral]"
+      :vault="getPairBorrowVault(pair)"
+      :collateral-vaults="collateralVaults?.length ? collateralVaults : [getPairCollateralVault(pair)]"
+      :default-open="false"
     />
   </div>
 </template>

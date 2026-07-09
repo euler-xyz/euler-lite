@@ -48,6 +48,7 @@ const KIND_BY_VIEM_NAME: Readonly<Record<string, ViemErrorKind>> = {
   SocketClosedError: 'rpc-socket-closed',
   ChainDisconnectedError: 'rpc-socket-closed',
   ProviderDisconnectedError: 'rpc-socket-closed',
+  ExecutionRevertedError: 'contract-revert',
   ContractFunctionRevertedError: 'contract-revert',
 }
 
@@ -174,6 +175,21 @@ const classifyByMessage = (msg: string): ViemErrorKind | undefined => {
   return undefined
 }
 
+const messageCandidates = (node: unknown): string[] => {
+  if (!isPlainObject(node)) {
+    return node instanceof Error ? [node.message] : []
+  }
+  return [
+    node instanceof Error ? node.message : undefined,
+    pickString(node, 'shortMessage'),
+    pickString(node, 'details'),
+    pickString(node, 'message'),
+  ].filter((v): v is string => typeof v === 'string' && v.length > 0)
+}
+
+const classifyRevertByMessage = (messages: readonly string[]): ViemErrorKind | undefined =>
+  messages.some(msg => REVERT_MESSAGE_PATTERNS.some(re => re.test(msg))) ? 'contract-revert' : undefined
+
 /**
  * Classify a viem error into a small, log-friendly shape. Walks the cause
  * chain via `BaseError.walk()` for viem errors and a manual cause walk for
@@ -183,14 +199,17 @@ const classifyByMessage = (msg: string): ViemErrorKind | undefined => {
  *
  *   1. Walk the cause chain — first node whose class name is in
  *      `KIND_BY_VIEM_NAME` wins.
- *   2. Otherwise, JSON-RPC `code` on any node (handles `RpcRequestError`
+ *   2. Otherwise, explicit revert messages on generic RPC/call wrappers win
+ *      before JSON-RPC code fallback. Some HyperEVM RPCs report
+ *      "Execution reverted" as a bare `RpcRequestError` with code -32000.
+ *   3. Otherwise, JSON-RPC `code` on any node (handles `RpcRequestError`
  *      subclasses that ship a code but a non-canonical `name`).
- *   3. Otherwise, generic `RpcRequestError` nodes become `rpc-unreachable`
+ *   4. Otherwise, generic `RpcRequestError` nodes become `rpc-unreachable`
  *      after code refinement has had a chance to produce a more specific kind.
- *   4. Otherwise, message-pattern scan against every cause-chain node
+ *   5. Otherwise, message-pattern scan against every cause-chain node
  *      (timeout / revert / network keywords) — covers fetch's
  *      `TypeError: fetch failed` and similar non-Error throwables.
- *   5. Otherwise `kind: 'unknown'`.
+ *   6. Otherwise `kind: 'unknown'`.
  */
 export const classifyViemError = (err: unknown): ViemErrorClassification => {
   const isViem = err instanceof BaseError
@@ -229,7 +248,24 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
     }
   }
 
-  // 2. JSON-RPC code fallback.
+  // 2. Revert messages on generic viem RPC/call wrappers are on-chain
+  //    failures, even when the JSON-RPC code is the ambiguous -32000.
+  if (kind === 'unknown') {
+    for (const node of chain) {
+      const matched = classifyRevertByMessage(messageCandidates(node))
+      if (matched) {
+        kind = matched
+        if (node instanceof Error) causeName ??= node.name
+        break
+      }
+    }
+    if (kind === 'unknown') {
+      const matched = classifyRevertByMessage([shortMessage])
+      if (matched) kind = matched
+    }
+  }
+
+  // 3. JSON-RPC code fallback.
   if (kind === 'unknown') {
     for (const node of chain) {
       const matched = classifyByCode(pickNumber(node, 'code'))
@@ -241,7 +277,7 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
     }
   }
 
-  // 3. Generic JSON-RPC wrappers are still transport failures, but only after
+  // 4. Generic JSON-RPC wrappers are still transport failures, but only after
   //    the code fallback gets the first shot at classifying rate limits etc.
   if (kind === 'unknown') {
     for (const node of chain) {
@@ -254,11 +290,12 @@ export const classifyViemError = (err: unknown): ViemErrorClassification => {
     }
   }
 
-  // 4. Message-pattern scan, walking the chain not just the outer.
+  // 5. Message-pattern scan, walking the chain not just the outer.
   if (kind === 'unknown') {
     for (const node of chain) {
-      const message = node instanceof Error ? node.message : ''
-      const matched = classifyByMessage(message)
+      const matched = messageCandidates(node)
+        .map(classifyByMessage)
+        .find((value): value is ViemErrorKind => value != null)
       if (matched) {
         kind = matched
         if (node instanceof Error) causeName ??= node.name

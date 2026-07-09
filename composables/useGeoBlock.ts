@@ -6,9 +6,12 @@ import {
   getEarnVaultRestricted,
   getAssetBlock,
   getAssetRestricted,
+  getAssetPatternRules,
   isVaultDeprecated,
+  patternRuleMatches,
+  isWrapPair,
 } from '~/utils/eulerLabelsUtils'
-import { assetPatternRules, type CompiledPatternRule } from '~/utils/eulerLabelsState'
+import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
@@ -65,26 +68,19 @@ const toAssetFields = (asset: AssetLike): { address?: string, symbol?: string, n
   }
 }
 
-// Cap inputs passed to regex .test() to protect against catastrophic
-// backtracking if a curator ships a poorly-formed pattern and an on-chain
-// token returns an attacker-chosen long symbol/name. Real ERC-20 symbols are
-// typically <=12 chars and names <=64; 128 is well above any legitimate value.
-const MAX_REGEX_INPUT_LEN = 128
-
 // Per-country cache for asset-level block / restricted resolution. Browse
 // pages call these helpers per-row for potentially hundreds of rows on each
 // render; the pattern-rule scan is O(rules) which adds up. Cache key
 // composes country + address + symbol + name so a country change (rare) or
 // a new unique asset produces a fresh entry without ever serving stale data.
-// Pattern-rule content lives in module-scoped `assetPatternRules`; the
-// labels loader calls `clearAssetGeoCache()` after repopulating that list
-// so we never serve a decision computed against removed rules.
+// Pattern-rule content comes from the current SDK labels snapshot. Include the
+// labels version in the key so a refreshed snapshot cannot reuse old decisions.
 const MAX_ASSET_CACHE_SIZE = 1000
 const assetBlockCache = new Map<string, boolean>()
 const assetRestrictedCache = new Map<string, boolean>()
 
 const makeAssetCacheKey = (fields: { address?: string, symbol?: string, name?: string }): string =>
-  `${country.value ?? ''}|${fields.address?.toLowerCase() ?? ''}|${fields.symbol?.toLowerCase() ?? ''}|${fields.name?.toLowerCase() ?? ''}`
+  `${getEulerLabelsVersion()}|${country.value ?? ''}|${fields.address?.toLowerCase() ?? ''}|${fields.symbol?.toLowerCase() ?? ''}|${fields.name?.toLowerCase() ?? ''}`
 
 const cacheSet = (cache: Map<string, boolean>, key: string, value: boolean): boolean => {
   if (cache.size >= MAX_ASSET_CACHE_SIZE) cache.clear()
@@ -95,16 +91,6 @@ const cacheSet = (cache: Map<string, boolean>, key: string, value: boolean): boo
 export const clearAssetGeoCache = (): void => {
   assetBlockCache.clear()
   assetRestrictedCache.clear()
-}
-
-// Test whether a pattern rule matches the given symbol/name (lowercase inputs).
-// OR across populated fields — any match wins.
-const patternRuleMatches = (rule: CompiledPatternRule, symbolLower: string | undefined, nameLower: string | undefined): boolean => {
-  if (rule.symbolsLower && symbolLower && rule.symbolsLower.has(symbolLower)) return true
-  if (rule.symbolRegex && symbolLower && symbolLower.length <= MAX_REGEX_INPUT_LEN && rule.symbolRegex.test(symbolLower)) return true
-  if (rule.namesLower && nameLower && rule.namesLower.has(nameLower)) return true
-  if (rule.nameRegex && nameLower && nameLower.length <= MAX_REGEX_INPUT_LEN && rule.nameRegex.test(nameLower)) return true
-  return false
 }
 
 // Resolve the underlying asset for a vault via the registry.
@@ -153,7 +139,7 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   const symbolLower = fields.symbol?.toLowerCase()
   const nameLower = fields.name?.toLowerCase()
   if (symbolLower || nameLower) {
-    for (const rule of assetPatternRules) {
+    for (const rule of getAssetPatternRules()) {
       if (!rule.block?.length) continue
       if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
       if (isCountryInList(expandBlockList(rule.block))) {
@@ -165,7 +151,10 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   return cacheSet(assetBlockCache, cacheKey, false)
 }
 
-export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
+export const isAssetRestrictedByCountry = (
+  asset: AssetLike,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
   const fields = toAssetFields(asset)
   if (!fields) return false
   if (country.value === undefined) return false // still loading
@@ -173,8 +162,25 @@ export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
 
   const cacheKey = makeAssetCacheKey(fields)
   const cached = assetRestrictedCache.get(cacheKey)
-  if (cached !== undefined) return cached
+  const restricted = cached !== undefined ? cached : computeAssetRestricted(fields, cacheKey)
+  if (!restricted) return false
 
+  if (opts?.counterpart) {
+    const counterFields = toAssetFields(opts.counterpart)
+    if (counterFields?.address && fields.address) {
+      const aLower = fields.address.toLowerCase()
+      const cLower = counterFields.address.toLowerCase()
+      if (aLower === cLower) return false
+      if (isWrapPair(aLower, cLower)) return false
+    }
+  }
+  return true
+}
+
+const computeAssetRestricted = (
+  fields: { address?: string, symbol?: string, name?: string },
+  cacheKey: string,
+): boolean => {
   if (fields.address) {
     const assetRestricted = getAssetRestricted(fields.address)
     if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) {
@@ -185,7 +191,7 @@ export const isAssetRestrictedByCountry = (asset: AssetLike): boolean => {
   const symbolLower = fields.symbol?.toLowerCase()
   const nameLower = fields.name?.toLowerCase()
   if (symbolLower || nameLower) {
-    for (const rule of assetPatternRules) {
+    for (const rule of getAssetPatternRules()) {
       if (!rule.restricted?.length) continue
       if (!patternRuleMatches(rule, symbolLower, nameLower)) continue
       if (isCountryInList(expandBlockList(rule.restricted))) {
@@ -221,7 +227,10 @@ export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
   return addresses.some(addr => isVaultBlockedByCountry(addr))
 }
 
-export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
+export const isVaultRestrictedByCountry = (
+  vaultAddress: string,
+  opts?: { counterpart?: AssetLike },
+): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
@@ -232,7 +241,7 @@ export const isVaultRestrictedByCountry = (vaultAddress: string): boolean => {
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
 
   // Asset-level restriction: a vault is restricted whenever its underlying asset is restricted.
-  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
+  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress), opts)) return true
 
   return false
 }

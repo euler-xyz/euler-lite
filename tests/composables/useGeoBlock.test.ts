@@ -12,10 +12,11 @@
  * - "Regex patterns never scan unbounded input." — MAX_REGEX_INPUT_LEN ReDoS guard.
  * - "Cache can't serve a decision against rules that have been cleared."
  *
- * The module state (country ref, assetBlocks / assetRestrictions / assetPatternRules)
- * is shared across imports — each test resets it explicitly in beforeEach.
+ * The country ref and current SDK labels snapshot are shared across imports —
+ * each test resets them explicitly in beforeEach.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type { EulerLabelAssetPatternRule } from '@eulerxyz/euler-v2-sdk'
 import {
   useGeoBlock,
   clearAssetGeoCache,
@@ -24,11 +25,7 @@ import {
   isVaultBlockedByCountry,
   isVaultRestrictedByCountry,
 } from '~/composables/useGeoBlock'
-import {
-  assetBlocks,
-  assetRestrictions,
-  assetPatternRules,
-} from '~/utils/eulerLabelsState'
+import { __setEulerLabelsDataForTest, getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 
 // Mock the vault registry before the module under test imports it.
 // The registry is consulted by isVaultBlockedByCountry / isVaultRestrictedByCountry
@@ -43,14 +40,44 @@ vi.mock('~/composables/useVaultRegistry', () => ({
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
 
+const labelState = () => getCurrentEulerLabelsData()
+const assetBlocks = new Proxy({} as Record<string, string[]>, {
+  get: (_, prop: string) => labelState().assetBlocks[prop],
+  set: (_, prop: string, value: string[]) => {
+    labelState().assetBlocks[prop] = value
+    return true
+  },
+  deleteProperty: (_, prop: string) => Reflect.deleteProperty(labelState().assetBlocks, prop),
+  ownKeys: () => Reflect.ownKeys(labelState().assetBlocks),
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+})
+const assetRestrictions = new Proxy({} as Record<string, string[]>, {
+  get: (_, prop: string) => labelState().assetRestrictions[prop],
+  set: (_, prop: string, value: string[]) => {
+    labelState().assetRestrictions[prop] = value
+    return true
+  },
+  deleteProperty: (_, prop: string) => Reflect.deleteProperty(labelState().assetRestrictions, prop),
+  ownKeys: () => Reflect.ownKeys(labelState().assetRestrictions),
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+})
+const assetPatternRules = new Proxy([] as EulerLabelAssetPatternRule[], {
+  get: (_, prop: string) => {
+    const value = (labelState().assetPatternRules as unknown as Record<string, unknown>)[prop]
+    return typeof value === 'function' ? value.bind(labelState().assetPatternRules) : value
+  },
+  set: (_, prop: string, value: EulerLabelAssetPatternRule | number) => {
+    ;(labelState().assetPatternRules as unknown as Record<string, unknown>)[prop] = value
+    return true
+  },
+})
+
 const setCountry = (code: string | null | undefined) => {
   useGeoBlock().country.value = code
 }
 
 const resetState = () => {
-  for (const k of Object.keys(assetBlocks)) Reflect.deleteProperty(assetBlocks, k)
-  for (const k of Object.keys(assetRestrictions)) Reflect.deleteProperty(assetRestrictions, k)
-  assetPatternRules.length = 0
+  __setEulerLabelsDataForTest()
   clearAssetGeoCache()
   getVaultMock.mockReset()
 }
@@ -215,20 +242,23 @@ describe('isAssetBlockedByCountry — pattern rules (symbols / names)', () => {
     expect(isAssetBlockedByCountry(USDC)).toBe(false)
   })
 
-  it('skips pattern .test() on inputs longer than 128 chars (ReDoS guard)', () => {
+  it('treats inputs longer than 128 chars as a regex match (fail-closed ReDoS guard)', () => {
     // A curator-typo regex must never run .test() against an attacker-chosen
-    // long on-chain symbol/name. Real symbols are <=12 chars; names <=64.
+    // long on-chain symbol/name (real symbols are <=12 chars; names <=64). The
+    // ReDoS guard still prevents .test() from running, but we fail closed:
+    // an oversize input is treated as if it matched the regex, so an attacker
+    // cannot bypass a geo rule by padding their token's symbol/name.
     setCountry('DE')
     assetPatternRules.push({
-      symbolRegex: /^.*A$/i, // would otherwise match the oversize input
+      symbolRegex: /^xx_no_match_xx$/i, // would NOT match the oversize input
       block: ['DE'],
     })
-    const oversize = 'B'.repeat(128) + 'A' // 129 chars → exceeds cap
-    expect(isAssetBlockedByCountry({ symbol: oversize })).toBe(false)
+    const oversize = 'B'.repeat(129) // 129 chars → exceeds cap → counted as a match
+    expect(isAssetBlockedByCountry({ symbol: oversize })).toBe(true)
 
     // A 128-char input (exactly at the cap) still runs through .test().
-    const atLimit = 'B'.repeat(127) + 'A' // 128 chars
-    expect(isAssetBlockedByCountry({ symbol: atLimit })).toBe(true)
+    const atLimit = 'B'.repeat(128) // 128 chars → does NOT match the regex
+    expect(isAssetBlockedByCountry({ symbol: atLimit })).toBe(false)
   })
 
   it('ignores a pattern rule whose block list is empty', () => {

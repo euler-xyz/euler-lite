@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "defaults": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "localStorage": {
+      "is-onboarding-completed": "true",
+      "euler_full_render": "1"
+    },
+    "waitFor": [
+      "[data-id]"
+    ],
+    "settleMs": 1000,
+    "rateLimitRetries": 0,
+    "navigationRetries": 0,
+    "persistenceRecheckMaxRatio": 0,
+    "persistenceRecheckDelayMs": 0
+  },
+  "scenarios": [
+    {
+      "id": "lists-lend-mainnet",
+      "label": "Lists scenario: Mainnet lend list",
+      "path": "/lend?network=1&showAll=true",
+      "ignoreListDataPointsOnListPage": [
+        {
+          "listPrefix": "collateral-exposure:"
+        }
+      ],
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"lend\"]"
+      ]
+    },
+    {
+      "id": "lists-earn-mainnet",
+      "label": "Lists scenario: Mainnet earn list",
+      "path": "/earn?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"earn\"]"
+      ]
+    },
+    {
+      "id": "lists-borrow-mainnet",
+      "label": "Lists scenario: Mainnet borrow list",
+      "path": "/borrow?network=1&showAll=true",
+      "waitFor": [
+        "[data-id=\"vault-list\"][data-list=\"borrow-pair\"]"
+      ]
+    },
+    {
+      "id": "lists-explore-mainnet",
+      "label": "Lists scenario: Mainnet explore market list",
+      "path": "/explore?network=1",
+      "waitFor": [
+        "[data-id=\"discovery-market-list\"]"
+      ]
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 import type { Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { USD_ADDRESS, EUR_ADDRESS, BTC_ADDRESS, ETH_ADDRESS } from '~/entities/constants'
-import { erc20SymbolAbi } from '~/abis/erc20'
+import { readErc20StringField } from '~/utils/erc20-metadata'
+import { shortenAddress } from '~/utils/string-utils'
 
 const resolvedSymbols: Ref<Map<string, string>> = shallowRef(new Map())
 const pendingAddresses = new Set<string>()
@@ -39,8 +40,6 @@ export const useTokenSymbolResolver = () => {
     return map
   }
 
-  const shortenAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`
-
   const lazyResolveSymbol = (address: string) => {
     const key = address.toLowerCase()
     if (pendingAddresses.has(key)) return
@@ -50,12 +49,12 @@ export const useTokenSymbolResolver = () => {
     pendingAddresses.add(key)
     const client = ensureClient()
 
-    client.readContract({
-      address: address as Address,
-      abi: erc20SymbolAbi,
-      functionName: 'symbol',
-    })
-      .then((symbol: string) => {
+    readErc20StringField(client, address as Address, 'symbol')
+      .then((symbol) => {
+        if (!symbol) {
+          failedAddresses.add(key)
+          return
+        }
         const updated = new Map(resolvedSymbols.value)
         updated.set(key, symbol)
         resolvedSymbols.value = updated

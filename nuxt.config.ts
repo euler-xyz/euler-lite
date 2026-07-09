@@ -1,9 +1,22 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
+import { lstatSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorage.getItem("theme")==="light"?"light":"dark"}catch(e){}document.documentElement.setAttribute("data-theme",theme);document.documentElement.style.colorScheme=theme})()'
+const eulerSdkPackage = '@eulerxyz/euler-v2-sdk'
+const chartPackages = ['chart.js', 'chartjs-plugin-annotation']
+const isLinkedEulerSdk = (() => {
+  try {
+    return lstatSync(resolve(process.cwd(), 'node_modules', ...eulerSdkPackage.split('/'))).isSymbolicLink()
+  }
+  catch {
+    return false
+  }
+})()
 
 export default defineNuxtConfig({
-  modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt', '@sentry/nuxt/module'],
+  modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint', '@gvade/nuxt3-svg-sprite', '@vueuse/nuxt'],
   ssr: false,
 
   components: [
@@ -51,6 +64,10 @@ export default defineNuxtConfig({
         {
           name: 'viewport',
           content: 'width=device-width, initial-scale=1, user-scalable=no',
+        },
+        {
+          name: 'base:app_id',
+          content: '6a032ec8f8601f8d21fe6b80',
         },
         {
           property: 'og:title',
@@ -144,12 +161,12 @@ export default defineNuxtConfig({
       configEnableMerkl: '',
       configEnableIncentra: '',
       configEnableFuul: '',
-      // Migration announcement: set to a tweet/announcement URL to show a
-      // one-time modal explaining the app upgrade. Empty = disabled (default).
-      configMigrationAnnouncementUrl: '',
-      // Migration: link to the legacy app shown in the header dropdown.
-      // Empty = no link rendered (default).
-      configMigrationLegacyAppUrl: '',
+      configEnableTurtle: '',
+      // Announcement modal: populate any content field to show a one-time modal.
+      configAnnouncementTitle: '',
+      configAnnouncementBody: '',
+      configAnnouncementItems: '',
+      configAnnouncementUrl: '',
       // External token list URLs for swap token selector
       configUniswapTokenListUrl: '',
       configDefillamaTokenListUrl: '',
@@ -158,16 +175,14 @@ export default defineNuxtConfig({
       appKitProjectId: '',
       appUrl: '',
       pythHermesUrl: '',
-      eulerApiUrl: '',
+      v3ApiUrl: '',
+      enableV3Backend: '',
+      // Adapter chain for the browser "fast" SDK. fallback (default) | onchain | v3.
+      // Maps to NUXT_PUBLIC_BROWSER_VAULT_SOURCE.
+      browserVaultSource: '',
+      executionRecordSdkQueries: '',
       swapApiUrl: '',
-      priceApiUrl: '',
-      sentryDsn: '', // set via NUXT_PUBLIC_SENTRY_DSN
     },
-  },
-
-  sourcemap: {
-    server: false,
-    client: process.env.SENTRY_AUTH_TOKEN ? 'hidden' : false,
   },
 
   devServer: {
@@ -210,11 +225,154 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, max-age=31536000, immutable',
         },
       },
-      // HTML and API responses must not be cached by browsers or CDNs — stale
-      // HTML referencing previous-build chunk hashes is the primary cause of
-      // "Failed to fetch dynamically imported module" errors after deploys.
-      // CDN-Cache-Control is honoured by compliant CDNs and overrides any
-      // edge-side cache rules that may ignore the origin Cache-Control.
+
+      // Static public assets. Safe to cache aggressively now that the
+      // deployment pipeline retains old `_nuxt/*` chunks in S3 across
+      // deploys — the chunk-404 risk that originally motivated the
+      // blanket `no-store` no longer applies to non-HTML routes.
+      // Fonts are pinned to specific content via the `?v=` query string
+      // in assets/styles/fonts.scss, so 1y immutable is safe.
+      '/fonts/**': {
+        headers: {
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'CDN-Cache-Control': 'public, max-age=31536000, immutable',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      },
+      // App metadata images are referenced by wallet/connect metadata and
+      // are stable between releases.
+      '/logo.svg': {
+        headers: {
+          'Cache-Control': 'public, max-age=86400',
+          'CDN-Cache-Control': 'public, max-age=604800',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
+        },
+      },
+      '/logo.png': {
+        headers: {
+          'Cache-Control': 'public, max-age=86400',
+          'CDN-Cache-Control': 'public, max-age=604800',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
+        },
+      },
+      '/manifest-img.png': {
+        headers: {
+          'Cache-Control': 'public, max-age=86400',
+          'CDN-Cache-Control': 'public, max-age=604800',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
+        },
+      },
+      // Icon assets without content-hashing: shorter browser cache so a
+      // forced reload re-fetches, longer edge cache because assets change
+      // very rarely and per-byte egress dominates.
+      '/entities/**': {
+        headers: {
+          'Cache-Control': 'public, max-age=86400',
+          'CDN-Cache-Control': 'public, max-age=604800',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
+        },
+      },
+      '/oracles/**': {
+        headers: {
+          'Cache-Control': 'public, max-age=86400',
+          'CDN-Cache-Control': 'public, max-age=604800',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
+        },
+      },
+      '/favicons/**': {
+        headers: {
+          'Cache-Control': 'public, max-age=86400',
+          'CDN-Cache-Control': 'public, max-age=604800',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
+        },
+      },
+      '/sounds/**': {
+        headers: {
+          'Cache-Control': 'public, max-age=86400',
+          'CDN-Cache-Control': 'public, max-age=604800',
+          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
+        },
+      },
+
+      // SWR-friendly API endpoints. Each handler already sets the browser
+      // Cache-Control policy. The catch-all below would otherwise stamp
+      // CDN-Cache-Control: no-store, so these explicit rules let Cloudflare
+      // collapse the same public payload across users while handlers still
+      // drive browser caching.
+      '/api/internal/vaults': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/public/**': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/labels/**': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/euler-chains': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/merkl/opportunities': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/fuul/incentives': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/proxy/intrinsic-apy-overrides': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
+      // Token lists change infrequently — 5 min edge cache, 10 min SWR.
+      '/api/internal/token-list': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
+      // TOS changes very rarely — cache aggressively. Browser gets a
+      // 5 min window; edge can serve for an hour and SWR for a day.
+      '/api/internal/tos': {
+        headers: {
+          'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+          'CDN-Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+        },
+      },
+
+      // HTML and everything else: must not be cached by browsers or CDNs.
+      // S3 retention of old chunks mitigates the original stale-HTML
+      // failure mode for non-HTML routes, but HTML itself must always
+      // resolve to the latest build's chunk hashes. Sensitive/live APIs
+      // such as /api/internal/pyth/updates,
+      // /api/internal/proxy/subgraph/*, /api/internal/proxy/turtle/*,
+      // user-specific reward/proof proxy paths, /api/internal/rpc/*,
+      // /api/internal/tenderly/*, and /api/internal/screen-address also
+      // stay on this strict fallback.
       '/**': {
         headers: {
           'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -227,28 +385,61 @@ export default defineNuxtConfig({
 
   vite: {
     build: { target: 'esnext' },
-    optimizeDeps: { esbuildOptions: { target: 'esnext' } },
+    server: {
+      watch: {
+        ignored: [
+          '**/.parity/**',
+          '**/artifacts/**',
+          '**/.playwright-mcp/**',
+          '**/.nuxt/**',
+          '**/.output/**',
+        ],
+      },
+    },
+    optimizeDeps: {
+      // Linked SDK builds should be loaded directly so Vite does not keep
+      // serving stale optimized bundles after rebuilding the sibling package.
+      include: isLinkedEulerSdk ? chartPackages : [eulerSdkPackage, ...chartPackages],
+      exclude: isLinkedEulerSdk ? [eulerSdkPackage] : [],
+      esbuildOptions: { target: 'esnext' },
+    },
+  },
+  typescript: {
+    strict: false,
+    tsConfig: {
+      compilerOptions: {
+        noImplicitOverride: false,
+        noUncheckedIndexedAccess: false,
+      },
+    },
   },
 
   telemetry: false,
-  eslint: { config: { stylistic: true } },
 
-  ...(process.env.SENTRY_AUTH_TOKEN
-    ? {
-        sentry: {
-          sourceMapsUploadOptions: {
-            org: 'euler',
-            project: 'euler-lite',
-            authToken: process.env.SENTRY_AUTH_TOKEN,
-            sourcemaps: {
-              filesToDeleteAfterUpload: ['**/*.map'],
-            },
-          },
-        },
-      }
-    : {}),
+  hooks: {
+    // The /ui component playground is a dev-only UI kit; it must not ship as
+    // a routable page in production builds. Drop the route (and its bundle)
+    // outside dev so it is neither reachable nor included in the output.
+    // (The /_icons svg-sprite gallery is disabled separately via svgSprite
+    // .iconsPath below, because it is registered by the module's own
+    // pages:extend hook which runs after this one — filtering here can't
+    // remove it reliably.)
+    // NODE_ENV, not import.meta.dev: nuxt.config runs under jiti, where
+    // import.meta.dev is undefined — it would remove the route in dev too.
+    'pages:extend': (pages) => {
+      if (process.env.NODE_ENV === 'development') return
+      const index = pages.findIndex(page => page.path === '/ui')
+      if (index !== -1) pages.splice(index, 1)
+    },
+  },
+  eslint: { config: { stylistic: true } },
 
   svgSprite: {
     elementClass: 'icon',
+    // The module registers a dev-only /_icons sprite-gallery page from
+    // iconsPath. It is not linked anywhere in the app, so disable the route
+    // outside dev (empty iconsPath is falsy and skips the module's page
+    // registration, matching the module's `if (options.iconsPath)` guard).
+    ...(process.env.NODE_ENV === 'development' ? {} : { iconsPath: '' }),
   },
 })

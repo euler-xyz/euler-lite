@@ -41,6 +41,23 @@ npm run lint:fix      # Auto-fix lint errors
 npm run typecheck     # Type-check the project
 ```
 
+## Continuous Integration
+
+Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 (matching the Dockerfile) with npm caching:
+
+- **typecheck** – `npm run typecheck` (blocking)
+- **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.
+- **lint** – `npm run lint` (blocking)
+
+Run the same checks locally before opening a PR:
+
+```bash
+npm run lint
+npm run typecheck
+npm run build       # required so the logger-bundle test can inspect .output
+CI=true npm run test:run
+```
+
 ## Project configuration
 
 - Nuxt config: `nuxt.config.ts`
@@ -54,7 +71,7 @@ npm run typecheck     # Type-check the project
 
 Configuration is split into two mechanisms:
 
-1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, wallet screening. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`. Accepts both plain names (`EULER_API_URL`) and Doppler-prefixed names (`NUXT_PUBLIC_EULER_API_URL`).
+1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, wallet screening. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`. Browser V3 data services use the same-origin `/api/internal/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
 
 2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — branding, social links, feature flags. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
 
@@ -70,33 +87,44 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 
 | Endpoint | Upstream source | Cache TTL | Env var override |
 |----------|----------------|-----------|------------------|
-| `GET /api/euler-chains` | `EulerChains.json` from euler-interfaces | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` |
-| `GET /api/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
-| `GET /api/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
-| `GET /api/token-list?chainId=X` | Euler API + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `EULER_API_URL`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
-| `GET /api/vault-categories?chainId=X[&address=0x…]` | Subgraph vaults query (paginated, capped at 10k per chain) + escrow perspective RPC | 5 min | `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
-| `GET /api/intrinsic-apy?chainId=X` | Every intrinsic-APY source for chain as `{ [addr]: info }` | 5 min (per upstream) | Provider-specific upstreams (DefiLlama, Pendle, Securitize, etc.) |
-| `GET /api/rewards/{merkl,brevis,fuul}?chainId=X` | Merkl / Incentra / Fuul public campaigns | 5 min | Hardcoded provider URLs |
-| `GET /api/vaults?chainId=X` | Pre-computed chain vault snapshot | 10 min (safety floor) | — |
-| `GET /api/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
+| `GET /api/internal/euler-chains` | `EulerChains.json` from euler-interfaces | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` |
+| `GET /api/internal/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels (query-shape; used by Lite helpers) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
+| `GET /api/internal/labels/:chainId/:file` | `{chainId}/{file}` from euler-labels (path-shape; matches the SDK's default `eulerLabelsBaseUrl` template, shares cache with the query-shape route) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
+| `GET /api/internal/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
+| `GET /api/internal/token-list?chainId=X` | Euler V3 + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
+| `GET /api/internal/vaults?chainId=X` | Pre-computed chain vault snapshot built by the server-side SDK | 2 min (V3 configured) / 5 min (no V3) | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL` (presence selects cadence) |
+| `GET\|HEAD /api/internal/proxy/merkl/:path` | `api.merkl.xyz/v4` (`opportunities`, `users`, `campaigns` allowlist) | 60 s | — |
+| `GET\|HEAD\|POST /api/internal/proxy/fuul/:path` | `api.fuul.xyz/api/v1` (`incentives`, `totals`, `claim-checks`, `rewards` allowlist) | 30 s | `FUUL_API_URL`, `NUXT_PUBLIC_FUUL_API_URL` |
+| `GET\|HEAD\|POST /api/internal/proxy/incentra/:path` | Incentra API (`sdk/v1/`, `v1/` allowlist) | 30 s | `INCENTRA_API_URL`, `NUXT_PUBLIC_INCENTRA_API_URL` |
+| `POST /api/internal/proxy/subgraph/:chainId` | Per-chain Goldsky subgraph | 30 s | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
+| `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, account positions, vault reads, vault batch/resolve) | none — V3 caches upstream | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
+| `GET /api/internal/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
 
-All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`.
+All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/internal/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`.
 
-**Startup cache warming**: `server/plugins/warm-cache.ts` runs at Nitro startup and pre-populates `/api/labels/*`, `/api/token-list`, `/api/intrinsic-apy`, `/api/vault-categories`, `/api/rewards/*`, and the vaults snapshot for every enabled chain, plus `/api/euler-chains` once globally. A 5-min interval re-warms thereafter. Each warm task is a **direct function call** (`refreshX()`) that bypasses the handler's fresh-cache short-circuit and forces an upstream fetch, so the entry is always overwritten before it can expire — user requests during the refresh window keep reading the still-fresh previous entry from cache. Warming runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses.
+**Startup cache warming**: `server/plugins/warm-cache.ts` runs at Nitro startup. Two timers:
+
+- **Global cycle (5 min)**: `/api/internal/euler-chains` once, cross-chain `labels/all/assets.json` once, then per-chain `/api/internal/labels/*` and `/api/internal/token-list` for every enabled non-deprecated chain, serialized so cross-chain upstreams dedupe via the in-flight cache.
+- **Vaults cycle (1 min when V3 is configured, otherwise 5 min)**: `/api/internal/vaults` per chain, also serialized.
+
+Each warm task is a **direct function call** (`refreshX()`) that bypasses the handler's fresh-cache short-circuit and forces an upstream fetch, so the entry is always overwritten before it can expire — user requests during the refresh window keep reading the still-fresh previous entry from cache. Warming runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses.
+
+For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
 ### Token List Endpoint Details
 
-The `/api/token-list` endpoint aggregates three token sources, all fetched in parallel with stale-fallback resilience:
+The `/api/internal/token-list` endpoint aggregates four token sources, all fetched in parallel with stale-fallback resilience:
 
-1. **Euler API** (`EULER_API_URL/v1/tokens`) — vault-relevant tokens with logos
+1. **Euler SDK token list** (`sdk.tokenlistService`, configured via `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`; authenticated with `EULER_SDK_V3_API_KEY` when set) — vault-relevant tokens with logos
 2. **DefiLlama** (`NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL`) — broad token coverage
 3. **Uniswap** (`NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`) — baseline token list
+4. **Merkl** — reward tokens
 
-Priority for deduplication: Euler API > DefiLlama > Uniswap. If any source fails, the endpoint still returns data from the remaining sources. The client consumes this via the `useTokenList` composable.
+Priority for deduplication: Euler SDK token list > DefiLlama > Uniswap > Merkl. If any source fails, the endpoint still returns data from the remaining sources. The client consumes this via the `useTokenList` composable.
 
 ### Pyth Proxy Endpoint Details
 
-The `/api/pyth/updates` endpoint proxies Pyth Hermes price update requests through the server. This avoids CORS restrictions and prevents the Hermes URL (which may contain credentials) from reaching the browser.
+The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update requests through the server. This avoids CORS restrictions and prevents the Hermes URL (which may contain credentials) from reaching the browser.
 
 - **Rate limit**: 600 requests per 60-second window
 - **Validation**: Feed IDs must match `0x[64 hex chars]` format, max 100 per request
@@ -121,8 +149,8 @@ The `/api/pyth/updates` endpoint proxies Pyth Hermes price update requests throu
 ## Troubleshooting
 
 - If the app fails to start, ensure Node 24+ and reinstall deps.
-- If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
-- If token logos don't load, verify `EULER_API_URL` (or `NUXT_PUBLIC_EULER_API_URL`) is set. Token data is fetched server-side via `/api/token-list` which aggregates Euler API, Uniswap, and DefiLlama sources with fallback.
+- If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
+- If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) and, when required by the upstream, `EULER_SDK_V3_API_KEY`. Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.
 
 ---
 

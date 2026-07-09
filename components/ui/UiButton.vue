@@ -74,8 +74,9 @@ const onClick = (e: Event) => {
     @click="onClick"
   >
     <div
-      v-show="!loading"
       class="ui-button__wrap"
+      :class="{ 'ui-button__wrap--hidden': loading }"
+      :aria-hidden="loading"
     >
       <div
         v-if="((icon && !iconRight) || $slots.icon)"
@@ -113,7 +114,7 @@ const onClick = (e: Event) => {
 
     <div
       v-if="loading"
-      class="ui-button__wrap"
+      class="ui-button__wrap ui-button__wrap--loading"
     >
       <div class="ui-button__loading">
         <SvgIcon
@@ -160,6 +161,15 @@ const onClick = (e: Event) => {
     width: 100%;
     height: 100%;
     gap: 8px;
+
+    &--hidden {
+      visibility: hidden;
+    }
+
+    &--loading {
+      position: absolute;
+      inset: 0;
+    }
   }
 
   &__text {

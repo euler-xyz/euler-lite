@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
+import { AnnouncementModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
-import { MigrationAnnouncementModal } from '#components'
 
 const route = useRoute()
 const router = useRouter()
-const { migrationAnnouncementUrl, migrationLegacyAppUrl } = useDeployConfig()
-const migrationAnnouncementSeen = useLocalStorage('migration-announcement-seen', false)
+const { announcement } = useDeployConfig()
+const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
+const announcementSeenToken = useLocalStorage('announcement-seen-token', '')
 const modal = useModal()
+let isAnnouncementOpen = false
 
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
@@ -24,9 +26,13 @@ const showAllLabelEntries = useShowAllLabelEntries()
 // imports the composable, making first detail-page visit wait on the full
 // subgraph + accountLens round-trip.
 useEulerAccount()
+// Start migratable-position discovery from the same app-root lifecycle so the
+// Portfolio Migrate tab can appear from preloaded shared state.
+useExternalMigrationPositions()
 
-// Initialize price backend (configures endpoint when chainId changes)
-usePriceBackend()
+// Instantiate the batch store at app root so its simulation watchers stay
+// alive across navigation (mirrors useEulerAccount above).
+useTxBatch()
 
 const { theme } = useTheme()
 
@@ -67,7 +73,6 @@ const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
 
 const checkOnboarding = () => {
-  const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
   if (!isOnboardingCompleted.value) {
     const isDeepLink = route.path !== '/' && route.path !== '/onboarding'
     if (isDeepLink) {
@@ -78,6 +83,12 @@ const checkOnboarding = () => {
   }
 }
 
+const getIsOnboardingCompleted = () => {
+  if (isOnboardingCompleted.value) return true
+  if (!import.meta.client) return false
+  return window.localStorage.getItem('is-onboarding-completed') === 'true'
+}
+
 watch(route, () => {
   if (['onboarding', 'metrics'].includes(route.name as string)) {
     isMenuVisible.value = false
@@ -86,6 +97,7 @@ watch(route, () => {
   }
 
   nextTick(() => {
+    const currentRouteName = route.name as string
     isMenuVisible.value = ![
       'lend-vault',
       'lend-withdraw',
@@ -94,29 +106,43 @@ watch(route, () => {
       'position-number-repay',
       'position-number-supply',
       'position-number-borrow',
+      'position-number-borrow-swap',
       'position-number-withdraw',
-    ].includes(route.name as string)
+      'position-number-multiply',
+      'position-number-collateral-swap',
+    ].includes(currentRouteName)
     isHeaderVisible.value = true
   })
 }, { immediate: true })
 
-const checkMigrationAnnouncement = () => {
-  if (!migrationAnnouncementUrl || migrationAnnouncementSeen.value) return
+const checkAnnouncement = () => {
+  if (!announcement.enabled || !announcement.token) return
+  if (announcementSeenToken.value === announcement.token) return
+  if (isAnnouncementOpen || route.name === 'onboarding') return
+  if (!getIsOnboardingCompleted()) return
 
-  modal.open(MigrationAnnouncementModal, {
+  isAnnouncementOpen = true
+  modal.open(AnnouncementModal, {
     isNotClosable: true,
-    onClose: () => { migrationAnnouncementSeen.value = true },
+    onClose: () => {
+      announcementSeenToken.value = announcement.token
+      isAnnouncementOpen = false
+    },
     props: {
-      announcementUrl: migrationAnnouncementUrl,
-      legacyAppUrl: migrationLegacyAppUrl,
+      title: announcement.title,
+      body: announcement.body,
+      items: announcement.items,
+      announcementUrl: announcement.url,
     },
   })
 }
 
-await loadEulerConfig()
 checkOnboarding()
-// onMounted (not synchronous like checkOnboarding) because the modal system requires the DOM
-onMounted(checkMigrationAnnouncement)
+void loadEulerConfig()
+onMounted(checkAnnouncement)
+watch(() => route.name, () => {
+  nextTick(checkAnnouncement)
+})
 
 watch([chainId, showAllLabelEntries], () => {
   setShowAllLabelEntries(showAllLabelEntries.value)
@@ -199,6 +225,7 @@ onUnmounted(() => {
   </main>
   <UiModals />
   <UiToastContainer />
+  <BatchDrawer />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>

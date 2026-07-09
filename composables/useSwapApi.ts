@@ -1,136 +1,84 @@
-import axios from 'axios'
 import { zeroAddress, type Address } from 'viem'
+import type { SwapProviderExtraData, SwapQuote, SwapQuoteRequest } from '@eulerxyz/euler-v2-sdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
-import {
-  type RoutingConfig,
-  type SwapApiQuote,
-  type SwapApiResponse,
-  SwapperMode,
-} from '~/entities/swap'
 import { EXCLUDED_SWAP_PROVIDERS, SWAP_DEFAULT_DEADLINE_SECONDS } from '~/entities/constants'
+import { COWSWAP_PROVIDER_NAME, isCowSwapSupportedChain } from '~/entities/cowswap'
 
-export interface SwapApiRequestInput {
-  chainId?: number
-  tokenIn: Address
-  tokenOut: Address
-  accountIn: Address
-  accountOut: Address
-  amount: bigint
-  vaultIn: Address
-  receiver: Address
-  origin?: Address
-  slippage?: number
-  swapperMode?: SwapperMode
-  isRepay?: boolean
-  targetDebt?: bigint
-  currentDebt?: bigint
-  deadline?: number
-  dustAccount?: Address
-  unusedInputReceiver?: Address
-  transferOutputToReceiver?: boolean
-  routingOverride?: RoutingConfig
-  provider?: string
-}
+// Re-export the SDK's SwapQuoteRequest, but with the three environment-derived
+// fields (chainId, origin, deadline) optional. The composable fills them from
+// the current Wagmi/Euler context when callers omit them.
+export type SwapQuoteInput
+  = Omit<SwapQuoteRequest, 'chainId' | 'origin' | 'deadline'>
+    & Partial<Pick<SwapQuoteRequest, 'chainId' | 'origin' | 'deadline'>>
 
-const buildRequestParams = (
-  chainId: number | undefined,
-  origin: Address,
-  params: SwapApiRequestInput,
-  deadline: number,
-) => {
-  const requestParams: Record<string, string | number | undefined> = {
+// Alias kept for parity with `origin/development`'s call sites; the dev branch
+// names this `SwapApiRequestInput`. Same shape — pick whichever reads better
+// at the call site.
+export type SwapApiRequestInput = SwapQuoteInput
+
+const withDefaults = (
+  params: SwapQuoteInput,
+  fallbackChainId: number | undefined,
+  fallbackOrigin: Address,
+): SwapQuoteRequest | null => {
+  const chainId = params.chainId ?? fallbackChainId
+  if (!chainId) return null
+  return {
+    ...params,
     chainId,
-    tokenIn: params.tokenIn,
-    tokenOut: params.tokenOut,
-    amount: params.amount?.toString(),
-    targetDebt: params.targetDebt?.toString() || '0',
-    currentDebt: params.currentDebt?.toString() || '0',
-    receiver: params.receiver,
-    vaultIn: params.vaultIn,
-    origin,
-    accountIn: params.accountIn,
-    accountOut: params.accountOut,
-    slippage: params.slippage?.toString() || '0',
-    deadline,
-    swapperMode: params.swapperMode ?? SwapperMode.EXACT_IN,
-    isRepay: String(params.isRepay ?? false),
-    dustAccount: params.dustAccount || origin,
-    unusedInputReceiver: params.unusedInputReceiver,
-    transferOutputToReceiver: params.transferOutputToReceiver != null ? String(params.transferOutputToReceiver) : undefined,
-    routingOverride: params.routingOverride ? JSON.stringify(params.routingOverride) : undefined,
-    provider: params.provider,
+    origin: params.origin ?? fallbackOrigin,
+    deadline: params.deadline ?? Math.floor(Date.now() / 1000) + SWAP_DEFAULT_DEADLINE_SECONDS,
   }
-
-  return Object.fromEntries(
-    Object.entries(requestParams).filter(([, value]) => value !== undefined && value !== null),
-  )
-}
-
-const parseSwapApiResponse = (payload: SwapApiResponse | { data?: SwapApiQuote[] }) => {
-  if ('success' in payload && payload.success === false) {
-    throw new Error('Swap API returned success=false')
-  }
-  if ('data' in payload && Array.isArray(payload.data)) {
-    return payload.data
-  }
-  return []
-}
-
-const parseSwapProvidersResponse = (payload: { success?: boolean, data?: string[] }) => {
-  if ('success' in payload && payload.success === false) {
-    throw new Error('Swap API returned success=false')
-  }
-  if ('data' in payload && Array.isArray(payload.data)) {
-    return payload.data
-  }
-  return []
 }
 
 export const useSwapApi = () => {
-  const { SWAP_API_URL } = useEulerConfig()
   const { chainId } = useEulerAddresses()
   const { address } = useWagmi()
-
-  const baseUrl = SWAP_API_URL
+  const { isSpyMode, spyAddress } = useSpyMode()
 
   const getSwapQuotes = async (
-    params: SwapApiRequestInput,
-    options?: { signal?: AbortSignal },
-  ): Promise<SwapApiQuote[]> => {
-    if (!params.tokenIn || !params.tokenOut) {
-      return []
-    }
+    params: SwapQuoteInput,
+    // Kept for source compatibility — the SDK does not accept an AbortSignal
+    // today. The composable's race guard discards stale responses; in-flight
+    // requests still run to completion.
+    _options?: { signal?: AbortSignal },
+  ): Promise<SwapQuote[]> => {
+    if (!params.tokenIn || !params.tokenOut) return []
 
-    const origin = params.origin || address.value || zeroAddress
-    const deadline = params.deadline || (Math.floor(Date.now() / 1000) + SWAP_DEFAULT_DEADLINE_SECONDS)
-    const requestParams = buildRequestParams(chainId.value, origin, params, deadline)
+    // Spy mode has no connected wallet, so address.value is empty. Falling
+    // through to zeroAddress makes every aggregator reject the request as the
+    // simulating `from` is invalid. Use the spied owner instead so providers
+    // see a real address with realistic balances/allowances.
+    const spyOrigin = isSpyMode.value && spyAddress.value ? spyAddress.value as Address : null
+    const fallbackOrigin = (address.value ?? spyOrigin ?? zeroAddress) as Address
+    const request = withDefaults(params, chainId.value, fallbackOrigin)
+    if (!request) return []
 
-    const response = await axios.get<SwapApiResponse>(
-      `${baseUrl}/swaps`,
-      {
-        params: requestParams,
-        signal: options?.signal,
-      },
-    )
-
-    return parseSwapApiResponse(response.data)
+    const sdk = await getEulerSdkForChain(request.chainId)
+    return sdk.swapService.fetchSwapQuotes(request)
   }
 
-  const getSwapProviders = async (): Promise<string[]> => {
-    if (!chainId.value) {
-      return []
-    }
+  // `includeCowSwap` lets the parallel-quotes pipeline opt CoW back in for
+  // pages that wire CoW execution (multiply / repay-with-collateral). The
+  // baseline excludes CoW because most legacy code paths assume an EVC
+  // batch, not an intent.
+  const getSwapProviders = async (
+    options?: { includeCowSwap?: boolean },
+  ): Promise<string[]> => {
+    // Capture the chain id once so the SDK backend selection and the fetch
+    // can't diverge if the user switches chains mid-await.
+    const targetChainId = chainId.value
+    if (!targetChainId) return []
     try {
-      const response = await axios.get<{ success?: boolean, data?: string[] }>(
-        `${baseUrl}/providers`,
-        {
-          params: {
-            chainId: chainId.value,
-          },
-        },
-      )
-      const providers = parseSwapProvidersResponse(response.data)
-      return providers.filter(p => !EXCLUDED_SWAP_PROVIDERS.has(p.toLowerCase()))
+      const sdk = await getEulerSdkForChain(targetChainId)
+      const providers = await sdk.swapService.fetchProviders(targetChainId)
+      const includeCow = options?.includeCowSwap && isCowSwapSupportedChain(targetChainId)
+      return providers.filter((p) => {
+        const normalized = p.toLowerCase()
+        return !EXCLUDED_SWAP_PROVIDERS.has(normalized)
+          && (normalized !== COWSWAP_PROVIDER_NAME || includeCow)
+      })
     }
     catch (error) {
       logWarn('swapApi/providers', error)
@@ -139,17 +87,20 @@ export const useSwapApi = () => {
   }
 
   const getSwapQuote = async (
-    params: SwapApiRequestInput,
+    params: SwapQuoteInput,
     options?: { signal?: AbortSignal },
-  ): Promise<SwapApiQuote | null> => {
+  ): Promise<SwapQuote | null> => {
     const quotes = await getSwapQuotes(params, options)
     return quotes[0] || null
   }
 
   return {
-    baseUrl,
     getSwapQuote,
     getSwapQuotes,
     getSwapProviders,
   }
 }
+
+// Re-export the SDK's provider-extra-data type so call sites that want to
+// type-check their CoW wrapper payloads don't need to reach into the SDK.
+export type { SwapProviderExtraData }

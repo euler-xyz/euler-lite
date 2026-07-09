@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { maxUint256 } from 'viem'
-import type { MarketGroup } from '~/entities/lend-discovery'
-import type { Vault, SecuritizeVault, AnyBorrowVaultPair } from '~/entities/vault'
+import { isEVault, type SecuritizeCollateralVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { formatCompactUsdValue } from '~/utils/string-utils'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
+import { logWarn } from '~/utils/errorHandling'
 import {
-  isVaultType,
   getVaultAddress,
   getMiniDiagram,
   getCollateralMatrix,
@@ -19,16 +18,32 @@ import {
   type CollateralMatrixData,
   type DotMetric,
   type ExpandedViewMode,
+  type MatrixVariant,
   type AttributeMatrixData,
   type MatrixViewId,
   type VaultUsdCacheEntry,
   type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
+import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
+import type { MarketGroup } from '~/entities/lend-discovery'
+import { maxUint256 } from 'viem'
 
 const props = defineProps<{
   markets: MarketGroup[]
   initialExpanded?: string[]
 }>()
+
+const { isMarketDataResolved } = useVaults()
+const route = useRoute()
+const { chainId } = useEulerAddresses()
+const { badDebtByChain, isBadDebtEnabled, isBadDebtLoaded, loadBadDebtForChain } = useVaultBadDebt()
+const shareLinkQuery = computed(() => {
+  const network = route.query.network
+
+  return {
+    network: Array.isArray(network) ? network[0] ?? chainId.value : network ?? chainId.value,
+  }
+})
 
 // -- Accordion expand state --
 
@@ -46,6 +61,9 @@ const toggleExpand = (marketId: string) => {
     }
     if (selectedGraphNode.value?.marketId === marketId) {
       selectedGraphNode.value = null
+    }
+    if (matrixDropdownOpenMarketId.value === marketId) {
+      matrixDropdownOpenMarketId.value = null
     }
   }
   else {
@@ -74,6 +92,9 @@ const setExpandedView = (marketId: string, mode: ExpandedViewMode) => {
     if (selectedMatrixHeader.value?.marketId === marketId) {
       selectedMatrixHeader.value = null
     }
+    if (matrixDropdownOpenMarketId.value === marketId) {
+      matrixDropdownOpenMarketId.value = null
+    }
   }
   else {
     if (selectedGraphNode.value?.marketId === marketId) {
@@ -89,77 +110,134 @@ const vaultUsdCache = ref<Map<string, VaultUsdCacheEntry>>(new Map())
 const formatUsdOrDisplay = (p: { hasPrice: boolean, usdValue: number, display: string }) =>
   p.hasPrice ? formatCompactUsdValue(p.usdValue) : p.display
 
-const loadVaultUsdValues = async (market: MarketGroup) => {
-  const newEntries = new Map(vaultUsdCache.value)
-  const allVaults = [...market.vaults, ...market.externalCollateral.filter(isMatrixCompatibleVault)]
+const loadVaultUsdValues = async (market: MarketGroup, { force = false }: { force?: boolean } = {}) => {
+  const existingEntries = vaultUsdCache.value
+  const marketEntries = new Map<string, VaultUsdCacheEntry>()
+  const allVaults = [...market.vaults, ...market.externalCollateral].filter(isMatrixCompatibleVault)
 
   await Promise.all(
     allVaults.map(async (vault) => {
       const addr = getVaultAddress(vault).toLowerCase()
-      if (!addr || newEntries.has(addr)) return
+      if (!addr || (!force && existingEntries.has(addr))) return
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
-      const supply = 'supply' in vault ? vault.supply as bigint : totalAssets
-      const borrow = 'borrow' in vault ? vault.borrow as bigint : 0n
-      const supplyCapRaw = 'supplyCap' in vault ? vault.supplyCap as bigint : maxUint256
-      const borrowCapRaw = 'borrowCap' in vault ? vault.borrowCap as bigint : maxUint256
+      const borrow = 'totalBorrowed' in vault ? vault.totalBorrowed as bigint : 0n
+      const supplyCapRaw = 'caps' in vault ? vault.caps.supplyCap : ('supplyCap' in vault ? vault.supplyCap as bigint : maxUint256)
+      const borrowCapRaw = 'caps' in vault ? vault.caps.borrowCap : maxUint256
 
-      const liquidity = supply >= borrow ? supply - borrow : 0n
+      const liquidity = 'availableLiquidity' in vault ? vault.availableLiquidity : 0n
       const supplyCapHasPrice = supplyCapRaw > 0n && supplyCapRaw < maxUint256
       const borrowCapHasPrice = borrowCapRaw > 0n && borrowCapRaw < maxUint256
 
-      const [supplyPrice, borrowPrice, liquidityPrice, supplyCapPrice, borrowCapPrice] = await Promise.all([
-        formatAssetValue(totalAssets, vault, 'off-chain'),
-        formatAssetValue(borrow, vault, 'off-chain'),
-        formatAssetValue(liquidity, vault, 'off-chain'),
-        supplyCapHasPrice ? formatAssetValue(supplyCapRaw, vault, 'off-chain') : null,
-        borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
-      ])
+      try {
+        const [supplyPrice, borrowPrice, liquidityPrice, supplyCapPrice, borrowCapPrice] = await Promise.all([
+          formatAssetValue(totalAssets, vault, 'off-chain'),
+          formatAssetValue(borrow, vault, 'off-chain'),
+          formatAssetValue(liquidity, vault, 'off-chain'),
+          supplyCapHasPrice ? formatAssetValue(supplyCapRaw, vault, 'off-chain') : null,
+          borrowCapHasPrice ? formatAssetValue(borrowCapRaw, vault, 'off-chain') : null,
+        ])
 
-      newEntries.set(addr, {
-        supply: formatUsdOrDisplay(supplyPrice),
-        supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
-        borrow: formatUsdOrDisplay(borrowPrice),
-        borrowUsd: borrowPrice.hasPrice ? borrowPrice.usdValue : 0,
-        liquidity: formatUsdOrDisplay(liquidityPrice),
-        liquidityUsd: liquidityPrice.hasPrice ? liquidityPrice.usdValue : 0,
-        supplyCap: formatCapDisplay(supplyCapRaw, supplyCapPrice ? formatUsdOrDisplay(supplyCapPrice) : null).display,
-        supplyCapUsd: supplyCapPrice?.hasPrice ? supplyCapPrice.usdValue : undefined,
-        borrowCap: formatCapDisplay(borrowCapRaw, borrowCapPrice ? formatUsdOrDisplay(borrowCapPrice) : null).display,
-        borrowCapUsd: borrowCapPrice?.hasPrice ? borrowCapPrice.usdValue : undefined,
-      })
+        marketEntries.set(addr, {
+          supply: formatUsdOrDisplay(supplyPrice),
+          supplyUsd: supplyPrice.hasPrice ? supplyPrice.usdValue : 0,
+          supplyHasPrice: supplyPrice.hasPrice,
+          borrow: formatUsdOrDisplay(borrowPrice),
+          borrowUsd: borrowPrice.hasPrice ? borrowPrice.usdValue : 0,
+          liquidity: formatUsdOrDisplay(liquidityPrice),
+          liquidityUsd: liquidityPrice.hasPrice ? liquidityPrice.usdValue : 0,
+          supplyCap: formatCapDisplay(supplyCapRaw, supplyCapPrice ? formatUsdOrDisplay(supplyCapPrice) : null).display,
+          supplyCapUsd: supplyCapPrice?.hasPrice ? supplyCapPrice.usdValue : undefined,
+          borrowCap: formatCapDisplay(borrowCapRaw, borrowCapPrice ? formatUsdOrDisplay(borrowCapPrice) : null).display,
+          borrowCapUsd: borrowCapPrice?.hasPrice ? borrowCapPrice.usdValue : undefined,
+        })
+      }
+      catch (e) {
+        // A rejected price fetch must not blank the whole market: leaving the
+        // entry absent reads as a perpetual "loading" exposure cell. Record it
+        // as priced-out (supplyHasPrice: false) so exposure degrades to the
+        // qualitative/unavailable state instead of spinning forever.
+        logWarn('DiscoveryMarketAccordion/loadVaultUsdValues', e)
+        marketEntries.set(addr, {
+          supply: '-',
+          supplyUsd: 0,
+          supplyHasPrice: false,
+          borrow: '-',
+          borrowUsd: 0,
+          liquidity: '-',
+          liquidityUsd: 0,
+          supplyCap: '-',
+          supplyCapUsd: undefined,
+          borrowCap: '-',
+          borrowCapUsd: undefined,
+        })
+      }
     }),
   )
 
-  vaultUsdCache.value = newEntries
+  vaultUsdCache.value = new Map([...vaultUsdCache.value, ...marketEntries])
+}
+
+const loadExpandedVaultUsdValues = async () => {
+  const expanded = props.markets.filter(market => isExpanded(market.id))
+  if (!expanded.length) return
+  await Promise.all(expanded.map(market => loadVaultUsdValues(market, { force: true })))
 }
 
 const onToggle = (market: MarketGroup) => {
   const wasExpanded = isExpanded(market.id)
   toggleExpand(market.id)
-  if (!wasExpanded) loadVaultUsdValues(market)
+  if (!wasExpanded) {
+    loadVaultUsdValues(market)
+    if (isBadDebtEnabled.value) void loadBadDebtForChain()
+  }
 }
+
+watch([() => props.markets, isMarketDataResolved, chainId], () => {
+  void loadExpandedVaultUsdValues()
+  if (isBadDebtEnabled.value && expandedMarkets.value.size > 0) void loadBadDebtForChain()
+})
 
 // -- Matrix view selector (single dropdown spans Stats, Configuration,
 // Oracles, and the four numeric pair metrics) --
 
-const matrixView = ref<MatrixViewId>('stats')
-const matrixDropdownOpen = ref(false)
+const matrixViews = ref<Map<string, MatrixViewId>>(new Map())
+const matrixDropdownOpenMarketId = ref<string | null>(null)
 
-const matrixVariant = computed(() => isAttributeMatrixView(matrixView.value) ? matrixView.value : 'pairs')
-const dotMetric = computed<DotMetric>(() => {
-  if (isAttributeMatrixView(matrixView.value)) return 'net-apy' // unused for attribute matrices
-  return matrixView.value
-})
+const getMatrixView = (marketId: string): MatrixViewId =>
+  matrixViews.value.get(marketId) ?? 'stats'
 
-const setMatrixView = (view: MatrixViewId) => {
-  if (matrixView.value === view) {
-    matrixDropdownOpen.value = false
+const getMatrixVariant = (marketId: string): MatrixVariant => {
+  const view = getMatrixView(marketId)
+  return isAttributeMatrixView(view) ? view : 'pairs'
+}
+
+const getDotMetric = (marketId: string): DotMetric => {
+  const view = getMatrixView(marketId)
+  if (isAttributeMatrixView(view)) return 'net-apy' // unused for non-pair matrices
+  return view
+}
+
+const setMatrixView = (marketId: string, view: MatrixViewId) => {
+  if (getMatrixView(marketId) === view) {
+    matrixDropdownOpenMarketId.value = null
     return
   }
-  matrixView.value = view
-  matrixDropdownOpen.value = false
-  selectedCell.value = null
-  selectedMatrixHeader.value = null
+  const next = new Map(matrixViews.value)
+  next.set(marketId, view)
+  matrixViews.value = next
+  matrixDropdownOpenMarketId.value = null
+  if (selectedCell.value?.marketId === marketId) {
+    selectedCell.value = null
+  }
+  if (selectedMatrixHeader.value?.marketId === marketId) {
+    selectedMatrixHeader.value = null
+  }
+}
+
+const isMatrixDropdownOpen = (marketId: string) => matrixDropdownOpenMarketId.value === marketId
+
+const toggleMatrixDropdown = (marketId: string) => {
+  matrixDropdownOpenMarketId.value = isMatrixDropdownOpen(marketId) ? null : marketId
 }
 
 // -- Precomputed matrix map --
@@ -174,31 +252,34 @@ const matrixMap = computed((): Map<string, CollateralMatrixData | null> => {
 
 const attributeMatrixMap = computed((): Map<string, AttributeMatrixData> => {
   const result = new Map<string, AttributeMatrixData>()
-  if (!isAttributeMatrixView(matrixView.value)) return result
   for (const market of props.markets) {
-    result.set(market.id, getAttributeMatrix(market, matrixView.value))
+    const matrixView = getMatrixView(market.id)
+    if (isAttributeMatrixView(matrixView)) {
+      result.set(market.id, getAttributeMatrix(market, matrixView))
+    }
   }
   return result
 })
 
 // Stats matrix needs the same APY users see on per-vault cards (base IRM rate
-// folded with intrinsic + supply/borrow rewards). The composables fetch this
-// data asynchronously and bump `version` when it lands; the explicit reads
-// here re-trigger the computed so the cells refresh in place.
-const { withIntrinsicSupplyApy, withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
-const { getSupplyRewardApy, getBorrowRewardApy, version: rewardsVersion } = useRewardsApy()
+// folded with intrinsic + supply/borrow rewards). Viewer + settings are
+// reactive — touching them inside the computed re-runs the cache build when
+// the connected wallet changes or the user toggles intrinsic/rewards.
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+const { viewer } = useApyVisibility()
 
 const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
-  void intrinsicVersion.value
-  void rewardsVersion.value
-  return buildVaultApyCache(
-    props.markets,
-    withIntrinsicSupplyApy,
-    withIntrinsicBorrowApy,
-    getSupplyRewardApy,
-    getBorrowRewardApy,
-  )
+  return buildVaultApyCache(props.markets, viewer.value, {
+    enableIntrinsicApy: enableIntrinsicApy.value,
+    enableRewardsApy: enableRewardsApy.value,
+  })
 })
+
+const vaultBadDebtCache = computed<Map<string, VaultBadDebtCacheEntry>>(() =>
+  badDebtByChain.value.get(chainId.value) ?? new Map(),
+)
 
 // -- Cell selection state (matrix view) --
 
@@ -262,7 +343,7 @@ const onCellClick = (marketId: string, collateralAddr: string, liabilityAddr: st
 
 // -- Selection → vault resolution --
 
-const getSelectedLendVault = (market: MarketGroup): Vault | SecuritizeVault | null => {
+const getSelectedLendVault = (market: MarketGroup): EVault | SecuritizeCollateralVault | null => {
   if (!selectedCell.value || selectedCell.value.marketId !== market.id) return null
   return findVault(market, selectedCell.value.liabilityAddr)
 }
@@ -275,19 +356,15 @@ const getSelectedBorrowPair = (market: MarketGroup): AnyBorrowVaultPair | null =
   if (!cell) return null
   const collateral = findVault(market, selectedCell.value.collateralAddr)
   const borrow = findVault(market, selectedCell.value.liabilityAddr)
-  if (!collateral || !borrow || !isVaultType(borrow)) return null
+  if (!collateral || !borrow || !isEVault(borrow)) return null
   return {
     borrow,
     collateral,
-    borrowLTV: cell.ltv.borrowLTV,
-    liquidationLTV: cell.ltv.liquidationLTV,
-    initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-    targetTimestamp: cell.ltv.targetTimestamp,
-    rampDuration: cell.ltv.rampDuration,
+    ltv: cell.ltv,
   } as AnyBorrowVaultPair
 }
 
-const getMatrixHeaderVault = (market: MarketGroup): Vault | SecuritizeVault | null => {
+const getMatrixHeaderVault = (market: MarketGroup): EVault | SecuritizeCollateralVault | null => {
   if (!selectedMatrixHeader.value || selectedMatrixHeader.value.marketId !== market.id) return null
   return findVault(market, selectedMatrixHeader.value.address)
 }
@@ -303,18 +380,14 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
   if (selectedMatrixHeader.value.axis === 'column') {
     for (const [collateralAddr, rowCells] of matrix.cells) {
       const cell = rowCells.get(addr)
-      if (!cell || cell.ltv.borrowLTV <= 0n) continue
+      if (!cell || cell.ltv.borrowLTV <= 0) continue
       const collateral = findVault(market, collateralAddr)
       const borrow = findVault(market, addr)
-      if (!collateral || !borrow || !isVaultType(borrow)) continue
+      if (!collateral || !borrow || !isEVault(borrow)) continue
       pairs.push({
         borrow,
         collateral,
-        borrowLTV: cell.ltv.borrowLTV,
-        liquidationLTV: cell.ltv.liquidationLTV,
-        initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-        targetTimestamp: cell.ltv.targetTimestamp,
-        rampDuration: cell.ltv.rampDuration,
+        ltv: cell.ltv,
       } as AnyBorrowVaultPair)
     }
   }
@@ -322,18 +395,14 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
     const rowCells = matrix.cells.get(addr)
     if (!rowCells) return []
     for (const [liabilityAddr, cell] of rowCells) {
-      if (cell.ltv.borrowLTV <= 0n) continue
+      if (cell.ltv.borrowLTV <= 0) continue
       const collateral = findVault(market, addr)
       const borrow = findVault(market, liabilityAddr)
-      if (!collateral || !borrow || !isVaultType(borrow)) continue
+      if (!collateral || !borrow || !isEVault(borrow)) continue
       pairs.push({
         borrow,
         collateral,
-        borrowLTV: cell.ltv.borrowLTV,
-        liquidationLTV: cell.ltv.liquidationLTV,
-        initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-        targetTimestamp: cell.ltv.targetTimestamp,
-        rampDuration: cell.ltv.rampDuration,
+        ltv: cell.ltv,
       } as AnyBorrowVaultPair)
     }
   }
@@ -341,7 +410,7 @@ const getMatrixHeaderBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] =
   return pairs
 }
 
-const getGraphSelectedVault = (market: MarketGroup): Vault | SecuritizeVault | null => {
+const getGraphSelectedVault = (market: MarketGroup): EVault | SecuritizeCollateralVault | null => {
   if (!selectedGraphNode.value || selectedGraphNode.value.marketId !== market.id) return null
   return findVault(market, selectedGraphNode.value.address)
 }
@@ -356,18 +425,14 @@ const getGraphBorrowPairs = (market: MarketGroup): AnyBorrowVaultPair[] => {
 
   for (const [collateralAddr, rowCells] of matrix.cells) {
     const cell = rowCells.get(selectedAddr)
-    if (!cell || cell.ltv.borrowLTV <= 0n) continue
+    if (!cell || cell.ltv.borrowLTV <= 0) continue
     const collateral = findVault(market, collateralAddr)
     const borrow = findVault(market, selectedAddr)
-    if (!collateral || !borrow || !isVaultType(borrow)) continue
+    if (!collateral || !borrow || !isEVault(borrow)) continue
     pairs.push({
       borrow,
       collateral,
-      borrowLTV: cell.ltv.borrowLTV,
-      liquidationLTV: cell.ltv.liquidationLTV,
-      initialLiquidationLTV: cell.ltv.initialLiquidationLTV,
-      targetTimestamp: cell.ltv.targetTimestamp,
-      rampDuration: cell.ltv.rampDuration,
+      ltv: cell.ltv,
     } as AnyBorrowVaultPair)
   }
 
@@ -385,11 +450,14 @@ const hasSelection = (market: MarketGroup): boolean => {
   return !!selectedGraphNode.value && selectedGraphNode.value.marketId === market.id
 }
 
+const maxRoeMatrixNotice = 'Max ROE only shown for correlated pairs.'
+const maxMultiplierMatrixNotice = 'Max multiplier only shown for correlated pairs.'
+
 // -- Global event handlers --
 
 onMounted(() => {
   const onClick = () => {
-    matrixDropdownOpen.value = false
+    matrixDropdownOpenMarketId.value = null
   }
   window.addEventListener('click', onClick)
   onUnmounted(() => {
@@ -401,16 +469,32 @@ onMounted(() => {
       loadVaultUsdValues(market)
     }
   }
+  if (isBadDebtEnabled.value && expandedMarkets.value.size > 0) void loadBadDebtForChain()
 })
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div
+    class="flex flex-col gap-8"
+    data-id="discovery-market-list"
+    data-list="discovery-market"
+    :data-count="markets.length"
+  >
     <article
       v-for="market in markets"
       :key="market.id"
-      class="bg-surface rounded-12 border border-line-default shadow-card transition-all"
-      :class="isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis'"
+      class="relative bg-surface rounded-12 border border-line-default shadow-card transition-all"
+      data-id="discovery-market-list-item"
+      data-list="discovery-market"
+      :data-key="market.id"
+      :data-market-id="market.id"
+      :data-vault-count="market.vaults.length"
+      :data-external-collateral-count="market.externalCollateral.length"
+      :data-pair-count="getMiniDiagram(market).pairCount"
+      :class="[
+        isExpanded(market.id) ? 'shadow-card-hover border-line-emphasis' : 'hover:shadow-card-hover hover:border-line-emphasis',
+        isMatrixDropdownOpen(market.id) ? 'z-[60]' : isExpanded(market.id) ? 'z-10' : 'z-0',
+      ]"
     >
       <!-- Collapsed Row Card -->
       <DiscoveryMarketCard
@@ -433,12 +517,12 @@ onMounted(() => {
                 :key="getVaultAddress(vault)"
               >
                 <VaultItem
-                  v-if="isVaultType(vault)"
+                  v-if="isEVault(vault)"
                   :vault="vault"
                 />
                 <SecuritizeVaultItem
                   v-else
-                  :vault="vault as SecuritizeVault"
+                  :vault="vault as SecuritizeCollateralVault"
                 />
               </template>
             </div>
@@ -451,17 +535,28 @@ onMounted(() => {
           <div
             v-if="matrix"
             class="border-t border-line-subtle"
+            data-id="discovery-market-expanded"
+            data-list="discovery-market-expanded"
+            :data-key="market.id"
+            :data-market-id="market.id"
+            :data-field="getExpandedView(market.id)"
+            :data-matrix-view="getMatrixView(market.id)"
             @click="selectedGraphNode?.marketId === market.id && (selectedGraphNode = null)"
           >
             <!-- Controls: view toggle + metric dropdown -->
             <div
-              class="px-16 pt-12 pb-8 flex flex-wrap items-center gap-8"
+              class="relative z-[70] px-16 pt-12 pb-8 flex flex-wrap items-center gap-8"
               @click.stop
             >
               <!-- Graph / Matrix toggle -->
               <div class="flex rounded-[100px] border border-line-default overflow-hidden">
                 <button
                   class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3"
+                  data-id="discovery-view-toggle"
+                  data-list="discovery-view-toggle"
+                  :data-key="`${market.id}:graph`"
+                  :data-market-id="market.id"
+                  data-field="graph"
                   :class="getExpandedView(market.id) === 'graph'
                     ? 'bg-accent-300/20 text-accent-700 font-medium'
                     : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
@@ -475,6 +570,11 @@ onMounted(() => {
                 </button>
                 <button
                   class="flex items-center gap-4 min-h-36 py-6 px-12 cursor-pointer transition-all text-p3 border-l border-line-default"
+                  data-id="discovery-view-toggle"
+                  data-list="discovery-view-toggle"
+                  :data-key="`${market.id}:matrix`"
+                  :data-market-id="market.id"
+                  data-field="matrix"
                   :class="getExpandedView(market.id) === 'matrix'
                     ? 'bg-accent-300/20 text-accent-700 font-medium'
                     : 'bg-surface text-content-secondary hover:bg-surface-secondary'"
@@ -495,41 +595,75 @@ onMounted(() => {
                    pair matrix with the corresponding dotMetric. -->
               <div
                 v-if="getExpandedView(market.id) === 'matrix'"
-                class="relative"
+                class="matrix-view-select relative"
               >
                 <div
-                  class="ui-select__field"
-                  @click.stop="matrixDropdownOpen = !matrixDropdownOpen"
+                  class="ui-select__field matrix-view-select__field"
+                  data-id="discovery-matrix-view-select"
+                  :data-key="market.id"
+                  :data-market-id="market.id"
+                  :data-field="getMatrixView(market.id)"
+                  @click.stop="toggleMatrixDropdown(market.id)"
                 >
                   <UiIcon
                     name="filter"
-                    class="ui-select__icon"
+                    class="ui-select__icon matrix-view-select__icon"
                   />
-                  <span class="ui-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === matrixView)?.label }}</span>
+                  <span class="ui-select__text matrix-view-select__text">{{ MATRIX_VIEW_OPTIONS.find(o => o.id === getMatrixView(market.id))?.label }}</span>
                   <UiIcon
                     name="arrow-down"
-                    class="ui-select__arrow"
-                    :style="matrixDropdownOpen ? 'transform: rotate(180deg)' : ''"
+                    class="ui-select__arrow matrix-view-select__arrow"
+                    :style="isMatrixDropdownOpen(market.id) ? 'transform: rotate(180deg)' : ''"
                   />
                 </div>
                 <div
-                  v-if="matrixDropdownOpen"
-                  class="absolute left-0 top-full mt-4 z-50 bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
+                  v-if="isMatrixDropdownOpen(market.id)"
+                  class="absolute left-0 top-full mt-4 z-[120] bg-surface border border-line-default rounded-12 shadow-card py-4 min-w-[180px]"
                 >
                   <button
                     v-for="option in MATRIX_VIEW_OPTIONS"
                     :key="option.id"
                     class="w-full text-left px-14 py-6 text-p3 cursor-pointer transition-colors"
-                    :class="matrixView === option.id
+                    data-id="discovery-matrix-view-option"
+                    data-list="discovery-matrix-view-option"
+                    :data-key="`${market.id}:${option.id}`"
+                    :data-market-id="market.id"
+                    :data-field="option.id"
+                    :class="getMatrixView(market.id) === option.id
                       ? 'text-accent-700 bg-accent-300/20 font-medium'
                       : 'text-content-secondary hover:bg-surface-secondary'"
-                    @click.stop="setMatrixView(option.id)"
+                    @click.stop="setMatrixView(market.id, option.id)"
                   >
                     {{ option.label }}
                   </button>
                 </div>
               </div>
+
+              <UiShareLinkButton
+                class="ml-auto !w-28 !h-28"
+                :path="`/explore/${market.id}`"
+                :query="shareLinkQuery"
+                label="Copy market link"
+                variant="ghost"
+              />
             </div>
+
+            <p
+              v-if="getExpandedView(market.id) === 'matrix' && getMatrixView(market.id) === 'roe'"
+              class="px-16 pb-8 text-center text-p3 text-content-tertiary"
+              data-id="discovery-max-roe-correlation-notice"
+              :data-key="market.id"
+            >
+              {{ maxRoeMatrixNotice }}
+            </p>
+            <p
+              v-if="getExpandedView(market.id) === 'matrix' && getMatrixView(market.id) === 'multiplier'"
+              class="px-16 pb-8 text-center text-p3 text-content-tertiary"
+              data-id="discovery-max-multiplier-correlation-notice"
+              :data-key="market.id"
+            >
+              {{ maxMultiplierMatrixNotice }}
+            </p>
 
             <!-- Graph View -->
             <DiscoveryMarketGraph
@@ -542,10 +676,10 @@ onMounted(() => {
 
             <!-- Matrix View: LTV pairs -->
             <DiscoveryMarketMatrix
-              v-else-if="matrixVariant === 'pairs'"
+              v-else-if="getMatrixVariant(market.id) === 'pairs'"
               :market="market"
               :matrix="matrix"
-              :dot-metric="dotMetric"
+              :dot-metric="getDotMetric(market.id)"
               :selected-cell="selectedCell?.marketId === market.id ? { collateralAddr: selectedCell.collateralAddr, liabilityAddr: selectedCell.liabilityAddr } : null"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-cell="(col: string, lia: string) => onCellClick(market.id, col, lia)"
@@ -556,8 +690,11 @@ onMounted(() => {
             <DiscoveryMarketAttributeMatrix
               v-else-if="attributeMatrixMap.get(market.id)"
               :data="attributeMatrixMap.get(market.id)!"
+              :view="getMatrixView(market.id)"
               :usd-cache="vaultUsdCache"
               :apy-cache="vaultApyCache"
+              :bad-debt-cache="vaultBadDebtCache"
+              :show-bad-debt-column="isBadDebtEnabled && isBadDebtLoaded"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />
@@ -585,12 +722,12 @@ onMounted(() => {
                             Lend
                           </h4>
                           <VaultItem
-                            v-if="isVaultType(vault)"
+                            v-if="isEVault(vault)"
                             :vault="vault"
                           />
                           <SecuritizeVaultItem
                             v-else
-                            :vault="vault as SecuritizeVault"
+                            :vault="vault as SecuritizeCollateralVault"
                           />
                         </template>
                       </template>
@@ -609,9 +746,29 @@ onMounted(() => {
                     </div>
                   </template>
 
-                  <!-- Cell selection: single lend + single borrow card -->
+                  <!-- Cell selection -->
                   <template v-else>
-                    <div class="flex flex-col gap-12">
+                    <!-- Oracle view: dedicated oracle adapters section for the
+                         selected collateral/liability pair (same component as the
+                         borrow page's Oracles block). -->
+                    <template v-if="getMatrixView(market.id) === 'oracle'">
+                      <template
+                        v-for="pair in [getSelectedBorrowPair(market)]"
+                        :key="'oracle-' + (pair ? `${pair.collateral.address}-${pair.borrow.address}` : '')"
+                      >
+                        <VaultOverviewBlockOracleAdapters
+                          v-if="pair"
+                          :vault="pair.borrow"
+                          :collateral-vaults="[pair.collateral]"
+                        />
+                      </template>
+                    </template>
+
+                    <!-- Other metrics: single lend + single borrow card -->
+                    <div
+                      v-else
+                      class="flex flex-col gap-12"
+                    >
                       <template
                         v-for="lendVault in [getSelectedLendVault(market)]"
                         :key="'lend-' + (lendVault ? getVaultAddress(lendVault) : '')"
@@ -621,12 +778,12 @@ onMounted(() => {
                             Lend
                           </h4>
                           <VaultItem
-                            v-if="isVaultType(lendVault)"
+                            v-if="isEVault(lendVault)"
                             :vault="lendVault"
                           />
                           <SecuritizeVaultItem
                             v-else
-                            :vault="lendVault as SecuritizeVault"
+                            :vault="lendVault as SecuritizeCollateralVault"
                           />
                         </template>
                       </template>
@@ -658,12 +815,12 @@ onMounted(() => {
                           Lend
                         </h4>
                         <VaultItem
-                          v-if="isVaultType(vault)"
+                          v-if="isEVault(vault)"
                           :vault="vault"
                         />
                         <SecuritizeVaultItem
                           v-else
-                          :vault="vault as SecuritizeVault"
+                          :vault="vault as SecuritizeCollateralVault"
                         />
                       </template>
                     </template>
@@ -699,3 +856,54 @@ onMounted(() => {
     </article>
   </div>
 </template>
+
+<style scoped lang="scss">
+.matrix-view-select {
+  width: fit-content;
+  max-width: 100%;
+
+  &__field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    width: fit-content;
+    max-width: 100%;
+    color: var(--ui-select-field-color);
+    font-size: 14px;
+    font-weight: 400;
+    white-space: nowrap;
+    padding: 6px 16px;
+    background: var(--ui-select-field-background-color);
+    border: 1px solid var(--neutral-300);
+    border-radius: 100px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: var(--ui-input-shadow);
+
+    &:hover {
+      border-color: var(--neutral-400);
+      background: var(--neutral-50);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+    }
+  }
+
+  &__icon,
+  &__arrow {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+  &__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__arrow {
+    margin-left: 2px;
+    margin-right: -4px;
+  }
+}
+</style>

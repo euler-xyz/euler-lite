@@ -59,14 +59,16 @@ function env(...keys: string[]): string | undefined {
   return undefined
 }
 
-/** Scan process.env for dynamic RPC / subgraph URL env vars. */
+/** Scan process.env for dynamic RPC URL env vars. */
 function scanDynamicEnvUrls(): string[] {
   const urls: string[] = []
   for (const [key, value] of Object.entries(process.env)) {
     if (!value) continue
-    // RPC_URL_<chainId> — wagmi uses these directly on the client
-    // NUXT_PUBLIC_SUBGRAPH_URI_<chainId> — client-side GraphQL queries
-    if (/^RPC_URL_\d+$/.test(key) || /^NUXT_PUBLIC_SUBGRAPH_URI_\d+$/.test(key)) {
+    // RPC_URL_<chainId> — wagmi uses these directly on the client.
+    // Subgraph URLs are intentionally absent: all subgraph traffic is
+    // same-origin via /api/internal/proxy/subgraph/{chainId}, so no connect-src is
+    // needed for the upstream.
+    if (/^RPC_URL_\d+$/.test(key)) {
       urls.push(value)
     }
   }
@@ -75,7 +77,7 @@ function scanDynamicEnvUrls(): string[] {
 
 /**
  * Derive connect-src origins for each enabled chain's default public RPC URL.
- * Wagmi uses these as a fallback when /api/rpc/{chainId} is unavailable
+ * Wagmi uses these as a fallback when /api/internal/rpc/{chainId} is unavailable
  * (configured explicitly in plugins/00.wagmi.ts). Auto-deriving from the chain
  * definition means new chains "just work" without a CSP update.
  */
@@ -98,13 +100,11 @@ function parseChainPublicRpcOrigins(): string[] {
 
 /** Derive CSP origins from URL env vars so deployers don't need to duplicate them. */
 function parseEnvOrigins(): { connect: string[] } {
-  // Labels, oracle checks, token lists, and euler-chains are proxied through
-  // server /api/* endpoints, so their origins are not needed in connect-src.
+  // Labels, oracle checks, and token lists are proxied through server /api/*
+  // endpoints, so their origins are not needed in connect-src.
   const connectVars = [
-    env('EULER_API_URL', 'NUXT_PUBLIC_EULER_API_URL'),
     env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
-    env('PRICE_API_URL', 'NUXT_PUBLIC_PRICE_API_URL'),
-    // Pyth Hermes is proxied through /api/pyth/updates — no external origin needed
+    // Pyth Hermes is proxied through /api/internal/pyth/updates — no external origin needed
     // Dynamic per-chain URLs (RPC for wagmi, subgraph for GraphQL)
     ...scanDynamicEnvUrls(),
   ]
@@ -142,6 +142,13 @@ const CONNECT_SRC_BASE = [
   'https://cca-lite.coinbase.com',
   // External data APIs
   'https://api.fuul.xyz',
+  // Error signature decoding (via SDK)
+  'https://api.4byte.sourcify.dev',
+  // CoW Protocol orderbook
+  'https://barn.api.cow.fi',
+  'https://api.cow.fi',
+  // SDK default deployments source
+  'https://raw.githubusercontent.com',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)

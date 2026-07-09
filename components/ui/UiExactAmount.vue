@@ -1,22 +1,26 @@
 <script setup lang="ts">
 const props = defineProps<{
   exact: string
+  placement?: 'top' | 'bottom'
+  align?: 'center' | 'end'
 }>()
 
-const copied = ref(false)
-let timer: ReturnType<typeof setTimeout>
+const { copied, copyToClipboard } = useClipboardCopy()
 
 function onCopy() {
   const numericPart = props.exact.replace(/\s+\S+$/, '').replaceAll(',', '')
-  navigator.clipboard.writeText(numericPart)
-  copied.value = true
-  clearTimeout(timer)
-  timer = setTimeout(() => (copied.value = false), 2000)
+  copyToClipboard(numericPart)
 }
 </script>
 
 <template>
-  <span class="ui-exact-amount">
+  <span
+    class="ui-exact-amount"
+    :class="{
+      'ui-exact-amount--bottom': props.placement === 'bottom',
+      'ui-exact-amount--align-end': props.align === 'end',
+    }"
+  >
     <slot />
     <span
       class="ui-exact-amount__tip"
@@ -62,7 +66,7 @@ function onCopy() {
     border-radius: 8px;
     background-color: var(--ui-footnote-floating-background-color);
     box-shadow: 0 4px 16px var(--ui-footnote-floating-box-shadow-color);
-    z-index: 10;
+    z-index: 4000;
     font-size: 13px;
     line-height: 18px;
     font-weight: 400;
@@ -82,6 +86,22 @@ function onCopy() {
       width: 100%;
       height: 6px;
     }
+  }
+
+  .ui-exact-amount--bottom:hover .ui-exact-amount__tip {
+    top: calc(100% + 6px);
+    bottom: auto;
+
+    &::after {
+      top: auto;
+      bottom: 100%;
+    }
+  }
+
+  .ui-exact-amount--align-end:hover .ui-exact-amount__tip {
+    right: 0;
+    left: auto;
+    transform: none;
   }
 
   .ui-exact-amount__copy {

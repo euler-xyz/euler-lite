@@ -45,13 +45,10 @@ export const useDeployConfig = () => {
     enableMerkl: isEnabled(rc.configEnableMerkl),
     enableIncentra: isEnabled(rc.configEnableIncentra),
     enableFuul: isEnabled(rc.configEnableFuul),
+    enableTurtle: isEnabled(rc.configEnableTurtle),
+    announcement: envConfig.announcement,
 
-    // Migration announcement (opt-in: non-empty URL enables the modal)
-    migrationAnnouncementUrl: rc.configMigrationAnnouncementUrl || '',
-    // Migration: link to legacy app shown in the header dropdown
-    migrationLegacyAppUrl: rc.configMigrationLegacyAppUrl || '',
-
-    // External token lists (defaults in server/api/token-list.get.ts)
+    // External token lists (defaults in server/api/internal/token-list.get.ts)
     uniswapTokenListUrl: rc.configUniswapTokenListUrl || '',
     defillamaTokenListUrl: rc.configDefillamaTokenListUrl || '',
 

@@ -1,18 +1,10 @@
 <script setup lang="ts">
-type SwapRouteBadgeTone = 'best' | 'worse'
-
-type SwapRouteItem = {
-  provider: string
-  amount: string
-  symbol: string
-  routeLabel?: string
-  badge?: {
-    label: string
-    tone: SwapRouteBadgeTone
-  }
-}
-
-const VISIBLE_COUNT = 3
+import type { SwapRouteItem } from '~/utils/swapRouteItems'
+import {
+  getVisibleSwapRouteItems,
+  isGaslessSwapRouteItem as isGaslessItem,
+  SWAP_ROUTE_VISIBLE_COUNT,
+} from '~/utils/swapRouteVisibility'
 
 const props = withDefaults(defineProps<{
   title?: string
@@ -36,10 +28,12 @@ const emit = defineEmits<{
 
 const expanded = ref(false)
 
-const hasMore = computed(() => props.items.length > VISIBLE_COUNT)
-const visibleItems = computed(() =>
-  expanded.value ? props.items : props.items.slice(0, VISIBLE_COUNT),
-)
+const hasMore = computed(() => props.items.length > SWAP_ROUTE_VISIBLE_COUNT)
+const visibleItems = computed(() => getVisibleSwapRouteItems(props.items, {
+  expanded: expanded.value,
+  promoteGasless: true,
+  visibleCount: SWAP_ROUTE_VISIBLE_COUNT,
+}))
 
 const onSelect = (provider: string) => {
   emit('select', provider)
@@ -47,7 +41,12 @@ const onSelect = (provider: string) => {
 </script>
 
 <template>
-  <div class="flex justify-between items-center">
+  <div
+    class="flex justify-between items-center"
+    data-id="swap-route-list-header"
+    :data-count="items.length"
+    :data-rendered-count="visibleItems.length"
+  >
     <p class="text-h4 text-content-primary">
       {{ title }}
     </p>
@@ -70,7 +69,12 @@ const onSelect = (provider: string) => {
       </button>
     </div>
   </div>
-  <div class="bg-surface-secondary p-16 rounded-16 flex flex-col gap-12 border border-line-default">
+  <div
+    class="bg-surface-secondary p-16 rounded-16 flex flex-col gap-12 border border-line-default"
+    data-id="swap-route-list"
+    :data-count="items.length"
+    :data-rendered-count="visibleItems.length"
+  >
     <div class="flex flex-col gap-8">
       <template v-if="items.length">
         <div
@@ -84,23 +88,74 @@ const onSelect = (provider: string) => {
             :key="item.provider"
             type="button"
             class="w-full text-left rounded-12 border p-12 transition-colors"
+            data-id="swap-route-list-item"
+            :data-key="item.provider"
+            :data-provider="item.provider"
+            :data-selected="selectedProvider === item.provider"
             :class="selectedProvider === item.provider
               ? 'border-accent-500 bg-neutral-200'
               : 'border-line-default bg-surface hover:bg-surface-secondary'"
             @click="onSelect(item.provider)"
           >
-            <div class="flex items-center justify-between gap-8">
-              <p class="text-p2 text-content-primary">
-                {{ item.amount }} {{ item.symbol }}
-              </p>
+            <div
+              class="flex justify-between gap-8"
+              :class="item.netUsdLabel ? 'items-start' : 'items-center'"
+            >
+              <div class="flex flex-col gap-2 min-w-0">
+                <p
+                  class="text-p2 text-content-primary"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-amount"
+                  :data-value="item.amount"
+                >
+                  {{ item.amount }} {{ item.symbol }}
+                </p>
+                <p
+                  class="text-p3 text-content-secondary truncate"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-label"
+                  :data-value="item.routeLabel || '-'"
+                >
+                  {{ item.routeLabel || '-' }}
+                </p>
+                <p
+                  v-if="item.netUsdLabel"
+                  class="text-p3 text-content-secondary"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-net-usd"
+                  :data-value="item.netUsdLabel"
+                >
+                  {{ item.netUsdLabel }}
+                </p>
+              </div>
               <div class="flex flex-col items-end gap-2 text-p3 text-content-secondary">
                 <p
                   v-if="item.badge"
                   :class="item.badge.tone === 'best' ? 'text-success-600' : 'text-error-500'"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-badge"
+                  :data-value="item.badge.label"
                 >
                   {{ item.badge.label }}
                 </p>
-                <span class="truncate">{{ item.routeLabel || '-' }}</span>
+                <span
+                  v-if="isGaslessItem(item) || item.gasCostLabel"
+                  class="flex items-center gap-2 text-success-600"
+                  data-id="data-point"
+                  :data-key="item.provider"
+                  data-field="swap-route-gas"
+                  :data-value="isGaslessItem(item) ? 'Gasless' : item.gasCostLabel"
+                >
+                  <SvgIcon
+                    name="gas"
+                    class="!w-12 !h-12"
+                  />
+                  {{ isGaslessItem(item) ? 'Gasless' : item.gasCostLabel }}
+                </span>
               </div>
             </div>
           </button>

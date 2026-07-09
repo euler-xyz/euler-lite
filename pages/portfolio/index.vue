@@ -1,23 +1,38 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getSubAccountIndex } from '~/entities/account'
+import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
 
-const { isConnected, address } = useAccount()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
-const { borrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
+const { borrowPositions, removedBorrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
 const { isReady } = useVaults()
 
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
 
 const sortedBorrowPositions = computed(() => {
-  if (!ownerAddress.value) return borrowPositions.value
-  return [...borrowPositions.value].sort((a, b) => {
-    const indexA = getSubAccountIndex(ownerAddress.value, a.subAccount)
-    const indexB = getSubAccountIndex(ownerAddress.value, b.subAccount)
+  const positions = [...removedBorrowPositions.value, ...borrowPositions.value]
+  if (!ownerAddress.value) return positions
+  return positions.sort((a, b) => {
+    const indexA = getSubAccountIndex(getAddress(ownerAddress.value), getAddress(a.subAccount))
+    const indexB = getSubAccountIndex(getAddress(ownerAddress.value), getAddress(b.subAccount))
     return indexA - indexB
   })
 })
+
+const borrowPositionScrollRenderKey = computed(() =>
+  sortedBorrowPositions.value.map(position => [
+    position.subAccount,
+    position.borrow?.vaultAddress,
+    position.collateral?.vaultAddress,
+    position.collateralVault?.address,
+    ...(position.collateralVaults ?? []),
+  ].filter(Boolean).join(':')).join('|'),
+)
+
+usePortfolioBatchScrollTarget(computed(() =>
+  borrowPositionScrollRenderKey.value,
+))
 </script>
 
 <template>
@@ -44,17 +59,11 @@ const sortedBorrowPositions = computed(() => {
         v-else-if="sortedBorrowPositions.length === 0"
         class="flex flex-1 justify-center items-center"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-            <SvgIcon name="search" />
-          </div>
-          <template v-if="hasActiveSession">
-            You don't have positions yet
-          </template>
-          <template v-else>
-            Connect your wallet to see your positions
-          </template>
-        </div>
+        <PortfolioEmptyState
+          :active="hasActiveSession"
+          active-text="You don't have positions yet"
+          inactive-text="Connect your wallet to see your positions"
+        />
       </div>
 
       <div

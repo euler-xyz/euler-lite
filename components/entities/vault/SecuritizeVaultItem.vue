@@ -1,29 +1,29 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
+import { isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import { useModal } from '~/components/ui/composables/useModal'
-import { VaultSupplyApyModal } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 
-const { isConnected } = useAccount()
-const { vault } = defineProps<{ vault: SecuritizeVault }>()
+const { isConnected } = useWagmi()
+const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
 
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
-// SecuritizeVault has governorAdmin, safe to cast for entity lookup
-const entities = useEulerEntitiesOfVault(vault as unknown as Vault)
+const { isVerifiedVault } = useVaultRegistry()
+// SecuritizeCollateralVault has governorAdmin, safe to cast for entity lookup
+const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
-const isUnverified = computed(() => !vault.verified)
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as Vault))
-const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
+const isUnverified = computed(() => !isVerifiedVault(vault.address))
+const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
@@ -34,12 +34,12 @@ const entityLogos = computed(() => {
   if (!entityName.value || entities.length === 0) return []
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
-const displayName = computed(() => product.name || vault.name)
+const displayName = computed(() => product.name || vault.shares.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
-const modal = useModal()
-const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
 
 const balance = computed(() =>
@@ -48,27 +48,25 @@ const balance = computed(() =>
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const lendingAPY = computed(() =>
-  nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+  getVaultSupplyApy(vault),
 )
 const supplyApy = computed(() =>
-  withIntrinsicSupplyApy(lendingAPY.value, vault.asset.address),
+  withVaultIntrinsicApy(lendingAPY.value, vault, enableIntrinsicApy.value),
 )
 const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
 )
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: lendingAPY.value,
-      intrinsicAPY: getIntrinsicApy(vault.asset.address),
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-    },
-  })
-}
+const supplyApyModalData = computed(() => ({
+  props: {
+    mode: 'supply',
+    lendingAPY: lendingAPY.value,
+    intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+    rewardVaultAddress: vault.address,
+  },
+}))
 
 const statsGridCols = computed(() => {
   const cols: string[] = []
@@ -101,6 +99,10 @@ watchEffect(async () => {
     class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="isGeoBlocked ? 'opacity-50' : ''"
     :to="{ path: `/lend/${vault.address}`, query: { network: $route.query.network } }"
+    data-id="vault-list-item"
+    data-list="lend"
+    :data-key="vault.address.toLowerCase()"
+    :data-vault-address="vault.address.toLowerCase()"
   >
     <div class="flex pb-12 p-16 border-b border-line-subtle">
       <AssetAvatar
@@ -108,7 +110,13 @@ watchEffect(async () => {
         size="40"
       />
       <div class="flex-grow ml-12">
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+        <div
+          class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="name"
+          :data-value="displayName"
+        >
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
@@ -116,26 +124,51 @@ watchEffect(async () => {
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           <RestrictedBadge v-if="isGeoBlocked" />
         </div>
-        <div class="text-h5 text-content-primary">
+        <div
+          class="text-h5 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="asset-symbol"
+          :data-value="vault.asset.symbol"
+        >
           {{ vault.asset.symbol }}
         </div>
       </div>
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <SvgIcon
-            class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onSupplyInfoIconClick"
-          />
+          <UiModalPreviewTrigger
+            :component="VaultApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY breakdown"
+          >
+            <SvgIcon
+              class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+              data-modal-trigger="supply-apy"
+            />
+          </UiModalPreviewTrigger>
         </div>
         <div class="flex items-center">
-          <div class="text-p2 flex items-center text-accent-600 font-semibold">
-            <SvgIcon
+          <div
+            class="text-p2 flex items-center text-accent-600 font-semibold"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="supply-apy"
+            :data-value="supplyApyWithRewards"
+          >
+            <UiModalPreviewTrigger
               v-if="hasRewards"
-              class="!w-20 !h-20 text-accent-500 mr-4"
-              name="sparks"
-            />
+              :component="VaultApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                name="sparks"
+                data-modal-trigger="supply-apy"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -170,7 +203,13 @@ watchEffect(async () => {
             :label="entityName"
             :src="entityLogos"
           />
-          <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
+          <span
+            class="text-p2 text-content-primary truncate"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="risk-manager"
+            :data-value="entityName"
+          >{{ entityName }}</span>
         </div>
         <div
           v-else
@@ -181,7 +220,13 @@ watchEffect(async () => {
         <div class="text-content-tertiary text-p3 mb-4">
           Total supply
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="total-supply"
+          :data-value="prices.totalSupply"
+        >
           {{ prices.totalSupply }}
         </div>
       </div>
@@ -194,7 +239,13 @@ watchEffect(async () => {
           :loading="isBalancesLoading"
           style="min-width: 70px; height: 20px"
         >
-          <div class="text-p2 text-content-primary whitespace-nowrap">
+          <div
+            class="text-p2 text-content-primary whitespace-nowrap"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="wallet-balance"
+            :data-value="prices.walletBalance"
+          >
             {{ prices.walletBalance }}
           </div>
         </BaseLoadableContent>

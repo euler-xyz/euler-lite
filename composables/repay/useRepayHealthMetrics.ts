@@ -1,13 +1,14 @@
+import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
-import type { AccountBorrowPosition } from '~/entities/account'
-import { getProjectedRates, getRoe } from '~/entities/vault'
+import { getProjectedRates, getRoe } from '~/utils/vault/apy'
+import { getVaultBorrowApy } from '~/utils/vault-display'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeNextLtv, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { createRaceGuard } from '~/utils/race-guard'
 
 interface UseRepayHealthMetricsOptions {
-  position: Ref<AccountBorrowPosition | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
+  position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
   debtRepaid: ComputedRef<bigint | null>
   priceRatio: ComputedRef<number | null>
   nextLiquidationLtv: ComputedRef<number | null>
@@ -40,23 +41,26 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
 
   const currentHealth = computed(() => {
     if (!position.value) return null
-    return nanoToValue(position.value.health, 18)
+    const health = position.value.healthFactor
+    return health === undefined ? null : nanoToValue(health, 18)
   })
 
   const currentLtv = computed(() => {
     if (!position.value) return null
-    return nanoToValue(position.value.userLTV, 18)
+    const ltv = position.value.userLTV ?? position.value.currentLTV
+    return ltv === undefined ? null : ltvToPercent(nanoToValue(ltv, 18))
   })
 
   const currentLiquidationLtv = computed(() => {
     if (!position.value) return null
-    return nanoToValue(position.value.liquidationLTV, 2)
+    const liquidationLTV = getBorrowPositionEffectiveLiquidationLTV(position.value)
+    return liquidationLTV === undefined ? null : ltvToPercent(liquidationLTV)
   })
 
   const borrowAmountAfter = computed(() => {
     if (!borrowVault.value || !position.value || debtRepaid.value === null) return null
     const nextBorrow = position.value.borrowed - debtRepaid.value
-    return nanoToValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value.decimals)
+    return nanoToValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value.shares.decimals)
   })
 
   const nextLtv = computed(() => {
@@ -95,8 +99,8 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
 
       const projected = await getProjectedRates(
         vault.address,
-        vault.interestRateInfo.cash,
-        vault.interestRateInfo.borrows,
+        vault.totalCash,
+        vault.totalBorrowed,
         repayAmount,
         -repayAmount,
       )
@@ -108,7 +112,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
         return
       }
 
-      const currentRaw = nanoToValue(vault.interestRateInfo.borrowAPY || 0n, 25)
+      const currentRaw = getVaultBorrowApy(vault)
       const projectedRaw = nanoToValue(projected.borrowAPY, 25)
       projectedBorrowApy.value = (currentBorrowApy ?? 0) + (projectedRaw - currentRaw)
     }

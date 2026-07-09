@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import type { SelectOption } from './select.types'
+import type { SelectOption, SelectQuickFilter } from './select.types'
 
 const props = defineProps<{
   selected: string[]
   options: SelectOption[]
+  quickFilters?: SelectQuickFilter[]
   title?: string
   inputPlaceholder?: string
   onSave?: (selected: string[]) => void
@@ -13,6 +14,16 @@ const emit = defineEmits(['close'])
 const localSelected = ref<string[]>([...props.selected])
 const selectedPrioritySet = ref(new Set(props.selected))
 const searchModel = ref('')
+const quickFilterValues = computed(() => new Set((props.quickFilters ?? []).map(filter => filter.value)))
+
+const isOptionSelected = (option: SelectOption): boolean => {
+  if (localSelected.value.includes(option.value)) return true
+  return option.quickFilterValues?.some(value => localSelected.value.includes(value)) ?? false
+}
+
+const activeQuickFilterValue = computed(() =>
+  (props.quickFilters ?? []).find(filter => localSelected.value.includes(filter.value))?.value ?? null,
+)
 
 const filteredOptions = computed(() => {
   const options = searchModel.value
@@ -24,7 +35,7 @@ const filteredOptions = computed(() => {
   const selectedFirst: typeof props.options = []
   const unselected: typeof props.options = []
   options.forEach((option) => {
-    if (selectedPrioritySet.value.has(option.value)) {
+    if (selectedPrioritySet.value.has(option.value) || isOptionSelected(option)) {
       selectedFirst.push(option)
       return
     }
@@ -33,13 +44,34 @@ const filteredOptions = computed(() => {
   return [...selectedFirst, ...unselected]
 })
 
-const toggleOption = (value: string) => {
-  const idx = localSelected.value.indexOf(value)
+const toggleQuickFilter = (value: string | null) => {
+  if (!value) {
+    localSelected.value = []
+    return
+  }
+
+  localSelected.value = activeQuickFilterValue.value === value ? [] : [value]
+}
+
+const toggleOption = (option: SelectOption) => {
+  const activeQuickFilter = activeQuickFilterValue.value
+  if (activeQuickFilter && option.quickFilterValues?.includes(activeQuickFilter)) {
+    localSelected.value = props.options
+      .filter(candidate => candidate.quickFilterValues?.includes(activeQuickFilter))
+      .map(candidate => candidate.value)
+      .filter(value => value !== option.value)
+    return
+  }
+
+  const idx = localSelected.value.indexOf(option.value)
   if (idx > -1) {
     localSelected.value.splice(idx, 1)
   }
   else {
-    localSelected.value.push(value)
+    localSelected.value = [
+      ...localSelected.value.filter(value => !quickFilterValues.value.has(value)),
+      option.value,
+    ]
   }
 }
 
@@ -67,6 +99,8 @@ watch(() => props.selected, (val) => {
 <template>
   <BaseModalWrapper
     class="ui-select-modal"
+    data-id="select-modal"
+    :data-modal-title="title || 'Select options'"
     :title="title || 'Select options'"
     :full="false"
     @close="close"
@@ -75,15 +109,43 @@ watch(() => props.selected, (val) => {
       <UiInput
         v-model="searchModel"
         :placeholder="inputPlaceholder || 'Search'"
-        class="mb-16"
+        :class="quickFilters?.length ? 'mb-12' : 'mb-16'"
         icon="search"
       />
+      <div
+        v-if="quickFilters?.length"
+        class="ui-select-modal__quick-filters"
+      >
+        <UiButton
+          size="small"
+          :variant="localSelected.length === 0 ? 'primary' : 'primary-stroke'"
+          class="ui-select-modal__quick-filter"
+          @click="toggleQuickFilter(null)"
+        >
+          All
+        </UiButton>
+        <UiButton
+          v-for="filter in quickFilters"
+          :key="filter.value"
+          size="small"
+          :variant="activeQuickFilterValue === filter.value ? 'primary' : 'primary-stroke'"
+          class="ui-select-modal__quick-filter"
+          :data-value="filter.value"
+          @click="toggleQuickFilter(filter.value)"
+        >
+          {{ filter.label }}
+        </UiButton>
+      </div>
       <div class="ui-select-modal__list">
         <div
           v-for="opt in filteredOptions"
           :key="opt.value"
           class="ui-select-modal__row"
-          @click="toggleOption(opt.value)"
+          data-id="select-modal-option"
+          :data-key="opt.value"
+          data-field="option"
+          :data-value="opt.value"
+          @click="toggleOption(opt)"
         >
           <div class="ui-select-modal__asset">
             <slot
@@ -101,6 +163,12 @@ watch(() => props.selected, (val) => {
                 >
               </div>
               <div
+                v-else-if="opt.iconName"
+                class="ui-select-modal__asset-symbol"
+              >
+                <UiIcon :name="opt.iconName" />
+              </div>
+              <div
                 v-else
                 class="ui-select-modal__asset-fallback"
               >
@@ -110,9 +178,9 @@ watch(() => props.selected, (val) => {
             <span class="ui-select-modal__label">{{ opt.label }}</span>
           </div>
           <UiCheckbox
-            :model-value="localSelected.includes(opt.value)"
+            :model-value="isOptionSelected(opt)"
             class="ui-select-modal__checkbox"
-            @update:model-value="() => toggleOption(opt.value)"
+            @update:model-value="() => toggleOption(opt)"
           />
         </div>
       </div>
@@ -125,6 +193,7 @@ watch(() => props.selected, (val) => {
         Save changes
       </UiButton>
       <UiButton
+        v-if="!quickFilters?.length"
         variant="primary-stroke"
         size="xlarge"
         @click="clear"
@@ -154,6 +223,19 @@ watch(() => props.selected, (val) => {
     &::-webkit-scrollbar {
       display: none;
     }
+  }
+
+  &__quick-filters {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 0 12px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--line-default);
+  }
+
+  &__quick-filter {
+    flex-shrink: 0;
   }
 
   &__row {
@@ -199,6 +281,23 @@ watch(() => props.selected, (val) => {
     justify-content: center;
     font-weight: 600;
     font-size: 16px;
+  }
+
+  &__asset-symbol {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--bg-surface-secondary);
+    border: 1px solid var(--line-default);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    svg {
+      width: 16px;
+      height: 16px;
+    }
   }
 
   &__label {

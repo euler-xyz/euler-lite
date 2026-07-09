@@ -1,42 +1,41 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { FixedPoint } from '~/utils/fixed-point'
-import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
-import { useToast } from '~/components/ui/composables/useToast'
-import {
-  convertSharesToAssets,
-  getCashLimitedWithdrawAmount,
-  type EarnVault,
-  type VaultAsset,
-} from '~/entities/vault'
-import { getSubAccountAddress } from '~/entities/account'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import type { TxPlan } from '~/entities/txPlan'
+import type { VaultAsset } from '~/types/asset'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
+import { useModal } from '~/components/ui/composables/useModal'
+import { useToast } from '~/components/ui/composables/useToast'
+import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import { OperationReviewModal } from '#components'
+import { FixedPoint } from '~/utils/fixed-point'
+import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { createRaceGuard } from '~/utils/race-guard'
+import { reportClientEvent } from '~/utils/client-observability'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { buildWithdrawPlan, buildRedeemPlan, executeTxPlan } = useEulerOperations()
-const { getEarnVault } = useVaults()
-const { isConnected, address } = useAccount()
-const { isSpyMode, spyAddress } = useSpyMode()
-const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
-const { fetchVaultShareBalance } = useWallets()
-const { runSimulation, simulationError, clearSimulationError } = useTxPlanSimulation()
-const { getSupplyRewardApy } = useRewardsApy()
+const { planWithdrawOrRedeem, executePlan } = useEulerTx()
+const { addEntry: addBatchEntry } = useTxBatch()
+const { redirectAfterAdd } = useBatchRedirect()
+const { account: planAccount } = usePlanAccount()
+const { getEarnVault, isMarketDataResolved } = useVaults()
+const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
+const { viewer, visibleTotal } = useApyVisibility()
 const vaultAddress = route.params.vault as string
 useOperationGuard([vaultAddress])
+const product = useEulerProductOfVault(vaultAddress)
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value
   if (!addr || isNaN(subAccountIndex)) return undefined
-  return getSubAccountAddress(addr, subAccountIndex)
+  return getSubAccountAddress(getAddress(addr), subAccountIndex)
 })
 
 const isLoading = ref(false)
@@ -44,21 +43,39 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isEstimatesLoading = ref(false)
 const amount = ref('')
-const plan = ref<TxPlan | null>(null)
-const vault: Ref<EarnVault | undefined> = ref()
+const plan = ref<TransactionPlan | null>(null)
+const vault: Ref<EulerEarn | undefined> = ref()
 const asset: Ref<VaultAsset | undefined> = ref()
-const assetsBalance = ref(0n)
-const sharesBalance = ref(0n)
+const earnVaultMarketLabel = computed(() => product.name || vault.value?.shares.name || '')
+// Share/asset balances from the layer-aware account entity (no direct balanceOf).
+const sharePosition = computed(() => {
+  const acct = planAccount.value
+  const sub = subAccount.value
+  if (!acct || !sub || !vault.value?.address) return undefined
+  try {
+    const target = getAddress(vault.value.address)
+    return acct.getSubAccount(getAddress(sub))?.positions.find(p => getAddress(p.vaultAddress) === target)
+  }
+  catch {
+    return undefined
+  }
+})
+const sharesBalance = computed(() => sharePosition.value?.shares ?? 0n)
+const assetsBalance = computed(() => sharePosition.value?.assets ?? 0n)
 const delta = ref(0n)
-const estimateSupplyAPY = ref(0)
+const estimateSupplyAPY = ref<number | undefined>(undefined)
 const estimatesError = ref('')
 
 // Reactive USD prices for display
 const assetsBalanceUsd = ref(0)
 const withdrawableAssetsUsd = ref(0)
 const deltaUsd = ref(0)
+const usdPriceGuard = createRaceGuard()
 
-const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
+const supplyApyBreakdown = computed(() =>
+  vault.value ? computeSupplyApyBreakdown(vault.value, viewer.value) : undefined,
+)
+const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
 const amountFixed = computed(() => {
   return FixedPoint.fromValue(
     valueToNano(amount.value || '0', asset.value?.decimals || 0),
@@ -70,7 +87,7 @@ const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
   vault.value,
 ))
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!isConnected.value && !isSpyMode.value) return false
   return withdrawableAssets.value < amountFixed.value.value
     || isLoading.value
     || amountFixed.value.isZero() || amountFixed.value.isNegative()
@@ -84,23 +101,21 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 const supplyAPYDisplay = computed(() => {
-  if (!vault.value) return '0.00'
-  return formatNumber(nanoToValue(vault.value.interestRateInfo.supplyAPY, 25) + rewardApy.value)
+  return formatNumber(supplyApyTotal.value)
 })
 const estimateSupplyAPYDisplay = computed(() => {
-  return formatNumber(estimateSupplyAPY.value + rewardApy.value)
+  return formatNumber(estimateSupplyAPY.value ?? supplyApyTotal.value)
 })
 
 const load = async () => {
   isLoading.value = true
   try {
     vault.value = await getEarnVault(vaultAddress)
-    estimateSupplyAPY.value = nanoToValue(vault.value?.interestRateInfo.supplyAPY ?? 0n, 25)
+    estimateSupplyAPY.value = supplyApyTotal.value
     asset.value = vault.value?.asset
 
     // Fetch fresh share balance and convert to assets
-    await fetchShareBalance()
-    await updateBalance()
+    updateBalance()
   }
   catch (e) {
     showError('Unable to load Vault')
@@ -111,27 +126,9 @@ const load = async () => {
   }
 }
 
-const fetchShareBalance = async () => {
-  if (!vault.value?.address) {
-    sharesBalance.value = 0n
-    return
-  }
-  sharesBalance.value = await fetchVaultShareBalance(vault.value.address, subAccount.value)
-}
-
-const updateBalance = async () => {
-  if ((!isConnected.value && !isSpyMode.value) || sharesBalance.value === 0n) {
-    assetsBalance.value = 0n
-    delta.value = 0n
-    return
-  }
-
-  // Convert shares to assets
-  assetsBalance.value = await convertSharesToAssets(
-    vaultAddress,
-    sharesBalance.value,
-  )
-  delta.value = assetsBalance.value
+// balances are reactive computeds over the account entity; sync delta baseline.
+const updateBalance = () => {
+  delta.value = (!isConnected.value && !isSpyMode.value) ? 0n : assetsBalance.value
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
@@ -145,12 +142,25 @@ const submit = async () => {
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
     try {
-      plan.value = isMax
-        ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-        : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
+      plan.value = await planWithdrawOrRedeem({
+        vaultAddress: vaultAddress as `0x${string}`,
+        owner: (subAccount.value ?? effectiveAddress.value!) as `0x${string}`,
+        isMax,
+        shares: sharesBalance.value,
+        assets: amountFixed.value.value,
+        account: planAccount.value,
+      })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
+      void reportClientEvent({
+        event: 'tx_plan_build_failed',
+        flow: 'earn_withdraw',
+        phase: 'build',
+        operationType: 'withdraw',
+        vaultAddress,
+        assetAddress: asset.value?.address,
+      }, e)
       plan.value = null
     }
 
@@ -178,19 +188,53 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
+const canAddToBatch = computed(() =>
+  !!(+amount.value) && !reviewWithdrawDisabled.value && !!asset.value?.address && !!(subAccount.value ?? effectiveAddress.value),
+)
+const addToBatch = async () => {
+  if (!canAddToBatch.value || !asset.value?.address) return
+  const assets = amountFixed.value.value
+  const ownerAddr = (subAccount.value ?? effectiveAddress.value) as `0x${string}` | undefined
+  if (!ownerAddr) return
+  const label = `Earn withdraw ${amount.value} ${asset.value.symbol}`
+  // Max withdraw → redeem the full share balance (redeem(full_balance)) instead
+  // of withdraw(assets), so the position clears without share-price rounding dust.
+  const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+  const shares = sharesBalance.value
+  await addBatchEntry({
+    label,
+    buildPlan: account => planWithdrawOrRedeem({
+      vaultAddress: vaultAddress as `0x${string}`,
+      owner: ownerAddr,
+      isMax,
+      shares,
+      assets,
+      account,
+    }),
+    subAccount: ownerAddr,
+    review: { type: 'withdraw', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
+  })
+  amount.value = ''
+  redirectAfterAdd('/portfolio/saving', { subAccount: ownerAddr, vault: vaultAddress })
+}
+
 const send = async () => {
   try {
     isSubmitting.value = true
     if (!asset.value?.address) {
       console.error('No asset address')
+      void reportClientEvent({
+        event: 'client_invariant_missing',
+        flow: 'earn_withdraw',
+        phase: 'execute_precheck',
+        invariant: 'no_asset_address',
+        vaultAddress,
+      }, new Error('No asset address'))
       return
     }
 
-    const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
-    const txPlan = isMax
-      ? await buildRedeemPlan(vaultAddress, amountFixed.value.value, sharesBalance.value, isMax, subAccount.value)
-      : await buildWithdrawPlan(vaultAddress, amountFixed.value.value, subAccount.value)
-    await executeTxPlan(txPlan)
+    if (!plan.value) return
+    await executePlan(plan.value)
 
     modal.close()
     setTimeout(() => {
@@ -200,6 +244,13 @@ const send = async () => {
   catch (e) {
     error('Transaction failed')
     console.error('Transaction error:', e)
+    void reportClientEvent({
+      event: 'tx_execute_failed',
+      flow: 'earn_withdraw',
+      phase: 'execute',
+      operationType: 'withdraw',
+      vaultAddress,
+    }, e)
   }
   finally {
     isSubmitting.value = false
@@ -217,12 +268,12 @@ const updateEstimates = () => {
       throw new Error('Not enough liquidity in vault')
     }
     delta.value = assetsBalance.value - amountFixed.value.value
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
+    estimateSupplyAPY.value = supplyApyTotal.value
   }
   catch (e) {
     logWarn('earn-withdraw/estimates', e)
     delta.value = assetsBalance.value || 0n
-    estimateSupplyAPY.value = nanoToValue(vault.value.interestRateInfo.supplyAPY, 25)
+    estimateSupplyAPY.value = supplyApyTotal.value
     estimatesError.value = (e as { message: string }).message
   }
   isEstimatesLoading.value = false
@@ -232,22 +283,27 @@ load()
 
 // Update USD prices when vault or amounts change
 watchEffect(async () => {
+  const gen = usdPriceGuard.next()
+  void isMarketDataResolved.value
   if (!vault.value) {
     assetsBalanceUsd.value = 0
     withdrawableAssetsUsd.value = 0
     deltaUsd.value = 0
     return
   }
-  assetsBalanceUsd.value = await getAssetUsdValueOrZero(assetsBalance.value, vault.value, 'off-chain')
-  withdrawableAssetsUsd.value = await getAssetUsdValueOrZero(withdrawableAssets.value, vault.value, 'off-chain')
-  deltaUsd.value = await getAssetUsdValueOrZero(delta.value, vault.value, 'off-chain')
+  const [nextAssetsBalanceUsd, nextWithdrawableAssetsUsd, nextDeltaUsd] = await Promise.all([
+    getAssetUsdValueOrZero(assetsBalance.value, vault.value, 'off-chain'),
+    getAssetUsdValueOrZero(withdrawableAssets.value, vault.value, 'off-chain'),
+    getAssetUsdValueOrZero(delta.value, vault.value, 'off-chain'),
+  ])
+  if (usdPriceGuard.isStale(gen)) return
+  assetsBalanceUsd.value = nextAssetsBalanceUsd
+  withdrawableAssetsUsd.value = nextWithdrawableAssetsUsd
+  deltaUsd.value = nextDeltaUsd
 })
 
-watch([isConnected, effectiveAddress], async () => {
-  if (vault.value) {
-    await fetchShareBalance()
-    await updateBalance()
-  }
+watch([isConnected, effectiveAddress, assetsBalance], () => {
+  if (vault.value) updateBalance()
 })
 watch(amount, () => {
   updateEstimates()
@@ -288,14 +344,14 @@ watch(amount, () => {
               maxable
             />
 
-            <UiToast
+            <UiAlert
               v-show="estimatesError"
               title="Error"
               variant="error"
               :description="estimatesError"
               size="compact"
             />
-            <UiToast
+            <UiAlert
               v-if="simulationError"
               title="Error"
               variant="error"
@@ -342,6 +398,8 @@ watch(amount, () => {
               :disabled="reviewWithdrawDisabled"
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
+              :can-add-to-batch="canAddToBatch"
+              @add-to-batch="addToBatch"
             >
               Review Withdraw
             </VaultFormSubmit>

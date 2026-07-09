@@ -1,17 +1,17 @@
-import type { Ref, ComputedRef } from 'vue'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits } from 'viem'
-import type { Vault } from '~/entities/vault'
-import type { AccountBorrowPosition } from '~/entities/account'
-import { getAssetUsdValue } from '~/services/pricing/priceProvider'
-import { SwapperMode } from '~/entities/swap'
+import type { Ref, ComputedRef } from 'vue'
+
+import { getAssetUsdValue } from '~/utils/sdk-prices'
+import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { createRaceGuard } from '~/utils/race-guard'
 import type { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
 
 interface UseRepaySwapDetailsOptions {
   quotes: ReturnType<typeof useSwapRepayQuotes>
-  sourceVault: Ref<Vault | undefined>
-  borrowVault: ComputedRef<AccountBorrowPosition['borrow'] | undefined>
+  sourceVault: Ref<EVault | undefined>
+  borrowVault: ComputedRef<EVault | undefined>
   direction: Ref<SwapperMode>
 }
 
@@ -36,6 +36,8 @@ export const useRepaySwapDetails = (options: UseRepaySwapDetailsOptions) => {
     return {
       from: `${formatSmartAmount(amountIn)} ${sourceVault.value.asset.symbol}`,
       to: `${formatSmartAmount(amountOut)} ${borrowVault.value.asset.symbol}`,
+      fromExact: `${amountIn} ${sourceVault.value.asset.symbol}`,
+      toExact: `${amountOut} ${borrowVault.value.asset.symbol}`,
     }
   })
 
@@ -85,6 +87,7 @@ export const useRepaySwapDetails = (options: UseRepaySwapDetailsOptions) => {
       symbol: asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: isExactIn ? 'amountOut' : 'amountIn',
+      compare: isExactIn ? 'max' : 'min',
     })
   })
 

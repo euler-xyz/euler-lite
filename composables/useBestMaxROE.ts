@@ -1,26 +1,58 @@
 import type { MarketGroup } from '~/entities/lend-discovery'
-import { type BestMaxRoeResult, getBorrowableVaults, isVaultType } from '~/utils/discoveryCalculations'
-import { nanoToValue } from '~/utils/crypto-utils'
+import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { type BestMaxRoeResult, getBorrowableVaults, getVaultAddress, getVaultAssetAddress, getVaultAssetSymbol } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import {
+  computeSupplyApy,
+  computeBorrowApy,
+  sumBorrowRewardApr,
+  sumLoopingRewardApr,
+} from '~/utils/collateralOptions'
+
+type LendRewardCampaign = { action?: string, apr?: number }
+type MaybeRewardedVault = {
+  rewards?: {
+    getActiveCampaigns: (params: { viewer: string | undefined }) => LendRewardCampaign[]
+  }
+}
+
+const getLendRewardCampaigns = (vault: unknown, viewer: string | undefined): LendRewardCampaign[] => {
+  if (!vault || typeof vault !== 'object' || !('rewards' in vault)) return []
+  return (vault as MaybeRewardedVault).rewards?.getActiveCampaigns({ viewer }) ?? []
+}
 
 /**
- * Computes the best max ROE for each market group by iterating all actual
- * collateral/liability pairs with LTV relationships. Uses leveraged return
- * (max ROE) instead of simple net APY spread.
+ * Computes the headline metric for each market group by iterating actual
+ * collateral/liability pairs with LTV relationships. Correlated pairs use
+ * leveraged return (max ROE); groups without a correlated pair fall back to
+ * the best visible net APY.
  *
  * Returns a reactive map of marketGroupId -> BestMaxRoeResult.
  */
 export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
-  const { withIntrinsicSupplyApy, withIntrinsicBorrowApy, version: intrinsicVersion } = useIntrinsicApy()
-  const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, version: rewardsVersion } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
+  const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
+  const { viewer } = useApyVisibility()
+  const { getTokenCategoryTags } = useTokenList()
 
   const computeForGroup = (group: MarketGroup): BestMaxRoeResult => {
     const borrowableVaults = getBorrowableVaults(group)
 
     const allVaults = [...group.vaults, ...group.externalCollateral]
     const knownAddresses = new Set(
-      allVaults.map(v => (isVaultType(v) ? v.address : '').toLowerCase()).filter(Boolean),
+      allVaults.map(v => getVaultAddress(v).toLowerCase()).filter(Boolean),
     )
+    const vaultsByAddress = new Map(
+      allVaults
+        .map(v => [getVaultAddress(v).toLowerCase(), v] as const)
+        .filter(([address]) => Boolean(address)),
+    )
+
+    const visibilitySettings = {
+      enableIntrinsicApy: enableIntrinsicApy.value,
+      enableRewardsApy: enableRewardsApy.value,
+    }
 
     let best = -Infinity
     let bestHasRewards = false
@@ -31,49 +63,92 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
     let bestBorrowLTV = 0
     let bestBorrowVaultAddress = ''
     let bestCollateralAddress = ''
+    let fallback = -Infinity
+    let fallbackHasRewards = false
+    let fallbackPair = ''
+    let fallbackSupplyAPY = 0
+    let fallbackBorrowAPY = 0
+    let fallbackBorrowVaultAddress = ''
+    let fallbackCollateralAddress = ''
 
     for (const liability of borrowableVaults) {
-      const borrowBase = nanoToValue(liability.interestRateInfo.borrowAPY, 25)
-      const borrowApy = withIntrinsicBorrowApy(borrowBase, liability.asset.address)
-
-      for (const ltv of liability.collateralLTVs) {
-        if (ltv.borrowLTV <= 0n) continue
-        const colAddr = ltv.collateral.toLowerCase()
+      for (const ltv of liability.collaterals) {
+        if (ltv.borrowLTV <= 0) continue
+        const colAddr = ltv.address.toLowerCase()
         if (!knownAddresses.has(colAddr)) continue
 
-        const collateral = allVaults.find(
-          v => isVaultType(v) && v.address.toLowerCase() === colAddr,
+        const collateral = vaultsByAddress.get(colAddr)
+        if (!collateral) continue
+        const collateralAddress = getVaultAddress(collateral)
+
+        const supplyFinal = computeSupplyApy(collateral, viewer.value, visibilitySettings)
+        const borrowFinal = computeBorrowApy(
+          liability,
+          viewer.value,
+          visibilitySettings,
+          collateralAddress,
         )
-        if (!collateral || !isVaultType(collateral)) continue
-
-        const supplyBase = nanoToValue(collateral.interestRateInfo.supplyAPY, 25)
-        const supplyApy = withIntrinsicSupplyApy(supplyBase, collateral.asset.address)
-        const supplyRewards = getSupplyRewardApy(collateral.address)
-        const borrowRewards = getBorrowRewardApy(liability.address, collateral.address)
-        const loopingRewards = getLoopingRewardApy(liability.address, collateral.address)
-
-        const supplyFinal = supplyApy + supplyRewards
-        const borrowFinal = borrowApy - borrowRewards
         const maxMultiplier = getMaxMultiplier(ltv.borrowLTV)
+        const loopingRewards = enableRewardsApy.value
+          ? sumLoopingRewardApr(liability, viewer.value, collateralAddress, maxMultiplier)
+          : 0
         const roe = getMaxRoe(maxMultiplier, supplyFinal, borrowFinal, loopingRewards)
+        const collateralLendCampaigns = getLendRewardCampaigns(collateral, viewer.value)
+
+        const supplyHasRewards = enableRewardsApy.value
+          && (liability.rewards !== undefined || collateralLendCampaigns.length > 0)
+          && (sumBorrowRewardApr(liability, viewer.value, collateralAddress) > 0
+            || loopingRewards > 0
+            || collateralLendCampaigns.some(
+              c => c.action === 'LEND' && typeof c.apr === 'number' && c.apr > 0,
+            ))
+
+        const netApy = supplyFinal - borrowFinal + loopingRewards
+        if (netApy > fallback) {
+          fallback = netApy
+          fallbackHasRewards = supplyHasRewards
+          fallbackPair = `${getVaultAssetSymbol(collateral)}/${liability.asset.symbol}`
+          fallbackSupplyAPY = supplyFinal
+          fallbackBorrowAPY = borrowFinal
+          fallbackBorrowVaultAddress = liability.address
+          fallbackCollateralAddress = collateralAddress
+        }
+
+        if (!areTokenAddressesCorrelatedByTags(getVaultAssetAddress(collateral), liability.asset.address, getTokenCategoryTags)) continue
 
         if (roe > best) {
           best = roe
-          bestHasRewards = supplyRewards > 0 || borrowRewards > 0 || loopingRewards > 0
-          bestPair = `${collateral.asset.symbol}/${liability.asset.symbol}`
+          bestHasRewards = supplyHasRewards
+          bestPair = `${getVaultAssetSymbol(collateral)}/${liability.asset.symbol}`
           bestMultiplier = maxMultiplier
           bestSupplyAPY = supplyFinal
           bestBorrowAPY = borrowFinal
-          bestBorrowLTV = nanoToValue(ltv.borrowLTV, 2)
+          bestBorrowLTV = ltvToPercent(ltv.borrowLTV)
           bestBorrowVaultAddress = liability.address
-          bestCollateralAddress = collateral.address
+          bestCollateralAddress = collateralAddress
         }
+      }
+    }
+
+    if (!(Number.isFinite(best) && best > -Infinity) && Number.isFinite(fallback) && fallback > -Infinity) {
+      return {
+        value: fallback,
+        metric: 'net-apy',
+        hasRewards: fallbackHasRewards,
+        pair: fallbackPair,
+        maxMultiplier: 1,
+        supplyAPY: fallbackSupplyAPY,
+        borrowAPY: fallbackBorrowAPY,
+        borrowLTV: 0,
+        borrowVaultAddress: fallbackBorrowVaultAddress,
+        collateralAddress: fallbackCollateralAddress,
       }
     }
 
     const value = Number.isFinite(best) && best > -Infinity ? best : 0
     return {
       value,
+      metric: 'max-roe',
       hasRewards: bestHasRewards,
       pair: bestPair,
       maxMultiplier: bestMultiplier,
@@ -86,8 +161,9 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
   }
 
   const bestMaxROEMap = computed((): Map<string, BestMaxRoeResult> => {
-    void intrinsicVersion.value
-    void rewardsVersion.value
+    void enableIntrinsicApy.value
+    void enableRewardsApy.value
+    void viewer.value
 
     const result = new Map<string, BestMaxRoeResult>()
     for (const group of marketGroups.value) {
@@ -98,6 +174,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
 
   const defaultResult: BestMaxRoeResult = {
     value: 0,
+    metric: 'max-roe',
     hasRewards: false,
     pair: '',
     maxMultiplier: 1,

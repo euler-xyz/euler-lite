@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useResizeObserver } from '@vueuse/core'
+import { snapRangeValue } from '~/utils/range'
 
 const {
   min = 0,
@@ -46,12 +47,10 @@ const ticks = computed(() => {
     roundTick(max),
   ]
 })
-const invStep = computed(() => 1.0 / step)
-
 const update = (x: number) => {
   const p = x / trackBox!.width
   const v = p * (max - min) + min
-  model.value = min + Math.round((v - min) * invStep.value) / invStep.value
+  model.value = snapRangeValue(v, min, max, step)
 }
 const render = async () => {
   await nextTick()
@@ -118,7 +117,15 @@ watch(model, () => {
 </script>
 
 <template>
-  <div class="ui-range">
+  <div
+    class="ui-range"
+    data-id="ui-range"
+    :data-label="label ?? ''"
+    :data-value="String(model)"
+    :data-min="String(min)"
+    :data-max="String(max)"
+    :data-step="String(step)"
+  >
     <div
       v-if="label"
       class="ui-range__top"
@@ -133,6 +140,8 @@ watch(model, () => {
     <div class="ui-range__wrap">
       <div
         ref="trackEl"
+        data-id="ui-range-track"
+        :data-label="label ?? ''"
         class="ui-range__track"
         @click="onClickTrack"
       >
@@ -153,6 +162,9 @@ watch(model, () => {
         <div
           v-for="(tick, idx) in ticks"
           :key="`step-${idx}`"
+          data-id="ui-range-step"
+          :data-label="label ?? ''"
+          :data-value="String(tick)"
           class="ui-range__step"
           @click="model = tick; render()"
         >

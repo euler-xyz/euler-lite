@@ -4,11 +4,15 @@ const {
   full = false,
   close = true,
   warning = false,
+  inline = false,
+  compact = false,
 } = defineProps<{
   title?: string
   full?: boolean
   close?: boolean
   warning?: boolean
+  inline?: boolean
+  compact?: boolean
 }>()
 const emit = defineEmits(['close'])
 
@@ -101,30 +105,50 @@ const dragStyle = computed(() => ({
   transform: dragY.value ? `translateY(${dragY.value}px)` : undefined,
   transition: dragY.value ? 'none' : 'transform 0.3s ease',
 }))
+
+const hasHeaderChrome = computed(() => !inline || Boolean(title || close))
+const bodyTopPaddingClass = computed(() => {
+  if (hasHeaderChrome.value) return ''
+  return compact ? '!pt-12' : 'pt-16'
+})
 </script>
 
 <template>
   <div
     ref="modalEl"
-    class="flex flex-col absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 min-w-[min(375px,100vw)] max-w-[600px] max-h-[85dvh] rounded-16 mobile:top-auto mobile:left-0 mobile:bottom-0 mobile:w-full mobile:min-w-full mobile:max-h-[95dvh] mobile:translate-x-0 mobile:translate-y-0 mobile:rounded-t-16 mobile:rounded-b-0 bg-card"
-    :class="[full ? 'min-h-[85dvh] mobile:min-h-[95dvh] min-w-[min(600px,100vw)]' : '']"
+    class="flex flex-col bg-card"
+    :class="[
+      inline
+        ? 'relative w-full max-h-[min(70vh,560px,var(--popover-available-height,100vh))] rounded-8 border border-line-subtle shadow-card'
+        : 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 min-w-[min(375px,100vw)] max-w-[600px] max-h-[85dvh] rounded-16 mobile:top-auto mobile:left-0 mobile:bottom-0 mobile:w-full mobile:min-w-full mobile:max-h-[95dvh] mobile:translate-x-0 mobile:translate-y-0 mobile:rounded-t-16 mobile:rounded-b-0',
+      full && !inline ? 'min-h-[85dvh] mobile:min-h-[95dvh] min-w-[min(600px,100vw)]' : '',
+    ]"
     :style="dragStyle"
   >
     <!-- Drag zone: pill + header, outside the scroll container -->
     <div
-      class="shrink-0 px-16 pt-12 mobile:pt-0 touch-none select-none"
+      v-if="hasHeaderChrome"
+      class="shrink-0 touch-none select-none"
+      :class="[
+        compact ? 'px-12 pt-14' : 'px-16 pt-12',
+        !inline ? 'mobile:pt-0' : '',
+      ]"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerCancel"
     >
-      <div class="hidden mobile:flex justify-center py-8">
+      <div
+        v-if="!inline"
+        class="hidden mobile:flex justify-center py-8"
+      >
         <div class="w-36 h-4 rounded-full bg-surface-subtle" />
       </div>
 
       <div
         v-if="title || close"
-        class="flex justify-between mb-12 items-center h-36"
+        class="flex justify-between items-center"
+        :class="compact ? 'mb-8 min-h-24' : 'mb-12 h-36'"
       >
         <div
           v-if="close"
@@ -132,7 +156,8 @@ const dragStyle = computed(() => ({
         />
         <p
           v-if="title"
-          class="flex text-center text-h4 items-center gap-8"
+          class="flex text-center items-center gap-8"
+          :class="compact ? 'text-p2 font-semibold' : 'text-h4'"
         >
           <SvgIcon
             v-if="warning"
@@ -141,21 +166,38 @@ const dragStyle = computed(() => ({
           />
           {{ title }}
         </p>
-        <UiButton
+        <button
           v-if="close"
-          variant="primary-stroke"
-          icon="close"
+          type="button"
+          class="ui-button ui-button--medium ui-button--primary-stroke is-icon-only"
           name="cross"
-          icon-only
-          @click="$emit('close')"
-        />
+          data-modal-close
+          aria-label="Close modal"
+          @click="emit('close')"
+        >
+          <div class="ui-button__wrap">
+            <div
+              class="ui-button__icon"
+              aria-hidden="true"
+            >
+              <SvgIcon
+                class="ui-button__icon-svg text-content-secondary"
+                name="close"
+              />
+            </div>
+          </div>
+        </button>
       </div>
     </div>
 
     <!-- Scroll container -->
     <div
       class="flex flex-col overflow-x-hidden overscroll-contain px-16 pb-16"
-      :class="[full ? 'flex-grow min-h-0' : 'overflow-y-auto styled-scrollbar']"
+      :class="[
+        full ? 'flex-grow min-h-0' : 'overflow-y-auto styled-scrollbar',
+        compact ? '!px-12 !pb-12' : '',
+        bodyTopPaddingClass,
+      ]"
       @touchstart="onScrollTouchStart"
       @touchmove="onScrollTouchMove"
       @touchend="onScrollTouchEnd"

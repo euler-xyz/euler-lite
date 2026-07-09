@@ -1,29 +1,43 @@
 <script setup lang="ts">
-import { formatUnits } from 'viem'
-import type { Vault, SecuritizeVault, VaultAsset, CollateralOption, EarnVault } from '~/entities/vault'
-import { getAssetUsdPrice } from '~/services/pricing/priceProvider'
+import type { SecuritizeCollateralVault, EulerEarn, EVault } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAsset } from '~/types/asset'
+import type { CollateralOption } from '~/types/collateral-option'
+import { getAssetUsdPrice } from '~/utils/sdk-prices'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { compactNumber, formatSmartAmount, trimTrailingZeros, formatExactAmount } from '~/utils/string-utils'
 import { ChooseCollateralModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
+import { formatUnits } from 'viem'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   label?: string
   desc?: string
   maxable?: boolean
-  vault?: Vault | EarnVault | SecuritizeVault
+  vault?: EVault | EulerEarn | SecuritizeCollateralVault
   asset: VaultAsset
   balance?: bigint
   balanceLoading?: boolean
   collateralOptions?: CollateralOption[]
+  collateralModalProductName?: string
   collateralModalTitle?: string
   collateralModalApyLabel?: string
+  collateralModalCompatibleLabel?: string
+  collateralModalIncompatibleLabel?: string
+  collateralModalCompatibleEmptyMessage?: string
+  collateralModalCompatibleNote?: string
+  collateralModalForceOpen?: boolean
   readonly?: boolean
   priceOverride?: number // USD unit price for assets without a vault (e.g., swap-to-deposit)
   swappable?: boolean // When true, asset pill shows dropdown arrow and emits click-asset
-  selectedSource?: 'wallet' | 'saving' // Source indicator chip when multiple collateral options exist
+  assetSelectorPlaceholder?: string
+  assetSelectorSelected?: boolean
+  selectedSource?: string // Matches CollateralOption.type (e.g. 'wallet' / 'saving' / 'vault') for the source-chip indicator
+  selectedSubAccount?: string // Disambiguates between multiple savings positions on different sub-accounts
+  selectedVaultAddress?: string // Disambiguates same sub-account positions across different vaults (e.g. wallet rows)
   maxHandler?: () => void // When provided, replaces the default "Max" button behavior
-}>()
+}>(), {
+  assetSelectorSelected: true,
+})
 const emits = defineEmits(['input', 'change-collateral', 'click-asset'])
 const model = defineModel<string>({ default: '' })
 
@@ -31,26 +45,53 @@ const inputEl = useTemplateRef<HTMLInputElement>('inputEl')
 const modal = useModal()
 const isFocused = ref(false)
 const emitInputTimeout = ref<ReturnType<typeof setTimeout> | null>(null)
+const lastEmittedInputValue = ref(model.value)
+
+const emitInputIfChanged = (force = false) => {
+  if (!force && lastEmittedInputValue.value === model.value) return
+  lastEmittedInputValue.value = model.value
+  emits('input')
+}
+
 const emitInputDebounced = () => {
   if (emitInputTimeout.value) {
     clearTimeout(emitInputTimeout.value)
   }
   emitInputTimeout.value = setTimeout(() => {
-    emits('input')
+    emitInputIfChanged()
     emitInputTimeout.value = null
   }, 250)
 }
 
-const emitInputNow = () => {
+const emitInputNow = (force = false) => {
   if (emitInputTimeout.value) {
     clearTimeout(emitInputTimeout.value)
     emitInputTimeout.value = null
   }
-  emits('input')
+  emitInputIfChanged(force)
 }
 
+const matchesSelectedSubAccount = (a?: string, b?: string) => {
+  if (!a || !b) return false
+  return a.toLowerCase() === b.toLowerCase()
+}
+const matchesSelectedVault = (a?: string, b?: string) => {
+  if (!b) return true
+  if (!a) return false
+  return a.toLowerCase() === b.toLowerCase()
+}
 const getSelectedIdx = () => {
   if (props.selectedSource && props.collateralOptions?.length) {
+    // Prefer the option that matches BOTH type and the optional disambiguators
+    // (sub-account for savings rows, vault address for wallet rows). Without
+    // this, a user with two savings positions of the same vault on different
+    // sub-accounts always sees the first matching row highlighted.
+    const exact = props.collateralOptions.findIndex(o =>
+      o.type === props.selectedSource
+      && matchesSelectedVault(o.vaultAddress, props.selectedVaultAddress)
+      && (!props.selectedSubAccount || matchesSelectedSubAccount(o.subAccount, props.selectedSubAccount)),
+    )
+    if (exact >= 0) return exact
     const idx = props.collateralOptions.findIndex(o => o.type === props.selectedSource)
     if (idx >= 0) return idx
   }
@@ -58,7 +99,7 @@ const getSelectedIdx = () => {
 }
 const selectedIdx = ref(getSelectedIdx())
 watch(
-  [() => props.selectedSource, () => props.collateralOptions],
+  [() => props.selectedSource, () => props.selectedSubAccount, () => props.selectedVaultAddress, () => props.collateralOptions],
   () => { selectedIdx.value = getSelectedIdx() },
 )
 const friendlyBalance = computed(() => nanoToValue(props.balance ?? 0n, props.asset?.decimals || 18))
@@ -71,7 +112,7 @@ watch(() => props.collateralOptions, (options) => {
     const firstEnabled = options.findIndex(o => !o.disabled)
     if (firstEnabled >= 0) {
       selectedIdx.value = firstEnabled
-      emits('change-collateral', firstEnabled)
+      emits('change-collateral', firstEnabled, options[firstEnabled])
     }
   }
 })
@@ -105,7 +146,9 @@ const setMax = () => {
     return
   }
   model.value = trimTrailingZeros(formatUnits(props.balance ?? 0n, Number(props.asset.decimals)))
-  emitInputNow()
+  // Max is an explicit command. The parent may have reset this model since
+  // the last emitted input, so do not suppress the handler by cached value.
+  emitInputNow(true)
   if (inputEl.value) {
     inputEl.value.value = model.value || ''
   }
@@ -132,6 +175,15 @@ const onBlur = () => {
     emitInputNow()
   }
 }
+const showAssetSelectorAsset = computed(() => props.assetSelectorSelected !== false)
+const canOpenCollateralModal = computed(() => {
+  const optionsCount = props.collateralOptions?.length ?? 0
+  return props.collateralModalForceOpen ? optionsCount > 0 : optionsCount >= 2
+})
+const canSelectAsset = computed(() => props.swappable || canOpenCollateralModal.value)
+// The arrow must mirror canOpenCollateralModal, or the pill looks clickable
+// while openChooseCollateralModal() immediately returns.
+const showAssetSelectorArrow = computed(() => canSelectAsset.value)
 
 onBeforeUnmount(() => {
   if (emitInputTimeout.value) {
@@ -140,29 +192,54 @@ onBeforeUnmount(() => {
   }
 })
 const openChooseCollateralModal = () => {
-  if ((props.collateralOptions?.length ?? 0) < 2) {
+  if (!canOpenCollateralModal.value) {
     return
   }
   modal.open(ChooseCollateralModal, {
     props: {
-      productName: props.desc,
+      productName: props.collateralModalProductName || props.desc || '',
       symbol: props.asset.symbol,
       collateralOptions: props.collateralOptions,
       selected: selectedIdx.value,
       title: props.collateralModalTitle,
       apyLabel: props.collateralModalApyLabel,
-      onSave: (selectedIndex: number) => {
+      compatibleLabel: props.collateralModalCompatibleLabel,
+      incompatibleLabel: props.collateralModalIncompatibleLabel,
+      compatibleEmptyMessage: props.collateralModalCompatibleEmptyMessage,
+      compatibleNote: props.collateralModalCompatibleNote,
+      onSave: (selectedIndex: number, selectedOption: CollateralOption) => {
         selectedIdx.value = selectedIndex
-        emits('change-collateral', selectedIndex)
+        emits('change-collateral', selectedIndex, selectedOption)
         modal.close()
       },
     },
   })
 }
+const onAssetSelectorClick = () => {
+  if (!canSelectAsset.value) return
+  if (props.swappable) {
+    emits('click-asset')
+    return
+  }
+  openChooseCollateralModal()
+}
 </script>
 
 <template>
   <div
+    data-id="asset-input"
+    :data-label="label ?? ''"
+    :data-desc="desc ?? ''"
+    :data-asset-symbol="asset.symbol"
+    :data-asset-address="asset.address"
+    :data-asset-decimals="String(asset.decimals)"
+    :data-vault-address="vault?.address ?? ''"
+    :data-balance="(balance ?? 0n).toString()"
+    :data-selected-source="selectedSource ?? ''"
+    :data-selected-sub-account="selectedSubAccount ?? ''"
+    :data-selected-vault-address="selectedVaultAddress ?? ''"
+    :data-readonly="readonly ? 'true' : 'false'"
+    :data-maxable="maxable ? 'true' : 'false'"
     class="flex flex-col gap-12 p-16 rounded-16 border transition-all duration-200"
     :class="[
       isFocused
@@ -188,6 +265,11 @@ const openChooseCollateralModal = () => {
       <input
         ref="inputEl"
         v-text-fit
+        data-id="asset-input-field"
+        :data-label="label ?? ''"
+        :data-asset-symbol="asset.symbol"
+        :data-asset-address="asset.address"
+        :data-readonly="readonly ? 'true' : 'false'"
         :value="model"
         class="text-h1 text-content-primary w-full min-w-0 h-40 outline-none placeholder:text-content-tertiary"
         type="text"
@@ -203,35 +285,54 @@ const openChooseCollateralModal = () => {
       >
 
       <div
-        class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap cursor-pointer shrink-0"
-        @click="swappable ? emits('click-asset') : openChooseCollateralModal()"
+        data-id="asset-input-asset-selector"
+        :data-label="label ?? ''"
+        :data-asset-symbol="asset.symbol"
+        :data-asset-address="asset.address"
+        :data-swappable="swappable ? 'true' : 'false'"
+        :data-selectable="canSelectAsset ? 'true' : 'false'"
+        class="bg-card text-p3 font-semibold gap-8 flex items-center justify-center px-12 min-h-36 py-6 rounded-[40px] whitespace-nowrap shrink-0"
+        :class="canSelectAsset ? 'cursor-pointer' : 'cursor-default'"
+        @click="onAssetSelectorClick"
       >
-        <AssetAvatar
-          :asset="asset"
-          size="20"
-        />
-        <div class="flex flex-col items-start">
+        <template v-if="showAssetSelectorAsset">
+          <AssetAvatar
+            :asset="asset"
+            size="20"
+          />
+          <div class="flex flex-col items-start">
+            <span class="flex items-center gap-8">
+              {{ asset.symbol }}
+              <SvgIcon
+                v-if="showAssetSelectorArrow"
+                class="text-content-tertiary !w-16 !h-16"
+                name="arrow-down"
+              />
+            </span>
+            <span
+              v-if="selectedSource === 'wallet' && (collateralOptions?.length ?? 0) > 1"
+              class="text-[10px] leading-[12px] text-accent-600"
+            >
+              Wallet balance
+            </span>
+            <span
+              v-else-if="selectedSource === 'saving' && (collateralOptions?.length ?? 0) > 1"
+              class="text-[10px] leading-[12px] text-yellow-600"
+            >
+              Savings balance
+            </span>
+          </div>
+        </template>
+        <template v-else>
           <span class="flex items-center gap-8">
-            {{ asset.symbol }}
+            {{ assetSelectorPlaceholder || 'Select asset' }}
             <SvgIcon
-              v-if="swappable || (collateralOptions?.length ?? 0) > 1"
+              v-if="showAssetSelectorArrow"
               class="text-content-tertiary !w-16 !h-16"
               name="arrow-down"
             />
           </span>
-          <span
-            v-if="selectedSource === 'wallet' && (collateralOptions?.length ?? 0) > 1"
-            class="text-[10px] leading-[12px] text-accent-600"
-          >
-            Wallet
-          </span>
-          <span
-            v-else-if="selectedSource === 'saving' && (collateralOptions?.length ?? 0) > 1"
-            class="text-[10px] leading-[12px] text-yellow-600"
-          >
-            Savings
-          </span>
-        </div>
+        </template>
       </div>
     </div>
     <div
@@ -254,7 +355,13 @@ const openChooseCollateralModal = () => {
         v-if="maxable"
         :loading="balanceLoading ?? false"
       >
-        <p @click="setMax">
+        <p
+          data-id="asset-input-max"
+          :data-label="label ?? ''"
+          :data-asset-symbol="asset.symbol"
+          :data-asset-address="asset.address"
+          @click="setMax"
+        >
           <UiExactAmount
             class="text-content-tertiary"
             :exact="formatExactAmount(balance ?? 0n, asset?.decimals ?? 18n, asset.symbol)"

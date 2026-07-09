@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { DateTime } from 'luxon'
 import { formatNumber } from '~/utils/string-utils'
-import type { RewardCampaign } from '~/entities/reward-campaign'
-import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
+import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignDisplays } from '~/entities/reward-campaign'
 
 const emits = defineEmits(['close'])
 const {
@@ -13,6 +11,8 @@ const {
   borrowLTV,
   borrowVaultAddress,
   collateralAddress,
+  inline = false,
+  close = true,
 } = defineProps<{
   maxRoe: number
   maxMultiplier: number
@@ -22,25 +22,11 @@ const {
   borrowVaultAddress?: string
   collateralAddress?: string
   isBestInMarket?: boolean
+  inline?: boolean
+  close?: boolean
 }>()
 
 const { getLoopingRewardApy, getLoopingRewardCampaigns, getSupplyRewardApy, getBorrowRewardApy, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
-
-const mapCampaigns = (campaigns: RewardCampaign[]) => {
-  const now = Math.floor(Date.now() / 1000)
-  return campaigns
-    .filter(c => c.endTimestamp > now || c.endTimestamp === 0)
-    .map(c => ({
-      apr: c.apr,
-      endDate: c.endTimestamp > 0 ? DateTime.fromSeconds(c.endTimestamp) : null,
-      rewardToken: c.rewardToken || { symbol: 'Unknown', icon: '' },
-      source: c.provider,
-      sourceUrl: c.sourceUrl,
-      minMultiplier: c.minMultiplier,
-      maxMultiplier: c.maxMultiplier,
-    }))
-    .sort((a, b) => a.rewardToken.symbol.localeCompare(b.rewardToken.symbol))
-}
 
 const loopingRewardAPR = computed(() =>
   borrowVaultAddress && collateralAddress
@@ -50,17 +36,17 @@ const loopingRewardAPR = computed(() =>
 
 const loopingCampaigns = computed(() => {
   if (!borrowVaultAddress || !collateralAddress) return []
-  return mapCampaigns(getLoopingRewardCampaigns(borrowVaultAddress, collateralAddress))
+  return rewardCampaignDisplays(getLoopingRewardCampaigns(borrowVaultAddress, collateralAddress), 'looping')
 })
 
 const supplyCampaigns = computed(() => {
   if (!collateralAddress) return []
-  return mapCampaigns(getSupplyRewardCampaigns(collateralAddress))
+  return rewardCampaignDisplays(getSupplyRewardCampaigns(collateralAddress), 'supply')
 })
 
 const borrowCampaigns = computed(() => {
   if (!borrowVaultAddress || !collateralAddress) return []
-  return mapCampaigns(getBorrowRewardCampaigns(borrowVaultAddress, collateralAddress))
+  return rewardCampaignDisplays(getBorrowRewardCampaigns(borrowVaultAddress, collateralAddress), 'borrow')
 })
 
 const supplyRewardAPY = computed(() =>
@@ -87,16 +73,19 @@ const handleClose = () => {
 
 <template>
   <BaseModalWrapper
-    :title="isBestInMarket ? 'Best Max ROE' : 'Max ROE'"
+    title="Max ROE"
+    :inline="inline"
+    :close="close"
     @close="handleClose"
   >
-    <p class="text-content-primary text-p3 mb-16">
+    <p class="text-content-primary text-p3 mb-12">
       ROE (Return on Equity) estimates the annualized return on your own capital in a multiplied position. A positive ROE means the supply yield exceeds borrowing costs at the given multiplier. A negative ROE means the position is gradually losing value to interest costs.
+      Max ROE is shown only when the collateral and debt assets share a correlated category, such as USD, ETH, or BTC. For uncorrelated pairs, Euler shows Net APY instead because ROE assumes the asset price ratio stays stable.
       <template v-if="isBestInMarket">
-        The value shown is the best max ROE out of all possible collateral/borrow pairs in this market.
+        The value shown is the max modelled ROE across correlated collateral/borrow pairs in this market. Not guaranteed. Borrowing and multiplied positions involve changing rates, liquidity constraints, and liquidation risk.
       </template>
     </p>
-    <div class="mb-24">
+    <div class="mb-12">
       <div class="pb-16 mb-16 border-b border-line-default">
         <div class="flex justify-between items-center mb-16">
           <div>
@@ -156,7 +145,7 @@ const handleClose = () => {
         </div>
         <div
           v-for="campaign in supplyCampaigns"
-          :key="`supply-${campaign.rewardToken.symbol}-${campaign.source}`"
+          :key="campaign.id"
           class="flex justify-between items-center mt-12"
         >
           <div class="flex">
@@ -228,7 +217,7 @@ const handleClose = () => {
         </div>
         <div
           v-for="campaign in borrowCampaigns"
-          :key="`borrow-${campaign.rewardToken.symbol}-${campaign.source}`"
+          :key="campaign.id"
           class="flex justify-between items-center mt-12"
         >
           <div class="flex">
@@ -287,8 +276,8 @@ const handleClose = () => {
             </div>
           </div>
           <div
-            v-for="(campaign, idx) in loopingCampaigns"
-            :key="idx"
+            v-for="campaign in loopingCampaigns"
+            :key="campaign.id"
             class="mt-12"
           >
             <div class="flex justify-between items-center">
@@ -350,7 +339,7 @@ const handleClose = () => {
           </p>
         </template>
       </div>
-      <div class="flex justify-between items-center mb-16">
+      <div class="flex justify-between items-center">
         <div>
           <p class="mb-4">
             Formula
@@ -367,7 +356,7 @@ const handleClose = () => {
       </div>
     </div>
 
-    <div class="bg-surface-secondary rounded-12 p-16 flex justify-between items-center mb-16">
+    <div class="bg-surface-secondary rounded-8 px-12 py-10 flex justify-between items-center gap-16">
       <div>
         <p>Max ROE</p>
         <p class="text-content-primary text-p3">

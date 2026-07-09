@@ -16,6 +16,7 @@ import type { H3Event } from 'h3'
 import { buildCsp } from '~/server/plugins/csp'
 import { applySecurityHeaders } from '~/server/middleware/security-headers'
 import { ANTI_CLICKJACK_SCRIPT } from '~/server/plugins/00-anti-clickjack'
+import { escapeScriptJson } from '~/server/plugins/app-config'
 
 describe('buildCsp', () => {
   const csp = buildCsp('test-nonce', [], { connect: [] }, [])
@@ -56,6 +57,14 @@ describe('buildCsp', () => {
 
   it('locks base-uri to self (prevents base-tag hijack)', () => {
     expect(csp).toContain('base-uri \'self\'')
+  })
+
+  it('allows SDK error signature decoding via Sourcify 4byte API', () => {
+    const connectSrc = csp
+      .split(';')
+      .map(d => d.trim())
+      .find(d => d.startsWith('connect-src'))
+    expect(connectSrc).toContain('https://api.4byte.sourcify.dev')
   })
 })
 
@@ -139,5 +148,34 @@ describe('ANTI_CLICKJACK_SCRIPT', () => {
     // to use template strings — escaping inside HTML `<script>` gets
     // tricky fast. Keep it as a plain single-quoted string literal.
     expect(ANTI_CLICKJACK_SCRIPT).not.toContain('`')
+  })
+})
+
+describe('escapeScriptJson (inline __APP_CONFIG__ payload)', () => {
+  it('escapes `<` so a value cannot close the inline <script> tag', () => {
+    const payload = JSON.stringify({ appTitle: '</script><script>alert(1)</script>' })
+    const escaped = escapeScriptJson(payload)
+    const scriptTag = `<script>window.__APP_CONFIG__=${escaped}</script>`
+
+    // The only `</script>` in the emitted tag must be the closing one we added.
+    expect(escaped).not.toContain('</script>')
+    expect(escaped).not.toContain('<')
+    expect(scriptTag.match(/<\/script>/g)).toHaveLength(1)
+  })
+
+  it('escapes U+2028 / U+2029 line separators (invalid in JS string literals)', () => {
+    const escaped = escapeScriptJson(JSON.stringify({ appTitle: 'a b c' }))
+    expect(escaped).toContain('\\u2028')
+    expect(escaped).toContain('\\u2029')
+    expect(escaped).not.toContain(' ')
+    expect(escaped).not.toContain(' ')
+  })
+
+  it('preserves JSON/JS semantics — escaped payload parses back to the original', () => {
+    const original = { appTitle: 'a < b </script>', appDescription: 'x y z' }
+    const escaped = escapeScriptJson(JSON.stringify(original))
+    // The unicode escapes are interpreted by the JS/JSON parser, yielding
+    // the original characters back inside the string values.
+    expect(JSON.parse(escaped)).toEqual(original)
   })
 })

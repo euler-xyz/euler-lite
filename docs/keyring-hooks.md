@@ -16,11 +16,11 @@ Keyring vaults are flagged via the labels system (`products.json`):
 {
   "private-market": {
     "name": "Private Market",
-    "keyring": true,           // All vaults in this product require keyring
+    "tags": ["keyring"],       // All vaults in this product require keyring
     "vaults": ["0x1234..."],
     "vaultOverrides": {
       "0x5678...": {
-        "keyring": true        // Per-vault override (if product-level is false)
+        "tags": ["keyring"]    // Per-vault classification
       }
     }
   }
@@ -28,8 +28,8 @@ Keyring vaults are flagged via the labels system (`products.json`):
 ```
 
 Utility functions in `utils/eulerLabelsUtils.ts`:
-- `isVaultKeyring(vaultAddress)` — checks product-level or vault-override `keyring` flag
-- `isProductKeyring(productKey)` — checks product-level flag (for explore page)
+- `isVaultKeyring(vaultAddress)` — checks product-level or vault-override `keyring` tag
+- `isProductKeyring(productKey)` — checks the product-level `keyring` tag
 
 ### On-chain reads (zero hardcoded addresses)
 
@@ -57,7 +57,7 @@ The Keyring credentials contract (`entityExp(policyId, address)`) is used to che
 
 ### Operation Guard Registry
 
-`utils/operationGuardRegistry.ts` provides a reactive system for automatic TxPlan transformation:
+`utils/operationGuardRegistry.ts` provides a reactive system for automatic SDK `TransactionPlan` transformation:
 
 ```text
 Page calls useOperationGuard([vaultAddresses])
@@ -65,7 +65,7 @@ Page calls useOperationGuard([vaultAddresses])
   → credential obtained from extension
   → registerOperationGuard('keyring', transformFn)
 
-Page calls executeTxPlan(plan) as normal
+Page calls executePlan(plan) as normal
   → applyOperationGuards(plan) automatically prepends createCredential
   → transaction executes with credential registration + vault operation atomically
 ```
@@ -75,10 +75,9 @@ This means **pages need zero changes to their submit handlers** — they just ca
 ### Transaction injection
 
 `utils/keyring-injection.ts` contains the `injectKeyringCredential()` pure function that:
-1. Creates a `createCredential` EVCCall targeting the Keyring credentials contract
+1. Creates a `createCredential` `EVCBatchItem` targeting the Keyring credentials contract
 2. Includes the ETH/native currency fee as the call's `value`
-3. Prepends it to the EVC batch items
-4. Recalculates the batch step's total value via `sumCallValues()`
+3. Prepends it to every `evcBatch` item in the SDK `TransactionPlan`
 
 The `createCredential` call executes first in the batch, registering the credential on-chain. Subsequent vault operations in the same batch then pass the hook target's credential check.
 
@@ -123,6 +122,6 @@ useOperationGuard(computed(() => [fromVault?.address, toVault?.address].filter(B
 | `composables/useKeyring/index.ts` | Main keyring composable |
 | `composables/useOperationGuard.ts` | Wires keyring to guard registry + provide/inject |
 | `utils/operationGuardRegistry.ts` | Reactive guard registry (register/unregister/apply) |
-| `utils/keyring-injection.ts` | TxPlan transformer (prepend createCredential to EVC batch) |
+| `utils/keyring-injection.ts` | SDK `TransactionPlan` transformer (prepend createCredential to EVC batch) |
 | `components/keyring/*` | UI components (badge, alert, flow, modal) |
 | `components/entities/vault/VaultTypeBadges.vue` | Unified vault type + private badge display |

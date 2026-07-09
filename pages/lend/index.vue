@@ -1,46 +1,50 @@
 <script setup lang="ts">
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getVaultUtilization } from '~/entities/vault'
-import type { Vault } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultFeatured, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import { nanoToValue } from '~/utils/crypto-utils'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 defineOptions({
   name: 'LendPage',
 })
 
-const { borrowList, isEVKUpdating } = useVaults()
-const { getVerifiedEvkVaults } = useVaultRegistry()
+const { borrowList, isEVaultUpdating, isMarketDataResolved } = useVaults()
+const { getVerifiedEVaults } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
-const list = computed(() => getVerifiedEvkVaults(showAllLabelEntries.value))
+const list = computed(() => getVerifiedEVaults(showAllLabelEntries.value))
 
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEVKUpdating.value || !isPricesReady.value)
+const { entities, isReady: labelsReady } = useEulerLabels()
+const isLoading = computed(() => isEVaultUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
-const { entities } = useEulerLabels()
-const { withIntrinsicSupplyApy } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
 const { getBalance } = useWallets()
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<Vault>((vault) => {
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EVault>((vault) => {
   const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
   return [
     vault.asset.symbol,
     vault.asset.name,
-    vault.name,
+    vault.shares.name,
+    vault.address,
+    vault.asset.address,
     product.name,
     product.description,
     ...getEntitiesByVault(vault).map(e => e.name),
@@ -66,10 +70,11 @@ useUrlQuerySync([
 const vaultUsdValues = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
 const vaultWalletUsd = ref<Map<string, number>>(new Map())
+let priceLoadId = 0
 
-const getVaultSupplyApy = (vault: Vault): number => {
-  const baseApy = nanoToValue(vault.interestRateInfo.supplyAPY, 25)
-  return withIntrinsicSupplyApy(baseApy, vault.asset.address) + getSupplyRewardApy(vault.address)
+const getDisplayedVaultSupplyApy = (vault: EVault): number => {
+  const baseApy = getVaultSupplyApy(vault)
+  return withVaultIntrinsicApy(baseApy, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 }
 
 const {
@@ -78,7 +83,7 @@ const {
   clearCustomFilters,
   openCustomFilterModal,
   matchesCustomFilters,
-} = useCustomFilters<Vault>(
+} = useCustomFilters<EVault>(
   [
     { key: 'totalSupply', label: 'Total supply', shortLabel: 'Total supply', unit: 'usd' },
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
@@ -91,8 +96,8 @@ const {
       case 'totalSupply': return vaultUsdValues.value.get(vault.address) ?? 0
       case 'liquidity': return vaultLiquidityUsd.value.get(vault.address) ?? 0
       case 'inWallet': return vaultWalletUsd.value.get(vault.address) ?? 0
-      case 'supplyApy': return getVaultSupplyApy(vault)
-      case 'utilization': return getVaultUtilization(vault)
+      case 'supplyApy': return getDisplayedVaultSupplyApy(vault)
+      case 'utilization': return vault.utilization
       default: return 0
     }
   },
@@ -124,6 +129,7 @@ const borrowableVaults = computed(() => {
 // price-fetch cycle. Reading rewardsVersion.value establishes a reactive
 // dependency so this also re-runs when reward data loads asynchronously.
 const fetchLendPrices = useDebounceFn(async () => {
+  const loadId = ++priceLoadId
   const vaults = borrowableVaults.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -138,7 +144,7 @@ const fetchLendPrices = useDebounceFn(async () => {
     await Promise.all(
       vaults.map(async (vault) => {
         const walletBalance = getBalance(vault.asset.address as `0x${string}`)
-        const liquidity = vault.supply >= vault.borrow ? vault.supply - vault.borrow : 0n
+        const liquidity = vault.availableLiquidity
         const [totalSupply, liquidityUsd, wallet] = await Promise.all([
           getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),
           getAssetUsdValueOrZero(liquidity, vault, 'off-chain'),
@@ -150,12 +156,15 @@ const fetchLendPrices = useDebounceFn(async () => {
       }),
     )
 
+    if (loadId !== priceLoadId) return
     vaultUsdValues.value = supplyValues
     vaultLiquidityUsd.value = liquidityValues
     vaultWalletUsd.value = walletValues
   }
   finally {
-    isPricesReady.value = true
+    if (loadId === priceLoadId) {
+      isPricesReady.value = true
+    }
   }
 }, DEBOUNCE_LIST_PRICE_FETCH_MS)
 
@@ -175,6 +184,7 @@ watchEffect(() => {
   // debounced fetcher. Values are re-read inside fetchLendPrices at execution
   // time to avoid closing over stale references.
   void rewardsVersion.value
+  void isMarketDataResolved.value
   void borrowableVaults.value
   if (!isActive.value) return
   fetchLendPrices()
@@ -222,11 +232,14 @@ const filteredList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyFeaturedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const af = isVaultFeatured(a.address) ? 1 : 0
-    const bf = isVaultFeatured(b.address) ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedBoost(
+      isVaultRecentlyAdded(a.address),
+      vaultLiquidityUsd.value.get(a.address) ?? 0,
+      isVaultRecentlyAdded(b.address),
+      vaultLiquidityUsd.value.get(b.address) ?? 0,
+    )
   })
 }
 
@@ -239,31 +252,55 @@ const applyDeprecatedSort = <T extends { address: string }>(sorted: T[]): T[] =>
 }
 
 const sortedList = computed(() => {
-  let sorted: Vault[]
+  let sorted: EVault[]
   switch (sortBy.value) {
     case 'Total Supply':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
         const aValue = vaultUsdValues.value.get(a.address) ?? 0
         const bValue = vaultUsdValues.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     case 'Supply APY':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
-        return Number(b.interestRateInfo.supplyAPY) - Number(a.interestRateInfo.supplyAPY)
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
+        return Number(getDisplayedVaultSupplyApy(b)) - Number(getDisplayedVaultSupplyApy(a))
       }))
       break
     case 'Utilization':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: Vault, b: Vault) => {
-        return getVaultUtilization(b) - getVaultUtilization(a)
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EVault, b: EVault) => {
+        return b.utilization - a.utilization
       }))
       break
     default:
-      sorted = applyFeaturedSort([...filteredList.value])
+      sorted = applyRecentlyAddedSort([...filteredList.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)
 })
+
+const hasActiveFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedCollateral.value.length > 0
+  || selectedMarkets.value.length > 0
+  || selectedRiskManagers.value.length > 0
+  || customFilters.value.length > 0,
+)
+const hasLendMarkets = computed(() => borrowableVaults.value.length > 0)
+const showFilteredEmptyState = computed(() => hasActiveFilters.value && hasLendMarkets.value)
+const emptyStateTitle = computed(() => showFilteredEmptyState.value ? 'No lend markets found' : 'No lend markets yet')
+const emptyStateDescription = computed(() =>
+  showFilteredEmptyState.value
+    ? 'Try clearing search or filters to uncover more supply opportunities.'
+    : 'No lend markets are available on this network yet.',
+)
+
+const clearLendFilters = () => {
+  clearSearch()
+  selectedCollateral.value = []
+  selectedMarkets.value = []
+  selectedRiskManagers.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
@@ -350,18 +387,26 @@ const sortedList = computed(() => {
         :items="sortedList"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-content-tertiary"
+        class="flex-1"
+        icon="lend-outline"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="showFilteredEmptyState"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearLendFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>

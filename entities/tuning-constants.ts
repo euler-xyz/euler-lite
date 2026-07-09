@@ -9,15 +9,22 @@ export const POLL_INTERVAL_60S_MS = 60_000
 // ── RPC Batch Sizes ───────────────────────────────────────
 export const BATCH_SIZE_RPC_CALLS = 5
 export const BATCH_SIZE_VAULT_FETCH = 25
+export const BATCH_SIZE_VAULT_FETCH_HYPEREVM = 15
 export const BATCH_SIZE_PARALLEL_ROUNDS = 5
 
+export const getVaultFetchBatchSize = (chainId: number): number =>
+  chainId === 999 ? BATCH_SIZE_VAULT_FETCH_HYPEREVM : BATCH_SIZE_VAULT_FETCH
+
 // ── Request Batching Delays ───────────────────────────────
-export const BATCH_DELAY_COLLECT_MS = 50
+export const BATCH_DELAY_COLLECT_MS = 100
 
 // ── Request Timeouts ────────────────────────────────────
 /** Subgraph query timeout (client-side). Longer than server-side subgraph
  * calls because client traffic tolerates higher variance. */
 export const SUBGRAPH_TIMEOUT_MS = 30_000
+/** Wallet screening must resolve promptly so the app can fail closed instead
+ * of leaving a connected wallet in an indeterminate state. */
+export const WALLET_SCREENING_TIMEOUT_MS = 10_000
 
 // ── Debounce ──────────────────────────────────────────────
 /** Price-fetch watchEffects on list pages. Collapses bursts of registry
@@ -30,6 +37,15 @@ export const DEBOUNCE_LIST_PRICE_FETCH_MS = 300
 export const LIST_INITIAL_BATCH_ROWS = 40
 /** Estimated per-row height for the scroll-restoration spacer reservation. */
 export const LIST_ROW_HEIGHT_PX = 88
+
+// ── Windowed list rendering ───────────────────────────────
+/** Distance (px) beyond the viewport at which windowed list rows are mounted
+ * and unmounted. Larger keeps fast scrolling smoother at the cost of more
+ * mounted rows. */
+export const LIST_RENDER_BUFFER_PX = 800
+/** Rows mounted eagerly on first paint (before the IntersectionObserver's
+ * first pass) so the initial viewport shows real content, not placeholders. */
+export const LIST_EAGER_RENDER_ROWS = 12
 
 // ── Wallet balances ───────────────────────────────────────
 /** TTL for a "full" wallet balance fetch (the one that includes the whole
@@ -49,7 +65,6 @@ export const SUBGRAPH_BLOCK_POLL_INTERVAL_MS = 1_000
  * back on the immediate triggerPortfolioRefresh + the 60s portfolio page
  * poll to eventually reconcile state. */
 export const SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS = 30_000
-
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n
 /** BPS_BASE + 1: pads amounts by 0.01% to cover interest accrual */

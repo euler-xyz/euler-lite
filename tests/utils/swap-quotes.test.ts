@@ -1,14 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import {
+  getQuoteCardAmount,
+  getQuoteCardScore,
   getQuoteAmount,
   sortQuoteCards,
   pickBestQuote,
   getQuoteDiffPct,
 } from '~/utils/swapQuotes'
-import type { SwapApiQuote } from '~/entities/swap'
+import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
 
-const makeQuote = (amountIn: string, amountOut: string): SwapApiQuote =>
-  ({ amountIn, amountOut }) as SwapApiQuote
+const makeQuote = (amountIn: string, amountOut: string): SwapQuote =>
+  ({ amountIn, amountOut }) as SwapQuote
+
+const makeCard = (provider: string, amountIn: string, amountOut: string) => ({
+  provider,
+  quote: makeQuote(amountIn, amountOut),
+  fetchedAt: 0,
+})
 
 describe('getQuoteAmount', () => {
   it('returns 0n for null quote', () => {
@@ -26,12 +34,12 @@ describe('getQuoteAmount', () => {
   })
 
   it('returns 0n for non-numeric quote field', () => {
-    const quote = { amountIn: 'invalid', amountOut: '200' } as SwapApiQuote
+    const quote = { amountIn: 'invalid', amountOut: '200' } as SwapQuote
     expect(getQuoteAmount(quote, 'amountIn')).toBe(0n)
   })
 
   it('returns 0n for null field value', () => {
-    const quote = { amountIn: null, amountOut: '200' } as unknown as SwapApiQuote
+    const quote = { amountIn: null, amountOut: '200' } as unknown as SwapQuote
     expect(getQuoteAmount(quote, 'amountIn')).toBe(0n)
   })
 })
@@ -39,9 +47,9 @@ describe('getQuoteAmount', () => {
 describe('sortQuoteCards', () => {
   it('sorts by max amountOut (descending)', () => {
     const cards = [
-      { provider: 'A', quote: makeQuote('100', '200') },
-      { provider: 'B', quote: makeQuote('100', '300') },
-      { provider: 'C', quote: makeQuote('100', '100') },
+      makeCard('A', '100', '200'),
+      makeCard('B', '100', '300'),
+      makeCard('C', '100', '100'),
     ]
     const sorted = sortQuoteCards(cards, 'amountOut', 'max')
     expect(sorted[0].provider).toBe('B')
@@ -51,9 +59,9 @@ describe('sortQuoteCards', () => {
 
   it('sorts by min amountIn (ascending)', () => {
     const cards = [
-      { provider: 'A', quote: makeQuote('300', '100') },
-      { provider: 'B', quote: makeQuote('100', '100') },
-      { provider: 'C', quote: makeQuote('200', '100') },
+      makeCard('A', '300', '100'),
+      makeCard('B', '100', '100'),
+      makeCard('C', '200', '100'),
     ]
     const sorted = sortQuoteCards(cards, 'amountIn', 'min')
     expect(sorted[0].provider).toBe('B')
@@ -63,16 +71,96 @@ describe('sortQuoteCards', () => {
 
   it('does not mutate original array', () => {
     const cards = [
-      { provider: 'A', quote: makeQuote('100', '100') },
-      { provider: 'B', quote: makeQuote('100', '200') },
+      makeCard('A', '100', '100'),
+      makeCard('B', '100', '200'),
     ]
     const sorted = sortQuoteCards(cards, 'amountOut', 'max')
-    expect(cards[0].provider).toBe('A') // original unchanged
-    expect(sorted[0].provider).toBe('B') // sorted has B first (higher amountOut)
+    expect(cards[0].provider).toBe('A')
+    expect(sorted[0].provider).toBe('B')
   })
 
   it('handles empty array', () => {
     expect(sortQuoteCards([], 'amountOut', 'max')).toEqual([])
+  })
+
+  it('sorts max quotes by USD output minus gas USD', () => {
+    const cards = [
+      { provider: 'A', quote: makeQuote('100', '300'), amountUsd: 339, gasCostUsd: 4.82 },
+      { provider: 'B', quote: makeQuote('100', '200'), amountUsd: 340, gasCostUsd: 0 },
+    ]
+    const sorted = sortQuoteCards(cards, 'amountOut', 'max')
+    expect(sorted[0].provider).toBe('B')
+    expect(sorted[1].provider).toBe('A')
+  })
+
+  it('sorts min quotes by USD input plus gas USD', () => {
+    const cards = [
+      { provider: 'A', quote: makeQuote('100', '300'), amountUsd: 339, gasCostUsd: 4.82 },
+      { provider: 'B', quote: makeQuote('200', '300'), amountUsd: 340, gasCostUsd: 0 },
+    ]
+    const sorted = sortQuoteCards(cards, 'amountIn', 'min')
+    expect(sorted[0].provider).toBe('B')
+  })
+
+  it('ranks cards with USD score ahead of cards without', () => {
+    const cards = [
+      { provider: 'A', quote: makeQuote('100', '200') },
+      { provider: 'B', quote: makeQuote('100', '300'), amountUsd: 300 },
+    ]
+    const sorted = sortQuoteCards(cards, 'amountOut', 'max')
+    expect(sorted[0].provider).toBe('B')
+  })
+
+  it('falls back to raw token amount when no card has a USD score', () => {
+    const cards = [
+      { provider: 'A', quote: makeQuote('100', '200') },
+      { provider: 'B', quote: makeQuote('100', '300') },
+    ]
+    const sorted = sortQuoteCards(cards, 'amountOut', 'max')
+    expect(sorted[0].provider).toBe('B')
+  })
+})
+
+describe('getQuoteCardAmount', () => {
+  it('returns the raw quote amount regardless of gas', () => {
+    expect(getQuoteCardAmount(
+      { provider: 'A', quote: makeQuote('100', '300'), gasCostUsd: 25 },
+      'amountOut',
+    )).toBe(300n)
+    expect(getQuoteCardAmount(
+      { provider: 'A', quote: makeQuote('100', '300'), gasCostUsd: 25 },
+      'amountIn',
+    )).toBe(100n)
+  })
+})
+
+describe('getQuoteCardScore', () => {
+  it('returns null when amountUsd is unset', () => {
+    expect(getQuoteCardScore(
+      { provider: 'A', quote: makeQuote('100', '300') },
+      'max',
+    )).toBeNull()
+  })
+
+  it('subtracts gas USD for max compare', () => {
+    expect(getQuoteCardScore(
+      { provider: 'A', quote: makeQuote('100', '300'), amountUsd: 340, gasCostUsd: 4.82 },
+      'max',
+    )).toBeCloseTo(335.18)
+  })
+
+  it('adds gas USD for min compare', () => {
+    expect(getQuoteCardScore(
+      { provider: 'A', quote: makeQuote('100', '300'), amountUsd: 100, gasCostUsd: 5 },
+      'min',
+    )).toBe(105)
+  })
+
+  it('treats missing gas as zero', () => {
+    expect(getQuoteCardScore(
+      { provider: 'A', quote: makeQuote('100', '300'), amountUsd: 100 },
+      'max',
+    )).toBe(100)
   })
 })
 
@@ -101,36 +189,30 @@ describe('pickBestQuote', () => {
 
 describe('getQuoteDiffPct', () => {
   it('returns null when amounts are equal', () => {
-    expect(getQuoteDiffPct(100n, 100n, 'max')).toBeNull()
+    expect(getQuoteDiffPct(100, 100, 'max')).toBeNull()
   })
 
   it('returns null when bestAmount is zero', () => {
-    expect(getQuoteDiffPct(100n, 0n, 'max')).toBeNull()
+    expect(getQuoteDiffPct(100, 0, 'max')).toBeNull()
   })
 
   it('returns null when quoteAmount is zero', () => {
-    expect(getQuoteDiffPct(0n, 100n, 'max')).toBeNull()
+    expect(getQuoteDiffPct(0, 100, 'max')).toBeNull()
   })
 
   it('calculates diff percentage for max compare', () => {
-    // best=200, quote=100, diff=100, diffBps=100*10000/200=5000 → 50%
-    const result = getQuoteDiffPct(100n, 200n, 'max')
-    expect(result).toBe(50)
+    expect(getQuoteDiffPct(100, 200, 'max')).toBe(50)
   })
 
   it('calculates diff percentage for min compare', () => {
-    // best=100, quote=200, diff=200-100=100, diffBps=100*10000/100=10000 → 100%
-    const result = getQuoteDiffPct(200n, 100n, 'min')
-    expect(result).toBe(100)
+    expect(getQuoteDiffPct(200, 100, 'min')).toBe(100)
   })
 
   it('returns null when quote is better than best in min mode', () => {
-    // quoteAmount=50 < bestAmount=100 => diff = 50-100 = -50 <= 0 => null
-    expect(getQuoteDiffPct(50n, 100n, 'min')).toBeNull()
+    expect(getQuoteDiffPct(50, 100, 'min')).toBeNull()
   })
 
   it('returns null when quote is better than best in max mode', () => {
-    // quoteAmount=200 > bestAmount=100 => diff = 100-200 = -100 <= 0 => null
-    expect(getQuoteDiffPct(200n, 100n, 'max')).toBeNull()
+    expect(getQuoteDiffPct(200, 100, 'max')).toBeNull()
   })
 })

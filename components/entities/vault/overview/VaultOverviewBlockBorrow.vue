@@ -1,35 +1,31 @@
 <script setup lang="ts">
-import { formatNumber } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import type { LTVRampConfig } from '~/entities/vault/ltv'
-import {
-  getCollateralExposurePairs,
-  getCurrentLiquidationLTV,
-  isLiquidationLTVRamping,
-} from '~/entities/vault'
-import { useModal } from '~/components/ui/composables/useModal'
+import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
-
-const modal = useModal()
+import { compactNumber, formatCompactUsdValue, formatNumber } from '~/utils/string-utils'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const { get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
+} = useCollateralOpenInterest()
 
 const onCollateralClick = (address: string) => {
   emits('vault-click', address)
 }
 
-const onRampDownInfoIconClick = (event: MouseEvent, pair: LTVRampConfig) => {
-  modal.open(VaultRampDownModal, {
-    props: pair,
-  })
-}
+const getRampDownModalData = (ltv: EVaultCollateral) => ({
+  props: ltv,
+})
 
 // Module-scope dedupe so we warn at most once per (vault, missing-collateral)
 // pair across recomputes and SFC instances. Mirrors the dedupe in
@@ -48,52 +44,103 @@ const allCollateralPairs = computed(() =>
           warnedUnresolved.add(key)
           logWarn(
             'vault-overview/missing-collateral',
-            `Vault ${vault.address} references unresolved collateral ${addr}`,
+            `EVault ${vault.address} references unresolved collateral ${addr}`,
           )
         }
       }
-      return entry?.vault as Vault | SecuritizeVault | undefined
+      return entry?.vault as EVault | SecuritizeCollateralVault | undefined
     },
   ),
 )
+
+const openInterestUsdByCollateral = computed<Record<string, number>>(() =>
+  isOpenInterestEnabled.value ? getOpenInterestForVault(vault.address) : {},
+)
+const collateralGroups = computed(() =>
+  getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
+)
+const totalOpenInterestUsd = computed(() =>
+  collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
+const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
+const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
+  const entry = Object.entries(openInterestUsdByCollateral.value)
+    .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
+  return entry?.[1] ?? 0
+}
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
+const sectionTitle = 'Collateral exposure'
+const sectionDescription = computed(() =>
+  isOpenInterestEnabled.value
+    ? 'Review current borrow exposure and configured collateral vaults before supplying.'
+    : 'Review configured collateral vaults and LTVs before supplying.',
+)
+const formatExposurePercent = (valueUsd: number) =>
+  !hasLiveExposureData.value
+    ? '-'
+    : totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
+const formatLiveExposureUsd = (valueUsd: number) =>
+  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
+
+watchEffect(() => {
+  if (!vault.address || !isOpenInterestEnabled.value) return
+  void loadOpenInterest()
+})
 </script>
 
 <template>
-  <div
-    v-if="allCollateralPairs.length"
-    class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card"
+  <VaultOverviewAccordionSection
+    v-if="collateralGroups.length"
+    :title="sectionTitle"
+    :default-open="defaultOpen"
+    content-class="flex flex-col gap-24"
   >
     <div>
-      <p class="text-h3 text-content-primary mb-12">
-        Collateral exposure
-      </p>
       <p class="text-content-secondary">
         Deposits in this vault can be borrowed.
-        Please make sure you're comfortable accepting the collaterals
-        listed in the table below before supplying.
+        {{ sectionDescription }}
       </p>
     </div>
 
     <div class="flex flex-col gap-12">
       <div
-        v-for="pair in allCollateralPairs"
+        v-for="pair in collateralPairs"
         :key="pair.collateral.address"
-        class="bg-surface rounded-xl text-content-primary block no-underline cursor-pointer hover:bg-card-hover transition-colors shadow-sm"
+        class="cursor-pointer rounded-12 border border-line-subtle bg-surface p-16 shadow-sm transition-colors hover:bg-card-hover"
         @click="onCollateralClick(pair.collateral.address)"
       >
-        <div
-          class="px-16 pt-16 pb-12 border-b border-line-subtle"
-        >
-          <VaultLabelsAndAssets
-            :vault="pair.collateral"
-            :assets="[pair.collateral.asset]"
-          />
-        </div>
-        <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
+        <VaultLabelsAndAssets
+          :vault="pair.collateral"
+          :assets="[pair.collateral.asset]"
+        />
+        <div class="mt-12 grid grid-cols-1 gap-12">
+          <VaultOverviewLabelValue
+            v-if="isOpenInterestEnabled"
+            orientation="horizontal"
+          >
+            <template #label>
+              <span class="flex items-center gap-4">
+                Current exposure
+                <span @click.stop.prevent>
+                  <UiHoverPreviewTooltip
+                    title="Current exposure"
+                    text="The amount currently borrowed against this collateral."
+                    icon-class="text-content-muted hover:text-content-secondary"
+                  />
+                </span>
+              </span>
+            </template>
+            <span class="flex items-center gap-4">
+              {{ formatLiveExposureUsd(getPairOpenInterestUsd(pair)) }}
+              <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>
+            </span>
+          </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"
-            :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
+            :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
           />
           <VaultOverviewLabelValue
             orientation="horizontal"
@@ -101,27 +148,36 @@ const allCollateralPairs = computed(() =>
             <template #label>
               <span class="flex items-center gap-4">
                 Liquidation LTV
-                <SvgIcon
-                  v-if="isLiquidationLTVRamping(pair)"
-                  class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
-                  name="info-circle"
-                  @click.stop.prevent="onRampDownInfoIconClick($event, pair)"
-                />
+                <UiModalPreviewTrigger
+                  v-if="pair.ltv.isLiquidationLTVRamping"
+                  :component="VaultRampDownModal"
+                  :modal-data="() => getRampDownModalData(pair.ltv)"
+                  aria-label="Show liquidation LTV ramp-down details"
+                >
+                  <SvgIcon
+                    class="!w-20 !h-20 text-content-muted cursor-pointer hover:text-content-secondary"
+                    name="info-circle"
+                  />
+                </UiModalPreviewTrigger>
               </span>
             </template>
             <span class="flex items-center gap-4">
-              <SvgIcon
-                v-if="isLiquidationLTVRamping(pair)"
-                name="arrow-top-right"
-                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
-                title="Liquidation LTV ramping down"
-                @click.stop.prevent="onRampDownInfoIconClick($event, pair)"
-              />
-              {{ `${formatNumber(nanoToValue(getCurrentLiquidationLTV(pair), 2), 2)}%` }}
+              <UiModalPreviewTrigger
+                v-if="pair.ltv.isLiquidationLTVRamping"
+                :component="VaultRampDownModal"
+                :modal-data="() => getRampDownModalData(pair.ltv)"
+                aria-label="Show liquidation LTV ramp-down details"
+              >
+                <SvgIcon
+                  name="arrow-top-right"
+                  class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180 cursor-pointer"
+                />
+              </UiModalPreviewTrigger>
+              {{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}
             </span>
           </VaultOverviewLabelValue>
         </div>
       </div>
     </div>
-  </div>
+  </VaultOverviewAccordionSection>
 </template>

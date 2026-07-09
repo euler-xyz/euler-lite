@@ -6,6 +6,9 @@ export type UiTab = {
   disabled?: boolean
   class?: string
   badge?: unknown
+  badgeLoading?: boolean
+  badgeVariant?: 'neutral' | 'accent'
+  ariaLabel?: string
   [key: string]: unknown
 }
 </script>
@@ -103,6 +106,11 @@ watch(currentIdx, () => {
 })
 watch(() => props.list.length, async () => {
   await nextTick()
+  // The tabs flex to equal widths, so adding/removing a tab (e.g. the Migrate
+  // tab appearing/disappearing on account switch) resizes the remaining tabs
+  // without changing the list element's own size — the ResizeObserver doesn't
+  // fire and the active-pill block keeps its stale width/offset. Recompute it.
+  updateBlockStyles()
   checkScrollPosition()
 })
 
@@ -144,8 +152,13 @@ defineExpose({
           :key="idx"
           class="ui-tabs__item"
           :class="item.class"
+          data-id="tab"
+          :data-key="String(item.value ?? 'default')"
+          data-field="tab"
+          :data-value="item.label"
           role="tab"
           :aria-selected="checkActive(item)"
+          :aria-label="item.ariaLabel || item.label"
           aria-expanded="true"
         >
           <UiTab
@@ -155,6 +168,8 @@ defineExpose({
             :pill="pills"
             :icon="item.icon"
             :badge="item.badge"
+            :badge-loading="item.badgeLoading"
+            :badge-variant="item.badgeVariant"
             @click="onSelect(item.value, idx)"
           >
             <span class="ui-tabs__tab-text">

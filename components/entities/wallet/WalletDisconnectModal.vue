@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { useAccount, useDisconnect } from '@wagmi/vue'
+import { useDisconnect } from '@wagmi/vue'
 import { getExplorerLink } from '~/utils/block-explorer'
 
 const emits = defineEmits(['close'])
 
-const { address } = useAccount()
 const { disconnect } = useDisconnect()
 const { chainId } = useEulerAddresses()
-const { isSpyMode, spyAddress, clearSpyMode } = useSpyMode()
+const { clearSpyMode } = useSpyMode()
 
-const displayAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+const { isSpyMode, effectiveAddress: displayAddress } = useEffectiveAddress()
 const explorerLink = computed(() => getExplorerLink(displayAddress.value, chainId.value, true))
 
 const onCopyAddressClick = () => {

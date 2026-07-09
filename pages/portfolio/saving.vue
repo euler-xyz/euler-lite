@@ -1,17 +1,29 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import type { AccountDepositPosition } from '~/entities/account'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
+import type { PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 
-const { isConnected } = useAccount()
-const { depositPositions, isDepositsLoaded } = useEulerAccount()
+const { isConnected } = useWagmi()
+const { isSpyMode } = useSpyMode()
+const { depositPositions, removedDepositPositions, isDepositsLoaded } = useEulerAccount()
 const { isReady } = useVaults()
 const { isEarnVault } = useVaultRegistry()
+const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 
-const earnItems = computed(() => depositPositions.value.filter(p => isEarnVault(p.vault.address)))
-const lendItems = computed(() => depositPositions.value.filter(p => !isEarnVault(p.vault.address)))
+const displayedDepositPositions = computed(() => [
+  ...removedDepositPositions.value,
+  ...depositPositions.value,
+])
 
-const sortByUsdValue = async (positions: AccountDepositPosition[]): Promise<AccountDepositPosition[]> => {
+const earnItems = computed(() => displayedDepositPositions.value.filter((p) => {
+  const vault = p.vault
+  return vault ? isEarnVault(vault.address) : false
+}))
+const lendItems = computed(() => displayedDepositPositions.value.filter((p) => {
+  const vault = p.vault
+  return vault ? !isEarnVault(vault.address) : false
+}))
+
+const sortByUsdValue = async (positions: PortfolioSavingsPosition<VaultEntity>[]): Promise<PortfolioSavingsPosition<VaultEntity>[]> => {
   if (positions.length <= 1) return positions
   const withValues = await Promise.all(
     positions.map(async p => ({
@@ -24,8 +36,8 @@ const sortByUsdValue = async (positions: AccountDepositPosition[]): Promise<Acco
     .map(item => item.position)
 }
 
-const sortedEarnItems = ref<AccountDepositPosition[]>([])
-const sortedLendItems = ref<AccountDepositPosition[]>([])
+const sortedEarnItems = ref<PortfolioSavingsPosition<VaultEntity>[]>([])
+const sortedLendItems = ref<PortfolioSavingsPosition<VaultEntity>[]>([])
 
 watchEffect(async () => {
   sortedEarnItems.value = await sortByUsdValue(earnItems.value)
@@ -33,21 +45,26 @@ watchEffect(async () => {
 watchEffect(async () => {
   sortedLendItems.value = await sortByUsdValue(lendItems.value)
 })
+
+usePortfolioBatchScrollTarget(computed(() => [
+  ...sortedEarnItems.value.map(position => position.subAccount),
+  ...sortedLendItems.value.map(position => position.subAccount),
+].join('|')))
 </script>
 
 <template>
   <div class="mx-16">
     <div class="flex justify-between items-center mb-8">
       <h3 class="text-h3 font-normal text-neutral-800">
-        Managed lending
+        Curated lending
       </h3>
     </div>
     <p class="text-p2 text-neutral-500 mb-16">
-      Passive yield earned across professionally curated strategies.
+      Supplied assets in curated vault strategies.
     </p>
     <div class="flex flex-1 p-8 rounded-12 mb-16 border border-line-default bg-card">
       <div
-        v-if="isConnected && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
+        v-if="hasActiveSession && (!isDepositsLoaded || (!isReady && earnItems.length === 0))"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />
@@ -56,17 +73,11 @@ watchEffect(async () => {
         v-else-if="earnItems.length === 0"
         class="flex flex-1 justify-center items-center"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-            <SvgIcon name="search" />
-          </div>
-          <template v-if="isConnected">
-            You don't have savings yet
-          </template>
-          <template v-else>
-            Connect your wallet to see your savings
-          </template>
-        </div>
+        <PortfolioEmptyState
+          :active="hasActiveSession"
+          active-text="You don't have deposit positions yet"
+          inactive-text="Connect your wallet to see your deposit positions"
+        />
       </div>
       <div
         v-else
@@ -91,11 +102,11 @@ watchEffect(async () => {
       </h3>
     </div>
     <p class="text-p2 text-neutral-500 mb-16">
-      Yield earned by lending assets directly to borrowers.
+      Assets supplied to Euler vaults.
     </p>
     <div class="flex flex-1 p-8 rounded-12 border border-line-default bg-card">
       <div
-        v-if="isConnected && (!isDepositsLoaded || !isReady)"
+        v-if="hasActiveSession && (!isDepositsLoaded || !isReady)"
         class="flex flex-1 justify-center items-center"
       >
         <UiLoader class="text-neutral-500 my-8" />
@@ -104,17 +115,11 @@ watchEffect(async () => {
         v-else-if="lendItems.length === 0"
         class="flex flex-1 justify-center items-center"
       >
-        <div class="flex flex-col gap-8 items-center text-neutral-500 py-32">
-          <div class="flex w-48 h-48 justify-center items-center rounded-12 bg-neutral-100">
-            <SvgIcon name="search" />
-          </div>
-          <template v-if="isConnected">
-            You don't have savings yet
-          </template>
-          <template v-else>
-            Connect your wallet to see your savings
-          </template>
-        </div>
+        <PortfolioEmptyState
+          :active="hasActiveSession"
+          active-text="You don't have deposit positions yet"
+          inactive-text="Connect your wallet to see your deposit positions"
+        />
       </div>
       <div
         v-else

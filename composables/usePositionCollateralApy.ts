@@ -1,16 +1,13 @@
-import { getAddress, type Abi, type Address } from 'viem'
-import type { AccountBorrowPosition } from '~/entities/account'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { isEVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import {
   getProjectedRatesBatch,
   type ProjectedRatesRequest,
-  type SecuritizeVault,
-  type Vault,
-} from '~/entities/vault'
-import { getCollateralUsdValueOrZero } from '~/services/pricing/priceProvider'
+} from '~/utils/vault/apy'
+import { getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
+import { getVaultSupplyApy } from '~/utils/vault-display'
+import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { nanoToValue } from '~/utils/crypto-utils'
-
-type PositionCollateralVault = Vault | SecuritizeVault
 
 interface CollateralApyDelta {
   vaultAddress: string
@@ -29,7 +26,7 @@ interface CollateralApySnapshot {
 
 interface CollateralApyEntry {
   address: string
-  vault: PositionCollateralVault
+  vault: VaultEntity
   assets: bigint
   delta: bigint
   projectRates: boolean | undefined
@@ -37,53 +34,28 @@ interface CollateralApyEntry {
 
 export const usePositionCollateralApy = () => {
   const { getSupplyRewardApy } = useRewardsApy()
-  const { withIntrinsicSupplyApy } = useIntrinsicApy()
   const { getOrFetch } = useVaultRegistry()
   const { isReady: isVaultsReady } = useVaults()
-  const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
-  const { client: rpcClient } = useRpcClient()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
-  const normalize = (address?: string | null) => {
-    if (!address) return ''
-    try {
-      return getAddress(address)
-    }
-    catch {
-      return ''
-    }
-  }
-
-  const getCollateralAssets = async (
-    position: AccountBorrowPosition,
+  const getCollateralAssets = (
+    position: PortfolioBorrowPosition<VaultEntity>,
     vaultAddress: string,
     primaryAddress: string,
   ) => {
-    if (normalize(vaultAddress) === normalize(primaryAddress)) {
-      return position.supplied || 0n
-    }
-
-    const lensAddress = eulerLensAddresses.value?.accountLens
-    if (!lensAddress || !rpcClient.value) {
-      return 0n
-    }
-
-    try {
-      const res = await rpcClient.value.readContract({
-        address: lensAddress as Address,
-        abi: eulerAccountLensABI as Abi,
-        functionName: 'getAccountInfo',
-        args: [position.subAccount, vaultAddress],
-      }) as Record<string, Record<string, unknown>>
-      return res.vaultAccountInfo.assets as bigint
-    }
-    catch {
-      return 0n
-    }
+    // Collateral assets from the (layer-aware) position rather than a direct
+    // lens read, so the snapshot reflects the active batch layer. Collateral
+    // the sub-account doesn't hold isn't in `collaterals` ⇒ 0.
+    const match = position.collaterals.find(c =>
+      normalizeAddressOrEmpty(c.vaultAddress) === vaultAddress)
+    if (match) return match.assets
+    return vaultAddress === primaryAddress ? (position.supplied || 0n) : 0n
   }
 
   const getCollateralApySnapshot = async (
-    position: AccountBorrowPosition | null | undefined,
-    liabilityVault: Vault | undefined,
+    position: PortfolioBorrowPosition<VaultEntity> | null | undefined,
+    liabilityVault: EVault | undefined,
     options: CollateralApySnapshotOptions = {},
   ): Promise<CollateralApySnapshot> => {
     if (!position || !liabilityVault) {
@@ -91,31 +63,25 @@ export const usePositionCollateralApy = () => {
     }
 
     try {
-      if (!isEulerAddressesReady.value) {
-        await loadEulerConfig()
-      }
       await until(isVaultsReady).toBe(true)
 
-      const primaryAddress = normalize(position.collateral.address)
+      const primaryAddress = normalizeAddressOrEmpty(position.collateral?.vaultAddress)
       const deltaByAddress = new Map(
         (options.deltas || [])
-          .map(delta => [normalize(delta.vaultAddress), delta])
+          .map(delta => [normalizeAddressOrEmpty(delta.vaultAddress), delta])
           .filter(([address]) => Boolean(address)) as Array<[string, CollateralApyDelta]>,
       )
-      const collateralAddresses = position.collaterals?.length
-        ? position.collaterals
-        : [position.collateral.address]
-      const normalized = collateralAddresses.map(normalize).filter(Boolean)
+      const collateralAddresses = position.collaterals.map(c => normalizeAddressOrEmpty(c.vaultAddress))
       const allAddresses = Array.from(new Set([
         primaryAddress,
-        ...normalized,
+        ...collateralAddresses,
         ...deltaByAddress.keys(),
       ].filter(Boolean)))
 
       const entries = (await Promise.all(allAddresses.map(async (address): Promise<CollateralApyEntry | null> => {
-        const vault = await getOrFetch(address) as PositionCollateralVault | undefined
+        const vault = await getOrFetch(address)
         if (!vault) return null
-        const currentAssets = await getCollateralAssets(position, address, primaryAddress)
+        const currentAssets = getCollateralAssets(position, address, primaryAddress)
         const delta = deltaByAddress.get(address)?.assetsDelta || 0n
         const nextAssets = currentAssets + delta
         return {
@@ -128,13 +94,13 @@ export const usePositionCollateralApy = () => {
       }))).filter((entry): entry is CollateralApyEntry => entry !== null)
 
       const projectionRequests = entries.reduce<Array<{ index: number, request: ProjectedRatesRequest }>>((acc, entry, index) => {
-        if (!entry.projectRates || entry.delta === 0n) return acc
+        if (!entry.projectRates || entry.delta === 0n || !isEVault(entry.vault)) return acc
         acc.push({
           index,
           request: {
             vaultAddress: entry.vault.address,
-            currentCash: entry.vault.interestRateInfo.cash,
-            currentBorrows: entry.vault.interestRateInfo.borrows,
+            currentCash: entry.vault.totalCash,
+            currentBorrows: entry.vault.totalBorrowed,
             cashDelta: entry.delta,
             borrowsDelta: 0n,
           },
@@ -147,9 +113,9 @@ export const usePositionCollateralApy = () => {
       const projectedByIndex = new Map(projectionRequests.map((item, index) => [item.index, projectedRates[index]]))
 
       const valued = await Promise.all(entries.map(async (entry, index) => {
-        const supplyUsd = await getCollateralUsdValueOrZero(entry.assets, liabilityVault, entry.vault as Vault, 'off-chain')
-        const currentRaw = nanoToValue(entry.vault.interestRateInfo.supplyAPY || 0n, 25)
-        const baseApy = withIntrinsicSupplyApy(currentRaw, entry.vault.asset.address) + getSupplyRewardApy(entry.vault.address)
+        const supplyUsd = await getCollateralUsdValueOrZero(entry.assets, liabilityVault, entry.vault, 'off-chain')
+        const currentRaw = getVaultSupplyApy(entry.vault)
+        const baseApy = withVaultIntrinsicApy(currentRaw, entry.vault, enableIntrinsicApy.value) + getSupplyRewardApy(entry.vault.address)
         const projected = projectedByIndex.get(index)
         const supplyApy = projected
           ? baseApy + (nanoToValue(projected.supplyAPY, 25) - currentRaw)

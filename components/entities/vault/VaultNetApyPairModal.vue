@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { DateTime } from 'luxon'
 import { formatNumber } from '~/utils/string-utils'
+import { combineApyWithIntrinsic } from '~/utils/vault-intrinsic-apy'
 import type { RewardCampaign } from '~/entities/reward-campaign'
-import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
+import { PROVIDER_LABELS, PROVIDER_LOGOS, rewardCampaignDisplays } from '~/entities/reward-campaign'
 
 const emits = defineEmits(['close'])
 const {
@@ -16,6 +16,8 @@ const {
   supplyCampaigns,
   borrowCampaigns,
   loopingCampaigns,
+  inline = false,
+  close = true,
 } = defineProps<{
   supplyAPY: number
   borrowAPY: number
@@ -27,13 +29,15 @@ const {
   supplyCampaigns?: RewardCampaign[]
   borrowCampaigns?: RewardCampaign[]
   loopingCampaigns?: RewardCampaign[]
+  inline?: boolean
+  close?: boolean
 }>()
 
 const totalSupplyApy = computed(() =>
-  supplyAPY + (intrinsicSupplyAPY ?? 0) + (supplyRewardAPY || 0),
+  combineApyWithIntrinsic(supplyAPY, intrinsicSupplyAPY ?? 0) + (supplyRewardAPY || 0),
 )
 const totalBorrowApy = computed(() =>
-  borrowAPY + (intrinsicBorrowAPY ?? 0) - (borrowRewardAPY || 0),
+  combineApyWithIntrinsic(borrowAPY, intrinsicBorrowAPY ?? 0) - (borrowRewardAPY || 0),
 )
 const netApy = computed(() => totalSupplyApy.value - totalBorrowApy.value + (loopingRewardAPY || 0))
 
@@ -42,21 +46,7 @@ const hasRewards = computed(() => (supplyRewardAPY || 0) > 0 || (borrowRewardAPY
 const hasLoopingRewards = computed(() => (loopingRewardAPY || 0) > 0)
 
 const mapCampaigns = (campaigns: RewardCampaign[] | undefined, side: string) => {
-  if (!campaigns) return []
-  const now = Math.floor(Date.now() / 1000)
-  return campaigns
-    .filter(c => c.endTimestamp > now || c.endTimestamp === 0)
-    .map(c => ({
-      id: `${side}-${c.vault}-${c.provider}-${c.type}-${c.endTimestamp}`,
-      apr: c.apr,
-      endDate: c.endTimestamp > 0 ? DateTime.fromSeconds(c.endTimestamp) : null,
-      rewardToken: c.rewardToken || { symbol: 'Unknown', icon: '' },
-      source: c.provider,
-      sourceUrl: c.sourceUrl,
-      minMultiplier: c.minMultiplier,
-      maxMultiplier: c.maxMultiplier,
-    }))
-    .sort((a, b) => a.rewardToken.symbol.localeCompare(b.rewardToken.symbol))
+  return rewardCampaignDisplays(campaigns, side)
 }
 
 const supplyRewardsInfo = computed(() => mapCampaigns(supplyCampaigns, 'supply'))
@@ -71,6 +61,8 @@ const handleClose = () => {
 <template>
   <BaseModalWrapper
     title="Net APY"
+    :inline="inline"
+    :close="close"
     @close="handleClose"
   >
     <p class="text-content-primary text-p3 mb-16">

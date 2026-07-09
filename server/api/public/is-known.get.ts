@@ -1,4 +1,4 @@
-import { createError, getQuery } from 'h3'
+import { createError, getQuery, setResponseHeader } from 'h3'
 import { getAddress, isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
@@ -31,9 +31,6 @@ export default defineEventHandler(async (event) => {
     ? rawInput.filter((v): v is string => typeof v === 'string').join(',')
     : typeof rawInput === 'string' ? rawInput : ''
   const parts = raw.split(',').map(s => s.trim()).filter(Boolean)
-  if (parts.length === 0) {
-    throw createError({ statusCode: 400, statusMessage: 'Missing addresses' })
-  }
   if (parts.length > MAX_ADDRESSES) {
     throw createError({ statusCode: 400, statusMessage: `Too many addresses (max ${MAX_ADDRESSES})` })
   }
@@ -55,7 +52,21 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 
+  // Public bridge responses are CDN/browser cacheable for short bursts.
+  // The warm-cache plugin keeps the upstream verified-set continuously fresh
+  // so a stale CDN entry is never more than ~30s behind the server cache.
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+
   const response: Record<string, boolean> = {}
+
+  // No addresses supplied → list mode: emit the full known set as an object
+  // with `true` values, preserving the lookup-mode response shape so callers
+  // don't need to branch on input.
+  if (checksumed.length === 0) {
+    for (const addr of verifiedSet) response[addr] = true
+    return response
+  }
+
   for (const addr of checksumed) {
     response[addr] = verifiedSet.has(addr)
   }

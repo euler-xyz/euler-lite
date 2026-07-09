@@ -1,0 +1,194 @@
+import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import {
+  groupExposureItemsByBackingAsset,
+  type ExposureBackingAssetGroup,
+} from '~/utils/vault/exposure-groups'
+
+/**
+ * A collateral pair with live borrow-side exposure to a vault. Matches the
+ * fields rendered by the "Exposure" overview block.
+ */
+export interface CollateralExposurePair {
+  collateral: EVault | SecuritizeCollateralVault
+  ltv: EVaultCollateral
+}
+
+export interface CollateralExposureGroup extends ExposureBackingAssetGroup<CollateralExposurePair> {
+  maxBorrowLTV: number
+  maxCurrentLiquidationLTV: number
+  openInterestUsd: number
+}
+
+export interface CollateralExposureBackingAssetSummary {
+  asset: CollateralExposureGroup['asset']
+  groups: CollateralExposureGroup[]
+  openInterestUsd: number
+  vaultCount: number
+}
+
+/**
+ * Resolves a collateral vault by address. Returns `undefined` when the
+ * collateral is unknown (not yet loaded in the vault registry).
+ */
+export type CollateralVaultResolver
+  = (address: string) => EVault | SecuritizeCollateralVault | undefined
+
+const normalizeAddress = (address: string): string => {
+  try {
+    return getAddress(address).toLowerCase()
+  }
+  catch {
+    return address.toLowerCase()
+  }
+}
+
+const readOpenInterestUsd = (
+  openInterestUsdByCollateral: Record<string, number>,
+  collateralAddress: string,
+): number => {
+  const normalizedCollateral = normalizeAddress(collateralAddress)
+  const entry = Object.entries(openInterestUsdByCollateral)
+    .find(([address]) => normalizeAddress(address) === normalizedCollateral)
+  return entry?.[1] ?? 0
+}
+
+/**
+ * Internal predicate: is this collateral/LTV combination "live" — i.e. does it
+ * represent active or residual borrow-side exposure against the vault?
+ *
+ * A pair is live when:
+ *  - the current liquidation LTV is still non-zero (i.e. not fully ramped
+ *    down), AND
+ *  - either the pair is currently borrowable (`borrowLTV > 0`) or the
+ *    collateral vault has outstanding supply — meaning existing borrows can
+ *    still accrue interest even after `borrowLTV` has been set to zero mid
+ *    ramp-down.
+ *
+ * Note: `collateral.totalAssets > 0n` is an intentional over-approximation.
+ * It checks whether the collateral vault has *any* deposits, not whether those
+ * deposits are actively backing borrows on *this* vault. This errs on the side
+ * of showing the IRM chart (false positive) rather than hiding it (false
+ * negative), and matches the heuristic used by the original inline code.
+ *
+ * Distinct from {@link isLiveCollateralEdge} (in `./ltv`), which is the
+ * edge-level predicate used by discovery views — it does not have access to
+ * the collateral vault object, treats `borrowLTV > 0` as sufficient on its
+ * own, and is intentionally broader.
+ */
+const isLiveExposure = (
+  ltv: EVaultCollateral,
+  collateral: EVault | SecuritizeCollateralVault,
+): boolean => {
+  if (ltv.currentLiquidationLTV <= 0) return false
+  return ltv.borrowLTV > 0 || collateral.totalAssets > 0n
+}
+
+/**
+ * Build the list of collateral pairs with live borrow-side exposure to a vault.
+ * Returns them sorted by `borrowLTV` descending (currently borrowable first).
+ *
+ * See {@link isLiveExposure} for the liveness definition. Pairs whose
+ * collateral is missing from the registry (resolver returns `undefined`) are
+ * skipped.
+ */
+export const getCollateralExposurePairs = (
+  vault: Pick<EVault, 'collaterals'>,
+  resolveCollateralVault: CollateralVaultResolver,
+): CollateralExposurePair[] => {
+  const pairs: CollateralExposurePair[] = []
+
+  vault.collaterals.forEach((ltv) => {
+    const collateral = resolveCollateralVault(ltv.address)
+    if (!collateral) return
+    if (!isLiveExposure(ltv, collateral)) return
+
+    pairs.push({
+      collateral,
+      ltv,
+    })
+  })
+
+  return pairs.sort((a, b) =>
+    b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0,
+  )
+}
+
+export const getCollateralExposureGroups = (
+  pairs: CollateralExposurePair[],
+  openInterestUsdByCollateral: Record<string, number> = {},
+): CollateralExposureGroup[] =>
+  groupExposureItemsByBackingAsset(pairs, pair => pair.collateral.asset)
+    .map(group => ({
+      ...group,
+      items: [...group.items].sort((a, b) =>
+        b.ltv.borrowLTV > a.ltv.borrowLTV ? 1 : b.ltv.borrowLTV < a.ltv.borrowLTV ? -1 : 0,
+      ),
+      maxBorrowLTV: Math.max(...group.items.map(pair => pair.ltv.borrowLTV), 0),
+      maxCurrentLiquidationLTV: Math.max(...group.items.map(pair => pair.ltv.currentLiquidationLTV), 0),
+      openInterestUsd: group.items.reduce((sum, pair) =>
+        sum + readOpenInterestUsd(openInterestUsdByCollateral, pair.collateral.address),
+      0),
+    }))
+    .sort((a, b) => {
+      if (b.openInterestUsd !== a.openInterestUsd) {
+        return b.openInterestUsd - a.openInterestUsd
+      }
+      if (b.maxCurrentLiquidationLTV !== a.maxCurrentLiquidationLTV) {
+        return b.maxCurrentLiquidationLTV - a.maxCurrentLiquidationLTV
+      }
+      if (b.maxBorrowLTV !== a.maxBorrowLTV) {
+        return b.maxBorrowLTV - a.maxBorrowLTV
+      }
+      return a.asset.symbol.localeCompare(b.asset.symbol)
+    })
+
+export const mergeCollateralExposureGroupsByBackingAsset = (
+  groups: CollateralExposureGroup[],
+): CollateralExposureBackingAssetSummary[] => {
+  const summaries = new Map<string, CollateralExposureBackingAssetSummary>()
+
+  for (const group of groups) {
+    const key = normalizeAddress(group.asset.address)
+    const existing = summaries.get(key)
+    if (existing) {
+      existing.groups.push(group)
+      existing.openInterestUsd += group.openInterestUsd
+      existing.vaultCount += group.vaultCount
+      continue
+    }
+
+    summaries.set(key, {
+      asset: group.asset,
+      groups: [group],
+      openInterestUsd: group.openInterestUsd,
+      vaultCount: group.vaultCount,
+    })
+  }
+
+  return [...summaries.values()].sort((a, b) => {
+    if (b.openInterestUsd !== a.openInterestUsd) {
+      return b.openInterestUsd - a.openInterestUsd
+    }
+    return a.asset.symbol.localeCompare(b.asset.symbol)
+  })
+}
+
+/**
+ * Predicate: does the vault have any live borrow-side exposure?
+ * Mirrors the filter used by {@link getCollateralExposurePairs} but
+ * short-circuits on the first match.
+ *
+ * Use this to gate borrow-side UI (IRM chart, collateral-exposure block, etc.)
+ * on vaults that either are currently borrowable or still carry outstanding
+ * debt being wound down via a liquidation-LTV ramp.
+ */
+export const hasCollateralExposure = (
+  vault: Pick<EVault, 'collaterals'>,
+  resolveCollateralVault: CollateralVaultResolver,
+): boolean =>
+  vault.collaterals.some((ltv) => {
+    const collateral = resolveCollateralVault(ltv.address)
+    if (!collateral) return false
+    return isLiveExposure(ltv, collateral)
+  })

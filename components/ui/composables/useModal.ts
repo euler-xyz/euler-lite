@@ -17,10 +17,14 @@ let scrollLocked = false
 function lockScroll() {
   if (scrollLocked) return
   scrollLocked = true
+  // Removing the page scrollbar widens the viewport by its width. Compensate the
+  // body (content) with padding, and expose the width as a CSS var so fixed
+  // elements (the batch drawer) can shift by the same amount and not flicker.
   const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
   document.body.style.overflow = 'hidden'
   if (scrollbarWidth > 0) {
     document.body.style.paddingRight = `${scrollbarWidth}px`
+    document.documentElement.style.setProperty('--scroll-lock-shift', `${scrollbarWidth}px`)
   }
 }
 
@@ -28,6 +32,7 @@ function unlockScroll() {
   scrollLocked = false
   document.body.style.overflow = ''
   document.body.style.paddingRight = ''
+  document.documentElement.style.removeProperty('--scroll-lock-shift')
 }
 
 let popstateHandler: EventListener | undefined
@@ -68,6 +73,8 @@ export const useModal = () => {
     if (data.absolute) {
       bus.emit('open')
     }
+
+    return id
   }
 
   const close = (id?: number | undefined, isBack = false) => {
@@ -76,14 +83,17 @@ export const useModal = () => {
       popstateHandler = undefined
     }
 
-    if (!id) {
+    if (id === undefined) {
       list.pop()
     }
     else {
-      list.splice(list.findIndex(item => item.id === id), 1)
+      const index = list.findIndex(item => item.id === id)
+      if (index !== -1) {
+        list.splice(index, 1)
+      }
     }
 
-    if (!isBack && window.history.state?.modalId === id) {
+    if (id !== undefined && !isBack && window.history.state?.modalId === id) {
       window.history.back()
     }
 

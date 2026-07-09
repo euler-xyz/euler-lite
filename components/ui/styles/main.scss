@@ -148,11 +148,11 @@
 
   // Toast
   --ui-toast-background-color: #ffffff;
-  --ui-toast-box-shadow: var(--shadow-lg);
+  --ui-toast-box-shadow: var(--shadow-md);
 
-  --ui-toast-info-border-color: rgba(var(--accent-rgb), 0.3);
-  --ui-toast-info-background-color: rgba(var(--accent-rgb), 0.1);
-  --ui-toast-info-text-color: var(--accent-700);
+  --ui-toast-info-border-color: rgba(var(--accent-rgb), 0.42);
+  --ui-toast-info-background-color: rgba(var(--accent-rgb), 0.14);
+  --ui-toast-info-text-color: var(--accent-300);
   --ui-toast-info-splitter-color: rgba(var(--accent-rgb), 0.3);
   --ui-toast-info-action-background-color: rgba(var(--accent-rgb), 0.1);
 
@@ -292,6 +292,9 @@
 
   // Toast
   --ui-toast-background-color: #0c1d2f;
+  --ui-toast-info-border-color: rgba(var(--accent-rgb), 0.45);
+  --ui-toast-info-background-color: rgba(var(--accent-rgb), 0.12);
+  --ui-toast-info-text-color: #a1f4e0;
   --ui-toast-neutral-background-color: #0c1d2f;
   --ui-toast-neutral-border-color: #14304e;
   --ui-toast-neutral-text-color: #f7f7f8;

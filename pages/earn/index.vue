@@ -1,40 +1,46 @@
 <script setup lang="ts">
+import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useVaults } from '~/composables/useVaults'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import type { EarnVault } from '~/entities/vault'
-import { getAssetUsdValueOrZero } from '~/services/pricing/priceProvider'
-import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultFeatured, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+
+import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
+import { computeSupplyApy } from '~/utils/collateralOptions'
+import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 
 defineOptions({
   name: 'EarnPage',
 })
 
-const { isEarnUpdating } = useVaults()
+const { isEarnUpdating, isMarketDataResolved } = useVaults()
 const isPricesReady = ref(false)
-const isLoading = computed(() => isEarnUpdating.value || !isPricesReady.value)
+const { isReady: labelsReady } = useEulerLabels()
+const isLoading = computed(() => isEarnUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
-const { getEarnVaults } = useVaultRegistry()
+const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getEarnVaults().filter(v =>
-  v.verified && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
+  isVerifiedVault(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
 ))
 
 const { enableEntityBranding } = useDeployConfig()
 
-const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EarnVault>((vault) => {
+const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EulerEarn>((vault) => {
   const product = applyVaultOverrides(getProductByVault(vault.address), vault.address)
   return [
     vault.asset.symbol,
     vault.asset.name,
-    vault.name,
+    vault.shares.name,
+    vault.address,
+    vault.asset.address,
     product.name,
     product.description,
     ...getEntitiesByEarnVault(vault).map(e => e.name),
@@ -45,6 +51,11 @@ const selectedCollateral = ref<string[]>([])
 const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Total Supply')
 const sortDir = ref<'desc' | 'asc'>('desc')
+const { settings } = useUserSettings()
+const { viewer } = useApyVisibility()
+
+const getDisplayedEarnSupplyApy = (vault: EulerEarn): number =>
+  computeSupplyApy(vault, viewer.value, settings.value)
 
 useUrlQuerySync([
   { ref: searchQuery, default: '', queryKey: 'search' },
@@ -57,10 +68,12 @@ useUrlQuerySync([
 // Cache for USD values used in sorting (keyed by vault address)
 const vaultTotalSupplyUsd = ref<Map<string, number>>(new Map())
 const vaultLiquidityUsd = ref<Map<string, number>>(new Map())
+let priceLoadId = 0
 
 // Fetch USD values for all earn vaults. Debounced to collapse the bursts
 // of registry updates streamed during loadVaults's RPC refresh.
 const fetchEarnPrices = useDebounceFn(async () => {
+  const loadId = ++priceLoadId
   const vaults = list.value
   if (!vaults.length) {
     isPricesReady.value = true
@@ -80,11 +93,14 @@ const fetchEarnPrices = useDebounceFn(async () => {
         liquidityValues.set(vault.address, liquidity)
       }),
     )
+    if (loadId !== priceLoadId) return
     vaultTotalSupplyUsd.value = totalSupplyValues
     vaultLiquidityUsd.value = liquidityValues
   }
   finally {
-    isPricesReady.value = true
+    if (loadId === priceLoadId) {
+      isPricesReady.value = true
+    }
   }
 }, DEBOUNCE_LIST_PRICE_FETCH_MS)
 
@@ -100,6 +116,7 @@ onDeactivated(() => {
 
 watchEffect(() => {
   void list.value
+  void isMarketDataResolved.value
   if (!isActive.value) return
   fetchEarnPrices()
 })
@@ -110,7 +127,7 @@ const {
   clearCustomFilters,
   openCustomFilterModal,
   matchesCustomFilters,
-} = useCustomFilters<EarnVault>(
+} = useCustomFilters<EulerEarn>(
   [
     { key: 'totalSupply', label: 'Total supply', shortLabel: 'Total supply', unit: 'usd' },
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
@@ -160,11 +177,14 @@ const filteredList = computed(() => {
     .filter(matchesCustomFilters)
 })
 
-const applyFeaturedSort = <T extends { address: string }>(sorted: T[]): T[] => {
+const applyRecentlyAddedSort = <T extends { address: string }>(sorted: T[]): T[] => {
   return [...sorted].sort((a, b) => {
-    const af = isVaultFeatured(a.address) ? 1 : 0
-    const bf = isVaultFeatured(b.address) ? 1 : 0
-    return bf - af
+    return compareRecentlyAddedBoost(
+      isVaultRecentlyAdded(a.address),
+      vaultLiquidityUsd.value.get(a.address) ?? 0,
+      isVaultRecentlyAdded(b.address),
+      vaultLiquidityUsd.value.get(b.address) ?? 0,
+    )
   })
 }
 
@@ -177,33 +197,55 @@ const applyDeprecatedSort = <T extends { address: string }>(sorted: T[]): T[] =>
 }
 
 const sortedList = computed(() => {
-  let sorted: EarnVault[]
+  let sorted: EulerEarn[]
   switch (sortBy.value) {
     case 'Total Supply':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
         const aValue = vaultTotalSupplyUsd.value.get(a.address) ?? 0
         const bValue = vaultTotalSupplyUsd.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     case 'Supply APY':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
-        return Number(b.interestRateInfo.supplyAPY) - Number(a.interestRateInfo.supplyAPY)
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
+        return getDisplayedEarnSupplyApy(b) - getDisplayedEarnSupplyApy(a)
       }))
       break
     case 'Liquidity':
-      sorted = applyFeaturedSort([...filteredList.value].sort((a: EarnVault, b: EarnVault) => {
+      sorted = applyRecentlyAddedSort([...filteredList.value].sort((a: EulerEarn, b: EulerEarn) => {
         const aValue = vaultLiquidityUsd.value.get(a.address) ?? 0
         const bValue = vaultLiquidityUsd.value.get(b.address) ?? 0
         return bValue - aValue
       }))
       break
     default:
-      sorted = applyFeaturedSort([...filteredList.value])
+      sorted = applyRecentlyAddedSort([...filteredList.value])
   }
   const directed = sortDir.value === 'asc' ? [...sorted].reverse() : sorted
   return applyDeprecatedSort(directed)
 })
+
+const hasActiveFilters = computed(() =>
+  searchQuery.value.trim().length > 0
+  || selectedCollateral.value.length > 0
+  || selectedCurators.value.length > 0
+  || customFilters.value.length > 0,
+)
+const hasEarnVaults = computed(() => list.value.length > 0)
+const showFilteredEmptyState = computed(() => hasActiveFilters.value && hasEarnVaults.value)
+const emptyStateTitle = computed(() => showFilteredEmptyState.value ? 'No earn vaults found' : 'No earn vaults yet')
+const emptyStateDescription = computed(() =>
+  showFilteredEmptyState.value
+    ? 'Try clearing search or filters to uncover more strategies.'
+    : 'No earn vaults are available on this network yet.',
+)
+
+const clearEarnFilters = () => {
+  clearSearch()
+  selectedCollateral.value = []
+  selectedCurators.value = []
+  clearCustomFilters()
+}
 </script>
 
 <template>
@@ -280,18 +322,26 @@ const sortedList = computed(() => {
         :items="sortedList"
       />
 
-      <div
+      <UiEmptyState
         v-else
-        class="flex flex-col flex-1 gap-3 items-center justify-center text-neutral-500"
+        class="flex-1"
+        icon="earn-outline"
+        :title="emptyStateTitle"
+        :description="emptyStateDescription"
       >
-        <UiIcon
-          name="search"
-          class="!w-24 !h-24"
-        />
-        <div class="text-center max-w-[180px]">
-          No markets were found by these filters
-        </div>
-      </div>
+        <template
+          v-if="showFilteredEmptyState"
+          #action
+        >
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            @click="clearEarnFilters"
+          >
+            Clear filters
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
   </section>
 </template>

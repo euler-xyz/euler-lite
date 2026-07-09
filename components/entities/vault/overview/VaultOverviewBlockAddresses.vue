@@ -1,21 +1,25 @@
 <script setup lang="ts">
-import type { Vault } from '~/entities/vault'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
+import { getVaultHookTarget } from '~/utils/vault-hooks'
+import { isVaultBorrowable } from '~/utils/vault/classification'
+import { shortenAddress } from '~/utils/string-utils'
 
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
-const { borrowList } = useVaults()
 const { chainId } = useEulerAddresses()
 
-const borrowCount = computed(() => {
-  return borrowList.value.filter(pair => pair.borrow.address === vault.address).length
-})
+// Surface borrow-side addresses while debt is being wound down, not only while
+// new borrows are allowed (see isVaultBorrowable).
+const isBorrowable = computed(() => isVaultBorrowable(vault))
 
-const isBorrowable = computed(() => borrowCount.value > 0)
+const interestRateModelAddress = computed(() =>
+  vault.interestRateModel.address,
+)
 
 const vaultAddresesInfo = computed(() => {
-  const baseAddresses = [
+  const baseAddresses: Array<{ title: string, address?: string }> = [
     {
       title: `${vault.asset.symbol} token`,
       address: vault.asset.address,
@@ -46,19 +50,19 @@ const vaultAddresesInfo = computed(() => {
     baseAddresses.push(
       {
         title: `Fee receiver`,
-        address: vault.governorFeeReceiver,
+        address: vault.fees.governorFeeReceiver,
       },
       {
         title: `Oracle router`,
-        address: vault.oracle,
+        address: vault.oracle.oracle,
       },
       {
         title: `Unit of account`,
-        address: vault.unitOfAccount,
+        address: vault.unitOfAccount?.address,
       },
       {
         title: `Interest rate model`,
-        address: vault.interestRateModelAddress,
+        address: interestRateModelAddress.value,
       },
     )
   }
@@ -66,68 +70,65 @@ const vaultAddresesInfo = computed(() => {
   baseAddresses.push(
     {
       title: `Hook target`,
-      address: vault.hookTarget,
+      address: getVaultHookTarget(vault),
     },
   )
 
-  return baseAddresses
+  return baseAddresses.filter((item): item is { title: string, address: string } => Boolean(item.address))
 })
 
-const shortenAddress = (address: string) => {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`
-}
+const { copyToClipboard } = useClipboardCopy()
 
 const onCopyClick = (address: string) => {
-  navigator.clipboard.writeText(address)
+  copyToClipboard(address).catch(() => {})
 }
 
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
 </script>
 
 <template>
-  <div class="bg-surface-secondary rounded-xl flex flex-col gap-24 p-24 shadow-card">
-    <p class="text-h3 text-content-primary">
-      Addresses
-    </p>
-    <div class="flex flex-col items-start gap-24">
-      <VaultOverviewLabelValue
-        v-for="infoItem in vaultAddresesInfo"
-        :key="infoItem.title"
-        :label="infoItem.title"
-        orientation="horizontal"
+  <VaultOverviewAccordionSection
+    title="Addresses"
+    :default-open="defaultOpen"
+    content-class="flex flex-col items-start gap-24"
+  >
+    <VaultOverviewLabelValue
+      v-for="infoItem in vaultAddresesInfo"
+      :key="infoItem.title"
+      :label="infoItem.title"
+      orientation="horizontal"
+    >
+      <template
+        v-if="infoItem.title === 'Unit of account'"
+        #label
       >
-        <template
-          v-if="infoItem.title === 'Unit of account'"
-          #label
+        <span class="flex items-center gap-4">
+          Unit of account
+          <UiHoverPreviewTooltip
+            title="Unit of Account"
+            text="The reference currency used to denominate prices for LTV and health calculations in this vault. Typically USD or ETH. All collateral and debt values are converted to this unit when determining account health."
+            icon-class="text-content-muted hover:text-content-secondary"
+          />
+        </span>
+      </template>
+      <div class="flex gap-4 items-center">
+        <NuxtLink
+          :to="getExplorerAddressLink(infoItem.address)"
+          class="text-accent-600 underline cursor-pointer hover:text-accent-500"
+          target="_blank"
         >
-          <span class="flex items-center gap-4">
-            Unit of account
-            <UiFootnote
-              title="Unit of Account"
-              text="The reference currency used to denominate prices for LTV and health calculations in this vault. Typically USD or ETH. All collateral and debt values are converted to this unit when determining account health."
-              class="[--ui-footnote-icon-color:var(--text-muted)] hover:[--ui-footnote-icon-color:var(--text-secondary)]"
-            />
-          </span>
-        </template>
-        <div class="flex gap-4 items-center">
-          <NuxtLink
-            :to="getExplorerAddressLink(infoItem.address)"
-            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-            target="_blank"
-          >
-            {{ getSpecialAddressLabel(infoItem.address) || shortenAddress(infoItem.address) }}
-          </NuxtLink>
-          <button
-            class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-            @click="onCopyClick(infoItem.address)"
-          >
-            <SvgIcon
-              class="!w-18 !h-18"
-              name="copy"
-            />
-          </button>
-        </div>
-      </VaultOverviewLabelValue>
-    </div>
-  </div>
+          {{ getSpecialAddressLabel(infoItem.address) || shortenAddress(infoItem.address) }}
+        </NuxtLink>
+        <button
+          class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
+          @click="onCopyClick(infoItem.address)"
+        >
+          <SvgIcon
+            class="!w-18 !h-18"
+            name="copy"
+          />
+        </button>
+      </div>
+    </VaultOverviewLabelValue>
+  </VaultOverviewAccordionSection>
 </template>

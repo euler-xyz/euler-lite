@@ -1,11 +1,12 @@
-import { useAccount, useDisconnect, useBalance, useSwitchChain, useEnsName, useConfig } from '@wagmi/vue'
+import { useAccount, useDisconnect, useSwitchChain, useEnsName, useConfig } from '@wagmi/vue'
 import { connect as connectWallet, getConnectors } from '@wagmi/vue/actions'
-import { formatUnits, getAddress, isAddress, type Address } from 'viem'
+import { getAddress, isAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { truncate } from '~/utils/string-utils'
 import { useAddressScreen } from '~/composables/useAddressScreen'
 import { parseChainId } from '~/entities/chainRegistry'
 import { hasBaseAppInjectedProvider, selectBaseAppConnector } from '~/utils/base-app-wallet'
+import { reportClientEvent } from '~/utils/client-observability'
 
 let isChangingChain = false
 let chainChangeCooldownUntil = 0
@@ -24,16 +25,20 @@ function initializeWagmi() {
   const { disconnect: wagmiDisconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
   const config = useConfig()
-  const { screenConnectedAddress, resetScreeningCache } = useAddressScreen()
+  const { screenConnectedAddress, resetScreeningCache, isAddressScreened } = useAddressScreen()
 
   const chainId = computed(() => wagmiChain.value?.id)
 
+  // Route internal wagmi reads through the screened address so wallet-tied
+  // queries (ENS, native balance) don't surface for an address whose
+  // screening verdict isn't in yet.
+  const screenedWagmiAddress: ComputedRef<Address | undefined> = computed(() =>
+    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
+  )
+
   const { data: ensName } = useEnsName({
-    address: wagmiAddress,
+    address: screenedWagmiAddress,
     chainId: chainId.value,
-  })
-  const { data: balanceData, isLoading: isLoadingBalance, refetch: refetchBalance } = useBalance({
-    address: wagmiAddress,
   })
 
   // AppKit may be deferred-initialized (see plugins/00.wagmi.ts). Route
@@ -44,6 +49,12 @@ function initializeWagmi() {
     const open = nuxtApp.$openWalletModal as (() => Promise<void>) | undefined
     if (!open) {
       console.warn('[useWagmi] $openWalletModal not available — wallet plugin may not have loaded')
+      void reportClientEvent({
+        event: 'wallet_modal_unavailable',
+        chainId: chainId.value,
+        count: getConnectors(config).length,
+        reason: 'open-wallet-modal-missing',
+      })
       return
     }
     await open()
@@ -65,7 +76,7 @@ function initializeWagmi() {
 
   watch(wagmiAddress, (address, oldAddress) => {
     if (address && address !== oldAddress) {
-      screenConnectedAddress(address)
+      void screenConnectedAddress(address).catch(err => logWarn('useWagmi/screenConnectedAddress', err))
     }
     if (!address && oldAddress) {
       resetScreeningCache()
@@ -81,11 +92,9 @@ function initializeWagmi() {
     wagmiDisconnect,
     switchChain,
     ensName,
-    balanceData,
-    isLoadingBalance,
-    refetchBalance,
     modal,
     connectBaseAppInjectedWallet,
+    isAddressScreened,
   }
 }
 
@@ -106,14 +115,17 @@ export const useWagmi = () => {
     wagmiDisconnect,
     switchChain,
     ensName,
-    balanceData,
-    isLoadingBalance,
-    refetchBalance,
     modal,
     connectBaseAppInjectedWallet,
+    isAddressScreened,
   } = cachedWagmiData
-  const address: ComputedRef<Address | undefined> = computed(() => wagmiAddress.value || undefined)
-  const isConnected = computed(() => Boolean(wagmiIsConnected.value))
+  // Fail closed: a connected address only becomes user-visible once screening
+  // returns a non-restricted verdict. Consumers that read `address`/`isConnected`
+  // automatically see the gated state without each having to import useAddressScreen.
+  const address: ComputedRef<Address | undefined> = computed(() =>
+    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
+  )
+  const isConnected = computed(() => Boolean(wagmiIsConnected.value && isAddressScreened(wagmiAddress.value)))
   const chain = computed(() => wagmiChain.value)
   const chainId = computed(() => wagmiChain.value?.id)
 
@@ -131,16 +143,6 @@ export const useWagmi = () => {
   const shorterAddress = computed(() => address.value ? truncate(address.value, 3) : '')
 
   const displayName = computed(() => ensName.value || walletName.value)
-
-  const balance = computed(() => {
-    if (!balanceData.value) return 0
-    return Number.parseFloat(formatUnits(balanceData.value.value, balanceData.value.decimals))
-  })
-
-  const balanceFormatted = computed(() => {
-    if (!balanceData.value) return '0'
-    return formatUnits(balanceData.value.value, balanceData.value.decimals)
-  })
 
   const getMainPathForRoute = (): string | null => {
     const path = route.path
@@ -382,10 +384,6 @@ export const useWagmi = () => {
     connector,
     chain,
     chainId,
-    balance,
-    balanceFormatted,
-    isLoadingBalance,
-    refetchBalance,
     modal,
     connect,
     disconnect,

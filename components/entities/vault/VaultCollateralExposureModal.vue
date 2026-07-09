@@ -1,45 +1,59 @@
 <script setup lang="ts">
-import { formatNumber } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
-import type { Vault, SecuritizeVault } from '~/entities/vault'
-import { getCurrentLiquidationLTV, isLiquidationLTVRamping, getRampTimeRemaining } from '~/entities/vault'
+import type { SecuritizeCollateralVault, EVault } from '@eulerxyz/euler-v2-sdk'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { compactNumber, formatCompactUsdValue, formatNumber } from '~/utils/string-utils'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 
 const emits = defineEmits(['close'])
 const router = useRouter()
 const route = useRoute()
-const { vault } = defineProps<{ vault: Vault }>()
+const { vault } = defineProps<{ vault: EVault }>()
 const { get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
+} = useCollateralOpenInterest()
 
-const allCollateralPairs = computed(() => {
-  const pairs: Array<{
-    collateral: Vault | SecuritizeVault
-    borrowLTV: bigint
-    liquidationLTV: bigint
-    initialLiquidationLTV: bigint
-    targetTimestamp: bigint
-    rampDuration: bigint
-  }> = []
+const allCollateralPairs = computed(() =>
+  getCollateralExposurePairs(
+    vault,
+    addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+  ),
+)
 
-  vault.collateralLTVs.forEach((ltv) => {
-    if (getCurrentLiquidationLTV(ltv) <= 0n) return
-
-    const pairData = {
-      borrowLTV: ltv.borrowLTV,
-      liquidationLTV: ltv.liquidationLTV,
-      initialLiquidationLTV: ltv.initialLiquidationLTV,
-      targetTimestamp: ltv.targetTimestamp,
-      rampDuration: ltv.rampDuration,
-    }
-
-    const collateralEntry = registryGet(ltv.collateral)
-    if (collateralEntry) {
-      pairs.push({ collateral: collateralEntry.vault as Vault | SecuritizeVault, ...pairData })
-    }
-  })
-
-  return pairs.sort((a, b) => (b.borrowLTV > a.borrowLTV ? 1 : b.borrowLTV < a.borrowLTV ? -1 : 0))
-})
+const openInterestUsdByCollateral = computed<Record<string, number>>(() =>
+  isOpenInterestEnabled.value ? getOpenInterestForVault(vault.address) : {},
+)
+const collateralGroups = computed(() =>
+  getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
+)
+const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
+const totalOpenInterestUsd = computed(() =>
+  collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
+)
+const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
+  const entry = Object.entries(openInterestUsdByCollateral.value)
+    .find(([address]) => address.toLowerCase() === pair.collateral.address.toLowerCase())
+  return entry?.[1] ?? 0
+}
+const hasLiveExposureData = computed(() =>
+  isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
+)
+const modalTitle = 'Collateral exposure'
+const description = computed(() =>
+  isOpenInterestEnabled.value
+    ? 'Make sure you\'re comfortable with the current exposure assets and configured collateral vaults before supplying.'
+    : 'Make sure you\'re comfortable with the configured collateral vaults and LTVs before supplying.',
+)
+const formatExposurePercent = (valueUsd: number) =>
+  !hasLiveExposureData.value
+    ? '-'
+    : totalOpenInterestUsd.value > 0 ? `${compactNumber(valueUsd / totalOpenInterestUsd.value * 100, 1, 0)}%` : '0%'
+const formatLiveExposureUsd = (valueUsd: number) =>
+  hasLiveExposureData.value ? formatCompactUsdValue(valueUsd) : '-'
 
 const formatTimeRemaining = (seconds: bigint): string => {
   const days = Number(seconds) / 86400
@@ -58,63 +72,100 @@ const onCollateralClick = (address: string) => {
   emits('close')
   router.push({ path: `/borrow/${address}/${vault.address}`, query: { network: route.query.network } })
 }
+
+watchEffect(() => {
+  if (!vault.address || !isOpenInterestEnabled.value) return
+  void loadOpenInterest()
+})
 </script>
 
 <template>
   <BaseModalWrapper
-    title="Collateral exposure"
+    :title="modalTitle"
     @close="$emit('close')"
   >
     <div
-      v-if="allCollateralPairs.length > 0"
+      v-if="collateralGroups.length > 0"
       class="flex flex-col gap-12"
     >
       <p class="text-p3 text-content-secondary mb-4">
         Deposits in this vault can be borrowed.
-        Make sure you're comfortable accepting the collaterals listed below before supplying.
+        {{ description }}
       </p>
       <div
-        v-for="pair in allCollateralPairs"
+        v-for="pair in collateralPairs"
         :key="pair.collateral.address"
-        class="bg-surface rounded-12 text-content-primary block no-underline cursor-pointer hover:bg-card-hover transition-colors"
+        class="cursor-pointer rounded-12 border border-line-subtle bg-surface p-16 text-content-primary transition-colors hover:bg-card-hover"
         @click="onCollateralClick(pair.collateral.address)"
       >
-        <div class="px-16 pt-16 pb-12 border-b border-line-subtle">
+        <div class="min-w-0">
           <VaultLabelsAndAssets
+            class="min-w-0"
             :vault="pair.collateral"
             :assets="[pair.collateral.asset]"
           />
+          <VaultTypeBadges
+            class="mt-8 w-full justify-end"
+            :vault="pair.collateral"
+            summary-only
+            @click.stop.prevent
+          />
         </div>
-        <div class="flex flex-col gap-12 px-16 pt-12 pb-16">
+        <div class="flex flex-col gap-12 pt-12">
+          <VaultOverviewLabelValue
+            v-if="isOpenInterestEnabled"
+            orientation="horizontal"
+          >
+            <template #label>
+              <span class="flex items-center gap-4">
+                Current exposure
+                <span @click.stop.prevent>
+                  <UiHoverPreviewTooltip
+                    title="Current exposure"
+                    text="The amount currently borrowed against this collateral."
+                    icon-class="text-content-muted hover:text-content-secondary"
+                  />
+                </span>
+              </span>
+            </template>
+            <span class="flex items-center gap-4">
+              {{ formatLiveExposureUsd(getPairOpenInterestUsd(pair)) }}
+              <span class="text-content-secondary">({{ formatExposurePercent(getPairOpenInterestUsd(pair)) }})</span>
+            </span>
+          </VaultOverviewLabelValue>
           <VaultOverviewLabelValue
             label="Max LTV"
             orientation="horizontal"
-            :value="`${formatNumber(nanoToValue(pair.borrowLTV, 2), 2)}%`"
+            :value="`${formatNumber(ltvToPercent(pair.ltv.borrowLTV), 2)}%`"
           />
           <VaultOverviewLabelValue orientation="horizontal">
             <template #label>
               <span class="flex items-center gap-4">
                 Liquidation LTV
                 <span
-                  v-if="isLiquidationLTVRamping(pair)"
+                  v-if="pair.ltv.isLiquidationLTVRamping"
                   @click.stop.prevent
                 >
-                  <UiFootnote
+                  <UiHoverPreviewTooltip
                     title="LTV Ramping"
-                    :text="`The Liquidation LTV for this collateral is currently being reduced. Target Liquidation LTV: ${formatNumber(nanoToValue(pair.liquidationLTV, 2), 2)}%. Time remaining: ${formatTimeRemaining(getRampTimeRemaining(pair))}.`"
-                    class="[--ui-footnote-icon-color:var(--c-content-tertiary)]"
+                    :text="`The Liquidation LTV for this collateral is currently being reduced. Target Liquidation LTV: ${formatNumber(ltvToPercent(pair.ltv.liquidationLTV), 2)}%. Time remaining: ${formatTimeRemaining(pair.ltv.rampTimeRemaining)}.`"
                   />
                 </span>
               </span>
             </template>
             <div class="flex items-center gap-4">
-              <SvgIcon
-                v-if="isLiquidationLTVRamping(pair)"
-                name="arrow-top-right"
-                class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180"
+              <UiHoverPreviewTooltip
+                v-if="pair.ltv.isLiquidationLTVRamping"
                 title="Liquidation LTV ramping down"
-              />
-              <span>{{ `${formatNumber(nanoToValue(getCurrentLiquidationLTV(pair), 2), 2)}%` }}</span>
+                text="The Liquidation LTV for this collateral is currently being reduced."
+                placement="top-start"
+              >
+                <SvgIcon
+                  name="arrow-top-right"
+                  class="!w-14 !h-14 text-warning-500 shrink-0 rotate-180"
+                />
+              </UiHoverPreviewTooltip>
+              <span>{{ `${formatNumber(ltvToPercent(pair.ltv.currentLiquidationLTV), 2)}%` }}</span>
             </div>
           </VaultOverviewLabelValue>
         </div>

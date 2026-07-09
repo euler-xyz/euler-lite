@@ -1,30 +1,39 @@
 <script setup lang="ts">
-import { useAccount } from '@wagmi/vue'
-import { getAddress } from 'viem'
-import { getVaultUtilization, getCurrentLiquidationLTV, isCyclicalNoteVault, type Vault } from '~/entities/vault'
+import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
-import { formatAssetValue } from '~/services/pricing/priceProvider'
+import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { isVaultFeatured, isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { nanoToValue } from '~/utils/crypto-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { VaultSupplyApyModal, VaultCollateralExposureModal } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
+import { isVaultBorrowable } from '~/utils/vault/classification'
+import { getAddress } from 'viem'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
-const { isConnected } = useAccount()
-const { vault } = defineProps<{ vault: Vault }>()
+const { isConnected } = useWagmi()
+const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified } = useVaults()
 const entities = useEulerEntitiesOfVault(vault)
-const isUnverified = computed(() => !vault.verified)
+const { getVaultCategory, isVerifiedVault, get: registryGet } = useVaultRegistry()
+const {
+  load: loadOpenInterest,
+  getOpenInterestForVault,
+  hasError: hasOpenInterestError,
+  isLoaded: isOpenInterestLoaded,
+  isOpenInterestEnabled,
+} = useCollateralOpenInterest()
+const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
-const isGovernanceLimited = computed(() => product.isGovernanceLimited && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
@@ -35,37 +44,46 @@ const entityLogos = computed(() => {
   if (!entityName.value || entities.length === 0) return []
   return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
-const isEscrow = computed(() => vault.vaultCategory === 'escrow')
-const isBorrowable = computed(() => vault.vaultCategory !== 'escrow' && vault.collateralLTVs.some(ltv => ltv.borrowLTV > 0n))
+const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
+const isBorrowable = computed(() => isVaultBorrowable(vault))
 const displayName = computed(() => {
   if (isEscrow.value) return 'Escrowed collateral'
-  return product.name || vault.name
+  return product.name || vault.shares.name
 })
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
-const { withIntrinsicSupplyApy, getIntrinsicApy, getIntrinsicApyInfo } = useIntrinsicApy()
+const { settings } = useUserSettings()
+const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
-const modal = useModal()
-const { get: registryGet } = useVaultRegistry()
-
-const collateralAssets = computed(() => {
+const collateralExposureGroups = computed(() => {
   if (!isBorrowable.value) return []
-  const seen = new Set<string>()
-  const assets: { address: string, symbol: string }[] = []
-  for (const ltv of vault.collateralLTVs) {
-    if (ltv.borrowLTV <= 0n) continue
-    if (getCurrentLiquidationLTV(ltv) <= 0n) continue
-    const entry = registryGet(ltv.collateral)
-    if (entry) {
-      const assetAddr = entry.vault.asset.address.toLowerCase()
-      if (seen.has(assetAddr)) continue
-      seen.add(assetAddr)
-      assets.push({ address: entry.vault.asset.address, symbol: entry.vault.asset.symbol })
-    }
-  }
-  return assets
+
+  return getCollateralExposureGroups(
+    getCollateralExposurePairs(
+      vault,
+      addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
+    ),
+    getOpenInterestForVault(vault.address),
+  )
 })
-const collateralDisplayAssets = computed(() => collateralAssets.value.slice(0, 5))
-const collateralOverflowCount = computed(() => Math.max(0, collateralAssets.value.length - 5))
+const exposureDisplay = computed<VaultExposureDisplay>(() =>
+  resolveVaultExposureDisplay({
+    openInterestEnabled: isOpenInterestEnabled.value,
+    openInterestLoaded: isOpenInterestLoaded.value,
+    hasOpenInterestError: hasOpenInterestError.value,
+    getCollateralGroups: () => collateralExposureGroups.value,
+    totalExposureUsd: priceValues.value.totalSupplyUsd,
+    totalSupplyState: priceValues.value.totalSupplyState,
+    utilization: vault.utilization,
+    acceptedCollateralCount: vault.collaterals.length,
+  }),
+)
+const exposureValueState = computed(() => exposureDisplay.value.valueState)
+const exposureDisplayItems = computed(() => exposureDisplay.value.items)
+
+watchEffect(() => {
+  if (!isBorrowable.value || !isOpenInterestEnabled.value) return
+  void loadOpenInterest()
+})
 
 const balance = computed(() =>
   getBalance(vault.asset.address as `0x${string}`),
@@ -73,20 +91,21 @@ const balance = computed(() =>
 const totalRewardsAPY = computed(() => getSupplyRewardApy(vault.address))
 const hasRewards = computed(() => hasSupplyRewards(vault.address))
 const lendingAPY = computed(() =>
-  nanoToValue(vault.interestRateInfo.supplyAPY, 25),
+  getVaultSupplyApy(vault),
 )
-const intrinsicAPY = computed(() => getIntrinsicApy(vault.asset.address))
+const intrinsicAPY = computed(() => getVaultIntrinsicApy(vault, enableIntrinsicApy.value))
 const supplyApy = computed(() =>
-  withIntrinsicSupplyApy(lendingAPY.value, vault.asset.address),
+  withVaultIntrinsicApy(lendingAPY.value, vault, enableIntrinsicApy.value),
 )
 const supplyApyWithRewards = computed(
   () => supplyApy.value + totalRewardsAPY.value,
 )
-const utilization = computed(() => getVaultUtilization(vault))
+const utilization = computed(() => vault.utilization)
+const utilizationDisplay = computed(() => compactNumber(utilization.value, 2, 2))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
-const isFeatured = computed(() => isVaultFeatured(vault.address))
+const isRecentlyAdded = computed(() => isVaultRecentlyAdded(vault.address))
 const isKeyring = computed(() => isVaultKeyring(vault.address))
-const isCyclicalNote = computed(() => isCyclicalNoteVault(vault))
+const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
 const supplyCapWarning = computed(() => getSupplyCapWarning(vault))
 const statsGridCols = computed(() => {
@@ -96,7 +115,7 @@ const statsGridCols = computed(() => {
   if (isBorrowable.value) {
     cols.push('1fr') // Available liquidity
     cols.push('1fr') // Utilization
-    cols.push('1fr') // Collateral
+    cols.push('1fr') // Current exposure
   }
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
@@ -114,33 +133,28 @@ const deprecationReason = computed(() =>
   isDeprecated.value ? product.deprecationReason : '',
 )
 
-const onSupplyInfoIconClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultSupplyApyModal, {
-    props: {
-      lendingAPY: lendingAPY.value,
-      intrinsicAPY: intrinsicAPY.value,
-      intrinsicApyInfo: getIntrinsicApyInfo(vault.asset.address),
-      campaigns: getSupplyRewardCampaigns(vault.address),
-    },
-  })
-}
-
-const onCollateralInfoClick = (event: MouseEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(VaultCollateralExposureModal, { props: { vault } })
-}
-
+const supplyApyModalData = computed(() => ({
+  props: {
+    mode: 'supply',
+    lendingAPY: lendingAPY.value,
+    intrinsicAPY: intrinsicAPY.value,
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
+    campaigns: getSupplyRewardCampaigns(vault.address),
+    rewardVaultAddress: vault.address,
+  },
+}))
 const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: string }>({
   totalSupply: '-',
   liquidity: '-',
   walletBalance: '-',
 })
+const priceValues = ref<{ totalSupplyUsd: number, totalSupplyState: ExposureValueState }>({
+  totalSupplyUsd: 0,
+  totalSupplyState: 'loading',
+})
 
 watchEffect(async () => {
-  const liquidity = vault.supply >= vault.borrow ? vault.supply - vault.borrow : 0n
+  const liquidity = vault.availableLiquidity
   const walletBal = balance.value
   const [supplyResult, liquidityResult, walletResult] = await Promise.all([
     formatAssetValue(vault.totalAssets, vault, 'off-chain'),
@@ -152,6 +166,10 @@ watchEffect(async () => {
     liquidity: liquidityResult.hasPrice ? formatCompactUsdValue(liquidityResult.usdValue) : liquidityResult.display,
     walletBalance: walletResult.hasPrice ? formatCompactUsdValue(walletResult.usdValue) : walletResult.display,
   }
+  priceValues.value = {
+    totalSupplyUsd: supplyResult.hasPrice ? supplyResult.usdValue : 0,
+    totalSupplyState: supplyResult.hasPrice ? 'ready' : 'unavailable',
+  }
 })
 </script>
 
@@ -160,6 +178,10 @@ watchEffect(async () => {
     class="block no-underline text-content-primary bg-surface rounded-12 border border-line-default shadow-card hover:shadow-card-hover hover:border-line-emphasis transition-all"
     :class="isGeoBlocked ? 'opacity-50' : ''"
     :to="{ path: `/lend/${vault.address}`, query: { network: $route.query.network } }"
+    data-id="vault-list-item"
+    :data-list="type"
+    :data-key="vault.address.toLowerCase()"
+    :data-vault-address="vault.address.toLowerCase()"
   >
     <div class="flex pb-12 p-16 border-b border-line-subtle">
       <AssetAvatar
@@ -167,62 +189,87 @@ watchEffect(async () => {
         size="40"
       />
       <div class="flex-grow ml-12">
-        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-8">
+        <div
+          class="text-content-tertiary text-p3 mb-4 flex items-center gap-8"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="name"
+          :data-value="displayName"
+        >
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
           />
-          <span
-            v-if="isFeatured"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5"
-            title="Featured Vault"
-          >
-            <SvgIcon
-              name="star"
-              class="!w-14 !h-14"
-            />
-            Featured
-          </span>
-          <KeyringBadge v-if="isKeyring" />
+          <RecentlyAddedBadge
+            v-if="isRecentlyAdded"
+          />
+          <KeyringBadge v-if="isKeyring && isGovernorVerified" />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
-          <CyclicalNoteBadge v-if="isCyclicalNote" />
+          <CyclicalNoteBadge v-if="isCyclicalNote && isGovernorVerified" />
           <RestrictedBadge v-if="isGeoBlocked" />
-          <span
+          <UiHoverPreviewTooltip
             v-if="isDeprecated"
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-            :title="deprecationReason || 'This vault has been deprecated.'"
+            title="Deprecated"
+            :text="deprecationReason || 'This vault has been deprecated.'"
+            placement="top-start"
           >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Deprecated
-          </span>
+            <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
+              <SvgIcon
+                name="warning"
+                class="!w-14 !h-14"
+              />
+              Deprecated
+            </span>
+          </UiHoverPreviewTooltip>
         </div>
-        <div class="text-h5 text-content-primary">
+        <div
+          class="text-h5 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="asset-symbol"
+          :data-value="vault.asset.symbol"
+        >
           {{ vault.asset.symbol }}
         </div>
       </div>
       <div class="flex flex-col items-end">
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
-          <SvgIcon
-            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onSupplyInfoIconClick"
-          />
+          <UiModalPreviewTrigger
+            :component="VaultApyModal"
+            :modal-data="supplyApyModalData"
+            aria-label="Show supply APY breakdown"
+          >
+            <SvgIcon
+              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
+              name="info-circle"
+              data-modal-trigger="supply-apy"
+            />
+          </UiModalPreviewTrigger>
         </div>
         <div class="flex items-center">
           <div class="mr-6">
             <VaultPoints :vault="vault" />
           </div>
-          <div class="text-p2 flex items-center text-accent-600 font-semibold">
-            <SvgIcon
+          <div
+            class="text-p2 flex items-center text-accent-600 font-semibold"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="supply-apy"
+            :data-value="supplyApyWithRewards"
+          >
+            <UiModalPreviewTrigger
               v-if="hasRewards"
-              class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
-              name="sparks"
-              @click="onSupplyInfoIconClick"
-            />
+              :component="VaultApyModal"
+              :modal-data="supplyApyModalData"
+              aria-label="Show supply APY rewards breakdown"
+            >
+              <SvgIcon
+                class="!w-20 !h-20 text-accent-500 mr-4 cursor-pointer"
+                name="sparks"
+                data-modal-trigger="supply-apy"
+              />
+            </UiModalPreviewTrigger>
             {{ formatNumber(supplyApyWithRewards) }}%
           </div>
         </div>
@@ -257,7 +304,13 @@ watchEffect(async () => {
             :label="entityName"
             :src="entityLogos"
           />
-          <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
+          <span
+            class="text-p2 text-content-primary truncate"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="risk-manager"
+            :data-value="entityName"
+          >{{ entityName }}</span>
         </div>
         <div
           v-else
@@ -272,7 +325,13 @@ watchEffect(async () => {
             tooltip-placement="top-start"
           />
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="total-supply"
+          :data-value="prices.totalSupply"
+        >
           {{ prices.totalSupply }}
         </div>
       </div>
@@ -283,7 +342,13 @@ watchEffect(async () => {
         <div class="text-content-tertiary text-p3 mb-4">
           Available liquidity
         </div>
-        <div class="text-p2 text-content-primary">
+        <div
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="available-liquidity"
+          :data-value="prices.liquidity"
+        >
           {{ prices.liquidity }}
         </div>
       </div>
@@ -303,8 +368,14 @@ watchEffect(async () => {
             :value="utilization"
             :max="100"
           />
-          <div class="text-p2 text-content-primary">
-            {{ compactNumber(utilization, 2, 2) }}%
+          <div
+            class="text-p2 text-content-primary"
+            data-id="data-point"
+            :data-key="vault.address.toLowerCase()"
+            data-field="utilization"
+            :data-value="utilizationDisplay"
+          >
+            {{ utilizationDisplay }}%
           </div>
         </div>
       </div>
@@ -314,34 +385,22 @@ watchEffect(async () => {
         :class="isConnected ? 'items-center' : 'items-end text-right'"
       >
         <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
-          Collateral exposure
-          <SvgIcon
-            v-if="collateralAssets.length > 0"
-            class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-            name="info-circle"
-            @click="onCollateralInfoClick"
-          />
+          Current exposure
         </div>
         <div
-          v-if="collateralAssets.length > 0"
-          class="flex items-center gap-4 cursor-pointer"
-          @click="onCollateralInfoClick"
+          class="flex min-w-0 items-center justify-end"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="current-exposure"
+          :data-value="exposureDisplayItems.map(item => item.label ?? item.asset.symbol).join(',')"
         >
-          <AssetAvatar
-            :asset="collateralDisplayAssets"
-            size="20"
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
           />
-          <span
-            v-if="collateralOverflowCount > 0"
-            class="text-p3 text-content-tertiary whitespace-nowrap"
-          >
-            & {{ collateralOverflowCount }} more
-          </span>
         </div>
-        <div
-          v-else
-          class="text-p2 text-content-primary"
-        >-</div>
       </div>
       <div
         v-if="isConnected"
@@ -411,7 +470,7 @@ watchEffect(async () => {
             :max="100"
           />
           <div class="text-p2 text-content-primary">
-            {{ compactNumber(utilization, 2, 2) }}%
+            {{ utilizationDisplay }}%
           </div>
         </div>
       </div>
@@ -421,36 +480,17 @@ watchEffect(async () => {
       >
         <div class="flex-1">
           <div class="text-content-tertiary text-p3 flex items-center gap-4">
-            Collateral exposure
-            <SvgIcon
-              v-if="collateralAssets.length > 0"
-              class="!w-16 !h-16 shrink-0 text-content-muted hover:text-content-secondary transition-colors cursor-pointer"
-              name="info-circle"
-              @click="onCollateralInfoClick"
-            />
+            Current exposure
           </div>
         </div>
-        <div class="flex gap-8 justify-end items-center text-right flex-1">
-          <div
-            v-if="collateralAssets.length > 0"
-            class="flex items-center gap-8 cursor-pointer"
-            @click="onCollateralInfoClick"
-          >
-            <AssetAvatar
-              :asset="collateralDisplayAssets"
-              size="20"
-            />
-            <span
-              v-if="collateralOverflowCount > 0"
-              class="text-p3 text-content-tertiary whitespace-nowrap"
-            >
-              & {{ collateralOverflowCount }} more
-            </span>
-          </div>
-          <div
-            v-else
-            class="text-p2 text-content-primary"
-          >-</div>
+        <div class="flex min-w-0 flex-1 justify-end text-right">
+          <VaultExposureSummary
+            :items="exposureDisplayItems"
+            :value-state="exposureValueState"
+            :max-visible="5"
+            avatar-size="20"
+            placement="top-start"
+          />
         </div>
       </div>
       <div
@@ -465,7 +505,13 @@ watchEffect(async () => {
             :loading="isBalancesLoading"
             style="min-width: 70px; height: 20px"
           >
-            <div class="text-p2 text-content-primary whitespace-nowrap">
+            <div
+              class="text-p2 text-content-primary whitespace-nowrap"
+              data-id="data-point"
+              :data-key="vault.address.toLowerCase()"
+              data-field="wallet-balance"
+              :data-value="prices.walletBalance"
+            >
               {{ prices.walletBalance }}
             </div>
           </BaseLoadableContent>
