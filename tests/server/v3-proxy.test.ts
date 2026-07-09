@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildV3ProxyLogFields,
   buildV3ProxyRequestHeaders,
   buildV3ProxyTarget,
   isV3ProxyPathAllowed,
@@ -99,6 +100,48 @@ describe('v3 proxy utilities', () => {
       'POST',
       new URL('https://app.example/api/internal/v3/prices'),
     )).toMatchObject({ ok: false, statusCode: 405 })
+  })
+
+  it('extracts public vault totals failure context without raw paths', () => {
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
+    )).toEqual({
+      v3ChainId: '1',
+      v3From: '1782380000',
+      v3Resolution: '1d',
+      v3To: '1782984800',
+      v3VaultAddress: VAULT,
+      v3VaultKind: 'evk',
+    })
+  })
+
+  it('extracts public open-interest and bad-debt failure context', () => {
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=10`),
+    )).toEqual({
+      v3ChainId: '1',
+      v3Limit: '10',
+      v3VaultAddress: VAULT,
+    })
+
+    expect(buildV3ProxyLogFields(
+      new URL('https://app.example/api/internal/v3/evk/vaults/bad-debt?chainId=1&minBadDebtUsd=0&offset=100&limit=100'),
+    )).toEqual({
+      v3ChainId: '1',
+      v3Limit: '100',
+      v3MinBadDebtUsd: '0',
+      v3Offset: '100',
+    })
+  })
+
+  it('does not log dynamic account addresses from account-position requests', () => {
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/accounts/${ACCOUNT}/positions?chainId=1&offset=0&limit=100`),
+    )).toEqual({
+      v3ChainId: '1',
+      v3Limit: '100',
+      v3Offset: '0',
+    })
   })
 
   it('injects only fixed SDK headers and the server-side API key', () => {

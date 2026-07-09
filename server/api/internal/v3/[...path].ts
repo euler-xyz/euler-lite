@@ -21,6 +21,7 @@ import {
 import {
   buildV3ProxyRequestHeaders,
   buildV3ProxyTarget,
+  buildV3ProxyLogFields,
   getV3ProxyPath,
   readForwardedV3ResponseHeaders,
   validateV3ProxyUrl,
@@ -44,6 +45,7 @@ export default defineEventHandler(async (event) => {
   const requestUrl = getRequestURL(event)
   const proxyPath = getV3ProxyPath(requestUrl)
   const pathTemplate = safePathTemplate(proxyPath)
+  const logFields = buildV3ProxyLogFields(requestUrl)
   const urlValidation = validateV3ProxyUrl(method, requestUrl)
   if (urlValidation.ok === false) {
     logger.warn(
@@ -81,6 +83,7 @@ export default defineEventHandler(async (event) => {
         ctx: 'v3-proxy',
         method,
         pathTemplate,
+        ...logFields,
         upstreamHost,
         bodyBytes: body?.length,
         durationMs: Date.now() - startedAt,
@@ -112,6 +115,7 @@ export default defineEventHandler(async (event) => {
         ctx: 'v3-proxy',
         method,
         pathTemplate,
+        ...logFields,
         upstreamHost,
         bodyBytes: body?.length,
         status: upstream.status,
