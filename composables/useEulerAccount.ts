@@ -126,11 +126,11 @@ export const useEulerAccount = () => {
     const gen = positionGuard.current()
 
     try {
-      hasPositionsFetchError.value = false
       if (!walletAddress) {
         visiblePortfolio.value = undefined
         allPortfolio.value = undefined
         portfolioDiagnostics.value = []
+        hasPositionsFetchError.value = false
         markLoaded()
         return
       }
@@ -163,6 +163,7 @@ export const useEulerAccount = () => {
       allPortfolio.value = nextAllPortfolio
       visiblePortfolio.value = nextVisiblePortfolio
       portfolioDiagnostics.value = fetched.errors
+      hasPositionsFetchError.value = false
       markLoaded()
     }
     catch (error) {
