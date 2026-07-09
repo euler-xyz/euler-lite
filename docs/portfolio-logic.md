@@ -337,6 +337,13 @@ Token balance fetching in `useWallets.ts` uses `Promise.all()` for concurrent re
 
 The poll interval awaits `updateBalances()` before `refreshVaults()` to ensure wallet balances are fresh when vault data triggers position recalculation.
 
+### Balance Refetch Settling
+
+After each fetch, `updateBalances()` schedules a follow-up run if its inputs (chain, address, registry readiness) changed mid-flight. Two safeguards keep this from looping:
+
+- Address identity is compared **case-insensitively**. Connector-reported addresses are not guaranteed to be EIP-55 checksummed (WalletConnect wallets commonly report lowercase, injected wallets checksum), while the last-fetched address is stored checksummed. A cased compare here once kept the follow-up condition true forever, refetching in an unbounded loop that hung the tab.
+- Consecutive follow-up runs are capped (`MAX_CONSECUTIVE_AUTO_REFETCHES`); hitting the cap logs a warning instead of spinning, since legitimate mid-flight changes settle within a couple of rounds.
+
 ## Related Documentation
 
 - [Pricing System](./pricing-system.md) — Full pricing architecture details
