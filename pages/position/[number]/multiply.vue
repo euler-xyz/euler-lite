@@ -39,7 +39,7 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { eulerLensAddresses, chainId } = useEulerAddresses()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const { getBorrowRewardApy } = useRewardsApy()
 const { getCollateralApySnapshot } = usePositionCollateralApy()
 const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
@@ -161,14 +161,6 @@ const multiplyRouteEmptyMessage = computed(() => {
     return 'Increase multiplier to fetch quotes'
   }
   return 'No quotes found'
-})
-
-const multiplyLongApy = computed(() => {
-  if (!multiplyLongVault.value) {
-    return null
-  }
-  const base = getVaultSupplyApy(multiplyLongVault.value)
-  return withVaultIntrinsicApy(base, multiplyLongVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(multiplyLongVault.value.address)
 })
 
 const multiplyDebtAmountNano = computed(() => {
@@ -354,18 +346,23 @@ const nextBorrowValueUsd = computed(() => {
   }
   return currentBorrowValueUsd.value + (multiplyBorrowValueUsd.value || 0)
 })
-const multiplyRoeBefore = computed(() => {
+// Borrow APY at current utilization — "before" figures must not include the
+// projected post-transaction rate delta baked into multiplyBorrowApy.
+const multiplyCurrentBorrowApy = computed(() => {
   if (!multiplyShortVault.value) return null
-  const borrowApy = withVaultIntrinsicApy(
+  return withVaultIntrinsicApy(
     getVaultBorrowApy(multiplyShortVault.value),
     multiplyShortVault.value,
     enableIntrinsicApy.value,
   ) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
+})
+const multiplyRoeBefore = computed(() => {
+  if (multiplyCurrentBorrowApy.value === null) return null
   return getRoe(
     currentSupplyValueUsd.value,
     currentWeightedSupplyApy.value,
     currentBorrowValueUsd.value,
-    borrowApy,
+    multiplyCurrentBorrowApy.value,
   )
 })
 const multiplyRoeAfter = computed(() => {
@@ -380,16 +377,16 @@ const multiplyNetApyBefore = computed(() => {
   if (
     currentSupplyValueUsd.value === null
     || currentBorrowValueUsd.value === null
-    || multiplyLongApy.value === null
-    || multiplyBorrowApy.value === null
+    || currentWeightedSupplyApy.value === null
+    || multiplyCurrentBorrowApy.value === null
   ) {
     return null
   }
   return getNetAPY(
     currentSupplyValueUsd.value,
-    multiplyLongApy.value,
+    currentWeightedSupplyApy.value,
     currentBorrowValueUsd.value,
-    multiplyBorrowApy.value,
+    multiplyCurrentBorrowApy.value,
   )
 })
 const multiplyNetApyAfter = computed(() => {

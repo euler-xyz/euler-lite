@@ -136,6 +136,8 @@ vi.mock('~/utils/sdk-prices', () => ({
 
 vi.mock('~/utils/vault/apy', () => ({
   getProjectedRates: vi.fn(async () => null),
+  getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
+  getRoe: vi.fn(() => 0),
 }))
 
 vi.mock('~/utils/multiply-math', () => ({
@@ -154,7 +156,6 @@ vi.mock('~/utils/priceImpact', () => ({
 }))
 
 vi.mock('~/utils/repayUtils', () => ({
-  calculateRoe: vi.fn(() => 0),
   computeNextHealth: vi.fn(() => null),
   computeLiquidationPrice: vi.fn(() => null),
 }))
