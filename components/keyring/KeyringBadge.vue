@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useModal } from '~/components/ui/composables/useModal'
 import { KeyringInfoModal } from '#components'
 
 const { size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
@@ -8,26 +7,17 @@ const { size = 'small', block = false, as = 'span', nudge = false } = defineProp
   as?: 'button' | 'span'
   nudge?: boolean
 }>()
-
-const modal = useModal()
-
-const openKeyringInfoModal = (event: MouseEvent | KeyboardEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-  modal.open(KeyringInfoModal)
-}
 </script>
 
 <template>
-  <VaultMetadataTag
-    :as="as"
+  <VaultMetadataBadge
     icon="shield"
     label="Private"
-    tone="accent"
+    title="This vault requires identity verification"
+    :modal="KeyringInfoModal"
     :size="size"
     :block="block"
+    :as="as"
     :nudge="nudge"
-    title="This vault requires identity verification"
-    @click="openKeyringInfoModal"
   />
 </template>

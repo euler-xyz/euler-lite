@@ -15,7 +15,7 @@ const normalizeHex = (value: string): Hex => (value.startsWith('0x') ? value as 
 const normalizeFeedId = (value: string): Hex => normalizeHex(value).toLowerCase() as Hex
 
 // Module-level SDK Pyth adapter used for on-chain getUpdateFee reads. The Hermes
-// URL is irrelevant here — we keep the local /api/pyth/updates proxy fetch
+// URL is irrelevant here — we keep the local /api/internal/pyth/updates proxy fetch
 // (see fetchPythUpdateDataDirect) for CORS, so this constructor argument is
 // only a placeholder. We pass the SDK build-query so reads go through the
 // shared cache/logging pipeline.
@@ -116,7 +116,7 @@ const executePythBatch = async () => {
 
 /**
  * Direct fetch without batching - used internally by the batching system.
- * Routes through server proxy at /api/pyth/updates to avoid CORS and credential exposure.
+ * Routes through server proxy at /api/internal/pyth/updates to avoid CORS and credential exposure.
  */
 const fetchPythUpdateDataDirect = async (feedIds: Hex[], _endpoint: string): Promise<Hex[]> => {
   if (!feedIds.length) {
@@ -124,7 +124,7 @@ const fetchPythUpdateDataDirect = async (feedIds: Hex[], _endpoint: string): Pro
   }
 
   try {
-    const url = new URL('/api/pyth/updates', window.location.origin)
+    const url = new URL('/api/internal/pyth/updates', window.location.origin)
     feedIds.forEach(id => url.searchParams.append('ids[]', id))
     url.searchParams.set('encoding', 'hex')
 
@@ -292,7 +292,7 @@ export const fetchPythPrices = async (
   }
 
   try {
-    const url = new URL('/api/pyth/updates', window.location.origin)
+    const url = new URL('/api/internal/pyth/updates', window.location.origin)
     missing.forEach(id => url.searchParams.append('ids[]', id))
     url.searchParams.set('encoding', 'hex')
     url.searchParams.set('parsed', 'true')
@@ -374,7 +374,7 @@ export const buildPythBatchItemsFromFeeds = async (
     const updateData = await fetchPythUpdateData([...feedSet], hermesEndpoint)
     if (!updateData.length) continue
 
-    let fee = 0n
+    let fee: bigint
     try {
       // The SDK is linked from a workspace and ships its own viem (2.43.x), so
       // its PublicClient is structurally similar but not identical to the app's

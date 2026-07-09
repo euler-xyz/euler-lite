@@ -44,7 +44,7 @@ export async function fetchLabels<T>(
   chainId: number,
   file: 'products.json' | 'entities.json' | 'earn-vaults.json',
 ): Promise<T> {
-  return await $fetch<T>(`/api/labels/${file}`, {
+  return await $fetch<T>(`/api/internal/labels/${file}`, {
     query: { chainId },
     headers: INTERNAL_FETCH_HEADERS,
   }) as unknown as T

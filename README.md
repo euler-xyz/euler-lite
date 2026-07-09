@@ -47,10 +47,10 @@ cp .env.example .env
 
 | Variable     | Default                       | Description                           |
 | ------------ | ----------------------------- | ------------------------------------- |
-| `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/v3` proxy |
-| `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/v3` as `X-API-Key` |
+| `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/internal/v3` proxy |
+| `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/internal/v3` as `X-API-Key` |
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
-| `PYTH_HERMES_URL` or `NUXT_PUBLIC_PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (proxied via `/api/pyth/updates`) |
+| `PYTH_HERMES_URL` or `NUXT_PUBLIC_PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (proxied via `/api/internal/pyth/updates`) |
 
 > **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. V3 API keys should use server-side names such as `EULER_SDK_V3_API_KEY`.
 
@@ -62,8 +62,10 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | -------- | ------- | ----------- |
 | `SERVER_VAULT_CACHE_SOURCE` | `fallback` | Server snapshot builder adapter chain: `fallback`, `onchain`, or `v3`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | `fallback` | Browser "fast" SDK adapter chain: `fallback`, `onchain`, or `v3`. The plan-time SDK is always on-chain. |
-| `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
+| `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/internal/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
 | `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. |
+| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of `DEPRECATED_CHAINS`; list a chain in both to deprecate it and route it onchain. |
+| `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
 
 `fallback` uses V3 first and on-chain reads second. If no V3 URL is configured, Lite passes `disableV3: true` to the SDK so fallback reads go straight on-chain.
 
@@ -74,9 +76,9 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowlist for `/api/*`; falls back to `NUXT_PUBLIC_APP_URL`. |
 | `CSP_EXTRA_CONNECT_SRC` | Extra `connect-src` origins for development or staging endpoints. |
 | `DEV_GEO_COUNTRY` | Local/preview country fallback when Cloudflare geo headers are absent. Do not set in production behind Cloudflare. |
-| `WALLET_SCREENING_URI` | Optional server-side wallet screening endpoint proxied by `/api/screen-address`. |
+| `WALLET_SCREENING_URI` | Optional server-side wallet screening endpoint proxied by `/api/internal/screen-address`. |
 | `STABLEWATCH_API_KEY` | Optional server-side Stablewatch key for intrinsic APY data. |
-| `MERKL_API_KEY` | Optional server-side Merkl key. The Merkl API works anonymously (10 req/sec shared across all users via `/api/proxy/merkl`); set this to send `X-API-Key` upstream for a higher quota. Server-only — never exposed to the browser. |
+| `MERKL_API_KEY` | Optional server-side Merkl key. The Merkl API works anonymously (10 req/sec shared across all users via `/api/internal/proxy/merkl`); set this to send `X-API-Key` upstream for a higher quota. Server-only — never exposed to the browser. |
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
@@ -134,7 +136,7 @@ RPC_URL_42161=https://your-arbitrum-rpc.com
 SUBGRAPH_URL_42161=https://api.goldsky.com/.../euler-simple-arbitrum/latest/gn
 ```
 
-The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second. No code changes needed to add or remove chains.
+The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/internal/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second. No code changes needed to add or remove chains.
 
 #### Base App In-App Browser
 
@@ -390,7 +392,7 @@ Before deploying:
 ### Token logos not loading
 
 - Verify `V3_API_URL` is set correctly. If the V3 deployment requires authentication, verify `EULER_SDK_V3_API_KEY` is set. If using Doppler, ensure the URL env var name matches (`V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`).
-- Token data is fetched server-side via `/api/token-list` which aggregates Euler V3, DefiLlama, Uniswap, and Merkl sources with fallback. Check server logs for upstream failures.
+- Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, DefiLlama, Uniswap, and Merkl sources with fallback. Check server logs for upstream failures.
 
 ### Build Errors
 

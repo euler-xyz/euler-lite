@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatUnits } from 'viem'
-import type { UserReward } from '@eulerxyz/euler-v2-sdk'
+import type { UserReward } from '~/entities/reward-campaign'
 
 const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()

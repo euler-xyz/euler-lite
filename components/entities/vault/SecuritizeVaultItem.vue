@@ -7,7 +7,7 @@ import { isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { VaultSupplyApyModal, UiModalPreviewTrigger } from '#components'
+import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 
 const { isConnected } = useWagmi()
@@ -59,6 +59,7 @@ const supplyApyWithRewards = computed(
 
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: lendingAPY.value,
     intrinsicAPY: getVaultIntrinsicApy(vault, enableIntrinsicApy.value),
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault, enableIntrinsicApy.value),
@@ -137,7 +138,7 @@ watchEffect(async () => {
         <div class="text-content-tertiary text-p3 mb-4 text-right flex items-center gap-4">
           Supply APY
           <UiModalPreviewTrigger
-            :component="VaultSupplyApyModal"
+            :component="VaultApyModal"
             :modal-data="supplyApyModalData"
             aria-label="Show supply APY breakdown"
           >
@@ -158,7 +159,7 @@ watchEffect(async () => {
           >
             <UiModalPreviewTrigger
               v-if="hasRewards"
-              :component="VaultSupplyApyModal"
+              :component="VaultApyModal"
               :modal-data="supplyApyModalData"
               aria-label="Show supply APY rewards breakdown"
             >

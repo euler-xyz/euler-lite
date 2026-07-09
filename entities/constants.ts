@@ -17,6 +17,8 @@ export const ERROR_MESSAGE_MAP: Record<string, string> = {
   ERC4626ExceededMaxWithdraw: 'Withdraw exceeds vault limits.',
   ERC4626ExceededMaxRedeem: 'Redeem exceeds vault limits.',
   SlippageExceeded: 'Slippage exceeded your tolerance. Increase slippage tolerance or refresh the quote.',
+  HealthFactorLowerThanLiquidationThreshold: 'Aave account health factor would be below the liquidation threshold.',
+  NotBorrowableInEMode: 'This Aave account is in an E-Mode that is incompatible with this position\'s assets. Exit the E-Mode in the Aave app before migrating.',
   Swapper_SwapError: 'Swap failed. Try increasing slippage tolerance, refreshing the quote, or selecting a different swap provider.',
   Swapper_UnknownHandler: 'Swap provider is not registered. Try selecting a different swap provider.',
   SwapVerifier_skimMin: 'Swap received less than the minimum amount. Increase slippage tolerance or refresh the quote.',
@@ -34,6 +36,8 @@ export const ERROR_MESSAGE_MAP: Record<string, string> = {
 
 export const ERROR_SIGNATURE_MAP: Record<string, string> = {
   ...EVC_ERROR_SIGNATURES,
+  '0x6679996d': 'HealthFactorLowerThanLiquidationThreshold',
+  '0x57db5bba': 'NotBorrowableInEMode', // Aave V3 borrow rejected: asset not borrowable in the account's active E-Mode
 }
 
 export const TTL_INFINITY = BigInt(

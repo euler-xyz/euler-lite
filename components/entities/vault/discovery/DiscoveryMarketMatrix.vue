@@ -303,10 +303,10 @@ watch(
               :class="
                 selectedHeader?.address === col.address
                   && selectedHeader?.axis === 'column'
-                  ? 'text-accent-500 !bg-accent-500/10'
+                  ? 'text-accent-500 shadow-[inset_0_0_0_9999px_rgba(var(--accent-rgb),0.10)]'
                   : isColumnHighlighted(col.address)
-                    ? 'text-content-primary !bg-white/[0.06]'
-                    : 'text-content-primary hover:bg-white/[0.04]'
+                    ? 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]'
+                    : 'text-content-primary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]'
               "
               @click.stop="$emit('selectHeader', col.address, 'column')"
             >
@@ -340,12 +340,12 @@ watch(
               :class="
                 selectedHeader?.address === row.address
                   && selectedHeader?.axis === 'row'
-                  ? 'text-accent-500 !bg-accent-500/10'
+                  ? 'text-accent-500 shadow-[inset_0_0_0_9999px_rgba(var(--accent-rgb),0.10)]'
                   : isRowHighlighted(row.address)
-                    ? (row.category !== 'borrowable' ? 'text-content-tertiary !bg-white/[0.06]' : 'text-content-primary !bg-white/[0.06]')
+                    ? (row.category !== 'borrowable' ? 'text-content-tertiary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]' : 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]')
                     : (row.category !== 'borrowable'
-                      ? 'text-content-tertiary hover:bg-white/[0.04]'
-                      : 'text-content-primary hover:bg-white/[0.04]')
+                      ? 'text-content-tertiary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]'
+                      : 'text-content-primary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]')
               "
               @click.stop="$emit('selectHeader', row.address, 'row')"
             >

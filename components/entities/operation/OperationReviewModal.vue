@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { encodeFunctionData, getAddress, type Address } from 'viem'
+import { encodeFunctionData, getAddress, type Address, type StateOverride } from 'viem'
 import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
+import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext, type StepKnownAsset, type StepKnownSwapOutput } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
@@ -22,17 +22,30 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel } = defineProps<{
-  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+  type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
-  /** Raw plan, used as a fallback when the caller hasn't pre-prepared.
-   *  Migrated callers should pass `prepared` instead. */
+  /** Raw plan, prepared inside the modal when no prepared envelope is provided. */
   plan?: TransactionPlan
   /** Pre-prepared envelope. When set, the modal renders immediately — no
    *  in-modal plugin/approval-resolution round-trip. */
   prepared?: TransactionPlanPrepared
+  /** Tenderly-only prepared plan. Used for display-only reviews that need a pre-signature simulation path. */
+  tenderlyPrepared?: TransactionPlanPrepared
+  /** Copy-calldata-only prepared plan. Used when executable calldata needs placeholder signatures before confirm-time signing. */
+  calldataPrepared?: TransactionPlanPrepared
+  /** The copy-calldata-only plan contains placeholder wallet signatures. */
+  calldataUsesPlaceholderSignatures?: boolean
+  /** Tenderly-only raw plan fallback. */
+  tenderlyPlan?: TransactionPlan
+  /** Additional simulation overrides required by the Tenderly-only plan. */
+  tenderlyStateOverrides?: StateOverride
+  /** Optional plan used only to decode displayed operation rows. */
+  displayPlan?: TransactionPlan
+  /** Optional wallet-signature rows shown separately before transaction rows. */
+  signatureSteps?: DisplayStep[]
   supplyingAssetForBorrow?: VaultAsset
   supplyingAmount?: number | string
   swapFromAsset?: VaultAsset
@@ -46,6 +59,9 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   subAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
+  knownAssets?: StepKnownAsset[]
+  swapQuoteOutputs?: StepKnownSwapOutput[]
+  confirmLabel?: string
   vaultAmounts?: Record<string, string>
   submittingLabel?: string
   /** Milliseconds since epoch when the active swap quote was fetched */
@@ -54,10 +70,12 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   hideExecute?: boolean
   /** Overrides the inferred Euler product name for non-product contexts, such as Earn vaults. */
   marketLabel?: string
+  /** Allow display-step-only reviews when the executable plan needs a confirm-time wallet authorization first. */
+  allowConfirmWithoutPlan?: boolean
 }>()
 
-const { address: walletAddress, chainId: currentChainId } = useWagmi()
-const { isSpyMode, spyAddress } = useSpyMode()
+const { address: walletAddress, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { chainId: currentChainId } = useWagmi()
 const { getVault } = useVaultRegistry()
 const { prepareTransactionPlan } = useEulerTx()
 const { eulerCoreAddresses } = useEulerAddresses()
@@ -77,15 +95,21 @@ const hasCopiedCalldata = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
-// `preparedPlan` is the prepared envelope's plan when the caller passed
-// `prepared`, otherwise it's the result of an on-the-fly prepare for callers
-// still on the legacy raw-plan path. Once every caller migrates, the
-// raw-plan branch below can be deleted.
+// `preparedPlan` is either the caller-provided prepared envelope's plan or the
+// result of preparing a raw plan inside this modal.
 const preparedPlan = shallowRef<TransactionPlan | undefined>()
 const prepareError = ref('')
 const tenderlyLocalError = ref('')
 const isPreparingPlan = ref(false)
 const reviewPlan = computed(() => preparedPlan.value)
+const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
+const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
+// calldataPrepared is the dedicated copy-calldata plan (e.g. carrying
+// placeholder signatures) — it must win over the review plan when both exist.
+const calldataPlan = computed(() => calldataPrepared?.plan ?? reviewPlan.value)
+const calldataChainId = computed(() => calldataPrepared?.chainId ?? prepared?.chainId ?? currentChainId.value)
+const displayReviewPlan = computed(() => displayPlan ?? reviewPlan.value ?? calldataPrepared?.plan ?? tenderlyPrepared?.plan ?? tenderlyPlan)
+const canCopyCalldata = computed(() => !!calldataPlan.value?.length)
 let prepareRequestId = 0
 
 fetchTenderlyEnabled().then((enabled) => {
@@ -105,7 +129,7 @@ onUnmounted(() => {
 })
 
 watch(
-  () => [prepared, plan, walletAddress.value, currentChainId.value] as const,
+  () => [prepared, plan, walletAddress.value, currentChainId.value, allowConfirmWithoutPlan] as const,
   async () => {
     const requestId = ++prepareRequestId
     hasCopiedCalldata.value = false
@@ -122,12 +146,12 @@ watch(
 
     if (!plan?.length) {
       isPreparingPlan.value = false
+      if (allowConfirmWithoutPlan) return
       prepareError.value = 'Transaction plan is unavailable. Close this review and try again.'
       return
     }
 
-    // Legacy fallback: caller passed only a raw plan. Run prepare here.
-    // Migrated callers should pass `prepared` and bypass this.
+    // Raw plans are prepared here so the displayed rows use resolved approvals.
     isPreparingPlan.value = true
     try {
       const envelope = await prepareTransactionPlan(plan)
@@ -153,19 +177,25 @@ watch(
 )
 
 const handleTenderlySimulate = async () => {
-  const currentPlan = reviewPlan.value
+  const currentPlan = tenderlyReviewPlan.value
   if (!currentPlan || !walletAddress.value) return
   tenderlyLocalError.value = ''
   clearTenderly()
 
   try {
     const owner = walletAddress.value as Address
-    const sdk = await getEulerSdk()
+    // Capture the plan's chain id once so the SDK backend selection and the
+    // payload can't diverge if the user switches chains mid-await. Uses the
+    // tenderly plan chain (not the wallet chain) so cross-chain migration
+    // plans simulate against the correct network.
+    const targetChainId = tenderlyChainId.value
+    const sdk = await getEulerSdkForChain(targetChainId)
     const payload = await buildTenderlySimulationPayload({
       plan: currentPlan,
       owner,
-      chainId: currentChainId.value,
+      chainId: targetChainId,
       sdk,
+      extraStateOverrides: tenderlyStateOverrides,
     })
 
     if (!payload) {
@@ -199,13 +229,16 @@ const handleConfirm = async () => {
   }
 }
 
-const displaySteps = computed((): DisplayStep[] => {
-  const currentPlan = reviewPlan.value
+const isWalletSignatureStep = (step: DisplayStep) =>
+  step.label === 'Sign permit2 message'
+
+const rawDisplaySteps = computed((): DisplayStep[] => {
+  const currentPlan = displayReviewPlan.value
   if (!currentPlan?.length) return []
   const ctx: StepDecodingContext = {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
-    swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts,
+    swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs,
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })
@@ -217,14 +250,14 @@ const displaySteps = computed((): DisplayStep[] => {
 const market = computed<string | undefined>(() => {
   if (marketLabel) return marketLabel
   const labels = getCurrentEulerLabelsData()
-  return buildPlanMarketLabel(reviewPlan.value, addr => getEulerLabelProductByVault(labels, addr)?.name)
+  return buildPlanMarketLabel(displayReviewPlan.value, addr => getEulerLabelProductByVault(labels, addr)?.name)
 })
 
 // "Position N" / "Deposits" tag for the sub-account this operation targets,
 // mirroring the pill in the batch review's operations list. Sub-account 0 is the
 // main account ("Deposits"); numbered borrow positions are "Position N".
 const positionTag = computed<string | undefined>(() => {
-  const ownerAddr = (isSpyMode.value ? spyAddress.value : walletAddress.value) || ''
+  const ownerAddr = effectiveAddress.value || ''
   if (!subAccount || !ownerAddr) return undefined
   try {
     const idx = getSubAccountId(getAddress(ownerAddr), getAddress(subAccount))
@@ -235,12 +268,27 @@ const positionTag = computed<string | undefined>(() => {
   }
 })
 
+const displaySteps = computed((): DisplayStep[] => {
+  // Wallet-signature rows always render in the signature section, never among
+  // the transaction steps — also when the caller provides its own signature
+  // rows (a raw permit2 row would otherwise appear in both sections).
+  const steps = rawDisplaySteps.value.filter(step => !isWalletSignatureStep(step))
+  return steps.map((step, idx) => ({ ...step, index: idx + 1 }))
+})
+
+const signatureSteps = computed((): DisplayStep[] =>
+  (providedSignatureSteps?.length
+    ? providedSignatureSteps
+    : rawDisplaySteps.value.filter(isWalletSignatureStep)
+  ).map((step, idx) => ({ ...step, index: idx + 1 })),
+)
+
 const copyCalldata = async () => {
-  const currentPlan = reviewPlan.value
+  const currentPlan = calldataPlan.value
   if (!currentPlan?.length) return
   try {
-    const sdk = await getEulerSdk()
-    const cid = currentChainId.value
+    const cid = calldataChainId.value
+    const sdk = await getEulerSdkForChain(cid)
     const entries: { to: string, data: string, value: string }[] = []
 
     for (const item of currentPlan) {
@@ -301,6 +349,8 @@ const btnLabel = computed(() => {
       return 'Transfer'
     case 'refinance':
       return 'Refinance'
+    case 'migration':
+      return 'Migrate'
     case 'reul-unlock':
       return 'Unlock'
     case 'reward':
@@ -335,6 +385,7 @@ const hasPermit2Approval = computed(() => {
 })
 
 const usesPermit2 = computed(() => hasPermit2Signature(reviewPlan.value) || hasPermit2Approval.value)
+const hasTenderlyPlan = computed(() => !!tenderlyReviewPlan.value?.length)
 
 const hasTenderlyFailedSimulation = computed(() => {
   return !!(tenderlyUrl.value && tenderlyError.value)
@@ -347,12 +398,13 @@ const isSwapQuoteStale = computed(() => {
 })
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
-const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || !reviewPlan.value?.length)
+const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
+const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
   if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
-  return internalSubmitting.value && submittingLabel ? submittingLabel : btnLabel.value
+  return internalSubmitting.value && submittingLabel ? submittingLabel : (providedConfirmLabel || btnLabel.value)
 })
 </script>
 
@@ -380,20 +432,32 @@ const confirmLabel = computed(() => {
           </span>
         </div>
         <div
-          v-if="displaySteps.length"
-          class="w-full rounded-8 border border-line-default bg-card px-12 py-10 shadow-xs"
+          v-if="signatureSteps.length || displaySteps.length"
+          class="w-full rounded-8 bg-card p-12"
         >
           <div class="flex w-full flex-col gap-8">
-            <OperationStepsList :steps="displaySteps" />
+            <OperationStepsList
+              v-if="signatureSteps.length"
+              :steps="signatureSteps"
+            />
+            <div
+              v-if="signatureSteps.length && displaySteps.length"
+              class="border-t border-border-primary my-4"
+            />
+            <OperationStepsList
+              v-if="displaySteps.length"
+              :steps="displaySteps"
+            />
           </div>
         </div>
       </div>
 
       <div
-        v-if="reviewPlan?.length && !hideExecute"
+        v-if="(canCopyCalldata || hasTenderlyPlan) && !hideExecute"
         class="flex items-center justify-center gap-16"
       >
         <button
+          v-if="canCopyCalldata"
           type="button"
           class="inline-flex h-36 items-center gap-6 rounded-8 border border-line-default bg-card px-12 text-p3 text-content-primary hover:border-line-emphasis hover:bg-card-hover transition-colors"
           @click="copyCalldata"
@@ -445,6 +509,12 @@ const confirmLabel = computed(() => {
         class="text-p4 text-content-primary text-center"
       >
         Copied calldata does not contain the permit() call. It is only known after the permit2 message is signed.
+      </p>
+      <p
+        v-if="calldataUsesPlaceholderSignatures && canCopyCalldata && !hideExecute"
+        class="text-p4 text-content-primary text-center"
+      >
+        Copied calldata contains placeholder authorization signatures. Sign the wallet messages to execute the final calldata.
       </p>
 
       <UiAlert

@@ -644,18 +644,16 @@ watch([collateralAmount, borrowAmount], async () => {
             </SummaryRow>
           </VaultFormInfoBlock>
 
-          <div class="flex flex-col gap-8 laptop:col-start-1 laptop:row-start-2">
-            <VaultFormSubmit
-              :disabled="reviewBorrowDisabled"
-              :loading="isSubmitting || isPreparing"
-              :disabled-reason="disabledReasonInfo?.message"
-              :disabled-reason-variant="disabledReasonInfo?.variant"
-              :can-add-to-batch="canAddToBatch"
-              @add-to-batch="addToBatch"
-            >
-              Review Borrow
-            </VaultFormSubmit>
-          </div>
+          <FormSubmitFooter
+            :submit-disabled="reviewBorrowDisabled"
+            :submit-loading="isSubmitting || isPreparing"
+            :disabled-reason="disabledReasonInfo?.message"
+            :disabled-reason-variant="disabledReasonInfo?.variant"
+            :can-add-to-batch="canAddToBatch"
+            @add-to-batch="addToBatch"
+          >
+            Review Borrow
+          </FormSubmitFooter>
         </div>
       </template>
     </VaultForm>

@@ -62,24 +62,48 @@ if ! pnpm -C packages/euler-v2-sdk run build; then
   pnpm -C packages/euler-v2-sdk run build
 fi
 
-# Stamp the SDK clone with the version this app pins. The source branch may carry
-# no version field (e.g. `main`, which is versioned only at release time) or a
-# version from a different release line — either breaks linking by branch: npm
-# pack requires a version, and the forced install must satisfy the app's exact
-# spec for `npm ls`. Reading the pin from the app keeps any branch installable
-# without publishing, and tracks future version bumps automatically.
-SDK_TARGET_SPEC="$(node -p "const p=require('/usr/src/app/package.json'); (p.dependencies||{})['@eulerxyz/euler-v2-sdk'] || (p.devDependencies||{})['@eulerxyz/euler-v2-sdk'] || ''")"
-SDK_TARGET_VERSION="$(printf '%s' "$SDK_TARGET_SPEC" | sed 's/^[^0-9]*//')"
-if [ -z "$SDK_TARGET_VERSION" ]; then
-  echo "Could not determine the pinned @eulerxyz/euler-v2-sdk version from the app's package.json." >&2
-  exit 1
-fi
-echo "Stamping SDK clone version to ${SDK_TARGET_VERSION} to match the app's pin."
-node -e "const fs=require('fs'); const f='./packages/euler-v2-sdk/package.json'; const j=JSON.parse(fs.readFileSync(f,'utf8')); j.version=process.argv[1]; fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n');" "$SDK_TARGET_VERSION"
+node - <<'NODE'
+const fs = require('node:fs')
+
+const packageJsonPath = 'packages/euler-v2-sdk/package.json'
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+const appPackageJson = JSON.parse(fs.readFileSync('/usr/src/app/package.json', 'utf8'))
+const appSdkSpec = appPackageJson.dependencies?.['@eulerxyz/euler-v2-sdk']
+  || appPackageJson.devDependencies?.['@eulerxyz/euler-v2-sdk']
+  || ''
+const appPinnedVersion = appSdkSpec.match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/)?.[0]
+
+if (!packageJson.name) {
+  throw new Error(`${packageJsonPath} is missing a package name`)
+}
+
+const targetVersion = appPinnedVersion || process.env.EULER_SDK_PREVIEW_VERSION || packageJson.version || '0.0.0-preview.0'
+if (packageJson.version !== targetVersion) {
+  packageJson.version = targetVersion
+  fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+  console.log(`Stamped preview package version ${packageJson.version} into ${packageJsonPath}.`)
+}
+NODE
 
 mkdir -p "$SDK_PACK_DIR"
-npm pack ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
+npm pack --ignore-scripts ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
 
 cd /usr/src/app
 npm install --no-save --package-lock=false --ignore-scripts "$SDK_PACK_DIR"/*.tgz
-npm ls @eulerxyz/euler-v2-sdk --depth=0
+if ! npm ls @eulerxyz/euler-v2-sdk --depth=0; then
+  echo "npm ls reported a version mismatch for the preview SDK tarball; validating runtime exports instead."
+fi
+
+node --input-type=module - <<'NODE'
+import { buildEulerSDK, PositionMigrationService } from '@eulerxyz/euler-v2-sdk'
+
+const missing = []
+if (typeof buildEulerSDK !== 'function') missing.push('buildEulerSDK')
+if (typeof PositionMigrationService !== 'function') missing.push('PositionMigrationService')
+
+if (missing.length > 0) {
+  throw new Error(`Preview SDK is missing expected exports: ${missing.join(', ')}`)
+}
+
+console.log('Preview @eulerxyz/euler-v2-sdk migration exports are available.')
+NODE

@@ -11,7 +11,7 @@ defineProps<{ reason: string }>()
         name="warning"
         class="!w-20 !h-20 flex-shrink-0"
       />
-      <!-- eslint-disable vue/no-v-html -- deprecationReason is validated server-side in server/api/labels/[file].get.ts -->
+      <!-- eslint-disable vue/no-v-html -- deprecationReason is validated server-side in server/api/internal/labels/[file].get.ts -->
       <p
         v-if="reason"
         class="text-p3 text-warning-500 auto-link"

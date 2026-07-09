@@ -2,13 +2,14 @@
 defineProps<{
   loading?: boolean
   variant?: 'card'
+  allowOverflow?: boolean
 }>()
 </script>
 
 <template>
   <div
     class="relative p-16 rounded-16 flex flex-col gap-16 bg-surface-secondary shadow-card"
-    style="overflow: hidden"
+    :style="{ overflow: allowOverflow ? 'visible' : 'hidden' }"
   >
     <BaseLoadingBar v-show="loading" />
     <slot />

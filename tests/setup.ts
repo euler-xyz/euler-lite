@@ -6,7 +6,7 @@
  * server/ module that calls one of these globals at module top level.
  */
 
-import { computed, reactive, readonly, ref, shallowReactive, shallowRef, watch, watchEffect } from 'vue'
+import { computed, reactive, readonly, ref, shallowReactive, shallowRef, watch, watchEffect, type Ref } from 'vue'
 
 type AnyFn = (...args: unknown[]) => unknown
 
@@ -33,4 +33,16 @@ const vueGlobals: Record<string, unknown> = {
 }
 for (const [key, value] of Object.entries(vueGlobals)) {
   if (g[key] === undefined) g[key] = value
+}
+
+if (!g.useState) {
+  const state = new Map<string, Ref<unknown>>()
+  g.useState = (key: string, init: () => unknown) => {
+    let entry = state.get(key)
+    if (!entry) {
+      entry = ref(init())
+      state.set(key, entry)
+    }
+    return entry
+  }
 }

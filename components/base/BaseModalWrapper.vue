@@ -128,8 +128,11 @@ const bodyTopPaddingClass = computed(() => {
     <!-- Drag zone: pill + header, outside the scroll container -->
     <div
       v-if="hasHeaderChrome"
-      class="shrink-0 mobile:pt-0 touch-none select-none"
-      :class="compact ? 'px-12 pt-10' : 'px-16 pt-12'"
+      class="shrink-0 touch-none select-none"
+      :class="[
+        compact ? 'px-12 pt-14' : 'px-16 pt-12',
+        !inline ? 'mobile:pt-0' : '',
+      ]"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"

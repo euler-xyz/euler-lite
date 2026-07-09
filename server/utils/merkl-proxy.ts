@@ -1,7 +1,7 @@
 import { readMerklApiKey } from '~/utils/api-url-env'
 
 /**
- * Request headers for the Merkl upstream fetch made by `/api/proxy/merkl`.
+ * Request headers for the Merkl upstream fetch made by `/api/internal/proxy/merkl`.
  *
  * Merkl serves anonymous requests at 10 req/sec, but every user's Merkl read
  * is funnelled through this one server-side proxy origin, so the anonymous

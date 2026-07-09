@@ -7,6 +7,8 @@ const props = defineProps<{
   pill?: boolean
   icon?: string
   badge?: unknown
+  badgeLoading?: boolean
+  badgeVariant?: 'neutral' | 'accent'
   disabled?: boolean
 }>()
 
@@ -14,7 +16,8 @@ const classes = computed(() => ({
   'is-active': props.active,
   'is-disabled': props.disabled,
   'is-pill': props.pill,
-  'is-badge': props.badge,
+  'is-badge': props.badge || props.badgeLoading,
+  [`is-badge-${props.badgeVariant || 'neutral'}`]: props.badge || props.badgeLoading,
 }))
 
 const onClick = () => {
@@ -38,10 +41,17 @@ const onClick = () => {
     />
     <slot />
     <div
-      v-if="badge"
+      v-if="badge || badgeLoading"
       class="ui-tab__badge"
     >
-      {{ badge }}
+      <SvgIcon
+        v-if="badgeLoading"
+        class="ui-tab__badge-loader"
+        name="loading"
+      />
+      <template v-else>
+        {{ badge }}
+      </template>
     </div>
   </button>
 </template>
@@ -79,6 +89,24 @@ const onClick = () => {
     border-radius: 8px;
   }
 
+  &__badge-loader {
+    display: block;
+    width: 14px;
+    height: 14px;
+    animation: rotate 0.6s infinite linear;
+  }
+
+  &.is-badge-accent {
+    .ui-tab__icon {
+      color: var(--accent-500);
+    }
+
+    .ui-tab__badge {
+      background-color: rgba(var(--accent-rgb), 0.15);
+      color: var(--accent-600);
+    }
+  }
+
   &.is-active {
     box-shadow: inset 0 -2px 0 -1px var(--ui-tab-active-box-shadow-color);
     color: var(--ui-tab-active-text-color);
@@ -98,11 +126,25 @@ const onClick = () => {
       .ui-tab__badge {
         background-color: var(--ui-tab-active-pill-badge-background-color);
       }
+
+      &.is-badge-accent .ui-tab__badge {
+        background-color: rgba(var(--accent-rgb), 0.15);
+      }
     }
   }
 
   &.is-badge {
     padding: 0 12px;
+  }
+
+  @keyframes rotate {
+    0% {
+      transform: rotate(0);
+    }
+
+    100% {
+      transform: rotate(360deg);
+    }
   }
 }
 </style>

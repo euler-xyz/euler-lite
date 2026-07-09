@@ -83,9 +83,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePlan, preloadSubAccountSnapshot } = useEulerTx()
-  const { isConnected, address } = useWagmi()
-  const { isSpyMode, spyAddress } = useSpyMode()
-  const effectiveAddress = computed(() => isSpyMode.value ? spyAddress.value : address.value)
+  const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   // State-override knobs: skip balance probing (form validates "Not enough
   // balance"), pass current wallet snapshot, and pre-prime slot hints when the
   // relevant assets resolve.

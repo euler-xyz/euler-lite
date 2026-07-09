@@ -10,7 +10,6 @@ import {
 import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
-import annotationPlugin from 'chartjs-plugin-annotation'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler, type ChartData, type ChartOptions } from 'chart.js'
 import { zeroAddress, formatUnits, type Address, type Abi } from 'viem'
 import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
@@ -29,7 +28,6 @@ ChartJS.register(
   Tooltip,
   Legend,
   Filler,
-  annotationPlugin,
 )
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()

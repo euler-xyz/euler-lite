@@ -2,12 +2,19 @@ import { getAddress } from 'viem'
 
 export const BATCH_SCROLL_SUB_ACCOUNT_QUERY = 'batchSubAccount'
 export const BATCH_SCROLL_VAULT_QUERY = 'batchVault'
+export const BATCH_SCROLL_COLLATERAL_QUERY = 'batchCollateral'
+export const BATCH_SCROLL_REMOVED_QUERY = 'batchRemoved'
 
 interface BatchRedirectOptions {
   subAccount?: string | undefined
   /** Vault address of the affected position — disambiguates the scroll target
    *  when several positions live on the same sub-account (savings/earn lists). */
   vault?: string | undefined
+  /** Collateral vault for borrow positions, used with `vault` to target the
+   *  exact removed/modified borrow row when a sub-account has several loans. */
+  collateral?: string | undefined
+  /** Wait for a simulated removed row instead of scrolling to the active source row. */
+  removed?: boolean | undefined
 }
 
 /**
@@ -31,6 +38,12 @@ export const useBatchRedirect = () => {
         query[BATCH_SCROLL_SUB_ACCOUNT_QUERY] = getAddress(options.subAccount).toLowerCase()
         if (options.vault) {
           query[BATCH_SCROLL_VAULT_QUERY] = getAddress(options.vault).toLowerCase()
+        }
+        if (options.collateral) {
+          query[BATCH_SCROLL_COLLATERAL_QUERY] = getAddress(options.collateral).toLowerCase()
+        }
+        if (options.removed) {
+          query[BATCH_SCROLL_REMOVED_QUERY] = 'true'
         }
       }
       catch {

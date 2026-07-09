@@ -1,4 +1,4 @@
-import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
@@ -20,19 +20,34 @@ const makeVault = (address: string): EVault => ({
   collaterals: [],
 }) as unknown as EVault
 
+const makeEarnVault = (address: string): EulerEarn => ({
+  address: getAddress(address),
+}) as unknown as EulerEarn
+
 const fetchVaults = vi.fn()
 const fetchEarnVaults = vi.fn()
+const fetchEarnVault = vi.fn()
 const fetchVerifiedVaultAddresses = vi.fn()
 const fetchVaultTypes = vi.fn()
 const chainId = ref(1)
 
 describe('useVaults EVault verification metadata', () => {
   beforeEach(() => {
+    fetchVaults.mockReset()
+    fetchEarnVaults.mockReset()
+    fetchEarnVault.mockReset()
+    fetchVerifiedVaultAddresses.mockReset()
+    fetchVaultTypes.mockReset()
+
     fetchVaults.mockImplementation(async (_chainId: number, addresses: Address[]) => ({
       errors: [],
       result: addresses.map(address => makeVault(address)),
     }))
     fetchEarnVaults.mockResolvedValue({ errors: [], result: [] })
+    fetchEarnVault.mockImplementation(async (_chainId: number, address: Address) => ({
+      errors: [],
+      result: makeEarnVault(address),
+    }))
     fetchVerifiedVaultAddresses.mockResolvedValue([])
     fetchVaultTypes.mockResolvedValue({})
     chainId.value = 1
@@ -40,13 +55,19 @@ describe('useVaults EVault verification metadata', () => {
     vi.stubGlobal('useEulerAddresses', () => ({
       chainId,
     }))
+    vi.stubGlobal('useChainConfig', () => ({
+      deprecatedChainIds: [],
+      eVaultFetchChunkChainIds: [],
+    }))
     vi.stubGlobal('useEulerLabels', useEulerLabels)
+    const sdk = {
+      eVaultService: { fetchVaults, fetchVerifiedVaultAddresses },
+      eulerEarnService: { fetchVaults: fetchEarnVaults, fetchVault: fetchEarnVault },
+      vaultMetaService: { fetchVaultTypes },
+    }
     vi.stubGlobal('useEulerSdk', () => ({
-      getEulerSdk: vi.fn(async () => ({
-        eVaultService: { fetchVaults, fetchVerifiedVaultAddresses },
-        eulerEarnService: { fetchVaults: fetchEarnVaults },
-        vaultMetaService: { fetchVaultTypes },
-      })),
+      getEulerSdk: vi.fn(async () => sdk),
+      getEulerSdkForChain: vi.fn(async () => sdk),
     }))
 
     __setEulerLabelsDataForTest()
@@ -56,6 +77,7 @@ describe('useVaults EVault verification metadata', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     useVaultRegistry().clear()
     vi.unstubAllGlobals()
   })
@@ -146,6 +168,44 @@ describe('useVaults EVault verification metadata', () => {
     ])
   })
 
+  it('chunks EVault fetches for configured chunk chains', async () => {
+    const addresses = Array.from(
+      { length: 7 },
+      (_, index) => getAddress(`0x${(0x200 + index).toString(16).padStart(40, '0')}`),
+    )
+    vi.stubGlobal('useChainConfig', () => ({
+      deprecatedChainIds: [],
+      eVaultFetchChunkChainIds: [1],
+    }))
+
+    await useVaults().updateEVaults(addresses, undefined, true, {
+      verifiedAddresses: new Set(addresses.map(address => address.toLowerCase())),
+    })
+
+    expect(fetchVaults).toHaveBeenCalledTimes(2)
+    expect(fetchVaults.mock.calls.map(([, fetched]) => fetched)).toEqual([
+      addresses.slice(0, 6),
+      addresses.slice(6),
+    ])
+    expect(useVaultRegistry().getVerifiedEVaults(true).map(vault => vault.address)).toEqual(addresses)
+  })
+
+  it('does not chunk deprecated chains unless chunking is configured', async () => {
+    const addresses = Array.from(
+      { length: 7 },
+      (_, index) => getAddress(`0x${(0x300 + index).toString(16).padStart(40, '0')}`),
+    )
+    vi.stubGlobal('useChainConfig', () => ({
+      deprecatedChainIds: [1],
+      eVaultFetchChunkChainIds: [],
+    }))
+
+    await useVaults().updateEVaults(addresses, undefined, true)
+
+    expect(fetchVaults).toHaveBeenCalledTimes(1)
+    expect(fetchVaults.mock.calls[0]?.[1]).toEqual(addresses)
+  })
+
   it('does not fetch stale Earn vault addresses after a chain switch invalidates the load', async () => {
     chainId.value = 8453
     __setEulerLabelsDataForTest({
@@ -160,6 +220,31 @@ describe('useVaults EVault verification metadata', () => {
     await useVaults().loadVaults()
 
     expect(fetchEarnVaults).not.toHaveBeenCalled()
+  })
+
+  it('falls back to direct fetch when a known Earn vault never reaches the registry', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('until', () => ({
+      toMatch: vi.fn(() => new Promise<void>(() => undefined)),
+    }))
+    __setEulerLabelsDataForTest({
+      earnVaults: [getAddress(BASE_EARN_VAULT)],
+    })
+
+    const promise = useVaults().getEarnVault(BASE_EARN_VAULT)
+    await vi.advanceTimersByTimeAsync(10_000)
+    const vault = await promise
+
+    expect(vault.address).toBe(getAddress(BASE_EARN_VAULT))
+    expect(fetchEarnVault).toHaveBeenCalledWith(
+      1,
+      getAddress(BASE_EARN_VAULT),
+      expect.objectContaining({
+        populateMarketPrices: true,
+        populateStrategyVaults: true,
+      }),
+    )
+    expect(useVaultRegistry().get(BASE_EARN_VAULT)?.type).toBe('earn')
   })
 
   it('keeps dynamically resolved off-label EVaults out of verified EVault lists', async () => {

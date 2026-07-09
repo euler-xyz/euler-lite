@@ -1075,6 +1075,7 @@ async function launchBrowser() {
     throw new Error(
       'Could not launch a browser. Install Playwright Chromium with "npx playwright install chromium" or set PARITY_BROWSER_CHANNEL to an installed channel. Original error: '
       + error.message,
+      { cause: error },
     )
   }
 }

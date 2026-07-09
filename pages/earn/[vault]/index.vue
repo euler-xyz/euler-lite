@@ -12,7 +12,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
-import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultSupplyApyModal } from '#components'
+import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
@@ -22,7 +22,7 @@ const { planDeposit, executePlan } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
-const { updateEarnVault } = useVaults()
+const { getEarnVault, updateEarnVault } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
@@ -63,6 +63,22 @@ const supplyApyBreakdown = computed(() => vault.value ? computeSupplyApyBreakdow
 const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
 const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
 
+const applyLoadedVault = (loadedVault: EulerEarn) => {
+  vault.value = loadedVault
+  asset.value = loadedVault.asset
+  estimateSupplyAPY.value = supplyApyTotal.value
+}
+
+const refreshEarnVault = async (address: string, silent = false) => {
+  try {
+    applyLoadedVault(await updateEarnVault(address))
+  }
+  catch (e) {
+    if (!silent) throw e
+    logWarn('[earn] failed to refresh vault', e)
+  }
+}
+
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
   try {
@@ -72,9 +88,7 @@ const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 
     if (!isLabelsReady.value) {
       await until(isLabelsReady).toBe(true)
     }
-    vault.value = await updateEarnVault(vaultAddress)
-    asset.value = vault.value?.asset
-    estimateSupplyAPY.value = supplyApyTotal.value
+    applyLoadedVault(await getEarnVault(vaultAddress))
 
     if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
       modal.open(VaultUnverifiedDisclaimerModal, {
@@ -86,6 +100,8 @@ const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 
         },
       })
     }
+
+    void refreshEarnVault(vault.value.address, true)
   }
   catch (e) {
     showError('Unable to load Vault')
@@ -210,9 +226,7 @@ const send = async () => {
 const updateEstimates = async () => {
   if (!vault.value) return
   try {
-    vault.value = await updateEarnVault(vault.value.address)
-    if (!asset.value?.address) return
-    estimateSupplyAPY.value = supplyApyTotal.value
+    await refreshEarnVault(vault.value.address)
   }
   catch (e) {
     logWarn('earn-supply/estimates', e)
@@ -223,13 +237,13 @@ const updateEstimates = async () => {
 }
 const supplyApyModalData = computed(() => ({
   props: {
+    mode: 'supply',
     lendingAPY: visibleApyBreakdown.value?.lending ?? 0,
     intrinsicAPY: visibleApyBreakdown.value?.intrinsicApy ?? 0,
     intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
     campaigns: settings.value.enableRewardsApy ? supplyRewardCampaigns.value : [],
     totalSupplyAPY: supplyApyTotal.value,
     rewardVaultAddress: vaultAddress,
-    baseApyAverageLabel: '1h',
   },
 }))
 
@@ -293,11 +307,8 @@ watch(amount, () => {
             >
               <p class="text-h3 text-content-tertiary flex items-center gap-4">
                 Supply APY
-                <span class="inline-flex items-center rounded-8 px-8 py-2 bg-accent-100 text-accent-600 text-p5">
-                  1h
-                </span>
                 <UiModalPreviewTrigger
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY breakdown"
                 >
@@ -314,7 +325,7 @@ watch(amount, () => {
                 />
                 <UiModalPreviewTrigger
                   v-if="hasRewards"
-                  :component="VaultSupplyApyModal"
+                  :component="VaultApyModal"
                   :modal-data="supplyApyModalData"
                   aria-label="Show supply APY rewards breakdown"
                 >

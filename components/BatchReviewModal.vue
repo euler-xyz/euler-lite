@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -17,7 +17,7 @@ import { formatNumber } from '~/utils/string-utils'
 // down to their details, the net wallet changes, a Tenderly simulation link,
 // and one atomic Execute. Opened from the "Review batch" button in the drawer
 // (and mobile page). The per-operation detail is the data captured at add-time;
-// execution reuses the composable's executeBatch (the exact simulated plan).
+// execution is delegated to the composable's executeBatch.
 const emit = defineEmits(['close'])
 
 const {
@@ -45,13 +45,13 @@ const {
   dismissExecutionError,
 } = useTxBatch()
 
-const { isSpyMode, spyAddress } = useSpyMode()
-const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
+const { isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { chainId: wagmiChainId } = useWagmi()
 const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
-const owner = computed(() => (isSpyMode.value ? spyAddress.value : walletAddress.value) || '')
+const owner = computed(() => effectiveAddress.value || '')
 const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
 const ownerSubAccountKey = computed(() => {
   try {
@@ -75,6 +75,24 @@ const positionTag = (subAccount?: string): string | undefined => {
   }
 }
 
+type ReviewWithSteps = StepDecodingContext & {
+  displayPlan?: TransactionPlan
+  signatureSteps?: DisplayStep[]
+}
+
+const isExternalProtocolMigrationReview = (review: ReviewWithSteps | undefined): boolean =>
+  review?.type === 'migration'
+
+const normalizeDisplaySteps = (steps: DisplayStep[] | undefined): DisplayStep[] =>
+  (steps ?? []).map((step, idx) => ({ ...step, index: idx + 1 }))
+
+const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  const review = entry.review as unknown as ReviewWithSteps | undefined
+  return isExternalProtocolMigrationReview(review)
+    ? normalizeDisplaySteps(review?.signatureSteps)
+    : []
+}
+
 // Per-operation step list — the exact decoded steps the per-op review modal
 // (opened by the row's (i) icon in the builder) shows, built from that op's
 // contextual plan (entryPlans) and the review context captured at add-time.
@@ -82,7 +100,7 @@ const positionTag = (subAccount?: string): string | undefined => {
 const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   const out: Record<string, DisplayStep[]> = {}
   for (const entry of entries.value) {
-    const plan = entryPlans.value[entry.id]
+    const plan = (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan ?? entryPlans.value[entry.id]
     const ctx = entry.review as unknown as StepDecodingContext | undefined
     if (!plan?.length || !ctx) continue
     try {
@@ -94,6 +112,21 @@ const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   }
   return out
 })
+
+const signatureStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
+  const out: Record<string, DisplayStep[]> = {}
+  for (const entry of entries.value) {
+    const steps = getEntrySignatureSteps(entry)
+    if (steps.length) out[entry.id] = steps
+  }
+  return out
+})
+
+const signatureRows = computed(() =>
+  entries.value.flatMap(entry =>
+    (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
+  ),
+)
 
 // Unverified vaults the batch touches — surfaced as a warning. A vault is the
 // target of an op's core action; we read targets off each op's contextual plan
@@ -284,8 +317,8 @@ const copyCalldata = async () => {
   const plan = preparedPlanRef.value
   if (!plan?.length) return
   try {
-    const sdk = await getEulerSdk()
     const cid = chainId.value
+    const sdk = await getEulerSdkForChain(cid)
     const out: { to: string, data: string, value: string }[] = []
     for (const item of plan) {
       if (item.type === 'requiredApproval') {
@@ -351,6 +384,29 @@ const handleClose = () => {
     <!-- Separator under the modal title -->
     <div class="-mx-16 mb-16 border-t border-line-default" />
     <div class="flex flex-col gap-20">
+      <!-- Off-chain signatures captured by operations such as migrations. -->
+      <div v-if="signatureRows.length">
+        <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
+          Signatures needed
+        </p>
+        <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
+          <div
+            v-for="({ entry, step }, i) in signatureRows"
+            :key="`${entry.id}-${i}`"
+            class="flex items-center justify-between gap-12 py-10"
+          >
+            <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
+              <SvgIcon
+                name="check-circle"
+                class="!w-16 !h-16 text-accent-500 shrink-0"
+              />
+              <span class="truncate">{{ step.label }}</span>
+            </span>
+            <span class="text-p3 text-content-tertiary shrink-0">1 signature</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Approvals -->
       <div v-if="approvals.length">
         <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
@@ -451,10 +507,28 @@ const handleClose = () => {
               <!-- Same decoded operation steps the per-op review modal shows
                    (the builder row's (i) icon). -->
               <div
-                v-if="stepsByEntryId[entry.id]?.length"
+                v-if="signatureStepsByEntryId[entry.id]?.length || stepsByEntryId[entry.id]?.length"
                 class="bg-card rounded-8 p-12 flex flex-col gap-8"
               >
-                <OperationStepsList :steps="stepsByEntryId[entry.id]" />
+                <template v-if="signatureStepsByEntryId[entry.id]?.length">
+                  <p class="text-p4 text-content-tertiary uppercase tracking-[0.04em]">
+                    Signatures
+                  </p>
+                  <OperationStepsList :steps="signatureStepsByEntryId[entry.id]" />
+                  <div
+                    v-if="stepsByEntryId[entry.id]?.length"
+                    class="border-t border-line-default"
+                  />
+                </template>
+                <template v-if="stepsByEntryId[entry.id]?.length">
+                  <p
+                    v-if="signatureStepsByEntryId[entry.id]?.length"
+                    class="text-p4 text-content-tertiary uppercase tracking-[0.04em]"
+                  >
+                    Operation
+                  </p>
+                  <OperationStepsList :steps="stepsByEntryId[entry.id]" />
+                </template>
               </div>
               <p
                 v-else
