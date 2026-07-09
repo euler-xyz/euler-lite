@@ -18,9 +18,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { decodeFunctionData, getAddress, maxUint256, toFunctionSelector, type Address } from 'viem'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { ExecutionService, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
-import { ADDR, CHAIN_ID, buildSdkAccount, buildSdkExecutionService } from './harness'
+import { ADDR, CHAIN_ID, buildSdkAccount, buildSdkExecutionService, buildSdkExecutionServiceNeedingApprovals } from './harness'
 import { normalizeSdkPlan, type CanonicalTx } from './normalize'
 import { loadSwapFixture } from './load-fixture'
 import { expectPlanMatchesGolden } from './plan-fixture'
@@ -28,8 +28,8 @@ import { expectPlanMatchesGolden } from './plan-fixture'
 const normalizeResolvedSdkPlan = async (
   sdkPlan: TransactionPlan,
   owner: Address = ADDR.user,
+  exec: ExecutionService = buildSdkExecutionService(),
 ) => {
-  const exec = buildSdkExecutionService()
   const resolved = await exec.resolveRequiredApprovals({
     plan: sdkPlan,
     chainId: CHAIN_ID,
@@ -44,8 +44,9 @@ const expectGoldenPlan = async (
   name: string,
   sdkPlan: TransactionPlan,
   owner: Address = ADDR.user,
+  exec?: ExecutionService,
 ) => {
-  const sdkTxs = await normalizeResolvedSdkPlan(sdkPlan, owner)
+  const sdkTxs = await normalizeResolvedSdkPlan(sdkPlan, owner, exec)
   expectPlanMatchesGolden(name, sdkTxs)
 }
 
@@ -220,6 +221,22 @@ describe('golden tx-plan parity: vault.deposit', () => {
       receiver: ADDR.subAccount1,
     })
     await expectGoldenPlan('deposit-sub-account', plan)
+  })
+
+  it('deposit that needs an ERC20 approval emits the approve tx first', async () => {
+    // Resolve against a zero-allowance wallet so the approval intent expands
+    // into a concrete ERC20 approve — covers normalizeSdkPlan's approval branch,
+    // which the default high-allowance harness never exercises.
+    const amount = 1_000_000n
+    const sdk = buildSdkExecutionService()
+    const plan = sdk.planDeposit({
+      account: buildSdkAccount(),
+      vault: ADDR.vaultUsdc,
+      asset: ADDR.assetUsdc,
+      amount,
+      receiver: ADDR.user,
+    })
+    await expectGoldenPlan('deposit-with-approval', plan, ADDR.user, buildSdkExecutionServiceNeedingApprovals())
   })
 })
 
@@ -678,8 +695,11 @@ describe('golden tx-plan parity: swap-quote operations', () => {
   })
 
   it('planMultiplySameAsset (no-swap branch, deposit collateral)', async () => {
-    // Same-asset loop: deposit collateral, borrow the same asset, and skim the
-    // borrowed amount into the long vault (borrow→skim, no swap).
+    // Same-asset loop across two vaults sharing the underlying: deposit
+    // collateral into the long vault, borrow the same asset from a distinct
+    // liability vault, and skim the borrowed amount into the long vault
+    // (borrow→skim, no swap). vaultDai stands in as a second USDC vault, matching
+    // the same-asset migration tests' convention.
     const sdk = buildSdkExecutionService()
     const plan = sdk.planMultiplySameAsset({
       account: buildSdkAccount(),
@@ -687,7 +707,7 @@ describe('golden tx-plan parity: swap-quote operations', () => {
       collateralAmount: 1_000_000n,
       collateralAsset: ADDR.assetUsdc,
       longVault: ADDR.vaultUsdc,
-      liabilityVault: ADDR.vaultUsdc,
+      liabilityVault: ADDR.vaultDai,
       liabilityAmount: 500_000n,
       receiver: ADDR.subAccount1,
       skipCleanup: true,

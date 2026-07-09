@@ -86,8 +86,14 @@ class StubDeploymentService implements IDeploymentService {
   addDeployment() { /* noop */ }
 }
 
-class HighAllowanceWalletAdapter implements IWalletAdapter {
+// Reports a sufficient balance and a configurable allowance for every spender.
+// `HIGH_ALLOWANCE` ⇒ resolveRequiredApprovals emits no approve (the default
+// "already approved" path); `0n` ⇒ it emits an ERC20 approve for the shortfall.
+class FixedAllowanceWalletAdapter implements IWalletAdapter {
+  constructor(private readonly allowance: bigint) {}
+
   async fetchWallet(chainId: number, account: Address, assetsWithSpenders: { asset: Address, spenders?: Address[] }[]) {
+    const allowance = this.allowance
     const assets = assetsWithSpenders.map(({ asset, spenders }) => ({
       account: getAddress(account),
       asset: getAddress(asset),
@@ -95,9 +101,9 @@ class HighAllowanceWalletAdapter implements IWalletAdapter {
       allowances: Object.fromEntries((spenders ?? []).map(spender => [
         getAddress(spender),
         {
-          assetForVault: HIGH_ALLOWANCE,
-          assetForPermit2: HIGH_ALLOWANCE,
-          assetForVaultInPermit2: HIGH_ALLOWANCE,
+          assetForVault: allowance,
+          assetForPermit2: allowance,
+          assetForVaultInPermit2: allowance,
           permit2ExpirationTime: 2 ** 31,
           permit2Nonce: 0,
         },
@@ -110,10 +116,18 @@ class HighAllowanceWalletAdapter implements IWalletAdapter {
   }
 }
 
+const buildExecutionService = (allowance: bigint) =>
+  new ExecutionService(new StubDeploymentService(), new WalletService(new FixedAllowanceWalletAdapter(allowance)))
+
+// Default: allowances already sufficient, so plans contain no ERC20 approve.
 export function buildSdkExecutionService() {
-  const deploymentService = new StubDeploymentService()
-  const walletService = new WalletService(new HighAllowanceWalletAdapter())
-  return new ExecutionService(deploymentService, walletService)
+  return buildExecutionService(HIGH_ALLOWANCE)
+}
+
+// Zero allowance, so resolveRequiredApprovals expands approval intents into
+// concrete ERC20 approve calls — used to cover the approval branch.
+export function buildSdkExecutionServiceNeedingApprovals() {
+  return buildExecutionService(0n)
 }
 
 export interface SeedPosition {
