@@ -17,7 +17,11 @@ const LOWERCASE = CHECKSUMMED.toLowerCase()
 const VAULT_ASSET = '0x6B175474E89094C44Da98b954EedeAC495271d0F'
 
 const fetchWallet = vi.fn(async () => ({ errors: [], result: { assets: [] } }))
+const logWarn = vi.fn()
 
+vi.mock('~/utils/errorHandling', () => ({
+  logWarn: (...args: unknown[]) => logWarn(...args),
+}))
 vi.mock('~/composables/useVaults', () => ({
   useVaults: () => ({ loadedChainId: ref(1) }),
 }))
@@ -42,7 +46,9 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 25))
 
 describe('useWallets balance refetch', () => {
   beforeEach(() => {
-    fetchWallet.mockClear()
+    fetchWallet.mockReset()
+    fetchWallet.mockImplementation(async () => ({ errors: [], result: { assets: [] } }))
+    logWarn.mockClear()
     isConnected.value = true
     isSpyMode.value = false
     chainId.value = 1
@@ -85,5 +91,36 @@ describe('useWallets balance refetch', () => {
     // address flip) — the unbounded pre-fix loop produced a new fetch every
     // few milliseconds, far exceeding this bound within the flush window.
     expect(fetchWallet.mock.calls.length).toBeLessThanOrEqual(3)
+  })
+
+  it('caps follow-up refetches when needsFetch() can never settle', async () => {
+    // A persistently failing fetch leaves lastFetchAddress null, so the
+    // address condition in needsFetch() stays true after every run — the same
+    // never-settling shape as the original casing bug.
+    fetchWallet.mockImplementation(async () => {
+      throw new Error('persistent fetch failure')
+    })
+    effectiveAddress.value = LOWERCASE
+    const { useWallets } = await import('~/composables/useWallets')
+    useWallets()
+    await flush()
+    await flush()
+
+    const settled = fetchWallet.mock.calls.length
+    // Initial run + capped follow-ups + at most a couple of watcher-driven
+    // external triggers (which the cap intentionally still allows); without
+    // the cap this grows unbounded within the flush window (the pre-fix loop
+    // iterated every few ms).
+    expect(settled).toBeGreaterThanOrEqual(2)
+    expect(settled).toBeLessThanOrEqual(6)
+    expect(logWarn).toHaveBeenCalledWith(
+      'wallets/fetchBalances',
+      expect.stringContaining('auto-refetch cap reached'),
+      expect.anything(),
+    )
+
+    // And it stays stopped: no further fetches without an external trigger.
+    await flush()
+    expect(fetchWallet.mock.calls.length).toBe(settled)
   })
 })
