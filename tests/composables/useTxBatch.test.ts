@@ -245,6 +245,9 @@ const stubBatchComposableGlobals = () => {
   vi.stubGlobal('useExternalMigrationRefresh', () => ({ scheduleExternalMigrationRefreshes }))
   vi.stubGlobal('useRouter', () => ({ replace: routerReplace }))
   vi.stubGlobal('useRoute', () => ({ query: routeQuery }))
+  vi.stubGlobal('useTokenList', () => ({
+    getTokenByAddress: vi.fn(),
+  }))
 }
 
 const createMockSdk = () => ({
