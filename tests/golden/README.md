@@ -1,29 +1,25 @@
-# Golden tests: SDK tx-plan builders
+# Golden canary: SDK tx-plan calldata
 
-These cover the SDK `executionService.plan*` builders that produce the on-chain
-EVC transaction plan behind `composables/useEulerTx.ts` — deposit, withdraw,
-redeem, borrow, repay (wallet/deposit), same-asset collateral/debt migration,
-multiply, transfer, cleanup, and the swap-quote operations. `useEulerTx`'s
-combined/branching wrappers (e.g. `planMultiply`, `planCollateralChange`,
-`planRefinancePosition`) delegate to these builders, so they're covered
-transitively. Cross-protocol (Aave/Morpho) migration goes through a separate
-service and is out of scope here.
+**This is a version canary, not a correctness suite.** The SDK tests each
+`executionService.plan*` builder comprehensively in its own repo
+(`euler-xyz/euler-sdks`, `test/executionService.test.ts`); duplicating that here
+would be redundant. This suite exists to catch the one thing the SDK's own tests
+can't: an SDK version bump (dependabot, or the preview-SDK path) that silently
+changes the byte-for-byte calldata a Lite user would sign.
 
-For each, these tests:
+It runs a handful of representative operations — one per encoder family (plain
+vault op, borrow, repay, migration, swap, leverage) — and for each:
 
-1. Run the SDK `executionService.plan*` method against deterministic args, then
-   `resolveRequiredApprovals` to expand approval intents into concrete approve
-   calls.
-2. Reduce the plan to a canonical `[{to, data, value, evcBatch}]` tx list
-   (see `normalize.ts`) — the post-approval-expansion view a wallet would sign:
-   ERC20 `approve` calls + the `EVC.batch(items)` call. Permit2 sign items are
-   dropped (off-chain signatures, not txs).
-3. Assert that list byte-for-byte against a committed fixture under `plans/`.
+1. Runs the SDK `executionService.plan*` method against deterministic args, then
+   `resolveRequiredApprovals`.
+2. Reduces the plan to a canonical `[{to, data, value, evcBatch}]` tx list
+   (see `normalize.ts`) — the view a wallet would sign: ERC20 `approve` calls +
+   the `EVC.batch(items)` call. Permit2 sign items are dropped (off-chain).
+3. Asserts that list byte-for-byte against a committed fixture under `plans/`.
 
-The fixtures in `plans/` are the reviewed calldata baseline. A change to the SDK
-builders that alters the bytes a wallet signs will fail the suite; an
-*intentional* change is applied by regenerating the fixtures and reviewing the
-diff.
+If a fixture fails, an SDK change moved the calldata: review the diff and
+regenerate with `npm run test:golden:update`. Deliberately narrow — expand it
+only if there's a specific calldata path worth pinning across upgrades.
 
 These tests run as part of the normal suite (`npm run test:run`) — no separate
 config or setup.
