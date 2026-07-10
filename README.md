@@ -120,8 +120,14 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_ENABLE_MERKL`           | `true`                                     | Enable Merkl rewards integration                      |
 | `NUXT_PUBLIC_CONFIG_ENABLE_INCENTRA`        | `true`                                     | Enable Incentra rewards integration                   |
 | `NUXT_PUBLIC_CONFIG_ENABLE_FUUL`            | `true`                                     | Enable Fuul rewards integration                       |
+| `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE`     | —                                          | Optional one-time modal title; any announcement content field enables the modal |
+| `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY`      | —                                          | Optional one-time modal body text                     |
+| `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS`     | —                                          | Optional newline-delimited or JSON-array bullet items |
+| `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_URL`       | —                                          | Optional announcement link (`https://`, `http://`, or safe root-relative path) |
 | `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL` | `https://tokens.uniswap.org`               | Uniswap token list for swap selector                  |
 | `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` | `https://d3g10bzo9rdluh.cloudfront.net`  | DefiLlama token list for swap selector                |
+
+Runtime deployments can also set the short `CONFIG_ANNOUNCEMENT_*` names. They are injected through `window.__APP_CONFIG__` at server startup and can change without rebuilding static assets. See [Announcement Modal](./docs/announcement-modal.md) for rollout and dismissal behavior.
 
 #### Chain Configuration
 

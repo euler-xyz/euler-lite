@@ -78,7 +78,86 @@ Both endpoints share the same in-memory TTL cache. Upstream is resolved by `NUXT
 
 ### V3 proxy
 
-`/api/internal/v3/{...path}` forwards only the SDK browser endpoints Lite needs. It accepts `GET` for token, price, APY, reward, account-position, and vault-read endpoints, and `POST` for the SDK vault batch and vault resolve endpoints. The route consumes a local rate-limit budget before forwarding (`GET` costs 1, `POST` costs 5), injects the server-side V3 API key when configured, and forwards only fixed JSON headers to upstream. Query strings and JSON bodies are left for V3 to validate.
+`/api/internal/v3/{...path}` is a deliberately narrow same-origin proxy for browser-side SDK V3 calls and a few Lite-owned chart endpoints. It normalizes browser paths to `/v3/...`, validates the exact path/method allowlist, consumes a local rate-limit budget, injects the server-side V3 API key when configured, and forwards only JSON-safe headers to the upstream V3 API. Query strings and POST bodies are forwarded unchanged after the route/method check; V3 remains responsible for domain-level validation.
+
+Request flow:
+
+```text
+browser / SDK
+  -> /api/internal/v3/{...path}
+  -> server/utils/v3-proxy.ts validates path + method
+  -> server/utils/v3-proxy-backoff.ts checks per-route cooldown
+  -> V3_API_URL / EULER_SDK_V3_API_URL / NUXT_PUBLIC_V3_API_URL
+```
+
+If no V3 URL env var is set, the proxy target falls back to `https://v3.euler.finance`; `enableV3Backend` still remains `false`, so normal `fallback` SDK reads skip V3 unless the deployment explicitly configures it.
+
+#### Allowlist
+
+Allowed `GET` paths:
+
+| Path | Notes |
+|---|---|
+| `/v3/tokens` | Token list / token metadata. |
+| `/v3/prices` | V3 prices. |
+| `/v3/apys/intrinsic` | Intrinsic APY data. |
+| `/v3/apys/rewards` | Reward APYs. |
+| `/v3/rewards/breakdown` | Rewards breakdown. |
+| `/v3/accounts/{address}/positions` | Account positions. |
+| `/v3/earn/vaults` | Earn vault catalogue. |
+| `/v3/earn/vaults/{chainId}/{vault}` | Earn vault read. |
+| `/v3/earn/vaults/{chainId}/{vault}/totals` | Earn vault totals history. |
+| `/v3/evk/vaults` | EVK vault catalogue. |
+| `/v3/evk/vaults/{chainId}/{vault}/totals` | EVK vault totals history. |
+| `/v3/evk/vaults/bad-debt` | Bad debt rows. |
+| `/v3/evk/vaults/open-interest` | Open interest by vault/collateral query. |
+| `/v3/evk/vaults/open-interest/by-collateral` | Open interest grouped by collateral. |
+
+Allowed `POST` paths:
+
+| Path | Notes |
+|---|---|
+| `/v3/evk/vaults/batch` | SDK batched EVK vault reads. |
+| `/v3/resolve/vaults` | SDK vault resolution. |
+
+Everything outside the allowlist returns `404 V3 path not allowed`; method mismatches return `405 Method not allowed`. Additions should be made in `server/utils/v3-proxy.ts` alongside tests so the browser cannot accidentally become an open proxy.
+
+#### Headers, rate limits, and responses
+
+- Rate limiter label: `v3-proxy`, `10_000` budget units per 60 seconds.
+- Cost: `GET` = 1 unit, `POST` = 5 units.
+- Request headers sent upstream: `accept: application/json`, `content-type: application/json` for POST, and `X-API-Key` when `V3_API_KEY`, `EULER_SDK_V3_API_KEY`, or `EULER_V3_API_KEY` is configured.
+- Response headers forwarded back: `cache-control`, `cf-ray`, `content-type`, `etag`, and `last-modified`.
+- The proxy itself does not TTL-cache V3 responses; V3 and any CDN in front of it own freshness. Retry protection is handled by the backoff described below.
+
+#### Failure backoff and logs
+
+`server/utils/v3-proxy-backoff.ts` applies a 10-second cooldown (`V3_PROXY_FAILURE_BACKOFF_MS`) per normalized route key after:
+
+- upstream fetch errors, or
+- retryable upstream statuses: `429`, `500`, `502`, `503`, `504`.
+
+During cooldown the proxy returns `503 V3 upstream cooling down` with a `retry-after` header. Fetch exceptions return `503 V3 upstream unavailable` and also set `retry-after`.
+
+Backoff keys normalize high-cardinality account and vault paths:
+
+| Request shape | Backoff key behavior |
+|---|---|
+| `/v3/accounts/{address}/positions` | Address is collapsed to `/v3/accounts/:address/positions`. |
+| `/v3/earn/vaults/{chainId}/{vault}` | Chain and vault are collapsed to `/v3/earn/vaults/:chainId/:vault`. |
+| `/v3/{evk,earn}/vaults/{chainId}/{vault}/totals` | Full path is retained, plus `resolution`, `from`, and `to` query params when present. |
+| Other paths | Full normalized path is used. |
+
+Non-OK upstream responses and fetch exceptions are logged with `ctx: "v3-proxy"`, `method`, `pathTemplate`, `upstreamHost`, `durationMs`, optional `bodyBytes`, and safe V3 context from `buildV3ProxyLogFields()`: `v3ChainId`, `v3VaultKind`, `v3VaultAddress`, and sanitized pagination/range fields such as `v3From`, `v3To`, `v3Limit`, `v3Offset`, `v3Resolution`, and `v3MinBadDebtUsd`.
+
+Troubleshooting quick checks:
+
+| Symptom | Check |
+|---|---|
+| `404 V3 path not allowed` | The browser is calling a path not declared in `GET_ONLY_PATHS`, `GET_ONLY_PATH_PATTERNS`, or `POST_ONLY_PATHS`. Add a narrow allowlist entry instead of forwarding a broad prefix. |
+| `405 Method not allowed` | The path exists but is being called with the wrong method, or an unsupported method was sent. |
+| Repeated `503 V3 upstream cooling down` | Search logs for the same `pathTemplate` and V3 context in the previous 10 seconds; the first retryable failure records the cooldown. |
+| V3-only charts or bad-debt sections are hidden | `useV3ChainGate()` requires `enableV3Backend` and excludes chains listed in `ONCHAIN_SDK_CHAINS`. Exposure displays can fall back to RPC-derived qualitative data, but bad debt and history have no on-chain equivalent. |
 
 ## Vault Snapshot Pipeline
 
