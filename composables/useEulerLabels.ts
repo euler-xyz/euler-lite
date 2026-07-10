@@ -52,7 +52,8 @@ const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
-let pendingLabelsLoad: Promise<void> | undefined
+const pendingLabelsFetches = new Map<number, Promise<EulerLabelsData>>()
+let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
 
@@ -69,6 +70,10 @@ export const getEulerLabelsVersion = (): number => labelsVersion.value
 export const getEulerLabelWrapPairs = (): Record<string, string> => wrapPairs
 
 export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {}) => {
+  labelsLoadGeneration += 1
+  wrapPairProbeGeneration += 1
+  pendingLabelsFetches.clear()
+  Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
   setLabelsData({
     ...createEmptyEulerLabelsData(),
     ...data,
@@ -82,9 +87,9 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
 const resolveChainId = async (): Promise<number> => {
   const { getCurrentChainConfig, loadEulerConfig } = useEulerAddresses()
 
-  if (!getCurrentChainConfig.value) {
-    void loadEulerConfig()
-  }
+  if (getCurrentChainConfig.value) return getCurrentChainConfig.value.chainId
+
+  void loadEulerConfig()
   await until(getCurrentChainConfig).toBeTruthy()
 
   return getCurrentChainConfig.value!.chainId
@@ -96,70 +101,99 @@ const points = toReactive(computed(() => labelsData.value.points as Record<strin
 const verifiedVaultAddresses = computed(() => labelsData.value.verifiedVaultAddresses)
 const earnVaults = computed(() => labelsData.value.earnVaults)
 
-const loadLabels = async (forceRefresh = false) => {
-  if (pendingLabelsLoad && !forceRefresh) return pendingLabelsLoad
+const isCurrentLabelsLoad = (chainId: number, generation: number) => {
+  const { getCurrentChainConfig } = useEulerAddresses()
+  return generation === labelsLoadGeneration && getCurrentChainConfig.value?.chainId === chainId
+}
 
-  const promise = (async () => {
-    const chainId = await resolveChainId()
+const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
+  const pendingFetch = pendingLabelsFetches.get(chainId)
+  if (pendingFetch && !forceRefresh) return pendingFetch
 
-    if (!forceRefresh && labelsChainId.value === chainId && isReady.value) return
-
-    try {
-      isReady.value = false
-      isLoading.value = true
-      const probeGeneration = ++wrapPairProbeGeneration
-      Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
-
-      if (labelsChainId.value !== chainId) {
-        setLabelsData(createEmptyEulerLabelsData(), chainId)
-      }
-
-      if (forceRefresh) {
-        await invalidateSdkQueries([...LABEL_QUERY_NAMES])
-      }
-
-      const sdk = await getEulerSdk()
-      setLabelsData(await sdk.eulerLabelsService.fetchEulerLabelsData(chainId), chainId)
-      void probeWrapPairs(chainId, probeGeneration)
+  const fetchPromise = (async () => {
+    if (forceRefresh) {
+      await invalidateSdkQueries([...LABEL_QUERY_NAMES])
     }
-    catch (e) {
-      logWarn('labels/load', e)
+
+    const sdk = await getEulerSdk()
+    return sdk.eulerLabelsService.fetchEulerLabelsData(chainId)
+  })()
+
+  pendingLabelsFetches.set(chainId, fetchPromise)
+  return fetchPromise
+}
+
+const loadLabels = async (forceRefresh = false): Promise<void> => {
+  const chainId = await resolveChainId()
+
+  const { getCurrentChainConfig } = useEulerAddresses()
+  if (getCurrentChainConfig.value?.chainId !== chainId) return
+  if (!forceRefresh && labelsChainId.value === chainId && isReady.value) return
+
+  const generation = ++labelsLoadGeneration
+  const isCurrentLoad = () => isCurrentLabelsLoad(chainId, generation)
+  if (!isCurrentLoad()) return
+
+  isReady.value = false
+  isLoading.value = true
+  const probeGeneration = ++wrapPairProbeGeneration
+  Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
+
+  if (labelsChainId.value !== chainId && isCurrentLoad()) {
+    setLabelsData(createEmptyEulerLabelsData(), chainId)
+  }
+
+  const fetchPromise = getLabelsFetch(chainId, forceRefresh)
+
+  try {
+    const data = await fetchPromise
+    if (isCurrentLoad()) {
+      setLabelsData(data, chainId)
     }
-    finally {
+    if (isCurrentLoad()) {
+      void probeWrapPairs(chainId, generation, probeGeneration)
+    }
+  }
+  catch (e) {
+    logWarn('labels/load', e)
+  }
+  finally {
+    if (pendingLabelsFetches.get(chainId) === fetchPromise) {
+      pendingLabelsFetches.delete(chainId)
+    }
+    if (isCurrentLoad()) {
       isLoading.value = false
       isReady.value = true
     }
-  })()
-
-  pendingLabelsLoad = promise
-  try {
-    await promise
-  }
-  finally {
-    if (pendingLabelsLoad === promise) pendingLabelsLoad = undefined
   }
 }
 
 const WRAP_PAIR_PROBE_BATCH_SIZE = 25
 
-const probeWrapPairs = async (startChainId: number, generation: number) => {
+const probeWrapPairs = async (startChainId: number, loadGeneration: number, probeGeneration: number) => {
+  const { getCurrentChainConfig } = useEulerAddresses()
   const isCurrentProbe = () =>
-    generation === wrapPairProbeGeneration && labelsChainId.value === startChainId
+    loadGeneration === labelsLoadGeneration
+    && probeGeneration === wrapPairProbeGeneration
+    && labelsChainId.value === startChainId
+    && getCurrentChainConfig.value?.chainId === startChainId
 
   try {
-    const { getCurrentChainConfig } = useEulerAddresses()
     const config = getCurrentChainConfig.value
     if (!config || config.chainId !== startChainId || !isCurrentProbe()) return
 
     const evcAddress = config.addresses.coreAddrs.evc
     const sdk = await getEulerSdk()
+    if (!isCurrentProbe()) return
     // The SDK is linked from a workspace and ships its own viem (2.43.x), so
     // its PublicClient is structurally similar but not identical to the app's
     // viem (2.48.x) — cast once at the boundary.
     const provider = sdk.providerService.getProvider(startChainId) as unknown as PublicClient
 
     const { useVaults } = await import('~/composables/useVaults')
+    if (!isCurrentProbe()) return
     const { useVaultRegistry } = await import('~/composables/useVaultRegistry')
+    if (!isCurrentProbe()) return
     const { isReady: isVaultsReady } = useVaults()
     if (!isVaultsReady.value) await until(isVaultsReady).toBe(true)
     if (!isCurrentProbe()) return
