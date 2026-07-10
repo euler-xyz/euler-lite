@@ -198,8 +198,8 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
  * Resolve the category of a single vault address from SDK metadata. Escrow
  * membership is checked first because escrow is a more specific EVault label.
  */
-export const fetchVaultCategory = async (address: string): Promise<VaultCategory | null> => {
-  const chainId = getChainId()
+export const fetchVaultCategory = async (address: string, targetChainId?: number): Promise<VaultCategory | null> => {
+  const chainId = targetChainId ?? getChainId()
   if (!chainId || !isAddress(address)) return null
 
   const normalized = normalize(address)

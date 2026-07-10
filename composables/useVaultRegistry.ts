@@ -40,12 +40,18 @@ interface VaultEntryMetadata {
   vaultCategory?: 'standard' | 'escrow'
 }
 
+interface VaultResolutionContext {
+  targetChainId: number
+  generation: number
+}
+
 // Registry state
 const registry: Ref<Map<string, VaultEntry>> = shallowRef(new Map())
 const isLoading = ref(false)
 const registryVersion = ref(0)
+let registryGeneration = 0
 
-// In-flight resolution promises — deduplicates concurrent getOrFetch() calls for the same vault
+// In-flight resolution promises — deduplicates concurrent getOrFetch() calls for the same vault on the same chain.
 const pendingResolutions = new Map<string, Promise<VaultEntity | undefined>>()
 
 // Escrow address set - populated early, before full vault info is loaded
@@ -115,6 +121,7 @@ const setMany = (entries: Array<{ address: string, vault: AnyVault, type: VaultT
 
 // Clear registry (for chain switching)
 const clear = (): void => {
+  registryGeneration++
   registry.value = new Map()
   escrowAddresses.value = new Set()
   pendingResolutions.clear()
@@ -210,32 +217,45 @@ const getVaultCategory = (address: string): 'standard' | 'escrow' | undefined =>
 // Reactive size for watchers
 const size = computed(() => registry.value.size)
 
+const createResolutionContext = (targetChainId?: number): VaultResolutionContext | undefined => {
+  const resolvedChainId = targetChainId ?? useEulerAddresses().chainId.value
+  if (!resolvedChainId) return undefined
+  return { targetChainId: resolvedChainId, generation: registryGeneration }
+}
+
+const isResolutionContextCurrent = (context: VaultResolutionContext): boolean => {
+  return context.generation === registryGeneration
+    && useEulerAddresses().chainId.value === context.targetChainId
+}
+
+const resolutionKey = (targetChainId: number, address: string): string => {
+  return `${targetChainId}:${normalizeAddress(address)}`
+}
+
 /**
  * Fetch vault using the appropriate SDK service based on type.
  * Escrow vaults are an EVault category, so they use the EVault service.
  */
-const fetchVaultByType = async (address: string, type: VaultType): Promise<VaultEntity> => {
-  const { chainId } = useEulerAddresses()
+const fetchVaultByType = async (address: string, type: VaultType, targetChainId?: number): Promise<VaultEntity> => {
   const { getEulerSdkForChain } = useEulerSdk()
-  // Capture the chain id once so the SDK backend selection and the fetches
-  // can't diverge if the user switches chains mid-await.
-  const targetChainId = chainId.value
-  const sdk = await getEulerSdkForChain(targetChainId)
+  const resolvedChainId = targetChainId ?? useEulerAddresses().chainId.value
+  if (!resolvedChainId) throw new Error('Cannot fetch vault without a target chain')
+  const sdk = await getEulerSdkForChain(resolvedChainId)
   const vaultAddress = getAddress(address) as Address
   switch (type) {
     case 'earn': {
-      const { result } = await sdk.eulerEarnService.fetchVault(targetChainId, vaultAddress, liteVaultFetchOptions)
+      const { result } = await sdk.eulerEarnService.fetchVault(resolvedChainId, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`Earn vault not found for ${address}`)
       return result
     }
     case 'securitize': {
-      const { result } = await sdk.securitizeVaultService.fetchVault(targetChainId, vaultAddress, liteSecuritizeVaultFetchOptions)
+      const { result } = await sdk.securitizeVaultService.fetchVault(resolvedChainId, vaultAddress, liteSecuritizeVaultFetchOptions)
       if (!result) throw new Error(`Securitize vault not found for ${address}`)
       return result
     }
     case 'evk':
     default: {
-      const { result } = await sdk.eVaultService.fetchVault(targetChainId, vaultAddress, liteVaultFetchOptions)
+      const { result } = await sdk.eVaultService.fetchVault(resolvedChainId, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`EVault not found for ${address}`)
       return result
     }
@@ -247,9 +267,12 @@ const fetchVaultByType = async (address: string, type: VaultType): Promise<Vault
  * SDK service, and cache in the registry. Escrow category comes from the SDK
  * verified-array read, so no separate local perspective probe is needed.
  */
-const resolveUnknown = async (address: string): Promise<VaultEntry> => {
+const resolveUnknownForContext = async (address: string, context: VaultResolutionContext): Promise<VaultEntry | undefined> => {
   const normalized = normalizeAddress(address)
-  const category = await fetchVaultCategory(normalized)
+  if (!isResolutionContextCurrent(context)) return undefined
+
+  const category = await fetchVaultCategory(normalized, context.targetChainId)
+  if (!isResolutionContextCurrent(context)) return undefined
 
   let type: VaultType
   if (category === 'earn') {
@@ -267,24 +290,34 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
     // EVault.
     logWarn('resolveUnknown', `Category not found for ${address}, trying fetch methods`)
     try {
-      const vault = await fetchVaultByType(normalized, 'securitize')
+      const vault = await fetchVaultByType(normalized, 'securitize', context.targetChainId)
+      if (!isResolutionContextCurrent(context)) return undefined
       set(normalized, vault, 'securitize')
       return get(normalized)!
     }
     catch {
+      if (!isResolutionContextCurrent(context)) return undefined
       type = 'evk'
     }
   }
 
   if (type === 'evk' && category === 'escrow') {
-    const vault = await fetchVaultByType(normalized, 'evk')
+    const vault = await fetchVaultByType(normalized, 'evk', context.targetChainId)
+    if (!isResolutionContextCurrent(context)) return undefined
     set(normalized, vault, 'evk', { verified: true, vaultCategory: 'escrow' })
     return get(normalized)!
   }
 
-  const vault = await fetchVaultByType(normalized, type)
+  const vault = await fetchVaultByType(normalized, type, context.targetChainId)
+  if (!isResolutionContextCurrent(context)) return undefined
   set(normalized, vault, type)
   return get(normalized)!
+}
+
+const resolveUnknown = async (address: string, targetChainId?: number): Promise<VaultEntry | undefined> => {
+  const context = createResolutionContext(targetChainId)
+  if (!context) return undefined
+  return resolveUnknownForContext(address, context)
 }
 
 /**
@@ -292,32 +325,38 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
  * Primary method for vault resolution. After calling, use getType(address) if you need the type.
  */
 const getOrFetch = async (address: string): Promise<VaultEntity | undefined> => {
+  const context = createResolutionContext()
+  if (!context) return undefined
+
   // Check registry first
   const existing = get(address)
-  if (existing) {
+  if (existing?.vault.chainId === context.targetChainId) {
     return existing.vault as VaultEntity
   }
 
   const normalized = normalizeAddress(address)
+  const key = resolutionKey(context.targetChainId, normalized)
 
   // Return existing in-flight promise if one exists (deduplicates concurrent calls)
-  const pending = pendingResolutions.get(normalized)
+  const pending = pendingResolutions.get(key)
   if (pending) {
     return pending
   }
 
   // Create and track new resolution promise
-  const resolution = resolveUnknown(address)
-    .then(entry => entry.vault as VaultEntity)
+  const resolution = resolveUnknownForContext(address, context)
+    .then(entry => entry?.vault as VaultEntity | undefined)
     .catch((e) => {
       logWarn('vaultRegistry/resolve', e)
       return undefined
     })
     .finally(() => {
-      pendingResolutions.delete(normalized)
+      if (pendingResolutions.get(key) === resolution) {
+        pendingResolutions.delete(key)
+      }
     })
 
-  pendingResolutions.set(normalized, resolution)
+  pendingResolutions.set(key, resolution)
   return resolution
 }
 
