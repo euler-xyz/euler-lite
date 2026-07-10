@@ -20,6 +20,7 @@ const {
   isPositionsLoaded,
   isShowAllPositions,
   refreshAllPositions,
+  hasPortfolioLoadError,
 } = useEulerAccount()
 const { refresh: refreshFreshAccount } = useFreshAccount()
 const { rewards } = useSdkRewards()
@@ -134,17 +135,23 @@ watch([() => route.name, showMigrationTab, hasMigrationLoaded, isMigrationLoadin
 })
 
 const portfolioNetApyDisplay = computed(() =>
-  Number.isFinite(portfolioNetApy.value) ? `${formatNumber(portfolioNetApy.value)}%` : '-',
+  !hasPortfolioLoadError.value && Number.isFinite(portfolioNetApy.value)
+    ? `${formatNumber(portfolioNetApy.value)}%`
+    : '-',
 )
 const portfolioRoeDisplay = computed(() =>
-  Number.isFinite(portfolioRoe.value) ? `${formatNumber(portfolioRoe.value)}%` : '-',
+  !hasPortfolioLoadError.value && Number.isFinite(portfolioRoe.value)
+    ? `${formatNumber(portfolioRoe.value)}%`
+    : '-',
 )
 const totalSuppliedDisplay = computed(() => {
+  if (hasPortfolioLoadError.value) return '—'
   const { total, hasMissingPrices } = totalSuppliedValueInfo.value
   if (total === 0 && hasMissingPrices) return '—'
   return formatCompactUsdValue(total)
 })
 const totalBorrowedDisplay = computed(() => {
+  if (hasPortfolioLoadError.value) return '—'
   const { total, hasMissingPrices } = totalBorrowedValueInfo.value
   if (total === 0 && hasMissingPrices) return '—'
   return formatCompactUsdValue(total)
@@ -153,6 +160,7 @@ const netAssetValueInfo = computed(() => {
   return netAssetMarketValueInfo.value
 })
 const netAssetValueDisplay = computed(() => {
+  if (hasPortfolioLoadError.value) return '—'
   const { total, hasMissingPrices } = netAssetValueInfo.value
   if (total === 0 && hasMissingPrices) return '—'
   return formatCompactUsdValue(total)
@@ -171,6 +179,10 @@ const updatePositions = async (
     source: options.portfolioSource,
     preempt: options.preemptPortfolio,
   })
+}
+
+const retryPortfolioLoad = () => {
+  void updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })
 }
 
 onActivated(async () => {
@@ -218,6 +230,26 @@ watch(showAllLabelEntries, (showAll) => {
 
     <PortfolioRampingBanner />
 
+    <div
+      v-if="hasPortfolioLoadError"
+      class="flex items-center gap-8 rounded-12 p-12 mx-16 bg-error-100"
+    >
+      <SvgIcon
+        name="warning"
+        class="!w-20 !h-20 text-error-500 shrink-0"
+      />
+      <span class="text-p4 flex-1 text-error-500">
+        We couldn't load your portfolio. Your funds are safe on-chain — this is usually temporary.
+      </span>
+      <button
+        type="button"
+        class="shrink-0 text-p4 font-medium text-error-500 hover:text-error-500/70 transition-colors"
+        @click="retryPortfolioLoad"
+      >
+        Retry
+      </button>
+    </div>
+
     <div class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch">
       <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
         <div class="text-h4 text-content-primary">
@@ -240,7 +272,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-net-apy"
-              :data-value="Number.isFinite(portfolioNetApy) ? portfolioNetApy : '-'"
+              :data-value="hasPortfolioLoadError ? '-' : (Number.isFinite(portfolioNetApy) ? portfolioNetApy : '-')"
             >
               {{ portfolioNetApyDisplay }}
             </div>
@@ -263,7 +295,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-roe"
-              :data-value="Number.isFinite(portfolioRoe) ? portfolioRoe : '-'"
+              :data-value="hasPortfolioLoadError ? '-' : (Number.isFinite(portfolioRoe) ? portfolioRoe : '-')"
             >
               {{ portfolioRoeDisplay }}
             </div>
@@ -291,7 +323,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-total-supplied"
-              :data-value="totalSuppliedValueInfo.hasMissingPrices ? totalSuppliedDisplay : totalSuppliedValueInfo.total"
+              :data-value="hasPortfolioLoadError ? '—' : (totalSuppliedValueInfo.hasMissingPrices ? totalSuppliedDisplay : totalSuppliedValueInfo.total)"
             >
               {{ totalSuppliedDisplay }}
             </div>
@@ -314,7 +346,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-total-borrowed"
-              :data-value="totalBorrowedValueInfo.hasMissingPrices ? totalBorrowedDisplay : totalBorrowedValueInfo.total"
+              :data-value="hasPortfolioLoadError ? '—' : (totalBorrowedValueInfo.hasMissingPrices ? totalBorrowedDisplay : totalBorrowedValueInfo.total)"
             >
               {{ totalBorrowedDisplay }}
             </div>
@@ -337,7 +369,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-net-asset-value"
-              :data-value="netAssetValueInfo.hasMissingPrices ? netAssetValueDisplay : netAssetValueInfo.total"
+              :data-value="hasPortfolioLoadError ? '—' : (netAssetValueInfo.hasMissingPrices ? netAssetValueDisplay : netAssetValueInfo.total)"
             >
               {{ netAssetValueDisplay }}
             </div>
