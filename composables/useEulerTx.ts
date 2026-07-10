@@ -58,6 +58,11 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateUserRewards: false,
 } as const
 type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
+type PreparedWalletContext = {
+  account: Address
+  chainId: number
+  assertCurrent: () => void
+}
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -1164,18 +1169,27 @@ export const useEulerTx = () => {
     })
   }
 
-  const buildSendTransaction = (isOkx: boolean) => {
+  const buildSendTransaction = (isOkx: boolean, preparedContext?: PreparedWalletContext) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
       if (okxDelayPending) {
         await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
         okxDelayPending = false
       }
-      const hash = await sendTransactionAsync({
-        to,
-        data: data as Hex,
-        value: value ?? 0n,
-      })
+      preparedContext?.assertCurrent()
+      const hash = preparedContext
+        ? await sendTransactionAsync({
+            account: preparedContext.account,
+            chainId: preparedContext.chainId,
+            to,
+            data: data as Hex,
+            value: value ?? 0n,
+          })
+        : await sendTransactionAsync({
+            to,
+            data: data as Hex,
+            value: value ?? 0n,
+          })
       if (isOkx && (data as Hex).toLowerCase().startsWith(ERC20_APPROVE_SELECTOR)) {
         okxDelayPending = true
       }
@@ -1250,15 +1264,38 @@ export const useEulerTx = () => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
+    const preparedOwner = typeof prepared.account === 'string'
+      ? prepared.account
+      : prepared.account.owner
+    const assertPreparedWalletContext = () => {
+      const currentOwner = requireOwner()
+      const currentChainId = requireChainId()
+      if (getAddress(currentOwner) !== getAddress(preparedOwner)) {
+        throw new Error('Wallet account changed since this transaction was prepared. Review the transaction again.')
+      }
+      if (currentChainId !== prepared.chainId) {
+        throw new Error('Wallet network changed since this transaction was prepared. Review the transaction again.')
+      }
+    }
+
+    assertPreparedWalletContext()
     const sdk = await getEulerSdkFresh()
     const isOkx = await isOkxWallet(getAccount(config).connector)
-    const sendTransaction = buildSendTransaction(isOkx)
+    const sendTransaction = buildSendTransaction(isOkx, {
+      account: preparedOwner,
+      chainId: prepared.chainId,
+      assertCurrent: assertPreparedWalletContext,
+    })
 
     const result = await sdk.executionService.executePreparedTransactionPlan({
       prepared,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        assertPreparedWalletContext()
+        const signature = await signTypedDataAsync({
+          ...typedData,
+          account: preparedOwner,
+        } as unknown as Parameters<typeof signTypedDataAsync>[0])
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
