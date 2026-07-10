@@ -116,8 +116,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Swap & borrow composable instances ---
   const { slippage: borrowSwapSlippage } = useSlippage({
-    fromSymbol: () => collateralVault.value?.asset.symbol,
-    toSymbol: () => borrowVault.value?.asset.symbol,
+    enabled: () => _formTab.value === 'borrow',
+    fromSymbol: () => borrowNeedsSwap.value
+      ? borrowSelectedAsset.value?.symbol
+      : collateralVault.value?.asset.symbol,
+    toSymbol: () => borrowNeedsSwap.value
+      ? collateralVault.value?.asset.symbol
+      : borrowVault.value?.asset.symbol,
   })
   const {
     sortedQuoteCards: borrowSwapQuoteCards,

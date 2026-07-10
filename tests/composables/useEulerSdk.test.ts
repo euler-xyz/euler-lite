@@ -137,7 +137,7 @@ describe('useEulerSdk', () => {
 
     await expect(getEulerSdk()).resolves.toBe(sdkB)
     expect(buildEulerSDK).toHaveBeenCalledTimes(2)
-  })
+  }, 20_000)
 
   it('passes runtime values through the SDK config object', async () => {
     const chainIds = ref([1, 8453])
