@@ -7,8 +7,9 @@ const USER_REWARD_QUERY_NAMES: EulerSDKQueryName[] = [
   'queryMerklUserRewards',
   'queryBrevisCampaigns',
   'queryBrevisUserProofs',
-  'queryFuulClaimableRewards' as EulerSDKQueryName,
-  'queryTurtleMerkleProofs' as EulerSDKQueryName,
+  'queryFuulClaimChecks',
+  'queryFuulClaimableRewards',
+  'queryTurtleMerkleProofs',
 ]
 const REWARD_CLAIM_REFRESH_RETRY_DELAYS_MS = [5_000, 30_000] as const
 

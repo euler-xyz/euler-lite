@@ -13,6 +13,8 @@
  * exports.
  */
 import { describe, expect, it } from 'vitest'
+import { buildEulerSDK, createKeyringPlugin, createPythPlugin } from '@eulerxyz/euler-v2-sdk'
+import type { BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
 import {
   FORM_STALE_TIMES,
   INVALIDATE_AFTER_TX,
@@ -78,4 +80,57 @@ describe('SDK_QUERY_POLICY derived lists', () => {
       expect(form, `${name}: form-time stale must be <= browsing stale`).toBeLessThanOrEqual(browse)
     }
   })
+})
+
+describe('SDK_QUERY_POLICY completeness', () => {
+  // Builds the real SDK with a buildQuery that records every query name it is
+  // asked to wrap. Every wrapped name must have an explicit policy row —
+  // otherwise a query added by an SDK bump silently inherits
+  // DEFAULT_STALE_TIME_MS on both the browsing and the plan-time instance
+  // (the regression that shipped the position-migration queries with a
+  // 5-minute plan-time cache).
+  it('classifies every query name the SDK routes through buildQuery', async () => {
+    const recorded = new Set<string>()
+    const recordingBuildQuery: BuildQueryFn = ((name: string, fn: unknown) => {
+      recorded.add(name)
+      // buildEulerSDK resolves deployments through buildQuery at build time;
+      // stub it so the build needs no network. Every URL below points at a
+      // closed port so any other build-time fetch fails the test loudly.
+      if (name === 'queryDeployments') return async () => []
+      return fn
+    }) as BuildQueryFn
+
+    const sdk = await buildEulerSDK({
+      config: {
+        rpcUrls: { 1: 'http://127.0.0.1:9/rpc' },
+        deploymentsUrl: 'http://127.0.0.1:9/deployments',
+        // V3 keeps the v3 adapters in the build so their query names are
+        // covered as well.
+        v3ApiUrl: 'http://127.0.0.1:9/v3',
+      },
+      buildQuery: recordingBuildQuery,
+      plugins: [
+        createPythPlugin({ buildQuery: recordingBuildQuery }),
+        createKeyringPlugin({
+          hookTargets: {},
+          getCredentialData: async () => undefined,
+          buildQuery: recordingBuildQuery,
+        }),
+      ],
+    })
+    expect(sdk).toBeTruthy()
+    expect(recorded.size).toBeGreaterThan(0)
+
+    const unclassified = [...recorded].filter(name => !(name in SDK_QUERY_POLICY)).sort()
+    expect(
+      unclassified,
+      'SDK query names without an SDK_QUERY_POLICY row — classify them so they do not silently inherit DEFAULT_STALE_TIME_MS',
+    ).toEqual([])
+
+    const unwrapped = Object.keys(SDK_QUERY_POLICY).filter(name => !recorded.has(name)).sort()
+    expect(
+      unwrapped,
+      'policy rows whose query name the SDK build never wrapped — likely a typo or a query removed upstream',
+    ).toEqual([])
+  }, 30_000)
 })
