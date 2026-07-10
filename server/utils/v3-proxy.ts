@@ -33,6 +33,18 @@ const POST_ONLY_PATHS = new Set([
   '/v3/resolve/vaults',
 ])
 
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
+const INTEGER_RE = /^[0-9]+$/
+const DECIMAL_RE = /^[0-9]+(?:\.[0-9]+)?$/
+const SAFE_QUERY_FIELDS = {
+  from: INTEGER_RE,
+  limit: INTEGER_RE,
+  minBadDebtUsd: DECIMAL_RE,
+  offset: INTEGER_RE,
+  resolution: /^[A-Za-z0-9_-]{1,16}$/,
+  to: INTEGER_RE,
+} as const
+
 type V3ProxyValidationResult
   = | { ok: true }
     | { ok: false, statusCode: number, statusMessage: string }
@@ -107,6 +119,69 @@ export function buildV3ProxyRequestHeaders(
   if (apiKey) headers.set('X-API-Key', apiKey)
 
   return headers
+}
+
+const cleanParam = (value: string | null, pattern: RegExp): string | undefined =>
+  value != null && pattern.test(value) ? value : undefined
+
+const readSafeQueryFields = (params: URLSearchParams): Record<string, string> => {
+  const fields: Record<string, string> = {}
+  for (const [name, pattern] of Object.entries(SAFE_QUERY_FIELDS)) {
+    const value = cleanParam(params.get(name), pattern)
+    if (value != null) fields[`v3${name[0].toUpperCase()}${name.slice(1)}`] = value
+  }
+  return fields
+}
+
+export function buildV3ProxyLogFields(requestUrl: URL): Record<string, string> {
+  const pathname = getV3ProxyPath(requestUrl)
+  const parts = pathname.split('/').filter(Boolean)
+  const fields: Record<string, string> = {}
+  const chainId = cleanParam(requestUrl.searchParams.get('chainId'), INTEGER_RE)
+  if (chainId != null) fields.v3ChainId = chainId
+
+  if (
+    parts.length === 5
+    && parts[0] === 'v3'
+    && (parts[1] === 'evk' || parts[1] === 'earn')
+    && parts[2] === 'vaults'
+    && INTEGER_RE.test(parts[3])
+    && ADDRESS_RE.test(parts[4])
+  ) {
+    fields.v3VaultKind = parts[1]
+    fields.v3ChainId = parts[3]
+    fields.v3VaultAddress = parts[4]
+  }
+
+  if (
+    parts.length === 6
+    && parts[0] === 'v3'
+    && (parts[1] === 'evk' || parts[1] === 'earn')
+    && parts[2] === 'vaults'
+    && INTEGER_RE.test(parts[3])
+    && ADDRESS_RE.test(parts[4])
+    && parts[5] === 'totals'
+  ) {
+    fields.v3VaultKind = parts[1]
+    fields.v3ChainId = parts[3]
+    fields.v3VaultAddress = parts[4]
+  }
+
+  if (
+    parts.length === 4
+    && parts[0] === 'v3'
+    && parts[1] === 'evk'
+    && parts[2] === 'vaults'
+    && parts[3] === 'open-interest'
+  ) {
+    const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
+    if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
+  }
+
+  return {
+    ...fields,
+    ...readSafeQueryFields(requestUrl.searchParams),
+  }
 }
 
 export function readForwardedV3ResponseHeaders(headers: Headers): Record<string, string> {

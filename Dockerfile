@@ -1,4 +1,30 @@
-# ── Build stage 
+# ── Doppler CLI stage ──
+FROM --platform=$BUILDPLATFORM node:24.14.1 AS doppler
+
+ARG TARGETARCH
+RUN set -eux; \
+  case "$TARGETARCH" in \
+    amd64) \
+      DOPPLER_URL='https://github.com/DopplerHQ/cli/releases/download/3.76.0/doppler_3.76.0_linux_amd64.tar.gz'; \
+      DOPPLER_SHA256='04f1ff30ed162d7af1dba7f11ad6a37ef35099de86a7ec6e261b64b1b337a3f3'; \
+      ;; \
+    arm64) \
+      DOPPLER_URL='https://github.com/DopplerHQ/cli/releases/download/3.76.0/doppler_3.76.0_linux_arm64.tar.gz'; \
+      DOPPLER_SHA256='ee57701385fc33fba550f913641812ed2ff020631e3ac8cc14616cbde2118884'; \
+      ;; \
+    *) \
+      echo "Unsupported TARGETARCH: $TARGETARCH" >&2; \
+      exit 1; \
+      ;; \
+  esac; \
+  curl --fail --silent --show-error --location \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 \
+    --output /tmp/doppler.tar.gz "$DOPPLER_URL"; \
+  printf '%s  %s\n' "$DOPPLER_SHA256" /tmp/doppler.tar.gz | sha256sum --check --strict -; \
+  tar --extract --gzip --file /tmp/doppler.tar.gz --directory /usr/local/bin doppler; \
+  chmod 0755 /usr/local/bin/doppler
+
+# ── Build stage ──
 FROM node:24.14.1 AS builder
 
 WORKDIR /usr/src/app
@@ -16,9 +42,6 @@ ENV NODE_OPTIONS=--max-old-space-size=4096
 
 RUN npm run build
 
-# Download Doppler CLI (binary only, no package manager install)
-RUN (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sh -s -- --no-package-manager --no-install
-
 # ── Production stage (distroless: no shell, no tools, non-root) ──
 FROM gcr.io/distroless/nodejs24-debian12:nonroot AS production
 
@@ -34,9 +57,9 @@ ENV NETWORK=${NETWORK}
 
 WORKDIR /usr/src/app
 
-# Copy only the built output and Doppler binary from builder
+# Copy only the built output and the verified Doppler binary
 COPY --from=builder /usr/src/app/.output .output
-COPY --from=builder /usr/src/app/doppler ./doppler
+COPY --from=doppler /usr/local/bin/doppler ./doppler
 
 EXPOSE ${APP_PORT}
 

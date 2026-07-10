@@ -37,6 +37,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
+import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
@@ -866,9 +867,42 @@ const collateralSelectionVaults = computed(() => [
   ...collateralTargetVaults.value,
 ])
 
+const refinanceSlippageLegs = computed<RefinanceSlippageLeg[]>(() => {
+  const legs: RefinanceSlippageLeg[] = []
+
+  if (collateralNeedsSwap.value && targetCollateralVault.value) {
+    const fromSymbol = isExternalSourceRoute.value
+      ? externalCollateralAsset.value?.symbol
+      : sourceCollateralEVault.value?.asset.symbol
+    if (fromSymbol) {
+      legs.push({
+        fromSymbol,
+        toSymbol: targetCollateralVault.value.asset.symbol,
+      })
+    }
+  }
+
+  if (debtNeedsSwap.value && targetDebtVault.value) {
+    const toSymbol = isExternalSourceRoute.value
+      ? externalDebtAsset.value?.symbol
+      : sourceDebtVault.value?.asset.symbol
+    if (toSymbol) {
+      legs.push({
+        fromSymbol: targetDebtVault.value.asset.symbol,
+        toSymbol,
+      })
+    }
+  }
+
+  return legs
+})
+const refinanceSlippageContext = computed(() =>
+  getRefinanceSlippageContext(refinanceSlippageLegs.value),
+)
+
 const { slippage } = useSlippage({
-  fromSymbol: () => externalCollateralAsset.value?.symbol || externalDebtAsset.value?.symbol || sourceCollateralVault.value?.asset.symbol || sourceDebtVault.value?.asset.symbol,
-  toSymbol: () => targetCollateralVault.value?.asset.symbol || targetDebtVault.value?.asset.symbol,
+  fromSymbol: () => refinanceSlippageContext.value?.fromSymbol,
+  toSymbol: () => refinanceSlippageContext.value?.toSymbol,
 })
 
 const buildRefinanceStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
