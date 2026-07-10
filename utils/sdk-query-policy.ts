@@ -34,6 +34,12 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *     SDK + invalidate-after-tx. The bumped 5-min stale lets quote plugins
  *     and simulate's `fetchVaultTypes` hit cache on Review-clicks; the post-tx
  *     invalidation makes display refresh after a deposit/borrow.
+ *   - **Position migration** (external position/target lists, position detail,
+ *     Euler source/target vault data): classified as portfolio-lens reads — 5 min
+ *     browse + 1 min plan-time + invalidate-after-tx — so a migration is built on
+ *     fresh position/vault state and the external-position list refreshes once the
+ *     migration lands. `queryGetAuthorization` takes the shortest window in the
+ *     table (5 s) so operator authorization is never planned from stale state.
  *   - **Pricing / APY** (assetPriceInfo, rewards breakdown, intrinsicApy):
  *     1 min. `queryV3Price` uses 30 s.
  *   - **Time-sensitive** (block reads, swap quotes, Pyth update data + fee,
@@ -99,6 +105,22 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultFactories: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
+
+  // === Position migration (SDK PositionMigrationService) ===
+  // These route through the supplied buildQuery like every other SDK read, so
+  // without explicit rows they would inherit DEFAULT_STALE_TIME_MS on both the
+  // browsing and plan-time instances and could build a migration from stale
+  // position/target/source state. The list/detail and Euler vault-data reads
+  // mirror the portfolio lens reads (queryEVCAccountInfo / queryVaultAccountInfo):
+  // 5-min browse, 1-min plan-time, evicted after every tx so the external
+  // position list refreshes once a migration lands. Authorization must never be
+  // planned from a cached value, so it takes the shortest window in the table.
+  queryGetAuthorization: { staleTimeMs: 5 * SECOND },
+  queryListPositions: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryListTargets: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryGetPosition: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryEulerTargetVaultData: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryEulerSourceVaultAssets: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
 
   // === Pricing / APY: display-side, 1-min cache ===
   queryAssetPriceInfo: { staleTimeMs: MINUTE },

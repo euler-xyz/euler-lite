@@ -12,6 +12,8 @@
  * These tests guard against drift between the entry shape and the derived
  * exports.
  */
+import { PositionMigrationService } from '@eulerxyz/euler-v2-sdk'
+import type { BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
 import { describe, expect, it } from 'vitest'
 import {
   FORM_STALE_TIMES,
@@ -77,5 +79,66 @@ describe('SDK_QUERY_POLICY derived lists', () => {
       const browse = STALE_TIMES[name as keyof typeof STALE_TIMES] ?? Infinity
       expect(form, `${name}: form-time stale must be <= browsing stale`).toBeLessThanOrEqual(browse)
     }
+  })
+})
+
+/**
+ * Completeness guard for the SDK's PositionMigrationService queries.
+ *
+ * These six reads are exposed as `query*` fields the SDK decorates with the
+ * supplied `buildQuery`, so — like every other SDK query — an unlisted name
+ * silently inherits `DEFAULT_STALE_TIME_MS` on both the browsing and plan-time
+ * instances. That would let a migration reuse stale position / authorization /
+ * source-target state. The set is enumerated from the live service (not a
+ * hardcoded list) so a future SDK bump that adds a migration query fails here
+ * until it is classified in SDK_QUERY_POLICY.
+ */
+const collectMigrationQueryNames = (): string[] => {
+  const names = new Set<string>()
+  const recordingBuildQuery: BuildQueryFn = (queryName, fn) => {
+    names.add(queryName)
+    return fn
+  }
+  // The constructor only registers connectors and decorates its `query*` fields
+  // via buildQuery — no network / provider I/O — so stub deps are sufficient.
+  new PositionMigrationService(
+    {} as unknown as ConstructorParameters<typeof PositionMigrationService>[0],
+    {} as unknown as ConstructorParameters<typeof PositionMigrationService>[1],
+    undefined,
+    recordingBuildQuery,
+  )
+  return [...names].sort()
+}
+
+describe('SDK_QUERY_POLICY position-migration completeness', () => {
+  it('enumerates the expected migration query set from the SDK', () => {
+    // If the SDK adds/renames a migration query, this pins the change so the
+    // classification below is revisited alongside it.
+    expect(collectMigrationQueryNames()).toEqual([
+      'queryEulerSourceVaultAssets',
+      'queryEulerTargetVaultData',
+      'queryGetAuthorization',
+      'queryGetPosition',
+      'queryListPositions',
+      'queryListTargets',
+    ])
+  })
+
+  it('classifies every migration query so none inherits DEFAULT_STALE_TIME_MS', () => {
+    for (const name of collectMigrationQueryNames()) {
+      expect(
+        Object.prototype.hasOwnProperty.call(SDK_QUERY_POLICY, name),
+        `${name}: PositionMigrationService query is unclassified — it would silently inherit DEFAULT_STALE_TIME_MS`,
+      ).toBe(true)
+    }
+  })
+
+  it('pins operator authorization to the shortest stale window in the table', () => {
+    const shortest = Math.min(...Object.values(SDK_QUERY_POLICY).map(p => p.staleTimeMs))
+    expect(SDK_QUERY_POLICY.queryGetAuthorization?.staleTimeMs).toBe(shortest)
+  })
+
+  it('invalidates the external position list after a tx', () => {
+    expect(INVALIDATE_AFTER_TX).toContain('queryListPositions')
   })
 })
