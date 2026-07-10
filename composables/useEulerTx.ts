@@ -1268,12 +1268,11 @@ export const useEulerTx = () => {
       ? prepared.account
       : prepared.account.owner
     const assertPreparedWalletContext = () => {
-      const currentOwner = requireOwner()
-      const currentChainId = requireChainId()
-      if (getAddress(currentOwner) !== getAddress(preparedOwner)) {
+      const currentWallet = getAccount(config)
+      if (!currentWallet.address || getAddress(currentWallet.address) !== getAddress(preparedOwner)) {
         throw new Error('Wallet account changed since this transaction was prepared. Review the transaction again.')
       }
-      if (currentChainId !== prepared.chainId) {
+      if (currentWallet.chainId === undefined || currentWallet.chainId !== prepared.chainId) {
         throw new Error('Wallet network changed since this transaction was prepared. Review the transaction again.')
       }
     }

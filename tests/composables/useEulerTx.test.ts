@@ -89,11 +89,13 @@ const preparedPlan = (account: TransactionPlanPrepared['account'] = OWNER): Tran
 describe('useEulerTx executePreparedPlan', () => {
   let walletAddress: Ref<Address | undefined>
   let walletChainId: Ref<number | undefined>
+  let walletConnector: { id: string } | undefined
 
   beforeEach(() => {
     vi.clearAllMocks()
     walletAddress = ref(OWNER)
     walletChainId = ref(CHAIN_ID)
+    walletConnector = undefined
 
     vi.stubGlobal('useWagmi', () => ({
       address: walletAddress,
@@ -107,7 +109,11 @@ describe('useEulerTx executePreparedPlan', () => {
     vi.stubGlobal('usePortfolioRefresh', () => ({ triggerPortfolioRefresh: mocks.triggerPortfolioRefresh }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(CHAIN_ID) }))
 
-    mocks.getAccount.mockReturnValue({ connector: undefined })
+    mocks.getAccount.mockImplementation(() => ({
+      address: walletAddress.value,
+      chainId: walletChainId.value,
+      connector: walletConnector,
+    }))
     mocks.getEulerSdkFresh.mockResolvedValue({
       executionService: {
         executePreparedTransactionPlan: mocks.executePreparedTransactionPlan,
@@ -126,6 +132,19 @@ describe('useEulerTx executePreparedPlan', () => {
 
     await expect(useEulerTx().executePreparedPlan(preparedPlan())).rejects.toThrow(
       'Wallet account changed since this transaction was prepared. Review the transaction again.',
+    )
+    expect(mocks.signTypedDataAsync).not.toHaveBeenCalled()
+  })
+
+  it('rejects a missing wallet chain immediately before a prepared signature', async () => {
+    mocks.executePreparedTransactionPlan.mockImplementation(async ({ signTypedData }: PreparedExecutionCallbacks) => {
+      walletChainId.value = undefined
+      await signTypedData(typedData)
+      return { receipts: [] }
+    })
+
+    await expect(useEulerTx().executePreparedPlan(preparedPlan())).rejects.toThrow(
+      'Wallet network changed since this transaction was prepared. Review the transaction again.',
     )
     expect(mocks.signTypedDataAsync).not.toHaveBeenCalled()
   })
