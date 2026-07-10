@@ -20,6 +20,9 @@
     "execution:suite": "node scripts/execution-suite.mjs",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:golden": "vitest run tests/golden",
+    "test:golden:update": "UPDATE_GOLDEN=1 vitest run tests/golden",
+    "test:golden:fetch-fixtures": "jiti tests/golden/fetch-fixtures.ts",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare && simple-git-hooks"
   },
