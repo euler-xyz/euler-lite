@@ -3,16 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { usePositionCollateralApy } from '~/composables/usePositionCollateralApy'
 
-const { getProjectedRatesBatch, getCollateralUsdValueOrZero } = vi.hoisted(() => ({
+const { getProjectedRatesBatch, getCollateralUsdValue } = vi.hoisted(() => ({
   getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => ({
     supplyAPY: 8n * 10n ** 25n,
     borrowAPY: 0n,
   }))),
-  getCollateralUsdValueOrZero: vi.fn(async (assets: bigint) => Number(assets)),
+  getCollateralUsdValue: vi.fn(async (assets: bigint) => Number(assets)),
 }))
 
 vi.mock('~/utils/vault/apy', () => ({ getProjectedRatesBatch }))
-vi.mock('~/utils/sdk-prices', () => ({ getCollateralUsdValueOrZero }))
+vi.mock('~/utils/sdk-prices', () => ({ getCollateralUsdValue }))
 vi.mock('~/utils/vault-display', () => ({
   getVaultSupplyApy: vi.fn((vault: { currentApy?: number }) => vault.currentApy ?? 0),
 }))
@@ -87,6 +87,7 @@ describe('usePositionCollateralApy', () => {
     expect(snapshot.supplyUsd).toBe(250)
     expect(snapshot.weightedSupplyApy).toBeCloseTo((150 * 9 + 100 * 11) / 250)
     expect(snapshot.collateralAddresses).toEqual([VAULT_A, VAULT_B])
+    expect(snapshot.isComplete).toBe(true)
   })
 
   it('fails closed when an expected collateral position is unresolved', async () => {
@@ -97,7 +98,35 @@ describe('usePositionCollateralApy', () => {
       supplyUsd: 0,
       weightedSupplyApy: null,
       collateralAddresses: [],
+      isComplete: false,
     })
-    expect(getCollateralUsdValueOrZero).not.toHaveBeenCalled()
+    expect(getCollateralUsdValue).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when an expected vault cannot be resolved', async () => {
+    vi.stubGlobal('useVaultRegistry', () => ({
+      getOrFetch: vi.fn(async (address: string) => address.toLowerCase() === VAULT_A.toLowerCase() ? vaultA : undefined),
+    }))
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+
+    await expect(getCollateralApySnapshot(makePosition(), liabilityVault)).resolves.toEqual({
+      supplyUsd: 0,
+      weightedSupplyApy: null,
+      collateralAddresses: [],
+      isComplete: false,
+    })
+  })
+
+  it('fails closed when a positive collateral cannot be priced', async () => {
+    getCollateralUsdValue.mockImplementationOnce(async (assets: bigint) => Number(assets))
+      .mockImplementationOnce(async () => undefined)
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+
+    await expect(getCollateralApySnapshot(makePosition(), liabilityVault)).resolves.toEqual({
+      supplyUsd: 0,
+      weightedSupplyApy: null,
+      collateralAddresses: [],
+      isComplete: false,
+    })
   })
 })

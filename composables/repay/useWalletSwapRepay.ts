@@ -37,7 +37,7 @@ interface UseWalletSwapRepayOptions {
   slippage: Readonly<Ref<number>>
   clearSimulationError: () => void
   runSimulation: (plan: TransactionPlan, stateOverrideOptions?: SimulationStateOverrideOptions) => Promise<boolean>
-  netAPY: Ref<number>
+  netAPY: Ref<number | null>
   collateralSupplyApy: ComputedRef<number>
   borrowApy: ComputedRef<number>
   collateralSupplyRewardApy: ComputedRef<number>
@@ -214,7 +214,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   // --- Health estimates ---
   const hasEstimate = ref(false)
-  const _estimateNetAPY = ref(0)
+  const _estimateNetAPY = ref<number | null>(null)
   const _estimateUserLTV = ref(0n)
   const _estimateHealth = ref(0n)
   const estimateNetAPY = computed(() => hasEstimate.value ? _estimateNetAPY.value : netAPY.value)

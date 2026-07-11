@@ -49,6 +49,7 @@ describe('getNetAPY', () => {
     const snapshot = {
       supplyUsd: 200,
       weightedSupplyApy: 0.07,
+      isComplete: true,
     }
 
     expect(getNetAPYFromWeightedSupplySnapshot(
@@ -64,6 +65,7 @@ describe('getNetAPY', () => {
     const snapshot = {
       supplyUsd: 200,
       weightedSupplyApy: null,
+      isComplete: true,
     }
 
     expect(getNetAPYFromWeightedSupplySnapshot(
@@ -73,6 +75,19 @@ describe('getNetAPY', () => {
       0.08,
       0.02,
     )).toBeCloseTo(0.03, 6)
+  })
+
+  it('does not turn an incomplete collateral snapshot into a 0% estimate', () => {
+    expect(getNetAPYFromWeightedSupplySnapshot(
+      {
+        supplyUsd: 0,
+        weightedSupplyApy: null,
+        isComplete: false,
+      },
+      0.05,
+      100,
+      0.08,
+    )).toBeNull()
   })
 })
 

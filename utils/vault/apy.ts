@@ -221,6 +221,7 @@ export const getPositionMultiplier = (
 interface WeightedSupplySnapshot {
   supplyUsd: number
   weightedSupplyApy: number | null
+  isComplete: boolean
 }
 
 export const getNetAPYFromWeightedSupplySnapshot = (
@@ -231,15 +232,18 @@ export const getNetAPYFromWeightedSupplySnapshot = (
   fallbackSupplyRewardAPY?: number | null,
   borrowRewardAPY?: number | null,
   loopingRewardAPY?: number | null,
-) => getNetAPY(
-  snapshot.supplyUsd,
-  snapshot.weightedSupplyApy ?? fallbackSupplyAPY,
-  borrowUSD,
-  borrowAPY,
-  snapshot.weightedSupplyApy === null ? fallbackSupplyRewardAPY : null,
-  borrowRewardAPY,
-  loopingRewardAPY,
-)
+): number | null => {
+  if (!snapshot.isComplete) return null
+  return getNetAPY(
+    snapshot.supplyUsd,
+    snapshot.weightedSupplyApy ?? fallbackSupplyAPY,
+    borrowUSD,
+    borrowAPY,
+    snapshot.weightedSupplyApy === null ? fallbackSupplyRewardAPY : null,
+    borrowRewardAPY,
+    loopingRewardAPY,
+  )
+}
 
 export function getRoe(
   supplyUSD: number,

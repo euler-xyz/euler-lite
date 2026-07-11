@@ -127,10 +127,10 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
 ))
 
 const netApyGuard = createRaceGuard()
-const netAPY = ref(0)
+const netAPY = ref<number | null>(null)
 watchEffect(async () => {
   if (!position.value || !collateralVault.value || !borrowVault.value) {
-    netAPY.value = 0
+    netAPY.value = null
     return
   }
   const gen = netApyGuard.next()
@@ -193,6 +193,9 @@ const walletSwap = useWalletSwapRepay({
   borrowRewardApy,
   oraclePriceRatio,
 })
+const walletEstimateNetAPY = computed(() =>
+  walletSwap.needsSwap.value ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value,
+)
 
 // Add the current repay (any tab) to the batch. CoW orders can't be merged
 // into an EVC batch, so swap routes via CoW are excluded.
@@ -804,8 +807,8 @@ watch(formTab, () => {
             >
               <SummaryRow label="Net APY">
                 <SummaryValue
-                  :before="formatNumber(netAPY)"
-                  :after="formatNumber(walletSwap.needsSwap.value ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value)"
+                  :before="netAPY !== null ? formatNumber(netAPY) : undefined"
+                  :after="walletEstimateNetAPY !== null ? formatNumber(walletEstimateNetAPY) : undefined"
                   suffix="%"
                 />
               </SummaryRow>

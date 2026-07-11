@@ -3,7 +3,7 @@ import {
   getProjectedRatesBatch,
   type ProjectedRatesRequest,
 } from '~/utils/vault/apy'
-import { getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
+import { getCollateralUsdValue } from '~/utils/sdk-prices'
 import { getVaultSupplyApy } from '~/utils/vault-display'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
@@ -24,6 +24,7 @@ interface CollateralApySnapshot {
   supplyUsd: number
   weightedSupplyApy: number | null
   collateralAddresses: string[]
+  isComplete: boolean
 }
 
 interface CollateralApyEntry {
@@ -60,8 +61,15 @@ export const usePositionCollateralApy = () => {
     liabilityVault: EVault | undefined,
     options: CollateralApySnapshotOptions = {},
   ): Promise<CollateralApySnapshot> => {
+    const incompleteSnapshot = (): CollateralApySnapshot => ({
+      supplyUsd: 0,
+      weightedSupplyApy: null,
+      collateralAddresses: [],
+      isComplete: false,
+    })
+
     if (!position || !liabilityVault) {
-      return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
+      return incompleteSnapshot()
     }
 
     try {
@@ -77,7 +85,7 @@ export const usePositionCollateralApy = () => {
           until(isMarketDataResolved).toBe(true).then(() => true),
           new Promise<false>(resolve => setTimeout(() => resolve(false), 10_000)),
         ])
-        if (!resolved) return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
+        if (!resolved) return incompleteSnapshot()
       }
 
       const primaryAddress = normalizeAddressOrEmpty(position.collateral?.vaultAddress)
@@ -90,7 +98,7 @@ export const usePositionCollateralApy = () => {
       const expectedCollateralAddresses = (position.collateralVaults ?? []).map(normalizeAddressOrEmpty).filter(Boolean)
       const resolvedCollateralAddresses = new Set([primaryAddress, ...collateralAddresses].filter(Boolean))
       if (expectedCollateralAddresses.some(address => !resolvedCollateralAddresses.has(address))) {
-        return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
+        return incompleteSnapshot()
       }
       const allAddresses = Array.from(new Set([
         primaryAddress,
@@ -99,7 +107,7 @@ export const usePositionCollateralApy = () => {
         ...deltaByAddress.keys(),
       ].filter(Boolean)))
 
-      const entries = (await Promise.all(allAddresses.map(async (address): Promise<CollateralApyEntry | null> => {
+      const resolvedEntries = await Promise.all(allAddresses.map(async (address): Promise<CollateralApyEntry | null> => {
         const vault = await getOrFetch(address)
         if (!vault) return null
         const currentAssets = getCollateralAssets(position, address, primaryAddress)
@@ -112,7 +120,9 @@ export const usePositionCollateralApy = () => {
           delta,
           projectRates: deltaByAddress.get(address)?.projectRates,
         }
-      }))).filter((entry): entry is CollateralApyEntry => entry !== null)
+      }))
+      if (resolvedEntries.some(entry => entry === null)) return incompleteSnapshot()
+      const entries = resolvedEntries as CollateralApyEntry[]
 
       const projectionRequests = entries.reduce<Array<{ index: number, request: ProjectedRatesRequest }>>((acc, entry, index) => {
         if (!entry.projectRates || entry.delta === 0n || !isEVault(entry.vault)) return acc
@@ -134,7 +144,10 @@ export const usePositionCollateralApy = () => {
       const projectedByIndex = new Map(projectionRequests.map((item, index) => [item.index, projectedRates[index]]))
 
       const valued = await Promise.all(entries.map(async (entry, index) => {
-        const supplyUsd = await getCollateralUsdValueOrZero(entry.assets, liabilityVault, entry.vault, 'off-chain')
+        const supplyUsd = entry.assets === 0n
+          ? 0
+          : await getCollateralUsdValue(entry.assets, liabilityVault, entry.vault, 'off-chain')
+        if (supplyUsd === undefined || !Number.isFinite(supplyUsd) || (entry.assets > 0n && supplyUsd <= 0)) return null
         const currentRaw = getVaultSupplyApy(entry.vault)
         const projected = projectedByIndex.get(index)
         const projectedRaw = projected ? nanoToValue(projected.supplyAPY, 25) : null
@@ -147,22 +160,25 @@ export const usePositionCollateralApy = () => {
 
         return { supplyUsd, supplyApy }
       }))
+      if (valued.some(entry => entry === null)) return incompleteSnapshot()
+      const completeValues = valued as Array<{ supplyUsd: number, supplyApy: number }>
 
-      const supplyUsd = valued.reduce((sum, item) => sum + item.supplyUsd, 0)
+      const supplyUsd = completeValues.reduce((sum, item) => sum + item.supplyUsd, 0)
       const positiveCollateralAddresses = entries.filter(entry => entry.assets > 0n).map(entry => entry.address)
       if (!Number.isFinite(supplyUsd) || supplyUsd <= 0) {
-        return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: positiveCollateralAddresses }
+        return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: positiveCollateralAddresses, isComplete: true }
       }
 
       return {
         supplyUsd,
-        weightedSupplyApy: valued.reduce((sum, item) => sum + item.supplyUsd * item.supplyApy, 0) / supplyUsd,
+        weightedSupplyApy: completeValues.reduce((sum, item) => sum + item.supplyUsd * item.supplyApy, 0) / supplyUsd,
         collateralAddresses: positiveCollateralAddresses,
+        isComplete: true,
       }
     }
     catch (error) {
       logWarn('positionCollateralApy/snapshot', error)
-      return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
+      return incompleteSnapshot()
     }
   }
 

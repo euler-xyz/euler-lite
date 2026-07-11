@@ -29,8 +29,8 @@ const form = props.form
   >
     <SummaryRow label="Net APY">
       <SummaryValue
-        :before="formatNumber(form.netAPY.value)"
-        :after="formatNumber(form.estimateNetAPY.value)"
+        :before="form.netAPY.value !== null ? formatNumber(form.netAPY.value) : undefined"
+        :after="form.estimateNetAPY.value !== null ? formatNumber(form.estimateNetAPY.value) : undefined"
         suffix="%"
       />
     </SummaryRow>

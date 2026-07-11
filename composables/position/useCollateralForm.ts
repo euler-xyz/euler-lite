@@ -154,7 +154,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // `shallowRef` so Vue doesn't deep-unwrap the envelope's Account class
   // entity — the class has private brand members that drop on UnwrapRef.
   const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
-  const estimateNetAPY = ref(0)
+  const estimateNetAPY = ref<number | null>(null)
   const estimateUserLTV = ref(0n)
   const estimateHealth = ref(0n)
   const estimatesError = ref('')
@@ -248,13 +248,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     enableIntrinsicApy.value,
   ))
 
-  const netAPY = ref(0)
+  const netAPY = ref<number | null>(null)
   const currentNetApyGuard = createRaceGuard()
 
   watchEffect(async () => {
     const gen = currentNetApyGuard.next()
     if (!position.value || !borrowVault.value || !collateralVault.value) {
-      netAPY.value = 0
+      netAPY.value = null
       return
     }
 
