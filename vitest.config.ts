@@ -11,7 +11,7 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/golden/**', 'node_modules/**'],
+    exclude: ['node_modules/**'],
     globals: true,
     setupFiles: ['./tests/setup.ts'],
   },

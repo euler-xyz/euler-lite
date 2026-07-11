@@ -105,7 +105,11 @@ The full object is serialized into `staticCacheKey`, so any change produces a ne
 
 ## Query Policy (single source of truth)
 
-`utils/sdk-query-policy.ts` owns the per-query policy. One row per `query*` name:
+`utils/sdk-query-policy.ts` owns the per-query policy. One row per `query*` name.
+Completeness is test-enforced: `tests/utils/sdk-query-policy.test.ts` builds the
+real SDK with a recording `buildQuery` and fails when a wrapped query name has
+no policy row (or when a row no longer matches any wrapped name), so an SDK bump
+cannot introduce a query that silently inherits `DEFAULT_STALE_TIME_MS`.
 
 ```ts
 interface SdkQueryPolicyEntry {
@@ -134,6 +138,12 @@ export const SDK_QUERY_POLICY = {
 
   // Balances
   queryBalanceOf:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
+
+  // Position migration: external position balances and authorization state
+  // are balance-like (debt accrues per block; the user can sign or revoke
+  // authorization mid-flow), so they take short windows + post-tx eviction.
+  queryGetPosition:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+  queryGetAuthorization: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
 }
 ```
 
@@ -170,7 +180,7 @@ export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => { … }
 ```
 
-`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? DEFAULT_STALE_TIME_MS })` call. Non-listed queries fall through to `DEFAULT_STALE_TIME_MS`.
+`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? DEFAULT_STALE_TIME_MS })` call. The `DEFAULT_STALE_TIME_MS` fall-through is a runtime backstop only — the completeness test keeps the policy table exhaustive, so no shipped query name actually relies on it.
 
 Key properties:
 

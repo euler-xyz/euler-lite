@@ -129,6 +129,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   )
 
   const { slippage: multiplySlippage } = useSlippage({
+    enabled: () => _formTab.value === 'multiply',
     fromSymbol: () => borrowVault.value?.asset.symbol,
     toSymbol: () => collateralVault.value?.asset.symbol,
   })

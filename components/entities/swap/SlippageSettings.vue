@@ -22,16 +22,13 @@ const customInput = ref('')
 const customInputError = ref('')
 const slippageSelection = useLocalStorage<'preset' | 'custom'>('swap-slippage-selection', 'preset')
 
-// Reset selection state when override expires back to a default (preset or stablecoin)
-if (!isOverrideActive.value && (presetValues.includes(slippage.value) || slippage.value === defaultSlippage.value)) {
-  slippageSelection.value = 'preset'
-}
-
+const isPresetOrDefault = (value: number) => presetValues.includes(value) || value === defaultSlippage.value
 const isCustomSelected = computed(() => slippageSelection.value === 'custom')
-const isCustomValue = computed(() => !presetValues.includes(slippage.value) && slippage.value !== defaultSlippage.value)
+const isCustomValue = computed(() => !isPresetOrDefault(slippage.value))
 const customChipActive = computed(() => isCustomInputVisible.value || isCustomSelected.value || isCustomValue.value)
 const customChipValue = computed(() => `${formatNumber(slippage.value, 2, 0)}%`)
 
+const isSlippageAboveDefault = computed(() => slippage.value > defaultSlippage.value)
 const isHighSlippage = computed(() => slippage.value > HIGH_SLIPPAGE_THRESHOLD)
 
 const onPresetSelect = (value: number) => {
@@ -83,12 +80,24 @@ const onSaveCustom = () => {
   }
   customInputError.value = ''
   setSlippage(parsed)
-  slippageSelection.value = 'custom'
+  slippageSelection.value = isPresetOrDefault(parsed) ? 'preset' : 'custom'
   isCustomInputVisible.value = false
 }
 
+// Reset selection state when override expires or is saved back to a default.
+watchEffect(() => {
+  if (isCustomInputVisible.value) return
+  if (isCustomValue.value) {
+    slippageSelection.value = 'custom'
+    return
+  }
+  if (!isOverrideActive.value && isPresetOrDefault(slippage.value)) {
+    slippageSelection.value = 'preset'
+  }
+})
+
 watch(slippage, (value) => {
-  if (slippageSelection.value === 'preset' && !presetValues.includes(value) && value !== defaultSlippage.value) {
+  if (slippageSelection.value === 'preset' && !isPresetOrDefault(value)) {
     slippageSelection.value = 'custom'
   }
 })
@@ -115,7 +124,7 @@ const savePending = (): boolean => {
   }
   customInputError.value = ''
   setSlippage(parsed)
-  slippageSelection.value = 'custom'
+  slippageSelection.value = isPresetOrDefault(parsed) ? 'preset' : 'custom'
   isCustomInputVisible.value = false
   return true
 }
@@ -130,7 +139,7 @@ defineExpose({ savePending })
         Slippage settings
       </div>
       <div class="text-p3 text-content-muted">
-        <template v-if="isOverrideActive && slippage > DEFAULT_SLIPPAGE">
+        <template v-if="isOverrideActive && isSlippageAboveDefault">
           Custom slippage (resets to {{ defaultSlippage }}% default after 24h)
         </template>
         <template v-else-if="defaultSlippage !== DEFAULT_SLIPPAGE">
@@ -157,7 +166,7 @@ defineExpose({ savePending })
         >
           <span v-if="isCustomSelected && !isCustomInputVisible">
             Custom
-            <span class="text-content-primary font-semibold">{{ customChipValue }}</span>
+            <span class="font-semibold">{{ customChipValue }}</span>
           </span>
           <span v-else>
             Set custom

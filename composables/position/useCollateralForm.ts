@@ -160,8 +160,15 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   // --- Swap infrastructure ---
   const { slippage: swapSlippage } = useSlippage({
-    fromSymbol: () => collateralVault.value?.asset.symbol,
-    toSymbol: () => borrowVault.value?.asset.symbol,
+    fromSymbol: () => {
+      if (!options.needsSwap.value) return collateralVault.value?.asset.symbol
+      return options.mode === 'withdraw'
+        ? collateralVault.value?.asset.symbol
+        : options.effectiveAsset.value?.symbol
+    },
+    toSymbol: () => options.needsSwap.value
+      ? options.getSwapOutputAsset()?.symbol
+      : borrowVault.value?.asset.symbol,
   })
   const {
     sortedQuoteCards: swapQuoteCardsSorted,

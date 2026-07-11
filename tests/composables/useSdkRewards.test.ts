@@ -210,6 +210,7 @@ describe('useSdkRewards', () => {
       'queryMerklUserRewards',
       'queryBrevisCampaigns',
       'queryBrevisUserProofs',
+      'queryFuulClaimChecks',
       'queryFuulClaimableRewards',
       'queryTurtleMerkleProofs',
     ])
@@ -237,6 +238,7 @@ describe('useSdkRewards', () => {
       'queryMerklUserRewards',
       'queryBrevisCampaigns',
       'queryBrevisUserProofs',
+      'queryFuulClaimChecks',
       'queryFuulClaimableRewards',
       'queryTurtleMerkleProofs',
     ])
