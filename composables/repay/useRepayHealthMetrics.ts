@@ -1,8 +1,9 @@
 import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
-import { getProjectedRates, getRoe } from '~/utils/vault/apy'
+import { getPositionMultiplier, getProjectedRates, getRoe } from '~/utils/vault/apy'
 import { getVaultBorrowApy } from '~/utils/vault-display'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { computeNextLtv, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { createRaceGuard } from '~/utils/race-guard'
 
@@ -16,6 +17,11 @@ interface UseRepayHealthMetricsOptions {
   collateralSupplyApy: ComputedRef<number | null>
   nextCollateralSupplyApy?: ComputedRef<number | null>
   borrowApy: ComputedRef<number | null>
+  borrowRewardApy: ComputedRef<number | null>
+  nextBorrowRewardApy?: ComputedRef<number | null>
+  collateralAddresses?: Ref<readonly string[]>
+  nextCollateralAddresses?: Ref<readonly string[]>
+  repayAddsCash?: ComputedRef<boolean>
   collateralValueUsd: Ref<number | null>
   nextCollateralValueUsd: Ref<number | null>
   borrowValueUsd: Ref<number | null>
@@ -33,11 +39,19 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     collateralSupplyApy,
     nextCollateralSupplyApy,
     borrowApy,
+    borrowRewardApy,
+    nextBorrowRewardApy,
+    collateralAddresses,
+    nextCollateralAddresses,
+    repayAddsCash,
     collateralValueUsd,
     nextCollateralValueUsd,
     borrowValueUsd,
     nextBorrowValueUsd,
   } = options
+  const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
   const currentHealth = computed(() => {
     if (!position.value) return null
@@ -85,7 +99,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     const vault = borrowVault.value
     const currentPosition = position.value
     const repaid = debtRepaid.value
-    const currentBorrowApy = borrowApy.value
+    void borrowApy.value
 
     if (!vault || !currentPosition || repaid === null) {
       projectedBorrowApy.value = null
@@ -101,7 +115,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
         vault.address,
         vault.totalCash,
         vault.totalBorrowed,
-        repayAmount,
+        repayAddsCash?.value === false ? 0n : repayAmount,
         -repayAmount,
       )
 
@@ -114,7 +128,12 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
 
       const currentRaw = getVaultBorrowApy(vault)
       const projectedRaw = nanoToValue(projected.borrowAPY, 25)
-      projectedBorrowApy.value = (currentBorrowApy ?? 0) + (projectedRaw - currentRaw)
+      projectedBorrowApy.value = withProjectedVaultIntrinsicApy(
+        currentRaw,
+        projectedRaw,
+        vault,
+        enableIntrinsicApy.value,
+      )
     }
     catch {
       if (!projectedBorrowApyGuard.isStale(gen)) {
@@ -123,11 +142,41 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     }
   })
 
+  const getLoopingRewardApy = (
+    supplyUsd: number | null,
+    borrowUsd: number | null,
+    addresses: readonly string[] | undefined,
+  ) => {
+    const vault = borrowVault.value
+    if (!vault || !position.value) return 0
+    return getEligibleLoopingRewardApyForCollaterals(
+      vault.address,
+      addresses ?? position.value.collateralVaults ?? [],
+      getPositionMultiplier(supplyUsd, borrowUsd),
+    )
+  }
+
   const roeBefore = computed(() =>
-    getRoe(collateralValueUsd.value, collateralSupplyApy.value, borrowValueUsd.value, borrowApy.value))
+    getRoe(
+      collateralValueUsd.value,
+      collateralSupplyApy.value,
+      borrowValueUsd.value,
+      borrowApy.value,
+      null,
+      borrowRewardApy.value,
+      getLoopingRewardApy(collateralValueUsd.value, borrowValueUsd.value, collateralAddresses?.value),
+    ))
 
   const roeAfter = computed(() =>
-    getRoe(nextCollateralValueUsd.value, nextCollateralSupplyApy?.value ?? collateralSupplyApy.value, nextBorrowValueUsd.value, projectedBorrowApy.value ?? borrowApy.value))
+    getRoe(
+      nextCollateralValueUsd.value,
+      nextCollateralSupplyApy?.value ?? collateralSupplyApy.value,
+      nextBorrowValueUsd.value,
+      projectedBorrowApy.value ?? borrowApy.value,
+      null,
+      nextBorrowRewardApy?.value ?? borrowRewardApy.value,
+      getLoopingRewardApy(nextCollateralValueUsd.value, nextBorrowValueUsd.value, nextCollateralAddresses?.value),
+    ))
 
   return {
     currentHealth,

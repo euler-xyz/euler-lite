@@ -90,7 +90,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { entryCount: batchEntryCount, getMergedPlan } = useTxBatch()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-  const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+  const { getSupplyRewardApy, getBorrowRewardApyForCollaterals } = useRewardsApy()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   // --- Source vault state ---
@@ -195,8 +195,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const borrowApy = computed(() => {
     if (!borrowVault.value) return null
     const base = getVaultBorrowApy(borrowVault.value)
-    return withVaultIntrinsicApy(base, borrowVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(borrowVault.value.address, collateralVault.value?.address)
+    return withVaultIntrinsicApy(base, borrowVault.value, enableIntrinsicApy.value)
   })
+
+  const borrowRewardApy = computed(() => borrowVault.value
+    ? getBorrowRewardApyForCollaterals(borrowVault.value.address, position.value?.collateralVaults ?? [])
+    : 0)
 
   // --- Price ratio ---
   const priceRatio = computed(() => {
@@ -231,6 +235,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const nextWeightedCollateralSupplyApy = ref<number | null>(null)
   const collateralValueUsd = ref<number | null>(null)
   const nextCollateralValueUsd = ref<number | null>(null)
+  const collateralAddresses = ref<string[]>([])
+  const nextCollateralAddresses = ref<string[]>([])
 
   watchEffect(async () => {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
@@ -238,6 +244,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       nextWeightedCollateralSupplyApy.value = null
       collateralValueUsd.value = null
       nextCollateralValueUsd.value = null
+      collateralAddresses.value = []
+      nextCollateralAddresses.value = []
       return
     }
     const gen = collateralPortfolioGuard.next()
@@ -257,9 +265,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextWeightedCollateralSupplyApy.value = nextSnapshot.weightedSupplyApy
     collateralValueUsd.value = currentSnapshot.supplyUsd
     nextCollateralValueUsd.value = nextSnapshot.supplyUsd
+    collateralAddresses.value = currentSnapshot.collateralAddresses ?? position.value.collateralVaults ?? []
+    nextCollateralAddresses.value = nextSnapshot.collateralAddresses ?? position.value.collateralVaults ?? []
   })
   const effectiveCollateralSupplyApy = computed(() => weightedCollateralSupplyApy.value ?? collateralSupplyApy.value)
   const effectiveNextCollateralSupplyApy = computed(() => nextWeightedCollateralSupplyApy.value ?? effectiveCollateralSupplyApy.value)
+  const nextBorrowRewardApy = computed(() => borrowVault.value
+    ? getBorrowRewardApyForCollaterals(borrowVault.value.address, nextCollateralAddresses.value)
+    : 0)
 
   // --- Health metrics ---
   const health = useRepayHealthMetrics({
@@ -272,6 +285,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     collateralSupplyApy: effectiveCollateralSupplyApy,
     nextCollateralSupplyApy: effectiveNextCollateralSupplyApy,
     borrowApy,
+    borrowRewardApy,
+    nextBorrowRewardApy,
+    collateralAddresses,
+    nextCollateralAddresses,
     collateralValueUsd,
     nextCollateralValueUsd,
     borrowValueUsd: core.borrowValueUsd,

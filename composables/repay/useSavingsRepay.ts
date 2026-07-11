@@ -38,6 +38,7 @@ interface UseSavingsRepayOptions {
   getCurrentDebt: () => bigint
   collateralSupplyApy: ComputedRef<number>
   borrowApy: ComputedRef<number>
+  borrowRewardApy: ComputedRef<number>
 }
 
 interface SavingsRepayPlanSnapshot {
@@ -65,6 +66,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     getCurrentDebt,
     collateralSupplyApy,
     borrowApy,
+    borrowRewardApy,
   } = options
 
   const modal = useModal()
@@ -151,11 +153,13 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const savingsCollateralUsdGuard = createRaceGuard()
   const savingsCollateralUsd = ref<number | null>(null)
   const savingsWeightedCollateralApy = ref<number | null>(null)
+  const savingsCollateralAddresses = ref<string[]>([])
 
   watchEffect(async () => {
     if (!borrowVault.value || !position.value) {
       savingsCollateralUsd.value = null
       savingsWeightedCollateralApy.value = null
+      savingsCollateralAddresses.value = []
       return
     }
     const gen = savingsCollateralUsdGuard.next()
@@ -163,6 +167,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     if (savingsCollateralUsdGuard.isStale(gen)) return
     savingsCollateralUsd.value = snapshot.supplyUsd
     savingsWeightedCollateralApy.value = snapshot.weightedSupplyApy
+    savingsCollateralAddresses.value = snapshot.collateralAddresses ?? position.value.collateralVaults ?? []
   })
   const effectiveCollateralSupplyApy = computed(() => savingsWeightedCollateralApy.value ?? collateralSupplyApy.value)
 
@@ -176,6 +181,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     collateralAmountAfter,
     collateralSupplyApy: effectiveCollateralSupplyApy,
     borrowApy,
+    borrowRewardApy,
+    collateralAddresses: savingsCollateralAddresses,
+    nextCollateralAddresses: savingsCollateralAddresses,
+    repayAddsCash: computed(() => !isSameVaultRepay.value),
     collateralValueUsd: savingsCollateralUsd,
     nextCollateralValueUsd: savingsCollateralUsd,
     borrowValueUsd: core.borrowValueUsd,

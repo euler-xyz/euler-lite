@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getNetAPY, getNetAPYFromWeightedSupplySnapshot, getRoe } from '~/utils/vault/apy'
+import { getNetAPY, getNetAPYFromWeightedSupplySnapshot, getPositionMultiplier, getRoe } from '~/utils/vault/apy'
 
 describe('getNetAPY', () => {
   it('returns 0 when supplyUSD is 0', () => {
@@ -104,5 +104,17 @@ describe('getRoe', () => {
   it('handles supply-only position', () => {
     // supply=100 at 5%, borrow=0 → equity=100, roe = 100*0.05/100 = 0.05
     expect(getRoe(100, 0.05, 0, 0)).toBeCloseTo(0.05, 6)
+  })
+})
+
+describe('getPositionMultiplier', () => {
+  it('derives leverage from supply and equity', () => {
+    expect(getPositionMultiplier(200, 100)).toBe(2)
+  })
+
+  it('returns null without positive finite equity', () => {
+    expect(getPositionMultiplier(100, 100)).toBeNull()
+    expect(getPositionMultiplier(100, 0)).toBeNull()
+    expect(getPositionMultiplier(Number.NaN, 0)).toBeNull()
   })
 })

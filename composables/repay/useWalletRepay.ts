@@ -1,4 +1,4 @@
-import { getProjectedRates, getNetAPYFromWeightedSupplySnapshot } from '~/utils/vault/apy'
+import { getPositionMultiplier, getProjectedRates, getNetAPYFromWeightedSupplySnapshot } from '~/utils/vault/apy'
 import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
 import { maxUint256, type Address } from 'viem'
@@ -18,6 +18,7 @@ import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { getBorrowPositionEffectiveLiquidationLTV, decimalLtvToBps } from '~/utils/ltv'
 import { getVaultBorrowApy } from '~/utils/vault-display'
+import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 interface UseWalletRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -52,7 +53,6 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     runSimulation,
     netAPY,
     collateralSupplyApy,
-    borrowApy,
     collateralSupplyRewardApy,
     borrowRewardApy,
     oraclePriceRatio,
@@ -66,6 +66,9 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
+  const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
   const amount = ref('')
   const walletRepayPercent = ref(0)
@@ -282,9 +285,18 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
       if (asyncEstimatesGuard.isStale(gen)) return
 
-      const projectedBorrowApy = projected
-        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
-        : borrowApy.value
+      const currentRaw = getVaultBorrowApy(borrowVault.value)
+      const projectedBorrowApy = withProjectedVaultIntrinsicApy(
+        currentRaw,
+        projected ? nanoToValue(projected.borrowAPY, 25) : null,
+        borrowVault.value,
+        enableIntrinsicApy.value,
+      )
+      const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+        borrowVault.value.address,
+        collateralSnapshot.collateralAddresses ?? position.value.collateralVaults ?? [],
+        getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
+      )
 
       _estimateNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
         collateralSnapshot,
@@ -293,6 +305,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         projectedBorrowApy,
         collateralSupplyRewardApy.value || null,
         borrowRewardApy.value || null,
+        loopingRewardApy || null,
       )
     }
     catch (e) {
@@ -335,6 +348,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   // Watch amount changes: sync percent slider + trigger estimates
   watch(amount, () => {
+    asyncEstimatesGuard.next()
     clearSimulationError()
     if (formTab.value !== 'wallet') return
 

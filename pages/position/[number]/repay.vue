@@ -2,7 +2,7 @@
 import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { maxUint256, type Address } from 'viem'
 import type { VaultAsset } from '~/types/asset'
-import { getNetAPYFromWeightedSupplySnapshot } from '~/utils/vault/apy'
+import { getNetAPYFromWeightedSupplySnapshot, getPositionMultiplier } from '~/utils/vault/apy'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -35,7 +35,11 @@ const { planRepayFromWallet } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const {
+  getSupplyRewardApy,
+  getBorrowRewardApyForCollaterals,
+  getEligibleLoopingRewardApyForCollaterals,
+} = useRewardsApy()
 const { getCollateralApySnapshot } = usePositionCollateralApy()
 const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
@@ -107,7 +111,10 @@ const liqPriceFromHealth = (health: number | null | undefined): number | null =>
 
 // --- APYs ---
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
-const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
+const borrowRewardApy = computed(() => getBorrowRewardApyForCollaterals(
+  borrowVault.value?.address || '',
+  position.value?.collateralVaults ?? [],
+))
 const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(collateralVault.value),
   collateralVault.value,
@@ -132,6 +139,11 @@ watchEffect(async () => {
     getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
   ])
   if (netApyGuard.isStale(gen)) return
+  const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+    borrowVault.value.address,
+    collateralSnapshot.collateralAddresses ?? position.value.collateralVaults ?? [],
+    getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
+  )
   netAPY.value = getNetAPYFromWeightedSupplySnapshot(
     collateralSnapshot,
     collateralSupplyApy.value,
@@ -139,6 +151,7 @@ watchEffect(async () => {
     borrowApy.value,
     collateralSupplyRewardApy.value || null,
     borrowRewardApy.value || null,
+    loopingRewardApy || null,
   )
 })
 
@@ -420,6 +433,7 @@ const savings = useSavingsRepay({
   getCurrentDebt,
   collateralSupplyApy,
   borrowApy,
+  borrowRewardApy,
 })
 
 const isPositionRoeApplicable = computed(() =>

@@ -85,6 +85,8 @@ vi.mock('~/components/ui/composables/useToast', () => ({
 vi.mock('~/utils/vault/apy', () => ({
   getProjectedRates: vi.fn(async () => null),
   getNetAPY: vi.fn(() => 0),
+  getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 0),
+  getPositionMultiplier: vi.fn(() => 1),
 }))
 
 vi.mock('~/utils/sdk-prices', () => ({
@@ -196,6 +198,12 @@ describe('useWalletSwapRepay', () => {
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('usePositionCollateralApy', () => ({
       getCollateralApySnapshot: vi.fn(async () => ({ supplyUsd: 0, weightedSupplyApy: null })),
+    }))
+    vi.stubGlobal('useRewardsApy', () => ({
+      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+    }))
+    vi.stubGlobal('useUserSettings', () => ({
+      settings: ref({ enableIntrinsicApy: false }),
     }))
   })
 

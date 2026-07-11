@@ -54,6 +54,7 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
       getSavingsPosition: vi.fn(),
       planRepayFromSource: vi.fn(),
       runSimulation: vi.fn(),
+      healthOptions: [] as Array<{ repayAddsCash?: { value: boolean } }>,
     },
   }
 })
@@ -99,16 +100,19 @@ vi.mock('~/composables/repay/useRepaySwapDetails', () => ({
 }))
 
 vi.mock('~/composables/repay/useRepayHealthMetrics', () => ({
-  useRepayHealthMetrics: () => ({
-    roeBefore: ref(null),
-    roeAfter: ref(null),
-    currentHealth: ref(null),
-    currentLtv: ref(null),
-    nextLtv: ref(null),
-    nextHealth: ref(null),
-    currentLiquidationPrice: ref(null),
-    nextLiquidationPrice: ref(null),
-  }),
+  useRepayHealthMetrics: (options: { repayAddsCash?: { value: boolean } }) => {
+    mocks.healthOptions.push(options)
+    return {
+      roeBefore: ref(null),
+      roeAfter: ref(null),
+      currentHealth: ref(null),
+      currentLtv: ref(null),
+      nextLtv: ref(null),
+      nextHealth: ref(null),
+      currentLiquidationPrice: ref(null),
+      nextLiquidationPrice: ref(null),
+    }
+  },
 }))
 
 vi.mock('~/composables/useEulerLabels', () => ({
@@ -186,6 +190,7 @@ describe('useSavingsRepay', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.swapQuoteOptions.length = 0
+    mocks.healthOptions.length = 0
     mocks.planRepayFromSource.mockResolvedValue({ type: 'repay-plan' } as unknown as TransactionPlan)
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
@@ -257,6 +262,7 @@ describe('useSavingsRepay', () => {
       getCurrentDebt: () => position.borrowed,
       collateralSupplyApy: computed(() => 0),
       borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
     })
 
     repay.initVault()
@@ -269,6 +275,7 @@ describe('useSavingsRepay', () => {
     expect(repay.amount.value).toBe('1000')
     expect(repay.isSubmitDisabled.value).toBe(false)
     expect(repay.disabledReason.value).toBeUndefined()
+    expect(mocks.healthOptions[0]?.repayAddsCash?.value).toBe(false)
   })
 
   it('builds quote-time gas estimation plans from the candidate savings repay quote', async () => {
@@ -287,6 +294,7 @@ describe('useSavingsRepay', () => {
       getCurrentDebt: () => position.borrowed,
       collateralSupplyApy: computed(() => 0),
       borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
     })
 
     repay.initVault()

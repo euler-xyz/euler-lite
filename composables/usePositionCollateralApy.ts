@@ -5,9 +5,10 @@ import {
 } from '~/utils/vault/apy'
 import { getCollateralUsdValueOrZero } from '~/utils/sdk-prices'
 import { getVaultSupplyApy } from '~/utils/vault-display'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { logWarn } from '~/utils/errorHandling'
 
 interface CollateralApyDelta {
   vaultAddress: string
@@ -22,6 +23,7 @@ interface CollateralApySnapshotOptions {
 interface CollateralApySnapshot {
   supplyUsd: number
   weightedSupplyApy: number | null
+  collateralAddresses: string[]
 }
 
 interface CollateralApyEntry {
@@ -33,9 +35,9 @@ interface CollateralApyEntry {
 }
 
 export const usePositionCollateralApy = () => {
-  const { getSupplyRewardApy } = useRewardsApy()
+  const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
   const { getOrFetch } = useVaultRegistry()
-  const { isReady: isVaultsReady } = useVaults()
+  const { isReady: isVaultsReady, isMarketDataResolved } = useVaults()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
@@ -59,11 +61,24 @@ export const usePositionCollateralApy = () => {
     options: CollateralApySnapshotOptions = {},
   ): Promise<CollateralApySnapshot> => {
     if (!position || !liabilityVault) {
-      return { supplyUsd: 0, weightedSupplyApy: null }
+      return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
     }
 
     try {
+      // These reads happen before the first await so an async watchEffect that
+      // calls this helper tracks enrichment, reward, and settings changes.
+      void rewardsVersion.value
+      const intrinsicApyEnabled = enableIntrinsicApy.value
+      void isMarketDataResolved.value
+
       await until(isVaultsReady).toBe(true)
+      if (!isMarketDataResolved.value) {
+        const resolved = await Promise.race([
+          until(isMarketDataResolved).toBe(true).then(() => true),
+          new Promise<false>(resolve => setTimeout(() => resolve(false), 10_000)),
+        ])
+        if (!resolved) return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
+      }
 
       const primaryAddress = normalizeAddressOrEmpty(position.collateral?.vaultAddress)
       const deltaByAddress = new Map(
@@ -72,9 +87,15 @@ export const usePositionCollateralApy = () => {
           .filter(([address]) => Boolean(address)) as Array<[string, CollateralApyDelta]>,
       )
       const collateralAddresses = position.collaterals.map(c => normalizeAddressOrEmpty(c.vaultAddress))
+      const expectedCollateralAddresses = (position.collateralVaults ?? []).map(normalizeAddressOrEmpty).filter(Boolean)
+      const resolvedCollateralAddresses = new Set([primaryAddress, ...collateralAddresses].filter(Boolean))
+      if (expectedCollateralAddresses.some(address => !resolvedCollateralAddresses.has(address))) {
+        return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
+      }
       const allAddresses = Array.from(new Set([
         primaryAddress,
         ...collateralAddresses,
+        ...expectedCollateralAddresses,
         ...deltaByAddress.keys(),
       ].filter(Boolean)))
 
@@ -115,27 +136,33 @@ export const usePositionCollateralApy = () => {
       const valued = await Promise.all(entries.map(async (entry, index) => {
         const supplyUsd = await getCollateralUsdValueOrZero(entry.assets, liabilityVault, entry.vault, 'off-chain')
         const currentRaw = getVaultSupplyApy(entry.vault)
-        const baseApy = withVaultIntrinsicApy(currentRaw, entry.vault, enableIntrinsicApy.value) + getSupplyRewardApy(entry.vault.address)
         const projected = projectedByIndex.get(index)
-        const supplyApy = projected
-          ? baseApy + (nanoToValue(projected.supplyAPY, 25) - currentRaw)
-          : baseApy
+        const projectedRaw = projected ? nanoToValue(projected.supplyAPY, 25) : null
+        const supplyApy = withProjectedVaultIntrinsicApy(
+          currentRaw,
+          projectedRaw,
+          entry.vault,
+          intrinsicApyEnabled,
+        ) + getSupplyRewardApy(entry.vault.address)
 
         return { supplyUsd, supplyApy }
       }))
 
       const supplyUsd = valued.reduce((sum, item) => sum + item.supplyUsd, 0)
+      const positiveCollateralAddresses = entries.filter(entry => entry.assets > 0n).map(entry => entry.address)
       if (!Number.isFinite(supplyUsd) || supplyUsd <= 0) {
-        return { supplyUsd: 0, weightedSupplyApy: null }
+        return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: positiveCollateralAddresses }
       }
 
       return {
         supplyUsd,
         weightedSupplyApy: valued.reduce((sum, item) => sum + item.supplyUsd * item.supplyApy, 0) / supplyUsd,
+        collateralAddresses: positiveCollateralAddresses,
       }
     }
-    catch {
-      return { supplyUsd: 0, weightedSupplyApy: null }
+    catch (error) {
+      logWarn('positionCollateralApy/snapshot', error)
+      return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: [] }
     }
   }
 

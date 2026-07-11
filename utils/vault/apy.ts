@@ -36,7 +36,7 @@ const parseProjectedRatesResult = (result: Record<string, any> | null): Projecte
   }
 }
 
-export const getProjectedRatesBatch = async (
+const executeProjectedRatesBatch = async (
   requests: ProjectedRatesRequest[],
 ): Promise<Array<ProjectedRates | null>> => {
   const { chainId, eulerLensAddresses, eulerCoreAddresses } = useEulerAddresses()
@@ -121,6 +121,55 @@ export const getProjectedRatesBatch = async (
   return results
 }
 
+interface PendingProjectedRatesBatch {
+  requests: ProjectedRatesRequest[]
+  resolve: (results: Array<ProjectedRates | null>) => void
+  reject: (error: unknown) => void
+}
+
+let pendingProjectedRatesBatches: PendingProjectedRatesBatch[] = []
+let projectedRatesFlushScheduled = false
+
+const flushProjectedRatesBatches = async () => {
+  const pending = pendingProjectedRatesBatches
+  pendingProjectedRatesBatches = []
+  projectedRatesFlushScheduled = false
+
+  const requests = pending.flatMap(batch => batch.requests)
+  try {
+    const results = await executeProjectedRatesBatch(requests)
+    let offset = 0
+    for (const batch of pending) {
+      batch.resolve(results.slice(offset, offset + batch.requests.length))
+      offset += batch.requests.length
+    }
+  }
+  catch (error) {
+    for (const batch of pending) batch.reject(error)
+  }
+}
+
+/**
+ * Coalesce projection requests created by sibling form watchers in the same
+ * render turn. Position forms often project supply and borrow legs in separate
+ * composables; collecting them until the next task keeps that recompute to one
+ * EVC lens batch without coupling those composables together.
+ */
+export const getProjectedRatesBatch = (
+  requests: ProjectedRatesRequest[],
+): Promise<Array<ProjectedRates | null>> => {
+  if (!requests.length) return Promise.resolve([])
+
+  return new Promise((resolve, reject) => {
+    pendingProjectedRatesBatches.push({ requests, resolve, reject })
+    if (projectedRatesFlushScheduled) return
+    projectedRatesFlushScheduled = true
+    setTimeout(() => {
+      void flushProjectedRatesBatches()
+    }, 0)
+  })
+}
+
 export const getProjectedRates = async (
   vaultAddress: string,
   currentCash: bigint,
@@ -156,6 +205,17 @@ export const getNetAPY = (
       - borrowUSD * (borrowAPY - (borrowRewardAPY || 0))
       + equity * (loopingRewardAPY || 0)
   return sum / supplyUSD
+}
+
+export const getPositionMultiplier = (
+  supplyUSD: number | null | undefined,
+  borrowUSD: number | null | undefined,
+): number | null => {
+  if (supplyUSD === null || supplyUSD === undefined || borrowUSD === null || borrowUSD === undefined) return null
+  if (!Number.isFinite(borrowUSD) || borrowUSD <= 0) return null
+  const equity = supplyUSD - borrowUSD
+  if (!Number.isFinite(supplyUSD) || !Number.isFinite(equity) || equity <= 0) return null
+  return supplyUSD / equity
 }
 
 interface WeightedSupplySnapshot {

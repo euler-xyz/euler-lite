@@ -43,6 +43,9 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
       fetchSingleBalance: vi.fn(async () => 0n),
       runSimulation: vi.fn(),
       modalOpen: vi.fn(),
+      getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
+      getAssetUsdValueOrZero: vi.fn(async () => 0),
+      borrowEffectiveQuote: undefined as unknown as Ref<unknown>,
     },
   }
 })
@@ -85,23 +88,26 @@ vi.mock('~/composables/useSwapPriceImpact', () => ({
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
-  useSwapQuotesParallel: () => ({
-    sortedQuoteCards: ref([]),
-    selectedProvider: ref(null),
-    selectedQuote: ref(null),
-    effectiveQuote: ref(null),
-    isLoading: ref(false),
-    quoteError: ref(null),
-    statusLabel: ref(''),
-    getQuoteDiffPct: vi.fn(() => null),
-    reset: vi.fn(),
-    requestQuotes: vi.fn(),
-    selectProvider: vi.fn(),
-  }),
+  useSwapQuotesParallel: () => {
+    mocks.borrowEffectiveQuote = ref(null)
+    return {
+      sortedQuoteCards: ref([]),
+      selectedProvider: ref(null),
+      selectedQuote: ref(null),
+      effectiveQuote: mocks.borrowEffectiveQuote,
+      isLoading: ref(false),
+      quoteError: ref(null),
+      statusLabel: ref(''),
+      getQuoteDiffPct: vi.fn(() => null),
+      reset: vi.fn(),
+      requestQuotes: vi.fn(),
+      selectProvider: vi.fn(),
+    }
+  },
 }))
 
 vi.mock('~/utils/sdk-prices', () => ({
-  getAssetUsdValueOrZero: vi.fn(async () => 0),
+  getAssetUsdValueOrZero: mocks.getAssetUsdValueOrZero,
   getAssetOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralUsdPrice: vi.fn(async () => ({ amountOutMid: 1_000_000_000_000_000_000n })),
@@ -111,7 +117,9 @@ vi.mock('~/utils/sdk-prices', () => ({
 
 vi.mock('~/utils/vault/apy', () => ({
   getProjectedRates: vi.fn(async () => null),
+  getProjectedRatesBatch: mocks.getProjectedRatesBatch,
   getNetAPY: vi.fn(() => 0),
+  getPositionMultiplier: vi.fn(() => 1),
 }))
 
 vi.mock('~/utils/swapRouteItems', () => ({
@@ -221,7 +229,14 @@ describe('useBorrowForm savings collateral', () => {
       chainId: ref(1),
     }))
     vi.stubGlobal('useWallets', () => ({
+      getBalance: vi.fn(() => 0n),
       fetchSingleBalance: mocks.fetchSingleBalance,
+    }))
+    vi.stubGlobal('useRewardsApy', () => ({
+      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+    }))
+    vi.stubGlobal('useUserSettings', () => ({
+      settings: ref({ enableIntrinsicApy: false }),
     }))
     vi.stubGlobal('useTransactionPlanSimulation', () => ({
       runSimulation: mocks.runSimulation,
@@ -247,6 +262,7 @@ describe('useBorrowForm savings collateral', () => {
     vi.stubGlobal('getIsBorrowCapReached', () => false)
     vi.stubGlobal('getVaultSupplyApy', () => 0)
     vi.stubGlobal('getVaultBorrowApy', () => 0)
+    vi.stubGlobal('ltvToPercent', () => 50)
   })
 
   afterEach(() => {
@@ -310,5 +326,37 @@ describe('useBorrowForm savings collateral', () => {
 
     expect(mocks.runSimulation).toHaveBeenCalled()
     expect(mocks.modalOpen).toHaveBeenCalled()
+  })
+
+  it('does not project a savings share transfer as new vault cash', async () => {
+    const positions = shallowRef<PortfolioSavingsPosition<VaultEntity>[]>([
+      makeSavingsPosition(SUB_ACCOUNT_A, 100n, 90n),
+    ])
+    const form = makeForm(positions)
+    form.onChangeCollateral(1)
+    form.collateralAmount.value = '10'
+    form.borrowAmount.value = '2'
+    form.updateEstimates()
+
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
+    const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{ cashDelta: bigint }>
+    expect(requests[0]?.cashDelta).toBe(0n)
+  })
+
+  it('values Pay with collateral from the quoted vault output', async () => {
+    const form = makeForm(shallowRef([]))
+    form.borrowSelectedAsset.value = {
+      address: '0x0000000000000000000000000000000000000099',
+      name: 'Pay token',
+      symbol: 'PAY',
+      decimals: 0,
+    }
+    mocks.borrowEffectiveQuote.value = { amountIn: '100', amountOut: '80' }
+    form.collateralAmount.value = '100'
+    form.borrowAmount.value = '20'
+    form.updateEstimates()
+
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
+    expect(mocks.getAssetUsdValueOrZero).toHaveBeenCalledWith(80n, vault, 'off-chain')
   })
 })

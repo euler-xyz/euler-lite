@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { getNetAPYFromWeightedSupplySnapshot, getProjectedRates } from '~/utils/vault/apy'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { getNetAPYFromWeightedSupplySnapshot, getPositionMultiplier, getProjectedRates } from '~/utils/vault/apy'
+import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import type { VaultAsset } from '~/types/asset'
 import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
@@ -43,7 +43,11 @@ const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = 
 const positionIndex = usePositionIndex()
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const {
+  getSupplyRewardApy,
+  getBorrowRewardApyForCollaterals,
+  getEligibleLoopingRewardApyForCollaterals,
+} = useRewardsApy()
 const { getCollateralApySnapshot } = usePositionCollateralApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -166,7 +170,10 @@ const borrowProduct = useEulerProductOfVault(computed(() => borrowVault.value?.a
 const _collateralProduct = useEulerProductOfVault(computed(() => collateralVault.value?.address || ''))
 
 const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
-const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
+const borrowRewardApy = computed(() => getBorrowRewardApyForCollaterals(
+  borrowVault.value?.address || '',
+  position.value?.collateralVaults ?? [],
+))
 const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
   getVaultSupplyApy(collateralVault.value),
   collateralVault.value,
@@ -225,6 +232,11 @@ const load = async () => {
       getCollateralApySnapshot(position.value, borrowVault.value),
       getAssetUsdValueOrZero(position.value!.borrowed || 0, borrowVault.value!, 'off-chain'),
     ])
+    const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+      borrowVault.value!.address,
+      collateralSnapshot.collateralAddresses ?? position.value!.collateralVaults ?? [],
+      getPositionMultiplier(collateralSnapshot.supplyUsd, borUsd),
+    )
     currentNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
       collateralSnapshot,
       collateralSupplyApy.value,
@@ -232,6 +244,7 @@ const load = async () => {
       borrowApy.value,
       collateralSupplyRewardApy.value || null,
       borrowRewardApy.value || null,
+      loopingRewardApy || null,
     )
   }
   catch (e) {
@@ -445,9 +458,18 @@ const updateAsyncEstimates = useDebounceFn(async () => {
 
     if (asyncEstimatesGuard.isStale(gen)) return
 
-    const projectedBorrowApy = borrowProjected
-      ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
-      : borrowApy.value
+    const currentRaw = getVaultBorrowApy(borrowVault.value)
+    const projectedBorrowApy = withProjectedVaultIntrinsicApy(
+      currentRaw,
+      borrowProjected ? nanoToValue(borrowProjected.borrowAPY, 25) : null,
+      borrowVault.value,
+      enableIntrinsicApy.value,
+    )
+    const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+      borrowVault.value.address,
+      collateralSnapshot.collateralAddresses ?? position.value?.collateralVaults ?? [],
+      getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
+    )
 
     netAPY.value = getNetAPYFromWeightedSupplySnapshot(
       collateralSnapshot,
@@ -456,6 +478,7 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       projectedBorrowApy,
       collateralSupplyRewardApy.value || null,
       borrowRewardApy.value || null,
+      loopingRewardApy || null,
     )
   }
   catch (e) {
@@ -482,6 +505,7 @@ watch(address, () => {
   updateBalance()
 })
 watch([collateralAmount, borrowAmount], async () => {
+  asyncEstimatesGuard.next()
   clearSimulationError()
   if (!pair.value) {
     return

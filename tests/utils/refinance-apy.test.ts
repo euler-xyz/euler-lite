@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest'
+import { buildRefinanceProjectedRateRequests } from '~/utils/refinance-apy'
+
+const source = {
+  address: '0x0000000000000000000000000000000000000001',
+  totalCash: 1_000n,
+  totalBorrowed: 500n,
+}
+const target = {
+  address: '0x0000000000000000000000000000000000000002',
+  totalCash: 2_000n,
+  totalBorrowed: 800n,
+}
+
+describe('buildRefinanceProjectedRateRequests', () => {
+  it('projects source withdrawal, target deposit, and target debt together', () => {
+    expect(buildRefinanceProjectedRateRequests(
+      [
+        { vault: source, cashDelta: -100n },
+        { vault: target, cashDelta: 95n },
+      ],
+      { vault: target, borrowsDelta: 50n },
+    )).toEqual([
+      {
+        address: source.address,
+        request: {
+          vaultAddress: source.address,
+          currentCash: 1_000n,
+          currentBorrows: 500n,
+          cashDelta: -100n,
+          borrowsDelta: 0n,
+        },
+      },
+      {
+        address: target.address,
+        request: {
+          vaultAddress: target.address,
+          currentCash: 2_000n,
+          currentBorrows: 800n,
+          cashDelta: 45n,
+          borrowsDelta: 50n,
+        },
+      },
+    ])
+  })
+
+  it('drops zero-net collateral moves', () => {
+    expect(buildRefinanceProjectedRateRequests([
+      { vault: target, cashDelta: -100n },
+      { vault: target, cashDelta: 100n },
+    ])).toEqual([])
+  })
+})

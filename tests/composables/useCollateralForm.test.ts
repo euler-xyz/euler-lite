@@ -72,6 +72,7 @@ vi.mock('~/utils/vault/apy', () => ({
   getProjectedRates: mocks.getProjectedRates,
   getNetAPY: mocks.getNetAPY,
   getNetAPYFromWeightedSupplySnapshot: mocks.getNetAPYFromWeightedSupplySnapshot,
+  getPositionMultiplier: vi.fn(() => 1),
 }))
 
 vi.mock('~/utils/sdk-prices', () => ({
@@ -271,7 +272,8 @@ describe('useCollateralForm amount denomination', () => {
     }))
     vi.stubGlobal('useRewardsApy', () => ({
       getSupplyRewardApy: () => 0,
-      getBorrowRewardApy: () => 0,
+      getBorrowRewardApyForCollaterals: () => 0,
+      getEligibleLoopingRewardApyForCollaterals: () => 0,
     }))
     vi.stubGlobal('usePositionCollateralApy', () => ({
       getCollateralApySnapshot: mocks.getCollateralApySnapshot,

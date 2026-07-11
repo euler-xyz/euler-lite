@@ -1,4 +1,4 @@
-import { getProjectedRates, getNetAPYFromWeightedSupplySnapshot } from '~/utils/vault/apy'
+import { getPositionMultiplier, getProjectedRates, getNetAPYFromWeightedSupplySnapshot } from '~/utils/vault/apy'
 import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
@@ -24,6 +24,7 @@ import { isNativeCurrencyAddress, resolveWrappedNativeAddress, resolveWrappedNat
 import { FixedPoint } from '~/utils/fixed-point'
 import { logWarn } from '~/utils/errorHandling'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
+import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 
 interface UseWalletSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -64,7 +65,6 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     runSimulation,
     netAPY,
     collateralSupplyApy,
-    borrowApy,
     collateralSupplyRewardApy,
     borrowRewardApy,
     oraclePriceRatio,
@@ -86,6 +86,9 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
+  const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
   // --- State ---
   const selectedAsset = ref<VaultAsset | undefined>()
@@ -520,9 +523,18 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       ])
       if (estimatesGuard.isStale(gen)) return
 
-      const projectedBorrowApy = projected
-        ? borrowApy.value + (nanoToValue(projected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
-        : borrowApy.value
+      const currentRaw = getVaultBorrowApy(borrowVault.value)
+      const projectedBorrowApy = withProjectedVaultIntrinsicApy(
+        currentRaw,
+        projected ? nanoToValue(projected.borrowAPY, 25) : null,
+        borrowVault.value,
+        enableIntrinsicApy.value,
+      )
+      const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+        borrowVault.value.address,
+        collateralSnapshot.collateralAddresses ?? position.value.collateralVaults ?? [],
+        getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
+      )
 
       _estimateNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
         collateralSnapshot,
@@ -531,6 +543,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         projectedBorrowApy,
         collateralSupplyRewardApy.value || null,
         borrowRewardApy.value || null,
+        loopingRewardApy || null,
       )
     }
     catch (e: unknown) {

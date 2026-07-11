@@ -58,6 +58,7 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
         message: 'The supply cap has been reached. New deposits will fail.',
       })),
       getBorrowCapWarning: vi.fn(() => null),
+      getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
     },
   }
 })
@@ -136,8 +137,9 @@ vi.mock('~/utils/sdk-prices', () => ({
 
 vi.mock('~/utils/vault/apy', () => ({
   getProjectedRates: vi.fn(async () => null),
-  getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
+  getProjectedRatesBatch: mocks.getProjectedRatesBatch,
   getRoe: vi.fn(() => 0),
+  getPositionMultiplier: vi.fn(() => 1),
 }))
 
 vi.mock('~/utils/multiply-math', () => ({
@@ -255,8 +257,9 @@ describe('useMultiplyForm cap validation', () => {
       finalizeTxAndRedirect: vi.fn(),
     }))
     vi.stubGlobal('useRewardsApy', () => ({
-      getSupplyRewardApy: vi.fn(async () => 0),
-      getBorrowRewardApy: vi.fn(async () => 0),
+      getSupplyRewardApy: vi.fn(() => 0),
+      getBorrowRewardApyForCollaterals: vi.fn(() => 0),
+      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
     }))
     vi.stubGlobal('useUserSettings', () => ({
       settings: ref({ enableIntrinsicApy: false }),
@@ -308,5 +311,18 @@ describe('useMultiplyForm cap validation', () => {
       title: 'Supply cap reached',
       message: 'The supply cap has been reached. New deposits will fail.',
     })
+  })
+
+  it('projects only the borrowed long deposit for savings collateral', async () => {
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.isMultiplySavingCollateral.value = true
+    form.multiplyInputAmount.value = '5'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
+    const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{ cashDelta: bigint }>
+    expect(requests[0]?.cashDelta).toBe(1n)
   })
 })

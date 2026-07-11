@@ -1,7 +1,8 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getProjectedRatesBatch, getNetAPY } from '~/utils/vault/apy'
+import { getProjectedRatesBatch, getNetAPY, getPositionMultiplier } from '~/utils/vault/apy'
+import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -76,8 +77,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     savingPositions,
     balance,
     resolvePendingSubAccount,
-    collateralSupplyApy,
-    borrowApy,
     collateralSupplyRewardApy,
     borrowRewardApy,
     collateralSupplyApyWithRewards,
@@ -95,6 +94,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
   const { getBalance } = useWallets()
+  const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { finalizeTxAndRedirect } = useTxFinalization()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
   // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
@@ -627,6 +629,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       const collateralAmountNano = borrowNeedsSwap.value
         ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
         : valueToNano(collateralAmount.value || '0', collateralVault.value.shares.decimals)
+      const collateralCashDelta = isSavingCollateral.value ? 0n : collateralAmountNano
       const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
 
       const [projectedRates, collateralUsdValue, borrowUsdValue] = await Promise.all([
@@ -635,7 +638,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             vaultAddress: collateralVault.value.address,
             currentCash: collateralVault.value.totalCash,
             currentBorrows: collateralVault.value.totalBorrowed,
-            cashDelta: collateralAmountNano,
+            cashDelta: collateralCashDelta,
             borrowsDelta: 0n,
           },
           {
@@ -646,23 +649,32 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             borrowsDelta: borrowAmountNano,
           },
         ]),
-        borrowNeedsSwap.value && borrowSwapAssetUsdPrice.value
-          ? Promise.resolve((+collateralAmount.value || 0) * borrowSwapAssetUsdPrice.value)
-          : getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
+        getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
         getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
       ])
       const [collateralProjected, borrowProjected] = projectedRates
 
       if (asyncEstimatesGuard.isStale(gen)) return
 
-      // Apply projected rate deltas on top of current APYs (which include intrinsic APY)
-      const projectedSupplyApy = collateralProjected
-        ? collateralSupplyApy.value + (nanoToValue(collateralProjected.supplyAPY, 25) - getVaultSupplyApy(collateralVault.value))
-        : collateralSupplyApy.value
-
-      const projectedBorrowApy = borrowProjected
-        ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
-        : borrowApy.value
+      const currentSupplyRaw = getVaultSupplyApy(collateralVault.value)
+      const projectedSupplyApy = withProjectedVaultIntrinsicApy(
+        currentSupplyRaw,
+        collateralProjected ? nanoToValue(collateralProjected.supplyAPY, 25) : null,
+        collateralVault.value,
+        enableIntrinsicApy.value,
+      )
+      const currentBorrowRaw = getVaultBorrowApy(borrowVault.value)
+      const projectedBorrowApy = withProjectedVaultIntrinsicApy(
+        currentBorrowRaw,
+        borrowProjected ? nanoToValue(borrowProjected.borrowAPY, 25) : null,
+        borrowVault.value,
+        enableIntrinsicApy.value,
+      )
+      const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+        borrowVault.value.address,
+        [collateralVault.value.address],
+        getPositionMultiplier(collateralUsdValue, borrowUsdValue),
+      )
 
       netAPY.value = getNetAPY(
         collateralUsdValue,
@@ -671,6 +683,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         projectedBorrowApy,
         collateralSupplyRewardApy.value || null,
         borrowRewardApy.value || null,
+        loopingRewardApy || null,
       )
     }
     catch (e) {
@@ -1060,6 +1073,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Watchers ---
   watch([collateralAmount, borrowAmount], () => {
+    asyncEstimatesGuard.next()
     clearBorrowSimulationError()
     if (!pair.value) {
       return
@@ -1112,6 +1126,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   watch(borrowSwapEffectiveQuote, () => {
+    asyncEstimatesGuard.next()
     if (borrowNeedsSwap.value && collateralAmount.value && +ltv.value > 0) {
       onCollateralInput()
     }

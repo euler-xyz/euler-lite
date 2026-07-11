@@ -1,4 +1,4 @@
-import { getNetAPYFromWeightedSupplySnapshot } from '~/utils/vault/apy'
+import { getNetAPYFromWeightedSupplySnapshot, getPositionMultiplier } from '~/utils/vault/apy'
 import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
@@ -131,7 +131,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { finalizeTxAndRedirect } = useTxFinalization()
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
-  const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+  const {
+    getSupplyRewardApy,
+    getBorrowRewardApyForCollaterals,
+    getEligibleLoopingRewardApyForCollaterals,
+  } = useRewardsApy()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -226,7 +230,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   // --- APY block ---
   const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
-  const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
+  const borrowRewardApy = computed(() => getBorrowRewardApyForCollaterals(
+    borrowVault.value?.address || '',
+    position.value?.collateralVaults ?? [],
+  ))
   const collateralSupplyApy = computed(() => {
     if (!collateralVault.value) return 0
     return withVaultIntrinsicApy(
@@ -242,8 +249,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   ))
 
   const netAPY = ref(0)
+  const currentNetApyGuard = createRaceGuard()
 
   watchEffect(async () => {
+    const gen = currentNetApyGuard.next()
     if (!position.value || !borrowVault.value || !collateralVault.value) {
       netAPY.value = 0
       return
@@ -253,6 +262,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       getCollateralApySnapshot(position.value, borrowVault.value),
       getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
     ])
+    if (currentNetApyGuard.isStale(gen)) return
+
+    const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+      borrowVault.value.address,
+      collateralSnapshot.collateralAddresses ?? position.value.collateralVaults ?? [],
+      getPositionMultiplier(collateralSnapshot.supplyUsd, borrowedUsd),
+    )
 
     netAPY.value = getNetAPYFromWeightedSupplySnapshot(
       collateralSnapshot,
@@ -261,6 +277,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       borrowApy.value,
       collateralSupplyRewardApy.value || null,
       borrowRewardApy.value || null,
+      loopingRewardApy || null,
     )
   })
 
@@ -640,6 +657,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
       if (asyncEstimatesGuard.isStale(gen)) return
 
+      const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+        borrowVault.value.address,
+        collateralSnapshot.collateralAddresses ?? position.value.collateralVaults ?? [],
+        getPositionMultiplier(collateralSnapshot.supplyUsd, borrowedUsd),
+      )
+
       estimateNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
         collateralSnapshot,
         collateralSupplyApy.value,
@@ -647,6 +670,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         borrowApy.value,
         collateralSupplyRewardApy.value || null,
         borrowRewardApy.value || null,
+        loopingRewardApy || null,
       )
     }
     catch (e) {
@@ -896,6 +920,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   watch(amount, async () => {
+    asyncEstimatesGuard.next()
     if (!collateralVault.value) return
     // Reset quotes before computing estimates: in swap-supply mode the
     // collateral delta derives from the effective quote, and the previous
@@ -915,6 +940,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // effective quote (and thus the collateral delta) changes, e.g. when quotes
   // arrive after the debounced fetch or the user picks a different provider.
   watch(swapCollateralDeltaNano, (val, old) => {
+    asyncEstimatesGuard.next()
     if (val === null || old === null || val === old) return
     if (!collateralVault.value) return
     updateSyncEstimates()
