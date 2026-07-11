@@ -19,6 +19,8 @@ interface UseRepayHealthMetricsOptions {
   borrowApy: ComputedRef<number | null>
   borrowRewardApy: ComputedRef<number | null>
   nextBorrowRewardApy?: ComputedRef<number | null>
+  collateralSnapshotComplete: Ref<boolean>
+  nextCollateralSnapshotComplete: Ref<boolean>
   collateralAddresses?: Ref<readonly string[]>
   nextCollateralAddresses?: Ref<readonly string[]>
   repayAddsCash?: ComputedRef<boolean>
@@ -41,6 +43,8 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     borrowApy,
     borrowRewardApy,
     nextBorrowRewardApy,
+    collateralSnapshotComplete,
+    nextCollateralSnapshotComplete,
     collateralAddresses,
     nextCollateralAddresses,
     repayAddsCash,
@@ -156,8 +160,9 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     )
   }
 
-  const roeBefore = computed(() =>
-    getRoe(
+  const roeBefore = computed(() => {
+    if (!collateralSnapshotComplete.value) return null
+    return getRoe(
       collateralValueUsd.value,
       collateralSupplyApy.value,
       borrowValueUsd.value,
@@ -165,10 +170,12 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
       null,
       borrowRewardApy.value,
       getLoopingRewardApy(collateralValueUsd.value, borrowValueUsd.value, collateralAddresses?.value),
-    ))
+    )
+  })
 
-  const roeAfter = computed(() =>
-    getRoe(
+  const roeAfter = computed(() => {
+    if (!nextCollateralSnapshotComplete.value) return null
+    return getRoe(
       nextCollateralValueUsd.value,
       nextCollateralSupplyApy?.value ?? collateralSupplyApy.value,
       nextBorrowValueUsd.value,
@@ -176,7 +183,8 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
       null,
       nextBorrowRewardApy?.value ?? borrowRewardApy.value,
       getLoopingRewardApy(nextCollateralValueUsd.value, nextBorrowValueUsd.value, nextCollateralAddresses?.value),
-    ))
+    )
+  })
 
   return {
     currentHealth,

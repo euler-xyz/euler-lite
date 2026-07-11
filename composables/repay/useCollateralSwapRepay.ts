@@ -237,6 +237,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const nextCollateralValueUsd = ref<number | null>(null)
   const collateralAddresses = ref<string[]>([])
   const nextCollateralAddresses = ref<string[]>([])
+  const collateralSnapshotComplete = ref(false)
+  const nextCollateralSnapshotComplete = ref(false)
 
   watchEffect(async () => {
     if (!position.value || !borrowVault.value || !sourceVault.value) {
@@ -246,9 +248,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       nextCollateralValueUsd.value = null
       collateralAddresses.value = []
       nextCollateralAddresses.value = []
+      collateralSnapshotComplete.value = false
+      nextCollateralSnapshotComplete.value = false
       return
     }
     const gen = collateralPortfolioGuard.next()
+    collateralSnapshotComplete.value = false
+    nextCollateralSnapshotComplete.value = false
     const spent = core.spent.value ?? 0n
     const [currentSnapshot, nextSnapshot] = await Promise.all([
       getCollateralApySnapshot(position.value, borrowVault.value),
@@ -267,6 +273,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextCollateralValueUsd.value = nextSnapshot.supplyUsd
     collateralAddresses.value = currentSnapshot.collateralAddresses ?? position.value.collateralVaults ?? []
     nextCollateralAddresses.value = nextSnapshot.collateralAddresses ?? position.value.collateralVaults ?? []
+    collateralSnapshotComplete.value = currentSnapshot.isComplete
+    nextCollateralSnapshotComplete.value = nextSnapshot.isComplete
   })
   const effectiveCollateralSupplyApy = computed(() => weightedCollateralSupplyApy.value ?? collateralSupplyApy.value)
   const effectiveNextCollateralSupplyApy = computed(() => nextWeightedCollateralSupplyApy.value ?? effectiveCollateralSupplyApy.value)
@@ -287,6 +295,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     borrowApy,
     borrowRewardApy,
     nextBorrowRewardApy,
+    collateralSnapshotComplete,
+    nextCollateralSnapshotComplete,
     collateralAddresses,
     nextCollateralAddresses,
     collateralValueUsd,

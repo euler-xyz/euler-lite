@@ -29,7 +29,11 @@ const position = {
   collateralVaults: [VAULT],
 } as unknown as PortfolioBorrowPosition<VaultEntity>
 
-const makeMetrics = (repayAddsCash?: boolean) => useRepayHealthMetrics({
+const makeMetrics = (
+  repayAddsCash?: boolean,
+  collateralSnapshotComplete = true,
+  nextCollateralSnapshotComplete = true,
+) => useRepayHealthMetrics({
   position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
   borrowVault: computed(() => vault),
   debtRepaid: computed(() => 25n),
@@ -39,6 +43,8 @@ const makeMetrics = (repayAddsCash?: boolean) => useRepayHealthMetrics({
   collateralSupplyApy: computed(() => 5),
   borrowApy: computed(() => 5),
   borrowRewardApy: computed(() => 0),
+  collateralSnapshotComplete: ref(collateralSnapshotComplete),
+  nextCollateralSnapshotComplete: ref(nextCollateralSnapshotComplete),
   repayAddsCash: repayAddsCash === undefined ? undefined : computed(() => repayAddsCash),
   collateralValueUsd: ref(100),
   nextCollateralValueUsd: ref(100),
@@ -79,5 +85,13 @@ describe('useRepayHealthMetrics projected utilization', () => {
 
     await vi.waitFor(() => expect(getProjectedRates).toHaveBeenCalled())
     expect(getProjectedRates).toHaveBeenLastCalledWith(VAULT, 100n, 100n, 25n, -25n)
+  })
+
+  it('hides current and next ROE when their collateral snapshots are incomplete', () => {
+    const currentIncomplete = makeMetrics(undefined, false, true)
+    const nextIncomplete = makeMetrics(undefined, true, false)
+
+    expect(currentIncomplete.roeBefore.value).toBeNull()
+    expect(nextIncomplete.roeAfter.value).toBeNull()
   })
 })

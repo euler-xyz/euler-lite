@@ -216,6 +216,8 @@ describe('useSavingsRepay', () => {
       getCollateralApySnapshot: vi.fn(async () => ({
         supplyUsd: 0,
         weightedSupplyApy: 0,
+        collateralAddresses: [],
+        isComplete: true,
       })),
     }))
     vi.stubGlobal('useSwapApi', () => ({
