@@ -8,6 +8,7 @@ import {
   getActiveExternalCollateral,
   getAttributeMatrixColumns,
   getCollateralMatrix,
+  getMiniDiagram,
   getMarketEntities,
   isNodeRampingDown,
   type VaultApyCacheEntry,
@@ -102,6 +103,7 @@ const makeMarket = (
   ({
     vaults,
     externalCollateral,
+    unknownCollateral: [],
   }) as unknown as MarketGroup
 
 describe('isNodeRampingDown', () => {
@@ -111,6 +113,14 @@ describe('isNodeRampingDown', () => {
     const market = makeMarket([borrowVault, collateralVault])
 
     expect(isNodeRampingDown(market, '0xBorrow')).toBe(true)
+  })
+
+  it('marks an external liability vault whose own collateral LTV is ramping down', () => {
+    const member = makeVault('0xMember', [makeLtv({ address: '0xExternal', borrowLTV: 0.7 })])
+    const external = makeVault('0xExternal', [makeLtv({ address: '0xMember' })])
+    const market = makeMarket([member], [external])
+
+    expect(isNodeRampingDown(market, '0xExternal')).toBe(true)
   })
 
   it('does not mark a collateral vault just because another vault is ramping against it', () => {
@@ -140,6 +150,28 @@ describe('isNodeRampingDown', () => {
 })
 
 describe('getCollateralMatrix', () => {
+  it('includes bounded external-vault liabilities without pulling in their unrelated collateral', () => {
+    const usdc = makeVault('0xUsdc', [
+      makeLtv({ address: '0xCoin', borrowLTV: 0.7 }),
+      makeLtv({ address: '0xMstr', borrowLTV: 0.7 }),
+    ])
+    const coin = makeVault('0xCoin', [
+      makeLtv({ address: '0xUsdc', borrowLTV: 0.7 }),
+      makeLtv({ address: '0xMstr', borrowLTV: 0.6 }),
+      makeLtv({ address: '0xUnrelated', borrowLTV: 0.5 }),
+    ])
+    const mstr = makeVault('0xMstr', [])
+    const market = makeMarket([usdc], [coin, mstr])
+
+    const matrix = getCollateralMatrix(market)
+
+    expect(matrix).not.toBeNull()
+    expect(matrix!.columns.map(column => column.address)).toContain('0xcoin')
+    expect(matrix!.cells.get('0xusdc')?.has('0xcoin')).toBe(true)
+    expect(matrix!.cells.get('0xmstr')?.has('0xcoin')).toBe(true)
+    expect(matrix!.rows.map(row => row.address)).not.toContain('0xunrelated')
+  })
+
   it('keeps a vault as a matrix column while its liquidation LTV is still ramping down', () => {
     const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral', borrowLTV: 0 })])
     const collateralVault = makeVault('0xCollateral', [])
@@ -184,6 +216,37 @@ describe('getCollateralMatrix', () => {
       assetAddress: '0xSecuritize',
       category: 'external',
     })
+  })
+})
+
+describe('getMiniDiagram', () => {
+  it('shows relationships among product members and their direct external collateral only', () => {
+    const usdc = makeVault('0xUsdc', [
+      makeLtv({ address: '0xCoin', borrowLTV: 0.7 }),
+      makeLtv({ address: '0xMstr', borrowLTV: 0.7 }),
+    ])
+    const coin = makeVault('0xCoin', [
+      makeLtv({ address: '0xUsdc', borrowLTV: 0.7 }),
+      makeLtv({ address: '0xMstr', borrowLTV: 0.6 }),
+      makeLtv({ address: '0xUnrelated', borrowLTV: 0.5 }),
+    ])
+    const mstr = makeVault('0xMstr', [])
+    const market = makeMarket([usdc], [coin, mstr])
+
+    const diagram = getMiniDiagram(market)
+    const edge = (from: string, to: string) => diagram.edges.find(candidate =>
+      candidate.from.address === from && candidate.to.address === to,
+    )
+
+    expect(diagram.nodes.map(node => node.address).sort()).toEqual([
+      '0xcoin',
+      '0xmstr',
+      '0xusdc',
+    ])
+    expect(edge('0xcoin', '0xusdc')).toMatchObject({ mutual: true })
+    expect(edge('0xmstr', '0xcoin')).toMatchObject({ mutual: false })
+    expect(diagram.pairCount).toBe(4)
+    expect(diagram.nodes.map(node => node.address)).not.toContain('0xunrelated')
   })
 })
 

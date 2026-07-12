@@ -7,6 +7,7 @@ import type { AnyVault } from '~/composables/useVaultRegistry'
 
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import { ltvToPercent } from '~/utils/crypto-utils'
 import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
@@ -183,6 +184,16 @@ const hasLiveDiscoveryColumn = (vault: EVault): boolean =>
 const getDiscoveryColumnVaults = (market: MarketGroup): EVault[] =>
   market.vaults.filter(isEVault).filter(hasLiveDiscoveryColumn)
 
+// Product members define the graph boundary. External collateral is resolved
+// one hop from those members; once resolved, include its relationships only
+// when the other endpoint is already inside that bounded set. This exposes
+// member ↔ external and external ↔ external edges without recursively pulling
+// an external vault's unrelated collateral into the product graph.
+const getBoundedRelationshipVaults = (market: MarketGroup): EVault[] =>
+  [...market.vaults, ...market.externalCollateral]
+    .filter(isEVault)
+    .filter(hasLiveDiscoveryColumn)
+
 const getDiscoveryRowOnlyVaults = (market: MarketGroup): EVault[] =>
   market.vaults.filter(isEVault).filter(v => !hasLiveDiscoveryColumn(v))
 
@@ -231,8 +242,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const connectedAddresses = new Set<string>()
   const connectedUnknownAddresses = new Set<string>()
 
-  for (const vault of market.vaults) {
-    if (!isEVault(vault)) continue
+  for (const vault of getBoundedRelationshipVaults(market)) {
     for (const ltv of vault.collaterals) {
       const colAddr = ltv.address.toLowerCase()
       const isKnown = vaultByAddr.has(colAddr)
@@ -345,7 +355,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
 // ============================================================
 
 export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData | null => {
-  const borrowable = getDiscoveryColumnVaults(market)
+  const borrowable = getBoundedRelationshipVaults(market)
   const nonBorrowable = getDiscoveryRowOnlyVaults(market)
 
   const knownAddresses = new Set<string>()
@@ -565,7 +575,7 @@ export const getGraphConnectedAddresses = (diagram: MiniDiagramData, address: st
 
 export const isNodeRampingDown = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
-  const vault = market.vaults
+  const vault = [...market.vaults, ...market.externalCollateral]
     .filter(isEVault)
     .find(v => v.address.toLowerCase() === normalized)
 
