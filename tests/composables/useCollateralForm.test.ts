@@ -1,4 +1,4 @@
-import { computed, nextTick, ref, shallowRef, getCurrentScope, type Ref } from 'vue'
+import { computed, effectScope, nextTick, ref, shallowRef, getCurrentScope, type EffectScope, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVault, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
@@ -274,25 +274,30 @@ const flush = async () => {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
-const makeForm = (overrides: Partial<UseCollateralFormOptions> = {}) => useCollateralForm({
-  mode: 'supply',
-  needsSwap: computed(() => true),
-  effectiveBalance: computed(() => 1_000_000n * 10n ** 6n),
-  effectiveAsset: computed(() => usdcAsset as VaultAsset),
-  computePriceFixed: () => FixedPoint.fromValue(10n ** 18n, 18),
-  computeLiquidationPrice: () => undefined,
-  validateEstimate: () => {},
-  buildDirectPlan: async () => ({}) as never,
-  buildSwapPlan: async () => ({}) as never,
-  requestSwapQuoteParams: () => null,
-  getSwapOutputAsset: () => wethAsset as VaultAsset,
-  reviewLabel: 'Review Supply',
-  reviewType: 'supply',
-  swapReviewType: 'swap-supply',
-  getReviewAsset: () => wethAsset as VaultAsset,
-  getSwapToAsset: () => wethAsset as VaultAsset,
-  ...overrides,
-})
+const formScopes: EffectScope[] = []
+const makeForm = (overrides: Partial<UseCollateralFormOptions> = {}) => {
+  const scope = effectScope()
+  formScopes.push(scope)
+  return scope.run(() => useCollateralForm({
+    mode: 'supply',
+    needsSwap: computed(() => true),
+    effectiveBalance: computed(() => 1_000_000n * 10n ** 6n),
+    effectiveAsset: computed(() => usdcAsset as VaultAsset),
+    computePriceFixed: () => FixedPoint.fromValue(10n ** 18n, 18),
+    computeLiquidationPrice: () => undefined,
+    validateEstimate: () => {},
+    buildDirectPlan: async () => ({}) as never,
+    buildSwapPlan: async () => ({}) as never,
+    requestSwapQuoteParams: () => null,
+    getSwapOutputAsset: () => wethAsset as VaultAsset,
+    reviewLabel: 'Review Supply',
+    reviewType: 'supply',
+    swapReviewType: 'swap-supply',
+    getReviewAsset: () => wethAsset as VaultAsset,
+    getSwapToAsset: () => wethAsset as VaultAsset,
+    ...overrides,
+  }))!
+}
 
 describe('useCollateralForm', () => {
   beforeEach(async () => {
@@ -366,6 +371,7 @@ describe('useCollateralForm', () => {
   })
 
   afterEach(() => {
+    for (const scope of formScopes.splice(0)) scope.stop()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
@@ -400,7 +406,121 @@ describe('useCollateralForm', () => {
     expect(options?.deltas?.[0]?.projectRates).toBe(true)
   })
 
+  it('swap-supply: keeps projected yield unavailable until a valid quote resolves', async () => {
+    const snapshot = {
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [],
+      isComplete: true,
+    }
+    mocks.getCollateralApySnapshot.mockResolvedValue(snapshot)
+    const swapApi = await getSwapApi()
+    const form = makeForm()
+    await flush()
+    mocks.getCollateralApySnapshot.mockClear()
+
+    form.amount.value = '100'
+    await flush()
+
+    expect(mocks.getCollateralApySnapshot).not.toHaveBeenCalled()
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+
+    const amountOut = 3n * 10n ** 16n
+    swapApi.effectiveQuote.value = {
+      amountIn: (100n * 10n ** 6n).toString(),
+      amountOut: amountOut.toString(),
+      tokenIn: usdcAsset,
+    } as unknown as SwapQuote
+    await flush()
+
+    const projectionCalls = mocks.getCollateralApySnapshot.mock.calls.filter(call => call[2])
+    expect(projectionCalls.length).toBeGreaterThan(0)
+    expect(projectionCalls.every((call) => {
+      const options = call[2] as {
+        deltas?: Array<{ assetsDelta: bigint, projectRates?: boolean }>
+      }
+      const delta = options.deltas?.[0]
+      return delta?.assetsDelta === amountOut && delta.projectRates === true
+    })).toBe(true)
+    expect(form.estimateNetAPY.value).not.toBeNull()
+    expect(form.projectedYieldDetails.value).not.toBeNull()
+  })
+
+  it('swap-supply: clearing the amount invalidates an in-flight projection and late quote', async () => {
+    const snapshot = {
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [],
+      isComplete: true,
+    }
+    let resolveProjection!: (value: typeof snapshot) => void
+    const pendingProjection = new Promise<typeof snapshot>((resolve) => {
+      resolveProjection = resolve
+    })
+    let amountCleared = false
+    let projectionsAfterClear = 0
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => {
+      if (!options) return snapshot
+      if (amountCleared) projectionsAfterClear++
+      return pendingProjection
+    })
+    const swapApi = await getSwapApi()
+    const form = makeForm()
+    await flush()
+
+    form.amount.value = '100'
+    await flush()
+    const staleQuote = {
+      amountIn: (100n * 10n ** 6n).toString(),
+      amountOut: (3n * 10n ** 16n).toString(),
+      tokenIn: usdcAsset,
+    } as unknown as SwapQuote
+    swapApi.effectiveQuote.value = staleQuote
+    await flush()
+    const projectedCallsBeforeClear = mocks.getCollateralApySnapshot.mock.calls
+      .filter(call => call[2]).length
+    expect(projectedCallsBeforeClear).toBeGreaterThan(0)
+
+    amountCleared = true
+    form.amount.value = ''
+    await flush()
+    expect(swapApi.effectiveQuote.value).toBeNull()
+    expect(form.isEstimatesLoading.value).toBe(false)
+
+    // Model a provider response that escaped cancellation. The form-level
+    // amount guard must still keep it from starting another projection.
+    swapApi.effectiveQuote.value = staleQuote
+    await flush()
+    expect(projectionsAfterClear).toBe(0)
+
+    resolveProjection(snapshot)
+    await flush()
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+    expect(form.isEstimatesLoading.value).toBe(false)
+  })
+
   it('swap-supply: clearing quotes resets the collateral delta to zero', async () => {
+    const snapshot = {
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [],
+      isComplete: true,
+    }
+    mocks.getCollateralApySnapshot.mockResolvedValue(snapshot)
     const swapApi = await getSwapApi()
     const form = makeForm()
     await flush()
@@ -414,10 +534,14 @@ describe('useCollateralForm', () => {
     } as unknown as SwapQuote
     await flush()
     expect(form.amountFixed.value.value).toBe(3n * 10n ** 16n)
+    expect(form.estimateNetAPY.value).not.toBeNull()
+    expect(form.projectedYieldDetails.value).not.toBeNull()
 
     swapApi.reset()
     await flush()
     expect(form.amountFixed.value.value).toBe(0n)
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
   })
 
   it('direct supply: amount is parsed with collateral decimals', async () => {
