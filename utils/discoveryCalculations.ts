@@ -27,7 +27,7 @@ export interface MatrixCell {
 
 export interface CollateralMatrixData {
   rows: Array<{ address: string, symbol: string, assetAddress: string, category: 'escrow' | 'external' | 'borrowable' }>
-  columns: Array<{ address: string, symbol: string, assetAddress: string }>
+  columns: Array<{ address: string, symbol: string, assetAddress: string, isExternal: boolean }>
   cells: Map<string, Map<string, MatrixCell>>
   pairCount: number
 }
@@ -359,9 +359,14 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   const nonBorrowable = getDiscoveryRowOnlyVaults(market)
 
   const knownAddresses = new Set<string>()
+  const externalAddresses = new Set<string>()
   for (const v of [...market.vaults, ...market.externalCollateral]) {
     const addr = getVaultAddress(v).toLowerCase()
     if (addr) knownAddresses.add(addr)
+  }
+  for (const v of market.externalCollateral) {
+    const addr = getVaultAddress(v).toLowerCase()
+    if (addr) externalAddresses.add(addr)
   }
 
   const cells = new Map<string, Map<string, MatrixCell>>()
@@ -442,13 +447,21 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
     rows.push({ address: addr, symbol, assetAddress, category })
   }
 
-  for (const v of sortedDiagonal) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
-  for (const v of sortedRowOnly) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'borrowable')
+  const getRelationshipRowCategory = (addr: string): CollateralMatrixData['rows'][0]['category'] =>
+    externalAddresses.has(addr) ? 'external' : 'borrowable'
 
-  // Escrow + external rows always render at the bottom, even when no
-  // borrowable vault references them, so curators can see same-asset escrow
-  // and external collateral at a glance. Rows without cells appear empty —
-  // the dim styling on the label conveys that they're inventory, not active.
+  for (const v of sortedDiagonal) {
+    const addr = v.address.toLowerCase()
+    addRow(addr, v.asset.symbol, v.asset.address, getRelationshipRowCategory(addr))
+  }
+  for (const v of sortedRowOnly) {
+    const addr = v.address.toLowerCase()
+    addRow(addr, v.asset.symbol, v.asset.address, getRelationshipRowCategory(addr))
+  }
+
+  // Non-liability rows render after relationship rows. External relationship
+  // rows stay aligned with their liability columns, while category metadata
+  // keeps every external label visually distinct.
   const sortedNonBorrowable = [...nonBorrowable]
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of sortedNonBorrowable) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'escrow')
@@ -465,8 +478,18 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   for (const v of sortedExternal) addRow(getVaultAddress(v).toLowerCase(), getVaultAssetSymbol(v), getVaultAssetAddress(v), 'external')
 
   const columns: CollateralMatrixData['columns'] = [
-    ...sortedDiagonal.map(v => ({ address: v.address.toLowerCase(), symbol: v.asset.symbol, assetAddress: v.asset.address })),
-    ...sortedColOnly.map(v => ({ address: v.address.toLowerCase(), symbol: v.asset.symbol, assetAddress: v.asset.address })),
+    ...sortedDiagonal.map(v => ({
+      address: v.address.toLowerCase(),
+      symbol: v.asset.symbol,
+      assetAddress: v.asset.address,
+      isExternal: externalAddresses.has(v.address.toLowerCase()),
+    })),
+    ...sortedColOnly.map(v => ({
+      address: v.address.toLowerCase(),
+      symbol: v.asset.symbol,
+      assetAddress: v.asset.address,
+      isExternal: externalAddresses.has(v.address.toLowerCase()),
+    })),
   ]
 
   return { rows, columns, cells, pairCount }
@@ -579,7 +602,20 @@ export const isNodeRampingDown = (market: MarketGroup, address: string): boolean
     .filter(isEVault)
     .find(v => v.address.toLowerCase() === normalized)
 
-  return vault?.collaterals.some(ltv => ltv.isLiquidationLTVRamping) ?? false
+  if (!vault) return false
+
+  const isExternal = market.externalCollateral.some(v => getVaultAddress(v).toLowerCase() === normalized)
+  if (!isExternal) return vault.collaterals.some(ltv => ltv.isLiquidationLTVRamping)
+
+  const displayedAddresses = new Set([
+    ...market.vaults.map(v => getVaultAddress(v).toLowerCase()),
+    ...market.externalCollateral.map(v => getVaultAddress(v).toLowerCase()),
+    ...market.unknownCollateral.map(addr => addr.toLowerCase()),
+  ])
+
+  return vault.collaterals.some(ltv =>
+    ltv.isLiquidationLTVRamping && displayedAddresses.has(ltv.address.toLowerCase()),
+  )
 }
 
 // ============================================================

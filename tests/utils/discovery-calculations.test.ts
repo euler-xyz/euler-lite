@@ -123,6 +123,14 @@ describe('isNodeRampingDown', () => {
     expect(isNodeRampingDown(market, '0xExternal')).toBe(true)
   })
 
+  it('ignores ramping relationships outside the displayed external-vault boundary', () => {
+    const member = makeVault('0xMember', [makeLtv({ address: '0xExternal', borrowLTV: 0.7 })])
+    const external = makeVault('0xExternal', [makeLtv({ address: '0xUnrelated' })])
+    const market = makeMarket([member], [external])
+
+    expect(isNodeRampingDown(market, '0xExternal')).toBe(false)
+  })
+
   it('does not mark a collateral vault just because another vault is ramping against it', () => {
     const borrowVault = makeVault('0xBorrow', [makeLtv({ address: '0xCollateral' })])
     const collateralVault = makeVault('0xCollateral', [])
@@ -167,8 +175,10 @@ describe('getCollateralMatrix', () => {
 
     expect(matrix).not.toBeNull()
     expect(matrix!.columns.map(column => column.address)).toContain('0xcoin')
+    expect(matrix!.columns.find(column => column.address === '0xcoin')).toMatchObject({ isExternal: true })
     expect(matrix!.cells.get('0xusdc')?.has('0xcoin')).toBe(true)
     expect(matrix!.cells.get('0xmstr')?.has('0xcoin')).toBe(true)
+    expect(matrix!.rows.find(row => row.address === '0xcoin')).toMatchObject({ category: 'external' })
     expect(matrix!.rows.map(row => row.address)).not.toContain('0xunrelated')
   })
 
