@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { getNetAPY, getPositionMultiplier, getProjectedRatesBatch, getRoe, type ProjectedRates } from '~/utils/vault/apy'
+import { areProjectedRatesComplete, getNetAPY, getPositionMultiplier, getProjectedRatesBatch, getRoe, type ProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -214,6 +214,7 @@ const multiplyCurrentMultiple = computed(() => {
   return Math.min(rounded, multiplyMaxMultiplier.value || rounded)
 })
 const projectedBorrowRates = ref<ProjectedRates | null>(null)
+const projectedBorrowRatesComplete = ref(false)
 const projectedRatesGuard = createRaceGuard()
 
 watchEffect(async () => {
@@ -223,11 +224,14 @@ watchEffect(async () => {
 
   if (!short || !debtNano) {
     projectedBorrowRates.value = null
+    projectedBorrowRatesComplete.value = false
     return
   }
 
+  projectedBorrowRatesComplete.value = false
+
   try {
-    const [shortResult] = await getProjectedRatesBatch([
+    const projectedRates = await getProjectedRatesBatch([
       {
         vaultAddress: short.address,
         currentCash: short.totalCash,
@@ -237,16 +241,20 @@ watchEffect(async () => {
       },
     ])
     if (projectedRatesGuard.isStale(gen)) return
+    if (!areProjectedRatesComplete(projectedRates, 1)) return
+    const [shortResult] = projectedRates
     projectedBorrowRates.value = shortResult
+    projectedBorrowRatesComplete.value = true
   }
   catch (e) {
     if (projectedRatesGuard.isStale(gen)) return
     console.warn('[Multiply] failed to project rates', e)
     projectedBorrowRates.value = null
+    projectedBorrowRatesComplete.value = false
   }
 })
 const multiplyBorrowApy = computed(() => {
-  if (!multiplyShortVault.value) {
+  if (!multiplyShortVault.value || !projectedBorrowRatesComplete.value) {
     return null
   }
   const currentRaw = getVaultBorrowApy(multiplyShortVault.value)

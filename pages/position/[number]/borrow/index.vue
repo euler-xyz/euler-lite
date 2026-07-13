@@ -457,11 +457,15 @@ const updateAsyncEstimates = useDebounceFn(async () => {
     ])
 
     if (asyncEstimatesGuard.isStale(gen)) return
+    if (!borrowProjected || !collateralSnapshot.isComplete) {
+      netAPY.value = undefined
+      return
+    }
 
     const currentRaw = getVaultBorrowApy(borrowVault.value)
     const projectedBorrowApy = withProjectedVaultIntrinsicApy(
       currentRaw,
-      borrowProjected ? nanoToValue(borrowProjected.borrowAPY, 25) : null,
+      nanoToValue(borrowProjected.borrowAPY, 25),
       borrowVault.value,
       enableIntrinsicApy.value,
     )

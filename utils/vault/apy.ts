@@ -16,6 +16,13 @@ export interface ProjectedRatesRequest {
   borrowsDelta: bigint
 }
 
+export const areProjectedRatesComplete = (
+  projectedRates: readonly (ProjectedRates | null)[],
+  expectedCount: number,
+): projectedRates is readonly ProjectedRates[] =>
+  projectedRates.length === expectedCount
+  && projectedRates.every((projected): projected is ProjectedRates => projected !== null)
+
 const toAdjustedRateState = (request: ProjectedRatesRequest) => {
   const adjustedCash = request.currentCash + request.cashDelta < 0n ? 0n : request.currentCash + request.cashDelta
   const adjustedBorrows = request.currentBorrows + request.borrowsDelta < 0n ? 0n : request.currentBorrows + request.borrowsDelta

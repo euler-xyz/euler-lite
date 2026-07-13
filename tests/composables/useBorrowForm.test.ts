@@ -116,6 +116,8 @@ vi.mock('~/utils/sdk-prices', () => ({
 }))
 
 vi.mock('~/utils/vault/apy', () => ({
+  areProjectedRatesComplete: (projectedRates: unknown[], expectedCount: number) =>
+    projectedRates.length === expectedCount && projectedRates.every(projected => projected !== null),
   getProjectedRates: vi.fn(async () => null),
   getProjectedRatesBatch: mocks.getProjectedRatesBatch,
   getNetAPY: vi.fn(() => 0),

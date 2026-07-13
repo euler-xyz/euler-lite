@@ -1,7 +1,7 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getProjectedRatesBatch, getNetAPY, getPositionMultiplier } from '~/utils/vault/apy'
+import { areProjectedRatesComplete, getProjectedRatesBatch, getNetAPY, getPositionMultiplier } from '~/utils/vault/apy'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
@@ -652,9 +652,12 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
         getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
       ])
-      const [collateralProjected, borrowProjected] = projectedRates
-
       if (asyncEstimatesGuard.isStale(gen)) return
+      if (!areProjectedRatesComplete(projectedRates, 2)) {
+        netAPY.value = undefined
+        return
+      }
+      const [collateralProjected, borrowProjected] = projectedRates
 
       const currentSupplyRaw = getVaultSupplyApy(collateralVault.value)
       const projectedSupplyApy = withProjectedVaultIntrinsicApy(

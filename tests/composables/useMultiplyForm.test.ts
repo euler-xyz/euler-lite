@@ -58,7 +58,7 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
         message: 'The supply cap has been reached. New deposits will fail.',
       })),
       getBorrowCapWarning: vi.fn(() => null),
-      getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
+      getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n }))),
       getNetAPY: vi.fn(() => 0.125),
     },
   }
@@ -137,6 +137,8 @@ vi.mock('~/utils/sdk-prices', () => ({
 }))
 
 vi.mock('~/utils/vault/apy', () => ({
+  areProjectedRatesComplete: (projectedRates: unknown[], expectedCount: number) =>
+    projectedRates.length === expectedCount && projectedRates.every(projected => projected !== null),
   getProjectedRates: vi.fn(async () => null),
   getProjectedRatesBatch: mocks.getProjectedRatesBatch,
   getNetAPY: mocks.getNetAPY,
@@ -337,5 +339,17 @@ describe('useMultiplyForm cap validation', () => {
 
     await vi.waitFor(() => expect(form.multiplyNetApyAfter.value).toBe(0.125))
     expect(mocks.getNetAPY).toHaveBeenCalledWith(0, 0, 0, 0, null, null, null)
+  })
+
+  it('hides projected APY when a requested rate is unavailable', async () => {
+    mocks.getProjectedRatesBatch.mockResolvedValueOnce([null])
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
+    expect(form.multiplyNetApyAfter.value).toBeNull()
   })
 })

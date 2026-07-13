@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { getProjectedRatesBatch } from '~/utils/vault/apy'
+import { areProjectedRatesComplete, getProjectedRatesBatch } from '~/utils/vault/apy'
 
 const { batchLensCalls, getEulerSdk } = vi.hoisted(() => ({
   batchLensCalls: vi.fn(),
@@ -88,5 +88,21 @@ describe('getProjectedRatesBatch', () => {
       '0x0000000000000000000000000000000000000040',
       '0x0000000000000000000000000000000000000030',
     ])
+  })
+})
+
+describe('areProjectedRatesComplete', () => {
+  const projected = { supplyAPY: 1n, borrowAPY: 2n }
+
+  it('accepts a complete projected-rate batch', () => {
+    expect(areProjectedRatesComplete([projected, projected], 2)).toBe(true)
+  })
+
+  it('rejects an explicit null result', () => {
+    expect(areProjectedRatesComplete([projected, null], 2)).toBe(false)
+  })
+
+  it('rejects a short result array', () => {
+    expect(areProjectedRatesComplete([projected], 2)).toBe(false)
   })
 })

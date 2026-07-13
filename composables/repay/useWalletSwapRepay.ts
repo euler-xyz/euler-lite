@@ -522,11 +522,15 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         getAssetUsdValueOrZero(nextBorrowed > 0n ? nextBorrowed : 0n, borrowVault.value, 'off-chain'),
       ])
       if (estimatesGuard.isStale(gen)) return
+      if (!projected || !collateralSnapshot.isComplete) {
+        _estimateNetAPY.value = null
+        return
+      }
 
       const currentRaw = getVaultBorrowApy(borrowVault.value)
       const projectedBorrowApy = withProjectedVaultIntrinsicApy(
         currentRaw,
-        projected ? nanoToValue(projected.borrowAPY, 25) : null,
+        nanoToValue(projected.borrowAPY, 25),
         borrowVault.value,
         enableIntrinsicApy.value,
       )

@@ -44,7 +44,7 @@ import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/v
 import { isRoeStateApplicable } from '~/utils/position-roe'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros, formatUsdValue } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
-import { getPositionMultiplier, getProjectedRatesBatch, getRoe, type ProjectedRates } from '~/utils/vault/apy'
+import { areProjectedRatesComplete, getPositionMultiplier, getProjectedRatesBatch, getRoe, type ProjectedRates } from '~/utils/vault/apy'
 import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
@@ -1666,8 +1666,15 @@ watchEffect(async () => {
     ])
     if (nextRefinanceEstimateGuard.isStale(gen)) return
 
+    if (!areProjectedRatesComplete(projectedRates, projectionEntries.length)) {
+      nextSupplyPortfolioValue.value = null
+      nextBorrowValueUsd.value = null
+      projectedNextBorrowApy.value = null
+      return
+    }
+
     const projectedByAddress = new Map(
-      projectionEntries.map((projection, index) => [projection.address, projectedRates[index] ?? null]),
+      projectionEntries.map((projection, index) => [projection.address, projectedRates[index]]),
     )
     const portfolioValue = await getCollateralPortfolioValue(legs, projectedByAddress)
     if (nextRefinanceEstimateGuard.isStale(gen)) return
