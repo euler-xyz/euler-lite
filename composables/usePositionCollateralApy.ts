@@ -141,6 +141,12 @@ export const usePositionCollateralApy = () => {
       const projectedRates = projectionRequests.length
         ? await getProjectedRatesBatch(projectionRequests.map(item => item.request))
         : []
+      if (
+        projectedRates.length !== projectionRequests.length
+        || projectedRates.some(projected => projected === null)
+      ) {
+        return incompleteSnapshot()
+      }
       const projectedByIndex = new Map(projectionRequests.map((item, index) => [item.index, projectedRates[index]]))
 
       const valued = await Promise.all(entries.map(async (entry, index) => {

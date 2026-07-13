@@ -90,6 +90,20 @@ describe('usePositionCollateralApy', () => {
     expect(snapshot.isComplete).toBe(true)
   })
 
+  it('fails closed when a requested projected rate is unavailable', async () => {
+    getProjectedRatesBatch.mockResolvedValueOnce([null])
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+
+    await expect(getCollateralApySnapshot(makePosition(), liabilityVault, {
+      deltas: [{ vaultAddress: VAULT_A, assetsDelta: 50n, projectRates: true }],
+    })).resolves.toEqual({
+      supplyUsd: 0,
+      weightedSupplyApy: null,
+      collateralAddresses: [],
+      isComplete: false,
+    })
+  })
+
   it('fails closed when an expected collateral position is unresolved', async () => {
     const { getCollateralApySnapshot } = usePositionCollateralApy()
     const position = makePosition([VAULT_A, VAULT_B, LIABILITY])
