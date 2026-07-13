@@ -1,6 +1,6 @@
 import { computed, nextTick, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, PortfolioSavingsPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, type Account, type EVault, type IHasVaultAddress, type PortfolioBorrowPosition, type PortfolioSavingsPosition, type SwapQuote, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 
 const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted(() => {
@@ -50,6 +50,11 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
       swapQuoteOptions: [] as Array<{
         buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: { account?: Account<IHasVaultAddress> }) => Promise<TransactionPlan>
         getPlanAccount?: () => Account<IHasVaultAddress> | string | undefined
+      }>,
+      swapQuoteInstances: [] as Array<{
+        amountField: 'amountIn' | 'amountOut'
+        selectedQuote: { value: SwapQuote | null }
+        effectiveQuote: { value: SwapQuote | null }
       }>,
       getSavingsPosition: vi.fn(),
       planRepayFromSource: vi.fn(),
@@ -156,14 +161,22 @@ vi.mock('~/composables/useRepaySavingsOptions', () => ({
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
   useSwapQuotesParallel: (options: {
+    amountField: 'amountIn' | 'amountOut'
     buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: { account?: Account<IHasVaultAddress> }) => Promise<TransactionPlan>
   }) => {
     mocks.swapQuoteOptions.push(options)
+    const selectedQuote = ref<SwapQuote | null>(null)
+    const effectiveQuote = ref<SwapQuote | null>(null)
+    mocks.swapQuoteInstances.push({
+      amountField: options.amountField,
+      selectedQuote,
+      effectiveQuote,
+    })
     return {
       sortedQuoteCards: ref([]),
       selectedProvider: ref(null),
-      selectedQuote: ref(null),
-      effectiveQuote: ref(null),
+      selectedQuote,
+      effectiveQuote,
       effectiveQuoteFetchedAt: ref(null),
       providersCount: ref(0),
       isLoading: ref(false),
@@ -201,6 +214,7 @@ describe('useSavingsRepay', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.swapQuoteOptions.length = 0
+    mocks.swapQuoteInstances.length = 0
     mocks.healthOptions.length = 0
     mocks.planRepayFromSource.mockResolvedValue({ type: 'repay-plan' } as unknown as TransactionPlan)
     mocks.getCollateralApySnapshot.mockResolvedValue({
@@ -418,6 +432,56 @@ describe('useSavingsRepay', () => {
           vaultAddress: VAULT,
           assetsDelta: 0n,
           cashDelta: -100n,
+          projectRates: true,
+        }],
+      },
+    ))
+  })
+
+  it('projects the TARGET_DEBT maximum input withdrawn from overlapping savings collateral', async () => {
+    const overlapPosition = {
+      ...position,
+      borrow: borrowVault,
+      collateralVaults: [VAULT],
+    } as unknown as PortfolioBorrowPosition<VaultEntity>
+    const repay = useSavingsRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(overlapPosition),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => overlapPosition.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    repay.initVault()
+    mocks.getCollateralApySnapshot.mockClear()
+    repay.direction.value = SwapperMode.TARGET_DEBT
+    const targetDebt = mocks.swapQuoteInstances.find(instance => instance.amountField === 'amountIn')!
+    const quote = {
+      amountIn: '100',
+      amountInMax: '110',
+      amountOut: '200',
+    } as SwapQuote
+    targetDebt.selectedQuote.value = quote
+    targetDebt.effectiveQuote.value = quote
+
+    await vi.waitFor(() => expect(mocks.getCollateralApySnapshot).toHaveBeenCalledWith(
+      overlapPosition,
+      borrowVault,
+      {
+        deltas: [{
+          vaultAddress: VAULT,
+          assetsDelta: 0n,
+          cashDelta: -110n,
           projectRates: true,
         }],
       },

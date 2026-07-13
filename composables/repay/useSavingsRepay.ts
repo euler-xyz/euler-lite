@@ -114,6 +114,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     position,
     borrowVault,
     sourceVault,
+    sourceAssets,
     sourceBalance,
     formTab,
     formTabName: 'savings',

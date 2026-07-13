@@ -8,6 +8,7 @@ import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
+import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { type Address, formatUnits, zeroAddress } from 'viem'
 import type { Ref, ComputedRef } from 'vue'
@@ -21,7 +22,7 @@ export interface UseRepaySwapCoreOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
   borrowVault: ComputedRef<EVault | undefined>
   sourceVault: Ref<EVault | undefined>
-  sourceAssets?: Readonly<Ref<bigint>>
+  sourceAssets: Readonly<Ref<bigint>>
   sourceShares?: Readonly<Ref<bigint>>
   sourceBalance: ComputedRef<bigint>
   formTab: Ref<string>
@@ -99,9 +100,20 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       }
       return null
     }
-    if (!quotes.quote.value) return null
+    const quote = quotes.quote.value
+    if (!quote) return null
     try {
-      return BigInt(quotes.quote.value.amountIn || 0)
+      // Validate with the SDK's strict bigint semantics before using the UI
+      // helper, which intentionally parses display data defensively.
+      const amountIn = BigInt(quote.amountIn || 0)
+      const amountInMax = BigInt(quote.amountInMax || 0)
+      if (amountIn < 0n || amountInMax < 0n) return null
+      const requestedInput = getSwapInputAmount(quote, direction.value)
+      const availableAssets = sourceAssets.value > 0n ? sourceAssets.value : 0n
+      // The SDK withdraw is capped by the live source-position assets. If even
+      // the quoted (pre-slippage) input is unavailable, no after-state exists.
+      if (amountIn > availableAssets) return null
+      return requestedInput < availableAssets ? requestedInput : availableAssets
     }
     catch { return null }
   })
@@ -122,7 +134,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       }
       return null
     }
-    if (!quotes.quote.value) return null
+    if (!quotes.quote.value || spent.value === null) return null
     try {
       return BigInt(quotes.quote.value.amountOut || 0)
     }
@@ -196,6 +208,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     clearSimulationError()
     debtAmount.value = ''
     direction.value = SwapperMode.EXACT_IN
+    quotes.reset()
     requestQuote()
   }
 
@@ -203,6 +216,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     clearSimulationError()
     amount.value = ''
     direction.value = SwapperMode.TARGET_DEBT
+    quotes.reset()
     const currentDebt = getCurrentDebt()
     let amountNano: bigint
     try {
@@ -219,11 +233,11 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     clearSimulationError()
     amount.value = ''
     direction.value = SwapperMode.TARGET_DEBT
+    quotes.reset()
     const currentDebt = getCurrentDebt()
     if (!borrowVault.value || currentDebt <= 0n) {
       debtAmount.value = ''
       debtPercent.value = 0
-      quotes.reset()
       return
     }
     const amountNano = percentToAmountNano(debtPercent.value, currentDebt)
@@ -260,6 +274,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     if (!sourceVault.value || !borrowVault.value) return
     const currentDebt = getCurrentDebt()
     if (currentDebt <= 0n) return
+    quotes.reset()
 
     const sourceDecimals = Number(sourceVault.value.asset.decimals)
     const borrowDecimals = Number(borrowVault.value.asset.decimals)
@@ -308,7 +323,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     if (!sourceVault.value || sourceBalance.value <= 0n) return 0n
 
     const sharesValue = sourceShares?.value ?? 0n
-    const assetsValue = sourceAssets?.value ?? 0n
+    const assetsValue = sourceAssets.value
 
     if (sourceBalance.value < assetsValue) {
       // Cash-limited withdraw — need to convert the balance to shares.
@@ -472,6 +487,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     () => {
       clearSimulationError()
       if (amount.value || debtAmount.value) {
+        quotes.reset()
         requestQuote()
       }
     },
