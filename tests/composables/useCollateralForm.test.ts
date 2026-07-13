@@ -820,6 +820,122 @@ describe('useCollateralForm', () => {
     expect(form.projectedYieldDetails.value?.rateLines[0]?.after).toBe(1)
   })
 
+  it('clears the current yield baseline while its replacement is in flight', async () => {
+    const snapshot = (baseSupplyApy: number) => ({
+      supplyUsd: 100,
+      weightedSupplyApy: baseSupplyApy,
+      weightedBaseSupplyApy: baseSupplyApy,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [{
+        address: COLLATERAL_VAULT,
+        vault: collateralVault,
+        assets: 10n * 10n ** 18n,
+        supplyUsd: 100,
+        baseSupplyApy,
+        intrinsicSupplyApy: 0,
+        supplyRewardApy: 0,
+        totalSupplyApy: baseSupplyApy,
+        supplyCampaigns: [],
+      }],
+      isComplete: true,
+    })
+    let replacementPending = false
+    let resolveReplacement!: (value: ReturnType<typeof snapshot>) => void
+    const replacement = new Promise<ReturnType<typeof snapshot>>((resolve) => {
+      resolveReplacement = resolve
+    })
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => {
+      if (options) return snapshot(2)
+      return replacementPending ? replacement : snapshot(5)
+    })
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+    expect(form.netAPY.value).toBe(5)
+
+    form.amount.value = '1'
+    await flush()
+    expect(form.projectedYieldDetails.value?.before?.total).toBe(5)
+
+    replacementPending = true
+    rewardsVersion.value++
+    await nextTick()
+    expect(form.netAPY.value).toBeNull()
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+
+    form.amount.value = '2'
+    await flush()
+    expect(form.projectedYieldDetails.value?.before).toBeNull()
+
+    resolveReplacement(snapshot(7))
+    await flush()
+    expect(form.netAPY.value).toBe(7)
+    expect(form.projectedYieldDetails.value?.before?.total).toBe(7)
+  })
+
+  it('invalidates a pending projection when the replacement baseline rejects', async () => {
+    const currentSnapshot = {
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [],
+      isComplete: true,
+    }
+    let replacementPending = false
+    let rejectReplacement!: (reason?: unknown) => void
+    let resolveProjection!: (value: typeof currentSnapshot) => void
+    const replacement = new Promise<typeof currentSnapshot>((_resolve, reject) => {
+      rejectReplacement = reject
+    })
+    const projection = new Promise<typeof currentSnapshot>((resolve) => {
+      resolveProjection = resolve
+    })
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => {
+      if (options) return projection
+      return replacementPending ? replacement : currentSnapshot
+    })
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+    expect(form.netAPY.value).toBe(5)
+
+    replacementPending = true
+    rewardsVersion.value++
+    await nextTick()
+    expect(form.netAPY.value).toBeNull()
+
+    form.amount.value = '1'
+    await nextTick()
+    expect(form.isEstimatesLoading.value).toBe(true)
+
+    rejectReplacement(new Error('baseline failed'))
+    await flush()
+
+    expect(form.netAPY.value).toBeNull()
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+    expect(form.isEstimatesLoading.value).toBe(false)
+
+    resolveProjection(currentSnapshot)
+    await flush()
+
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+    expect(form.isEstimatesLoading.value).toBe(false)
+  })
+
   it('clears estimate loading when the position disappears during a projection', async () => {
     const snapshot = {
       supplyUsd: 100,

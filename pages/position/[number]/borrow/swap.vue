@@ -38,7 +38,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
-import { buildRefinanceProjectedRateRequests } from '~/utils/refinance-apy'
+import { buildRefinanceProjectedRateRequests, getSameAssetRefinanceBorrowAmount } from '~/utils/refinance-apy'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { isRoeStateApplicable } from '~/utils/position-roe'
@@ -221,7 +221,7 @@ const externalCollateralOptionsEmptyDescription = computed(() =>
 )
 const inboundBorrowAmountWithBuffer = computed(() => {
   const debt = externalDebtAsset.value?.amount ?? 0n
-  return debt > 0n ? (debt * 10_100n) / 10_000n : 0n
+  return getSameAssetRefinanceBorrowAmount(debt, true)
 })
 const externalSourcePairLabel = computed(() => {
   const collateral = externalCollateralAsset.value?.symbol ?? ''
@@ -1591,7 +1591,9 @@ const nextDebtAmountNano = computed<bigint | null>(() => {
   if (!effectiveDebtVault.value) return null
   if (!hasDebtChange.value) return currentDebt.value
   if (!targetDebtVault.value) return null
-  if (isSameDebtAsset.value) return currentDebt.value
+  if (isSameDebtAsset.value) {
+    return getSameAssetRefinanceBorrowAmount(currentDebt.value, isExternalSourceRoute.value)
+  }
   if (!activeDebtQuote.value) return null
   return getSwapInputAmount(activeDebtQuote.value, SwapperMode.TARGET_DEBT)
 })

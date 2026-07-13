@@ -1,4 +1,16 @@
 import type { ProjectedRatesRequest } from '~/utils/vault/apy'
+import { BPS_BASE } from '~/entities/tuning-constants'
+import { adjustForInterest } from '~/utils/adjust-for-interest'
+
+const EXTERNAL_MIGRATION_INTEREST_BUFFER_BPS = 100n
+
+/** Target-vault debt opened by a same-asset refinance after execution cushions. */
+export const getSameAssetRefinanceBorrowAmount = (currentDebt: bigint, isExternalSource: boolean) => {
+  if (currentDebt <= 0n) return 0n
+  return isExternalSource
+    ? (currentDebt * (BPS_BASE + EXTERNAL_MIGRATION_INTEREST_BUFFER_BPS)) / BPS_BASE
+    : adjustForInterest(currentDebt)
+}
 
 export interface RefinanceRateVault {
   address: string

@@ -368,12 +368,15 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     void enableIntrinsicApy.value
     asyncEstimatesGuard.next()
     clearProjectedYieldEstimate()
+    // The previous context belongs to the inputs that triggered the prior
+    // generation. Keep it unavailable while the replacement loads so a new
+    // after-state cannot pair with a stale before-state.
+    netAPY.value = null
+    currentYieldContext.value = null
+    isEstimatesLoading.value = false
     const currentPosition = position.value
     const currentBorrowVault = borrowVault.value
     if (!currentPosition || !currentBorrowVault || !collateralVault.value) {
-      netAPY.value = null
-      currentYieldContext.value = null
-      isEstimatesLoading.value = false
       return
     }
     const fallbackBaseSupplyApy = collateralBaseSupplyApy.value
@@ -382,56 +385,67 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     const currentBaseBorrowApy = borrowBaseApy.value
     const currentTotalBorrowApy = borrowApy.value
 
-    const [collateralSnapshot, borrowedUsd] = await Promise.all([
-      getCollateralApySnapshot(currentPosition, currentBorrowVault),
-      getAssetUsdValueOrZero(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
-    ])
-    if (currentNetApyGuard.isStale(gen)) return
+    try {
+      const [collateralSnapshot, borrowedUsd] = await Promise.all([
+        getCollateralApySnapshot(currentPosition, currentBorrowVault),
+        getAssetUsdValueOrZero(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
+      ])
+      if (currentNetApyGuard.isStale(gen)) return
 
-    const currentBorrowCollateralAddresses = currentPosition.collateralVaults ?? []
-    const currentBorrowRewardApy = getBorrowRewardApyForCollaterals(
-      currentBorrowVault.address,
-      currentBorrowCollateralAddresses,
-    )
-    const currentLoopingCollateralAddresses = collateralSnapshot.collateralAddresses
-      ?? currentBorrowCollateralAddresses
-    const multiplier = getPositionMultiplier(collateralSnapshot.supplyUsd, borrowedUsd)
-    const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
-      currentBorrowVault.address,
-      currentLoopingCollateralAddresses,
-      multiplier,
-    )
-
-    const currentState = getNetApyYieldState({
-      snapshot: collateralSnapshot,
-      borrowedUsd,
-      fallbackBaseSupplyApy,
-      fallbackTotalSupplyApy,
-      fallbackSupplyRewardApy,
-      baseBorrowApy: currentBaseBorrowApy,
-      totalBorrowApy: currentTotalBorrowApy,
-      borrowRewardApy: currentBorrowRewardApy,
-      loopingRewardApy,
-    })
-    if (!currentState) {
-      netAPY.value = null
-      currentYieldContext.value = null
-      isEstimatesLoading.value = false
-      return
-    }
-
-    netAPY.value = currentState.total
-    currentYieldContext.value = {
-      key: getYieldContextKey(currentPosition.subAccount, currentBorrowVault.address),
-      snapshot: collateralSnapshot,
-      state: currentState,
-      campaigns: getYieldCampaignInputs(
-        collateralSnapshot,
+      const currentBorrowCollateralAddresses = currentPosition.collateralVaults ?? []
+      const currentBorrowRewardApy = getBorrowRewardApyForCollaterals(
         currentBorrowVault.address,
         currentBorrowCollateralAddresses,
+      )
+      const currentLoopingCollateralAddresses = collateralSnapshot.collateralAddresses
+        ?? currentBorrowCollateralAddresses
+      const multiplier = getPositionMultiplier(collateralSnapshot.supplyUsd, borrowedUsd)
+      const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+        currentBorrowVault.address,
         currentLoopingCollateralAddresses,
         multiplier,
-      ),
+      )
+
+      const currentState = getNetApyYieldState({
+        snapshot: collateralSnapshot,
+        borrowedUsd,
+        fallbackBaseSupplyApy,
+        fallbackTotalSupplyApy,
+        fallbackSupplyRewardApy,
+        baseBorrowApy: currentBaseBorrowApy,
+        totalBorrowApy: currentTotalBorrowApy,
+        borrowRewardApy: currentBorrowRewardApy,
+        loopingRewardApy,
+      })
+      if (!currentState) {
+        asyncEstimatesGuard.next()
+        clearProjectedYieldEstimate()
+        isEstimatesLoading.value = false
+        return
+      }
+
+      netAPY.value = currentState.total
+      currentYieldContext.value = {
+        key: getYieldContextKey(currentPosition.subAccount, currentBorrowVault.address),
+        snapshot: collateralSnapshot,
+        state: currentState,
+        campaigns: getYieldCampaignInputs(
+          collateralSnapshot,
+          currentBorrowVault.address,
+          currentBorrowCollateralAddresses,
+          currentLoopingCollateralAddresses,
+          multiplier,
+        ),
+      }
+    }
+    catch (e) {
+      if (currentNetApyGuard.isStale(gen)) return
+      logWarn('collateral/currentNetApy', e)
+      asyncEstimatesGuard.next()
+      netAPY.value = null
+      currentYieldContext.value = null
+      clearProjectedYieldEstimate()
+      isEstimatesLoading.value = false
     }
   })
 

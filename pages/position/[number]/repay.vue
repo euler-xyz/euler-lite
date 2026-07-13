@@ -2,14 +2,11 @@
 import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { maxUint256, type Address } from 'viem'
 import type { VaultAsset } from '~/types/asset'
-import { getNetAPYFromWeightedSupplySnapshot, getPositionMultiplier } from '~/utils/vault/apy'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, SwapTokenSelector } from '#components'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { createRaceGuard } from '~/utils/race-guard'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -18,6 +15,7 @@ import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
+import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
@@ -35,16 +33,7 @@ const { planRepayFromWallet } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
-const {
-  version: rewardsVersion,
-  getSupplyRewardApy,
-  getBorrowRewardApyForCollaterals,
-  getEligibleLoopingRewardApyForCollaterals,
-} = useRewardsApy()
-const { getCollateralApySnapshot } = usePositionCollateralApy()
 const { getTokenCategoryTags } = useTokenList()
-const { settings } = useUserSettings()
-const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -111,64 +100,16 @@ const liqPriceFromHealth = (health: number | null | undefined): number | null =>
 }
 
 // --- APYs ---
-const collateralSupplyRewardApy = computed(() => {
-  void rewardsVersion.value
-  return getSupplyRewardApy(collateralVault.value?.address || '')
-})
-const borrowRewardApy = computed(() => {
-  void rewardsVersion.value
-  return getBorrowRewardApyForCollaterals(
-    borrowVault.value?.address || '',
-    position.value?.collateralVaults ?? [],
-  )
-})
-const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
-  getVaultSupplyApy(collateralVault.value),
-  collateralVault.value,
-  enableIntrinsicApy.value,
-))
-const borrowApy = computed(() => withVaultIntrinsicApy(
-  getVaultBorrowApy(borrowVault.value),
-  borrowVault.value,
-  enableIntrinsicApy.value,
-))
-
-const netApyGuard = createRaceGuard()
-const netAPY = ref<number | null>(null)
-watchEffect(async () => {
-  const gen = netApyGuard.next()
-  void rewardsVersion.value
-  const currentPosition = position.value
-  const currentCollateralVault = collateralVault.value
-  const currentBorrowVault = borrowVault.value
-  const currentCollateralSupplyApy = collateralSupplyApy.value
-  const currentBorrowApy = borrowApy.value
-  const currentCollateralSupplyRewardApy = collateralSupplyRewardApy.value
-  const currentBorrowRewardApy = borrowRewardApy.value
-
-  if (!currentPosition || !currentCollateralVault || !currentBorrowVault) {
-    netAPY.value = null
-    return
-  }
-  const [collateralSnapshot, borrowUsd] = await Promise.all([
-    getCollateralApySnapshot(currentPosition, currentBorrowVault),
-    getAssetUsdValueOrZero(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
-  ])
-  if (netApyGuard.isStale(gen)) return
-  const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
-    currentBorrowVault.address,
-    collateralSnapshot.collateralAddresses ?? currentPosition.collateralVaults ?? [],
-    getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
-  )
-  netAPY.value = getNetAPYFromWeightedSupplySnapshot(
-    collateralSnapshot,
-    currentCollateralSupplyApy,
-    borrowUsd,
-    currentBorrowApy,
-    currentCollateralSupplyRewardApy || null,
-    currentBorrowRewardApy || null,
-    loopingRewardApy || null,
-  )
+const {
+  netAPY,
+  collateralSupplyApy,
+  borrowApy,
+  collateralSupplyRewardApy,
+  borrowRewardApy,
+} = useRepayNetApy({
+  position,
+  borrowVault,
+  collateralVault,
 })
 
 // --- Tab composables ---

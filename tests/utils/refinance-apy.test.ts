@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRefinanceProjectedRateRequests } from '~/utils/refinance-apy'
+import { buildRefinanceProjectedRateRequests, getSameAssetRefinanceBorrowAmount } from '~/utils/refinance-apy'
 
 const source = {
   address: '0x0000000000000000000000000000000000000001',
@@ -80,5 +80,15 @@ describe('buildRefinanceProjectedRateRequests', () => {
       { vault: target, cashDelta: -100n },
       { vault: target, cashDelta: 100n },
     ])).toEqual([])
+  })
+})
+
+describe('getSameAssetRefinanceBorrowAmount', () => {
+  it('matches the SDK interest cushion for an internal Euler refinance', () => {
+    expect(getSameAssetRefinanceBorrowAmount(1_000_000n, false)).toBe(1_000_100n)
+  })
+
+  it('matches the explicit one-percent borrow buffer for an external migration', () => {
+    expect(getSameAssetRefinanceBorrowAmount(1_000_000n, true)).toBe(1_010_000n)
   })
 })
