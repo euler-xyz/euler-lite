@@ -154,6 +154,13 @@ watch(feed.hasLoaded, (hasLoaded) => {
     </div>
 
     <div
+      v-else-if="feed.isPartial.value && feed.events.value.length === 0"
+      class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
+    >
+      No activity is available from the indexed sources. This history may be incomplete.
+    </div>
+
+    <div
       v-else-if="feed.isEmpty.value"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >

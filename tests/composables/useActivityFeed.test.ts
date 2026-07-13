@@ -407,7 +407,7 @@ describe('useActivityFeed', () => {
   it('distinguishes empty, partial, syncing and unsupported coverage', async () => {
     const fetchVaultActivityEvents = vi.fn()
       .mockResolvedValueOnce(page([], { status: 'complete' }))
-      .mockResolvedValueOnce(page([event('partial')], { status: 'partial' }))
+      .mockResolvedValueOnce(page([], { status: 'partial' }))
       .mockResolvedValueOnce(page([], { status: 'syncing' }))
       .mockResolvedValueOnce(page([], { status: 'unsupported' }))
     const { useActivityFeed } = await setup(fetchVaultActivityEvents)
@@ -424,6 +424,7 @@ describe('useActivityFeed', () => {
     await vi.waitFor(() => expect(feed?.isEmpty.value).toBe(true))
     await feed?.refresh()
     expect(feed?.isPartial.value).toBe(true)
+    expect(feed?.isEmpty.value).toBe(false)
     await feed?.refresh()
     expect(feed?.isSyncing.value).toBe(true)
     expect(feed?.isEmpty.value).toBe(false)

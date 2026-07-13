@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest'
-import { buildV3ProxyBackoffKey } from '~/server/utils/v3-proxy-backoff'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  buildV3ProxyBackoffKey,
+  getV3ProxyBackoffCountForTest,
+  readV3ProxyBackoffMs,
+  recordV3ProxyBackoff,
+  resetV3ProxyBackoffsForTest,
+  V3_PROXY_FAILURE_BACKOFF_MS,
+  V3_PROXY_MAX_BACKOFF_ENTRIES,
+} from '~/server/utils/v3-proxy-backoff'
 
 const ACCOUNT = '0x0000000000000000000000000000000000000001'
 const OTHER_ACCOUNT = '0x0000000000000000000000000000000000000002'
@@ -7,6 +15,8 @@ const VAULT = '0x0000000000000000000000000000000000000003'
 const OTHER_VAULT = '0x0000000000000000000000000000000000000004'
 
 describe('activity V3 proxy backoff keys', () => {
+  afterEach(() => resetV3ProxyBackoffsForTest())
+
   it('does not key account cooldowns by wallet address', () => {
     const params = new URLSearchParams({
       chainId: '1',
@@ -71,5 +81,30 @@ describe('activity V3 proxy backoff keys', () => {
     expect(first).toBe('GET /v3/activity/vaults/1/:vault/events?vaultType=earn&category=governance')
     expect(first).not.toBe(otherChain)
     expect(first).not.toContain(VAULT)
+  })
+
+  it('prunes expired entries whenever a backoff is recorded', () => {
+    recordV3ProxyBackoff('expired-one', 0)
+    recordV3ProxyBackoff('expired-two', 1)
+
+    recordV3ProxyBackoff('current', V3_PROXY_FAILURE_BACKOFF_MS + 1)
+
+    expect(getV3ProxyBackoffCountForTest()).toBe(1)
+    expect(readV3ProxyBackoffMs('current', V3_PROXY_FAILURE_BACKOFF_MS + 1)).toBe(
+      V3_PROXY_FAILURE_BACKOFF_MS,
+    )
+  })
+
+  it('bounds active backoffs and evicts the oldest recorded key', () => {
+    for (let index = 0; index <= V3_PROXY_MAX_BACKOFF_ENTRIES; index++) {
+      recordV3ProxyBackoff(`key-${index}`, 0)
+    }
+
+    expect(getV3ProxyBackoffCountForTest()).toBe(V3_PROXY_MAX_BACKOFF_ENTRIES)
+    expect(readV3ProxyBackoffMs('key-0', 0)).toBe(0)
+    expect(readV3ProxyBackoffMs('key-1', 0)).toBe(V3_PROXY_FAILURE_BACKOFF_MS)
+    expect(readV3ProxyBackoffMs(`key-${V3_PROXY_MAX_BACKOFF_ENTRIES}`, 0)).toBe(
+      V3_PROXY_FAILURE_BACKOFF_MS,
+    )
   })
 })

@@ -99,8 +99,7 @@ export const useActivityFeed = ({
   const isEmpty = computed(() =>
     hasLoaded.value
     && !error.value
-    && !isUnsupported.value
-    && !isSyncing.value
+    && coverage.value?.status === 'complete'
     && events.value.length === 0,
   )
 

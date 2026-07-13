@@ -79,16 +79,19 @@ export const getActivityCategoryIcon = (category: ActivityCategory): string =>
 
 export const getVaultActivityFilterOptions = (
   vaultType: ActivityVaultType,
-  { borrowable = true }: { borrowable?: boolean } = {},
 ): ActivityFilterOption[] => {
-  const userCategories: ActivityCategory[] = vaultType === 'evk' && borrowable
+  const lendingCategories: ActivityCategory[] = vaultType === 'evk'
     ? ['lending', 'borrowing']
     : ['lending']
   const options: ActivityFilterOption[] = [
-    { value: 'user-operations', label: 'User operations', categories: userCategories },
+    {
+      value: vaultType === 'evk' ? 'lending-borrowing' : 'lending',
+      label: vaultType === 'evk' ? 'Lending and borrowing' : 'Lending',
+      categories: lendingCategories,
+    },
     { value: 'governance', label: 'Governance', categories: ['governance'] },
   ]
-  if (vaultType === 'evk' && borrowable) {
+  if (vaultType === 'evk') {
     options.push({ value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] })
   }
   return options

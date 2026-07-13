@@ -1,4 +1,5 @@
 export const V3_PROXY_FAILURE_BACKOFF_MS = 10_000
+export const V3_PROXY_MAX_BACKOFF_ENTRIES = 256
 
 const RETRYABLE_V3_PROXY_STATUSES = new Set([429, 500, 502, 503, 504])
 
@@ -7,6 +8,12 @@ type V3ProxyBackoffEntry = {
 }
 
 const backoffs = new Map<string, V3ProxyBackoffEntry>()
+
+const pruneV3ProxyBackoffs = (now: number) => {
+  for (const [key, entry] of backoffs) {
+    if (entry.until <= now) backoffs.delete(key)
+  }
+}
 
 const normalizeV3ProxyBackoffPath = (pathname: string) => {
   if (/^\/v3\/accounts\/[^/]+\/positions$/.test(pathname)) {
@@ -101,6 +108,13 @@ export const recordV3ProxyBackoff = (
   key: string,
   now = Date.now(),
 ) => {
+  pruneV3ProxyBackoffs(now)
+  backoffs.delete(key)
+  while (backoffs.size >= V3_PROXY_MAX_BACKOFF_ENTRIES) {
+    const oldestKey = backoffs.keys().next().value
+    if (oldestKey === undefined) break
+    backoffs.delete(oldestKey)
+  }
   backoffs.set(key, { until: now + V3_PROXY_FAILURE_BACKOFF_MS })
 }
 
@@ -121,3 +135,5 @@ export const updateV3ProxyBackoffFromResponse = (
 export const resetV3ProxyBackoffsForTest = () => {
   backoffs.clear()
 }
+
+export const getV3ProxyBackoffCountForTest = () => backoffs.size

@@ -14,34 +14,50 @@ import {
   isActivityScopeUnsupported,
   resolveActivityFilterCategories,
 } from '~/utils/activity-display'
+import { isVaultBorrowable } from '~/utils/vault/classification'
 
 const ASSET = '0x0000000000000000000000000000000000000001' as const
 const VAULT = '0x0000000000000000000000000000000000000002' as const
 const SHARES = '0x0000000000000000000000000000000000000003' as const
 
 describe('activity display helpers', () => {
-  it('returns vault-specific category filters', () => {
+  it('returns vault-specific category filters with category-accurate labels', () => {
     expect(getVaultActivityFilterOptions('evk')).toEqual([
-      { value: 'user-operations', label: 'User operations', categories: ['lending', 'borrowing'] },
+      { value: 'lending-borrowing', label: 'Lending and borrowing', categories: ['lending', 'borrowing'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
       { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
     ])
-    expect(getVaultActivityFilterOptions('evk', { borrowable: false })).toEqual([
-      { value: 'user-operations', label: 'User operations', categories: ['lending'] },
-      { value: 'governance', label: 'Governance', categories: ['governance'] },
-    ])
     expect(getVaultActivityFilterOptions('earn')).toEqual([
-      { value: 'user-operations', label: 'User operations', categories: ['lending'] },
+      { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
     ])
     expect(getVaultActivityFilterOptions('securitize')).toEqual([
-      { value: 'user-operations', label: 'User operations', categories: ['lending'] },
+      { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
     ])
 
-    const options = getVaultActivityFilterOptions('evk', { borrowable: false })
-    expect(resolveActivityFilterCategories(options, [])).toEqual(['governance', 'lending'])
-    expect(resolveActivityFilterCategories(options, ['user-operations'])).toEqual(['lending'])
+    const options = getVaultActivityFilterOptions('evk')
+    expect(resolveActivityFilterCategories(options, [])).toEqual([
+      'borrowing',
+      'governance',
+      'lending',
+      'liquidations',
+    ])
+    expect(resolveActivityFilterCategories(options, ['lending-borrowing'])).toEqual([
+      'borrowing',
+      'lending',
+    ])
+  })
+
+  it('keeps historical borrowing filters for a currently non-borrowable EVK', () => {
+    expect(isVaultBorrowable({ isBorrowable: false, totalBorrowed: 0n })).toBe(false)
+
+    expect(resolveActivityFilterCategories(getVaultActivityFilterOptions('evk'), [])).toEqual([
+      'borrowing',
+      'governance',
+      'lending',
+      'liquidations',
+    ])
   })
 
   it('treats only explicit-All unsupported coverage as scope-wide', () => {

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type {
   ActivityVaultType,
-  EVault,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
@@ -10,7 +9,6 @@ import {
   type ActivityFeedScope,
 } from '~/composables/useActivityFeed'
 import { getVaultActivityFilterOptions } from '~/utils/activity-display'
-import { isVaultBorrowable } from '~/utils/vault/classification'
 
 const props = withDefaults(defineProps<{
   vault: VaultEntity
@@ -36,12 +34,7 @@ const feedScope = computed<ActivityFeedScope>(() => ({
   vaultType: props.vaultType,
 }))
 const feedContextKey = computed(() => buildActivityFeedContextKey(feedScope.value, []))
-const isBorrowable = computed(() =>
-  props.vaultType === 'evk' && isVaultBorrowable(props.vault as EVault),
-)
-const categoryOptions = computed(() => getVaultActivityFilterOptions(props.vaultType, {
-  borrowable: isBorrowable.value,
-}))
+const categoryOptions = computed(() => getVaultActivityFilterOptions(props.vaultType))
 
 const setRuntimeUnsupported = (unsupported: boolean) => {
   isRuntimeUnsupported.value = unsupported
