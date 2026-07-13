@@ -26,7 +26,7 @@ const afterDisplay = computed(() => props.after != null ? formatNumber(props.aft
 <template>
   <SummaryRow :label="label">
     <template #label>
-      <span class="inline-flex items-center gap-4">
+      <span class="inline-flex items-center gap-0">
         <span>{{ label }}</span>
         <UiModalPreviewTrigger
           v-if="details"
