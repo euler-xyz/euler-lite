@@ -2,11 +2,13 @@ import { computed, nextTick, ref, shallowRef, getCurrentScope, type Ref } from '
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVault, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
+import type { RewardCampaign } from '~/entities/reward-campaign'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useCollateralForm, type UseCollateralFormOptions } from '~/composables/position/useCollateralForm'
 
-const { COLLATERAL_VAULT, wethAsset, usdcAsset, collateralVault, borrowVault, mocks } = vi.hoisted(() => {
+const { COLLATERAL_VAULT, NEW_COLLATERAL_VAULT, wethAsset, usdcAsset, collateralVault, borrowVault, mocks } = vi.hoisted(() => {
   const COLLATERAL_VAULT = '0x0000000000000000000000000000000000000002'
+  const NEW_COLLATERAL_VAULT = '0x0000000000000000000000000000000000000006'
   const BORROW_VAULT = '0x0000000000000000000000000000000000000004'
   const wethAsset = {
     address: '0x0000000000000000000000000000000000000003',
@@ -36,6 +38,7 @@ const { COLLATERAL_VAULT, wethAsset, usdcAsset, collateralVault, borrowVault, mo
   } as unknown as EVault
   return {
     COLLATERAL_VAULT,
+    NEW_COLLATERAL_VAULT,
     wethAsset,
     usdcAsset,
     collateralVault,
@@ -43,11 +46,42 @@ const { COLLATERAL_VAULT, wethAsset, usdcAsset, collateralVault, borrowVault, mo
     mocks: {
       getProjectedRates: vi.fn(async () => null),
       getNetAPY: vi.fn(() => 0),
-      getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 0),
-      getCollateralApySnapshot: vi.fn(async () => ({ supplyUsd: 0, weightedSupplyApy: null })),
+      getNetAPYFromWeightedSupplySnapshot: vi.fn((
+        snapshot: { supplyUsd?: number, weightedSupplyApy?: number | null, isComplete?: boolean } = {},
+        fallbackSupplyApy = 0,
+        borrowUsd = 0,
+        borrowApy = 0,
+        fallbackSupplyRewardApy = 0,
+        borrowRewardApy = 0,
+        loopingRewardApy = 0,
+      ) => {
+        if (snapshot.isComplete === false) return null
+        const supplyUsd = snapshot.supplyUsd ?? 0
+        if (supplyUsd === 0) return 0
+        const supplyApy = snapshot.weightedSupplyApy ?? fallbackSupplyApy
+        const supplyRewardApy = snapshot.weightedSupplyApy === null ? fallbackSupplyRewardApy : 0
+        return (
+          supplyUsd * (supplyApy + supplyRewardApy)
+          - borrowUsd * (borrowApy - borrowRewardApy)
+          + (supplyUsd - borrowUsd) * loopingRewardApy
+        ) / supplyUsd
+      }),
+      getCollateralApySnapshot: vi.fn(async (
+        _position?: unknown,
+        _borrowVault?: unknown,
+        _options?: unknown,
+      ) => ({ supplyUsd: 0, weightedSupplyApy: null })),
+      getBorrowRewardApyForCollaterals: vi.fn((
+        _borrowVaultAddress = '',
+        _collateralAddresses: readonly string[] = [],
+      ) => 0),
+      getBorrowRewardCampaignsForCollaterals: vi.fn((): RewardCampaign[] => []),
+      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+      getEligibleLoopingRewardCampaignsForCollaterals: vi.fn((): RewardCampaign[] => []),
     },
   }
 })
+const rewardsVersion = ref(0)
 
 vi.mock('#components', () => ({
   OperationReviewModal: {},
@@ -182,7 +216,13 @@ vi.mock('~/utils/errorHandling', () => ({
 }))
 
 vi.mock('~/utils/race-guard', () => ({
-  createRaceGuard: () => ({ next: () => 0, isStale: () => false }),
+  createRaceGuard: () => {
+    let latest = 0
+    return {
+      next: () => ++latest,
+      isStale: (generation: number) => generation !== latest,
+    }
+  },
 }))
 
 vi.mock('~/utils/position-estimates', () => ({
@@ -216,6 +256,19 @@ const makePosition = () => ({
   currentLTV: 4000n,
 })
 
+const makeCampaign = (
+  campaignId: string,
+  action: RewardCampaign['action'],
+  rewardTokenSymbol: string,
+): RewardCampaign => ({
+  campaignId,
+  source: 'merkl',
+  action,
+  apr: 0.01,
+  rewardTokenSymbol,
+  rewardTokenIcon: `/${rewardTokenSymbol.toLowerCase()}.png`,
+} as RewardCampaign)
+
 const flush = async () => {
   await nextTick()
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -241,9 +294,15 @@ const makeForm = (overrides: Partial<UseCollateralFormOptions> = {}) => useColla
   ...overrides,
 })
 
-describe('useCollateralForm amount denomination', () => {
+describe('useCollateralForm', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    mocks.getCollateralApySnapshot.mockResolvedValue({ supplyUsd: 0, weightedSupplyApy: null })
+    mocks.getBorrowRewardApyForCollaterals.mockReturnValue(0)
+    mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([])
+    mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(0)
+    mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([])
+    rewardsVersion.value = 0
     const swapApi = await getSwapApi()
     swapApi.effectiveQuote.value = null
     swapApi.selectedQuote.value = null
@@ -271,9 +330,12 @@ describe('useCollateralForm amount denomination', () => {
       getPositionBySubAccountIndex: () => makePosition(),
     }))
     vi.stubGlobal('useRewardsApy', () => ({
+      version: rewardsVersion,
       getSupplyRewardApy: () => 0,
-      getBorrowRewardApyForCollaterals: () => 0,
-      getEligibleLoopingRewardApyForCollaterals: () => 0,
+      getBorrowRewardApyForCollaterals: mocks.getBorrowRewardApyForCollaterals,
+      getBorrowRewardCampaignsForCollaterals: mocks.getBorrowRewardCampaignsForCollaterals,
+      getEligibleLoopingRewardApyForCollaterals: mocks.getEligibleLoopingRewardApyForCollaterals,
+      getEligibleLoopingRewardCampaignsForCollaterals: mocks.getEligibleLoopingRewardCampaignsForCollaterals,
     }))
     vi.stubGlobal('usePositionCollateralApy', () => ({
       getCollateralApySnapshot: mocks.getCollateralApySnapshot,
@@ -391,5 +453,289 @@ describe('useCollateralForm amount denomination', () => {
     } as unknown as SwapQuote
     await flush()
     expect(form.amountFixed.value.value).toBe(2n * 10n ** 18n)
+  })
+
+  it('uses the projected collateral set when a new collateral adds borrow rewards', async () => {
+    const currentCollateralAddresses = [COLLATERAL_VAULT]
+    const projectedCollateralAddresses = [COLLATERAL_VAULT, NEW_COLLATERAL_VAULT]
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => ({
+      supplyUsd: 100,
+      weightedSupplyApy: 1,
+      collateralAddresses: options ? projectedCollateralAddresses : currentCollateralAddresses,
+      entries: [],
+      isComplete: true,
+    }))
+    mocks.getBorrowRewardApyForCollaterals.mockImplementation((_borrowVaultAddress = '', collateralAddresses = []) =>
+      collateralAddresses.includes(NEW_COLLATERAL_VAULT) ? 7 : 0)
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+
+    form.amount.value = '1'
+    await flush()
+
+    expect(mocks.getBorrowRewardApyForCollaterals).toHaveBeenLastCalledWith(
+      borrowVault.address,
+      projectedCollateralAddresses,
+    )
+    expect(form.projectedYieldDetails.value).not.toBeNull()
+  })
+
+  it('removes borrow rewards that are ineligible for the projected collateral set', async () => {
+    const currentCollateralAddresses = [COLLATERAL_VAULT]
+    const projectedCollateralAddresses: string[] = []
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => ({
+      supplyUsd: options ? 0 : 100,
+      weightedSupplyApy: options ? null : 1,
+      collateralAddresses: options ? projectedCollateralAddresses : currentCollateralAddresses,
+      entries: [],
+      isComplete: true,
+    }))
+    mocks.getBorrowRewardApyForCollaterals.mockImplementation((_borrowVaultAddress = '', collateralAddresses = []) =>
+      collateralAddresses.includes(COLLATERAL_VAULT) ? 7 : 0)
+
+    const form = makeForm({
+      mode: 'withdraw',
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+
+    form.amount.value = '10'
+    await flush()
+
+    expect(mocks.getBorrowRewardApyForCollaterals).toHaveBeenLastCalledWith(
+      borrowVault.address,
+      projectedCollateralAddresses,
+    )
+    expect(form.projectedYieldDetails.value?.after.breakdown.rewards).toBe(0)
+  })
+
+  it('builds projected Net APY details with per-vault rates and distinct reward assets', async () => {
+    const supplyCampaign = makeCampaign('supply', 'LEND', 'SUPPLY')
+    const borrowCampaign = makeCampaign('borrow', 'BORROW_COLLATERAL', 'BORROW')
+    const loopingCampaign = makeCampaign('loop', 'LOOPING', 'LOOP')
+    const snapshot = (projected: boolean) => ({
+      supplyUsd: 100,
+      weightedSupplyApy: projected ? 3 : 6,
+      weightedBaseSupplyApy: projected ? 2 : 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 1,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [{
+        address: COLLATERAL_VAULT,
+        vault: collateralVault,
+        assets: 10n * 10n ** 18n,
+        supplyUsd: 100,
+        baseSupplyApy: projected ? 2 : 5,
+        intrinsicSupplyApy: 0,
+        supplyRewardApy: 1,
+        totalSupplyApy: projected ? 3 : 6,
+        supplyCampaigns: [supplyCampaign],
+      }],
+      isComplete: true,
+    })
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) =>
+      snapshot(Boolean(options)))
+    mocks.getBorrowRewardApyForCollaterals.mockReturnValue(2)
+    mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([borrowCampaign])
+    mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(3)
+    mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([loopingCampaign])
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+
+    form.amount.value = '1'
+    await flush()
+
+    expect(form.projectedYieldDetails.value).toMatchObject({
+      metric: 'net-apy',
+      before: { total: form.netAPY.value },
+      after: { total: form.estimateNetAPY.value },
+      rateLines: [{
+        label: 'Collateral lending APY',
+        symbol: 'WETH',
+        before: 5,
+        after: 2,
+      }],
+    })
+    expect(form.projectedYieldDetails.value?.rewards.map(reward => reward.rewardToken.symbol))
+      .toEqual(['BORROW', 'LOOP', 'SUPPLY'])
+  })
+
+  it('clears the projected headline and details when the next snapshot is incomplete', async () => {
+    let projectionComplete = true
+    const currentSnapshot = {
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [],
+      isComplete: true,
+    }
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => {
+      if (!options || projectionComplete) return currentSnapshot
+      return {
+        supplyUsd: 0,
+        weightedSupplyApy: null,
+        weightedBaseSupplyApy: null,
+        weightedIntrinsicSupplyApy: null,
+        weightedSupplyRewardApy: null,
+        collateralAddresses: [],
+        entries: [],
+        isComplete: false,
+      }
+    })
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+    form.amount.value = '1'
+    await flush()
+    expect(form.projectedYieldDetails.value).not.toBeNull()
+
+    projectionComplete = false
+    form.amount.value = '2'
+    await flush()
+
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+  })
+
+  it('clears the projected headline and details when projection rejects', async () => {
+    const currentSnapshot = {
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [],
+      isComplete: true,
+    }
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => {
+      if (options) throw new Error('projection failed')
+      return currentSnapshot
+    })
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+
+    form.amount.value = '1'
+    await flush()
+
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+  })
+
+  it('does not restore stale projected details after a newer amount completes', async () => {
+    const snapshot = (baseSupplyApy: number) => ({
+      supplyUsd: 100,
+      weightedSupplyApy: baseSupplyApy,
+      weightedBaseSupplyApy: baseSupplyApy,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [{
+        address: COLLATERAL_VAULT,
+        vault: collateralVault,
+        assets: 10n * 10n ** 18n,
+        supplyUsd: 100,
+        baseSupplyApy,
+        intrinsicSupplyApy: 0,
+        supplyRewardApy: 0,
+        totalSupplyApy: baseSupplyApy,
+        supplyCampaigns: [],
+      }],
+      isComplete: true,
+    })
+    let resolveSlowProjection!: (value: ReturnType<typeof snapshot>) => void
+    const slowProjection = new Promise<ReturnType<typeof snapshot>>((resolve) => {
+      resolveSlowProjection = resolve
+    })
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) => {
+      if (!options) return snapshot(5)
+      const assetsDelta = (options as { deltas?: Array<{ assetsDelta: bigint }> }).deltas?.[0]?.assetsDelta
+      if (assetsDelta === 2n * 10n ** 18n) return slowProjection
+      return snapshot(assetsDelta === 3n * 10n ** 18n ? 1 : 4)
+    })
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+    form.amount.value = '1'
+    await flush()
+    expect(form.projectedYieldDetails.value?.rateLines[0]?.after).toBe(4)
+
+    form.amount.value = '2'
+    await nextTick()
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+
+    form.amount.value = '3'
+    await flush()
+    expect(form.projectedYieldDetails.value?.rateLines[0]?.after).toBe(1)
+
+    resolveSlowProjection(snapshot(9))
+    await flush()
+    expect(form.projectedYieldDetails.value?.rateLines[0]?.after).toBe(1)
+  })
+
+  it('clears estimate loading when the position disappears during a projection', async () => {
+    const snapshot = {
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [COLLATERAL_VAULT],
+      entries: [],
+      isComplete: true,
+    }
+    let resolveProjection!: (value: typeof snapshot) => void
+    const pendingProjection = new Promise<typeof snapshot>((resolve) => {
+      resolveProjection = resolve
+    })
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position?, _borrowVault?, options?) =>
+      options ? pendingProjection : snapshot)
+    const positionRef = shallowRef<ReturnType<typeof makePosition> | undefined>(makePosition())
+    vi.stubGlobal('useEulerAccount', () => ({
+      isPositionsLoaded: ref(true),
+      getPositionBySubAccountIndex: () => positionRef.value,
+    }))
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+
+    form.amount.value = '1'
+    await nextTick()
+    expect(form.isEstimatesLoading.value).toBe(true)
+
+    positionRef.value = undefined
+    await flush()
+    expect(form.isEstimatesLoading.value).toBe(false)
+    expect(form.projectedYieldDetails.value).toBeNull()
+
+    resolveProjection(snapshot)
+    await flush()
+    expect(form.isEstimatesLoading.value).toBe(false)
+    expect(form.projectedYieldDetails.value).toBeNull()
   })
 })

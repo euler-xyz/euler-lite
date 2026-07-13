@@ -25,6 +25,7 @@ const { USER, borrowVault, collateralVault, planAccount, getProjectedRates, getN
     getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 10),
   }
 })
+const rewardsVersion = ref(0)
 
 vi.mock('#components', () => ({ OperationReviewModal: {} }))
 vi.mock('~/components/ui/composables/useModal', () => ({
@@ -66,6 +67,8 @@ const position = {
 describe('useWalletRepay projected Net APY', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    rewardsVersion.value = 0
+    getProjectedRates.mockResolvedValue({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -84,12 +87,20 @@ describe('useWalletRepay projected Net APY', () => {
       getCollateralApySnapshot: vi.fn(async () => ({
         supplyUsd: 1_000,
         weightedSupplyApy: 5,
+        weightedBaseSupplyApy: 5,
+        weightedIntrinsicSupplyApy: 0,
+        weightedSupplyRewardApy: 0,
         collateralAddresses: [collateralVault.address],
+        entries: [],
         isComplete: true,
       })),
     }))
     vi.stubGlobal('useRewardsApy', () => ({
+      version: rewardsVersion,
+      getBorrowRewardApyForCollaterals: vi.fn(() => 0),
       getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+      getBorrowRewardCampaignsForCollaterals: vi.fn(() => []),
+      getEligibleLoopingRewardCampaignsForCollaterals: vi.fn(() => []),
     }))
     vi.stubGlobal('useUserSettings', () => ({
       settings: ref({ enableIntrinsicApy: false }),
@@ -122,11 +133,77 @@ describe('useWalletRepay projected Net APY', () => {
     })
 
     repay.amount.value = '100'
-    await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBe(10))
+    await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBeCloseTo(4.93))
 
     getProjectedRates.mockRejectedValueOnce(new Error('projection failed'))
     repay.amount.value = '200'
 
     await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBeNull())
+  })
+
+  it('does not expose projected details when synchronous validation fails', async () => {
+    const repay = useWalletRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      walletBalance: ref(1_000n * 10n ** 18n),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      clearSimulationError: vi.fn(),
+      runSimulation: vi.fn(async () => true),
+      netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5),
+      borrowApy: computed(() => 5),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+
+    repay.amount.value = '100'
+    await vi.waitFor(() => expect(repay.projectedYieldDetails.value).not.toBeNull())
+    getProjectedRates.mockClear()
+
+    repay.amount.value = '2001'
+    await vi.waitFor(() => expect(repay.estimatesError.value).toBe('Not enough balance'))
+
+    expect(getProjectedRates).not.toHaveBeenCalled()
+    expect(repay.projectedYieldDetails.value).toBeNull()
+  })
+
+  it('invalidates an in-flight projection when the layered position disappears', async () => {
+    let resolveProjection!: (value: { supplyAPY: bigint, borrowAPY: bigint }) => void
+    getProjectedRates.mockReturnValueOnce(new Promise((resolve) => {
+      resolveProjection = resolve
+    }))
+    const positionRef = shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position)
+    const repay = useWalletRepay({
+      position: positionRef,
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      walletBalance: ref(1_000n * 10n ** 18n),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      clearSimulationError: vi.fn(),
+      runSimulation: vi.fn(async () => true),
+      netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5),
+      borrowApy: computed(() => 5),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+
+    repay.amount.value = '100'
+    await vi.waitFor(() => expect(getProjectedRates).toHaveBeenCalledTimes(1))
+    positionRef.value = undefined
+    resolveProjection({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(repay.projectedYieldDetails.value).toBeNull()
+    expect(repay.isEstimatesLoading.value).toBe(false)
   })
 })

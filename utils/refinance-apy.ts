@@ -25,7 +25,7 @@ const normalizeAddress = (address: string) => address.toLowerCase()
 
 export const buildRefinanceProjectedRateRequests = (
   collateralDeltas: readonly RefinanceCollateralRateDelta[],
-  debtDelta?: RefinanceDebtRateDelta,
+  debtDeltas: readonly RefinanceDebtRateDelta[] = [],
 ): RefinanceProjectedRateRequest[] => {
   const merged = new Map<string, { vault: RefinanceRateVault, cashDelta: bigint, borrowsDelta: bigint }>()
   const add = (vault: RefinanceRateVault, cashDelta: bigint, borrowsDelta: bigint) => {
@@ -39,8 +39,10 @@ export const buildRefinanceProjectedRateRequests = (
   }
 
   for (const delta of collateralDeltas) add(delta.vault, delta.cashDelta, 0n)
-  if (debtDelta && debtDelta.borrowsDelta !== 0n) {
-    add(debtDelta.vault, -debtDelta.borrowsDelta, debtDelta.borrowsDelta)
+  for (const debtDelta of debtDeltas) {
+    if (debtDelta.borrowsDelta !== 0n) {
+      add(debtDelta.vault, -debtDelta.borrowsDelta, debtDelta.borrowsDelta)
+    }
   }
 
   return [...merged.entries()]

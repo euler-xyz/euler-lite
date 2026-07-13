@@ -151,12 +151,12 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const sourceValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!sourceVault.value) {
-      sourceValueUsd.value = null
-      return
-    }
     const gen = sourceUsdGuard.next()
-    const result = (await getAssetUsdValue(sourceBalance.value, sourceVault.value, 'off-chain')) ?? null
+    const currentSourceVault = sourceVault.value
+    const currentSourceBalance = sourceBalance.value
+    sourceValueUsd.value = null
+    if (!currentSourceVault) return
+    const result = (await getAssetUsdValue(currentSourceBalance, currentSourceVault, 'off-chain')) ?? null
     if (sourceUsdGuard.isStale(gen)) return
     sourceValueUsd.value = result
   })
@@ -165,12 +165,12 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const borrowValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!borrowVault.value || !position.value) {
-      borrowValueUsd.value = null
-      return
-    }
     const gen = borrowUsdGuard.next()
-    const result = (await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
+    const currentBorrowVault = borrowVault.value
+    const currentPosition = position.value
+    borrowValueUsd.value = null
+    if (!currentBorrowVault || !currentPosition) return
+    const result = (await getAssetUsdValue(currentPosition.borrowed, currentBorrowVault, 'off-chain')) ?? null
     if (borrowUsdGuard.isStale(gen)) return
     borrowValueUsd.value = result
   })
@@ -179,13 +179,14 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const nextBorrowValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!borrowVault.value || !position.value || debtRepaid.value === null) {
-      nextBorrowValueUsd.value = null
-      return
-    }
     const gen = nextBorrowUsdGuard.next()
-    const nextBorrow = position.value.borrowed - debtRepaid.value
-    const result = (await getAssetUsdValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value, 'off-chain')) ?? null
+    const currentBorrowVault = borrowVault.value
+    const currentPosition = position.value
+    const currentDebtRepaid = debtRepaid.value
+    nextBorrowValueUsd.value = null
+    if (!currentBorrowVault || !currentPosition || currentDebtRepaid === null) return
+    const nextBorrow = currentPosition.borrowed - currentDebtRepaid
+    const result = (await getAssetUsdValue(nextBorrow > 0n ? nextBorrow : 0n, currentBorrowVault, 'off-chain')) ?? null
     if (nextBorrowUsdGuard.isStale(gen)) return
     nextBorrowValueUsd.value = result
   })

@@ -1,7 +1,7 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { areProjectedRatesComplete, getProjectedRatesBatch, getNetAPY, getPositionMultiplier } from '~/utils/vault/apy'
+import { areProjectedRatesComplete, getProjectedRatesBatch, getPositionMultiplier } from '~/utils/vault/apy'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
@@ -25,6 +25,12 @@ import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning,
 import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldCampaignInput,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
 
 // Snapshot of all borrow inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may have been reset), so the plan
@@ -77,8 +83,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     savingPositions,
     balance,
     resolvePendingSubAccount,
-    collateralSupplyRewardApy,
-    borrowRewardApy,
     collateralSupplyApyWithRewards,
     isSecuritizeCollateral,
     isGeoBlocked,
@@ -94,7 +98,15 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
   const { getBalance } = useWallets()
-  const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+  const {
+    version: rewardsVersion,
+    getSupplyRewardApy,
+    getBorrowRewardApyForCollaterals,
+    getEligibleLoopingRewardApyForCollaterals,
+    getSupplyRewardCampaigns,
+    getBorrowRewardCampaignsForCollaterals,
+    getEligibleLoopingRewardCampaignsForCollaterals,
+  } = useRewardsApy()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -208,7 +220,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // Estimates
   const health = ref<number | undefined>()
-  const netAPY = ref<number | undefined>()
+  const projectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
+  const netAPY = computed<number | undefined>(() => projectedYieldDetails.value?.after.total)
   const liquidationPrice = ref<number | undefined>()
 
   // Swap state
@@ -534,6 +547,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isUnknownBorrowSwapToken = ref(false)
 
   const onSelectBorrowSwapAsset = (newAsset: VaultAsset, meta?: { isUnknownToken?: boolean }) => {
+    // Selecting a Pay-with token switches execution to the wallet-funded path.
+    // Do not retain a previously selected savings-share source behind that UI.
+    isSavingCollateral.value = false
+    selectedSavingSubAccount.value = undefined
     borrowSelectedAsset.value = newAsset
     isUnknownBorrowSwapToken.value = meta?.isUnknownToken ?? false
     collateralAmount.value = ''
@@ -621,78 +638,130 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // Async estimates (projected rates, USD prices, net APY) are debounced
   const asyncEstimatesGuard = createRaceGuard()
-  const updateAsyncEstimates = useDebounceFn(async () => {
-    if (!pair.value || !collateralVault.value || !borrowVault.value) return
-    const gen = asyncEstimatesGuard.next()
+  const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
+    if (asyncEstimatesGuard.isStale(gen)) return
+    const collateral = collateralVault.value
+    const borrow = borrowVault.value
+    if (!pair.value || !collateral || !borrow) {
+      projectedYieldDetails.value = null
+      isEstimatesLoading.value = false
+      return
+    }
     try {
       // When swapping, use the quote output amount (collateral-vault-asset denominated)
       const collateralAmountNano = borrowNeedsSwap.value
         ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
-        : valueToNano(collateralAmount.value || '0', collateralVault.value.shares.decimals)
-      const collateralCashDelta = isSavingCollateral.value ? 0n : collateralAmountNano
-      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
+        : valueToNano(collateralAmount.value || '0', collateral.shares.decimals)
+      const collateralCashDelta = isSavingCollateral.value && !borrowNeedsSwap.value ? 0n : collateralAmountNano
+      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrow.shares.decimals)
 
       const [projectedRates, collateralUsdValue, borrowUsdValue] = await Promise.all([
         getProjectedRatesBatch([
           {
-            vaultAddress: collateralVault.value.address,
-            currentCash: collateralVault.value.totalCash,
-            currentBorrows: collateralVault.value.totalBorrowed,
+            vaultAddress: collateral.address,
+            currentCash: collateral.totalCash,
+            currentBorrows: collateral.totalBorrowed,
             cashDelta: collateralCashDelta,
             borrowsDelta: 0n,
           },
           {
-            vaultAddress: borrowVault.value.address,
-            currentCash: borrowVault.value.totalCash,
-            currentBorrows: borrowVault.value.totalBorrowed,
+            vaultAddress: borrow.address,
+            currentCash: borrow.totalCash,
+            currentBorrows: borrow.totalBorrowed,
             cashDelta: -borrowAmountNano,
             borrowsDelta: borrowAmountNano,
           },
         ]),
-        getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
-        getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
+        getAssetUsdValueOrZero(collateralAmountNano, collateral, 'off-chain'),
+        getAssetUsdValueOrZero(borrowAmountNano, borrow, 'off-chain'),
       ])
       if (asyncEstimatesGuard.isStale(gen)) return
       if (!areProjectedRatesComplete(projectedRates, 2)) {
-        netAPY.value = undefined
+        projectedYieldDetails.value = null
         return
       }
       const [collateralProjected, borrowProjected] = projectedRates
 
-      const currentSupplyRaw = getVaultSupplyApy(collateralVault.value)
+      const currentSupplyRaw = getVaultSupplyApy(collateral)
+      const projectedSupplyRaw = nanoToValue(collateralProjected!.supplyAPY, 25)
       const projectedSupplyApy = withProjectedVaultIntrinsicApy(
         currentSupplyRaw,
-        collateralProjected ? nanoToValue(collateralProjected.supplyAPY, 25) : null,
-        collateralVault.value,
+        projectedSupplyRaw,
+        collateral,
         enableIntrinsicApy.value,
       )
-      const currentBorrowRaw = getVaultBorrowApy(borrowVault.value)
+      const currentBorrowRaw = getVaultBorrowApy(borrow)
+      const projectedBorrowRaw = nanoToValue(borrowProjected!.borrowAPY, 25)
       const projectedBorrowApy = withProjectedVaultIntrinsicApy(
         currentBorrowRaw,
-        borrowProjected ? nanoToValue(borrowProjected.borrowAPY, 25) : null,
-        borrowVault.value,
+        projectedBorrowRaw,
+        borrow,
         enableIntrinsicApy.value,
       )
+      const multiplier = getPositionMultiplier(collateralUsdValue, borrowUsdValue)
       const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
-        borrowVault.value.address,
-        [collateralVault.value.address],
-        getPositionMultiplier(collateralUsdValue, borrowUsdValue),
+        borrow.address,
+        [collateral.address],
+        multiplier,
       )
+      const after = getProjectedYieldState('net-apy', {
+        supplyUsd: collateralUsdValue,
+        baseSupplyApy: projectedSupplyRaw,
+        intrinsicSupplyApy: projectedSupplyApy - projectedSupplyRaw,
+        supplyRewardApy: getSupplyRewardApy(collateral.address),
+        borrowUsd: borrowUsdValue,
+        baseBorrowApy: projectedBorrowRaw,
+        intrinsicBorrowApy: projectedBorrowApy - projectedBorrowRaw,
+        borrowRewardApy: getBorrowRewardApyForCollaterals(borrow.address, [collateral.address]),
+        loopingRewardApy,
+      })
+      if (!after) {
+        projectedYieldDetails.value = null
+        return
+      }
 
-      netAPY.value = getNetAPY(
-        collateralUsdValue,
-        projectedSupplyApy,
-        borrowUsdValue,
-        projectedBorrowApy,
-        collateralSupplyRewardApy.value || null,
-        borrowRewardApy.value || null,
-        loopingRewardApy || null,
-      )
+      const afterCampaigns: ProjectedYieldCampaignInput[] = [
+        ...(collateralUsdValue > 0
+          ? getSupplyRewardCampaigns(collateral.address).map(campaign => ({ campaign, vaultAddress: collateral.address }))
+          : []),
+        ...(borrowUsdValue > 0
+          ? getBorrowRewardCampaignsForCollaterals(borrow.address, [collateral.address])
+              .map(campaign => ({ campaign, vaultAddress: borrow.address }))
+          : []),
+        ...getEligibleLoopingRewardCampaignsForCollaterals(
+          borrow.address,
+          [collateral.address],
+          multiplier,
+        ).map(campaign => ({ campaign, vaultAddress: borrow.address })),
+      ]
+      projectedYieldDetails.value = {
+        metric: 'net-apy',
+        after,
+        rateLines: [
+          {
+            id: `supply:${collateral.address.toLowerCase()}`,
+            label: 'Collateral lending APY',
+            symbol: collateral.asset.symbol,
+            vaultAddress: collateral.address,
+            before: currentSupplyRaw,
+            after: projectedSupplyRaw,
+          },
+          {
+            id: `borrow:${borrow.address.toLowerCase()}`,
+            label: 'Liability borrow APY',
+            symbol: borrow.asset.symbol,
+            vaultAddress: borrow.address,
+            before: currentBorrowRaw,
+            after: projectedBorrowRaw,
+          },
+        ],
+        rewards: mergeProjectedRewardCampaigns([], afterCampaigns),
+      }
     }
     catch (e) {
       if (asyncEstimatesGuard.isStale(gen)) return
       logWarn('borrow/asyncEstimates', e)
-      netAPY.value = undefined
+      projectedYieldDetails.value = null
     }
     finally {
       if (!asyncEstimatesGuard.isStale(gen)) {
@@ -700,6 +769,22 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
     }
   }, 500)
+
+  const queueAsyncEstimates = () => {
+    const gen = asyncEstimatesGuard.next()
+    projectedYieldDetails.value = null
+    const hasInput = +collateralAmount.value > 0 || +borrowAmount.value > 0
+    if (!pair.value || !collateralVault.value || !borrowVault.value || !hasInput) {
+      isEstimatesLoading.value = false
+      return
+    }
+    if (borrowNeedsSwap.value && !borrowSwapEffectiveQuote.value) {
+      isEstimatesLoading.value = false
+      return
+    }
+    isEstimatesLoading.value = true
+    updateAsyncEstimates(gen)
+  }
 
   // --- Actions: submit & send ---
   const buildSwapBorrowPlanFromQuote = async (quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
@@ -1076,16 +1161,47 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Watchers ---
   watch([collateralAmount, borrowAmount], () => {
-    asyncEstimatesGuard.next()
     clearBorrowSimulationError()
     if (!pair.value) {
+      asyncEstimatesGuard.next()
+      projectedYieldDetails.value = null
+      isEstimatesLoading.value = false
       return
     }
     updateSyncEstimates()
-    if (!isEstimatesLoading.value) {
-      isEstimatesLoading.value = true
+    queueAsyncEstimates()
+  })
+
+  watch([
+    pair,
+    collateralVault,
+    borrowVault,
+    () => collateralVault.value?.totalCash,
+    () => collateralVault.value?.totalBorrowed,
+    () => borrowVault.value?.totalCash,
+    () => borrowVault.value?.totalBorrowed,
+  ], () => {
+    asyncEstimatesGuard.next()
+    projectedYieldDetails.value = null
+    const hasInput = +collateralAmount.value > 0 || +borrowAmount.value > 0
+    if (!pair.value || !collateralVault.value || !borrowVault.value || !hasInput) {
+      isEstimatesLoading.value = false
+      return
     }
-    updateAsyncEstimates()
+    updateSyncEstimates()
+    queueAsyncEstimates()
+  }, { flush: 'sync' })
+
+  watch(isSavingCollateral, () => {
+    // Source changes do not change either amount, but they do change whether
+    // collateral enters the vault as new cash. Invalidate synchronously so an
+    // older request cannot publish between the source change and this rerun.
+    clearBorrowSimulationError()
+    queueAsyncEstimates()
+  }, { flush: 'sync' })
+
+  watch([rewardsVersion, enableIntrinsicApy], () => {
+    queueAsyncEstimates()
   })
 
   watch(borrowSelectedAsset, async () => {
@@ -1129,20 +1245,12 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   watch(borrowSwapEffectiveQuote, () => {
-    asyncEstimatesGuard.next()
     if (borrowNeedsSwap.value && collateralAmount.value && +ltv.value > 0) {
       onCollateralInput()
     }
     // Re-run projected rate estimates when quote resolves — collateralAmountNano depends on amountOut
     if (borrowNeedsSwap.value) {
-      if (borrowSwapEffectiveQuote.value) {
-        if (!isEstimatesLoading.value) isEstimatesLoading.value = true
-        updateAsyncEstimates()
-      }
-      else {
-        isEstimatesLoading.value = true
-        updateAsyncEstimates()
-      }
+      queueAsyncEstimates()
     }
   })
 
@@ -1172,6 +1280,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     // Estimates
     health,
     netAPY,
+    projectedYieldDetails,
     liquidationPrice,
 
     // Computed: math
@@ -1244,7 +1353,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     buildBorrowPlan, // Batch
     updateEstimates: () => {
       updateSyncEstimates()
-      updateAsyncEstimates()
+      queueAsyncEstimates()
     },
     updateBorrowSwapAssetBalance,
     resetOnTabSwitch,

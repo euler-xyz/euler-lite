@@ -70,6 +70,7 @@ const { USER, borrowVault, collateralVault, walletAsset, planAccount, mocks } = 
     },
   }
 })
+const rewardsVersion = ref(0)
 
 vi.mock('#components', () => ({
   OperationReviewModal: {},
@@ -185,6 +186,7 @@ describe('useWalletSwapRepay', () => {
     mocks.planSwapAndRepay.mockResolvedValue({ type: 'wallet-swap-repay-plan' } as unknown as TransactionPlan)
     mocks.getProjectedRates.mockResolvedValue({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
     mocks.getNetAPYFromWeightedSupplySnapshot.mockReturnValue(10)
+    rewardsVersion.value = 0
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -230,12 +232,20 @@ describe('useWalletSwapRepay', () => {
       getCollateralApySnapshot: vi.fn(async () => ({
         supplyUsd: 10_000,
         weightedSupplyApy: 5,
+        weightedBaseSupplyApy: 5,
+        weightedIntrinsicSupplyApy: 0,
+        weightedSupplyRewardApy: 0,
         collateralAddresses: [collateralVault.address],
+        entries: [],
         isComplete: true,
       })),
     }))
     vi.stubGlobal('useRewardsApy', () => ({
+      version: rewardsVersion,
+      getBorrowRewardApyForCollaterals: vi.fn(() => 0),
       getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+      getBorrowRewardCampaignsForCollaterals: vi.fn(() => []),
+      getEligibleLoopingRewardCampaignsForCollaterals: vi.fn(() => []),
     }))
     vi.stubGlobal('useUserSettings', () => ({
       settings: ref({ enableIntrinsicApy: false }),
@@ -322,11 +332,100 @@ describe('useWalletSwapRepay', () => {
     mocks.quoteStates[0]!.selectedQuote.value = firstQuote
     mocks.quoteStates[0]!.effectiveQuote.value = firstQuote
 
-    await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBe(10))
+    await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBe(5))
 
     mocks.getProjectedRates.mockRejectedValueOnce(new Error('projection failed'))
     mocks.quoteStates[0]!.effectiveQuote.value = { ...firstQuote, amountOut: '210' } as SwapQuote
 
     await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBeNull())
+  })
+
+  it('skips projected details when the selected quote fails balance validation', async () => {
+    const repay = useWalletSwapRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5),
+      borrowApy: computed(() => 5),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+    repay.selectedAsset.value = walletAsset
+    repay.amount.value = '100'
+    const validQuote = {
+      amountIn: '100',
+      amountOut: '200',
+      amountOutMin: '190',
+      receiver: borrowVault.address,
+      accountOut: USER,
+    } as SwapQuote
+    mocks.quoteStates[0]!.selectedQuote.value = validQuote
+    mocks.quoteStates[0]!.effectiveQuote.value = validQuote
+    await vi.waitFor(() => expect(repay.projectedYieldDetails.value).not.toBeNull())
+    mocks.getProjectedRates.mockClear()
+
+    repay.amount.value = '2000'
+    repay.onAmountInput()
+    const invalidQuote = { ...validQuote, amountIn: '2000' } as SwapQuote
+    mocks.quoteStates[0]!.selectedQuote.value = invalidQuote
+    mocks.quoteStates[0]!.effectiveQuote.value = invalidQuote
+
+    await vi.waitFor(() => expect(repay.estimatesError.value).toBe('Not enough balance'))
+    expect(mocks.getProjectedRates).not.toHaveBeenCalled()
+    expect(repay.projectedYieldDetails.value).toBeNull()
+  })
+
+  it('invalidates an in-flight projection when the layered position disappears', async () => {
+    let resolveProjection!: (value: { supplyAPY: bigint, borrowAPY: bigint }) => void
+    mocks.getProjectedRates.mockReturnValueOnce(new Promise((resolve) => {
+      resolveProjection = resolve
+    }))
+    const positionRef = shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position)
+    const repay = useWalletSwapRepay({
+      position: positionRef,
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5),
+      borrowApy: computed(() => 5),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+    repay.selectedAsset.value = walletAsset
+    repay.amount.value = '100'
+    const quote = {
+      amountIn: '100',
+      amountOut: '200',
+      amountOutMin: '190',
+      receiver: borrowVault.address,
+      accountOut: USER,
+    } as SwapQuote
+    mocks.quoteStates[0]!.selectedQuote.value = quote
+    mocks.quoteStates[0]!.effectiveQuote.value = quote
+    await vi.waitFor(() => expect(mocks.getProjectedRates).toHaveBeenCalledTimes(1))
+
+    positionRef.value = undefined
+    resolveProjection({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(repay.projectedYieldDetails.value).toBeNull()
+    expect(repay.isEstimatesLoading.value).toBe(false)
   })
 })

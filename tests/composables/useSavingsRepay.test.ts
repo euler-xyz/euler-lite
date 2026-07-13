@@ -376,4 +376,51 @@ describe('useSavingsRepay', () => {
     expect(healthOptions?.collateralAddresses?.value).toEqual([])
     expect(healthOptions?.collateralSnapshotComplete?.value).toBe(false)
   })
+
+  it('projects a savings-vault cash withdrawal when that vault is also position collateral', async () => {
+    const sameAssetBorrowVault = {
+      ...borrowVault,
+      asset: sameVault.asset,
+    } as EVault
+    const overlapPosition = {
+      ...position,
+      borrow: sameAssetBorrowVault,
+      collateralVaults: [VAULT],
+    } as unknown as PortfolioBorrowPosition<VaultEntity>
+    const repay = useSavingsRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(overlapPosition),
+      borrowVault: computed(() => sameAssetBorrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => overlapPosition.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    repay.initVault()
+    mocks.getCollateralApySnapshot.mockClear()
+    repay.amount.value = '100'
+    repay.onAmountInput()
+
+    await vi.waitFor(() => expect(mocks.getCollateralApySnapshot).toHaveBeenCalledWith(
+      overlapPosition,
+      sameAssetBorrowVault,
+      {
+        deltas: [{
+          vaultAddress: VAULT,
+          assetsDelta: 0n,
+          cashDelta: -100n,
+          projectRates: true,
+        }],
+      },
+    ))
+  })
 })

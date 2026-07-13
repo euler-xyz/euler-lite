@@ -6,6 +6,15 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { computeNextLtv, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { createRaceGuard } from '~/utils/race-guard'
+import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import {
+  getCollateralSnapshotCampaignInputs,
+  getCollateralSnapshotRateLines,
+  getProjectedYieldStateFromCollateralSnapshot,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldCampaignInput,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
 
 interface UseRepayHealthMetricsOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -23,6 +32,8 @@ interface UseRepayHealthMetricsOptions {
   nextCollateralSnapshotComplete: Ref<boolean>
   collateralAddresses?: Ref<readonly string[]>
   nextCollateralAddresses?: Ref<readonly string[]>
+  collateralSnapshot?: Ref<CollateralApySnapshot | null>
+  nextCollateralSnapshot?: Ref<CollateralApySnapshot | null>
   repayAddsCash?: ComputedRef<boolean>
   collateralValueUsd: Ref<number | null>
   nextCollateralValueUsd: Ref<number | null>
@@ -47,13 +58,19 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     nextCollateralSnapshotComplete,
     collateralAddresses,
     nextCollateralAddresses,
+    collateralSnapshot,
+    nextCollateralSnapshot,
     repayAddsCash,
     collateralValueUsd,
     nextCollateralValueUsd,
     borrowValueUsd,
     nextBorrowValueUsd,
   } = options
-  const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+  const {
+    getEligibleLoopingRewardApyForCollaterals,
+    getBorrowRewardCampaignsForCollaterals,
+    getEligibleLoopingRewardCampaignsForCollaterals,
+  } = useRewardsApy()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
@@ -96,6 +113,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     computeLiquidationPrice(priceRatio.value, nextHealth.value))
 
   const projectedBorrowApy = ref<number | null>(null)
+  const projectedBorrowRawApy = ref<number | null>(null)
   const projectedBorrowApyComplete = ref(false)
   const projectedBorrowApyGuard = createRaceGuard()
 
@@ -109,6 +127,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
 
     if (!vault || !currentPosition || repaid === null) {
       projectedBorrowApy.value = null
+      projectedBorrowRawApy.value = null
       return
     }
 
@@ -129,6 +148,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
 
       if (!projected) {
         projectedBorrowApy.value = null
+        projectedBorrowRawApy.value = null
         return
       }
 
@@ -140,11 +160,13 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
         vault,
         enableIntrinsicApy.value,
       )
+      projectedBorrowRawApy.value = projectedRaw
       projectedBorrowApyComplete.value = true
     }
     catch {
       if (!projectedBorrowApyGuard.isStale(gen)) {
         projectedBorrowApy.value = null
+        projectedBorrowRawApy.value = null
       }
     }
   })
@@ -163,8 +185,53 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     )
   }
 
+  const currentRoeState = computed(() => {
+    const snapshot = collateralSnapshot?.value
+    const vault = borrowVault.value
+    const currentBorrowUsd = borrowValueUsd.value
+    const currentBorrowApy = borrowApy.value
+    if (!snapshot || !vault || currentBorrowUsd === null || currentBorrowApy === null) return null
+    return getProjectedYieldStateFromCollateralSnapshot('roe', snapshot, {
+      borrowUsd: currentBorrowUsd,
+      baseBorrowApy: getVaultBorrowApy(vault),
+      borrowApyWithIntrinsic: currentBorrowApy,
+      borrowRewardApy: borrowRewardApy.value,
+      loopingRewardApy: getLoopingRewardApy(
+        snapshot.supplyUsd,
+        currentBorrowUsd,
+        snapshot.collateralAddresses,
+      ),
+    })
+  })
+
+  const nextRoeState = computed(() => {
+    const snapshot = nextCollateralSnapshot?.value
+    const projectedBorrowUsd = nextBorrowValueUsd.value
+    const nextBorrowApy = projectedBorrowApy.value
+    const nextBorrowRaw = projectedBorrowRawApy.value
+    if (
+      !snapshot
+      || projectedBorrowUsd === null
+      || nextBorrowApy === null
+      || nextBorrowRaw === null
+      || !projectedBorrowApyComplete.value
+    ) return null
+    return getProjectedYieldStateFromCollateralSnapshot('roe', snapshot, {
+      borrowUsd: projectedBorrowUsd,
+      baseBorrowApy: nextBorrowRaw,
+      borrowApyWithIntrinsic: nextBorrowApy,
+      borrowRewardApy: nextBorrowRewardApy?.value ?? borrowRewardApy.value,
+      loopingRewardApy: getLoopingRewardApy(
+        snapshot.supplyUsd,
+        projectedBorrowUsd,
+        snapshot.collateralAddresses,
+      ),
+    })
+  })
+
   const roeBefore = computed(() => {
     if (!collateralSnapshotComplete.value) return null
+    if (collateralSnapshot) return currentRoeState.value?.total ?? null
     return getRoe(
       collateralValueUsd.value,
       collateralSupplyApy.value,
@@ -182,6 +249,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
       || !projectedBorrowApyComplete.value
       || projectedBorrowApy.value === null
     ) return null
+    if (nextCollateralSnapshot) return nextRoeState.value?.total ?? null
     return getRoe(
       nextCollateralValueUsd.value,
       nextCollateralSupplyApy?.value ?? collateralSupplyApy.value,
@@ -191,6 +259,74 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
       nextBorrowRewardApy?.value ?? borrowRewardApy.value,
       getLoopingRewardApy(nextCollateralValueUsd.value, nextBorrowValueUsd.value, nextCollateralAddresses?.value),
     )
+  })
+
+  const buildCampaignInputs = (
+    snapshot: CollateralApySnapshot,
+    supplyUsd: number | null,
+    debtUsd: number | null,
+  ): ProjectedYieldCampaignInput[] => {
+    const vault = borrowVault.value
+    if (!vault) return []
+    const addresses = snapshot.collateralAddresses
+    const multiplier = getPositionMultiplier(supplyUsd, debtUsd)
+    return [
+      ...getCollateralSnapshotCampaignInputs(snapshot),
+      ...(debtUsd !== null && debtUsd > 0
+        ? getBorrowRewardCampaignsForCollaterals(vault.address, addresses)
+            .map(campaign => ({ campaign, vaultAddress: vault.address }))
+        : []),
+      ...getEligibleLoopingRewardCampaignsForCollaterals(vault.address, addresses, multiplier)
+        .map(campaign => ({ campaign, vaultAddress: vault.address })),
+    ]
+  }
+
+  const projectedYieldDetails = computed<ProjectedYieldDetails | null>(() => {
+    const currentSnapshot = collateralSnapshot?.value
+    const nextSnapshot = nextCollateralSnapshot?.value
+    const vault = borrowVault.value
+    const currentBorrowUsd = borrowValueUsd.value
+    const projectedBorrowUsd = nextBorrowValueUsd.value
+    const currentBorrowApy = borrowApy.value
+    const nextBorrowApy = projectedBorrowApy.value
+    const nextBorrowRaw = projectedBorrowRawApy.value
+    if (
+      !currentSnapshot
+      || !nextSnapshot
+      || !vault
+      || currentBorrowUsd === null
+      || projectedBorrowUsd === null
+      || currentBorrowApy === null
+      || nextBorrowApy === null
+      || nextBorrowRaw === null
+      || !projectedBorrowApyComplete.value
+    ) return null
+
+    const currentRaw = getVaultBorrowApy(vault)
+    const before = currentRoeState.value
+    const after = nextRoeState.value
+    if (!after) return null
+
+    return {
+      metric: 'roe',
+      before,
+      after,
+      rateLines: [
+        ...getCollateralSnapshotRateLines(currentSnapshot, nextSnapshot),
+        {
+          id: `borrow:${vault.address.toLowerCase()}`,
+          label: 'Borrow APY',
+          symbol: vault.asset.symbol,
+          vaultAddress: vault.address,
+          before: currentRaw,
+          after: nextBorrowRaw,
+        },
+      ],
+      rewards: mergeProjectedRewardCampaigns(
+        buildCampaignInputs(currentSnapshot, currentSnapshot.supplyUsd, currentBorrowUsd),
+        buildCampaignInputs(nextSnapshot, nextSnapshot.supplyUsd, projectedBorrowUsd),
+      ),
+    }
   })
 
   return {
@@ -204,5 +340,6 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     nextLiquidationPrice,
     roeBefore,
     roeAfter,
+    projectedYieldDetails,
   }
 }

@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type EVault, type PortfolioBorrowPosition, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
@@ -52,6 +52,7 @@ const { USER, sourceVault, borrowVault, position, mocks } = vi.hoisted(() => {
     borrowVault,
     position,
     mocks: {
+      getAssetUsdValue: vi.fn(async (_amount?: number | bigint) => null as number | null),
       quoteInstances: [] as Array<{
         options: { amountField: 'amountIn' | 'amountOut' }
         requestQuotes: ReturnType<typeof vi.fn>
@@ -62,7 +63,7 @@ const { USER, sourceVault, borrowVault, position, mocks } = vi.hoisted(() => {
 })
 
 vi.mock('~/utils/sdk-prices', () => ({
-  getAssetUsdValue: vi.fn(async () => null),
+  getAssetUsdValue: mocks.getAssetUsdValue,
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
@@ -93,6 +94,7 @@ describe('useRepaySwapCore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.quoteInstances.length = 0
+    mocks.getAssetUsdValue.mockResolvedValue(null)
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -153,5 +155,59 @@ describe('useRepaySwapCore', () => {
       targetDebt: 0n,
       currentDebt: 2_000n,
     }))
+  })
+
+  it('invalidates pending next-debt USD values on newer input and missing position', async () => {
+    let resolve1900!: (value: number) => void
+    let resolve1700!: (value: number) => void
+    const pending1900 = new Promise<number>((resolve) => {
+      resolve1900 = resolve
+    })
+    const pending1700 = new Promise<number>((resolve) => {
+      resolve1700 = resolve
+    })
+    mocks.getAssetUsdValue.mockImplementation(async (amount?: number | bigint) => {
+      if (amount === undefined) return null
+      if (amount === 1900n) return pending1900
+      if (amount === 1700n) return pending1700
+      return Number(amount) / 100
+    })
+    const positionRef = shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position)
+    const sameAssetSource = {
+      ...sourceVault,
+      asset: { ...sourceVault.asset, address: borrowVault.asset.address },
+    } as EVault
+    const repay = useRepaySwapCore({
+      position: positionRef,
+      borrowVault: computed(() => borrowVault),
+      sourceVault: shallowRef<EVault | undefined>(sameAssetSource),
+      sourceBalance: computed(() => 5_000n),
+      formTab: ref('collateral'),
+      formTabName: 'collateral',
+      slippage: ref(0.5),
+      clearSimulationError: vi.fn(),
+      getCurrentDebt: () => positionRef.value?.borrowed ?? 0n,
+      getQuoteAccounts: () => ({ accountIn: USER, accountOut: USER }),
+      buildTxPlanForQuote: vi.fn(async () => [] as unknown as TransactionPlan),
+    })
+
+    repay.debtAmount.value = '100'
+    await vi.waitFor(() => expect(mocks.getAssetUsdValue).toHaveBeenCalledWith(1900n, borrowVault, 'off-chain'))
+    expect(repay.nextBorrowValueUsd.value).toBeNull()
+
+    repay.debtAmount.value = '200'
+    await vi.waitFor(() => expect(repay.nextBorrowValueUsd.value).toBe(18))
+    resolve1900(19)
+    await flushPromises()
+    expect(repay.nextBorrowValueUsd.value).toBe(18)
+
+    repay.debtAmount.value = '300'
+    await vi.waitFor(() => expect(mocks.getAssetUsdValue).toHaveBeenCalledWith(1700n, borrowVault, 'off-chain'))
+    positionRef.value = undefined
+    await nextTick()
+    expect(repay.nextBorrowValueUsd.value).toBeNull()
+    resolve1700(17)
+    await flushPromises()
+    expect(repay.nextBorrowValueUsd.value).toBeNull()
   })
 })

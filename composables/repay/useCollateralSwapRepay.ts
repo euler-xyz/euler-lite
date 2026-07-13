@@ -20,6 +20,7 @@ import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
+import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { adjustForInterest } from '~/utils/adjust-for-interest'
 import { getSwapInputAmount } from '~/utils/swapQuotes'
@@ -239,6 +240,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const nextCollateralAddresses = ref<string[]>([])
   const collateralSnapshotComplete = ref(false)
   const nextCollateralSnapshotComplete = ref(false)
+  const collateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
+  const nextCollateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
 
   watchEffect(async () => {
     const gen = collateralPortfolioGuard.next()
@@ -256,10 +259,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       nextCollateralAddresses.value = []
       collateralSnapshotComplete.value = false
       nextCollateralSnapshotComplete.value = false
+      collateralSnapshot.value = null
+      nextCollateralSnapshot.value = null
       return
     }
     collateralSnapshotComplete.value = false
     nextCollateralSnapshotComplete.value = false
+    collateralSnapshot.value = null
+    nextCollateralSnapshot.value = null
     const [currentSnapshot, nextSnapshot] = await Promise.all([
       getCollateralApySnapshot(currentPosition, currentBorrowVault),
       getCollateralApySnapshot(currentPosition, currentBorrowVault, {
@@ -279,6 +286,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextCollateralAddresses.value = nextSnapshot.collateralAddresses ?? currentPosition.collateralVaults ?? []
     collateralSnapshotComplete.value = currentSnapshot.isComplete
     nextCollateralSnapshotComplete.value = nextSnapshot.isComplete
+    collateralSnapshot.value = currentSnapshot.isComplete ? currentSnapshot : null
+    nextCollateralSnapshot.value = nextSnapshot.isComplete ? nextSnapshot : null
   })
   const effectiveCollateralSupplyApy = computed(() => weightedCollateralSupplyApy.value ?? collateralSupplyApy.value)
   const effectiveNextCollateralSupplyApy = computed(() => nextWeightedCollateralSupplyApy.value ?? effectiveCollateralSupplyApy.value)
@@ -303,6 +312,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextCollateralSnapshotComplete,
     collateralAddresses,
     nextCollateralAddresses,
+    collateralSnapshot,
+    nextCollateralSnapshot,
     collateralValueUsd,
     nextCollateralValueUsd,
     borrowValueUsd: core.borrowValueUsd,
@@ -760,6 +771,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // Health metrics
     roeBefore: health.roeBefore,
     roeAfter: health.roeAfter,
+    projectedYieldDetails: health.projectedYieldDetails,
     nextCollateralAddresses,
     nextCollateralSnapshotComplete,
     priceRatio,

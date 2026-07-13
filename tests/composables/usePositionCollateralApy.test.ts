@@ -52,6 +52,7 @@ describe('usePositionCollateralApy', () => {
     vi.stubGlobal('useRewardsApy', () => ({
       version: ref(1),
       getSupplyRewardApy: vi.fn(() => 1),
+      getSupplyRewardCampaigns: vi.fn(() => []),
     }))
     vi.stubGlobal('useVaultRegistry', () => ({
       getOrFetch: vi.fn(async (address: string) => ({
@@ -86,8 +87,39 @@ describe('usePositionCollateralApy', () => {
     })])
     expect(snapshot.supplyUsd).toBe(250)
     expect(snapshot.weightedSupplyApy).toBeCloseTo((150 * 9 + 100 * 11) / 250)
+    expect(snapshot.weightedBaseSupplyApy).toBeCloseTo((150 * 8 + 100 * 10) / 250)
+    expect(snapshot.weightedIntrinsicSupplyApy).toBe(0)
+    expect(snapshot.weightedSupplyRewardApy).toBe(1)
+    expect(snapshot.entries).toEqual([
+      expect.objectContaining({ address: VAULT_A, supplyUsd: 150, baseSupplyApy: 8, supplyRewardApy: 1 }),
+      expect.objectContaining({ address: VAULT_B, supplyUsd: 100, baseSupplyApy: 10, supplyRewardApy: 1 }),
+    ])
     expect(snapshot.collateralAddresses).toEqual([VAULT_A, VAULT_B])
     expect(snapshot.isComplete).toBe(true)
+  })
+
+  it('projects a vault cash change without changing the position assets', async () => {
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+    const snapshot = await getCollateralApySnapshot(makePosition(), liabilityVault, {
+      deltas: [{
+        vaultAddress: VAULT_A,
+        assetsDelta: 0n,
+        cashDelta: -25n,
+        projectRates: true,
+      }],
+    })
+
+    expect(getProjectedRatesBatch).toHaveBeenCalledWith([expect.objectContaining({
+      vaultAddress: VAULT_A,
+      cashDelta: -25n,
+    })])
+    expect(snapshot.supplyUsd).toBe(200)
+    expect(snapshot.entries[0]).toMatchObject({
+      address: VAULT_A,
+      assets: 100n,
+      supplyUsd: 100,
+      baseSupplyApy: 8,
+    })
   })
 
   it('fails closed when a requested projected rate is unavailable', async () => {
@@ -99,7 +131,11 @@ describe('usePositionCollateralApy', () => {
     })).resolves.toEqual({
       supplyUsd: 0,
       weightedSupplyApy: null,
+      weightedBaseSupplyApy: null,
+      weightedIntrinsicSupplyApy: null,
+      weightedSupplyRewardApy: null,
       collateralAddresses: [],
+      entries: [],
       isComplete: false,
     })
   })
@@ -111,7 +147,11 @@ describe('usePositionCollateralApy', () => {
     await expect(getCollateralApySnapshot(position, liabilityVault)).resolves.toEqual({
       supplyUsd: 0,
       weightedSupplyApy: null,
+      weightedBaseSupplyApy: null,
+      weightedIntrinsicSupplyApy: null,
+      weightedSupplyRewardApy: null,
       collateralAddresses: [],
+      entries: [],
       isComplete: false,
     })
     expect(getCollateralUsdValue).not.toHaveBeenCalled()
@@ -126,7 +166,11 @@ describe('usePositionCollateralApy', () => {
     await expect(getCollateralApySnapshot(makePosition(), liabilityVault)).resolves.toEqual({
       supplyUsd: 0,
       weightedSupplyApy: null,
+      weightedBaseSupplyApy: null,
+      weightedIntrinsicSupplyApy: null,
+      weightedSupplyRewardApy: null,
       collateralAddresses: [],
+      entries: [],
       isComplete: false,
     })
   })
@@ -139,7 +183,11 @@ describe('usePositionCollateralApy', () => {
     await expect(getCollateralApySnapshot(makePosition(), liabilityVault)).resolves.toEqual({
       supplyUsd: 0,
       weightedSupplyApy: null,
+      weightedBaseSupplyApy: null,
+      weightedIntrinsicSupplyApy: null,
+      weightedSupplyRewardApy: null,
       collateralAddresses: [],
+      entries: [],
       isComplete: false,
     })
   })

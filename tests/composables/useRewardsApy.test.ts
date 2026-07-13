@@ -63,16 +63,25 @@ describe('useRewardsApy multi-collateral rewards', () => {
   })
 
   it('includes base borrow and every matching collateral campaign once', () => {
-    const { getBorrowRewardApyForCollaterals } = useRewardsApy()
+    const { getBorrowRewardApyForCollaterals, getBorrowRewardCampaignsForCollaterals } = useRewardsApy()
 
     expect(getBorrowRewardApyForCollaterals(BORROW, [COLLATERAL_A, COLLATERAL_B])).toBe(6)
+    expect(getBorrowRewardCampaignsForCollaterals(BORROW, [COLLATERAL_B]).map(item => item.action)).toEqual([
+      'BORROW',
+      'BORROW_COLLATERAL',
+    ])
   })
 
   it('includes looping rewards only for matching collateral and multiplier', () => {
-    const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+    const {
+      getEligibleLoopingRewardApyForCollaterals,
+      getEligibleLoopingRewardCampaignsForCollaterals,
+    } = useRewardsApy()
 
     expect(getEligibleLoopingRewardApyForCollaterals(BORROW, [COLLATERAL_A, COLLATERAL_B], 2.5)).toBe(9)
     expect(getEligibleLoopingRewardApyForCollaterals(BORROW, [COLLATERAL_A, COLLATERAL_B], 4)).toBe(0)
     expect(getEligibleLoopingRewardApyForCollaterals(BORROW, [COLLATERAL_A], null)).toBe(0)
+    expect(getEligibleLoopingRewardCampaignsForCollaterals(BORROW, [COLLATERAL_A], 2.5)).toHaveLength(1)
+    expect(getEligibleLoopingRewardCampaignsForCollaterals(BORROW, [COLLATERAL_A], 4)).toEqual([])
   })
 })

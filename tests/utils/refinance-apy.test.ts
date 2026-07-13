@@ -19,7 +19,7 @@ describe('buildRefinanceProjectedRateRequests', () => {
         { vault: source, cashDelta: -100n },
         { vault: target, cashDelta: 95n },
       ],
-      { vault: target, borrowsDelta: 50n },
+      [{ vault: target, borrowsDelta: 50n }],
     )).toEqual([
       {
         address: source.address,
@@ -38,6 +38,37 @@ describe('buildRefinanceProjectedRateRequests', () => {
           currentCash: 2_000n,
           currentBorrows: 800n,
           cashDelta: 45n,
+          borrowsDelta: 50n,
+        },
+      },
+    ])
+  })
+
+  it('merges source debt repayment when the source debt vault becomes collateral', () => {
+    expect(buildRefinanceProjectedRateRequests(
+      [{ vault: source, cashDelta: 95n }],
+      [
+        { vault: target, borrowsDelta: 50n },
+        { vault: source, borrowsDelta: -100n },
+      ],
+    )).toEqual([
+      {
+        address: source.address,
+        request: {
+          vaultAddress: source.address,
+          currentCash: 1_000n,
+          currentBorrows: 500n,
+          cashDelta: 195n,
+          borrowsDelta: -100n,
+        },
+      },
+      {
+        address: target.address,
+        request: {
+          vaultAddress: target.address,
+          currentCash: 2_000n,
+          currentBorrows: 800n,
+          cashDelta: -50n,
           borrowsDelta: 50n,
         },
       },

@@ -22,6 +22,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
+import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 
 interface UseSavingsRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -155,28 +156,72 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const savingsWeightedCollateralApy = ref<number | null>(null)
   const savingsCollateralAddresses = ref<string[]>([])
   const savingsCollateralSnapshotComplete = ref(false)
+  const savingsCollateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
+  const nextSavingsWeightedCollateralApy = ref<number | null>(null)
+  const nextSavingsCollateralAddresses = ref<string[]>([])
+  const nextSavingsCollateralSnapshotComplete = ref(false)
+  const nextSavingsCollateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
 
   watchEffect(async () => {
     const gen = savingsCollateralUsdGuard.next()
     const currentBorrowVault = borrowVault.value
     const currentPosition = position.value
+    const currentSourceVault = sourceVault.value
+    const spent = core.spent.value
+    const sourceAddress = normalizeAddressOrEmpty(currentSourceVault?.address)
+    const sourceIsPositionCollateral = !!sourceAddress && (currentPosition?.collateralVaults ?? [])
+      .some(address => normalizeAddressOrEmpty(address) === sourceAddress)
+    const withdrawalCashDelta = currentSourceVault
+      && !isSameVaultRepay.value
+      && sourceIsPositionCollateral
+      && spent !== null
+      && spent > 0n
+      ? -spent
+      : null
 
     if (!currentBorrowVault || !currentPosition) {
       savingsCollateralUsd.value = null
       savingsWeightedCollateralApy.value = null
       savingsCollateralAddresses.value = []
       savingsCollateralSnapshotComplete.value = false
+      savingsCollateralSnapshot.value = null
+      nextSavingsWeightedCollateralApy.value = null
+      nextSavingsCollateralAddresses.value = []
+      nextSavingsCollateralSnapshotComplete.value = false
+      nextSavingsCollateralSnapshot.value = null
       return
     }
     savingsCollateralSnapshotComplete.value = false
-    const snapshot = await getCollateralApySnapshot(currentPosition, currentBorrowVault)
+    savingsCollateralSnapshot.value = null
+    nextSavingsCollateralSnapshotComplete.value = false
+    nextSavingsCollateralSnapshot.value = null
+    const snapshotPromise = getCollateralApySnapshot(currentPosition, currentBorrowVault)
+    const nextSnapshotPromise = withdrawalCashDelta !== null
+      ? getCollateralApySnapshot(currentPosition, currentBorrowVault, {
+          deltas: [{
+            vaultAddress: sourceAddress,
+            assetsDelta: 0n,
+            cashDelta: withdrawalCashDelta,
+            projectRates: true,
+          }],
+        })
+      : snapshotPromise
+    const [snapshot, nextSnapshot] = await Promise.all([snapshotPromise, nextSnapshotPromise])
     if (savingsCollateralUsdGuard.isStale(gen)) return
     savingsCollateralUsd.value = snapshot.supplyUsd
     savingsWeightedCollateralApy.value = snapshot.weightedSupplyApy
     savingsCollateralAddresses.value = snapshot.collateralAddresses ?? currentPosition.collateralVaults ?? []
     savingsCollateralSnapshotComplete.value = snapshot.isComplete
+    savingsCollateralSnapshot.value = snapshot.isComplete ? snapshot : null
+    nextSavingsWeightedCollateralApy.value = nextSnapshot.weightedSupplyApy
+    nextSavingsCollateralAddresses.value = nextSnapshot.collateralAddresses ?? currentPosition.collateralVaults ?? []
+    nextSavingsCollateralSnapshotComplete.value = nextSnapshot.isComplete
+    nextSavingsCollateralSnapshot.value = nextSnapshot.isComplete ? nextSnapshot : null
   })
   const effectiveCollateralSupplyApy = computed(() => savingsWeightedCollateralApy.value ?? collateralSupplyApy.value)
+  const nextEffectiveCollateralSupplyApy = computed(() =>
+    nextSavingsWeightedCollateralApy.value ?? effectiveCollateralSupplyApy.value,
+  )
 
   // --- Health metrics ---
   const health = useRepayHealthMetrics({
@@ -187,12 +232,15 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     nextLiquidationLtv,
     collateralAmountAfter,
     collateralSupplyApy: effectiveCollateralSupplyApy,
+    nextCollateralSupplyApy: nextEffectiveCollateralSupplyApy,
     borrowApy,
     borrowRewardApy,
     collateralSnapshotComplete: savingsCollateralSnapshotComplete,
-    nextCollateralSnapshotComplete: savingsCollateralSnapshotComplete,
+    nextCollateralSnapshotComplete: nextSavingsCollateralSnapshotComplete,
     collateralAddresses: savingsCollateralAddresses,
-    nextCollateralAddresses: savingsCollateralAddresses,
+    nextCollateralAddresses: nextSavingsCollateralAddresses,
+    collateralSnapshot: savingsCollateralSnapshot,
+    nextCollateralSnapshot: nextSavingsCollateralSnapshot,
     repayAddsCash: computed(() => !isSameVaultRepay.value),
     collateralValueUsd: savingsCollateralUsd,
     nextCollateralValueUsd: savingsCollateralUsd,
@@ -503,6 +551,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     // Health metrics
     roeBefore: health.roeBefore,
     roeAfter: health.roeAfter,
+    projectedYieldDetails: health.projectedYieldDetails,
     currentHealth: health.currentHealth,
     currentLtv: health.currentLtv,
     nextLtv: health.nextLtv,

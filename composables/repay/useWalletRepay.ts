@@ -1,4 +1,4 @@
-import { getPositionMultiplier, getProjectedRates, getNetAPYFromWeightedSupplySnapshot } from '~/utils/vault/apy'
+import { getPositionMultiplier, getProjectedRates } from '~/utils/vault/apy'
 import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
 import { maxUint256, type Address } from 'viem'
@@ -19,6 +19,13 @@ import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { getBorrowPositionEffectiveLiquidationLTV, decimalLtvToBps } from '~/utils/ltv'
 import { getVaultBorrowApy } from '~/utils/vault-display'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import {
+  getCollateralSnapshotCampaignInputs,
+  getProjectedYieldStateFromCollateralSnapshot,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldCampaignInput,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
 
 interface UseWalletRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -52,9 +59,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     clearSimulationError,
     runSimulation,
     netAPY,
-    collateralSupplyApy,
-    collateralSupplyRewardApy,
-    borrowRewardApy,
+    borrowApy,
     oraclePriceRatio,
   } = options
 
@@ -66,7 +71,13 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
-  const { getEligibleLoopingRewardApyForCollaterals } = useRewardsApy()
+  const {
+    version: rewardsVersion,
+    getBorrowRewardApyForCollaterals,
+    getEligibleLoopingRewardApyForCollaterals,
+    getBorrowRewardCampaignsForCollaterals,
+    getEligibleLoopingRewardCampaignsForCollaterals,
+  } = useRewardsApy()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
@@ -74,6 +85,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const walletRepayPercent = ref(0)
   const hasEstimate = ref(false)
   const _estimateNetAPY = ref<number | null>(null)
+  const projectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
   const _estimateUserLTV = ref(0n)
   const _estimateHealth = ref(0n)
   const estimateNetAPY = computed(() => hasEstimate.value ? _estimateNetAPY.value : netAPY.value)
@@ -214,10 +226,11 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
   }
 
-  const updateSyncEstimates = () => {
+  const updateSyncEstimates = (): boolean => {
     clearSimulationError()
     estimatesError.value = ''
-    if (!position.value || !collateralVault.value || !borrowVault.value) return
+    hasEstimate.value = false
+    if (!position.value || !collateralVault.value || !borrowVault.value || !(+amount.value > 0)) return false
     try {
       if (walletBalance.value < valueToNano(amount.value, borrowVault.value.shares.decimals)) {
         throw new Error('Not enough balance')
@@ -252,70 +265,135 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       if (userLtvFixed.gte(FixedPoint.fromValue(liquidationLtv, 2))) {
         throw new Error('Not enough liquidity for the vault, LTV is too large')
       }
+      return true
     }
     catch (e: unknown) {
       logWarn('walletRepay/syncEstimates', e)
       hasEstimate.value = false
       estimatesError.value = (e as { message: string }).message
+      return false
     }
   }
 
   const asyncEstimatesGuard = createRaceGuard()
-  const updateAsyncEstimates = useDebounceFn(async () => {
-    if (!position.value || !collateralVault.value || !borrowVault.value) {
+  const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
+    if (asyncEstimatesGuard.isStale(gen)) return
+    const currentPosition = position.value
+    const currentCollateralVault = collateralVault.value
+    const currentBorrowVault = borrowVault.value
+    const currentBorrowApy = borrowApy.value
+    _estimateNetAPY.value = null
+    projectedYieldDetails.value = null
+    if (!currentPosition || !currentCollateralVault || !currentBorrowVault) {
       isEstimatesLoading.value = false
       return
     }
-    const gen = asyncEstimatesGuard.next()
     try {
-      const repayNano = valueToNano(amount.value, borrowVault.value.shares.decimals)
-      const remainingBorrow = (position.value.borrowed || 0n) - repayNano
+      const repayNano = valueToNano(amount.value, currentBorrowVault.shares.decimals)
+      const remainingBorrow = (currentPosition.borrowed || 0n) - repayNano
 
-      const [projected, collateralSnapshot, borrowUsd] = await Promise.all([
+      const [projected, collateralSnapshot, currentBorrowUsd, borrowUsd] = await Promise.all([
         getProjectedRates(
-          borrowVault.value.address,
-          borrowVault.value.totalCash,
-          borrowVault.value.totalBorrowed,
+          currentBorrowVault.address,
+          currentBorrowVault.totalCash,
+          currentBorrowVault.totalBorrowed,
           repayNano,
           -repayNano,
         ),
-        getCollateralApySnapshot(position.value, borrowVault.value),
-        getAssetUsdValueOrZero(remainingBorrow > 0n ? remainingBorrow : 0n, borrowVault.value, 'off-chain'),
+        getCollateralApySnapshot(currentPosition, currentBorrowVault),
+        getAssetUsdValueOrZero(currentPosition.borrowed || 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueOrZero(remainingBorrow > 0n ? remainingBorrow : 0n, currentBorrowVault, 'off-chain'),
       ])
 
       if (asyncEstimatesGuard.isStale(gen)) return
       if (!projected || !collateralSnapshot.isComplete) {
         _estimateNetAPY.value = null
+        projectedYieldDetails.value = null
         return
       }
 
-      const currentRaw = getVaultBorrowApy(borrowVault.value)
+      const currentRaw = getVaultBorrowApy(currentBorrowVault)
       const projectedBorrowApy = withProjectedVaultIntrinsicApy(
         currentRaw,
         nanoToValue(projected.borrowAPY, 25),
-        borrowVault.value,
+        currentBorrowVault,
         enableIntrinsicApy.value,
       )
       const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
-        borrowVault.value.address,
-        collateralSnapshot.collateralAddresses ?? position.value.collateralVaults ?? [],
+        currentBorrowVault.address,
+        collateralSnapshot.collateralAddresses,
         getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
       )
-
-      _estimateNetAPY.value = getNetAPYFromWeightedSupplySnapshot(
-        collateralSnapshot,
-        collateralSupplyApy.value,
-        borrowUsd,
-        projectedBorrowApy,
-        collateralSupplyRewardApy.value || null,
-        borrowRewardApy.value || null,
-        loopingRewardApy || null,
+      const projectedRaw = nanoToValue(projected.borrowAPY, 25)
+      const currentMultiplier = getPositionMultiplier(collateralSnapshot.supplyUsd, currentBorrowUsd)
+      const nextMultiplier = getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd)
+      const collateralAddresses = collateralSnapshot.collateralAddresses
+      const currentBorrowRewardApy = getBorrowRewardApyForCollaterals(
+        currentBorrowVault.address,
+        collateralAddresses,
       )
+      const currentLoopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+        currentBorrowVault.address,
+        collateralAddresses,
+        currentMultiplier,
+      )
+      const before = getProjectedYieldStateFromCollateralSnapshot('net-apy', collateralSnapshot, {
+        borrowUsd: currentBorrowUsd,
+        baseBorrowApy: currentRaw,
+        borrowApyWithIntrinsic: currentBorrowApy,
+        borrowRewardApy: currentBorrowRewardApy,
+        loopingRewardApy: currentLoopingRewardApy,
+      })
+      const after = getProjectedYieldStateFromCollateralSnapshot('net-apy', collateralSnapshot, {
+        borrowUsd,
+        baseBorrowApy: projectedRaw,
+        borrowApyWithIntrinsic: projectedBorrowApy,
+        borrowRewardApy: currentBorrowRewardApy,
+        loopingRewardApy,
+      })
+      if (!after) {
+        _estimateNetAPY.value = null
+        projectedYieldDetails.value = null
+        return
+      }
+
+      const getCampaignInputs = (multiplier: number | null, hasDebt: boolean): ProjectedYieldCampaignInput[] => [
+        ...getCollateralSnapshotCampaignInputs(collateralSnapshot),
+        ...(hasDebt
+          ? getBorrowRewardCampaignsForCollaterals(currentBorrowVault.address, collateralAddresses)
+              .map(campaign => ({ campaign, vaultAddress: currentBorrowVault.address }))
+          : []),
+        ...getEligibleLoopingRewardCampaignsForCollaterals(
+          currentBorrowVault.address,
+          collateralAddresses,
+          multiplier,
+        ).map(campaign => ({ campaign, vaultAddress: currentBorrowVault.address })),
+      ]
+
+      _estimateNetAPY.value = after.total
+      projectedYieldDetails.value = {
+        metric: 'net-apy',
+        before,
+        after,
+        rateLines: [{
+          id: `borrow:${currentBorrowVault.address.toLowerCase()}`,
+          label: 'Borrow APY',
+          symbol: currentBorrowVault.asset.symbol,
+          vaultAddress: currentBorrowVault.address,
+          before: currentRaw,
+          after: projectedRaw,
+        }],
+        rewards: mergeProjectedRewardCampaigns(
+          getCampaignInputs(currentMultiplier, currentBorrowUsd > 0),
+          getCampaignInputs(nextMultiplier, borrowUsd > 0),
+        ),
+      }
     }
     catch (e) {
       if (asyncEstimatesGuard.isStale(gen)) return
       logWarn('walletRepay/asyncEstimates', e)
       _estimateNetAPY.value = null
+      projectedYieldDetails.value = null
     }
     finally {
       if (!asyncEstimatesGuard.isStale(gen)) {
@@ -323,6 +401,18 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       }
     }
   }, 500)
+
+  const queueAsyncEstimates = () => {
+    const gen = asyncEstimatesGuard.next()
+    _estimateNetAPY.value = null
+    projectedYieldDetails.value = null
+    if (formTab.value !== 'wallet' || !updateSyncEstimates()) {
+      isEstimatesLoading.value = false
+      return
+    }
+    isEstimatesLoading.value = true
+    updateAsyncEstimates(gen)
+  }
 
   const onWalletRepayPercentInput = () => {
     clearSimulationError()
@@ -354,6 +444,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   // Watch amount changes: sync percent slider + trigger estimates
   watch(amount, () => {
     asyncEstimatesGuard.next()
+    _estimateNetAPY.value = null
+    projectedYieldDetails.value = null
     clearSimulationError()
     if (formTab.value !== 'wallet') return
 
@@ -373,24 +465,54 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         walletRepayPercent.value = 0
       }
     }
-    if (!collateralVault.value) return
-    updateSyncEstimates()
-    if (!isEstimatesLoading.value) {
-      isEstimatesLoading.value = true
+    if (!collateralVault.value) {
+      hasEstimate.value = false
+      isEstimatesLoading.value = false
+      return
     }
-    updateAsyncEstimates()
+    queueAsyncEstimates()
+  })
+
+  watch([rewardsVersion, enableIntrinsicApy], () => {
+    if (!(+amount.value > 0)) return
+    queueAsyncEstimates()
+  })
+
+  watch([
+    position,
+    borrowVault,
+    collateralVault,
+    borrowApy,
+    () => position.value?.borrowed,
+    () => position.value?.collateralVaults?.join(','),
+  ], () => {
+    asyncEstimatesGuard.next()
+    hasEstimate.value = false
+    _estimateNetAPY.value = null
+    projectedYieldDetails.value = null
+    if (!(+amount.value > 0)) {
+      isEstimatesLoading.value = false
+      return
+    }
+    queueAsyncEstimates()
   })
 
   const initEstimates = () => {
+    asyncEstimatesGuard.next()
     hasEstimate.value = false
+    _estimateNetAPY.value = null
+    projectedYieldDetails.value = null
     estimatesError.value = ''
     isEstimatesLoading.value = false
   }
 
   const resetOnTabSwitch = () => {
+    asyncEstimatesGuard.next()
     amount.value = ''
     walletRepayPercent.value = 0
     hasEstimate.value = false
+    _estimateNetAPY.value = null
+    projectedYieldDetails.value = null
     estimatesError.value = ''
     isEstimatesLoading.value = false
   }
@@ -399,6 +521,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     amount,
     walletRepayPercent,
     estimateNetAPY,
+    projectedYieldDetails,
     estimateUserLTV,
     estimateHealth,
     estimatesError,

@@ -9,10 +9,12 @@ import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { logWarn } from '~/utils/errorHandling'
+import type { RewardCampaign } from '~/entities/reward-campaign'
 
 interface CollateralApyDelta {
   vaultAddress: string
   assetsDelta: bigint
+  cashDelta?: bigint
   projectRates?: boolean
 }
 
@@ -20,10 +22,26 @@ interface CollateralApySnapshotOptions {
   deltas?: CollateralApyDelta[]
 }
 
-interface CollateralApySnapshot {
+export interface CollateralApySnapshotEntry {
+  address: string
+  vault: VaultEntity
+  assets: bigint
+  supplyUsd: number
+  baseSupplyApy: number
+  intrinsicSupplyApy: number
+  supplyRewardApy: number
+  totalSupplyApy: number
+  supplyCampaigns: RewardCampaign[]
+}
+
+export interface CollateralApySnapshot {
   supplyUsd: number
   weightedSupplyApy: number | null
+  weightedBaseSupplyApy: number | null
+  weightedIntrinsicSupplyApy: number | null
+  weightedSupplyRewardApy: number | null
   collateralAddresses: string[]
+  entries: CollateralApySnapshotEntry[]
   isComplete: boolean
 }
 
@@ -32,11 +50,16 @@ interface CollateralApyEntry {
   vault: VaultEntity
   assets: bigint
   delta: bigint
+  cashDelta: bigint
   projectRates: boolean | undefined
 }
 
 export const usePositionCollateralApy = () => {
-  const { getSupplyRewardApy, version: rewardsVersion } = useRewardsApy()
+  const {
+    getSupplyRewardApy,
+    getSupplyRewardCampaigns,
+    version: rewardsVersion,
+  } = useRewardsApy()
   const { getOrFetch } = useVaultRegistry()
   const { isReady: isVaultsReady, isMarketDataResolved } = useVaults()
   const { settings } = useUserSettings()
@@ -64,7 +87,11 @@ export const usePositionCollateralApy = () => {
     const incompleteSnapshot = (): CollateralApySnapshot => ({
       supplyUsd: 0,
       weightedSupplyApy: null,
+      weightedBaseSupplyApy: null,
+      weightedIntrinsicSupplyApy: null,
+      weightedSupplyRewardApy: null,
       collateralAddresses: [],
+      entries: [],
       isComplete: false,
     })
 
@@ -118,6 +145,7 @@ export const usePositionCollateralApy = () => {
           vault,
           assets: nextAssets > 0n ? nextAssets : 0n,
           delta,
+          cashDelta: deltaByAddress.get(address)?.cashDelta ?? delta,
           projectRates: deltaByAddress.get(address)?.projectRates,
         }
       }))
@@ -125,14 +153,14 @@ export const usePositionCollateralApy = () => {
       const entries = resolvedEntries as CollateralApyEntry[]
 
       const projectionRequests = entries.reduce<Array<{ index: number, request: ProjectedRatesRequest }>>((acc, entry, index) => {
-        if (!entry.projectRates || entry.delta === 0n || !isEVault(entry.vault)) return acc
+        if (!entry.projectRates || entry.cashDelta === 0n || !isEVault(entry.vault)) return acc
         acc.push({
           index,
           request: {
             vaultAddress: entry.vault.address,
             currentCash: entry.vault.totalCash,
             currentBorrows: entry.vault.totalBorrowed,
-            cashDelta: entry.delta,
+            cashDelta: entry.cashDelta,
             borrowsDelta: 0n,
           },
         })
@@ -157,28 +185,57 @@ export const usePositionCollateralApy = () => {
         const currentRaw = getVaultSupplyApy(entry.vault)
         const projected = projectedByIndex.get(index)
         const projectedRaw = projected ? nanoToValue(projected.supplyAPY, 25) : null
-        const supplyApy = withProjectedVaultIntrinsicApy(
+        const baseSupplyApy = projectedRaw ?? currentRaw
+        const supplyApyWithIntrinsic = withProjectedVaultIntrinsicApy(
           currentRaw,
           projectedRaw,
           entry.vault,
           intrinsicApyEnabled,
-        ) + getSupplyRewardApy(entry.vault.address)
+        )
+        const supplyRewardApy = getSupplyRewardApy(entry.vault.address)
+        const totalSupplyApy = supplyApyWithIntrinsic + supplyRewardApy
 
-        return { supplyUsd, supplyApy }
+        return {
+          address: entry.address,
+          vault: entry.vault,
+          assets: entry.assets,
+          supplyUsd,
+          baseSupplyApy,
+          intrinsicSupplyApy: supplyApyWithIntrinsic - baseSupplyApy,
+          supplyRewardApy,
+          totalSupplyApy,
+          supplyCampaigns: getSupplyRewardCampaigns(entry.vault.address),
+        }
       }))
       if (valued.some(entry => entry === null)) return incompleteSnapshot()
-      const completeValues = valued as Array<{ supplyUsd: number, supplyApy: number }>
+      const completeValues = valued as CollateralApySnapshotEntry[]
 
       const supplyUsd = completeValues.reduce((sum, item) => sum + item.supplyUsd, 0)
       const positiveCollateralAddresses = entries.filter(entry => entry.assets > 0n).map(entry => entry.address)
       if (!Number.isFinite(supplyUsd) || supplyUsd <= 0) {
-        return { supplyUsd: 0, weightedSupplyApy: null, collateralAddresses: positiveCollateralAddresses, isComplete: true }
+        return {
+          supplyUsd: 0,
+          weightedSupplyApy: null,
+          weightedBaseSupplyApy: null,
+          weightedIntrinsicSupplyApy: null,
+          weightedSupplyRewardApy: null,
+          collateralAddresses: positiveCollateralAddresses,
+          entries: completeValues,
+          isComplete: true,
+        }
       }
+
+      const weighted = (select: (item: CollateralApySnapshotEntry) => number) =>
+        completeValues.reduce((sum, item) => sum + item.supplyUsd * select(item), 0) / supplyUsd
 
       return {
         supplyUsd,
-        weightedSupplyApy: completeValues.reduce((sum, item) => sum + item.supplyUsd * item.supplyApy, 0) / supplyUsd,
+        weightedSupplyApy: weighted(item => item.totalSupplyApy),
+        weightedBaseSupplyApy: weighted(item => item.baseSupplyApy),
+        weightedIntrinsicSupplyApy: weighted(item => item.intrinsicSupplyApy),
+        weightedSupplyRewardApy: weighted(item => item.supplyRewardApy),
         collateralAddresses: positiveCollateralAddresses,
+        entries: completeValues,
         isComplete: true,
       }
     }
