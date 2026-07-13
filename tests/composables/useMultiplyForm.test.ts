@@ -59,6 +59,7 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
       })),
       getBorrowCapWarning: vi.fn(() => null),
       getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
+      getNetAPY: vi.fn(() => 0.125),
     },
   }
 })
@@ -138,6 +139,7 @@ vi.mock('~/utils/sdk-prices', () => ({
 vi.mock('~/utils/vault/apy', () => ({
   getProjectedRates: vi.fn(async () => null),
   getProjectedRatesBatch: mocks.getProjectedRatesBatch,
+  getNetAPY: mocks.getNetAPY,
   getRoe: vi.fn(() => 0),
   getPositionMultiplier: vi.fn(() => 1),
 }))
@@ -324,5 +326,16 @@ describe('useMultiplyForm cap validation', () => {
     await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
     const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{ cashDelta: bigint }>
     expect(requests[0]?.cashDelta).toBe(1n)
+  })
+
+  it('exposes projected net APY for the multiply summary fallback', async () => {
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(form.multiplyNetApyAfter.value).toBe(0.125))
+    expect(mocks.getNetAPY).toHaveBeenCalledWith(0, 0, 0, 0, null, null, null)
   })
 })

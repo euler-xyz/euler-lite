@@ -984,9 +984,22 @@ watch(
                       :loading="multiply.isMultiplyQuoteLoading.value"
                       variant="card"
                     >
-                      <SummaryRow label="ROE">
+                      <SummaryRow
+                        v-if="showMultiplyRoe"
+                        label="ROE"
+                      >
                         <SummaryValue
                           :after="multiply.multiplyRoeAfter.value !== null && multiply.multiplySwapReady.value ? formatNumber(multiply.multiplyRoeAfter.value) : (multiply.multiplyRoeBefore.value !== null ? formatNumber(multiply.multiplyRoeBefore.value) : undefined)"
+                          suffix="%"
+                          estimate-only
+                        />
+                      </SummaryRow>
+                      <SummaryRow
+                        v-else
+                        label="Net APY"
+                      >
+                        <SummaryValue
+                          :after="multiply.multiplyNetApyAfter.value !== null && multiply.multiplySwapReady.value ? formatNumber(multiply.multiplyNetApyAfter.value) : undefined"
                           suffix="%"
                           estimate-only
                         />

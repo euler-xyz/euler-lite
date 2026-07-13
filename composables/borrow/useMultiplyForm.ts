@@ -1,5 +1,5 @@
 import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { type ProjectedRates, getPositionMultiplier, getProjectedRatesBatch, getRoe } from '~/utils/vault/apy'
+import { type ProjectedRates, getNetAPY, getPositionMultiplier, getProjectedRatesBatch, getRoe } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -529,6 +529,25 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       || multiplyBorrowApy.value === null
     ) return null
     return getRoe(
+      multiplyTotalSupplyUsd.value,
+      multiplyWeightedSupplyApy.value,
+      multiplyBorrowValueUsd.value,
+      multiplyBorrowApy.value,
+      null,
+      multiplyBorrowRewardApy.value || null,
+      multiplyLoopingRewardApy.value || null,
+    )
+  })
+
+  const multiplyNetApyAfter = computed(() => {
+    if (isMultiplyQuoteLoading.value) return null
+    if (
+      multiplyTotalSupplyUsd.value === null
+      || multiplyBorrowValueUsd.value === null
+      || multiplyWeightedSupplyApy.value === null
+      || multiplyBorrowApy.value === null
+    ) return null
+    return getNetAPY(
       multiplyTotalSupplyUsd.value,
       multiplyWeightedSupplyApy.value,
       multiplyBorrowValueUsd.value,
@@ -1306,6 +1325,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     // ROE
     multiplyRoeBefore,
     multiplyRoeAfter,
+    multiplyNetApyAfter,
 
     // Health / LTV
     multiplyLiquidationLtv,
