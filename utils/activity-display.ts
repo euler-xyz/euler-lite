@@ -310,6 +310,22 @@ export const getVaultActivityFilterOptions = (
   return options
 }
 
+const ACCOUNT_ACTIVITY_CATEGORIES = [
+  'lending',
+  'borrowing',
+  'swaps',
+  'liquidations',
+  'account',
+  'rewards',
+] as const satisfies readonly ActivityCategory[]
+
+export const getAccountActivityFilterOptions = (): ActivityFilterOption[] =>
+  ACCOUNT_ACTIVITY_CATEGORIES.map(category => ({
+    value: category,
+    label: getActivityCategoryLabel(category),
+    categories: [category],
+  }))
+
 export const titleizeActivityType = (type: string): string => {
   const words = type
     .replace(/[_-]+/g, ' ')

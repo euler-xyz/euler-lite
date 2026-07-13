@@ -8,6 +8,7 @@ import {
   formatActivityEventLabel,
   formatActivityTimestamp,
   formatActivityValuation,
+  getAccountActivityFilterOptions,
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
   getActivityAssetsForDisplay,
@@ -53,6 +54,17 @@ describe('activity display helpers', () => {
       'transfer',
       'set_caps',
     ]))
+  })
+
+  it('returns the six portfolio account category filters in display order', () => {
+    expect(getAccountActivityFilterOptions()).toEqual([
+      { value: 'lending', label: 'Lending', categories: ['lending'] },
+      { value: 'borrowing', label: 'Borrowing', categories: ['borrowing'] },
+      { value: 'swaps', label: 'Swaps', categories: ['swaps'] },
+      { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
+      { value: 'account', label: 'Account', categories: ['account'] },
+      { value: 'rewards', label: 'Rewards', categories: ['rewards'] },
+    ])
   })
 
   it('returns vault-specific category filters with category-accurate labels', () => {
