@@ -16,9 +16,13 @@ import {
   getActivityChangeEntries,
   getActivityEventIcon,
   getActivityParticipants,
+  resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event } = defineProps<{ event: ActivityEvent }>()
+const { event, showVault = false } = defineProps<{
+  event: ActivityEvent
+  showVault?: boolean
+}>()
 
 const expanded = ref(false)
 const { getVault: getRegistryVault, registryVersion } = useVaultRegistry()
@@ -103,6 +107,17 @@ const hasExpandableMobileDetails = computed(() =>
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => formatActivityEventLabel(event))
 const transactionLink = computed(() => getExplorerLink(event.txHash, event.chainId))
+const vaultDisplay = computed(() => {
+  if (!showVault) return null
+  // Re-resolve when vault metadata arrives after the activity page.
+  void registryVersion.value
+  const display = resolveActivityVaultDisplay(event.vault, getRegistryVault)
+  if (!display) return null
+  return {
+    ...display,
+    link: getExplorerLink(display.address, event.chainId, true),
+  }
+})
 </script>
 
 <template>
@@ -130,6 +145,30 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
               class="whitespace-nowrap"
               :datetime="event.timestamp"
             >{{ formatActivityTimestamp(event.timestamp) }}</time>
+          </div>
+          <div
+            v-if="vaultDisplay"
+            class="mt-2 flex min-w-0 items-center gap-4 text-p4 text-content-tertiary"
+          >
+            <span class="shrink-0">Market</span>
+            <a
+              :href="vaultDisplay.link"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="flex min-w-0 items-center gap-4 text-accent-600 underline transition-colors hover:text-accent-500"
+              :title="vaultDisplay.address"
+            >
+              <span
+                v-if="vaultDisplay.name"
+                class="truncate"
+              >{{ vaultDisplay.name }}</span>
+              <span
+                v-if="vaultDisplay.name"
+                class="shrink-0"
+                aria-hidden="true"
+              >&middot;</span>
+              <span class="shrink-0">{{ vaultDisplay.addressLabel }}</span>
+            </a>
           </div>
         </div>
       </div>

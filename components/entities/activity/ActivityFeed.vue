@@ -187,6 +187,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
             v-for="event in feed.events.value"
             :key="event.id"
             :event="event"
+            :show-vault="subject === 'account'"
           />
         </ul>
       </div>

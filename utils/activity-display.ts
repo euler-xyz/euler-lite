@@ -10,10 +10,11 @@ import type {
   ActivityVaultType,
 } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits, type Address } from 'viem'
-import { formatCompactUsdValue, formatSmartAmount } from '~/utils/string-utils'
+import { formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
 
 interface ActivityTokenMetadata {
   address: Address
+  name?: string
   symbol: string
   decimals: number
 }
@@ -30,6 +31,32 @@ interface ActivityAssetContext {
 
 type ActivityVaultMetadataLookup = (address: Address) => ActivityVaultMetadata | undefined
 type ActivityTokenMetadataLookup = (address: Address) => ActivityTokenMetadata | undefined
+
+export interface ActivityVaultDisplay {
+  address: Address
+  addressLabel: string
+  name?: string
+}
+
+/**
+ * Resolves account-history market context from the vault registry. The address
+ * remains part of the visible label so markets with the same share-token name
+ * are still distinguishable.
+ */
+export const resolveActivityVaultDisplay = (
+  vaultAddress: Address | undefined,
+  getVaultMetadata: ActivityVaultMetadataLookup,
+): ActivityVaultDisplay | null => {
+  if (!vaultAddress) return null
+
+  const name = getVaultMetadata(vaultAddress)?.shares?.name?.trim() || undefined
+  const addressLabel = shortenAddress(vaultAddress)
+  return {
+    address: vaultAddress,
+    addressLabel,
+    ...(name ? { name } : {}),
+  }
+}
 
 const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   lending: 'Lending',

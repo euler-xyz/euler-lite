@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ActivityEvent } from '@eulerxyz/euler-v2-sdk'
+import type { Address } from 'viem'
 import {
   enrichActivityAssetForDisplay,
   filterActivityEventsForDisplay,
@@ -20,6 +21,7 @@ import {
   getVaultActivityFilterOptions,
   isActivityScopeUnsupported,
   resolveActivityFilterCategories,
+  resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 
@@ -104,6 +106,39 @@ describe('activity display helpers', () => {
       'lending',
       'liquidations',
     ])
+  })
+
+  it('distinguishes same-token account activity from different markets', () => {
+    const getVaultMetadata = (address: Address) => ({
+      asset: { address: ASSET, name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+      shares: {
+        address,
+        name: 'Euler USDC',
+        symbol: 'eUSDC',
+        decimals: 18,
+      },
+    })
+
+    const firstMarket = resolveActivityVaultDisplay(VAULT, getVaultMetadata)
+    const secondMarket = resolveActivityVaultDisplay(OTHER_VAULT, getVaultMetadata)
+
+    expect(firstMarket).toMatchObject({
+      name: 'Euler USDC',
+      addressLabel: '0x0000...0002',
+    })
+    expect(secondMarket).toMatchObject({
+      name: 'Euler USDC',
+      addressLabel: '0x0000...0004',
+    })
+    expect(firstMarket?.addressLabel).not.toBe(secondMarket?.addressLabel)
+  })
+
+  it('falls back to a shortened market address when registry metadata is unavailable', () => {
+    expect(resolveActivityVaultDisplay(VAULT, () => undefined)).toEqual({
+      address: VAULT,
+      addressLabel: '0x0000...0002',
+    })
+    expect(resolveActivityVaultDisplay(undefined, () => undefined)).toBeNull()
   })
 
   it('treats only explicit-All unsupported coverage as scope-wide', () => {
