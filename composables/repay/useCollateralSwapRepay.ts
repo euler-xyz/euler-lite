@@ -241,7 +241,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const nextCollateralSnapshotComplete = ref(false)
 
   watchEffect(async () => {
-    if (!position.value || !borrowVault.value || !sourceVault.value) {
+    const gen = collateralPortfolioGuard.next()
+    const currentPosition = position.value
+    const currentBorrowVault = borrowVault.value
+    const currentSourceVault = sourceVault.value
+    const spent = core.spent.value ?? 0n
+
+    if (!currentPosition || !currentBorrowVault || !currentSourceVault) {
       weightedCollateralSupplyApy.value = null
       nextWeightedCollateralSupplyApy.value = null
       collateralValueUsd.value = null
@@ -252,15 +258,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       nextCollateralSnapshotComplete.value = false
       return
     }
-    const gen = collateralPortfolioGuard.next()
     collateralSnapshotComplete.value = false
     nextCollateralSnapshotComplete.value = false
-    const spent = core.spent.value ?? 0n
     const [currentSnapshot, nextSnapshot] = await Promise.all([
-      getCollateralApySnapshot(position.value, borrowVault.value),
-      getCollateralApySnapshot(position.value, borrowVault.value, {
+      getCollateralApySnapshot(currentPosition, currentBorrowVault),
+      getCollateralApySnapshot(currentPosition, currentBorrowVault, {
         deltas: [{
-          vaultAddress: sourceVault.value.address,
+          vaultAddress: currentSourceVault.address,
           assetsDelta: -spent,
           projectRates: spent > 0n,
         }],
@@ -271,8 +275,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextWeightedCollateralSupplyApy.value = nextSnapshot.weightedSupplyApy
     collateralValueUsd.value = currentSnapshot.supplyUsd
     nextCollateralValueUsd.value = nextSnapshot.supplyUsd
-    collateralAddresses.value = currentSnapshot.collateralAddresses ?? position.value.collateralVaults ?? []
-    nextCollateralAddresses.value = nextSnapshot.collateralAddresses ?? position.value.collateralVaults ?? []
+    collateralAddresses.value = currentSnapshot.collateralAddresses ?? currentPosition.collateralVaults ?? []
+    nextCollateralAddresses.value = nextSnapshot.collateralAddresses ?? currentPosition.collateralVaults ?? []
     collateralSnapshotComplete.value = currentSnapshot.isComplete
     nextCollateralSnapshotComplete.value = nextSnapshot.isComplete
   })

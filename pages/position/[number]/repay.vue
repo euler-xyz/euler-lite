@@ -129,28 +129,36 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
 const netApyGuard = createRaceGuard()
 const netAPY = ref<number | null>(null)
 watchEffect(async () => {
-  if (!position.value || !collateralVault.value || !borrowVault.value) {
+  const gen = netApyGuard.next()
+  const currentPosition = position.value
+  const currentCollateralVault = collateralVault.value
+  const currentBorrowVault = borrowVault.value
+  const currentCollateralSupplyApy = collateralSupplyApy.value
+  const currentBorrowApy = borrowApy.value
+  const currentCollateralSupplyRewardApy = collateralSupplyRewardApy.value
+  const currentBorrowRewardApy = borrowRewardApy.value
+
+  if (!currentPosition || !currentCollateralVault || !currentBorrowVault) {
     netAPY.value = null
     return
   }
-  const gen = netApyGuard.next()
   const [collateralSnapshot, borrowUsd] = await Promise.all([
-    getCollateralApySnapshot(position.value, borrowVault.value),
-    getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
+    getCollateralApySnapshot(currentPosition, currentBorrowVault),
+    getAssetUsdValueOrZero(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
   ])
   if (netApyGuard.isStale(gen)) return
   const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
-    borrowVault.value.address,
-    collateralSnapshot.collateralAddresses ?? position.value.collateralVaults ?? [],
+    currentBorrowVault.address,
+    collateralSnapshot.collateralAddresses ?? currentPosition.collateralVaults ?? [],
     getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
   )
   netAPY.value = getNetAPYFromWeightedSupplySnapshot(
     collateralSnapshot,
-    collateralSupplyApy.value,
+    currentCollateralSupplyApy,
     borrowUsd,
-    borrowApy.value,
-    collateralSupplyRewardApy.value || null,
-    borrowRewardApy.value || null,
+    currentBorrowApy,
+    currentCollateralSupplyRewardApy || null,
+    currentBorrowRewardApy || null,
     loopingRewardApy || null,
   )
 })

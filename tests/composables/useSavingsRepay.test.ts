@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, PortfolioSavingsPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
@@ -54,7 +54,13 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
       getSavingsPosition: vi.fn(),
       planRepayFromSource: vi.fn(),
       runSimulation: vi.fn(),
-      healthOptions: [] as Array<{ repayAddsCash?: { value: boolean } }>,
+      getCollateralApySnapshot: vi.fn(),
+      healthOptions: [] as Array<{
+        repayAddsCash?: { value: boolean }
+        collateralValueUsd?: { value: number | null }
+        collateralAddresses?: { value: string[] }
+        collateralSnapshotComplete?: { value: boolean }
+      }>,
     },
   }
 })
@@ -100,7 +106,12 @@ vi.mock('~/composables/repay/useRepaySwapDetails', () => ({
 }))
 
 vi.mock('~/composables/repay/useRepayHealthMetrics', () => ({
-  useRepayHealthMetrics: (options: { repayAddsCash?: { value: boolean } }) => {
+  useRepayHealthMetrics: (options: {
+    repayAddsCash?: { value: boolean }
+    collateralValueUsd?: { value: number | null }
+    collateralAddresses?: { value: string[] }
+    collateralSnapshotComplete?: { value: boolean }
+  }) => {
     mocks.healthOptions.push(options)
     return {
       roeBefore: ref(null),
@@ -192,6 +203,12 @@ describe('useSavingsRepay', () => {
     mocks.swapQuoteOptions.length = 0
     mocks.healthOptions.length = 0
     mocks.planRepayFromSource.mockResolvedValue({ type: 'repay-plan' } as unknown as TransactionPlan)
+    mocks.getCollateralApySnapshot.mockResolvedValue({
+      supplyUsd: 0,
+      weightedSupplyApy: 0,
+      collateralAddresses: [],
+      isComplete: true,
+    })
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -213,12 +230,7 @@ describe('useSavingsRepay', () => {
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
     vi.stubGlobal('usePositionCollateralApy', () => ({
-      getCollateralApySnapshot: vi.fn(async () => ({
-        supplyUsd: 0,
-        weightedSupplyApy: 0,
-        collateralAddresses: [],
-        isComplete: true,
-      })),
+      getCollateralApySnapshot: mocks.getCollateralApySnapshot,
     }))
     vi.stubGlobal('useSwapApi', () => ({
       getSwapProviders: vi.fn(async () => []),
@@ -314,5 +326,54 @@ describe('useSavingsRepay', () => {
     }))
     expect(mocks.swapQuoteOptions[0]?.getPlanAccount?.()).toBe(planAccount)
     expect(plan).toEqual({ type: 'repay-plan' })
+  })
+
+  it('keeps collateral summary cleared when an in-flight snapshot resolves after invalidation', async () => {
+    let resolveSnapshot: ((value: {
+      supplyUsd: number
+      weightedSupplyApy: number
+      collateralAddresses: string[]
+      isComplete: boolean
+    }) => void) | undefined
+    mocks.getCollateralApySnapshot.mockReturnValueOnce(new Promise((resolve) => {
+      resolveSnapshot = resolve
+    }))
+    const positionRef = shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position)
+
+    useSavingsRepay({
+      position: positionRef,
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => position.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    expect(mocks.getCollateralApySnapshot).toHaveBeenCalledTimes(1)
+    positionRef.value = undefined
+    await nextTick()
+
+    resolveSnapshot?.({
+      supplyUsd: 123,
+      weightedSupplyApy: 4.5,
+      collateralAddresses: [VAULT],
+      isComplete: true,
+    })
+    await Promise.resolve()
+    await nextTick()
+
+    const healthOptions = mocks.healthOptions[0]
+    expect(healthOptions?.collateralValueUsd?.value).toBeNull()
+    expect(healthOptions?.collateralAddresses?.value).toEqual([])
+    expect(healthOptions?.collateralSnapshotComplete?.value).toBe(false)
   })
 })

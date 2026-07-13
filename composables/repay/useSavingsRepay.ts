@@ -157,20 +157,23 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const savingsCollateralSnapshotComplete = ref(false)
 
   watchEffect(async () => {
-    if (!borrowVault.value || !position.value) {
+    const gen = savingsCollateralUsdGuard.next()
+    const currentBorrowVault = borrowVault.value
+    const currentPosition = position.value
+
+    if (!currentBorrowVault || !currentPosition) {
       savingsCollateralUsd.value = null
       savingsWeightedCollateralApy.value = null
       savingsCollateralAddresses.value = []
       savingsCollateralSnapshotComplete.value = false
       return
     }
-    const gen = savingsCollateralUsdGuard.next()
     savingsCollateralSnapshotComplete.value = false
-    const snapshot = await getCollateralApySnapshot(position.value, borrowVault.value)
+    const snapshot = await getCollateralApySnapshot(currentPosition, currentBorrowVault)
     if (savingsCollateralUsdGuard.isStale(gen)) return
     savingsCollateralUsd.value = snapshot.supplyUsd
     savingsWeightedCollateralApy.value = snapshot.weightedSupplyApy
-    savingsCollateralAddresses.value = snapshot.collateralAddresses ?? position.value.collateralVaults ?? []
+    savingsCollateralAddresses.value = snapshot.collateralAddresses ?? currentPosition.collateralVaults ?? []
     savingsCollateralSnapshotComplete.value = snapshot.isComplete
   })
   const effectiveCollateralSupplyApy = computed(() => savingsWeightedCollateralApy.value ?? collateralSupplyApy.value)
