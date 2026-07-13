@@ -19,15 +19,23 @@ const request = (vaultAddress: string) => ({
 })
 
 describe('getProjectedRatesBatch', () => {
+  const chainId = ref(1)
+  const eulerLensAddresses = ref({ vaultLens: '0x0000000000000000000000000000000000000010' })
+  const eulerCoreAddresses = ref({ evc: '0x0000000000000000000000000000000000000020' })
+  const getProvider = vi.fn((id: number) => ({ chainId: id }))
+
   beforeEach(() => {
     vi.useFakeTimers()
+    chainId.value = 1
+    eulerLensAddresses.value = { vaultLens: '0x0000000000000000000000000000000000000010' }
+    eulerCoreAddresses.value = { evc: '0x0000000000000000000000000000000000000020' }
     vi.stubGlobal('useEulerAddresses', () => ({
-      chainId: ref(1),
-      eulerLensAddresses: ref({ vaultLens: '0x0000000000000000000000000000000000000010' }),
-      eulerCoreAddresses: ref({ evc: '0x0000000000000000000000000000000000000020' }),
+      chainId,
+      eulerLensAddresses,
+      eulerCoreAddresses,
     }))
     getEulerSdk.mockResolvedValue({
-      providerService: { getProvider: vi.fn(() => ({})) },
+      providerService: { getProvider },
     })
     batchLensCalls.mockImplementation(async (_provider, _evc, _lens, _abi, calls: unknown[]) =>
       calls.map((_, index) => ({
@@ -57,5 +65,28 @@ describe('getProjectedRatesBatch', () => {
     expect(batchLensCalls.mock.calls[0]?.[4]).toHaveLength(2)
     expect(firstResult[0]).toEqual({ supplyAPY: 1n, borrowAPY: 11n })
     expect(secondResult[0]).toEqual({ supplyAPY: 2n, borrowAPY: 12n })
+  })
+
+  it('keeps queued projections scoped to their enqueue-time chain deployment', async () => {
+    const first = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000001')])
+
+    chainId.value = 2
+    eulerLensAddresses.value = { vaultLens: '0x0000000000000000000000000000000000000030' }
+    eulerCoreAddresses.value = { evc: '0x0000000000000000000000000000000000000040' }
+    const second = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000002')])
+
+    await vi.runAllTimersAsync()
+    await Promise.all([first, second])
+
+    expect(getProvider.mock.calls.map(([id]) => id)).toEqual([1, 2])
+    expect(batchLensCalls).toHaveBeenCalledTimes(2)
+    expect(batchLensCalls.mock.calls[0]?.slice(1, 3)).toEqual([
+      '0x0000000000000000000000000000000000000020',
+      '0x0000000000000000000000000000000000000010',
+    ])
+    expect(batchLensCalls.mock.calls[1]?.slice(1, 3)).toEqual([
+      '0x0000000000000000000000000000000000000040',
+      '0x0000000000000000000000000000000000000030',
+    ])
   })
 })

@@ -41,7 +41,7 @@ import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/
 import { buildRefinanceProjectedRateRequests } from '~/utils/refinance-apy'
 import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
+import { isRoeStateApplicable } from '~/utils/position-roe'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros, formatUsdValue } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { getPositionMultiplier, getProjectedRatesBatch, getRoe, type ProjectedRates } from '~/utils/vault/apy'
@@ -1537,15 +1537,22 @@ const nextDebtAmountNano = computed<bigint | null>(() => {
   return getSwapInputAmount(activeDebtQuote.value, SwapperMode.TARGET_DEBT)
 })
 
-const areRoeLegsApplicable = (legs: readonly RefinanceCollateralLeg[], debtVault: EVault | undefined) =>
-  areRoeCollateralVaultsCorrelatedWithBorrow(legs.map(({ vault }) => vault), debtVault, getTokenCategoryTags)
-const isCurrentRoeApplicable = computed(() =>
+const areCurrentRoeLegsComplete = computed(() =>
   sourceCollateralVaultAddresses.value.every(address =>
     currentCollateralLegs.value.some(leg => normalizeVaultAddress(leg.vault.address) === address),
-  ) && areRoeLegsApplicable(currentCollateralLegs.value, sourceDebtVault.value),
+  ),
+)
+const isCurrentRoeApplicable = computed(() =>
+  isRoeStateApplicable({
+    vaults: currentCollateralLegs.value.map(({ vault }) => vault),
+    isComplete: areCurrentRoeLegsComplete.value,
+  }, sourceDebtVault.value, getTokenCategoryTags),
 )
 const isNextRoeApplicable = computed(() =>
-  isCurrentRoeApplicable.value && areRoeLegsApplicable(nextCollateralLegs.value, effectiveDebtVault.value),
+  isRoeStateApplicable({
+    vaults: nextCollateralLegs.value.map(({ vault }) => vault),
+    isComplete: areCurrentRoeLegsComplete.value,
+  }, effectiveDebtVault.value, getTokenCategoryTags),
 )
 
 const getSupplyApyForVault = (vault: RefinanceCollateralVault, projected?: ProjectedRates | null) => {

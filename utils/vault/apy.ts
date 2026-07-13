@@ -36,16 +36,31 @@ const parseProjectedRatesResult = (result: Record<string, any> | null): Projecte
   }
 }
 
+interface ProjectedRatesExecutionContext {
+  chainId: number
+  vaultLens: string
+  evc?: string
+}
+
+const getProjectedRatesExecutionContext = (): ProjectedRatesExecutionContext | null => {
+  const { chainId, eulerLensAddresses, eulerCoreAddresses } = useEulerAddresses()
+  if (!chainId.value || !eulerLensAddresses.value?.vaultLens) return null
+  return {
+    chainId: chainId.value,
+    vaultLens: eulerLensAddresses.value.vaultLens,
+    evc: eulerCoreAddresses.value?.evc,
+  }
+}
+
 const executeProjectedRatesBatch = async (
   requests: ProjectedRatesRequest[],
+  context: ProjectedRatesExecutionContext | null,
 ): Promise<Array<ProjectedRates | null>> => {
-  const { chainId, eulerLensAddresses, eulerCoreAddresses } = useEulerAddresses()
-
   if (!requests.length) {
     return []
   }
 
-  if (!eulerLensAddresses.value?.vaultLens || !chainId.value) {
+  if (!context) {
     return requests.map(() => null)
   }
 
@@ -74,7 +89,7 @@ const executeProjectedRatesBatch = async (
   // The SDK is linked from a workspace and ships its own viem (2.43.x), so
   // its PublicClient is structurally similar but not identical to the app's
   // viem (2.48.x) — cast once at the boundary.
-  const provider = sdk.providerService.getProvider(chainId.value) as unknown as PublicClient
+  const provider = sdk.providerService.getProvider(context.chainId) as unknown as PublicClient
 
   const calls = active.map(item => ({
     functionName: 'getVaultInterestRateModelInfo',
@@ -85,11 +100,11 @@ const executeProjectedRatesBatch = async (
     ],
   }))
 
-  if (eulerCoreAddresses.value?.evc) {
+  if (context.evc) {
     const batchResults = await batchLensCalls<Record<string, unknown>>(
       provider,
-      eulerCoreAddresses.value.evc,
-      eulerLensAddresses.value.vaultLens,
+      context.evc,
+      context.vaultLens,
       eulerVaultLensABI,
       calls,
     )
@@ -105,7 +120,7 @@ const executeProjectedRatesBatch = async (
 
   const fallbackResults = await Promise.all(calls.map(async call =>
     provider.readContract({
-      address: eulerLensAddresses.value!.vaultLens as Address,
+      address: context.vaultLens as Address,
       abi: eulerVaultLensABI,
       functionName: 'getVaultInterestRateModelInfo',
       authorizationList: undefined,
@@ -123,6 +138,7 @@ const executeProjectedRatesBatch = async (
 
 interface PendingProjectedRatesBatch {
   requests: ProjectedRatesRequest[]
+  context: ProjectedRatesExecutionContext | null
   resolve: (results: Array<ProjectedRates | null>) => void
   reject: (error: unknown) => void
 }
@@ -135,18 +151,30 @@ const flushProjectedRatesBatches = async () => {
   pendingProjectedRatesBatches = []
   projectedRatesFlushScheduled = false
 
-  const requests = pending.flatMap(batch => batch.requests)
-  try {
-    const results = await executeProjectedRatesBatch(requests)
-    let offset = 0
-    for (const batch of pending) {
-      batch.resolve(results.slice(offset, offset + batch.requests.length))
-      offset += batch.requests.length
+  const grouped = new Map<string, PendingProjectedRatesBatch[]>()
+  for (const batch of pending) {
+    const key = batch.context
+      ? `${batch.context.chainId}:${batch.context.vaultLens.toLowerCase()}:${batch.context.evc?.toLowerCase() ?? ''}`
+      : 'unavailable'
+    const group = grouped.get(key) ?? []
+    group.push(batch)
+    grouped.set(key, group)
+  }
+
+  await Promise.all([...grouped.values()].map(async (group) => {
+    const requests = group.flatMap(batch => batch.requests)
+    try {
+      const results = await executeProjectedRatesBatch(requests, group[0]?.context ?? null)
+      let offset = 0
+      for (const batch of group) {
+        batch.resolve(results.slice(offset, offset + batch.requests.length))
+        offset += batch.requests.length
+      }
     }
-  }
-  catch (error) {
-    for (const batch of pending) batch.reject(error)
-  }
+    catch (error) {
+      for (const batch of group) batch.reject(error)
+    }
+  }))
 }
 
 /**
@@ -159,9 +187,10 @@ export const getProjectedRatesBatch = (
   requests: ProjectedRatesRequest[],
 ): Promise<Array<ProjectedRates | null>> => {
   if (!requests.length) return Promise.resolve([])
+  const context = getProjectedRatesExecutionContext()
 
   return new Promise((resolve, reject) => {
-    pendingProjectedRatesBatches.push({ requests, resolve, reject })
+    pendingProjectedRatesBatches.push({ requests, context, resolve, reject })
     if (projectedRatesFlushScheduled) return
     projectedRatesFlushScheduled = true
     setTimeout(() => {

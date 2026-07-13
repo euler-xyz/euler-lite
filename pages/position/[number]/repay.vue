@@ -20,7 +20,7 @@ import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRep
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
 import { isCowProvider } from '~/entities/cowswap'
 
 const _route = useRoute()
@@ -440,12 +440,23 @@ const savings = useSavingsRepay({
 })
 
 const isPositionRoeApplicable = computed(() =>
-  positionCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
+  isRoeStateApplicable(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
 )
-const isCollateralRepayRoeApplicable = computed(() =>
-  positionCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
+const nextCollateralRepayRoeVaults = computed(() => {
+  const nextState = resolveRoeCollateralVaultsByAddresses(
+    collateral.nextCollateralAddresses.value,
+    positionCollateralVaults.value.vaults,
+  )
+  return {
+    ...nextState,
+    isComplete: collateral.nextCollateralSnapshotComplete.value && nextState.isComplete,
+  }
+})
+const isCurrentCollateralRepayRoeApplicable = computed(() =>
+  isRoeStateApplicable(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
+)
+const isNextCollateralRepayRoeApplicable = computed(() =>
+  isRoeStateApplicable(nextCollateralRepayRoeVaults.value, borrowVault.value, getTokenCategoryTags),
 )
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
@@ -978,12 +989,12 @@ watch(formTab, () => {
               class="w-full laptop:max-w-[360px]"
             >
               <SummaryRow
-                v-if="isCollateralRepayRoeApplicable"
+                v-if="isCurrentCollateralRepayRoeApplicable || isNextCollateralRepayRoeApplicable"
                 label="ROE"
               >
                 <SummaryValue
-                  :before="collateral.roeBefore.value !== null ? formatNumber(collateral.roeBefore.value) : undefined"
-                  :after="collateral.roeAfter.value !== null && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? formatNumber(collateral.roeAfter.value) : undefined"
+                  :before="isCurrentCollateralRepayRoeApplicable && collateral.roeBefore.value !== null ? formatNumber(collateral.roeBefore.value) : undefined"
+                  :after="isNextCollateralRepayRoeApplicable && collateral.roeAfter.value !== null && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? formatNumber(collateral.roeAfter.value) : undefined"
                   suffix="%"
                 />
               </SummaryRow>

@@ -756,6 +756,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     // Health metrics
     roeBefore: health.roeBefore,
     roeAfter: health.roeAfter,
+    nextCollateralAddresses,
+    nextCollateralSnapshotComplete,
     priceRatio,
     currentLtv: health.currentLtv,
     currentLiquidationLtv: health.currentLiquidationLtv,

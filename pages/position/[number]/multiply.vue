@@ -10,7 +10,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/compos
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isRoeStateApplicable, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { isCowProviderOrQuote } from '~/entities/cowswap'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
@@ -121,9 +121,14 @@ const projectedMultiplyCollateralVaults = computed(() =>
     multiplyLongVault.value,
   ]),
 )
-const isMultiplyRoeApplicable = computed(() =>
-  positionRoeCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+const isCurrentMultiplyRoeApplicable = computed(() =>
+  isRoeStateApplicable(positionRoeCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+)
+const isNextMultiplyRoeApplicable = computed(() =>
+  isRoeStateApplicable({
+    vaults: projectedMultiplyCollateralVaults.value,
+    isComplete: positionRoeCollateralVaults.value.isComplete,
+  }, multiplyShortVault.value, getTokenCategoryTags),
 )
 const correlatedBadgeTitle = computed(() => {
   const category = getTokenAddressesCorrelationCategoryLabel(
@@ -1058,7 +1063,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
         >
           <template #symbol-trailing>
             <CorrelatedPairBadge
-              v-if="isMultiplyRoeApplicable"
+              v-if="isNextMultiplyRoeApplicable"
               compact
               :title="correlatedBadgeTitle"
             />
@@ -1160,12 +1165,12 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             class="w-full laptop:max-w-[360px]"
           >
             <SummaryRow
-              v-if="isMultiplyRoeApplicable"
+              v-if="isCurrentMultiplyRoeApplicable || isNextMultiplyRoeApplicable"
               label="ROE"
             >
               <SummaryValue
-                :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
-                :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
+                :before="isCurrentMultiplyRoeApplicable && multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
+                :after="isNextMultiplyRoeApplicable && multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
                 suffix="%"
               />
             </SummaryRow>
