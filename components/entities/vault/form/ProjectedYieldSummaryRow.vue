@@ -26,30 +26,22 @@ const afterDisplay = computed(() => props.after != null ? formatNumber(props.aft
 <template>
   <SummaryRow :label="label">
     <template #label>
-      <span class="inline-flex items-center gap-0">
+      <span class="inline-flex items-center gap-4">
         <span>{{ label }}</span>
         <UiModalPreviewTrigger
           v-if="details"
-          class="inline-flex min-w-24 min-h-24 items-center justify-center"
+          class="inline-flex min-w-24 min-h-24 items-center justify-center gap-2"
           :component="ProjectedYieldBreakdownModal"
           :modal-data="modalData"
-          :aria-label="`Show ${label} projection breakdown`"
+          :aria-label="`Show ${label} projection${hasRewards ? ' and reward' : ''} breakdown`"
           popover-width="wide"
         >
           <SvgIcon
             class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors"
             name="info-circle"
           />
-        </UiModalPreviewTrigger>
-        <UiModalPreviewTrigger
-          v-if="details && hasRewards"
-          class="inline-flex min-w-24 min-h-24 items-center justify-center"
-          :component="ProjectedYieldBreakdownModal"
-          :modal-data="modalData"
-          :aria-label="`Show ${label} reward breakdown`"
-          popover-width="wide"
-        >
           <SvgIcon
+            v-if="hasRewards"
             class="!w-16 !h-16 text-accent-500"
             name="sparks"
           />
