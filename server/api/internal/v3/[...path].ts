@@ -9,7 +9,7 @@ import {
 } from 'h3'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
-import { safePathTemplate, urlHost } from '~/server/utils/observability'
+import { safeErrorLogFields, safePathTemplate, urlHost } from '~/server/utils/observability'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   buildV3ProxyBackoffKey,
@@ -87,7 +87,7 @@ export default defineEventHandler(async (event) => {
         upstreamHost,
         bodyBytes: body?.length,
         durationMs: Date.now() - startedAt,
-        err,
+        err: safeErrorLogFields(err),
       },
       'upstream fetch failed',
     )
