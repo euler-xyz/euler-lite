@@ -553,6 +553,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     catch (e: unknown) {
       if (estimatesGuard.isStale(gen)) return
       logWarn('walletSwapRepay/asyncEstimates', e)
+      _estimateNetAPY.value = null
     }
     finally {
       if (!estimatesGuard.isStale(gen)) {

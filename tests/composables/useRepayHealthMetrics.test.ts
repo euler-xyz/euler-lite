@@ -3,14 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useRepayHealthMetrics } from '~/composables/repay/useRepayHealthMetrics'
 
-const { getProjectedRates } = vi.hoisted(() => ({
+const { getProjectedRates, getRoe } = vi.hoisted(() => ({
   getProjectedRates: vi.fn(async () => ({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })),
+  getRoe: vi.fn(() => 0),
 }))
 
 vi.mock('~/utils/vault/apy', () => ({
   getProjectedRates,
   getPositionMultiplier: vi.fn(() => 2),
-  getRoe: vi.fn(() => 0),
+  getRoe,
 }))
 
 vi.mock('~/utils/vault-display', () => ({
@@ -93,5 +94,17 @@ describe('useRepayHealthMetrics projected utilization', () => {
 
     expect(currentIncomplete.roeBefore.value).toBeNull()
     expect(nextIncomplete.roeAfter.value).toBeNull()
+  })
+
+  it.each([
+    ['returns null', () => getProjectedRates.mockResolvedValueOnce(null)],
+    ['rejects', () => getProjectedRates.mockRejectedValueOnce(new Error('projection failed'))],
+  ])('hides next ROE when the projected borrow rate %s', async (_label, arrange) => {
+    arrange()
+    const metrics = makeMetrics()
+
+    await vi.waitFor(() => expect(getProjectedRates).toHaveBeenCalled())
+    expect(metrics.roeAfter.value).toBeNull()
+    expect(getRoe).not.toHaveBeenCalled()
   })
 })

@@ -1,0 +1,132 @@
+import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { useWalletRepay } from '~/composables/repay/useWalletRepay'
+
+const { USER, borrowVault, collateralVault, planAccount, getProjectedRates, getNetAPYFromWeightedSupplySnapshot } = vi.hoisted(() => {
+  const USER = '0x0000000000000000000000000000000000000001' as `0x${string}`
+  const BORROW_VAULT = '0x0000000000000000000000000000000000000002' as `0x${string}`
+  const COLLATERAL_VAULT = '0x0000000000000000000000000000000000000003' as `0x${string}`
+  const makeVault = (address: string) => ({
+    address,
+    totalCash: 1_000n,
+    totalBorrowed: 100n,
+    asset: { address, symbol: 'USDC', decimals: 18 },
+    shares: { address, symbol: 'eUSDC', decimals: 18 },
+    collaterals: [],
+  }) as unknown as EVault
+
+  return {
+    USER,
+    borrowVault: makeVault(BORROW_VAULT),
+    collateralVault: makeVault(COLLATERAL_VAULT),
+    planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
+    getProjectedRates: vi.fn(async () => ({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })),
+    getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 10),
+  }
+})
+
+vi.mock('#components', () => ({ OperationReviewModal: {} }))
+vi.mock('~/components/ui/composables/useModal', () => ({
+  useModal: () => ({ open: vi.fn(), close: vi.fn() }),
+}))
+vi.mock('~/components/ui/composables/useToast', () => ({
+  useToast: () => ({ error: vi.fn() }),
+}))
+vi.mock('~/utils/vault/apy', () => ({
+  getProjectedRates,
+  getNetAPYFromWeightedSupplySnapshot,
+  getPositionMultiplier: vi.fn(() => 1),
+}))
+vi.mock('~/utils/sdk-prices', () => ({
+  getAssetUsdValueOrZero: vi.fn(async () => 10),
+}))
+vi.mock('~/utils/position-estimates', () => ({
+  getTotalCollateralValue: vi.fn(() => 10_000),
+}))
+vi.mock('~/utils/ltv', () => ({
+  getBorrowPositionEffectiveLiquidationLTV: vi.fn(() => 0.8),
+  decimalLtvToBps: vi.fn(() => 8_000n),
+}))
+vi.mock('~/utils/vault-display', () => ({
+  getVaultBorrowApy: vi.fn(() => 5),
+}))
+vi.mock('~/utils/vault-intrinsic-apy', () => ({
+  withProjectedVaultIntrinsicApy: vi.fn((_current: number, projected: number) => projected),
+}))
+
+const position = {
+  subAccount: USER,
+  borrowed: 2_000n * 10n ** 18n,
+  supplied: 10_000n * 10n ** 18n,
+  collateralVaults: [collateralVault.address],
+  collaterals: [],
+} as unknown as PortfolioBorrowPosition<VaultEntity>
+
+describe('useWalletRepay projected Net APY', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('ref', ref)
+    vi.stubGlobal('computed', computed)
+    vi.stubGlobal('watch', watch)
+    vi.stubGlobal('watchEffect', watchEffect)
+    vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
+    vi.stubGlobal('useEulerTx', () => ({
+      planRepayFromWallet: vi.fn(async () => ({ type: 'plan' }) as unknown as TransactionPlan),
+      executePlan: vi.fn(),
+    }))
+    vi.stubGlobal('usePlanAccount', () => ({ account: shallowRef(planAccount) }))
+    vi.stubGlobal('useWagmi', () => ({ isConnected: ref(true) }))
+    vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false) }))
+    vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
+    vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
+    vi.stubGlobal('usePositionCollateralApy', () => ({
+      getCollateralApySnapshot: vi.fn(async () => ({
+        supplyUsd: 1_000,
+        weightedSupplyApy: 5,
+        collateralAddresses: [collateralVault.address],
+        isComplete: true,
+      })),
+    }))
+    vi.stubGlobal('useRewardsApy', () => ({
+      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+    }))
+    vi.stubGlobal('useUserSettings', () => ({
+      settings: ref({ enableIntrinsicApy: false }),
+    }))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('clears an earlier Net APY estimate when the next projection rejects', async () => {
+    const repay = useWalletRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      walletBalance: ref(1_000n * 10n ** 18n),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      clearSimulationError: vi.fn(),
+      runSimulation: vi.fn(async () => true),
+      netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5),
+      borrowApy: computed(() => 5),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+
+    repay.amount.value = '100'
+    await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBe(10))
+
+    getProjectedRates.mockRejectedValueOnce(new Error('projection failed'))
+    repay.amount.value = '200'
+
+    await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBeNull())
+  })
+})

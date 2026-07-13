@@ -96,6 +96,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     computeLiquidationPrice(priceRatio.value, nextHealth.value))
 
   const projectedBorrowApy = ref<number | null>(null)
+  const projectedBorrowApyComplete = ref(false)
   const projectedBorrowApyGuard = createRaceGuard()
 
   watchEffect(async () => {
@@ -104,6 +105,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     const currentPosition = position.value
     const repaid = debtRepaid.value
     void borrowApy.value
+    projectedBorrowApyComplete.value = false
 
     if (!vault || !currentPosition || repaid === null) {
       projectedBorrowApy.value = null
@@ -138,6 +140,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
         vault,
         enableIntrinsicApy.value,
       )
+      projectedBorrowApyComplete.value = true
     }
     catch {
       if (!projectedBorrowApyGuard.isStale(gen)) {
@@ -174,12 +177,16 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
   })
 
   const roeAfter = computed(() => {
-    if (!nextCollateralSnapshotComplete.value) return null
+    if (
+      !nextCollateralSnapshotComplete.value
+      || !projectedBorrowApyComplete.value
+      || projectedBorrowApy.value === null
+    ) return null
     return getRoe(
       nextCollateralValueUsd.value,
       nextCollateralSupplyApy?.value ?? collateralSupplyApy.value,
       nextBorrowValueUsd.value,
-      projectedBorrowApy.value ?? borrowApy.value,
+      projectedBorrowApy.value,
       null,
       nextBorrowRewardApy?.value ?? borrowRewardApy.value,
       getLoopingRewardApy(nextCollateralValueUsd.value, nextBorrowValueUsd.value, nextCollateralAddresses?.value),

@@ -315,6 +315,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     catch (e) {
       if (asyncEstimatesGuard.isStale(gen)) return
       logWarn('walletRepay/asyncEstimates', e)
+      _estimateNetAPY.value = null
     }
     finally {
       if (!asyncEstimatesGuard.isStale(gen)) {
