@@ -124,6 +124,16 @@ watch(() => route.name, (name) => {
   document.documentElement.classList.toggle('beacon-hidden', name === 'onboarding')
 }, { immediate: true })
 
+// Attach the connected wallet address to HelpScout conversations so support
+// agents see it without the user typing it. session-data is added to the
+// conversation as a visitor activity note when the user submits a message;
+// it is not shown in (and cannot be edited via) the Beacon form itself.
+// Safe to call before the Beacon script loads — the shim queues calls.
+watch(address, (addr) => {
+  if (!import.meta.client || typeof window.Beacon !== 'function') return
+  window.Beacon('session-data', { 'Wallet address': addr ?? 'Not connected' })
+}, { immediate: true })
+
 const checkBatchAnnouncement = () => {
   if (!enableBatchAnnouncement || batchAnnouncementSeen.value) return
   if (isBatchAnnouncementOpen || route.name === 'onboarding') return
