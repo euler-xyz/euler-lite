@@ -124,24 +124,54 @@ watch(() => route.name, (name) => {
   document.documentElement.classList.toggle('beacon-hidden', name === 'onboarding')
 }, { immediate: true })
 
-// Attach the connected wallet address to HelpScout conversations so support
-// agents see it without the user typing it. session-data is added to the
-// conversation as a visitor activity note when the user submits a message.
-// The form itself has no read-only fields, so the user is told about the
-// attachment via the responseTime sublabel shown in the form header — static
-// text they can see but not edit.
+// Attach support diagnostics to HelpScout conversations: the connected wallet
+// address, recent console output (utils/console-capture.ts), and an app-state
+// snapshot. session-data lands in the conversation's visitor activity note
+// when the user submits a message. Keys are accumulated locally and always
+// sent together so a later call can't clobber earlier entries.
+// The form has no read-only fields, so the user is told about the attachment
+// via the responseTime sublabel in the form header — visible but not editable.
 // Safe to call before the Beacon script loads — the shim queues calls.
+const beaconSessionData: Record<string, string> = {}
+const setBeaconSessionData = (data: Record<string, string>) => {
+  if (typeof window.Beacon !== 'function') return
+  Object.assign(beaconSessionData, data)
+  window.Beacon('session-data', { ...beaconSessionData })
+}
+
 watch(address, (addr) => {
-  if (!import.meta.client || typeof window.Beacon !== 'function') return
-  window.Beacon('session-data', { 'Wallet address': addr ?? 'Not connected' })
+  if (!import.meta.client) return
+  setBeaconSessionData({ 'Wallet address': addr ?? 'Not connected' })
   window.Beacon('config', {
     labels: {
       responseTime: addr
-        ? `We usually respond in a few hours. Your connected wallet ${shortenAddress(addr)} will be attached to your message.`
-        : 'We usually respond in a few hours',
+        ? `We usually respond in a few hours. Your connected wallet ${shortenAddress(addr)} and technical diagnostics will be attached to your message.`
+        : 'We usually respond in a few hours. Technical diagnostics will be attached to your message.',
     },
   })
 }, { immediate: true })
+
+// Diagnostics are snapshotted when the widget opens (not at submit time) —
+// Beacon has no pre-submit hook, and open-time state is what prompted the
+// user to reach out.
+onMounted(() => {
+  if (typeof window.Beacon !== 'function') return
+  window.Beacon('on', 'open', () => {
+    setBeaconSessionData({
+      'Recent console output': getRecentConsoleOutput() || 'none captured',
+      'App state': JSON.stringify({
+        url: window.location.href,
+        route: route.name,
+        chainId: chainId.value,
+        wallet: address.value ?? 'not connected',
+        theme: theme.value,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        userAgent: navigator.userAgent,
+        openedAt: new Date().toISOString(),
+      }),
+    })
+  })
+})
 
 const checkBatchAnnouncement = () => {
   if (!enableBatchAnnouncement || batchAnnouncementSeen.value) return
