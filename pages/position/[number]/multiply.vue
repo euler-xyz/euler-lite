@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import { areProjectedRatesComplete, getPositionMultiplier, getProjectedRatesBatch, type ProjectedRates } from '~/utils/vault/apy'
-import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -319,7 +319,7 @@ watchEffect(async () => {
     multiplyBorrowValueUsd.value = null
     return
   }
-  const value = (await getAssetUsdValue(amount, vault, 'off-chain')) ?? null
+  const value = (await getAssetUsdValueForEstimate(amount, vault, 'off-chain')) ?? null
   if (!multiplyBorrowValueGuard.isStale(gen)) multiplyBorrowValueUsd.value = value
 })
 const currentSupplyValueUsd = ref<number | null>(null)
@@ -358,7 +358,7 @@ watchEffect(async () => {
     currentBorrowValueUsd.value = null
     return
   }
-  const value = (await getAssetUsdValue(currentPosition.borrowed, vault, 'off-chain')) ?? null
+  const value = (await getAssetUsdValueForEstimate(currentPosition.borrowed, vault, 'off-chain')) ?? null
   if (!currentBorrowValueGuard.isStale(gen)) currentBorrowValueUsd.value = value
 })
 const nextSupplyValueUsd = ref<number | null>(null)

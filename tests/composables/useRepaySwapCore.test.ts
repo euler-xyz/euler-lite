@@ -65,7 +65,7 @@ const { USER, sourceVault, borrowVault, position, mocks } = vi.hoisted(() => {
 })
 
 vi.mock('~/utils/sdk-prices', () => ({
-  getAssetUsdValue: mocks.getAssetUsdValue,
+  getAssetUsdValueForEstimate: mocks.getAssetUsdValue,
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({

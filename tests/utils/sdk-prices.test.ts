@@ -40,6 +40,17 @@ describe('sdk-prices', () => {
     await expect(getAssetUsdValueForEstimate(1_000_000n, vault, 'off-chain')).resolves.toBeUndefined()
   })
 
+  it('rejects a zero USD price for a positive estimate amount', async () => {
+    const vault = {
+      address: addressA,
+      asset: { decimals: 6, symbol: 'USDC' },
+      marketPriceUsd: 0n,
+    }
+
+    await expect(getAssetUsdValueForEstimate(0n, vault, 'off-chain')).resolves.toBe(0)
+    await expect(getAssetUsdValueForEstimate(1_000_000n, vault, 'off-chain')).resolves.toBeUndefined()
+  })
+
   it('uses the liability vault collateral edge marketPriceUsd for collateral values', async () => {
     const liabilityVault = {
       collaterals: [

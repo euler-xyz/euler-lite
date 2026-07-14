@@ -96,6 +96,7 @@ vi.mock('~/components/ui/composables/useToast', () => ({
 
 vi.mock('~/utils/sdk-prices', () => ({
   getAssetUsdValue: vi.fn(async () => null),
+  getAssetUsdValueForEstimate: vi.fn(async () => null),
 }))
 
 vi.mock('~/composables/repay/useRepaySwapDetails', () => ({

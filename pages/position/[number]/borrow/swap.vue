@@ -39,7 +39,7 @@ import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
 import { buildRefinanceProjectedRateRequests, getSameAssetRefinanceBorrowAmount } from '~/utils/refinance-apy'
-import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { isRoeStateApplicable } from '~/utils/position-roe'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros, formatUsdValue } from '~/utils/string-utils'
@@ -1645,7 +1645,7 @@ const getCollateralPortfolioValue = async (
   let valueUsd = 0
   const entries: CollateralPortfolioEntry[] = []
   for (const leg of legs) {
-    const legValue = await getAssetUsdValue(leg.amount, leg.vault, 'off-chain')
+    const legValue = await getAssetUsdValueForEstimate(leg.amount, leg.vault, 'off-chain')
     if (legValue === undefined || legValue === null) return null
     const apy = getSupplyApyValueForVault(
       leg.vault,
@@ -1780,7 +1780,7 @@ watchEffect(async () => {
   const vault = sourceDebtVault.value
   const amount = currentDebt.value
   if (!vault) return
-  const value = (await getAssetUsdValue(amount, vault, 'off-chain')) ?? null
+  const value = (await getAssetUsdValueForEstimate(amount, vault, 'off-chain')) ?? null
   if (!currentBorrowValueGuard.isStale(gen)) currentBorrowValueUsd.value = value
 })
 const nextRefinanceEstimate = shallowRef<NextRefinanceEstimate | null>(null)
@@ -1826,7 +1826,7 @@ watchEffect(async () => {
       projectionEntries.length
         ? getProjectedRatesBatch(projectionEntries.map(projection => projection.request))
         : Promise.resolve([]),
-      getAssetUsdValue(amount, vault, 'off-chain'),
+      getAssetUsdValueForEstimate(amount, vault, 'off-chain'),
     ])
     if (nextRefinanceEstimateGuard.isStale(gen)) return
 

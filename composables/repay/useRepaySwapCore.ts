@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EVault, PluginPrefetchData, PortfolioBorrowPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValue } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildClosePositionQuoteAppData, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
@@ -168,7 +168,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     const currentSourceBalance = sourceBalance.value
     sourceValueUsd.value = null
     if (!currentSourceVault) return
-    const result = (await getAssetUsdValue(currentSourceBalance, currentSourceVault, 'off-chain')) ?? null
+    const result = (await getAssetUsdValueForEstimate(currentSourceBalance, currentSourceVault, 'off-chain')) ?? null
     if (sourceUsdGuard.isStale(gen)) return
     sourceValueUsd.value = result
   })
@@ -182,7 +182,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     const currentPosition = position.value
     borrowValueUsd.value = null
     if (!currentBorrowVault || !currentPosition) return
-    const result = (await getAssetUsdValue(currentPosition.borrowed, currentBorrowVault, 'off-chain')) ?? null
+    const result = (await getAssetUsdValueForEstimate(currentPosition.borrowed, currentBorrowVault, 'off-chain')) ?? null
     if (borrowUsdGuard.isStale(gen)) return
     borrowValueUsd.value = result
   })
@@ -198,7 +198,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     nextBorrowValueUsd.value = null
     if (!currentBorrowVault || !currentPosition || currentDebtRepaid === null) return
     const nextBorrow = currentPosition.borrowed - currentDebtRepaid
-    const result = (await getAssetUsdValue(nextBorrow > 0n ? nextBorrow : 0n, currentBorrowVault, 'off-chain')) ?? null
+    const result = (await getAssetUsdValueForEstimate(nextBorrow > 0n ? nextBorrow : 0n, currentBorrowVault, 'off-chain')) ?? null
     if (nextBorrowUsdGuard.isStale(gen)) return
     nextBorrowValueUsd.value = result
   })

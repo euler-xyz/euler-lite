@@ -2,7 +2,7 @@ import { getPositionMultiplier, getProjectedRates } from '~/utils/vault/apy'
 import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
-import { getAssetUsdValue, getAssetUsdValueForEstimate, getTokenUsdValue } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate, getTokenUsdValue } from '~/utils/sdk-prices'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { valueToNano } from '~/utils/crypto-utils'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
@@ -280,7 +280,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       borrowValueUsd.value = null
       return
     }
-    const result = (await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
+    const result = (await getAssetUsdValueForEstimate(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
     if (borrowValueUsdGuard.isStale(gen)) return
     borrowValueUsd.value = result
   })

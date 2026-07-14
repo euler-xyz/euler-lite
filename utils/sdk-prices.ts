@@ -228,7 +228,7 @@ export const getAssetUsdValueForEstimate = async (
   if (!vault) return undefined
   if (amount === 0 || amount === 0n) return 0
   const value = await getAssetUsdValue(amount, vault, source)
-  return value !== undefined && Number.isFinite(value) && value >= 0 ? value : undefined
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
 export const getAssetUsdValueOrZero = async (

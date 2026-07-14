@@ -148,6 +148,7 @@ vi.mock('~/composables/cowswap', () => ({
 
 vi.mock('~/utils/sdk-prices', () => ({
   getAssetUsdValue: vi.fn(async () => null),
+  getAssetUsdValueForEstimate: vi.fn(async () => null),
   getAssetOraclePrice: vi.fn(() => 0n),
   conservativePriceRatioNumber: vi.fn(() => 1),
 }))
