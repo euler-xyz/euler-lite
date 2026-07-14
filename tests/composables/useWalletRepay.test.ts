@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 
-const { USER, borrowVault, collateralVault, planAccount, getProjectedRates, getNetAPYFromWeightedSupplySnapshot } = vi.hoisted(() => {
+const { USER, borrowVault, collateralVault, planAccount, getProjectedRates, getNetAPYFromWeightedSupplySnapshot, getAssetUsdValueForEstimate } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001' as `0x${string}`
   const BORROW_VAULT = '0x0000000000000000000000000000000000000002' as `0x${string}`
   const COLLATERAL_VAULT = '0x0000000000000000000000000000000000000003' as `0x${string}`
@@ -23,6 +23,7 @@ const { USER, borrowVault, collateralVault, planAccount, getProjectedRates, getN
     planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
     getProjectedRates: vi.fn(async () => ({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })),
     getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 10),
+    getAssetUsdValueForEstimate: vi.fn(async () => 10 as number | undefined),
   }
 })
 const rewardsVersion = ref(0)
@@ -40,7 +41,7 @@ vi.mock('~/utils/vault/apy', () => ({
   getPositionMultiplier: vi.fn(() => 1),
 }))
 vi.mock('~/utils/sdk-prices', () => ({
-  getAssetUsdValueOrZero: vi.fn(async () => 10),
+  getAssetUsdValueForEstimate,
 }))
 vi.mock('~/utils/position-estimates', () => ({
   getTotalCollateralValue: vi.fn(() => 10_000),
@@ -69,6 +70,7 @@ describe('useWalletRepay projected Net APY', () => {
     vi.clearAllMocks()
     rewardsVersion.value = 0
     getProjectedRates.mockResolvedValue({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
+    getAssetUsdValueForEstimate.mockResolvedValue(10)
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -169,6 +171,34 @@ describe('useWalletRepay projected Net APY', () => {
     await vi.waitFor(() => expect(repay.estimatesError.value).toBe('Not enough balance'))
 
     expect(getProjectedRates).not.toHaveBeenCalled()
+    expect(repay.projectedYieldDetails.value).toBeNull()
+  })
+
+  it('keeps projected yield unavailable when positive debt has no USD price', async () => {
+    getAssetUsdValueForEstimate.mockResolvedValue(undefined)
+    const repay = useWalletRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      walletBalance: ref(1_000n * 10n ** 18n),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      clearSimulationError: vi.fn(),
+      runSimulation: vi.fn(async () => true),
+      netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5),
+      borrowApy: computed(() => 5),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+
+    repay.amount.value = '100'
+
+    await vi.waitFor(() => expect(getAssetUsdValueForEstimate).toHaveBeenCalled())
+    expect(repay.estimateNetAPY.value).toBeNull()
     expect(repay.projectedYieldDetails.value).toBeNull()
   })
 

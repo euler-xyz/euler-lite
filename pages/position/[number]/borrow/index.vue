@@ -4,7 +4,7 @@ import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/v
 import type { VaultAsset } from '~/types/asset'
 import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
 import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
-import { getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
@@ -216,9 +216,9 @@ const refreshCurrentYield = async () => {
 
   const [collateralSnapshot, borrowUsd] = await Promise.all([
     getCollateralApySnapshot(currentPosition, currentBorrowVault),
-    getAssetUsdValueOrZero(currentPosition.borrowed || 0n, currentBorrowVault, 'off-chain'),
+    getAssetUsdValueForEstimate(currentPosition.borrowed || 0n, currentBorrowVault, 'off-chain'),
   ])
-  if (currentYieldGuard.isStale(gen) || !collateralSnapshot.isComplete) return
+  if (currentYieldGuard.isStale(gen) || !collateralSnapshot.isComplete || borrowUsd === undefined) return
 
   const multiplier = getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd)
   const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
@@ -514,11 +514,11 @@ const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
         additionalBorrowNano,
       ),
       getCollateralApySnapshot(currentPosition, currentBorrowVault),
-      getAssetUsdValueOrZero(totalBorrow, currentBorrowVault, 'off-chain'),
+      getAssetUsdValueForEstimate(totalBorrow, currentBorrowVault, 'off-chain'),
     ])
 
     if (asyncEstimatesGuard.isStale(gen)) return
-    if (!borrowProjected || !collateralSnapshot.isComplete) {
+    if (!borrowProjected || !collateralSnapshot.isComplete || borrowUsd === undefined) {
       netAPY.value = undefined
       projectedYieldDetails.value = undefined
       return

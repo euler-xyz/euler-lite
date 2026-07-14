@@ -5,7 +5,7 @@ import type {
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getNetAPYFromWeightedSupplySnapshot, getPositionMultiplier } from '~/utils/vault/apy'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -73,9 +73,10 @@ export const useRepayNetApy = ({
     try {
       const [collateralSnapshot, borrowUsd] = await Promise.all([
         getCollateralApySnapshot(currentPosition, currentBorrowVault),
-        getAssetUsdValueOrZero(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
       ])
       if (guard.isStale(gen)) return
+      if (borrowUsd === undefined) return
       const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
         currentBorrowVault.address,
         collateralSnapshot.collateralAddresses ?? currentPosition.collateralVaults ?? [],

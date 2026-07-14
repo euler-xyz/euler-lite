@@ -7,7 +7,7 @@ import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, ty
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getCollateralUsdPrice, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getCollateralUsdPrice, getAssetUsdValueForEstimate, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { SwapTokenSelector, OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
@@ -672,11 +672,15 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             borrowsDelta: borrowAmountNano,
           },
         ]),
-        getAssetUsdValueOrZero(collateralAmountNano, collateral, 'off-chain'),
-        getAssetUsdValueOrZero(borrowAmountNano, borrow, 'off-chain'),
+        getAssetUsdValueForEstimate(collateralAmountNano, collateral, 'off-chain'),
+        getAssetUsdValueForEstimate(borrowAmountNano, borrow, 'off-chain'),
       ])
       if (asyncEstimatesGuard.isStale(gen)) return
-      if (!areProjectedRatesComplete(projectedRates, 2)) {
+      if (
+        !areProjectedRatesComplete(projectedRates, 2)
+        || collateralUsdValue === undefined
+        || borrowUsdValue === undefined
+      ) {
         projectedYieldDetails.value = null
         return
       }

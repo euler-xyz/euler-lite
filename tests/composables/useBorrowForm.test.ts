@@ -45,7 +45,7 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
       runSimulation: vi.fn(),
       modalOpen: vi.fn(),
       getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
-      getAssetUsdValueOrZero: vi.fn(async () => 0),
+      getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
       getSupplyRewardCampaigns: vi.fn(() => [] as RewardCampaign[]),
       getBorrowRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
       getEligibleLoopingRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
@@ -114,7 +114,8 @@ vi.mock('~/composables/useSwapQuotesParallel', () => ({
 }))
 
 vi.mock('~/utils/sdk-prices', () => ({
-  getAssetUsdValueOrZero: mocks.getAssetUsdValueOrZero,
+  getAssetUsdValueForEstimate: mocks.getAssetUsdValueForEstimate,
+  getAssetUsdValueOrZero: vi.fn(async () => 0),
   getAssetOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralUsdPrice: vi.fn(async () => ({ amountOutMid: 1_000_000_000_000_000_000n })),
@@ -218,7 +219,7 @@ describe('useBorrowForm savings collateral', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => null))
-    mocks.getAssetUsdValueOrZero.mockResolvedValue(0)
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
     mocks.getSupplyRewardCampaigns.mockReturnValue([])
     mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([])
     mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([])
@@ -544,7 +545,7 @@ describe('useBorrowForm savings collateral', () => {
     await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
     const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{ cashDelta: bigint }>
     expect(requests[0]?.cashDelta).toBe(80n)
-    expect(mocks.getAssetUsdValueOrZero).toHaveBeenCalledWith(80n, vault, 'off-chain')
+    expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(80n, vault, 'off-chain')
   })
 
   it('keeps projected rate transitions and reward-token identity with the headline', async () => {
@@ -558,7 +559,7 @@ describe('useBorrowForm savings collateral', () => {
     } as RewardCampaign
     mocks.supplyRewardApy = 2
     mocks.getSupplyRewardCampaigns.mockReturnValue([reward])
-    mocks.getAssetUsdValueOrZero.mockResolvedValue(100)
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(100)
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({
       supplyAPY: 0n,
       borrowAPY: 0n,
@@ -582,8 +583,23 @@ describe('useBorrowForm savings collateral', () => {
     }])
   })
 
+  it('keeps projected yield unavailable when a positive form leg has no USD price', async () => {
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(undefined)
+    mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({
+      supplyAPY: 0n,
+      borrowAPY: 0n,
+    })))
+    const form = makeForm(shallowRef([]))
+    form.collateralAmount.value = '10'
+    form.borrowAmount.value = '2'
+
+    await vi.waitFor(() => expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalled())
+    expect(form.netAPY.value).toBeUndefined()
+    expect(form.projectedYieldDetails.value).toBeNull()
+  })
+
   it('refreshes projected rewards when campaign enrichment arrives', async () => {
-    mocks.getAssetUsdValueOrZero.mockResolvedValue(100)
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(100)
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({
       supplyAPY: 0n,
       borrowAPY: 0n,

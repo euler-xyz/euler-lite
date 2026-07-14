@@ -2,7 +2,7 @@ import { getPositionMultiplier } from '~/utils/vault/apy'
 import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, TransactionPlan, TransactionPlanPrepared, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -388,9 +388,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     try {
       const [collateralSnapshot, borrowedUsd] = await Promise.all([
         getCollateralApySnapshot(currentPosition, currentBorrowVault),
-        getAssetUsdValueOrZero(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
       ])
       if (currentNetApyGuard.isStale(gen)) return
+      if (borrowedUsd === undefined) return
 
       const currentBorrowCollateralAddresses = currentPosition.collateralVaults ?? []
       const currentBorrowRewardApy = getBorrowRewardApyForCollaterals(
@@ -847,10 +848,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             projectRates: true,
           }],
         }),
-        getAssetUsdValueOrZero(estimatePosition.borrowed || 0n, estimateBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(estimatePosition.borrowed || 0n, estimateBorrowVault, 'off-chain'),
       ])
 
       if (asyncEstimatesGuard.isStale(gen)) return
+      if (borrowedUsd === undefined) {
+        clearProjectedYieldEstimate()
+        return
+      }
 
       const projectedCollateralAddresses = collateralSnapshot.collateralAddresses
         ?? estimatePosition.collateralVaults

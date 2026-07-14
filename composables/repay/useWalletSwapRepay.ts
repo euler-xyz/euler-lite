@@ -2,7 +2,7 @@ import { getPositionMultiplier, getProjectedRates } from '~/utils/vault/apy'
 import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
-import { getAssetUsdValue, getAssetUsdValueOrZero, getTokenUsdValue } from '~/utils/sdk-prices'
+import { getAssetUsdValue, getAssetUsdValueForEstimate, getTokenUsdValue } from '~/utils/sdk-prices'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { valueToNano } from '~/utils/crypto-utils'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
@@ -541,11 +541,16 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           -debtRepaidNano,
         ),
         getCollateralApySnapshot(currentPosition, currentBorrowVault),
-        getAssetUsdValueOrZero(currentDebt, currentBorrowVault, 'off-chain'),
-        getAssetUsdValueOrZero(nextBorrowed > 0n ? nextBorrowed : 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(currentDebt, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(nextBorrowed > 0n ? nextBorrowed : 0n, currentBorrowVault, 'off-chain'),
       ])
       if (estimatesGuard.isStale(gen)) return
-      if (!projected || !collateralSnapshot.isComplete) {
+      if (
+        !projected
+        || !collateralSnapshot.isComplete
+        || currentBorrowUsd === undefined
+        || borrowUsd === undefined
+      ) {
         _estimateNetAPY.value = null
         projectedYieldDetails.value = null
         return

@@ -60,7 +60,7 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
       })),
       getBorrowCapWarning: vi.fn(() => null),
       getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n }))),
-      getAssetUsdValueOrZero: vi.fn(async () => 0),
+      getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
       getSupplyRewardApy: vi.fn(() => 0),
       getBorrowRewardApyForCollaterals: vi.fn(() => 0),
       getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
@@ -137,7 +137,7 @@ vi.mock('~/composables/borrow/useMultiplyCowSwap', () => ({
 
 vi.mock('~/utils/sdk-prices', () => ({
   getAssetUsdValue: vi.fn(async () => 0),
-  getAssetUsdValueOrZero: mocks.getAssetUsdValueOrZero,
+  getAssetUsdValueForEstimate: mocks.getAssetUsdValueForEstimate,
   getAssetOraclePrice: vi.fn(() => ({ amountOutMid: 1n, amountOutAsk: 1n })),
   getCollateralOraclePrice: vi.fn(() => ({ amountOutMid: 1n, amountOutBid: 1n })),
   getCollateralShareOraclePrice: vi.fn(() => ({ amountIn: 1n })),
@@ -224,7 +224,7 @@ describe('useMultiplyForm cap validation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n })))
-    mocks.getAssetUsdValueOrZero.mockResolvedValue(0)
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
     mocks.getSupplyRewardApy.mockReturnValue(0)
     mocks.getBorrowRewardApyForCollaterals.mockReturnValue(0)
     mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(0)
@@ -354,7 +354,7 @@ describe('useMultiplyForm cap validation', () => {
 
   it('derives projected Net APY, ROE, and rate transitions from one breakdown', async () => {
     const rateUnit = 10n ** 25n
-    mocks.getAssetUsdValueOrZero.mockResolvedValue(100)
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(100)
     mocks.getProjectedRatesBatch.mockResolvedValue([
       { supplyAPY: 2n * rateUnit, borrowAPY: 0n },
       { supplyAPY: 0n, borrowAPY: rateUnit },
@@ -388,13 +388,28 @@ describe('useMultiplyForm cap validation', () => {
     expect(form.projectedYieldDetails.value).toBeNull()
   })
 
+  it('hides projected metrics when a positive leg has no USD price', async () => {
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(undefined)
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalled())
+    expect(form.multiplySupplyValueUsd.value).toBeNull()
+    expect(form.multiplyLongValueUsd.value).toBeNull()
+    expect(form.multiplyBorrowValueUsd.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+  })
+
   it('keeps projected risk metrics unavailable while long-collateral pricing is pending', async () => {
     let resolveLongValue!: (value: number) => void
     const pendingLongValue = new Promise<number>((resolve) => {
       resolveLongValue = resolve
     })
     let priceCall = 0
-    mocks.getAssetUsdValueOrZero.mockImplementation(async () => {
+    mocks.getAssetUsdValueForEstimate.mockImplementation(async () => {
       priceCall++
       if (priceCall === 2) return pendingLongValue
       return 100
@@ -405,7 +420,7 @@ describe('useMultiplyForm cap validation', () => {
     form.multiplyInputAmount.value = '1'
     form.multiplier.value = 2
 
-    await vi.waitFor(() => expect(mocks.getAssetUsdValueOrZero).toHaveBeenCalledTimes(3))
+    await vi.waitFor(() => expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledTimes(3))
     expect(form.multiplyLongValueUsd.value).toBeNull()
     expect(form.multiplyTotalSupplyUsd.value).toBeNull()
     expect(form.multiplyNextLtv.value).toBeNull()
@@ -433,7 +448,7 @@ describe('useMultiplyForm cap validation', () => {
         rewardTokenSymbol: 'LOOP', rewardTokenIcon: '/loop.png',
       } as RewardCampaign,
     }
-    mocks.getAssetUsdValueOrZero.mockResolvedValue(100)
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(100)
     mocks.getSupplyRewardApy.mockReturnValue(2)
     mocks.getBorrowRewardApyForCollaterals.mockReturnValue(3)
     mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(4)

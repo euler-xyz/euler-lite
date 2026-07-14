@@ -4,13 +4,13 @@ import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/eul
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
 
-const { getAssetUsdValueOrZero, getNetAPYFromWeightedSupplySnapshot, logWarn } = vi.hoisted(() => ({
-  getAssetUsdValueOrZero: vi.fn(async () => 50),
+const { getAssetUsdValueForEstimate, getNetAPYFromWeightedSupplySnapshot, logWarn } = vi.hoisted(() => ({
+  getAssetUsdValueForEstimate: vi.fn(async () => 50 as number | undefined),
   getNetAPYFromWeightedSupplySnapshot: vi.fn((snapshot: CollateralApySnapshot) => snapshot.weightedSupplyApy),
   logWarn: vi.fn(),
 }))
 
-vi.mock('~/utils/sdk-prices', () => ({ getAssetUsdValueOrZero }))
+vi.mock('~/utils/sdk-prices', () => ({ getAssetUsdValueForEstimate }))
 vi.mock('~/utils/vault/apy', () => ({
   getNetAPYFromWeightedSupplySnapshot,
   getPositionMultiplier: vi.fn(() => 2),
@@ -69,7 +69,7 @@ describe('useRepayNetApy', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     rewardsVersion.value = 0
-    getAssetUsdValueOrZero.mockResolvedValue(50)
+    getAssetUsdValueForEstimate.mockResolvedValue(50)
     getCollateralApySnapshot.mockResolvedValue(snapshot(5))
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
@@ -123,7 +123,7 @@ describe('useRepayNetApy', () => {
     const baseline = makeBaseline()
     await vi.waitFor(() => expect(baseline.netAPY.value).toBe(5))
 
-    getAssetUsdValueOrZero.mockRejectedValueOnce(new Error('price failed'))
+    getAssetUsdValueForEstimate.mockRejectedValueOnce(new Error('price failed'))
     rewardsVersion.value++
 
     await vi.waitFor(() => expect(logWarn).toHaveBeenCalledWith(
@@ -131,5 +131,19 @@ describe('useRepayNetApy', () => {
       expect.objectContaining({ message: 'price failed' }),
     ))
     expect(baseline.netAPY.value).toBeNull()
+  })
+
+  it('keeps positive unpriced debt unavailable', async () => {
+    getAssetUsdValueForEstimate.mockResolvedValueOnce(undefined)
+
+    const baseline = makeBaseline()
+
+    await vi.waitFor(() => expect(getAssetUsdValueForEstimate).toHaveBeenCalledWith(
+      position.borrowed,
+      borrowVault,
+      'off-chain',
+    ))
+    expect(baseline.netAPY.value).toBeNull()
+    expect(getNetAPYFromWeightedSupplySnapshot).not.toHaveBeenCalled()
   })
 })

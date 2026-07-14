@@ -1,6 +1,6 @@
 import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { areProjectedRatesComplete, type ProjectedRates, getPositionMultiplier, getProjectedRatesBatch } from '~/utils/vault/apy'
-import { getAssetUsdValue, getAssetUsdValueOrZero, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
@@ -380,8 +380,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       multiplySupplyValueUsd.value = null
       return
     }
-    const value = await getAssetUsdValueOrZero(amount, vault, 'off-chain')
-    if (!multiplySupplyValueGuard.isStale(gen)) multiplySupplyValueUsd.value = value
+    const value = await getAssetUsdValueForEstimate(amount, vault, 'off-chain')
+    if (!multiplySupplyValueGuard.isStale(gen)) multiplySupplyValueUsd.value = value ?? null
   })
 
   watchEffect(async () => {
@@ -393,8 +393,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       multiplyLongValueUsd.value = null
       return
     }
-    const value = await getAssetUsdValueOrZero(amount, vault, 'off-chain')
-    if (!multiplyLongValueGuard.isStale(gen)) multiplyLongValueUsd.value = value
+    const value = await getAssetUsdValueForEstimate(amount, vault, 'off-chain')
+    if (!multiplyLongValueGuard.isStale(gen)) multiplyLongValueUsd.value = value ?? null
   })
 
   watchEffect(async () => {
@@ -406,8 +406,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       multiplyBorrowValueUsd.value = null
       return
     }
-    const value = await getAssetUsdValueOrZero(amount, vault, 'off-chain')
-    if (!multiplyBorrowValueGuard.isStale(gen)) multiplyBorrowValueUsd.value = value
+    const value = await getAssetUsdValueForEstimate(amount, vault, 'off-chain')
+    if (!multiplyBorrowValueGuard.isStale(gen)) multiplyBorrowValueUsd.value = value ?? null
   })
 
   const multiplyTotalSupplyUsd = computed(() => {

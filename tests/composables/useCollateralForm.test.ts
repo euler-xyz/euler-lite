@@ -78,6 +78,7 @@ const { COLLATERAL_VAULT, NEW_COLLATERAL_VAULT, wethAsset, usdcAsset, collateral
       getBorrowRewardCampaignsForCollaterals: vi.fn((): RewardCampaign[] => []),
       getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
       getEligibleLoopingRewardCampaignsForCollaterals: vi.fn((): RewardCampaign[] => []),
+      getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
     },
   }
 })
@@ -110,7 +111,7 @@ vi.mock('~/utils/vault/apy', () => ({
 }))
 
 vi.mock('~/utils/sdk-prices', () => ({
-  getAssetUsdValueOrZero: vi.fn(async () => 0),
+  getAssetUsdValueForEstimate: mocks.getAssetUsdValueForEstimate,
   getCollateralUsdValueOrZero: vi.fn(async () => 0),
 }))
 
@@ -307,6 +308,7 @@ describe('useCollateralForm', () => {
     mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([])
     mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(0)
     mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([])
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
     rewardsVersion.value = 0
     const swapApi = await getSwapApi()
     swapApi.effectiveQuote.value = null
@@ -877,6 +879,26 @@ describe('useCollateralForm', () => {
     await flush()
     expect(form.netAPY.value).toBe(7)
     expect(form.projectedYieldDetails.value?.before?.total).toBe(7)
+  })
+
+  it('keeps current and projected yield unavailable when positive debt has no USD price', async () => {
+    mocks.getCollateralApySnapshot.mockResolvedValue({
+      supplyUsd: 100,
+      weightedSupplyApy: 5,
+    })
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(undefined)
+
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+    expect(form.netAPY.value).toBeNull()
+
+    form.amount.value = '1'
+    await flush()
+    expect(form.estimateNetAPY.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
   })
 
   it('invalidates a pending projection when the replacement baseline rejects', async () => {

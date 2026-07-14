@@ -5,7 +5,7 @@ import { maxUint256, type Address } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { OperationReviewModal } from '#components'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { formatUnits } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { logWarn } from '~/utils/errorHandling'
@@ -301,12 +301,17 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
           -repayNano,
         ),
         getCollateralApySnapshot(currentPosition, currentBorrowVault),
-        getAssetUsdValueOrZero(currentPosition.borrowed || 0n, currentBorrowVault, 'off-chain'),
-        getAssetUsdValueOrZero(remainingBorrow > 0n ? remainingBorrow : 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(currentPosition.borrowed || 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(remainingBorrow > 0n ? remainingBorrow : 0n, currentBorrowVault, 'off-chain'),
       ])
 
       if (asyncEstimatesGuard.isStale(gen)) return
-      if (!projected || !collateralSnapshot.isComplete) {
+      if (
+        !projected
+        || !collateralSnapshot.isComplete
+        || currentBorrowUsd === undefined
+        || borrowUsd === undefined
+      ) {
         _estimateNetAPY.value = null
         projectedYieldDetails.value = null
         return
