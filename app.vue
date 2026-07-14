@@ -126,12 +126,21 @@ watch(() => route.name, (name) => {
 
 // Attach the connected wallet address to HelpScout conversations so support
 // agents see it without the user typing it. session-data is added to the
-// conversation as a visitor activity note when the user submits a message;
-// it is not shown in (and cannot be edited via) the Beacon form itself.
+// conversation as a visitor activity note when the user submits a message.
+// The form itself has no read-only fields, so the user is told about the
+// attachment via the responseTime sublabel shown in the form header — static
+// text they can see but not edit.
 // Safe to call before the Beacon script loads — the shim queues calls.
 watch(address, (addr) => {
   if (!import.meta.client || typeof window.Beacon !== 'function') return
   window.Beacon('session-data', { 'Wallet address': addr ?? 'Not connected' })
+  window.Beacon('config', {
+    labels: {
+      responseTime: addr
+        ? `We usually respond in a few hours. Your connected wallet ${shortenAddress(addr)} will be attached to your message.`
+        : 'We usually respond in a few hours',
+    },
+  })
 }, { immediate: true })
 
 const checkBatchAnnouncement = () => {
