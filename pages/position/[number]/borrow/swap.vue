@@ -48,7 +48,7 @@ import { areProjectedRatesComplete, getPositionMultiplier, getProjectedRatesBatc
 import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
-import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
+import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/utils/collateralOptions'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
@@ -1475,7 +1475,18 @@ const effectiveCurrentBorrowApyValue = computed(() =>
   effectiveDebtVault.value ? getRefinanceBorrowApyValue(effectiveDebtVault.value) : null,
 )
 const fromBorrowApy = computed(() => {
-  return currentBorrowApyValue.value?.totalApy ?? null
+  void rewardsVersion.value
+  const vault = sourceDebtVault.value
+  if (!vault) return null
+  return computeBorrowApy(
+    vault,
+    viewer.value,
+    {
+      enableIntrinsicApy: enableIntrinsicApy.value,
+      enableRewardsApy: enableRewardsApy.value,
+    },
+    effectiveCollateralEVaultForOptions.value?.address,
+  )
 })
 const toBorrowApy = computed(() => {
   return effectiveCurrentBorrowApyValue.value?.totalApy ?? null

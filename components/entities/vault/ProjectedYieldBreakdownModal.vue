@@ -26,12 +26,14 @@ const description = computed(() => details.metric === 'roe'
     ? 'Supply APY is the projected annualized yield for this deposit after utilization changes, intrinsic yield, and rewards.'
     : 'Net APY is annualized return relative to supplied collateral after lending yield, borrowing costs, intrinsic yield, and rewards.')
 
-const breakdownRows = [
+const breakdownRows = computed(() => [
   { key: 'lending' as const, label: 'Lending yield' },
-  { key: 'borrowing' as const, label: 'Borrowing cost' },
+  ...(details.metric === 'supply-apy'
+    ? []
+    : [{ key: 'borrowing' as const, label: 'Borrowing cost' }]),
   { key: 'intrinsicApy' as const, label: 'Intrinsic yield' },
   { key: 'rewards' as const, label: 'Rewards' },
-]
+])
 
 const actionLabels: Record<string, string> = {
   LEND: 'Lending reward',
@@ -186,10 +188,6 @@ const showRateVaultAddress = (rate: ProjectedYieldRateLine) =>
                 :alt="PROVIDER_LABELS[reward.source]"
               >{{ PROVIDER_LABELS[reward.source] || reward.source }}</a><template v-else>
                 {{ PROVIDER_LABELS[reward.source] || reward.source }}
-              </template><template v-if="reward.vaultAddress">
-                · {{ reward.action === 'LEND' ? 'Supply vault' : 'Debt vault' }} {{ shortAddress(reward.vaultAddress) }}
-              </template><template v-if="reward.collateralAddress">
-                · Collateral {{ shortAddress(reward.collateralAddress) }}
               </template>
             </p>
           </div>
