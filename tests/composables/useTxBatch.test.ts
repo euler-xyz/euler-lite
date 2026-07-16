@@ -669,6 +669,48 @@ describe('useTxBatch execution errors', () => {
     expect(activeLayerVaultsRef.value[vault.toLowerCase()]).toBe(simulatedVault)
   })
 
+  it('invalidates a successful overlay when the replacement simulation rejects', async () => {
+    const sdk = createMockSdk()
+    const simulatedVault = {
+      ...pricedVault(vault, 'USDC'),
+      totalCash: 900n,
+      totalBorrowed: 450n,
+    }
+    sdk.executionService.simulateTransactionPlan
+      .mockResolvedValueOnce({
+        simulatedAccounts: [accountWithPosition(subAccount, subAccount, 2n)],
+        simulatedVaultsLayers: [[simulatedVault]],
+        simulatedWalletBalances: [],
+        simulatedVaults: [simulatedVault],
+        failedBatchItems: [],
+        insufficientWalletAssets: [],
+      } as never)
+      .mockRejectedValueOnce(new Error('replacement simulation failed'))
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Withdraw USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+    await vi.waitFor(() => expect(activeLayerVaultsRef.value[vault.toLowerCase()]).toBe(simulatedVault))
+
+    await batch.addEntry({
+      label: 'Borrow USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+    await vi.waitFor(() => expect(batch.simError.value).toBe('replacement simulation failed'))
+
+    expect(batch.entryCount.value).toBe(2)
+    expect(batch.layers.value).toEqual([])
+    expect(batch.activeLayer.value).toBe(0)
+    expect(batch.isSimulated.value).toBe(false)
+    expect(batch.getMergedPlan()).toBeNull()
+    expect(activeLayerVaultsRef.value).toEqual({})
+  })
+
   it('can dismiss a failed execution message without clearing the cart', () => {
     const batch = useTxBatch()
     batch.execError.value = 'User rejected the request.'

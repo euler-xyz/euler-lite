@@ -38,7 +38,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
-import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount } from '~/utils/refinance-apy'
+import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount, resolveRefinanceCollateralLegs } from '~/utils/refinance-apy'
 import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { isRoeStateApplicable } from '~/utils/position-roe'
@@ -1571,15 +1571,11 @@ const nextCollateralAmountNano = computed<bigint | null>(() => {
 })
 
 const currentCollateralLegs = computed<RefinanceCollateralLeg[]>(() =>
-  (position.value?.collaterals ?? [])
-    .filter(collateral => isRefinanceCollateralVault(collateral.vault) && collateral.assets > 0n)
-    .map(collateral => ({
-      vault: getLayeredVault(
-        collateral.vault!.address,
-        collateral.vault as RefinanceCollateralVault,
-      )!,
-      amount: collateral.assets,
-    })),
+  resolveRefinanceCollateralLegs(
+    position.value?.collaterals ?? [],
+    (address, fallback) => getLayeredVault(address, fallback ?? getVault(address)),
+    isRefinanceCollateralVault,
+  ),
 )
 const sourceCollateralVaultAddresses = computed(() => {
   const currentPosition = position.value

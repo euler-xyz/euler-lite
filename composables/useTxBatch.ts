@@ -531,6 +531,14 @@ const syncOverlay = () => {
   activeLayerAccountRef.value = layer?.account
 }
 
+const invalidateSimulationLayers = () => {
+  layers.value = []
+  activeLayer.value = 0
+  walletShortfalls.value = []
+  lastMerged = null
+  syncOverlay()
+}
+
 /**
  * Build a human-readable message from a failed simulation. Note: only real
  * reverts (failedBatchItems / status checks / EVC error) drive per-operation
@@ -1826,6 +1834,7 @@ export const useTxBatch = () => {
       }
       logBatchDiag('resimulate:threw', { token, error: error instanceof Error ? error.message : String(error) }, 'error')
       logWarn('useTxBatch/resimulate', error)
+      invalidateSimulationLayers()
       simError.value = error instanceof Error ? error.message : String(error)
     }
     finally {

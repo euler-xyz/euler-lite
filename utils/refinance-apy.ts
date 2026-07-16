@@ -33,6 +33,17 @@ export interface RefinanceProjectedRateRequest {
   request: ProjectedRatesRequest
 }
 
+export interface RefinanceCollateralPosition<TVault> {
+  vaultAddress: string
+  vault?: TVault
+  assets: bigint
+}
+
+export interface ResolvedRefinanceCollateralLeg<TVault> {
+  vault: TVault
+  amount: bigint
+}
+
 const normalizeAddress = (address: string) => address.toLowerCase()
 
 export const getRefinanceRewardCollateralAddresses = (
@@ -53,6 +64,23 @@ export const getRefinanceRewardCollateralAddresses = (
   }
 
   return [...addresses]
+}
+
+export const resolveRefinanceCollateralLegs = <TPositionVault, TCandidate, TVault extends TCandidate>(
+  collaterals: readonly RefinanceCollateralPosition<TPositionVault>[],
+  resolveVault: (address: string, fallback?: TPositionVault) => TCandidate | undefined,
+  isSupportedVault: (vault: TCandidate | undefined) => vault is TVault,
+): ResolvedRefinanceCollateralLeg<TVault>[] => {
+  const legs: ResolvedRefinanceCollateralLeg<TVault>[] = []
+
+  for (const collateral of collaterals) {
+    if (collateral.assets <= 0n) continue
+    const vault = resolveVault(collateral.vaultAddress, collateral.vault)
+    if (!isSupportedVault(vault)) continue
+    legs.push({ vault, amount: collateral.assets })
+  }
+
+  return legs
 }
 
 export const buildRefinanceProjectedRateRequests = (

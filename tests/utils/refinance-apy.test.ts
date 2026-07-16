@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount } from '~/utils/refinance-apy'
+import { describe, expect, it, vi } from 'vitest'
+import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount, resolveRefinanceCollateralLegs } from '~/utils/refinance-apy'
 
 const source = {
   address: '0x0000000000000000000000000000000000000001',
@@ -104,5 +104,23 @@ describe('getRefinanceRewardCollateralAddresses', () => {
       sibling,
       target.address,
     ])
+  })
+})
+
+describe('resolveRefinanceCollateralLegs', () => {
+  it('resolves an unenriched position before validating the vault shape', () => {
+    const registryVault = {
+      ...source,
+      asset: { address: source.address },
+      shares: { decimals: 18 },
+    }
+    const resolveVault = vi.fn(() => registryVault)
+
+    expect(resolveRefinanceCollateralLegs(
+      [{ vaultAddress: source.address, assets: 100n }],
+      resolveVault,
+      (vault): vault is typeof registryVault => !!vault && 'asset' in vault && 'shares' in vault,
+    )).toEqual([{ vault: registryVault, amount: 100n }])
+    expect(resolveVault).toHaveBeenCalledWith(source.address, undefined)
   })
 })
