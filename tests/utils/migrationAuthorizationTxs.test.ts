@@ -35,7 +35,7 @@ const aaveApprovalRequest = (): MigrationAuthorizationRequest => ({
     to: aToken,
     abi: erc20Abi,
     functionName: 'approve',
-    args: [swapVerifier, 0n],
+    args: [swapVerifier, 250n],
   },
 } as unknown as MigrationAuthorizationRequest)
 
@@ -76,7 +76,7 @@ const typedDataRequest = (): MigrationAuthorizationRequest => ({
 } as unknown as MigrationAuthorizationRequest)
 
 describe('encodeMigrationAuthorizationTxs', () => {
-  it('encodes an Aave approval grant and its zeroing revoke', () => {
+  it('encodes an Aave approval grant and restores the previous allowance', () => {
     const { grants, revokes } = encodeMigrationAuthorizationTxs(aaveApprovalRequest())
 
     expect(grants).toEqual([{
@@ -85,11 +85,11 @@ describe('encodeMigrationAuthorizationTxs', () => {
     }])
     expect(revokes).toEqual([{
       to: aToken,
-      data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 0n] }),
+      data: encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 250n] }),
     }])
   })
 
-  it('encodes a Morpho enable grant and its disable revoke', () => {
+  it('encodes a Morpho enable grant and restores its disabled state', () => {
     const { grants, revokes } = encodeMigrationAuthorizationTxs(morphoAuthorizationRequest())
 
     expect(grants[0]!.data).toBe(
@@ -109,12 +109,12 @@ describe('encodeMigrationAuthorizationTxs', () => {
     const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
 
     expect(grants.map(tx => tx.to)).toEqual([aToken, morphoBlue])
-    // A later grant must never depend on an earlier revoke.
+    // A later grant must never depend on an earlier restoration.
     expect(revokes.map(tx => tx.to)).toEqual([morphoBlue, aToken])
     expect(revokesByGrant.map(tx => tx?.to)).toEqual([aToken, morphoBlue])
   })
 
-  it('omits a revoke when the request carries none', () => {
+  it('omits restoration when the request carries none', () => {
     const request = { ...aaveApprovalRequest(), revocation: undefined } as unknown as MigrationAuthorizationRequest
 
     const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
@@ -140,24 +140,24 @@ describe('encodeMigrationAuthorizationTxs', () => {
 })
 
 describe('buildMigrationAuthorizationTxSteps', () => {
-  it('labels grant and revoke rows per connector', () => {
+  it('labels grant and restoration rows per connector', () => {
     expect(buildMigrationAuthorizationTxSteps(aaveApprovalRequest(), 'grant')).toEqual([
       { index: 1, label: 'Approve aToken transfer', isSeparateTx: true },
     ])
     expect(buildMigrationAuthorizationTxSteps(morphoAuthorizationRequest(), 'revoke', 4)).toEqual([
-      { index: 4, label: 'Disable Morpho authorization', isSeparateTx: true },
+      { index: 4, label: 'Restore previous Morpho authorization', isSeparateTx: true },
     ])
   })
 
-  it('orders revoke rows to match the transactions actually sent', () => {
+  it('orders restoration rows to match the transactions actually sent', () => {
     const request = {
       ...aaveApprovalRequest(),
       postMigrationAuthorization: morphoAuthorizationRequest(),
     } as unknown as MigrationAuthorizationRequest
 
     expect(buildMigrationAuthorizationTxSteps(request, 'revoke').map(step => step.label)).toEqual([
-      'Disable Morpho authorization',
-      'Revoke aToken approval',
+      'Restore previous Morpho authorization',
+      'Restore previous aToken approval',
     ])
   })
 
@@ -165,6 +165,7 @@ describe('buildMigrationAuthorizationTxSteps', () => {
     const request = { ...aaveApprovalRequest(), authorizationType: 'somethingNew' } as unknown as MigrationAuthorizationRequest
 
     expect(buildMigrationAuthorizationTxSteps(request, 'grant')[0]!.label).toBe('Approve migration')
+    expect(buildMigrationAuthorizationTxSteps(request, 'revoke')[0]!.label).toBe('Restore previous migration authorization')
   })
 
   it('renders nothing for a typed-data request or no request', () => {

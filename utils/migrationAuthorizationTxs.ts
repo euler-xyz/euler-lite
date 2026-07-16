@@ -22,9 +22,9 @@ export interface PlainTxRequest {
 export interface MigrationAuthorizationTxs {
   /** Grant, to send and mine before the migration plan is built. */
   grants: PlainTxRequest[]
-  /** Revokes, to send once the migration has settled, in reverse grant order. */
+  /** SDK revocations that restore prior state, in reverse grant order. */
   revokes: PlainTxRequest[]
-  /** Revoke paired with each grant, in grant order, for incremental cleanup. */
+  /** Restoration paired with each grant, in grant order, for incremental cleanup. */
   revokesByGrant: Array<PlainTxRequest | undefined>
 }
 
@@ -46,7 +46,7 @@ const flattenRequests = (
     : []
 
 /**
- * Encode an authorization request into its grant and revoke transactions.
+ * Encode an authorization request into its grant and restoration transactions.
  *
  * Throws on a typed-data request: that form is signed, not sent, and reaching
  * here with one means the request was fetched without
@@ -69,7 +69,7 @@ export const encodeMigrationAuthorizationTxs = (
     if (revoke) revokes.push(revoke)
   }
 
-  // Unwind in reverse so a later grant never depends on an earlier revoke.
+  // Unwind in reverse so a later grant never depends on an earlier restoration.
   return { grants, revokes: revokes.reverse(), revokesByGrant }
 }
 
@@ -80,21 +80,21 @@ const GRANT_LABELS: Record<string, string> = {
   metamorphoApproval: 'Approve Morpho vault shares',
 }
 
-const REVOKE_LABELS: Record<string, string> = {
-  aTokenApproval: 'Revoke aToken approval',
-  variableDebtDelegationApproval: 'Revoke debt delegation',
-  morphoAuthorization: 'Disable Morpho authorization',
-  metamorphoApproval: 'Revoke Morpho vault share approval',
+const RESTORE_LABELS: Record<string, string> = {
+  aTokenApproval: 'Restore previous aToken approval',
+  variableDebtDelegationApproval: 'Restore previous debt delegation',
+  morphoAuthorization: 'Restore previous Morpho authorization',
+  metamorphoApproval: 'Restore previous Morpho vault share approval',
 }
 
-/** Review-modal rows for the standalone grant or revoke transactions. */
+/** Review-modal rows for the standalone grant or restoration transactions. */
 export const buildMigrationAuthorizationTxSteps = (
   request: MigrationAuthorizationRequest | undefined,
   phase: 'grant' | 'revoke',
   startIndex = 1,
 ): DisplayStep[] => {
-  const labels = phase === 'grant' ? GRANT_LABELS : REVOKE_LABELS
-  const fallback = phase === 'grant' ? 'Approve migration' : 'Revoke migration approval'
+  const labels = phase === 'grant' ? GRANT_LABELS : RESTORE_LABELS
+  const fallback = phase === 'grant' ? 'Approve migration' : 'Restore previous migration authorization'
   const steps: DisplayStep[] = []
 
   for (const entry of flattenRequests(request)) {

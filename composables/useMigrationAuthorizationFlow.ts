@@ -12,11 +12,12 @@ const STALE_AUTHORIZATION_MESSAGE
   = 'On-chain allowances changed while preparing the migration. Please retry.'
 
 /**
- * Toast-wrapped revokes for the plain-transaction migration flow, plus the
- * translation of the SDK's missing-authorization errors.
+ * Toast-wrapped authorization restoration for the plain-transaction migration
+ * flow, plus the translation of the SDK's missing-authorization errors.
  *
- * Revokes are best-effort by design: the migration itself has already settled
- * (or already failed), so a declined revoke must not surface as a failure.
+ * Restoration transactions are best-effort by design: the migration itself has
+ * already settled (or already failed), so a declined restoration must not
+ * surface as a failure.
  */
 export const useMigrationAuthorizationFlow = () => {
   const { sendMigrationAuthorizationRevokes } = useEulerTx()
@@ -25,13 +26,13 @@ export const useMigrationAuthorizationFlow = () => {
   const revokeAfterSuccess = async (revokes: readonly PlainTxRequest[]) => {
     if (!revokes.length) return
     if (await sendMigrationAuthorizationRevokes(revokes)) return
-    showWarning('Migration succeeded, but revoking the temporary authorization failed or was cancelled. You can revoke it manually later.')
+    showWarning('Migration succeeded, but restoring your previous authorization failed or was cancelled. You can restore it manually later.')
   }
 
   const revokeAfterAbort = async (revokes: readonly PlainTxRequest[]) => {
     if (!revokes.length) return
     if (await sendMigrationAuthorizationRevokes(revokes)) return
-    showWarning('The authorization granted for this migration is still standing. Retry the migration or revoke it manually.')
+    showWarning('The temporary authorization granted for this migration is still standing. Retry the migration or restore your previous authorization manually.')
   }
 
   const toMigrationExecutionError = (err: unknown): unknown =>
