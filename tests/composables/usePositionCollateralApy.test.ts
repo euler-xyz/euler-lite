@@ -122,6 +122,36 @@ describe('usePositionCollateralApy', () => {
     })
   })
 
+  it('uses the simulated collateral vault state instead of the layer-zero registry state', async () => {
+    const simulatedVaultA = {
+      ...vaultA,
+      currentApy: 6,
+      totalCash: 900n,
+      totalBorrowed: 450n,
+    } as unknown as EVault
+    const position = {
+      ...makePosition(),
+      collateral: { vaultAddress: VAULT_A, vault: simulatedVaultA, assets: 100n },
+      collaterals: [
+        { vaultAddress: VAULT_A, vault: simulatedVaultA, assets: 100n },
+        { vaultAddress: VAULT_B, vault: vaultB, assets: 100n },
+      ],
+    } as unknown as PortfolioBorrowPosition<VaultEntity>
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+
+    const snapshot = await getCollateralApySnapshot(position, liabilityVault, {
+      deltas: [{ vaultAddress: VAULT_A, assetsDelta: -25n, projectRates: true }],
+    })
+
+    expect(getProjectedRatesBatch).toHaveBeenCalledWith([expect.objectContaining({
+      vaultAddress: VAULT_A,
+      currentCash: 900n,
+      currentBorrows: 450n,
+      cashDelta: -25n,
+    })])
+    expect(snapshot.entries[0]?.vault).toBe(simulatedVaultA)
+  })
+
   it('fails closed when a requested projected rate is unavailable', async () => {
     getProjectedRatesBatch.mockResolvedValueOnce([null])
     const { getCollateralApySnapshot } = usePositionCollateralApy()
@@ -163,7 +193,9 @@ describe('usePositionCollateralApy', () => {
     }))
     const { getCollateralApySnapshot } = usePositionCollateralApy()
 
-    await expect(getCollateralApySnapshot(makePosition(), liabilityVault)).resolves.toEqual({
+    await expect(getCollateralApySnapshot(makePosition(), liabilityVault, {
+      deltas: [{ vaultAddress: LIABILITY, assetsDelta: 50n }],
+    })).resolves.toEqual({
       supplyUsd: 0,
       weightedSupplyApy: null,
       weightedBaseSupplyApy: null,

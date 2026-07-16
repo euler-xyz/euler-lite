@@ -65,6 +65,16 @@ export const usePositionCollateralApy = () => {
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
+  const getPositionCollateral = (
+    position: PortfolioBorrowPosition<VaultEntity>,
+    vaultAddress: string,
+    primaryAddress: string,
+  ) => (
+    position.collaterals.find(c =>
+      normalizeAddressOrEmpty(c.vaultAddress) === vaultAddress)
+    ?? (vaultAddress === primaryAddress ? position.collateral : undefined)
+  )
+
   const getCollateralAssets = (
     position: PortfolioBorrowPosition<VaultEntity>,
     vaultAddress: string,
@@ -73,8 +83,7 @@ export const usePositionCollateralApy = () => {
     // Collateral assets from the (layer-aware) position rather than a direct
     // lens read, so the snapshot reflects the active batch layer. Collateral
     // the sub-account doesn't hold isn't in `collaterals` ⇒ 0.
-    const match = position.collaterals.find(c =>
-      normalizeAddressOrEmpty(c.vaultAddress) === vaultAddress)
+    const match = getPositionCollateral(position, vaultAddress, primaryAddress)
     if (match) return match.assets
     return vaultAddress === primaryAddress ? (position.supplied || 0n) : 0n
   }
@@ -135,7 +144,8 @@ export const usePositionCollateralApy = () => {
       ].filter(Boolean)))
 
       const resolvedEntries = await Promise.all(allAddresses.map(async (address): Promise<CollateralApyEntry | null> => {
-        const vault = await getOrFetch(address)
+        const existingCollateral = getPositionCollateral(position, address, primaryAddress)
+        const vault = existingCollateral ? existingCollateral.vault : await getOrFetch(address)
         if (!vault) return null
         const currentAssets = getCollateralAssets(position, address, primaryAddress)
         const delta = deltaByAddress.get(address)?.assetsDelta || 0n

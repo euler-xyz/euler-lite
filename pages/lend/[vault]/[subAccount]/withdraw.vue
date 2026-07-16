@@ -188,8 +188,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const supplyAPY = computed(() => {
   if (!vault.value) return 0
-  const base = withVaultIntrinsicApy(getVaultSupplyApy(vault.value), vault.value, enableIntrinsicApy.value)
-  return base + rewardApy.value
+  return getVaultTotalSupplyApy(vault.value, enableIntrinsicApy.value, rewardApy.value)
 })
 
 const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | null => {
@@ -418,7 +417,7 @@ const load = async () => {
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
       vault.value = await _getSecuritizeVault(vaultAddress)
-      estimateSupplyAPY.value = 0 // Securitize vaults don't have interest rate
+      estimateSupplyAPY.value = supplyAPY.value
       projectedYieldDetails.value = null
     }
     else {
@@ -667,13 +666,18 @@ const queueAsyncEstimates = () => {
   estimatesGuard.next()
   estimateSupplyAPY.value = null
   projectedYieldDetails.value = null
-  if (!vault.value || isSecuritizeVaultType.value) {
+  if (!vault.value) {
+    isEstimatesLoading.value = false
+    return
+  }
+  if (isSecuritizeVaultType.value) {
+    estimateSupplyAPY.value = supplyAPY.value
     isEstimatesLoading.value = false
     return
   }
   if (!(+amount.value > 0)) {
     const rawApy = getVaultSupplyApy(vault.value)
-    estimateSupplyAPY.value = withVaultIntrinsicApy(rawApy, vault.value, enableIntrinsicApy.value) + rewardApy.value
+    estimateSupplyAPY.value = supplyAPY.value
     projectedYieldDetails.value = buildProjectedSupplyDetails(rawApy)
     isEstimatesLoading.value = false
     return
