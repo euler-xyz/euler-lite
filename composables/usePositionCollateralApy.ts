@@ -1,6 +1,7 @@
 import { isEVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import {
   getProjectedRatesBatch,
+  type ProjectedRates,
   type ProjectedRatesRequest,
 } from '~/utils/vault/apy'
 import { getCollateralUsdValue } from '~/utils/sdk-prices'
@@ -21,6 +22,10 @@ interface CollateralApyDelta {
 
 interface CollateralApySnapshotOptions {
   deltas?: CollateralApyDelta[]
+  liabilityRateDelta?: {
+    cashDelta: bigint
+    borrowsDelta: bigint
+  }
 }
 
 export interface CollateralApySnapshotEntry {
@@ -43,6 +48,7 @@ export interface CollateralApySnapshot {
   weightedSupplyRewardApy: number | null
   collateralAddresses: string[]
   entries: CollateralApySnapshotEntry[]
+  liabilityProjectedRates: ProjectedRates | null
   isComplete: boolean
 }
 
@@ -102,6 +108,7 @@ export const usePositionCollateralApy = () => {
       weightedSupplyRewardApy: null,
       collateralAddresses: [],
       entries: [],
+      liabilityProjectedRates: null,
       isComplete: false,
     })
 
@@ -164,22 +171,34 @@ export const usePositionCollateralApy = () => {
       if (resolvedEntries.some(entry => entry === null)) return incompleteSnapshot()
       const entries = resolvedEntries as CollateralApyEntry[]
 
-      const projectionRequests = entries.reduce<Array<{ index: number, request: ProjectedRatesRequest }>>((acc, entry, index) => {
+      const projectionRequests = entries.reduce<ProjectedRatesRequest[]>((acc, entry) => {
         if (!entry.projectRates || entry.cashDelta === 0n || !isEVault(entry.vault)) return acc
         acc.push({
-          index,
-          request: {
-            vaultAddress: entry.vault.address,
-            currentCash: entry.vault.totalCash,
-            currentBorrows: entry.vault.totalBorrowed,
-            cashDelta: entry.cashDelta,
-            borrowsDelta: 0n,
-          },
+          vaultAddress: entry.vault.address,
+          currentCash: entry.vault.totalCash,
+          currentBorrows: entry.vault.totalBorrowed,
+          cashDelta: entry.cashDelta,
+          borrowsDelta: 0n,
         })
         return acc
       }, [])
+
+      const liabilityAddress = normalizeAddressOrEmpty(liabilityVault.address)
+      const liabilityRateDelta = options.liabilityRateDelta
+      if (liabilityRateDelta && (liabilityRateDelta.cashDelta !== 0n || liabilityRateDelta.borrowsDelta !== 0n)) {
+        const matchingCollateralVault = entries.find(entry => entry.address === liabilityAddress)?.vault
+        const projectedLiabilityVault = matchingCollateralVault ?? await resolveLayeredVault(liabilityAddress, liabilityVault)
+        if (!projectedLiabilityVault || !isEVault(projectedLiabilityVault)) return incompleteSnapshot()
+        projectionRequests.push({
+          vaultAddress: projectedLiabilityVault.address,
+          currentCash: projectedLiabilityVault.totalCash,
+          currentBorrows: projectedLiabilityVault.totalBorrowed,
+          cashDelta: liabilityRateDelta.cashDelta,
+          borrowsDelta: liabilityRateDelta.borrowsDelta,
+        })
+      }
       const projectedRates = projectionRequests.length
-        ? await getProjectedRatesBatch(projectionRequests.map(item => item.request))
+        ? await getProjectedRatesBatch(projectionRequests)
         : []
       if (
         projectedRates.length !== projectionRequests.length
@@ -187,15 +206,19 @@ export const usePositionCollateralApy = () => {
       ) {
         return incompleteSnapshot()
       }
-      const projectedByIndex = new Map(projectionRequests.map((item, index) => [item.index, projectedRates[index]]))
+      const projectedByAddress = new Map(projectionRequests.map((request, index) => [
+        normalizeAddressOrEmpty(request.vaultAddress),
+        projectedRates[index] ?? null,
+      ]))
+      const liabilityProjectedRates = projectedByAddress.get(liabilityAddress) ?? null
 
-      const valued = await Promise.all(entries.map(async (entry, index) => {
+      const valued = await Promise.all(entries.map(async (entry) => {
         const supplyUsd = entry.assets === 0n
           ? 0
           : await getCollateralUsdValue(entry.assets, liabilityVault, entry.vault, 'off-chain')
         if (supplyUsd === undefined || !Number.isFinite(supplyUsd) || (entry.assets > 0n && supplyUsd <= 0)) return null
         const currentRaw = getVaultSupplyApy(entry.vault)
-        const projected = projectedByIndex.get(index)
+        const projected = projectedByAddress.get(entry.address)
         const projectedRaw = projected ? nanoToValue(projected.supplyAPY, 25) : null
         const baseSupplyApy = projectedRaw ?? currentRaw
         const supplyApyWithIntrinsic = withProjectedVaultIntrinsicApy(
@@ -233,6 +256,7 @@ export const usePositionCollateralApy = () => {
           weightedSupplyRewardApy: null,
           collateralAddresses: positiveCollateralAddresses,
           entries: completeValues,
+          liabilityProjectedRates,
           isComplete: true,
         }
       }
@@ -248,6 +272,7 @@ export const usePositionCollateralApy = () => {
         weightedSupplyRewardApy: weighted(item => item.supplyRewardApy),
         collateralAddresses: positiveCollateralAddresses,
         entries: completeValues,
+        liabilityProjectedRates,
         isComplete: true,
       }
     }

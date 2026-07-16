@@ -34,6 +34,7 @@ const makeMetrics = (
   repayAddsCash?: boolean,
   collateralSnapshotComplete = true,
   nextCollateralSnapshotComplete = true,
+  projectedBorrowRates?: { supplyAPY: bigint, borrowAPY: bigint },
 ) => useRepayHealthMetrics({
   position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
   borrowVault: computed(() => vault),
@@ -46,6 +47,9 @@ const makeMetrics = (
   borrowRewardApy: computed(() => 0),
   collateralSnapshotComplete: ref(collateralSnapshotComplete),
   nextCollateralSnapshotComplete: ref(nextCollateralSnapshotComplete),
+  projectedBorrowRates: projectedBorrowRates === undefined
+    ? undefined
+    : computed(() => projectedBorrowRates),
   repayAddsCash: repayAddsCash === undefined ? undefined : computed(() => repayAddsCash),
   collateralValueUsd: ref(100),
   nextCollateralValueUsd: ref(100),
@@ -86,6 +90,25 @@ describe('useRepayHealthMetrics projected utilization', () => {
 
     await vi.waitFor(() => expect(getProjectedRates).toHaveBeenCalled())
     expect(getProjectedRates).toHaveBeenLastCalledWith(VAULT, 100n, 100n, 25n, -25n)
+  })
+
+  it('uses the unified collateral snapshot rate without issuing a second projection', async () => {
+    const metrics = makeMetrics(undefined, true, true, {
+      supplyAPY: 6n * 10n ** 25n,
+      borrowAPY: 7n * 10n ** 25n,
+    })
+
+    await vi.waitFor(() => expect(metrics.roeAfter.value).toBe(0))
+    expect(getProjectedRates).not.toHaveBeenCalled()
+    expect(getRoe).toHaveBeenCalledWith(
+      100,
+      5,
+      25,
+      7,
+      null,
+      0,
+      0,
+    )
   })
 
   it('hides current and next ROE when their collateral snapshots are incomplete', () => {

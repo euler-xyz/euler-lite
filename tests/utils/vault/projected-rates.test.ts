@@ -67,6 +67,53 @@ describe('getProjectedRatesBatch', () => {
     expect(secondResult[0]).toEqual({ supplyAPY: 2n, borrowAPY: 12n })
   })
 
+  it('merges same-vault deltas into one atomic projected state', async () => {
+    const projection = getProjectedRatesBatch([
+      {
+        vaultAddress: '0x0000000000000000000000000000000000000001',
+        currentCash: 100n,
+        currentBorrows: 50n,
+        cashDelta: 20n,
+        borrowsDelta: 0n,
+      },
+      {
+        vaultAddress: '0x0000000000000000000000000000000000000001',
+        currentCash: 100n,
+        currentBorrows: 50n,
+        cashDelta: -10n,
+        borrowsDelta: 10n,
+      },
+    ])
+
+    await vi.runAllTimersAsync()
+    const result = await projection
+
+    const calls = batchLensCalls.mock.calls[0]?.[4]
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.args).toEqual([
+      '0x0000000000000000000000000000000000000001',
+      [110n],
+      [60n],
+    ])
+    expect(result).toEqual([
+      { supplyAPY: 1n, borrowAPY: 11n },
+      { supplyAPY: 1n, borrowAPY: 11n },
+    ])
+  })
+
+  it('fails closed when same-vault requests disagree on their base state', async () => {
+    const result = await getProjectedRatesBatch([
+      request('0x0000000000000000000000000000000000000001'),
+      {
+        ...request('0x0000000000000000000000000000000000000001'),
+        currentCash: 99n,
+      },
+    ])
+
+    expect(result).toEqual([null, null])
+    expect(batchLensCalls).not.toHaveBeenCalled()
+  })
+
   it('keeps queued projections scoped to their enqueue-time chain deployment', async () => {
     const first = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000001')])
 

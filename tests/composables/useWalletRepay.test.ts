@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 
-const { USER, borrowVault, collateralVault, planAccount, getProjectedRates, getNetAPYFromWeightedSupplySnapshot, getAssetUsdValueForEstimate } = vi.hoisted(() => {
+const { USER, borrowVault, collateralVault, planAccount, getCollateralApySnapshot, getNetAPYFromWeightedSupplySnapshot, getAssetUsdValueForEstimate } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001' as `0x${string}`
   const BORROW_VAULT = '0x0000000000000000000000000000000000000002' as `0x${string}`
   const COLLATERAL_VAULT = '0x0000000000000000000000000000000000000003' as `0x${string}`
@@ -21,7 +21,7 @@ const { USER, borrowVault, collateralVault, planAccount, getProjectedRates, getN
     borrowVault: makeVault(BORROW_VAULT),
     collateralVault: makeVault(COLLATERAL_VAULT),
     planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
-    getProjectedRates: vi.fn(async () => ({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })),
+    getCollateralApySnapshot: vi.fn(),
     getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 10),
     getAssetUsdValueForEstimate: vi.fn(async () => 10 as number | undefined),
   }
@@ -36,7 +36,6 @@ vi.mock('~/components/ui/composables/useToast', () => ({
   useToast: () => ({ error: vi.fn() }),
 }))
 vi.mock('~/utils/vault/apy', () => ({
-  getProjectedRates,
   getNetAPYFromWeightedSupplySnapshot,
   getPositionMultiplier: vi.fn(() => 1),
 }))
@@ -69,7 +68,19 @@ describe('useWalletRepay projected Net APY', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     rewardsVersion.value = 0
-    getProjectedRates.mockResolvedValue({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
+    getCollateralApySnapshot.mockImplementation(async (_position, _vault, options?: { liabilityRateDelta?: unknown }) => ({
+      supplyUsd: 1_000,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [collateralVault.address],
+      entries: [],
+      liabilityProjectedRates: options?.liabilityRateDelta
+        ? { supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n }
+        : null,
+      isComplete: true,
+    }))
     getAssetUsdValueForEstimate.mockResolvedValue(10)
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
@@ -86,16 +97,7 @@ describe('useWalletRepay projected Net APY', () => {
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('usePositionCollateralApy', () => ({
-      getCollateralApySnapshot: vi.fn(async () => ({
-        supplyUsd: 1_000,
-        weightedSupplyApy: 5,
-        weightedBaseSupplyApy: 5,
-        weightedIntrinsicSupplyApy: 0,
-        weightedSupplyRewardApy: 0,
-        collateralAddresses: [collateralVault.address],
-        entries: [],
-        isComplete: true,
-      })),
+      getCollateralApySnapshot,
     }))
     vi.stubGlobal('useRewardsApy', () => ({
       version: rewardsVersion,
@@ -137,7 +139,19 @@ describe('useWalletRepay projected Net APY', () => {
     repay.amount.value = '100'
     await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBeCloseTo(4.93))
 
-    getProjectedRates.mockRejectedValueOnce(new Error('projection failed'))
+    getCollateralApySnapshot
+      .mockImplementationOnce(async () => ({
+        supplyUsd: 1_000,
+        weightedSupplyApy: 5,
+        weightedBaseSupplyApy: 5,
+        weightedIntrinsicSupplyApy: 0,
+        weightedSupplyRewardApy: 0,
+        collateralAddresses: [collateralVault.address],
+        entries: [],
+        liabilityProjectedRates: null,
+        isComplete: true,
+      }))
+      .mockRejectedValueOnce(new Error('projection failed'))
     repay.amount.value = '200'
 
     await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBeNull())
@@ -165,12 +179,12 @@ describe('useWalletRepay projected Net APY', () => {
 
     repay.amount.value = '100'
     await vi.waitFor(() => expect(repay.projectedYieldDetails.value).not.toBeNull())
-    getProjectedRates.mockClear()
+    getCollateralApySnapshot.mockClear()
 
     repay.amount.value = '2001'
     await vi.waitFor(() => expect(repay.estimatesError.value).toBe('Not enough balance'))
 
-    expect(getProjectedRates).not.toHaveBeenCalled()
+    expect(getCollateralApySnapshot).not.toHaveBeenCalled()
     expect(repay.projectedYieldDetails.value).toBeNull()
   })
 
@@ -203,10 +217,22 @@ describe('useWalletRepay projected Net APY', () => {
   })
 
   it('invalidates an in-flight projection when the layered position disappears', async () => {
-    let resolveProjection!: (value: { supplyAPY: bigint, borrowAPY: bigint }) => void
-    getProjectedRates.mockReturnValueOnce(new Promise((resolve) => {
-      resolveProjection = resolve
-    }))
+    let resolveProjection!: (value: Awaited<ReturnType<typeof getCollateralApySnapshot>>) => void
+    getCollateralApySnapshot
+      .mockImplementationOnce(async () => ({
+        supplyUsd: 1_000,
+        weightedSupplyApy: 5,
+        weightedBaseSupplyApy: 5,
+        weightedIntrinsicSupplyApy: 0,
+        weightedSupplyRewardApy: 0,
+        collateralAddresses: [collateralVault.address],
+        entries: [],
+        liabilityProjectedRates: null,
+        isComplete: true,
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveProjection = resolve
+      }))
     const positionRef = shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position)
     const repay = useWalletRepay({
       position: positionRef,
@@ -228,9 +254,19 @@ describe('useWalletRepay projected Net APY', () => {
     })
 
     repay.amount.value = '100'
-    await vi.waitFor(() => expect(getProjectedRates).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(getCollateralApySnapshot).toHaveBeenCalledTimes(2))
     positionRef.value = undefined
-    resolveProjection({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
+    resolveProjection({
+      supplyUsd: 1_000,
+      weightedSupplyApy: 5,
+      weightedBaseSupplyApy: 5,
+      weightedIntrinsicSupplyApy: 0,
+      weightedSupplyRewardApy: 0,
+      collateralAddresses: [collateralVault.address],
+      entries: [],
+      liabilityProjectedRates: { supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n },
+      isComplete: true,
+    })
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(repay.projectedYieldDetails.value).toBeNull()

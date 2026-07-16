@@ -6,7 +6,7 @@ import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
@@ -870,6 +870,17 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         estimateBorrowVault.address,
         projectedCollateralAddresses,
       )
+      const projectedBorrowRawApy = collateralSnapshot.liabilityProjectedRates
+        ? nanoToValue(collateralSnapshot.liabilityProjectedRates.borrowAPY, 25)
+        : estimateBaseBorrowApy
+      const projectedBorrowApy = collateralSnapshot.liabilityProjectedRates
+        ? withProjectedVaultIntrinsicApy(
+            estimateBaseBorrowApy,
+            projectedBorrowRawApy,
+            estimateBorrowVault,
+            enableIntrinsicApy.value,
+          )
+        : estimateTotalBorrowApy
 
       const nextState = getNetApyYieldState({
         snapshot: collateralSnapshot,
@@ -877,8 +888,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         fallbackBaseSupplyApy,
         fallbackTotalSupplyApy,
         fallbackSupplyRewardApy,
-        baseBorrowApy: estimateBaseBorrowApy,
-        totalBorrowApy: estimateTotalBorrowApy,
+        baseBorrowApy: projectedBorrowRawApy,
+        totalBorrowApy: projectedBorrowApy,
         borrowRewardApy: projectedBorrowRewardApy,
         loopingRewardApy,
       })
@@ -893,7 +904,19 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         metric: 'net-apy',
         before: before?.state ?? null,
         after: nextState,
-        rateLines: getCollateralRateLines(before?.snapshot ?? null, collateralSnapshot),
+        rateLines: [
+          ...getCollateralRateLines(before?.snapshot ?? null, collateralSnapshot),
+          ...(collateralSnapshot.liabilityProjectedRates
+            ? [{
+                id: `borrow:${estimateBorrowVault.address.toLowerCase()}`,
+                label: 'Borrow APY',
+                symbol: estimateBorrowVault.asset.symbol,
+                vaultAddress: estimateBorrowVault.address,
+                before: estimateBaseBorrowApy,
+                after: projectedBorrowRawApy,
+              }]
+            : []),
+        ],
         rewards: mergeProjectedRewardCampaigns(
           before?.campaigns ?? [],
           getYieldCampaignInputs(

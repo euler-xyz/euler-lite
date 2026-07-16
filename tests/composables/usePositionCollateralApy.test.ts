@@ -127,6 +127,41 @@ describe('usePositionCollateralApy', () => {
     })
   })
 
+  it('projects same-vault collateral and liability deltas as one snapshot', async () => {
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+    const snapshot = await getCollateralApySnapshot(makePosition(), vaultA, {
+      deltas: [{
+        vaultAddress: VAULT_A,
+        assetsDelta: 20n,
+        cashDelta: 20n,
+        projectRates: true,
+      }],
+      liabilityRateDelta: {
+        cashDelta: -10n,
+        borrowsDelta: 10n,
+      },
+    })
+
+    expect(getProjectedRatesBatch).toHaveBeenCalledWith([
+      expect.objectContaining({
+        vaultAddress: VAULT_A,
+        cashDelta: 20n,
+        borrowsDelta: 0n,
+      }),
+      expect.objectContaining({
+        vaultAddress: VAULT_A,
+        cashDelta: -10n,
+        borrowsDelta: 10n,
+      }),
+    ])
+    expect(snapshot.entries[0]?.baseSupplyApy).toBe(8)
+    expect(snapshot.liabilityProjectedRates).toEqual({
+      supplyAPY: 8n * 10n ** 25n,
+      borrowAPY: 0n,
+    })
+    expect(snapshot.isComplete).toBe(true)
+  })
+
   it('uses the simulated collateral vault state instead of the layer-zero registry state', async () => {
     const simulatedVaultA = {
       ...vaultA,
@@ -212,6 +247,7 @@ describe('usePositionCollateralApy', () => {
       weightedSupplyRewardApy: null,
       collateralAddresses: [],
       entries: [],
+      liabilityProjectedRates: null,
       isComplete: false,
     })
   })
@@ -228,6 +264,7 @@ describe('usePositionCollateralApy', () => {
       weightedSupplyRewardApy: null,
       collateralAddresses: [],
       entries: [],
+      liabilityProjectedRates: null,
       isComplete: false,
     })
     expect(getCollateralUsdValue).not.toHaveBeenCalled()
@@ -249,6 +286,7 @@ describe('usePositionCollateralApy', () => {
       weightedSupplyRewardApy: null,
       collateralAddresses: [],
       entries: [],
+      liabilityProjectedRates: null,
       isComplete: false,
     })
   })
@@ -266,6 +304,7 @@ describe('usePositionCollateralApy', () => {
       weightedSupplyRewardApy: null,
       collateralAddresses: [],
       entries: [],
+      liabilityProjectedRates: null,
       isComplete: false,
     })
   })

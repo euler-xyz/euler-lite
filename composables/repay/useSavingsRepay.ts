@@ -169,6 +169,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     const currentPosition = position.value
     const currentSourceVault = sourceVault.value
     const spent = core.spent.value
+    const debtRepaid = core.debtRepaid.value
     const sourceAddress = normalizeAddressOrEmpty(currentSourceVault?.address)
     const sourceIsPositionCollateral = !!sourceAddress && (currentPosition?.collateralVaults ?? [])
       .some(address => normalizeAddressOrEmpty(address) === sourceAddress)
@@ -197,14 +198,29 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     nextSavingsCollateralSnapshotComplete.value = false
     nextSavingsCollateralSnapshot.value = null
     const snapshotPromise = getCollateralApySnapshot(currentPosition, currentBorrowVault)
-    const nextSnapshotPromise = withdrawalCashDelta !== null
+    const repayAmount = debtRepaid === null
+      ? null
+      : debtRepaid > (currentPosition.borrowed || 0n)
+        ? currentPosition.borrowed || 0n
+        : debtRepaid
+    const nextSnapshotPromise = withdrawalCashDelta !== null || repayAmount !== null
       ? getCollateralApySnapshot(currentPosition, currentBorrowVault, {
-          deltas: [{
-            vaultAddress: sourceAddress,
-            assetsDelta: 0n,
-            cashDelta: withdrawalCashDelta,
-            projectRates: true,
-          }],
+          deltas: withdrawalCashDelta !== null
+            ? [{
+                vaultAddress: sourceAddress,
+                assetsDelta: 0n,
+                cashDelta: withdrawalCashDelta,
+                projectRates: true,
+              }]
+            : [],
+          ...(repayAmount !== null
+            ? {
+                liabilityRateDelta: {
+                  cashDelta: isSameVaultRepay.value ? 0n : repayAmount,
+                  borrowsDelta: -repayAmount,
+                },
+              }
+            : {}),
         })
       : snapshotPromise
     const [snapshot, nextSnapshot] = await Promise.all([snapshotPromise, nextSnapshotPromise])
@@ -242,6 +258,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     nextCollateralAddresses: nextSavingsCollateralAddresses,
     collateralSnapshot: savingsCollateralSnapshot,
     nextCollateralSnapshot: nextSavingsCollateralSnapshot,
+    projectedBorrowRates: computed(() => nextSavingsCollateralSnapshot.value?.liabilityProjectedRates ?? null),
     repayAddsCash: computed(() => !isSameVaultRepay.value),
     collateralValueUsd: savingsCollateralUsd,
     nextCollateralValueUsd: savingsCollateralUsd,

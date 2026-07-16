@@ -435,6 +435,10 @@ describe('useSavingsRepay', () => {
           cashDelta: -100n,
           projectRates: true,
         }],
+        liabilityRateDelta: {
+          cashDelta: 100n,
+          borrowsDelta: -100n,
+        },
       },
     ))
   })
@@ -485,6 +489,10 @@ describe('useSavingsRepay', () => {
           cashDelta: -110n,
           projectRates: true,
         }],
+        liabilityRateDelta: {
+          cashDelta: 200n,
+          borrowsDelta: -200n,
+        },
       },
     ))
   })

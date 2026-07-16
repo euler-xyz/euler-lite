@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { areProjectedRatesComplete, getPositionMultiplier, getProjectedRatesBatch, type ProjectedRates } from '~/utils/vault/apy'
+import { getPositionMultiplier, type ProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -225,44 +225,6 @@ const multiplyCurrentMultiple = computed(() => {
 })
 const projectedBorrowRates = ref<ProjectedRates | null>(null)
 const projectedBorrowRatesComplete = ref(false)
-const projectedRatesGuard = createRaceGuard()
-
-watchEffect(async () => {
-  const short = multiplyShortVault.value
-  const debtNano = multiplyDebtAmountNano.value
-  const gen = projectedRatesGuard.next()
-
-  if (!short || !debtNano) {
-    projectedBorrowRates.value = null
-    projectedBorrowRatesComplete.value = false
-    return
-  }
-
-  projectedBorrowRatesComplete.value = false
-
-  try {
-    const projectedRates = await getProjectedRatesBatch([
-      {
-        vaultAddress: short.address,
-        currentCash: short.totalCash,
-        currentBorrows: short.totalBorrowed,
-        cashDelta: -debtNano,
-        borrowsDelta: debtNano,
-      },
-    ])
-    if (projectedRatesGuard.isStale(gen)) return
-    if (!areProjectedRatesComplete(projectedRates, 1)) return
-    const [shortResult] = projectedRates
-    projectedBorrowRates.value = shortResult
-    projectedBorrowRatesComplete.value = true
-  }
-  catch (e) {
-    if (projectedRatesGuard.isStale(gen)) return
-    console.warn('[Multiply] failed to project rates', e)
-    projectedBorrowRates.value = null
-    projectedBorrowRatesComplete.value = false
-  }
-})
 const multiplyBorrowApy = computed(() => {
   if (!multiplyShortVault.value || !projectedBorrowRatesComplete.value) {
     return null
@@ -368,29 +330,43 @@ const nextCollateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
 const nextSupplySnapshotGuard = createRaceGuard()
 watchEffect(async () => {
   const gen = nextSupplySnapshotGuard.next()
+  const currentPosition = position.value
+  const shortVault = multiplyShortVault.value
+  const longVault = multiplyLongVault.value
+  const debtNano = multiplyDebtAmountNano.value
+  const swapAmountOut = multiplySwapAmountOut.value
+  const fallbackCollateralAddresses = projectedMultiplyCollateralVaults.value.map(vault => vault.address)
   nextSupplyValueUsd.value = null
   multiplyWeightedSupplyApy.value = null
   nextSnapshotCollateralAddresses.value = []
   nextCollateralSnapshot.value = null
-  if (!position.value || !multiplyShortVault.value || !multiplyLongVault.value) {
+  projectedBorrowRates.value = null
+  projectedBorrowRatesComplete.value = false
+  if (!currentPosition || !shortVault || !longVault || debtNano <= 0n) {
     nextSupplyValueUsd.value = null
     multiplyWeightedSupplyApy.value = null
     nextSnapshotCollateralAddresses.value = []
     nextCollateralSnapshot.value = null
     return
   }
-  const snapshot = await getCollateralApySnapshot(position.value, multiplyShortVault.value, {
+  const snapshot = await getCollateralApySnapshot(currentPosition, shortVault, {
     deltas: [{
-      vaultAddress: multiplyLongVault.value.address,
-      assetsDelta: multiplySwapAmountOut.value,
+      vaultAddress: longVault.address,
+      assetsDelta: swapAmountOut,
       projectRates: true,
     }],
+    liabilityRateDelta: {
+      cashDelta: -debtNano,
+      borrowsDelta: debtNano,
+    },
   })
   if (nextSupplySnapshotGuard.isStale(gen)) return
   nextSupplyValueUsd.value = snapshot.supplyUsd
   multiplyWeightedSupplyApy.value = snapshot.weightedSupplyApy
-  nextSnapshotCollateralAddresses.value = snapshot.collateralAddresses ?? projectedMultiplyCollateralVaults.value.map(vault => vault.address)
+  nextSnapshotCollateralAddresses.value = snapshot.collateralAddresses ?? fallbackCollateralAddresses
   nextCollateralSnapshot.value = snapshot.isComplete ? snapshot : null
+  projectedBorrowRates.value = snapshot.liabilityProjectedRates
+  projectedBorrowRatesComplete.value = snapshot.isComplete && snapshot.liabilityProjectedRates !== null
 })
 const nextBorrowValueUsd = computed(() => {
   if (currentBorrowValueUsd.value === null || multiplyBorrowValueUsd.value === null) {

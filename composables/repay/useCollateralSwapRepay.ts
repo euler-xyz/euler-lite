@@ -249,6 +249,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const currentBorrowVault = borrowVault.value
     const currentSourceVault = sourceVault.value
     const spent = core.spent.value ?? 0n
+    const debtRepaid = core.debtRepaid.value
 
     if (!currentPosition || !currentBorrowVault || !currentSourceVault) {
       weightedCollateralSupplyApy.value = null
@@ -267,14 +268,30 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextCollateralSnapshotComplete.value = false
     collateralSnapshot.value = null
     nextCollateralSnapshot.value = null
+    const sourceIsLiability = normalizeAddressOrEmpty(currentSourceVault.address)
+      === normalizeAddressOrEmpty(currentBorrowVault.address)
+    const repayAmount = debtRepaid === null
+      ? null
+      : debtRepaid > (currentPosition.borrowed || 0n)
+        ? currentPosition.borrowed || 0n
+        : debtRepaid
     const [currentSnapshot, nextSnapshot] = await Promise.all([
       getCollateralApySnapshot(currentPosition, currentBorrowVault),
       getCollateralApySnapshot(currentPosition, currentBorrowVault, {
         deltas: [{
           vaultAddress: currentSourceVault.address,
           assetsDelta: -spent,
+          cashDelta: sourceIsLiability ? 0n : -spent,
           projectRates: spent > 0n,
         }],
+        ...(repayAmount !== null
+          ? {
+              liabilityRateDelta: {
+                cashDelta: sourceIsLiability ? 0n : repayAmount,
+                borrowsDelta: -repayAmount,
+              },
+            }
+          : {}),
       }),
     ])
     if (collateralPortfolioGuard.isStale(gen)) return
@@ -314,6 +331,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     nextCollateralAddresses,
     collateralSnapshot,
     nextCollateralSnapshot,
+    projectedBorrowRates: computed(() => nextCollateralSnapshot.value?.liabilityProjectedRates ?? null),
     collateralValueUsd,
     nextCollateralValueUsd,
     borrowValueUsd: core.borrowValueUsd,

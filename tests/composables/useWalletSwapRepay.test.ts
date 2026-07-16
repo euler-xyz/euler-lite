@@ -65,7 +65,7 @@ const { USER, borrowVault, collateralVault, walletAsset, planAccount, mocks } = 
       }>,
       planSwapAndRepay: vi.fn(),
       runSimulation: vi.fn(),
-      getProjectedRates: vi.fn(async () => ({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })),
+      getCollateralApySnapshot: vi.fn(),
       getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 10),
       getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
     },
@@ -91,7 +91,6 @@ vi.mock('~/components/ui/composables/useToast', () => ({
 }))
 
 vi.mock('~/utils/vault/apy', () => ({
-  getProjectedRates: mocks.getProjectedRates,
   getNetAPY: vi.fn(() => 0),
   getNetAPYFromWeightedSupplySnapshot: mocks.getNetAPYFromWeightedSupplySnapshot,
   getPositionMultiplier: vi.fn(() => 1),
@@ -179,13 +178,29 @@ const position = {
   liquidatable: false,
 } as unknown as PortfolioBorrowPosition<VaultEntity>
 
+const makeCollateralSnapshot = (projected: boolean) => ({
+  supplyUsd: 10_000,
+  weightedSupplyApy: 5,
+  weightedBaseSupplyApy: 5,
+  weightedIntrinsicSupplyApy: 0,
+  weightedSupplyRewardApy: 0,
+  collateralAddresses: [collateralVault.address],
+  entries: [],
+  liabilityProjectedRates: projected
+    ? { supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n }
+    : null,
+  isComplete: true,
+})
+
 describe('useWalletSwapRepay', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.swapQuoteOptions.length = 0
     mocks.quoteStates.length = 0
     mocks.planSwapAndRepay.mockResolvedValue({ type: 'wallet-swap-repay-plan' } as unknown as TransactionPlan)
-    mocks.getProjectedRates.mockResolvedValue({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
+    mocks.getCollateralApySnapshot.mockImplementation(async (_position, _vault, options?: { liabilityRateDelta?: unknown }) =>
+      makeCollateralSnapshot(Boolean(options?.liabilityRateDelta)),
+    )
     mocks.getNetAPYFromWeightedSupplySnapshot.mockReturnValue(10)
     mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
     rewardsVersion.value = 0
@@ -231,16 +246,7 @@ describe('useWalletSwapRepay', () => {
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('usePositionCollateralApy', () => ({
-      getCollateralApySnapshot: vi.fn(async () => ({
-        supplyUsd: 10_000,
-        weightedSupplyApy: 5,
-        weightedBaseSupplyApy: 5,
-        weightedIntrinsicSupplyApy: 0,
-        weightedSupplyRewardApy: 0,
-        collateralAddresses: [collateralVault.address],
-        entries: [],
-        isComplete: true,
-      })),
+      getCollateralApySnapshot: mocks.getCollateralApySnapshot,
     }))
     vi.stubGlobal('useRewardsApy', () => ({
       version: rewardsVersion,
@@ -336,7 +342,9 @@ describe('useWalletSwapRepay', () => {
 
     await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBe(5))
 
-    mocks.getProjectedRates.mockRejectedValueOnce(new Error('projection failed'))
+    mocks.getCollateralApySnapshot
+      .mockResolvedValueOnce(makeCollateralSnapshot(false))
+      .mockRejectedValueOnce(new Error('projection failed'))
     mocks.quoteStates[0]!.effectiveQuote.value = { ...firstQuote, amountOut: '210' } as SwapQuote
 
     await vi.waitFor(() => expect(repay.estimateNetAPY.value).toBeNull())
@@ -411,7 +419,7 @@ describe('useWalletSwapRepay', () => {
     mocks.quoteStates[0]!.selectedQuote.value = validQuote
     mocks.quoteStates[0]!.effectiveQuote.value = validQuote
     await vi.waitFor(() => expect(repay.projectedYieldDetails.value).not.toBeNull())
-    mocks.getProjectedRates.mockClear()
+    mocks.getCollateralApySnapshot.mockClear()
 
     repay.amount.value = '2000'
     repay.onAmountInput()
@@ -420,15 +428,17 @@ describe('useWalletSwapRepay', () => {
     mocks.quoteStates[0]!.effectiveQuote.value = invalidQuote
 
     await vi.waitFor(() => expect(repay.estimatesError.value).toBe('Not enough balance'))
-    expect(mocks.getProjectedRates).not.toHaveBeenCalled()
+    expect(mocks.getCollateralApySnapshot).not.toHaveBeenCalled()
     expect(repay.projectedYieldDetails.value).toBeNull()
   })
 
   it('invalidates an in-flight projection when the layered position disappears', async () => {
-    let resolveProjection!: (value: { supplyAPY: bigint, borrowAPY: bigint }) => void
-    mocks.getProjectedRates.mockReturnValueOnce(new Promise((resolve) => {
-      resolveProjection = resolve
-    }))
+    let resolveProjection!: (value: ReturnType<typeof makeCollateralSnapshot>) => void
+    mocks.getCollateralApySnapshot
+      .mockResolvedValueOnce(makeCollateralSnapshot(false))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveProjection = resolve
+      }))
     const positionRef = shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position)
     const repay = useWalletSwapRepay({
       position: positionRef,
@@ -459,10 +469,10 @@ describe('useWalletSwapRepay', () => {
     } as SwapQuote
     mocks.quoteStates[0]!.selectedQuote.value = quote
     mocks.quoteStates[0]!.effectiveQuote.value = quote
-    await vi.waitFor(() => expect(mocks.getProjectedRates).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(mocks.getCollateralApySnapshot).toHaveBeenCalledTimes(2))
 
     positionRef.value = undefined
-    resolveProjection({ supplyAPY: 0n, borrowAPY: 7n * 10n ** 25n })
+    resolveProjection(makeCollateralSnapshot(true))
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(repay.projectedYieldDetails.value).toBeNull()

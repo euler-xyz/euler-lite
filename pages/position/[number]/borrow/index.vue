@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getPositionMultiplier, getProjectedRates } from '~/utils/vault/apy'
+import { getPositionMultiplier } from '~/utils/vault/apy'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import type { VaultAsset } from '~/types/asset'
 import { getHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning } from '~/composables/useVaultWarnings'
@@ -29,6 +29,7 @@ import { OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
 import {
   getProjectedYieldState,
+  getCollateralSnapshotRateLines,
   mergeProjectedRewardCampaigns,
   type ProjectedYieldCampaignInput,
   type ProjectedYieldDetails,
@@ -97,6 +98,7 @@ const currentUserLTV = ref(0)
 const projectedYieldDetails = ref<ProjectedYieldDetails>()
 const currentYieldState = ref<ProjectedYieldState>()
 const currentRewardCampaigns = ref<ProjectedYieldCampaignInput[]>([])
+const currentCollateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
 
 const getRewardCampaignInputs = (
   snapshot: CollateralApySnapshot,
@@ -221,6 +223,7 @@ const refreshCurrentYield = async () => {
   currentYieldState.value = undefined
   currentNetAPY.value = undefined
   currentRewardCampaigns.value = []
+  currentCollateralSnapshot.value = null
   if (!currentPosition || !currentBorrowVault || !currentCollateralVault) return
 
   const [collateralSnapshot, borrowUsd] = await Promise.all([
@@ -255,6 +258,7 @@ const refreshCurrentYield = async () => {
   if (currentYieldGuard.isStale(gen)) return
   currentYieldState.value = state ?? undefined
   currentNetAPY.value = state?.total
+  currentCollateralSnapshot.value = state ? collateralSnapshot : null
   currentRewardCampaigns.value = getRewardCampaignInputs(
     collateralSnapshot,
     currentBorrowVault.address,
@@ -503,6 +507,7 @@ const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
   const currentBorrowAmount = borrowAmount.value
   const baselineState = currentYieldState.value
   const baselineCampaigns = currentRewardCampaigns.value
+  const baselineCollateralSnapshot = currentCollateralSnapshot.value
   netAPY.value = undefined
   projectedYieldDetails.value = undefined
   if (!currentPair || !currentBorrowVault || !currentCollateralVault || !currentPosition || !(+currentBorrowAmount > 0)) {
@@ -514,19 +519,18 @@ const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
     const existingBorrow = nanoToValue(currentPosition.borrowed || 0n, currentBorrowVault.shares.decimals)
     const totalBorrow = existingBorrow + +currentBorrowAmount
 
-    const [borrowProjected, collateralSnapshot, borrowUsd] = await Promise.all([
-      getProjectedRates(
-        currentBorrowVault.address,
-        currentBorrowVault.totalCash,
-        currentBorrowVault.totalBorrowed,
-        -additionalBorrowNano,
-        additionalBorrowNano,
-      ),
-      getCollateralApySnapshot(currentPosition, currentBorrowVault),
+    const [collateralSnapshot, borrowUsd] = await Promise.all([
+      getCollateralApySnapshot(currentPosition, currentBorrowVault, {
+        liabilityRateDelta: {
+          cashDelta: -additionalBorrowNano,
+          borrowsDelta: additionalBorrowNano,
+        },
+      }),
       getAssetUsdValueForEstimate(totalBorrow, currentBorrowVault, 'off-chain'),
     ])
 
     if (asyncEstimatesGuard.isStale(gen)) return
+    const borrowProjected = collateralSnapshot.liabilityProjectedRates
     if (!borrowProjected || !collateralSnapshot.isComplete || borrowUsd === undefined) {
       netAPY.value = undefined
       projectedYieldDetails.value = undefined
@@ -578,14 +582,17 @@ const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
       metric: 'net-apy',
       before: baselineState,
       after: state,
-      rateLines: [{
-        id: `borrow:${currentBorrowVault.address.toLowerCase()}`,
-        label: 'Borrow APY',
-        symbol: currentBorrowVault.asset.symbol,
-        vaultAddress: currentBorrowVault.address,
-        before: currentRaw,
-        after: projectedBorrowRaw,
-      }],
+      rateLines: [
+        ...getCollateralSnapshotRateLines(baselineCollateralSnapshot, collateralSnapshot),
+        {
+          id: `borrow:${currentBorrowVault.address.toLowerCase()}`,
+          label: 'Borrow APY',
+          symbol: currentBorrowVault.asset.symbol,
+          vaultAddress: currentBorrowVault.address,
+          before: currentRaw,
+          after: projectedBorrowRaw,
+        },
+      ],
       rewards: mergeProjectedRewardCampaigns(baselineCampaigns, afterCampaigns),
     }
   }

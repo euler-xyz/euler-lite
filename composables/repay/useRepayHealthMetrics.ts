@@ -1,6 +1,6 @@
 import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
-import { getPositionMultiplier, getProjectedRates, getRoe } from '~/utils/vault/apy'
+import { getPositionMultiplier, getProjectedRates, getRoe, type ProjectedRates } from '~/utils/vault/apy'
 import { getVaultBorrowApy } from '~/utils/vault-display'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -34,6 +34,7 @@ interface UseRepayHealthMetricsOptions {
   nextCollateralAddresses?: Ref<readonly string[]>
   collateralSnapshot?: Ref<CollateralApySnapshot | null>
   nextCollateralSnapshot?: Ref<CollateralApySnapshot | null>
+  projectedBorrowRates?: Ref<ProjectedRates | null>
   repayAddsCash?: ComputedRef<boolean>
   collateralValueUsd: Ref<number | null>
   nextCollateralValueUsd: Ref<number | null>
@@ -60,6 +61,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     nextCollateralAddresses,
     collateralSnapshot,
     nextCollateralSnapshot,
+    projectedBorrowRates,
     repayAddsCash,
     collateralValueUsd,
     nextCollateralValueUsd,
@@ -122,12 +124,32 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
     const vault = borrowVault.value
     const currentPosition = position.value
     const repaid = debtRepaid.value
+    const snapshotProjectedRates = projectedBorrowRates?.value
     void borrowApy.value
     projectedBorrowApyComplete.value = false
 
     if (!vault || !currentPosition || repaid === null) {
       projectedBorrowApy.value = null
       projectedBorrowRawApy.value = null
+      return
+    }
+
+    if (projectedBorrowRates) {
+      if (!snapshotProjectedRates) {
+        projectedBorrowApy.value = null
+        projectedBorrowRawApy.value = null
+        return
+      }
+      const currentRaw = getVaultBorrowApy(vault)
+      const projectedRaw = nanoToValue(snapshotProjectedRates.borrowAPY, 25)
+      projectedBorrowApy.value = withProjectedVaultIntrinsicApy(
+        currentRaw,
+        projectedRaw,
+        vault,
+        enableIntrinsicApy.value,
+      )
+      projectedBorrowRawApy.value = projectedRaw
+      projectedBorrowApyComplete.value = true
       return
     }
 

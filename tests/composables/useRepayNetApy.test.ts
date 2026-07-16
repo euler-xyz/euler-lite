@@ -50,6 +50,7 @@ const snapshot = (weightedSupplyApy: number): CollateralApySnapshot => ({
   weightedSupplyRewardApy: 0,
   collateralAddresses: [COLLATERAL_VAULT],
   entries: [],
+  liabilityProjectedRates: null,
   isComplete: true,
 })
 

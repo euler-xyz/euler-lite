@@ -279,8 +279,13 @@ describe('useCollateralSwapRepay', () => {
         deltas: [{
           vaultAddress: SOURCE_VAULT,
           assetsDelta: -110n,
+          cashDelta: -110n,
           projectRates: true,
         }],
+        liabilityRateDelta: {
+          cashDelta: 200n,
+          borrowsDelta: -200n,
+        },
       },
     ))
   })

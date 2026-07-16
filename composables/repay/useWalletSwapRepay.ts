@@ -1,4 +1,4 @@
-import { getPositionMultiplier, getProjectedRates } from '~/utils/vault/apy'
+import { getPositionMultiplier } from '~/utils/vault/apy'
 import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
@@ -27,11 +27,13 @@ import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import {
   getCollateralSnapshotCampaignInputs,
+  getCollateralSnapshotRateLines,
   getProjectedYieldStateFromCollateralSnapshot,
   mergeProjectedRewardCampaigns,
   type ProjectedYieldCampaignInput,
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
+import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 
 interface UseWalletSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -532,22 +534,23 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const currentDebt = getCurrentDebt()
       const nextBorrowed = currentDebt - debtRepaidNano
 
-      const [projected, collateralSnapshot, currentBorrowUsd, borrowUsd] = await Promise.all([
-        getProjectedRates(
-          currentBorrowVault.address,
-          currentBorrowVault.totalCash,
-          currentBorrowVault.totalBorrowed,
-          debtRepaidNano,
-          -debtRepaidNano,
-        ),
+      const [currentCollateralSnapshot, nextCollateralSnapshot, currentBorrowUsd, borrowUsd] = await Promise.all([
         getCollateralApySnapshot(currentPosition, currentBorrowVault),
+        getCollateralApySnapshot(currentPosition, currentBorrowVault, {
+          liabilityRateDelta: {
+            cashDelta: debtRepaidNano,
+            borrowsDelta: -debtRepaidNano,
+          },
+        }),
         getAssetUsdValueForEstimate(currentDebt, currentBorrowVault, 'off-chain'),
         getAssetUsdValueForEstimate(nextBorrowed > 0n ? nextBorrowed : 0n, currentBorrowVault, 'off-chain'),
       ])
       if (estimatesGuard.isStale(gen)) return
+      const projected = nextCollateralSnapshot.liabilityProjectedRates
       if (
         !projected
-        || !collateralSnapshot.isComplete
+        || !currentCollateralSnapshot.isComplete
+        || !nextCollateralSnapshot.isComplete
         || currentBorrowUsd === undefined
         || borrowUsd === undefined
       ) {
@@ -565,34 +568,39 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       )
       const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
         currentBorrowVault.address,
-        collateralSnapshot.collateralAddresses,
-        getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd),
+        nextCollateralSnapshot.collateralAddresses,
+        getPositionMultiplier(nextCollateralSnapshot.supplyUsd, borrowUsd),
       )
       const projectedRaw = nanoToValue(projected.borrowAPY, 25)
-      const currentMultiplier = getPositionMultiplier(collateralSnapshot.supplyUsd, currentBorrowUsd)
-      const nextMultiplier = getPositionMultiplier(collateralSnapshot.supplyUsd, borrowUsd)
-      const collateralAddresses = collateralSnapshot.collateralAddresses
+      const currentMultiplier = getPositionMultiplier(currentCollateralSnapshot.supplyUsd, currentBorrowUsd)
+      const nextMultiplier = getPositionMultiplier(nextCollateralSnapshot.supplyUsd, borrowUsd)
+      const currentCollateralAddresses = currentCollateralSnapshot.collateralAddresses
+      const nextCollateralAddresses = nextCollateralSnapshot.collateralAddresses
       const currentBorrowRewardApy = getBorrowRewardApyForCollaterals(
         currentBorrowVault.address,
-        collateralAddresses,
+        currentCollateralAddresses,
+      )
+      const nextBorrowRewardApy = getBorrowRewardApyForCollaterals(
+        currentBorrowVault.address,
+        nextCollateralAddresses,
       )
       const currentLoopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
         currentBorrowVault.address,
-        collateralAddresses,
+        currentCollateralAddresses,
         currentMultiplier,
       )
-      const before = getProjectedYieldStateFromCollateralSnapshot('net-apy', collateralSnapshot, {
+      const before = getProjectedYieldStateFromCollateralSnapshot('net-apy', currentCollateralSnapshot, {
         borrowUsd: currentBorrowUsd,
         baseBorrowApy: currentRaw,
         borrowApyWithIntrinsic: currentBorrowApy,
         borrowRewardApy: currentBorrowRewardApy,
         loopingRewardApy: currentLoopingRewardApy,
       })
-      const after = getProjectedYieldStateFromCollateralSnapshot('net-apy', collateralSnapshot, {
+      const after = getProjectedYieldStateFromCollateralSnapshot('net-apy', nextCollateralSnapshot, {
         borrowUsd,
         baseBorrowApy: projectedRaw,
         borrowApyWithIntrinsic: projectedBorrowApy,
-        borrowRewardApy: currentBorrowRewardApy,
+        borrowRewardApy: nextBorrowRewardApy,
         loopingRewardApy,
       })
       if (!after) {
@@ -601,15 +609,19 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         return
       }
 
-      const getCampaignInputs = (multiplier: number | null, hasDebt: boolean): ProjectedYieldCampaignInput[] => [
-        ...getCollateralSnapshotCampaignInputs(collateralSnapshot),
+      const getCampaignInputs = (
+        snapshot: CollateralApySnapshot,
+        multiplier: number | null,
+        hasDebt: boolean,
+      ): ProjectedYieldCampaignInput[] => [
+        ...getCollateralSnapshotCampaignInputs(snapshot),
         ...(hasDebt
-          ? getBorrowRewardCampaignsForCollaterals(currentBorrowVault.address, collateralAddresses)
+          ? getBorrowRewardCampaignsForCollaterals(currentBorrowVault.address, snapshot.collateralAddresses)
               .map(campaign => ({ campaign, vaultAddress: currentBorrowVault.address }))
           : []),
         ...getEligibleLoopingRewardCampaignsForCollaterals(
           currentBorrowVault.address,
-          collateralAddresses,
+          snapshot.collateralAddresses,
           multiplier,
         ).map(campaign => ({ campaign, vaultAddress: currentBorrowVault.address })),
       ]
@@ -619,17 +631,20 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
         metric: 'net-apy',
         before,
         after,
-        rateLines: [{
-          id: `borrow:${currentBorrowVault.address.toLowerCase()}`,
-          label: 'Borrow APY',
-          symbol: currentBorrowVault.asset.symbol,
-          vaultAddress: currentBorrowVault.address,
-          before: currentRaw,
-          after: projectedRaw,
-        }],
+        rateLines: [
+          ...getCollateralSnapshotRateLines(currentCollateralSnapshot, nextCollateralSnapshot),
+          {
+            id: `borrow:${currentBorrowVault.address.toLowerCase()}`,
+            label: 'Borrow APY',
+            symbol: currentBorrowVault.asset.symbol,
+            vaultAddress: currentBorrowVault.address,
+            before: currentRaw,
+            after: projectedRaw,
+          },
+        ],
         rewards: mergeProjectedRewardCampaigns(
-          getCampaignInputs(currentMultiplier, currentBorrowUsd > 0),
-          getCampaignInputs(nextMultiplier, borrowUsd > 0),
+          getCampaignInputs(currentCollateralSnapshot, currentMultiplier, currentBorrowUsd > 0),
+          getCampaignInputs(nextCollateralSnapshot, nextMultiplier, borrowUsd > 0),
         ),
       }
     }

@@ -150,6 +150,56 @@ interface PendingProjectedRatesBatch {
   reject: (error: unknown) => void
 }
 
+interface PreparedProjectedRatesBatch {
+  requests: ProjectedRatesRequest[]
+  originalToMerged: Array<number | null>
+}
+
+// One caller batch describes one atomic after-state. Role-specific requests
+// for the same vault must therefore share the combined cash/borrow deltas.
+const mergeProjectedRatesRequests = (
+  requests: ProjectedRatesRequest[],
+): PreparedProjectedRatesBatch => {
+  const grouped = new Map<string, {
+    requests: ProjectedRatesRequest[]
+    originalIndexes: number[]
+  }>()
+
+  requests.forEach((request, index) => {
+    const key = request.vaultAddress.toLowerCase()
+    const group = grouped.get(key) ?? { requests: [], originalIndexes: [] }
+    group.requests.push(request)
+    group.originalIndexes.push(index)
+    grouped.set(key, group)
+  })
+
+  const mergedRequests: ProjectedRatesRequest[] = []
+  const originalToMerged: Array<number | null> = requests.map(() => null)
+
+  for (const group of grouped.values()) {
+    const first = group.requests[0]
+    if (!first) continue
+
+    const hasConsistentBaseState = group.requests.every(request =>
+      request.currentCash === first.currentCash
+      && request.currentBorrows === first.currentBorrows,
+    )
+    if (!hasConsistentBaseState) continue
+
+    const mergedIndex = mergedRequests.length
+    mergedRequests.push({
+      ...first,
+      cashDelta: group.requests.reduce((sum, request) => sum + request.cashDelta, 0n),
+      borrowsDelta: group.requests.reduce((sum, request) => sum + request.borrowsDelta, 0n),
+    })
+    group.originalIndexes.forEach((index) => {
+      originalToMerged[index] = mergedIndex
+    })
+  }
+
+  return { requests: mergedRequests, originalToMerged }
+}
+
 let pendingProjectedRatesBatches: PendingProjectedRatesBatch[] = []
 let projectedRatesFlushScheduled = false
 
@@ -194,10 +244,17 @@ export const getProjectedRatesBatch = (
   requests: ProjectedRatesRequest[],
 ): Promise<Array<ProjectedRates | null>> => {
   if (!requests.length) return Promise.resolve([])
+  const prepared = mergeProjectedRatesRequests(requests)
+  if (!prepared.requests.length) return Promise.resolve(requests.map(() => null))
   const context = getProjectedRatesExecutionContext()
 
   return new Promise((resolve, reject) => {
-    pendingProjectedRatesBatches.push({ requests, context, resolve, reject })
+    pendingProjectedRatesBatches.push({
+      requests: prepared.requests,
+      context,
+      resolve: results => resolve(prepared.originalToMerged.map(index => index === null ? null : results[index] ?? null)),
+      reject,
+    })
     if (projectedRatesFlushScheduled) return
     projectedRatesFlushScheduled = true
     setTimeout(() => {
