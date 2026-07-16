@@ -76,7 +76,7 @@ Plans may include `requiredApproval` items. During review and execution, `resolv
 - an ERC-20 approval transaction, or
 - a Permit2 signature request.
 
-`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Lite chooses whether Permit2 is enabled through `usePermit2Preference()`.
+`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Lite chooses whether message signatures are enabled through `useSignaturePreference()`; disabling them makes approval-capable flows use transactions instead.
 
 ## Operation Guards
 

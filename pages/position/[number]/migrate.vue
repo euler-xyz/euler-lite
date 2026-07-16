@@ -589,6 +589,7 @@ async function getAuthorizationRequest(
   input: OutgoingMigrationInput,
   migrationPosition?: MigrationPosition,
   account?: Account<IHasVaultAddress>,
+  useSignatures = signaturesEnabled.value,
 ): Promise<MigrationAuthorizationRequest | undefined> {
   if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
@@ -605,7 +606,7 @@ async function getAuthorizationRequest(
     removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
     // Without signatures the connectors return msg.sender grants to send as
     // their own transactions instead of an EIP-712 message to sign.
-    authorizationKind: signaturesEnabled.value ? 'typedData' : 'transaction',
+    authorizationKind: useSignatures ? 'typedData' : 'transaction',
     deadline,
   })
 }
@@ -842,29 +843,29 @@ async function sendMigration(target: OutgoingMigrationTarget) {
   submittingTargetId.value = target.id
   clearSimulationError()
   try {
+    const useSignatures = signaturesEnabled.value
     const input = buildMigrationInput(target)
     // Reuse the cached preview's resolved position (its addresses are static);
     // amounts, the authorization request, and the executed plan are still
     // rebuilt fresh here for execution safety.
     const migrationPosition = getCachedOutgoingPreview(target)?.position
-    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, planAccount.value)
+    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, planAccount.value, useSignatures)
 
     // An undefined request means the grant is already live on-chain: nothing to
     // sign, nothing to grant, and nothing of ours to revoke afterwards.
     let authorization: SignedMigrationAuthorization | undefined
-    let revokeTxs: PlainTxRequest[] = []
-    if (authorizationRequest) {
-      if (signaturesEnabled.value) {
-        authorization = await signMigrationAuthorization(authorizationRequest)
-      }
-      else {
-        // Must be mined before the plan is built: the connector reads the live
-        // allowance to decide whether the batch still needs an authorization.
-        revokeTxs = await executeMigrationAuthorizationGrants(authorizationRequest)
-      }
-    }
-
+    const revokeTxs: PlainTxRequest[] = []
     try {
+      if (authorizationRequest) {
+        if (useSignatures) {
+          authorization = await signMigrationAuthorization(authorizationRequest)
+        }
+        else {
+          // Record each revoke as soon as its grant is broadcast so partial or
+          // receipt-ambiguous failures can still unwind what may have landed.
+          await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs)
+        }
+      }
       const plan = await buildMigrationPlan(input, authorization, migrationPosition)
       const prepared = await prepareTransactionPlan(plan, { account: planAccount.value, chainId: input.target.chainId })
       const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
@@ -932,7 +933,7 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
     nameOverride: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
     buildExecutionPlan: async (account: Account<IHasVaultAddress>) => {
       const executionAuthorizationRequest = useSignatures
-        ? await getAuthorizationRequest(input, migrationPosition, account)
+        ? await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
         : undefined
       const authorization = executionAuthorizationRequest
         ? await signMigrationAuthorization(executionAuthorizationRequest)
@@ -945,10 +946,10 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       ? {}
       : {
           buildExecutionPrerequisites: async (account: Account<IHasVaultAddress>) => {
-            const request = await getAuthorizationRequest(input, migrationPosition, account)
+            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
             if (!request) return undefined
-            const { grants, revokes } = encodeMigrationAuthorizationTxs(request)
-            return { preTxs: grants, postTxs: revokes }
+            const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+            return { preTxs: grants, postTxs: revokes, postTxsByPreTx: revokesByGrant }
           },
         }),
     stateOverrides: preview.tenderlySimulation.stateOverrides,

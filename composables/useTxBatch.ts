@@ -68,6 +68,8 @@ export interface BatchEntryExecutionPrerequisites {
   preTxs: BatchEntryExternalTx[]
   /** Sent after the batch executes. Failures are non-fatal. */
   postTxs: BatchEntryExternalTx[]
+  /** Revoke paired with each pre-transaction, in pre-transaction order. */
+  postTxsByPreTx?: Array<BatchEntryExternalTx | undefined>
 }
 
 export interface BatchEntry {
@@ -2138,12 +2140,20 @@ export const useTxBatch = () => {
       if (!entry.buildExecutionPrerequisites) continue
       const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
       if (!prerequisites) continue
-      if (prerequisites.preTxs.length) await sendPlainTransactions(prerequisites.preTxs)
-      // Recorded into the caller's array, and only once the grants landed, so a
-      // rejection on a later entry still revokes what an earlier one granted.
-      // Losing them would orphan the allowance: a retry finds it already granted
-      // and so registers no revoke of its own.
-      grantedRevokes.push(...prerequisites.postTxs)
+      if (prerequisites.preTxs.length) {
+        await sendPlainTransactions(prerequisites.preTxs, {
+          onBroadcast: (preTxIndex) => {
+            const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
+            if (revoke) grantedRevokes.unshift(revoke)
+          },
+        })
+      }
+      // Entries without a one-to-one mapping retain the original all-or-nothing
+      // behavior. Migration entries always provide postTxsByPreTx so partial or
+      // receipt-ambiguous grant sequences can unwind precisely.
+      if (!prerequisites.postTxsByPreTx) {
+        grantedRevokes.push(...prerequisites.postTxs)
+      }
     }
   }
 

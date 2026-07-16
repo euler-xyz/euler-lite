@@ -106,20 +106,22 @@ describe('encodeMigrationAuthorizationTxs', () => {
       postMigrationAuthorization: morphoAuthorizationRequest(),
     } as unknown as MigrationAuthorizationRequest
 
-    const { grants, revokes } = encodeMigrationAuthorizationTxs(request)
+    const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
 
     expect(grants.map(tx => tx.to)).toEqual([aToken, morphoBlue])
     // A later grant must never depend on an earlier revoke.
     expect(revokes.map(tx => tx.to)).toEqual([morphoBlue, aToken])
+    expect(revokesByGrant.map(tx => tx?.to)).toEqual([aToken, morphoBlue])
   })
 
   it('omits a revoke when the request carries none', () => {
     const request = { ...aaveApprovalRequest(), revocation: undefined } as unknown as MigrationAuthorizationRequest
 
-    const { grants, revokes } = encodeMigrationAuthorizationTxs(request)
+    const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
 
     expect(grants).toHaveLength(1)
     expect(revokes).toEqual([])
+    expect(revokesByGrant).toEqual([undefined])
   })
 
   it('preserves a call value when present', () => {

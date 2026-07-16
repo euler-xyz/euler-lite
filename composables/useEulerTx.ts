@@ -1198,6 +1198,7 @@ export const useEulerTx = () => {
    */
   const sendPlainTransactions = async (
     txs: readonly PlainTxRequest[],
+    options?: { onBroadcast?: (index: number) => void },
   ): Promise<TransactionReceipt[]> => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1215,21 +1216,28 @@ export const useEulerTx = () => {
     const send = buildSendTransaction(isOkx)
 
     const receipts: TransactionReceipt[] = []
-    for (const tx of txs) {
-      const hash = await send(tx)
-      const receipt = await provider.waitForTransactionReceipt({ hash })
-      if (receipt.status !== 'success') {
-        throw new Error('Authorization transaction reverted')
+    let lastBroadcastData: Hex | undefined
+    try {
+      for (const [index, tx] of txs.entries()) {
+        const hash = await send(tx)
+        lastBroadcastData = tx.data
+        // Once a hash exists the transaction may land even if receipt polling
+        // fails, so cleanup must start tracking it before awaiting confirmation.
+        options?.onBroadcast?.(index)
+        const receipt = await provider.waitForTransactionReceipt({ hash })
+        if (receipt.status !== 'success') {
+          throw new Error('Authorization transaction reverted')
+        }
+        receipts.push(receipt)
       }
-      receipts.push(receipt)
     }
-
-    // buildSendTransaction only applies its post-approve delay to the next send
-    // from the same closure. The batch that follows these grants builds its own
-    // closure, so flush the pending delay here instead of losing it.
-    const lastData = txs[txs.length - 1]?.data.toLowerCase()
-    if (isOkx && lastData?.startsWith(ERC20_APPROVE_SELECTOR)) {
-      await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
+    finally {
+      // buildSendTransaction only applies its post-approve delay to the next send
+      // from the same closure. The batch or abort cleanup builds another closure,
+      // so flush a trailing broadcast approve even when receipt polling failed.
+      if (isOkx && lastBroadcastData?.toLowerCase().startsWith(ERC20_APPROVE_SELECTOR)) {
+        await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
+      }
     }
 
     return receipts
@@ -1245,10 +1253,16 @@ export const useEulerTx = () => {
    */
   const executeMigrationAuthorizationGrants = async (
     request: MigrationAuthorizationRequest,
+    broadcastRevokes: PlainTxRequest[] = [],
   ): Promise<PlainTxRequest[]> => {
-    const { grants, revokes } = encodeMigrationAuthorizationTxs(request)
-    await sendPlainTransactions(grants)
-    return revokes
+    const { grants, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+    await sendPlainTransactions(grants, {
+      onBroadcast: (index) => {
+        const revoke = revokesByGrant[index]
+        if (revoke) broadcastRevokes.unshift(revoke)
+      },
+    })
+    return broadcastRevokes
   }
 
   /** Best-effort revoke; never throws. Returns false when it did not complete. */

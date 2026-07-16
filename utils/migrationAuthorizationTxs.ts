@@ -24,6 +24,8 @@ export interface MigrationAuthorizationTxs {
   grants: PlainTxRequest[]
   /** Revokes, to send once the migration has settled, in reverse grant order. */
   revokes: PlainTxRequest[]
+  /** Revoke paired with each grant, in grant order, for incremental cleanup. */
+  revokesByGrant: Array<PlainTxRequest | undefined>
 }
 
 const encodeCall = (call: MigrationAuthorizationCall): PlainTxRequest => ({
@@ -55,17 +57,20 @@ export const encodeMigrationAuthorizationTxs = (
 ): MigrationAuthorizationTxs => {
   const grants: PlainTxRequest[] = []
   const revokes: PlainTxRequest[] = []
+  const revokesByGrant: Array<PlainTxRequest | undefined> = []
 
   for (const entry of flattenRequests(request)) {
     if (entry.kind !== 'transaction') {
       throw new Error('Migration authorization was not requested in transaction form')
     }
     grants.push(encodeCall(entry.call))
-    if (entry.revocation) revokes.push(encodeCall(entry.revocation))
+    const revoke = entry.revocation ? encodeCall(entry.revocation) : undefined
+    revokesByGrant.push(revoke)
+    if (revoke) revokes.push(revoke)
   }
 
   // Unwind in reverse so a later grant never depends on an earlier revoke.
-  return { grants, revokes: revokes.reverse() }
+  return { grants, revokes: revokes.reverse(), revokesByGrant }
 }
 
 const GRANT_LABELS: Record<string, string> = {

@@ -2216,6 +2216,7 @@ const shouldRemoveInboundExternalAuthorization = (connectorId: string) =>
 
 const getInboundExternalMigrationAuthorizationRequest = async (
   input: InboundExternalMigrationInput,
+  useSignatures = signaturesEnabled.value,
 ): Promise<MigrationAuthorizationRequest | undefined> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2230,10 +2231,10 @@ const getInboundExternalMigrationAuthorizationRequest = async (
     position: input.position,
     positionRef: input.source.ref,
     target: input.eulerTarget,
-    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
+    removeAuthorizationAfterMigration: input.source.connectorId === MORPHO_CONNECTOR_ID && useSignatures,
     // Without signatures the connectors return msg.sender grants to send as
     // their own transactions instead of an EIP-712 message to sign.
-    authorizationKind: signaturesEnabled.value ? 'typedData' : 'transaction',
+    authorizationKind: useSignatures ? 'typedData' : 'transaction',
     deadline,
   })
 }
@@ -2246,6 +2247,7 @@ const getInboundExternalMigrationAuthorizationRequest = async (
 const buildInboundExternalMigrationExecutionPlan = async (
   input: InboundExternalMigrationInput,
   authorization?: SignedMigrationAuthorization,
+  useSignatures = signaturesEnabled.value,
 ): Promise<TransactionPlan> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2261,7 +2263,7 @@ const buildInboundExternalMigrationExecutionPlan = async (
     positionRef: input.source.ref,
     target: input.eulerTarget,
     authorization,
-    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
+    removeAuthorizationAfterMigration: input.source.connectorId === MORPHO_CONNECTOR_ID && useSignatures,
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
     operationName: `${input.source.connectorId}ToEulerMigration`,
@@ -2303,18 +2305,21 @@ const buildInboundExternalMigrationCalldataPreview = async (
  */
 const resolveInboundExternalMigrationAuthorization = async (
   input: InboundExternalMigrationInput,
-): Promise<{ authorization?: SignedMigrationAuthorization, revokeTxs: PlainTxRequest[] }> => {
-  const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
+  revokeTxs: PlainTxRequest[],
+  useSignatures: boolean,
+): Promise<SignedMigrationAuthorization | undefined> => {
+  const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
   inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
   // No request means the grant is already live on-chain: nothing to sign, and
   // nothing of ours to revoke afterwards.
-  if (!authorizationRequest) return { revokeTxs: [] }
-  if (signaturesEnabled.value) {
-    return { authorization: await signMigrationAuthorization(authorizationRequest), revokeTxs: [] }
+  if (!authorizationRequest) return undefined
+  if (useSignatures) {
+    return signMigrationAuthorization(authorizationRequest)
   }
   // Must be mined before the plan is built: the connector reads the live
   // allowance to decide whether the batch still needs an authorization.
-  return { revokeTxs: await executeMigrationAuthorizationGrants(authorizationRequest) }
+  await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs)
+  return undefined
 }
 
 const buildInboundExternalMigrationSimulationResult = async (
@@ -2876,13 +2881,14 @@ const sendInboundExternalMigration = async () => {
   try {
     inboundExternalPreparedPlan.value = null
     const migrationChainId = externalPosition.value?.chainId
+    const useSignatures = signaturesEnabled.value
     // Resolve the input once so the authorization and the plan are built from
     // the same position snapshot.
     const input = await buildInboundExternalMigrationInput()
-    const { authorization, revokeTxs } = await resolveInboundExternalMigrationAuthorization(input)
-
+    const revokeTxs: PlainTxRequest[] = []
     try {
-      inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization)
+      const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)
+      inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
       inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, { account: currentPlanAccount(), chainId: migrationChainId })
       const ok = await runPreparedSimulation(inboundExternalPreparedPlan.value, buildRefinanceStateOverrideOptions())
       if (!ok) {
@@ -2953,23 +2959,23 @@ const addInboundExternalMigrationToBatch = async () => {
       nameOverride: `Migrate ${positionLabel}`,
       buildExecutionPlan: async () => {
         const authorizationRequest = useSignatures
-          ? await getInboundExternalMigrationAuthorizationRequest(input)
+          ? await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
           : undefined
         const authorization = authorizationRequest
           ? await signMigrationAuthorization(authorizationRequest)
           : undefined
         // Without signatures the grant was already mined by the batch's
         // pre-phase, so the connector omits the authorization item.
-        return buildInboundExternalMigrationExecutionPlan(input, authorization)
+        return buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
       },
       ...(useSignatures
         ? {}
         : {
             buildExecutionPrerequisites: async () => {
-              const request = await getInboundExternalMigrationAuthorizationRequest(input)
+              const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
               if (!request) return undefined
-              const { grants, revokes } = encodeMigrationAuthorizationTxs(request)
-              return { preTxs: grants, postTxs: revokes }
+              const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+              return { preTxs: grants, postTxs: revokes, postTxsByPreTx: revokesByGrant }
             },
           }),
       stateOverrides: preview.tenderlySimulation.stateOverrides,
