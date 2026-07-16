@@ -43,6 +43,10 @@ import type {
 import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
+import {
+  encodeMigrationAuthorizationTxs,
+  type PlainTxRequest,
+} from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
@@ -424,7 +428,7 @@ export interface PlanWithdrawOrRedeemInput {
 export const useEulerTx = () => {
   const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
-  const { permit2Enabled } = usePermit2Preference()
+  const { signaturesEnabled } = useSignaturePreference()
   const { sendTransactionAsync } = useSendTransaction()
   const { signTypedDataAsync } = useSignTypedData()
   const config = useConfig()
@@ -1117,7 +1121,7 @@ export const useEulerTx = () => {
         plan,
         chainId: cid,
         account: options?.account ?? owner,
-        usePermit2: permit2Enabled.value,
+        usePermit2: signaturesEnabled.value,
         prefetch: options?.prefetch,
       })
     })
@@ -1184,6 +1188,84 @@ export const useEulerTx = () => {
     return send
   }
 
+  /**
+   * Send standalone transactions sequentially, waiting for each to be mined.
+   *
+   * Used for migration authorization grants and revokes, which cannot live in
+   * the EVC batch (the EVC forwards batch items as itself, so a msg.sender-based
+   * grant would be attributed to the EVC) and cannot be merged into the plan
+   * (`mergePlans` rejects contractCall items).
+   */
+  const sendPlainTransactions = async (
+    txs: readonly PlainTxRequest[],
+  ): Promise<TransactionReceipt[]> => {
+    if (isSpyMode.value) {
+      throw new Error('Transactions are disabled in spy mode')
+    }
+    if (!txs.length) return []
+
+    const cid = requireChainId()
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(cid)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
+
+    const isOkx = await isOkxWallet(getAccount(config).connector)
+    const send = buildSendTransaction(isOkx)
+
+    const receipts: TransactionReceipt[] = []
+    for (const tx of txs) {
+      const hash = await send(tx)
+      const receipt = await provider.waitForTransactionReceipt({ hash })
+      if (receipt.status !== 'success') {
+        throw new Error('Authorization transaction reverted')
+      }
+      receipts.push(receipt)
+    }
+
+    // buildSendTransaction only applies its post-approve delay to the next send
+    // from the same closure. The batch that follows these grants builds its own
+    // closure, so flush the pending delay here instead of losing it.
+    const lastData = txs[txs.length - 1]?.data.toLowerCase()
+    if (isOkx && lastData?.startsWith(ERC20_APPROVE_SELECTOR)) {
+      await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
+    }
+
+    return receipts
+  }
+
+  /**
+   * Grant a migration authorization on-chain instead of signing it, and return
+   * the revoke transactions to send once the batch has settled.
+   *
+   * The grants must be mined before the migration plan is built: the SDK
+   * connectors read the live allowance to decide whether the batch needs a
+   * permit item, and throw when it does but no signature was supplied.
+   */
+  const executeMigrationAuthorizationGrants = async (
+    request: MigrationAuthorizationRequest,
+  ): Promise<PlainTxRequest[]> => {
+    const { grants, revokes } = encodeMigrationAuthorizationTxs(request)
+    await sendPlainTransactions(grants)
+    return revokes
+  }
+
+  /** Best-effort revoke; never throws. Returns false when it did not complete. */
+  const sendMigrationAuthorizationRevokes = async (
+    revokes: readonly PlainTxRequest[],
+  ): Promise<boolean> => {
+    if (!revokes.length) return true
+    try {
+      await sendPlainTransactions(revokes)
+      return true
+    }
+    catch (err) {
+      logWarn('useEulerTx/migrationRevoke', err)
+      return false
+    }
+  }
+
   const runPostTxSubgraphSync = async (cid: number, targetBlock: bigint) => {
     // Poll the SDK's subgraph proxy (not a separately-resolved upstream) so the
     // head we wait on is the same one serving queryAccountVaults.
@@ -1233,7 +1315,7 @@ export const useEulerTx = () => {
       plan,
       chainId: cid,
       account: owner,
-      usePermit2: permit2Enabled.value,
+      usePermit2: signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
@@ -1317,6 +1399,9 @@ export const useEulerTx = () => {
     getMigrationAuthorization,
     signMigrationAuthorization,
     buildPlaceholderMigrationAuthorization,
+    executeMigrationAuthorizationGrants,
+    sendMigrationAuthorizationRevokes,
+    sendPlainTransactions,
     planCrossProtocolMigration,
     planCrossProtocolMigrationSimulation,
     planWithdrawOrRedeem,

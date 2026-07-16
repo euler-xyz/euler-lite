@@ -32,6 +32,11 @@ import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { OP_REDEEM, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { DisplayStep } from '~/utils/stepDecoding'
+import {
+  buildMigrationAuthorizationTxSteps,
+  encodeMigrationAuthorizationTxs,
+  type PlainTxRequest,
+} from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
@@ -99,12 +104,15 @@ const {
   getMigrationPosition,
   getMigrationAuthorization,
   signMigrationAuthorization,
+  executeMigrationAuthorizationGrants,
   planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
   executePreparedPlan,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
+const { signaturesEnabled } = useSignaturePreference()
+const { revokeAfterSuccess, revokeAfterAbort, toMigrationExecutionError } = useMigrationAuthorizationFlow()
 const {
   addEntry: addBatchEntry,
   entryCount: batchEntryCount,
@@ -564,7 +572,9 @@ function buildMigrationInput(target: OutgoingMigrationTarget) {
   const externalTarget = {
     interestBufferBps: outgoingMigrationInterestBufferBps,
   }
-  const removeAuthorizationAfterMigration = target.connectorId === MORPHO_CONNECTOR_ID
+  // The SDK's post-migration disable is a second signed authorization appended
+  // to the batch. Without signatures the revoke is a plain tx sent afterwards.
+  const removeAuthorizationAfterMigration = target.connectorId === MORPHO_CONNECTOR_ID && signaturesEnabled.value
   const cleanupEulerPosition = true
   return {
     target,
@@ -593,6 +603,9 @@ async function getAuthorizationRequest(
     externalTarget: input.externalTarget,
     account,
     removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
+    // Without signatures the connectors return msg.sender grants to send as
+    // their own transactions instead of an EIP-712 message to sign.
+    authorizationKind: signaturesEnabled.value ? 'typedData' : 'transaction',
     deadline,
   })
 }
@@ -663,6 +676,8 @@ const outgoingPreviewBaseKey = computed(() => {
     sourceCollateralEVault.value.address,
     currentDebt.value.toString(),
     outgoingMigrationBorrowAmountWithBuffer.value.toString(),
+    // Signature mode changes the built plan and the displayed steps.
+    signaturesEnabled.value ? 'sig' : 'nosig',
   ].join('|')
 })
 const outgoingPreviews = shallowRef<Record<string, OutgoingMigrationPreview>>({})
@@ -722,10 +737,16 @@ async function prepareOutgoingMigrationPreview(
       logWarn('positionMigration/prefetchPluginData', err)
     }
     const prepareOptions = { account: planAccount.value, chainId: input.target.chainId, prefetch }
-    const [tenderlyPrepared, calldataPrepared] = await Promise.all([
+    // Without signatures the authorization is granted by a standalone tx, so the
+    // simulation plan (authorization item filtered out) is already the exact
+    // calldata that executes — no stub-signed preview plan needed.
+    const [tenderlyPrepared, previewPrepared] = await Promise.all([
       prepareTransactionPlan(simulationResult.plan, prepareOptions),
-      prepareTransactionPlan(simulationResult.previewPlan, prepareOptions),
+      signaturesEnabled.value
+        ? prepareTransactionPlan(simulationResult.previewPlan, prepareOptions)
+        : Promise.resolve(undefined),
     ])
+    const calldataPrepared = previewPrepared ?? tenderlyPrepared
 
     if (epoch !== outgoingPreviewEpoch || key !== outgoingPreviewKeyFor(target)) {
       throw new Error(STALE_OUTGOING_MIGRATION_PREVIEW_ERROR)
@@ -795,8 +816,9 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         asset: sourceDebtVault.value.asset,
         amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
         signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest),
+        postSteps: buildRevokeSteps(preview.authorizationRequest),
         calldataPrepared: preview.calldataPrepared,
-        calldataUsesPlaceholderSignatures: !!preview.authorizationRequest,
+        calldataUsesPlaceholderSignatures: signaturesEnabled.value && !!preview.authorizationRequest,
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
@@ -826,14 +848,39 @@ async function sendMigration(target: OutgoingMigrationTarget) {
     // rebuilt fresh here for execution safety.
     const migrationPosition = getCachedOutgoingPreview(target)?.position
     const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, planAccount.value)
-    const authorization = authorizationRequest
-      ? await signMigrationAuthorization(authorizationRequest)
-      : undefined
-    const plan = await buildMigrationPlan(input, authorization, migrationPosition)
-    const prepared = await prepareTransactionPlan(plan, { account: planAccount.value, chainId: input.target.chainId })
-    const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
-    if (!ok) return
-    await executePreparedPlan(prepared)
+
+    // An undefined request means the grant is already live on-chain: nothing to
+    // sign, nothing to grant, and nothing of ours to revoke afterwards.
+    let authorization: SignedMigrationAuthorization | undefined
+    let revokeTxs: PlainTxRequest[] = []
+    if (authorizationRequest) {
+      if (signaturesEnabled.value) {
+        authorization = await signMigrationAuthorization(authorizationRequest)
+      }
+      else {
+        // Must be mined before the plan is built: the connector reads the live
+        // allowance to decide whether the batch still needs an authorization.
+        revokeTxs = await executeMigrationAuthorizationGrants(authorizationRequest)
+      }
+    }
+
+    try {
+      const plan = await buildMigrationPlan(input, authorization, migrationPosition)
+      const prepared = await prepareTransactionPlan(plan, { account: planAccount.value, chainId: input.target.chainId })
+      const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
+      if (!ok) {
+        await revokeAfterAbort(revokeTxs)
+        return
+      }
+      await executePreparedPlan(prepared)
+    }
+    catch (err) {
+      // Covers a rejected batch, a failed prepare, and a stale grant.
+      await revokeAfterAbort(revokeTxs)
+      throw toMigrationExecutionError(err)
+    }
+
+    await revokeAfterSuccess(revokeTxs)
     schedulePostMigrationRefreshes()
     modal.close()
     setTimeout(() => {
@@ -876,17 +923,34 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
   const sourceDebtSymbol = sourceDebtAsset.symbol
   const sourceCollateralSymbol = sourceCollateralEVault.value.asset.symbol
   const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
+  // Pin the mode: the captured review rows cannot follow a later toggle, and
+  // `input` was already built against this value.
+  const useSignatures = signaturesEnabled.value
 
   const batchEntry = {
     label: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetProtocolDisplay(input.target)}`,
     nameOverride: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
     buildExecutionPlan: async (account: Account<IHasVaultAddress>) => {
-      const executionAuthorizationRequest = await getAuthorizationRequest(input, migrationPosition, account)
+      const executionAuthorizationRequest = useSignatures
+        ? await getAuthorizationRequest(input, migrationPosition, account)
+        : undefined
       const authorization = executionAuthorizationRequest
         ? await signMigrationAuthorization(executionAuthorizationRequest)
         : undefined
+      // Without signatures the grant was already mined by the batch's pre-phase,
+      // so the connector omits the authorization item from the plan.
       return buildMigrationPlan(input, authorization, migrationPosition, account)
     },
+    ...(useSignatures
+      ? {}
+      : {
+          buildExecutionPrerequisites: async (account: Account<IHasVaultAddress>) => {
+            const request = await getAuthorizationRequest(input, migrationPosition, account)
+            if (!request) return undefined
+            const { grants, revokes } = encodeMigrationAuthorizationTxs(request)
+            return { preTxs: grants, postTxs: revokes }
+          },
+        }),
     stateOverrides: preview.tenderlySimulation.stateOverrides,
     subAccount: migrationAccount.value,
     refreshExternalMigrationPositions: true,
@@ -899,6 +963,7 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       asset: sourceDebtAsset,
       amount: debtAmount,
       signatureSteps: buildSignatureSteps(input.target, authorizationRequest),
+      postSteps: buildRevokeSteps(authorizationRequest),
       displayPlan: preview.calldataPrepared.plan,
     },
   }
@@ -943,6 +1008,9 @@ function flattenAuthorizationRequests(request: MigrationAuthorizationRequest | u
 
 function buildSignatureSteps(target: OutgoingMigrationTarget | undefined, authorizationRequest: MigrationAuthorizationRequest | undefined): DisplayStep[] {
   if (!authorizationRequest || !target) return []
+  if (!signaturesEnabled.value) {
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant')
+  }
   if (target.connectorId === AAVE_CONNECTOR_ID) {
     return [{
       index: 1,
@@ -957,6 +1025,12 @@ function buildSignatureSteps(target: OutgoingMigrationTarget | undefined, author
       : 'Signature: enable Morpho authorization',
     isSeparateTx: false,
   }))
+}
+
+/** Rows for the revoke transactions sent after the batch settles. */
+function buildRevokeSteps(authorizationRequest: MigrationAuthorizationRequest | undefined): DisplayStep[] {
+  if (!authorizationRequest || signaturesEnabled.value) return []
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke')
 }
 
 function targetLiquidityDisplay(target: OutgoingMigrationTarget): string {

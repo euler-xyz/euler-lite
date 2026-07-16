@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getAddress, type Address } from 'viem'
+import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 
@@ -12,6 +12,8 @@ vi.mock('~/composables/useEulerSdk', () => ({
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
 const vault = getAddress('0x797Dd80692C3B2daDAbcE8e30C07fDE5307d48A9')
+const aToken = getAddress('0x4d5F47FA6A74757f35C14fD3a6Ef8E3C9BC514E8')
+const morphoBlue = getAddress('0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb')
 const borrowVault = getAddress('0x859160Db5841E5cfB8D3f144C6b3381A85A4b410')
 const targetVault = getAddress('0x3000000000000000000000000000000000000000')
 const WAD = 10n ** 18n
@@ -21,6 +23,12 @@ const eulerTxMocks = {
   prepareTransactionPlan: vi.fn(),
   executePreparedPlan: vi.fn(),
   estimateGasForPlan: vi.fn(),
+  sendPlainTransactions: vi.fn(),
+}
+const migrationFlowMocks = {
+  revokeAfterSuccess: vi.fn(),
+  revokeAfterAbort: vi.fn(),
+  toMigrationExecutionError: vi.fn((err: unknown) => err),
 }
 const scheduleExternalMigrationRefreshes = vi.fn()
 
@@ -242,6 +250,7 @@ const stubBatchComposableGlobals = () => {
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useEulerTx', () => eulerTxMocks)
+  vi.stubGlobal('useMigrationAuthorizationFlow', () => migrationFlowMocks)
   vi.stubGlobal('useExternalMigrationRefresh', () => ({ scheduleExternalMigrationRefreshes }))
   vi.stubGlobal('useRouter', () => ({ replace: routerReplace }))
   vi.stubGlobal('useRoute', () => ({ query: routeQuery }))
@@ -280,6 +289,9 @@ beforeEach(() => {
   eulerTxMocks.prepareTransactionPlan.mockReset()
   eulerTxMocks.executePreparedPlan.mockReset()
   eulerTxMocks.estimateGasForPlan.mockReset()
+  eulerTxMocks.sendPlainTransactions.mockReset()
+  migrationFlowMocks.revokeAfterSuccess.mockReset()
+  migrationFlowMocks.revokeAfterAbort.mockReset()
   scheduleExternalMigrationRefreshes.mockReset()
   routerReplace.mockReset()
   routeQuery.network = '1'
@@ -734,6 +746,163 @@ describe('useTxBatch execution errors', () => {
 
     expect(executionAccount?.getSubAccount(subAccount)?.positions[0]?.shares).toBe(42n)
     expect(sdk.executionService.mergePlans).toHaveBeenLastCalledWith([borrowPlan, migrationExecutionPlan])
+  })
+})
+
+describe('useTxBatch execution prerequisites', () => {
+  const grantTx = { to: aToken, data: '0xgrant' as Hex }
+  const revokeTx = { to: aToken, data: '0xrevoke' as Hex }
+
+  const addMigrationEntryWithPrerequisites = async (
+    batch: ReturnType<typeof useTxBatch>,
+    prerequisites: { preTxs: typeof grantTx[], postTxs: typeof revokeTx[] } | undefined,
+  ) => {
+    await batch.addEntry({
+      label: 'Migrate Aave position',
+      buildPlan: async () => [] as TransactionPlan,
+      buildExecutionPrerequisites: async () => prerequisites,
+      refreshExternalMigrationPositions: true,
+    })
+  }
+
+  const addGrantingMigrationEntry = (batch: ReturnType<typeof useTxBatch>) =>
+    addMigrationEntryWithPrerequisites(batch, { preTxs: [grantTx], postTxs: [revokeTx] })
+
+  it('revokes an already-granted entry when a later entry\'s grant is rejected', async () => {
+    // A two-entry batch needs a simulated account per layer, or executeBatch
+    // bails before the prerequisite phase.
+    const sdk = createMockSdk()
+    let simulationCallCount = 0
+    sdk.executionService.simulateTransactionPlan.mockImplementation(async () => {
+      simulationCallCount += 1
+      const account = accountWithPosition(subAccount, subAccount, 42n)
+      return {
+        simulatedAccounts: simulationCallCount > 1 ? [account, account] : [account],
+        simulatedWalletBalances: [],
+        simulatedVaults: [],
+        failedBatchItems: [],
+        insufficientWalletAssets: [],
+      }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    const batch = useTxBatch()
+    const secondGrantTx = { to: morphoBlue, data: '0xgrant2' as Hex }
+    const secondRevokeTx = { to: morphoBlue, data: '0xrevoke2' as Hex }
+    // First entry's grant lands; the second is rejected in the wallet.
+    eulerTxMocks.sendPlainTransactions.mockImplementation(async (txs: { data: Hex }[]) => {
+      if (txs[0]?.data === secondGrantTx.data) throw new Error('User rejected the request.')
+      return []
+    })
+
+    await addGrantingMigrationEntry(batch)
+    await addMigrationEntryWithPrerequisites(batch, {
+      preTxs: [secondGrantTx],
+      postTxs: [secondRevokeTx],
+    })
+    // Let the multi-entry resimulation settle so executeBatch does not bail.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await batch.executeBatch()
+
+    // The first grant is mined and standing. Leaving it would orphan the
+    // allowance: a retry sees it already granted, so it registers no revoke.
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([revokeTx])
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(2)
+  })
+
+  it('grants before building the plan and revokes after a successful batch', async () => {
+    const batch = useTxBatch()
+    const calls: string[] = []
+    const sdk = createMockSdk()
+    sdk.executionService.mergePlans.mockImplementation((plans: TransactionPlan[]) => {
+      calls.push('mergePlans')
+      return plans.flat()
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    eulerTxMocks.sendPlainTransactions.mockImplementation(async () => void calls.push('sendPlainTransactions'))
+    eulerTxMocks.estimateGasForPlan.mockImplementation(async () => void calls.push('estimateGasForPlan'))
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async () => void calls.push('executePreparedPlan'))
+    migrationFlowMocks.revokeAfterSuccess.mockImplementation(async () => void calls.push('revokeAfterSuccess'))
+
+    await addGrantingMigrationEntry(batch)
+    // Drop what add-time preview simulation recorded; only execution order matters.
+    calls.length = 0
+    await batch.executeBatch()
+
+    // The grant must be mined before the plan is built: the connector reads the
+    // live allowance to decide whether the batch needs an authorization item.
+    expect(calls).toEqual([
+      'sendPlainTransactions',
+      'mergePlans',
+      'estimateGasForPlan',
+      'executePreparedPlan',
+      'revokeAfterSuccess',
+    ])
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledWith([grantTx])
+    expect(migrationFlowMocks.revokeAfterSuccess).toHaveBeenCalledWith([revokeTx])
+    expect(migrationFlowMocks.revokeAfterAbort).not.toHaveBeenCalled()
+  })
+
+  it('keeps the cart and skips execution when a grant is rejected', async () => {
+    const batch = useTxBatch()
+    eulerTxMocks.sendPlainTransactions.mockRejectedValue(new Error('User rejected the request.'))
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toBeDefined()
+    // Nothing landed, so there is nothing of ours to revoke.
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([])
+  })
+
+  it('revokes the granted authorization when the batch itself fails', async () => {
+    const batch = useTxBatch()
+    eulerTxMocks.sendPlainTransactions.mockResolvedValue([])
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('User rejected the request.'))
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([revokeTx])
+    expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('sends no transactions when an entry reports no prerequisites', async () => {
+    const batch = useTxBatch()
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+
+    // An authorization already standing on-chain resolves to no prerequisite,
+    // and must not be revoked — we did not grant it.
+    await addMigrationEntryWithPrerequisites(batch, undefined)
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    expect(migrationFlowMocks.revokeAfterSuccess).toHaveBeenCalledWith([])
+    expect(batch.entryCount.value).toBe(0)
+  })
+
+  it('still clears the batch when the revoke fails after a successful execution', async () => {
+    const batch = useTxBatch()
+    eulerTxMocks.sendPlainTransactions.mockResolvedValue([])
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+    // revokeAfterSuccess swallows failures internally; it must never throw.
+    migrationFlowMocks.revokeAfterSuccess.mockResolvedValue(undefined)
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    expect(batch.entryCount.value).toBe(0)
+    expect(batch.execError.value).toBeUndefined()
   })
 })
 

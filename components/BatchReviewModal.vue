@@ -78,6 +78,7 @@ const positionTag = (subAccount?: string): string | undefined => {
 type ReviewWithSteps = StepDecodingContext & {
   displayPlan?: TransactionPlan
   signatureSteps?: DisplayStep[]
+  postSteps?: DisplayStep[]
 }
 
 const isExternalProtocolMigrationReview = (review: ReviewWithSteps | undefined): boolean =>
@@ -90,6 +91,13 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? normalizeDisplaySteps(review?.signatureSteps)
+    : []
+}
+
+const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  const review = entry.review as unknown as ReviewWithSteps | undefined
+  return isExternalProtocolMigrationReview(review)
+    ? normalizeDisplaySteps(review?.postSteps)
     : []
 }
 
@@ -121,6 +129,24 @@ const signatureStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   }
   return out
 })
+
+const postStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
+  const out: Record<string, DisplayStep[]> = {}
+  for (const entry of entries.value) {
+    const steps = getEntryPostSteps(entry)
+    if (steps.length) out[entry.id] = steps
+  }
+  return out
+})
+
+/**
+ * Signature-mode rows are wallet messages; without signatures the same slot
+ * carries standalone authorization transactions.
+ */
+const signatureStepsHeading = (entryId: string): string =>
+  (signatureStepsByEntryId.value[entryId] ?? []).some(step => step.isSeparateTx)
+    ? 'Authorization transactions'
+    : 'Signatures'
 
 const signatureRows = computed(() =>
   entries.value.flatMap(entry =>
@@ -507,12 +533,12 @@ const handleClose = () => {
               <!-- Same decoded operation steps the per-op review modal shows
                    (the builder row's (i) icon). -->
               <div
-                v-if="signatureStepsByEntryId[entry.id]?.length || stepsByEntryId[entry.id]?.length"
+                v-if="signatureStepsByEntryId[entry.id]?.length || stepsByEntryId[entry.id]?.length || postStepsByEntryId[entry.id]?.length"
                 class="bg-card rounded-8 p-12 flex flex-col gap-8"
               >
                 <template v-if="signatureStepsByEntryId[entry.id]?.length">
                   <p class="text-p4 text-content-tertiary uppercase tracking-[0.04em]">
-                    Signatures
+                    {{ signatureStepsHeading(entry.id) }}
                   </p>
                   <OperationStepsList :steps="signatureStepsByEntryId[entry.id]" />
                   <div
@@ -528,6 +554,16 @@ const handleClose = () => {
                     Operation
                   </p>
                   <OperationStepsList :steps="stepsByEntryId[entry.id]" />
+                </template>
+                <template v-if="postStepsByEntryId[entry.id]?.length">
+                  <div
+                    v-if="signatureStepsByEntryId[entry.id]?.length || stepsByEntryId[entry.id]?.length"
+                    class="border-t border-line-default"
+                  />
+                  <p class="text-p4 text-content-tertiary uppercase tracking-[0.04em]">
+                    After execution
+                  </p>
+                  <OperationStepsList :steps="postStepsByEntryId[entry.id]" />
                 </template>
               </div>
               <p
