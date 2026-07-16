@@ -2,13 +2,15 @@ import { computed, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { usePositionCollateralApy } from '~/composables/usePositionCollateralApy'
+import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 
-const { getProjectedRatesBatch, getCollateralUsdValue } = vi.hoisted(() => ({
+const { getProjectedRatesBatch, getCollateralUsdValue, getOrFetch } = vi.hoisted(() => ({
   getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => ({
     supplyAPY: 8n * 10n ** 25n,
     borrowAPY: 0n,
   }))),
   getCollateralUsdValue: vi.fn(async (assets: bigint) => Number(assets)),
+  getOrFetch: vi.fn(),
 }))
 
 vi.mock('~/utils/vault/apy', () => ({ getProjectedRatesBatch }))
@@ -48,6 +50,11 @@ const makePosition = (collateralVaults = [VAULT_A, VAULT_B]) => ({
 describe('usePositionCollateralApy', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    activeLayerVaultsRef.value = {}
+    getOrFetch.mockImplementation(async (address: string) => ({
+      [VAULT_A.toLowerCase()]: vaultA,
+      [VAULT_B.toLowerCase()]: vaultB,
+    })[address.toLowerCase()])
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('useRewardsApy', () => ({
       version: ref(1),
@@ -55,10 +62,7 @@ describe('usePositionCollateralApy', () => {
       getSupplyRewardCampaigns: vi.fn(() => []),
     }))
     vi.stubGlobal('useVaultRegistry', () => ({
-      getOrFetch: vi.fn(async (address: string) => ({
-        [VAULT_A.toLowerCase()]: vaultA,
-        [VAULT_B.toLowerCase()]: vaultB,
-      })[address.toLowerCase()]),
+      getOrFetch,
     }))
     vi.stubGlobal('useVaults', () => ({
       isReady: ref(true),
@@ -71,6 +75,7 @@ describe('usePositionCollateralApy', () => {
   })
 
   afterEach(() => {
+    activeLayerVaultsRef.value = {}
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
@@ -150,6 +155,47 @@ describe('usePositionCollateralApy', () => {
       cashDelta: -25n,
     })])
     expect(snapshot.entries[0]?.vault).toBe(simulatedVaultA)
+  })
+
+  it('falls back to the registry when a matching collateral position is unenriched', async () => {
+    const position = {
+      ...makePosition(),
+      collateral: { vaultAddress: VAULT_A, assets: 100n },
+      collaterals: [
+        { vaultAddress: VAULT_A, assets: 100n },
+        { vaultAddress: VAULT_B, vault: vaultB, assets: 100n },
+      ],
+    } as unknown as PortfolioBorrowPosition<VaultEntity>
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+
+    const snapshot = await getCollateralApySnapshot(position, liabilityVault)
+
+    expect(getOrFetch).toHaveBeenCalledWith(VAULT_A)
+    expect(snapshot.isComplete).toBe(true)
+    expect(snapshot.entries[0]?.vault).toBe(vaultA)
+  })
+
+  it('uses a simulated layer vault for a newly introduced collateral address', async () => {
+    const simulatedVault = {
+      ...liabilityVault,
+      totalCash: 750n,
+      totalBorrowed: 300n,
+    } as unknown as EVault
+    activeLayerVaultsRef.value = { [LIABILITY.toLowerCase()]: simulatedVault }
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+
+    const snapshot = await getCollateralApySnapshot(makePosition(), liabilityVault, {
+      deltas: [{ vaultAddress: LIABILITY, assetsDelta: 25n, projectRates: true }],
+    })
+
+    expect(getProjectedRatesBatch).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({
+        vaultAddress: LIABILITY,
+        currentCash: 750n,
+        currentBorrows: 300n,
+      }),
+    ]))
+    expect(snapshot.entries.find(entry => entry.address === LIABILITY)?.vault).toBe(simulatedVault)
   })
 
   it('fails closed when a requested projected rate is unavailable', async () => {

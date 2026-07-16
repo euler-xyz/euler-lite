@@ -13,6 +13,12 @@ import type {
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
+import {
+  activeLayerVaultsRef,
+  collectAccountVaults,
+  mergeLayeredVaults,
+  type LayeredVaultMap,
+} from '~/composables/useLayeredVaults'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { buildPlanMarketLabel } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
@@ -123,6 +129,8 @@ export interface BatchLayer {
   portfolio?: Portfolio<VaultEntity>
   /** All-positions projection (for the "Show all" view). */
   portfolioAll?: Portfolio<VaultEntity>
+  /** Cumulative simulated vault state for utilization-aware projections. */
+  vaults?: LayeredVaultMap
   /**
    * Stitched wallet ERC20 balances (lowercased token → absolute balance) for the
    * assets the batch touched, at this layer: the real wallet balance with this
@@ -515,6 +523,10 @@ const syncOverlay = () => {
 
   // Active layer's stitched wallet balances (absolute) for touched tokens.
   activeLayerWalletBalancesRef.value = layer?.walletBalances ?? {}
+  // Active layer's cumulative simulated vault snapshots. These are kept
+  // separately from positions because a full withdrawal can remove its account
+  // position while the vault's post-withdraw utilization remains relevant.
+  activeLayerVaultsRef.value = layer?.vaults ?? {}
   // Active layer's full stitched account (for share-balance / plan-account reads).
   activeLayerAccountRef.value = layer?.account
 }
@@ -1624,6 +1636,10 @@ export const useTxBatch = () => {
       const simAccounts = rawSimAccounts.length === plans.length
         ? [baseAccount, ...rawSimAccounts]
         : rawSimAccounts
+      const rawSimVaultLayers = sim.simulatedVaultsLayers ?? []
+      const simVaultLayers = rawSimVaultLayers.length === plans.length
+        ? [[], ...rawSimVaultLayers]
+        : rawSimVaultLayers
       // A healthy sim returns exactly one account per operation on top of the
       // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1. Anything
       // else is the smoking gun for the "not loaded" symptom (getCurrentFinalLayer
@@ -1657,6 +1673,20 @@ export const useTxBatch = () => {
         }, 'error')
         simError.value = 'Batch simulation did not return per-operation state layers — the installed @eulerxyz/euler-v2-sdk build does not support the batch builder.'
       }
+
+      // Preserve the SDK's per-layer vault snapshots independently from account
+      // positions. This is the authoritative source for utilization after an
+      // operation, including a full withdrawal that removes its zeroed position
+      // from the simulated account. Older/final-only SDK shapes fall back to the
+      // vault entities carried by each touched account slice.
+      const vaultLayers: LayeredVaultMap[] = []
+      let cumulativeVaults: LayeredVaultMap = {}
+      for (let i = 0; i < simAccounts.length; i++) {
+        cumulativeVaults = mergeLayeredVaults(cumulativeVaults, collectAccountVaults(simAccounts[i]))
+        cumulativeVaults = mergeLayeredVaults(cumulativeVaults, simVaultLayers[i] ?? [])
+        vaultLayers.push(cumulativeVaults)
+      }
+
       const fullLayers: Account<IHasVaultAddress>[] = [baseAccount]
       const cumulativeClosedPositions: BatchClosedPosition[] = []
       for (let i = 1; i < simAccounts.length; i++) {
@@ -1771,6 +1801,7 @@ export const useTxBatch = () => {
           account: acc,
           portfolio: projected.visible,
           portfolioAll: projected.all,
+          vaults: vaultLayers[idx] ?? {},
           walletBalances: walletLayers[idx],
           walletBalancesSim: simWb[idx] ?? {},
           failed,

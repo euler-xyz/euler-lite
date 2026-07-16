@@ -35,6 +35,7 @@ import {
   type ProjectedYieldState,
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 const router = useRouter()
 const _route = useRoute()
@@ -166,6 +167,14 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
+const projectionBorrowVault = computed(() => {
+  const fallback = borrowVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
+const projectionCollateralVault = computed(() => {
+  const fallback = collateralVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
 useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.value?.address].filter(Boolean)))
 const borrowWarnings = computed(() => {
   if (!borrowVault.value) return []
@@ -207,8 +216,8 @@ const currentYieldGuard = createRaceGuard()
 const refreshCurrentYield = async () => {
   const gen = currentYieldGuard.next()
   const currentPosition = position.value
-  const currentBorrowVault = borrowVault.value
-  const currentCollateralVault = collateralVault.value
+  const currentBorrowVault = projectionBorrowVault.value
+  const currentCollateralVault = projectionCollateralVault.value
   currentYieldState.value = undefined
   currentNetAPY.value = undefined
   currentRewardCampaigns.value = []
@@ -488,8 +497,8 @@ const asyncEstimatesGuard = createRaceGuard()
 const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
   if (asyncEstimatesGuard.isStale(gen)) return
   const currentPair = pair.value
-  const currentBorrowVault = borrowVault.value
-  const currentCollateralVault = collateralVault.value
+  const currentBorrowVault = projectionBorrowVault.value
+  const currentCollateralVault = projectionCollateralVault.value
   const currentPosition = position.value
   const currentBorrowAmount = borrowAmount.value
   const baselineState = currentYieldState.value
@@ -628,7 +637,13 @@ watch([collateralAmount, borrowAmount], async () => {
   updateSyncEstimates()
   queueAsyncEstimates()
 })
-watch(position, async () => {
+watch([
+  position,
+  () => projectionBorrowVault.value?.totalCash,
+  () => projectionBorrowVault.value?.totalBorrowed,
+  () => projectionCollateralVault.value?.totalCash,
+  () => projectionCollateralVault.value?.totalBorrowed,
+], async () => {
   asyncEstimatesGuard.next()
   netAPY.value = undefined
   projectedYieldDetails.value = undefined

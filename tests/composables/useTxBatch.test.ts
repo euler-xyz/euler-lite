@@ -4,6 +4,7 @@ import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type 
 import { getAddress, type Address } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -642,6 +643,32 @@ describe('buildWalletBalanceLayers', () => {
 })
 
 describe('useTxBatch execution errors', () => {
+  it('publishes per-layer simulated vault state even without an enriched account position', async () => {
+    const sdk = createMockSdk()
+    const simulatedVault = {
+      ...pricedVault(vault, 'USDC'),
+      totalCash: 900n,
+      totalBorrowed: 450n,
+    }
+    sdk.executionService.simulateTransactionPlan.mockResolvedValue({
+      simulatedAccounts: [accountWithPosition(subAccount, subAccount, 2n)],
+      simulatedVaultsLayers: [[simulatedVault]],
+      simulatedWalletBalances: [],
+      simulatedVaults: [simulatedVault],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    } as never)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    await useTxBatch().addEntry({
+      label: 'Withdraw USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+
+    expect(activeLayerVaultsRef.value[vault.toLowerCase()]).toBe(simulatedVault)
+  })
+
   it('can dismiss a failed execution message without clearing the cart', () => {
     const batch = useTxBatch()
     batch.execError.value = 'User rejected the request.'

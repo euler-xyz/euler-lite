@@ -31,6 +31,7 @@ import {
   type ProjectedYieldCampaignInput,
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 // Snapshot of all borrow inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may have been reset), so the plan
@@ -638,10 +639,18 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // Async estimates (projected rates, USD prices, net APY) are debounced
   const asyncEstimatesGuard = createRaceGuard()
+  const projectionCollateralVault = computed(() => {
+    const fallback = collateralVault.value
+    return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+  })
+  const projectionBorrowVault = computed(() => {
+    const fallback = borrowVault.value
+    return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+  })
   const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
     if (asyncEstimatesGuard.isStale(gen)) return
-    const collateral = collateralVault.value
-    const borrow = borrowVault.value
+    const collateral = projectionCollateralVault.value
+    const borrow = projectionBorrowVault.value
     if (!pair.value || !collateral || !borrow) {
       projectedYieldDetails.value = null
       isEstimatesLoading.value = false
@@ -1180,10 +1189,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     pair,
     collateralVault,
     borrowVault,
-    () => collateralVault.value?.totalCash,
-    () => collateralVault.value?.totalBorrowed,
-    () => borrowVault.value?.totalCash,
-    () => borrowVault.value?.totalBorrowed,
+    () => projectionCollateralVault.value?.totalCash,
+    () => projectionCollateralVault.value?.totalBorrowed,
+    () => projectionBorrowVault.value?.totalCash,
+    () => projectionBorrowVault.value?.totalBorrowed,
   ], () => {
     asyncEstimatesGuard.next()
     projectedYieldDetails.value = null

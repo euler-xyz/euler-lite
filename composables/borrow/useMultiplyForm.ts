@@ -42,6 +42,7 @@ import {
   type ProjectedYieldDetails,
   type ProjectedYieldRateLine,
 } from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -421,11 +422,23 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const projectedBorrowRates = ref<ProjectedRates | null>(null)
   const projectedRatesComplete = ref(false)
   const projectedRatesGuard = createRaceGuard()
+  const projectionSupplyVault = computed(() => {
+    const fallback = multiplySupplyVault.value
+    return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+  })
+  const projectionLongVault = computed(() => {
+    const fallback = multiplyLongVault.value
+    return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+  })
+  const projectionShortVault = computed(() => {
+    const fallback = multiplyShortVault.value
+    return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+  })
 
   watchEffect(async () => {
-    const supply = multiplySupplyVault.value
-    const short = multiplyShortVault.value
-    const long = multiplyLongVault.value
+    const supply = projectionSupplyVault.value
+    const short = projectionShortVault.value
+    const long = projectionLongVault.value
     const supplyNano = multiplySupplyAmountNano.value
     const upfrontSupplyNano = isMultiplySavingCollateral.value ? 0n : supplyNano
     const debtNano = multiplyDebtAmountNano.value
@@ -487,27 +500,30 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- APYs ---
   const multiplySupplyApy = computed(() => {
     void rewardsVersion.value
-    if (!multiplySupplyVault.value || !projectedRatesComplete.value) return null
-    const currentRaw = getVaultSupplyApy(multiplySupplyVault.value)
+    const vault = projectionSupplyVault.value
+    if (!vault || !projectedRatesComplete.value) return null
+    const currentRaw = getVaultSupplyApy(vault)
     const projectedRaw = projectedSupplyRates.value ? nanoToValue(projectedSupplyRates.value.supplyAPY, 25) : null
-    return withProjectedVaultIntrinsicApy(currentRaw, projectedRaw, multiplySupplyVault.value, enableIntrinsicApy.value)
-      + getSupplyRewardApy(multiplySupplyVault.value.address)
+    return withProjectedVaultIntrinsicApy(currentRaw, projectedRaw, vault, enableIntrinsicApy.value)
+      + getSupplyRewardApy(vault.address)
   })
 
   const multiplyLongApy = computed(() => {
     void rewardsVersion.value
-    if (!multiplyLongVault.value || !projectedRatesComplete.value) return null
-    const currentRaw = getVaultSupplyApy(multiplyLongVault.value)
+    const vault = projectionLongVault.value
+    if (!vault || !projectedRatesComplete.value) return null
+    const currentRaw = getVaultSupplyApy(vault)
     const projectedRaw = projectedLongRates.value ? nanoToValue(projectedLongRates.value.supplyAPY, 25) : null
-    return withProjectedVaultIntrinsicApy(currentRaw, projectedRaw, multiplyLongVault.value, enableIntrinsicApy.value)
-      + getSupplyRewardApy(multiplyLongVault.value.address)
+    return withProjectedVaultIntrinsicApy(currentRaw, projectedRaw, vault, enableIntrinsicApy.value)
+      + getSupplyRewardApy(vault.address)
   })
 
   const multiplyBorrowApy = computed(() => {
-    if (!multiplyShortVault.value || !projectedRatesComplete.value) return null
-    const currentRaw = getVaultBorrowApy(multiplyShortVault.value)
+    const vault = projectionShortVault.value
+    if (!vault || !projectedRatesComplete.value) return null
+    const currentRaw = getVaultBorrowApy(vault)
     const projectedRaw = projectedBorrowRates.value ? nanoToValue(projectedBorrowRates.value.borrowAPY, 25) : null
-    return withProjectedVaultIntrinsicApy(currentRaw, projectedRaw, multiplyShortVault.value, enableIntrinsicApy.value)
+    return withProjectedVaultIntrinsicApy(currentRaw, projectedRaw, vault, enableIntrinsicApy.value)
   })
 
   const multiplyCollateralAddresses = computed(() => [
@@ -548,9 +564,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     roe: ProjectedYieldDetails
   } | null>(() => {
     void rewardsVersion.value
-    const supply = multiplySupplyVault.value
-    const long = multiplyLongVault.value
-    const borrow = multiplyShortVault.value
+    const supply = projectionSupplyVault.value
+    const long = projectionLongVault.value
+    const borrow = projectionShortVault.value
     const supplyUsd = multiplySupplyValueUsd.value
     const longUsd = multiplyLongValueUsd.value
     const totalSupplyUsd = multiplyTotalSupplyUsd.value

@@ -10,6 +10,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { logWarn } from '~/utils/errorHandling'
 import type { RewardCampaign } from '~/entities/reward-campaign'
+import { activeLayerVaultsRef, useLayeredVaults } from '~/composables/useLayeredVaults'
 
 interface CollateralApyDelta {
   vaultAddress: string
@@ -60,7 +61,7 @@ export const usePositionCollateralApy = () => {
     getSupplyRewardCampaigns,
     version: rewardsVersion,
   } = useRewardsApy()
-  const { getOrFetch } = useVaultRegistry()
+  const { resolveLayeredVault } = useLayeredVaults()
   const { isReady: isVaultsReady, isMarketDataResolved } = useVaults()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -114,6 +115,7 @@ export const usePositionCollateralApy = () => {
       void rewardsVersion.value
       const intrinsicApyEnabled = enableIntrinsicApy.value
       void isMarketDataResolved.value
+      void activeLayerVaultsRef.value
 
       await until(isVaultsReady).toBe(true)
       if (!isMarketDataResolved.value) {
@@ -145,7 +147,7 @@ export const usePositionCollateralApy = () => {
 
       const resolvedEntries = await Promise.all(allAddresses.map(async (address): Promise<CollateralApyEntry | null> => {
         const existingCollateral = getPositionCollateral(position, address, primaryAddress)
-        const vault = existingCollateral ? existingCollateral.vault : await getOrFetch(address)
+        const vault = await resolveLayeredVault(address, existingCollateral?.vault)
         if (!vault) return null
         const currentAssets = getCollateralAssets(position, address, primaryAddress)
         const delta = deltaByAddress.get(address)?.assetsDelta || 0n

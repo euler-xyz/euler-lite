@@ -32,6 +32,7 @@ import {
   mergeProjectedRewardCampaigns,
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 const router = useRouter()
 const route = useRoute()
@@ -75,6 +76,12 @@ const asset: Ref<VaultAsset | undefined> = ref()
 
 // Check if vault is securitize (for things like supply/borrow which securitize doesn't have)
 const isSecuritizeVaultType = computed(() => !!vault.value && isSecuritizeCollateralVault(vault.value))
+const projectionEVault = computed(() => {
+  const fallback = vault.value
+  if (!fallback || isSecuritizeCollateralVault(fallback)) return undefined
+  return getLayeredVault(fallback.address, fallback)
+})
+const yieldVault = computed(() => projectionEVault.value ?? vault.value)
 
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
@@ -187,15 +194,16 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 const supplyAPY = computed(() => {
-  if (!vault.value) return 0
-  return getVaultTotalSupplyApy(vault.value, enableIntrinsicApy.value, rewardApy.value)
+  if (!yieldVault.value) return 0
+  return getVaultTotalSupplyApy(yieldVault.value, enableIntrinsicApy.value, rewardApy.value)
 })
 
 const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | null => {
-  if (!vault.value || isSecuritizeVaultType.value) return null
-  const currentRaw = getVaultSupplyApy(vault.value)
-  const currentWithIntrinsic = withVaultIntrinsicApy(currentRaw, vault.value, enableIntrinsicApy.value)
-  const projectedWithIntrinsic = withVaultIntrinsicApy(rawApy, vault.value, enableIntrinsicApy.value)
+  const currentVault = projectionEVault.value
+  if (!currentVault) return null
+  const currentRaw = getVaultSupplyApy(currentVault)
+  const currentWithIntrinsic = withVaultIntrinsicApy(currentRaw, currentVault, enableIntrinsicApy.value)
+  const projectedWithIntrinsic = withVaultIntrinsicApy(rawApy, currentVault, enableIntrinsicApy.value)
   const before = getProjectedYieldState('supply-apy', {
     supplyUsd: 1,
     baseSupplyApy: currentRaw,
@@ -213,17 +221,17 @@ const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | nu
     baseBorrowApy: 0,
   })
   if (!after) return null
-  const campaigns = getSupplyRewardCampaigns(vault.value.address)
-    .map(campaign => ({ campaign, vaultAddress: vault.value!.address }))
+  const campaigns = getSupplyRewardCampaigns(currentVault.address)
+    .map(campaign => ({ campaign, vaultAddress: currentVault.address }))
   return {
     metric: 'supply-apy',
     before,
     after,
     rateLines: [{
-      id: `supply:${vault.value.address.toLowerCase()}`,
+      id: `supply:${currentVault.address.toLowerCase()}`,
       label: 'Lending APY',
-      symbol: vault.value.asset.symbol,
-      vaultAddress: vault.value.address,
+      symbol: currentVault.asset.symbol,
+      vaultAddress: currentVault.address,
       before: currentRaw,
       after: rawApy,
     }],
@@ -422,8 +430,9 @@ const load = async () => {
     }
     else {
       vault.value = await getVault(vaultAddress)
-      const rawApy = getVaultSupplyApy(vault.value as EVault)
-      estimateSupplyAPY.value = withVaultIntrinsicApy(rawApy, vault.value, enableIntrinsicApy.value) + rewardApy.value
+      const currentVault = projectionEVault.value ?? (vault.value as EVault)
+      const rawApy = getVaultSupplyApy(currentVault)
+      estimateSupplyAPY.value = withVaultIntrinsicApy(rawApy, currentVault, enableIntrinsicApy.value) + rewardApy.value
       projectedYieldDetails.value = buildProjectedSupplyDetails(rawApy)
     }
 
@@ -623,13 +632,13 @@ const updateSyncEstimates = () => {
 const estimatesGuard = createRaceGuard()
 
 const updateAsyncEstimates = useDebounceFn(async () => {
-  if (!vault.value || isSecuritizeVaultType.value) {
+  if (!projectionEVault.value || isSecuritizeVaultType.value) {
     isEstimatesLoading.value = false
     return
   }
   const gen = estimatesGuard.next()
   try {
-    const v = vault.value as EVault
+    const v = projectionEVault.value
     const amountNano = valueToNano(amount.value, v.shares.decimals)
     const projected = await getProjectedRates(
       v.address,
@@ -676,7 +685,7 @@ const queueAsyncEstimates = () => {
     return
   }
   if (!(+amount.value > 0)) {
-    const rawApy = getVaultSupplyApy(vault.value)
+    const rawApy = getVaultSupplyApy(projectionEVault.value)
     estimateSupplyAPY.value = supplyAPY.value
     projectedYieldDetails.value = buildProjectedSupplyDetails(rawApy)
     isEstimatesLoading.value = false
@@ -702,7 +711,12 @@ watch(amount, async () => {
   }
 })
 
-watch([rewardsVersion, enableIntrinsicApy], () => {
+watch([
+  rewardsVersion,
+  enableIntrinsicApy,
+  () => projectionEVault.value?.totalCash,
+  () => projectionEVault.value?.totalBorrowed,
+], () => {
   queueAsyncEstimates()
 })
 

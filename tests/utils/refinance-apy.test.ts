@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRefinanceProjectedRateRequests, getSameAssetRefinanceBorrowAmount } from '~/utils/refinance-apy'
+import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount } from '~/utils/refinance-apy'
 
 const source = {
   address: '0x0000000000000000000000000000000000000001',
@@ -90,5 +90,19 @@ describe('getSameAssetRefinanceBorrowAmount', () => {
 
   it('matches the explicit one-percent borrow buffer for an external migration', () => {
     expect(getSameAssetRefinanceBorrowAmount(1_000_000n, true)).toBe(1_010_000n)
+  })
+})
+
+describe('getRefinanceRewardCollateralAddresses', () => {
+  it('retains sibling collateral addresses when replacing the selected source', () => {
+    const sibling = '0x0000000000000000000000000000000000000003'
+
+    expect(getRefinanceRewardCollateralAddresses([
+      { vaultAddress: source.address, assets: 100n },
+      { vaultAddress: sibling, assets: 50n },
+    ], source.address, target.address)).toEqual([
+      sibling,
+      target.address,
+    ])
   })
 })

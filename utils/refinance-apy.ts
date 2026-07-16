@@ -35,6 +35,26 @@ export interface RefinanceProjectedRateRequest {
 
 const normalizeAddress = (address: string) => address.toLowerCase()
 
+export const getRefinanceRewardCollateralAddresses = (
+  currentCollaterals: readonly { vaultAddress: string, assets: bigint }[],
+  sourceAddress?: string,
+  targetAddress?: string,
+): string[] => {
+  const addresses = new Set(
+    currentCollaterals
+      .filter(collateral => collateral.assets > 0n)
+      .map(collateral => normalizeAddress(collateral.vaultAddress)),
+  )
+
+  if (!addresses.size && sourceAddress) addresses.add(normalizeAddress(sourceAddress))
+  if (targetAddress) {
+    if (sourceAddress) addresses.delete(normalizeAddress(sourceAddress))
+    addresses.add(normalizeAddress(targetAddress))
+  }
+
+  return [...addresses]
+}
+
 export const buildRefinanceProjectedRateRequests = (
   collateralDeltas: readonly RefinanceCollateralRateDelta[],
   debtDeltas: readonly RefinanceDebtRateDelta[] = [],

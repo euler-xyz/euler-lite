@@ -35,6 +35,7 @@ import {
   mergeProjectedRewardCampaigns,
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -169,6 +170,10 @@ const {
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeCollateralVault | undefined> = ref(undefined)
+const projectionEVault = computed(() => {
+  const fallback = eVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
 
 // Check if the active debt-pricing route uses Pyth oracles (requires fresh prices)
 const hasPythOracles = (v: EVault | undefined): boolean => {
@@ -359,12 +364,12 @@ const hasRewards = computed(() => {
   void rewardsVersion.value
   return hasSupplyRewards(vaultAddress)
 })
-const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(projectionEVault.value ?? vault.value, enableIntrinsicApy.value))
 
 const baseSupplyApy = computed(() => {
   if (!features.value.hasInterestRate) return 0
-  if (!eVault.value) return 0
-  return getVaultSupplyApy(eVault.value)
+  if (!projectionEVault.value) return 0
+  return getVaultSupplyApy(projectionEVault.value)
 })
 const supplyApyWithIntrinsic = computed(() => combineApyWithIntrinsic(baseSupplyApy.value, intrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
@@ -372,7 +377,8 @@ const supplyAPYDisplay = computed(() => {
   return formatNumber(supplyApyWithIntrinsic.value + totalRewardsAPY.value)
 })
 const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | null => {
-  if (!eVault.value) return null
+  const currentVault = projectionEVault.value
+  if (!currentVault) return null
   const supplyApyWithIntrinsic = combineApyWithIntrinsic(rawApy, intrinsicApy.value)
   const after = getProjectedYieldState('supply-apy', {
     supplyUsd: 1,
@@ -387,15 +393,15 @@ const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | nu
     metric: 'supply-apy',
     after,
     rateLines: [{
-      id: `supply:${eVault.value.address.toLowerCase()}`,
+      id: `supply:${currentVault.address.toLowerCase()}`,
       label: 'Lending APY',
-      symbol: eVault.value.asset.symbol,
-      vaultAddress: eVault.value.address,
-      before: getVaultSupplyApy(eVault.value),
+      symbol: currentVault.asset.symbol,
+      vaultAddress: currentVault.address,
+      before: getVaultSupplyApy(currentVault),
       after: rawApy,
     }],
-    rewards: mergeProjectedRewardCampaigns([], getSupplyRewardCampaigns(eVault.value.address)
-      .map(campaign => ({ campaign, vaultAddress: eVault.value!.address }))),
+    rewards: mergeProjectedRewardCampaigns([], getSupplyRewardCampaigns(currentVault.address)
+      .map(campaign => ({ campaign, vaultAddress: currentVault.address }))),
   }
 }
 
@@ -421,9 +427,9 @@ const isVaultVerified = computed(() => {
 const load = async () => {
   isLoading.value = true
   try {
-    if (features.value.hasInterestRate && eVault.value) {
+    if (features.value.hasInterestRate && projectionEVault.value) {
       estimateSupplyAPY.value
-        = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+        = combineApyWithIntrinsic(getVaultSupplyApy(projectionEVault.value), intrinsicApy.value)
           + totalRewardsAPY.value
     }
     else {
@@ -670,11 +676,12 @@ const updateEstimates = useDebounceFn(async () => {
   const gen = estimatesGuard.next()
   projectedYieldDetails.value = null
   try {
-    if (features.value.hasInterestRate && eVault.value) {
+    const currentVault = projectionEVault.value
+    if (features.value.hasInterestRate && currentVault) {
       // When swapping, use the swap output amount (vault-asset denominated)
       const supplyNano = needsSwap.value
         ? BigInt(swapEffectiveQuote.value?.amountOut || 0)
-        : valueToNano(amount.value, eVault.value.shares.decimals)
+        : valueToNano(amount.value, currentVault.shares.decimals)
 
       if (needsSwap.value && !supplyNano) {
         // The vault-asset amount is unknown until a quote resolves, so there is
@@ -683,9 +690,9 @@ const updateEstimates = useDebounceFn(async () => {
       }
       else {
         const projected = await getProjectedRates(
-          eVault.value.address,
-          eVault.value.totalCash,
-          eVault.value.totalBorrowed,
+          currentVault.address,
+          currentVault.totalCash,
+          currentVault.totalBorrowed,
           supplyNano,
           0n,
         )
@@ -741,7 +748,7 @@ const supplyApyModalData = computed(() => ({
     mode: 'supply',
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(projectionEVault.value ?? vault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vaultAddress),
     rewardVaultAddress: vaultAddress,
   },
@@ -955,7 +962,12 @@ watch(amount, async () => {
   queueEstimates()
 })
 
-watch([rewardsVersion, enableIntrinsicApy], () => {
+watch([
+  rewardsVersion,
+  enableIntrinsicApy,
+  () => projectionEVault.value?.totalCash,
+  () => projectionEVault.value?.totalBorrowed,
+], () => {
   queueEstimates()
 })
 </script>

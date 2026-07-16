@@ -23,6 +23,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { buildLendSwapProjectionPlan, resolveLendSwapProjectedRates } from '~/utils/lend-swap-apy'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
@@ -48,6 +49,14 @@ const subAccount = computed(() => {
 // ── Vaults ───────────────────────────────────────────────────────────────
 const fromVault: Ref<EVault | SecuritizeCollateralVault | undefined> = ref()
 const toVault: Ref<EVault | undefined> = ref()
+const projectionFromVault = computed(() => {
+  const fallback = fromVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
+const projectionToVault = computed(() => {
+  const fallback = toVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)))
 
 const fromVaultAsRegular = computed(() => fromVault.value as EVault | undefined)
@@ -78,19 +87,21 @@ const savingPosition = computed(() => {
 const assetsBalance = computed(() => savingPosition.value?.assets || 0n)
 const balance = computed(() => getCashLimitedWithdrawAmount(
   assetsBalance.value,
-  fromVault.value,
+  projectionFromVault.value,
 ))
 
 // ── Supply APY ───────────────────────────────────────────────────────────
 const fromSupplyApy = computed(() => {
-  if (!fromVault.value) return null
-  const base = getVaultSupplyApy(fromVault.value)
-  return withVaultIntrinsicApy(base, fromVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(fromVault.value.address)
+  const vault = projectionFromVault.value
+  if (!vault) return null
+  const base = getVaultSupplyApy(vault)
+  return withVaultIntrinsicApy(base, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 })
 const toSupplyApy = computed(() => {
-  if (!toVault.value) return null
-  const base = getVaultSupplyApy(toVault.value)
-  return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(toVault.value.address)
+  const vault = projectionToVault.value
+  if (!vault) return null
+  const base = getVaultSupplyApy(vault)
+  return withVaultIntrinsicApy(base, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 })
 const projectedFromSupplyApy = ref<number | null>(null)
 const projectedToSupplyApy = ref<number | null>(null)
@@ -217,8 +228,8 @@ const {
 const yieldEstimateGuard = createRaceGuard()
 const updateYieldEstimates = useDebounceFn(async (gen: number) => {
   if (yieldEstimateGuard.isStale(gen)) return
-  const source = fromVault.value
-  const target = toVault.value
+  const source = projectionFromVault.value
+  const target = projectionToVault.value
   const sourceAmount = fromAmount.value
   const sameAsset = isSameAsset.value
   const quote = selectedQuote.value
@@ -405,7 +416,19 @@ watch([() => route.params.vault, () => route.query.to], () => {
 })
 
 watch(
-  [fromAmount, fromVault, toVault, isSameAsset, selectedQuote, rewardsVersion, enableIntrinsicApy],
+  [
+    fromAmount,
+    fromVault,
+    toVault,
+    isSameAsset,
+    selectedQuote,
+    rewardsVersion,
+    enableIntrinsicApy,
+    () => isEVault(projectionFromVault.value) ? projectionFromVault.value.totalCash : undefined,
+    () => isEVault(projectionFromVault.value) ? projectionFromVault.value.totalBorrowed : undefined,
+    () => projectionToVault.value?.totalCash,
+    () => projectionToVault.value?.totalBorrowed,
+  ],
   queueYieldEstimates,
 )
 </script>

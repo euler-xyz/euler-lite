@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
+import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 
 const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
@@ -225,6 +226,7 @@ describe('useBorrowForm savings collateral', () => {
     mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([])
     mocks.supplyRewardApy = 0
     mocks.borrowRewardApy = 0
+    activeLayerVaultsRef.value = {}
     rewardsVersion.value = 0
     mocks.preloadSubAccountSnapshot.mockResolvedValue(undefined)
     vi.stubGlobal('ref', ref)
@@ -303,6 +305,7 @@ describe('useBorrowForm savings collateral', () => {
   })
 
   afterEach(() => {
+    activeLayerVaultsRef.value = {}
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
@@ -506,6 +509,28 @@ describe('useBorrowForm savings collateral', () => {
     await Promise.resolve()
     await nextTick()
     expect(form.projectedYieldDetails.value?.rateLines.find(line => line.id.startsWith('supply:'))?.after).toBe(2)
+  })
+
+  it('seeds projections from the active simulated vault layer', async () => {
+    const simulatedVault = {
+      ...vault,
+      totalCash: 9_000n,
+      totalBorrowed: 1_250n,
+    } as EVault
+    activeLayerVaultsRef.value = { [VAULT.toLowerCase()]: simulatedVault }
+    const form = makeForm(shallowRef([]))
+
+    form.collateralAmount.value = '10'
+    form.borrowAmount.value = '2'
+
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
+    const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{
+      currentCash: bigint
+      currentBorrows: bigint
+    }>
+    expect(requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ currentCash: 9_000n, currentBorrows: 1_250n }),
+    ]))
   })
 
   it('clears the savings source when selecting a Pay-with token', () => {

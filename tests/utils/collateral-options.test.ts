@@ -38,4 +38,23 @@ describe('computeBorrowApy', () => {
       enableRewardsApy: true,
     }, COLLATERAL)).toBeCloseTo(6.06)
   })
+
+  it('subtracts collateral-qualified rewards for every retained collateral', () => {
+    const vault = {
+      interestRates: { borrowAPY: 6 },
+      intrinsicApy: { apy: 1 },
+      rewards: {
+        getActiveCampaigns: () => [
+          campaign('general', 'BORROW', 0.0025),
+          campaign('first', 'BORROW_COLLATERAL', 0.0075, COLLATERAL),
+          campaign('second', 'BORROW_COLLATERAL', 0.01, OTHER_COLLATERAL),
+        ],
+      },
+    } as unknown as EVault
+
+    expect(computeBorrowApy(vault, undefined, {
+      enableIntrinsicApy: true,
+      enableRewardsApy: true,
+    }, [COLLATERAL, OTHER_COLLATERAL])).toBeCloseTo(5.06)
+  })
 })
