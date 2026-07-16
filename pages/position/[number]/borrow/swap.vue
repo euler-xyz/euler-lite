@@ -164,8 +164,18 @@ const {
 const inboundExternalEulerAccount = shallowRef<Address | null>(null)
 const inboundExternalEulerAccountKey = ref('')
 
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
-const isLoading = ref(false)
+// Layer-aware: `getPositionBySubAccountIndex` follows the active batch layer's
+// portfolio, so refinance debt/collateral inputs must stay reactive to it. A
+// one-shot ref would combine simulated vault utilization with layer-0 balances.
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() => {
+  if (isExternalSourceRoute.value || (!isConnected.value && !isSpyMode.value)) return null
+  return getPositionBySubAccountIndex(+positionIndex) || null
+})
+const isLoading = computed(() =>
+  !isExternalSourceRoute.value
+  && (isConnected.value || isSpyMode.value)
+  && !isPositionsLoaded.value,
+)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isAddingToBatch = ref(false)
@@ -3036,27 +3046,6 @@ watch(
   },
   { immediate: true },
 )
-
-const loadPosition = async () => {
-  if (isExternalSourceRoute.value) {
-    position.value = null
-    isLoading.value = false
-    return
-  }
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
-  isLoading.value = true
-  await until(isPositionsLoaded).toBe(true)
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
-  isLoading.value = false
-}
-
-watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
-  if (isExternalSourceRoute.value) return
-  if (loaded) void loadPosition()
-}, { immediate: true })
 
 const resolveSelectedVault = <T extends EVault | EulerEarn | SecuritizeCollateralVault>(
   vaults: T[],
