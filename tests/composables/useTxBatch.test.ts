@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 
 vi.mock('~/composables/useEulerSdk', () => ({
@@ -642,6 +642,32 @@ describe('buildWalletBalanceLayers', () => {
   })
 })
 
+describe('normalizeSimulatedVaultLayers', () => {
+  const afterFirst = [{ id: 'after-first' }]
+  const afterSecond = [{ id: 'after-second' }]
+  const afterThird = [{ id: 'after-third' }]
+
+  it('accepts absent, per-operation, and base-inclusive cardinalities', () => {
+    expect(normalizeSimulatedVaultLayers([], 2)).toEqual([])
+    expect(normalizeSimulatedVaultLayers([afterFirst, afterSecond], 2)).toEqual([
+      [],
+      afterFirst,
+      afterSecond,
+    ])
+    expect(normalizeSimulatedVaultLayers([[], afterFirst, afterSecond], 2)).toEqual([
+      [],
+      afterFirst,
+      afterSecond,
+    ])
+  })
+
+  it('rejects final-only and partial non-empty layers for multi-operation batches', () => {
+    expect(normalizeSimulatedVaultLayers([afterSecond], 2)).toBeNull()
+    expect(normalizeSimulatedVaultLayers([afterFirst, afterSecond], 3)).toBeNull()
+    expect(normalizeSimulatedVaultLayers([afterFirst, afterSecond, afterThird], 4)).toBeNull()
+  })
+})
+
 describe('useTxBatch execution errors', () => {
   it('publishes per-layer simulated vault state even without an enriched account position', async () => {
     const sdk = createMockSdk()
@@ -667,6 +693,63 @@ describe('useTxBatch execution errors', () => {
     })
 
     expect(activeLayerVaultsRef.value[vault.toLowerCase()]).toBe(simulatedVault)
+  })
+
+  it('does not apply a final-only vault snapshot to earlier layers of a multi-operation batch', async () => {
+    const sdk = createMockSdk()
+    const firstOperationVault = {
+      ...pricedVault(vault, 'USDC'),
+      totalCash: 900n,
+      totalBorrowed: 450n,
+    }
+    const finalOnlyVault = {
+      ...pricedVault(vault, 'USDC'),
+      totalCash: 800n,
+      totalBorrowed: 500n,
+    }
+    sdk.executionService.simulateTransactionPlan
+      .mockResolvedValueOnce({
+        simulatedAccounts: [accountWithPosition(subAccount, subAccount, 2n)],
+        simulatedVaultsLayers: [[firstOperationVault]],
+        simulatedWalletBalances: [],
+        simulatedVaults: [firstOperationVault],
+        failedBatchItems: [],
+        insufficientWalletAssets: [],
+      } as never)
+      .mockResolvedValueOnce({
+        simulatedAccounts: [
+          accountWithPosition(subAccount, subAccount, 2n),
+          accountWithPosition(subAccount, subAccount, 3n),
+        ],
+        // Unsupported final-only shape for two operations. It must not be
+        // treated as the base/first layer and carried into earlier estimates.
+        simulatedVaultsLayers: [[finalOnlyVault]],
+        simulatedWalletBalances: [],
+        simulatedVaults: [finalOnlyVault],
+        failedBatchItems: [],
+        insufficientWalletAssets: [],
+      } as never)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Withdraw USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+    await vi.waitFor(() => expect(activeLayerVaultsRef.value[vault.toLowerCase()]).toBe(firstOperationVault))
+
+    await batch.addEntry({
+      label: 'Borrow USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(3))
+
+    expect(batch.layers.value[0]?.vaults?.[vault.toLowerCase()]).toBeUndefined()
+    expect(batch.layers.value[1]?.vaults?.[vault.toLowerCase()]).toBeUndefined()
+    expect(activeLayerVaultsRef.value[vault.toLowerCase()]).toBeUndefined()
+    expect(batch.simError.value).toBeUndefined()
   })
 
   it('invalidates a successful overlay when the replacement simulation rejects', async () => {

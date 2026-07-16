@@ -483,6 +483,22 @@ export const buildWalletBalanceLayers = (
   })
 }
 
+/**
+ * Align optional SDK vault snapshots with account layers. The only proven
+ * shapes are no snapshots, one snapshot per operation, or a base snapshot plus
+ * one per operation. Any other non-empty cardinality is ambiguous and must not
+ * be indexed into earlier layers.
+ */
+export const normalizeSimulatedVaultLayers = <T>(
+  rawLayers: T[][],
+  operationCount: number,
+): T[][] | null => {
+  if (rawLayers.length === 0) return []
+  if (rawLayers.length === operationCount) return [[], ...rawLayers]
+  if (rawLayers.length === operationCount + 1) return rawLayers
+  return null
+}
+
 type BatchSimulationWalletBalances = {
   simulatedWalletBalances?: Record<string, bigint>[]
 }
@@ -1645,9 +1661,16 @@ export const useTxBatch = () => {
         ? [baseAccount, ...rawSimAccounts]
         : rawSimAccounts
       const rawSimVaultLayers = sim.simulatedVaultsLayers ?? []
-      const simVaultLayers = rawSimVaultLayers.length === plans.length
-        ? [[], ...rawSimVaultLayers]
-        : rawSimVaultLayers
+      const normalizedSimVaultLayers = normalizeSimulatedVaultLayers(rawSimVaultLayers, plans.length)
+      const simVaultLayers = normalizedSimVaultLayers ?? []
+      if (normalizedSimVaultLayers === null) {
+        logBatchDiag('resimulate:vault-layer-cardinality-invalid', {
+          token,
+          rawVaultLayers: rawSimVaultLayers.length,
+          plans: plans.length,
+          acceptedVaultLayerCounts: [0, plans.length, plans.length + 1],
+        }, 'error')
+      }
       // A healthy sim returns exactly one account per operation on top of the
       // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1. Anything
       // else is the smoking gun for the "not loaded" symptom (getCurrentFinalLayer
