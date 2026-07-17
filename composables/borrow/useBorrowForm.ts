@@ -609,8 +609,19 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (typeof selection === 'number') {
       const option = collateralOptions.value[selection]
       const nextIsSaving = option?.type === 'saving'
-      isSavingCollateral.value = nextIsSaving
-      selectedSavingSubAccount.value = nextIsSaving ? option?.subAccount : undefined
+      if (nextIsSaving) {
+        // Set the concrete source first. The source watcher ignores this
+        // preparatory change while wallet mode is still active, then reruns
+        // once when savings mode becomes active.
+        selectedSavingSubAccount.value = option?.subAccount
+        isSavingCollateral.value = true
+      }
+      else {
+        // Leave savings mode before clearing its disambiguator so this also
+        // produces a single estimate rerun.
+        isSavingCollateral.value = false
+        selectedSavingSubAccount.value = undefined
+      }
       return
     }
     isSavingCollateral.value = selection
@@ -1297,10 +1308,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     queueAsyncEstimates()
   }, { flush: 'sync' })
 
-  watch(isSavingCollateral, () => {
+  watch([isSavingCollateral, selectedSavingSubAccount], ([isSaving, selected], [wasSaving, previousSelected]) => {
+    const sourceChanged = isSaving !== wasSaving
+      || (isSaving && selected !== previousSelected)
+    if (!sourceChanged) return
     // Source changes do not change either amount, but they do change whether
-    // collateral enters the vault as new cash. Invalidate synchronously so an
-    // older request cannot publish between the source change and this rerun.
+    // collateral enters the vault as new cash and whether it is a self-transfer.
+    // Invalidate synchronously so an older request cannot publish between the
+    // source change and this rerun.
     clearBorrowSimulationError()
     queueAsyncEstimates()
   }, { flush: 'sync' })

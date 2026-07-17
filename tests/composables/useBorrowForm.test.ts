@@ -457,6 +457,33 @@ describe('useBorrowForm savings collateral', () => {
     ).toBe(3))
   })
 
+  it('reruns projected rates when switching between savings sub-accounts', async () => {
+    const positions = shallowRef<PortfolioSavingsPosition<VaultEntity>[]>([
+      makeSavingsPosition(SUB_ACCOUNT_A, 100n, 90n),
+      makeSavingsPosition(SUB_ACCOUNT_B, 200n, 180n),
+    ])
+    mocks.getProjectedRatesBatch.mockImplementation(async requests => requests.map(() => ({
+      supplyAPY: 0n,
+      borrowAPY: 0n,
+    })))
+    const form = makeForm(positions)
+    form.onChangeCollateral(1)
+    form.collateralAmount.value = '10'
+    form.borrowAmount.value = '2'
+
+    await vi.waitFor(() => expect(form.projectedYieldDetails.value).not.toBeNull())
+    await vi.waitFor(() => expect(form.isEstimatesLoading.value).toBe(false))
+    mocks.getProjectedRatesBatch.mockClear()
+    mocks.getAssetUsdValueForEstimate.mockClear()
+
+    form.onChangeCollateral(2)
+
+    expect(form.isSavingCollateral.value).toBe(true)
+    expect(form.selectedSavingSubAccount.value).toBe(SUB_ACCOUNT_B)
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalledTimes(1))
+    expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalled()
+  })
+
   it('does not run a queued projection after both inputs are cleared', async () => {
     let runQueued: (() => Promise<void>) | undefined
     vi.stubGlobal('useDebounceFn', (fn: (...args: unknown[]) => unknown) => (...args: unknown[]) => {
