@@ -10,6 +10,7 @@ import {
   getActivityAssetLabel,
   getActivityChangeEntries,
   getActivityParticipants,
+  getDisplayActivityEventTypes,
   getVaultActivityFilterOptions,
   isActivityScopeUnsupported,
   resolveActivityFilterCategories,
@@ -21,6 +22,33 @@ const VAULT = '0x0000000000000000000000000000000000000002' as const
 const SHARES = '0x0000000000000000000000000000000000000003' as const
 
 describe('activity display helpers', () => {
+  it('uses bounded scope-specific event filters without display noise', () => {
+    const scopes = [
+      { kind: 'account' },
+      { kind: 'vault', vaultType: 'evk' },
+      { kind: 'vault', vaultType: 'earn' },
+      { kind: 'vault', vaultType: 'securitize' },
+    ] as const
+    const hiddenTypes = ['interest_accrued', 'accrue_interest', 'mint', 'burn']
+
+    for (const scope of scopes) {
+      const eventTypes = getDisplayActivityEventTypes(scope)
+      expect(eventTypes.join(',').length).toBeLessThanOrEqual(1_024)
+      expect(eventTypes).not.toEqual(expect.arrayContaining(hiddenTypes))
+    }
+
+    expect(getDisplayActivityEventTypes({ kind: 'account' })).toEqual(expect.arrayContaining([
+      'deposit',
+      'transfer',
+      'reward_transfer',
+    ]))
+    expect(getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'evk' })).toEqual(expect.arrayContaining([
+      'deposit',
+      'transfer',
+      'set_caps',
+    ]))
+  })
+
   it('returns vault-specific category filters with category-accurate labels', () => {
     expect(getVaultActivityFilterOptions('evk')).toEqual([
       { value: 'lending-borrowing', label: 'Lending and borrowing', categories: ['lending', 'borrowing'] },

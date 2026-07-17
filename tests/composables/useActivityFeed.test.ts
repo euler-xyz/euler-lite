@@ -6,11 +6,15 @@ const VAULT = '0x0000000000000000000000000000000000000001' as const
 const OTHER_VAULT = '0x0000000000000000000000000000000000000002' as const
 const TX_HASH = `0x${'1'.repeat(64)}` as const
 
-const event = (id: string, vault: typeof VAULT | typeof OTHER_VAULT = VAULT) => ({
+const event = (
+  id: string,
+  vault: typeof VAULT | typeof OTHER_VAULT = VAULT,
+  type = 'deposit',
+) => ({
   id,
   chainId: 1,
-  type: 'deposit',
-  rawType: 'deposit',
+  type,
+  rawType: type === 'mint' || type === 'burn' ? 'transfer' : type,
   category: 'lending' as const,
   timestamp: '2026-07-13T10:30:00.000Z',
   blockNumber: '123',
@@ -76,7 +80,7 @@ describe('useActivityFeed', () => {
   })
 
   it('does not request activity until enabled and forwards server-side categories', async () => {
-    const fetchVaultActivityEvents = vi.fn(async () => page([event('one')]))
+    const fetchVaultActivityEvents = vi.fn(async (_args: { eventTypes?: readonly string[] }) => page([event('one')]))
     const { useActivityFeed } = await setup(fetchVaultActivityEvents)
     const enabled = ref(false)
     const categories = ref(['lending', 'governance'] as const)
@@ -99,8 +103,45 @@ describe('useActivityFeed', () => {
       chainId: 1,
       vaultType: 'evk',
       categories: ['governance', 'lending'],
+      eventTypes: expect.any(Array),
       limit: 25,
     })
+    const requestedEventTypes = fetchVaultActivityEvents.mock.calls[0]?.[0]?.eventTypes
+    expect(requestedEventTypes).toEqual(expect.arrayContaining(['deposit', 'withdraw', 'transfer']))
+    expect(requestedEventTypes).not.toEqual(expect.arrayContaining([
+      'interest_accrued',
+      'accrue_interest',
+      'mint',
+      'burn',
+    ]))
+  })
+
+  it('keeps display events while dropping interest accrual and paired share movements', async () => {
+    const fetchVaultActivityEvents = vi.fn(async () => page([
+      event('deposit'),
+      event('mint-shadow', VAULT, 'mint'),
+      event('evk-interest', VAULT, 'interest_accrued'),
+      event('earn-interest', VAULT, 'accrue_interest'),
+      event('transfer', VAULT, 'transfer'),
+      event('withdraw', VAULT, 'withdraw'),
+      event('burn-shadow', VAULT, 'burn'),
+    ]))
+    const { useActivityFeed } = await setup(fetchVaultActivityEvents)
+    let feed: ReturnType<typeof useActivityFeed> | undefined
+    effect = effectScope()
+    effect.run(() => {
+      feed = useActivityFeed({
+        scope: { kind: 'vault', vault: VAULT, chainId: 1, vaultType: 'evk' },
+        enabled: true,
+        categories: [],
+      })
+    })
+
+    await vi.waitFor(() => expect(feed?.events.value.map(item => item.id)).toEqual([
+      'deposit',
+      'transfer',
+      'withdraw',
+    ]))
   })
 
   it('retains loaded rows without refetching when collapsed and reopened', async () => {

@@ -17,6 +17,10 @@ import {
 } from 'vue'
 import { subscribeToSdkQueryInvalidations } from '~/utils/sdk-query-cache'
 import { ACTIVITY_QUERY_STALE_TIME_MS } from '~/utils/sdk-query-policy'
+import {
+  filterActivityEventsForDisplay,
+  getDisplayActivityEventTypes,
+} from '~/utils/activity-display'
 
 export type ActivityFeedScope
   = | { kind: 'account', owner: Address, chainId: number | readonly number[] }
@@ -153,9 +157,11 @@ export const useActivityFeed = ({
     try {
       const { getEulerSdkForChain } = useEulerSdk()
       const sdk = await getEulerSdkForChain(scopeSdkChainId(requestScope))
+      const eventTypes = getDisplayActivityEventTypes(requestScope)
       const common = {
         ...(requestCategories.length ? { categories: requestCategories } : {}),
         ...(cursor ? { cursor } : {}),
+        eventTypes,
         limit,
       }
       const page = requestScope.kind === 'account'
@@ -176,9 +182,10 @@ export const useActivityFeed = ({
         throw new Error('Activity pagination cursor did not advance')
       }
 
+      const displayEvents = filterActivityEventsForDisplay(page.data, eventTypes)
       events.value = mode === 'append'
-        ? mergeActivityEvents(events.value, page.data)
-        : mergeActivityEvents([], page.data)
+        ? mergeActivityEvents(events.value, displayEvents)
+        : mergeActivityEvents([], displayEvents)
       meta.value = page.meta
       error.value = undefined
       loadMoreError.value = undefined
