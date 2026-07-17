@@ -36,7 +36,10 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
     SUB_ACCOUNT_B,
     VAULT,
     vault,
-    planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
+    planAccount: {
+      chainId: 1,
+      getSubAccount: vi.fn(),
+    } as unknown as Account<IHasVaultAddress>,
     mocks: {
       planBorrow: vi.fn(),
       executePlan: vi.fn(),
@@ -46,13 +49,19 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
       runSimulation: vi.fn(),
       modalOpen: vi.fn(),
       getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => null)),
-      getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
+      getPositionMultiplier: vi.fn((
+        _supplyUsd: number | null | undefined,
+        _borrowUsd: number | null | undefined,
+      ) => 1),
+      getAssetUsdValueForEstimate: vi.fn(async (_amount: number | bigint) => 0 as number | undefined),
       getSupplyRewardCampaigns: vi.fn(() => [] as RewardCampaign[]),
       getBorrowRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
+      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
       getEligibleLoopingRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
       supplyRewardApy: 0,
       borrowRewardApy: 0,
       borrowEffectiveQuote: undefined as unknown as Ref<unknown>,
+      planAccountRef: undefined as unknown as Ref<Account<IHasVaultAddress>>,
     },
   }
 })
@@ -129,7 +138,7 @@ vi.mock('~/utils/vault/apy', () => ({
     projectedRates.length === expectedCount && projectedRates.every(projected => projected !== null),
   getProjectedRates: vi.fn(async () => null),
   getProjectedRatesBatch: mocks.getProjectedRatesBatch,
-  getPositionMultiplier: vi.fn(() => 1),
+  getPositionMultiplier: mocks.getPositionMultiplier,
 }))
 
 vi.mock('~/utils/swapRouteItems', () => ({
@@ -182,9 +191,9 @@ interface TestPair {
   }
 }
 
-const makePair = (pairVault = vault): TestPair => ({
+const makePair = (pairVault = vault, pairBorrowVault = pairVault): TestPair => ({
   collateral: pairVault,
-  borrow: pairVault,
+  borrow: pairBorrowVault,
   ltv: {
     borrowLTV: 500000000000000000n,
     liquidationLTV: 750000000000000000n,
@@ -202,6 +211,7 @@ const makeForm = (
     formTab: ref('borrow'),
     savingPositions: computed(() => positions.value),
     balance: ref(7n),
+    pendingSubAccount: ref(USER),
     resolvePendingSubAccount: vi.fn(async () => USER),
     collateralSupplyApy: computed(() => 0),
     borrowApy: computed(() => 0),
@@ -220,12 +230,16 @@ describe('useBorrowForm savings collateral', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => null))
+    mocks.getPositionMultiplier.mockReturnValue(1)
     mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
     mocks.getSupplyRewardCampaigns.mockReturnValue([])
     mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([])
+    mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(0)
     mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([])
     mocks.supplyRewardApy = 0
     mocks.borrowRewardApy = 0
+    vi.mocked(planAccount.getSubAccount).mockReturnValue(undefined)
+    mocks.planAccountRef = shallowRef(planAccount)
     activeLayerVaultsRef.value = {}
     rewardsVersion.value = 0
     mocks.preloadSubAccountSnapshot.mockResolvedValue(undefined)
@@ -242,7 +256,7 @@ describe('useBorrowForm savings collateral', () => {
       preloadSubAccountSnapshot: mocks.preloadSubAccountSnapshot,
     }))
     vi.stubGlobal('usePlanAccount', () => ({
-      account: shallowRef(planAccount),
+      account: mocks.planAccountRef,
     }))
     vi.stubGlobal('useWagmi', () => ({
       address: ref(USER),
@@ -269,7 +283,7 @@ describe('useBorrowForm savings collateral', () => {
       version: rewardsVersion,
       getSupplyRewardApy: vi.fn(() => mocks.supplyRewardApy),
       getBorrowRewardApyForCollaterals: vi.fn(() => mocks.borrowRewardApy),
-      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+      getEligibleLoopingRewardApyForCollaterals: mocks.getEligibleLoopingRewardApyForCollaterals,
       getSupplyRewardCampaigns: mocks.getSupplyRewardCampaigns,
       getBorrowRewardCampaignsForCollaterals: mocks.getBorrowRewardCampaignsForCollaterals,
       getEligibleLoopingRewardCampaignsForCollaterals: mocks.getEligibleLoopingRewardCampaignsForCollaterals,
@@ -516,7 +530,7 @@ describe('useBorrowForm savings collateral', () => {
       ...vault,
       totalCash: 9_000n,
       totalBorrowed: 1_250n,
-    } as EVault
+    } as unknown as EVault
     activeLayerVaultsRef.value = { [VAULT.toLowerCase()]: simulatedVault }
     const form = makeForm(shallowRef([]))
 
@@ -531,6 +545,163 @@ describe('useBorrowForm savings collateral', () => {
     expect(requests).toEqual(expect.arrayContaining([
       expect.objectContaining({ currentCash: 9_000n, currentBorrows: 1_250n }),
     ]))
+  })
+
+  it('includes collateral already held by the pending layered sub-account', async () => {
+    vi.mocked(planAccount.getSubAccount).mockReturnValue({
+      enabledCollaterals: [VAULT],
+      positions: [{
+        vaultAddress: VAULT,
+        vault,
+        assets: 100n,
+        borrowed: 0n,
+        isCollateral: true,
+      }],
+    } as never)
+    mocks.getAssetUsdValueForEstimate.mockImplementation(async amount => Number(amount))
+    mocks.getPositionMultiplier.mockImplementation((supplyUsd, borrowUsd) =>
+      supplyUsd / (supplyUsd - borrowUsd))
+    mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(1)
+    mocks.supplyRewardApy = 2
+    const rateUnit = 10n ** 25n
+    mocks.getProjectedRatesBatch.mockImplementation(async requests => requests.map(() => ({
+      supplyAPY: 5n * rateUnit,
+      borrowAPY: 10n * rateUnit,
+    })))
+    const form = makeForm(shallowRef([]))
+
+    form.borrowAmount.value = '20'
+
+    await vi.waitFor(() => expect(form.projectedYieldDetails.value).not.toBeNull())
+    expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(100n, vault, 'off-chain')
+    expect(mocks.getEligibleLoopingRewardApyForCollaterals).toHaveBeenCalledWith(
+      VAULT,
+      [VAULT],
+      1.25,
+    )
+    expect(form.projectedYieldDetails.value?.after).toMatchObject({
+      total: 5.8,
+      breakdown: {
+        lending: 5,
+        borrowing: -2,
+        rewards: 2.8,
+      },
+    })
+  })
+
+  it('reruns the estimate when the active layered account changes', async () => {
+    mocks.getAssetUsdValueForEstimate.mockImplementation(async amount => Number(amount))
+    mocks.getProjectedRatesBatch.mockImplementation(async requests => requests.map(() => ({
+      supplyAPY: 0n,
+      borrowAPY: 0n,
+    })))
+    const form = makeForm(shallowRef([]))
+    form.borrowAmount.value = '20'
+
+    await vi.waitFor(() => expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(0n, vault, 'off-chain'))
+
+    mocks.planAccountRef.value = {
+      chainId: 1,
+      getSubAccount: vi.fn(() => ({
+        enabledCollaterals: [VAULT],
+        positions: [{
+          vaultAddress: VAULT,
+          vault,
+          assets: 100n,
+          borrowed: 0n,
+          isCollateral: true,
+        }],
+      })),
+    } as unknown as Account<IHasVaultAddress>
+
+    await vi.waitFor(() => expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(100n, vault, 'off-chain'))
+    await vi.waitFor(() => expect(form.projectedYieldDetails.value).not.toBeNull())
+  })
+
+  it('does not double count savings collateral already held by the pending sub-account', async () => {
+    vi.mocked(planAccount.getSubAccount).mockReturnValue({
+      enabledCollaterals: [VAULT],
+      positions: [{
+        vaultAddress: VAULT,
+        vault,
+        assets: 100n,
+        borrowed: 0n,
+        isCollateral: true,
+      }],
+    } as never)
+    mocks.getAssetUsdValueForEstimate.mockImplementation(async amount => Number(amount))
+    mocks.getProjectedRatesBatch.mockImplementation(async requests => requests.map(() => ({
+      supplyAPY: 0n,
+      borrowAPY: 0n,
+    })))
+    const form = makeForm(shallowRef([
+      makeSavingsPosition(USER, 100n, 90n),
+    ]))
+
+    form.onChangeCollateral(1)
+    form.collateralAmount.value = '20'
+    form.borrowAmount.value = '5'
+
+    await vi.waitFor(() => expect(form.projectedYieldDetails.value).not.toBeNull())
+    expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(100n, vault, 'off-chain')
+    expect(mocks.getAssetUsdValueForEstimate).not.toHaveBeenCalledWith(120n, vault, 'off-chain')
+  })
+
+  it('combines every enabled collateral and existing debt with only the current form deltas', async () => {
+    const otherAddress = '0x0000000000000000000000000000000000000004'
+    const borrowAddress = '0x0000000000000000000000000000000000000005'
+    const otherVault = {
+      ...vault,
+      address: otherAddress,
+      asset: { ...vault.asset, symbol: 'OTHER' },
+      shares: { ...vault.shares, address: otherAddress, symbol: 'eOTHER' },
+    } as unknown as EVault
+    const debtVault = {
+      ...vault,
+      address: borrowAddress,
+      asset: { ...vault.asset, symbol: 'DEBT' },
+      shares: { ...vault.shares, address: borrowAddress, symbol: 'eDEBT' },
+    } as unknown as EVault
+    vi.mocked(planAccount.getSubAccount).mockReturnValue({
+      enabledCollaterals: [VAULT, otherAddress],
+      positions: [
+        { vaultAddress: VAULT, vault, assets: 100n, borrowed: 0n },
+        { vaultAddress: otherAddress, vault: otherVault, assets: 50n, borrowed: 0n },
+        { vaultAddress: borrowAddress, vault: debtVault, assets: 0n, borrowed: 10n },
+      ],
+    } as never)
+    mocks.getAssetUsdValueForEstimate.mockImplementation(async amount => Number(amount))
+    mocks.getPositionMultiplier.mockImplementation((supplyUsd, borrowUsd) =>
+      supplyUsd! / (supplyUsd! - borrowUsd!))
+    mocks.getProjectedRatesBatch.mockImplementation(async requests => requests.map(() => ({
+      supplyAPY: 0n,
+      borrowAPY: 0n,
+    })))
+    const pair = shallowRef<TestPair>(makePair(vault, debtVault))
+    const form = makeForm(shallowRef([]), pair)
+
+    form.collateralAmount.value = '20'
+    form.borrowAmount.value = '5'
+
+    await vi.waitFor(() => expect(form.projectedYieldDetails.value).not.toBeNull())
+    const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{
+      vaultAddress: string
+      cashDelta: bigint
+      borrowsDelta: bigint
+    }>
+    expect(requests).toMatchObject([
+      { vaultAddress: VAULT, cashDelta: 20n, borrowsDelta: 0n },
+      { vaultAddress: borrowAddress, cashDelta: -5n, borrowsDelta: 5n },
+    ])
+    expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(120n, vault, 'off-chain')
+    expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(50n, otherVault, 'off-chain')
+    expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(15n, debtVault, 'off-chain')
+    expect(mocks.getPositionMultiplier).toHaveBeenLastCalledWith(170, 15)
+    expect(mocks.getEligibleLoopingRewardApyForCollaterals).toHaveBeenLastCalledWith(
+      borrowAddress,
+      [VAULT, otherAddress],
+      170 / 155,
+    )
   })
 
   it('clears the savings source when selecting a Pay-with token', () => {

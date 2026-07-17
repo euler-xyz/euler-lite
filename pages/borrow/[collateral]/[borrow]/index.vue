@@ -155,6 +155,7 @@ const borrow = useBorrowForm({
   formTab,
   savingPositions,
   balance,
+  pendingSubAccount,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,

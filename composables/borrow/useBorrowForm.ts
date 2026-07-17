@@ -1,7 +1,7 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { areProjectedRatesComplete, getProjectedRatesBatch, getPositionMultiplier } from '~/utils/vault/apy'
+import { areProjectedRatesComplete, getProjectedRatesBatch, getPositionMultiplier, type ProjectedRates, type ProjectedRatesRequest } from '~/utils/vault/apy'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
@@ -59,6 +59,7 @@ export interface UseBorrowFormOptions {
   savingPositions: ComputedRef<PortfolioSavingsPosition<VaultEntity>[]>
   balance: Ref<bigint>
 
+  pendingSubAccount: Ref<string | null>
   resolvePendingSubAccount: () => Promise<string>
 
   collateralSupplyApy: ComputedRef<number>
@@ -83,6 +84,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     formTab: _formTab,
     savingPositions,
     balance,
+    pendingSubAccount,
     resolvePendingSubAccount,
     collateralSupplyApyWithRewards,
     isSecuritizeCollateral,
@@ -657,75 +659,161 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       return
     }
     try {
+      const account = planAccount.value
+      const targetSubAccountAddress = pendingSubAccount.value
+        ?? (account && effectiveAddress.value ? await resolvePendingSubAccount() : undefined)
+      const targetSubAccount = account && effectiveAddress.value
+        && targetSubAccountAddress
+        ? account.getSubAccount(getAddress(targetSubAccountAddress))
+        : undefined
+      if (asyncEstimatesGuard.isStale(gen)) return
+
       // When swapping, use the quote output amount (collateral-vault-asset denominated)
       const collateralAmountNano = borrowNeedsSwap.value
         ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
-        : valueToNano(collateralAmount.value || '0', collateral.shares.decimals)
+        : valueToNano(collateralAmount.value || '0', collateral.asset.decimals)
       const collateralCashDelta = isSavingCollateral.value && !borrowNeedsSwap.value ? 0n : collateralAmountNano
-      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrow.shares.decimals)
+      const savingsSourceAddress = normalizeAddress(savingCollateral.value?.subAccount)
+      const normalizedTargetSubAccountAddress = normalizeAddress(targetSubAccountAddress)
+      const isSavingsSelfTransfer = isSavingCollateral.value
+        && !borrowNeedsSwap.value
+        && !!savingsSourceAddress
+        && savingsSourceAddress === normalizedTargetSubAccountAddress
+      // The SDK omits a savings-share transfer when source and destination are
+      // the same sub-account, so those assets are already present in the
+      // layered position and must not be added a second time.
+      const selectedCollateralAssetsDelta = isSavingsSelfTransfer ? 0n : collateralAmountNano
+      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrow.asset.decimals)
+      const selectedCollateralAddress = normalizeAddress(collateral.address)
+      const borrowVaultAddress = normalizeAddress(borrow.address)
+      if (!selectedCollateralAddress || !borrowVaultAddress) {
+        projectedYieldDetails.value = null
+        return
+      }
 
-      const [projectedRates, collateralUsdValue, borrowUsdValue] = await Promise.all([
-        getProjectedRatesBatch([
-          {
-            vaultAddress: collateral.address,
-            currentCash: collateral.totalCash,
-            currentBorrows: collateral.totalBorrowed,
-            cashDelta: collateralCashDelta,
-            borrowsDelta: 0n,
-          },
-          {
-            vaultAddress: borrow.address,
-            currentCash: borrow.totalCash,
-            currentBorrows: borrow.totalBorrowed,
-            cashDelta: -borrowAmountNano,
-            borrowsDelta: borrowAmountNano,
-          },
-        ]),
-        getAssetUsdValueForEstimate(collateralAmountNano, collateral, 'off-chain'),
-        getAssetUsdValueForEstimate(borrowAmountNano, borrow, 'off-chain'),
+      const positions = targetSubAccount?.positions ?? []
+      const findPosition = (address: string) => positions.find(position =>
+        normalizeAddress(position.vaultAddress) === address)
+      const collateralAddresses = new Set<string>([selectedCollateralAddress])
+      targetSubAccount?.enabledCollaterals.forEach((address) => {
+        const normalized = normalizeAddress(address)
+        if (normalized) collateralAddresses.add(normalized)
+      })
+
+      const collateralLegs: Array<{ address: string, vault: VaultEntity, assets: bigint }> = []
+      for (const address of collateralAddresses) {
+        const position = findPosition(address)
+        const existingAssets = position?.assets ?? 0n
+        const nextAssets = existingAssets + (address === selectedCollateralAddress ? selectedCollateralAssetsDelta : 0n)
+        if (nextAssets <= 0n && address !== selectedCollateralAddress) continue
+
+        const positionVault = position?.vault && 'asset' in position.vault
+          ? position.vault as VaultEntity
+          : undefined
+        const fallbackVault = address === selectedCollateralAddress ? collateral : positionVault
+        const vault = getLayeredVault(address, fallbackVault)
+        if (!vault || !('asset' in vault)) {
+          projectedYieldDetails.value = null
+          return
+        }
+        collateralLegs.push({ address, vault: vault as VaultEntity, assets: nextAssets > 0n ? nextAssets : 0n })
+      }
+
+      const existingBorrowed = findPosition(borrowVaultAddress)?.borrowed ?? 0n
+      const nextBorrowed = existingBorrowed + borrowAmountNano
+      const projectionRequests: ProjectedRatesRequest[] = [
+        {
+          vaultAddress: collateral.address,
+          currentCash: collateral.totalCash,
+          currentBorrows: collateral.totalBorrowed,
+          cashDelta: collateralCashDelta,
+          borrowsDelta: 0n,
+        },
+        {
+          vaultAddress: borrow.address,
+          currentCash: borrow.totalCash,
+          currentBorrows: borrow.totalBorrowed,
+          cashDelta: -borrowAmountNano,
+          borrowsDelta: borrowAmountNano,
+        },
+      ]
+
+      const [projectedRates, collateralUsdValues, borrowUsdValue] = await Promise.all([
+        getProjectedRatesBatch(projectionRequests),
+        Promise.all(collateralLegs.map(leg =>
+          getAssetUsdValueForEstimate(leg.assets, leg.vault, 'off-chain'))),
+        getAssetUsdValueForEstimate(nextBorrowed, borrow, 'off-chain'),
       ])
       if (asyncEstimatesGuard.isStale(gen)) return
       if (
-        !areProjectedRatesComplete(projectedRates, 2)
-        || collateralUsdValue === undefined
+        !areProjectedRatesComplete(projectedRates, projectionRequests.length)
+        || collateralUsdValues.some(value => value === undefined)
         || borrowUsdValue === undefined
       ) {
         projectedYieldDetails.value = null
         return
       }
-      const [collateralProjected, borrowProjected] = projectedRates
+      const projectedByAddress = new Map<string, ProjectedRates>()
+      projectionRequests.forEach((request, index) => {
+        const address = normalizeAddress(request.vaultAddress)
+        if (!projectedByAddress.has(address)) projectedByAddress.set(address, projectedRates[index]!)
+      })
+      const supplyEntries = collateralLegs.map((leg, index) => {
+        const supplyUsd = collateralUsdValues[index]!
+        const currentRaw = getVaultSupplyApy(leg.vault)
+        const projected = projectedByAddress.get(leg.address)
+        const projectedRaw = projected ? nanoToValue(projected.supplyAPY, 25) : currentRaw
+        const supplyApyWithIntrinsic = withProjectedVaultIntrinsicApy(
+          currentRaw,
+          projected ? projectedRaw : null,
+          leg.vault,
+          enableIntrinsicApy.value,
+        )
+        return {
+          ...leg,
+          supplyUsd,
+          currentRaw,
+          projectedRaw,
+          intrinsicSupplyApy: supplyApyWithIntrinsic - projectedRaw,
+          supplyRewardApy: getSupplyRewardApy(leg.address),
+        }
+      })
+      const collateralUsdValue = supplyEntries.reduce((sum, entry) => sum + entry.supplyUsd, 0)
+      const weightedSupply = (select: (entry: typeof supplyEntries[number]) => number) =>
+        collateralUsdValue > 0
+          ? supplyEntries.reduce((sum, entry) => sum + entry.supplyUsd * select(entry), 0) / collateralUsdValue
+          : 0
+      const projectedBaseSupplyApy = weightedSupply(entry => entry.projectedRaw)
+      const projectedIntrinsicSupplyApy = weightedSupply(entry => entry.intrinsicSupplyApy)
+      const projectedSupplyRewardApy = weightedSupply(entry => entry.supplyRewardApy)
+      const positiveCollateralAddresses = supplyEntries
+        .filter(entry => entry.assets > 0n)
+        .map(entry => entry.address)
 
-      const currentSupplyRaw = getVaultSupplyApy(collateral)
-      const projectedSupplyRaw = nanoToValue(collateralProjected!.supplyAPY, 25)
-      const projectedSupplyApy = withProjectedVaultIntrinsicApy(
-        currentSupplyRaw,
-        projectedSupplyRaw,
-        collateral,
-        enableIntrinsicApy.value,
-      )
       const currentBorrowRaw = getVaultBorrowApy(borrow)
-      const projectedBorrowRaw = nanoToValue(borrowProjected!.borrowAPY, 25)
+      const borrowProjected = projectedRates[1]!
+      const projectedBorrowRaw = borrowProjected ? nanoToValue(borrowProjected.borrowAPY, 25) : currentBorrowRaw
       const projectedBorrowApy = withProjectedVaultIntrinsicApy(
         currentBorrowRaw,
-        projectedBorrowRaw,
+        borrowProjected ? projectedBorrowRaw : null,
         borrow,
         enableIntrinsicApy.value,
       )
       const multiplier = getPositionMultiplier(collateralUsdValue, borrowUsdValue)
       const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
         borrow.address,
-        [collateral.address],
+        positiveCollateralAddresses,
         multiplier,
       )
       const after = getProjectedYieldState('net-apy', {
         supplyUsd: collateralUsdValue,
-        baseSupplyApy: projectedSupplyRaw,
-        intrinsicSupplyApy: projectedSupplyApy - projectedSupplyRaw,
-        supplyRewardApy: getSupplyRewardApy(collateral.address),
+        baseSupplyApy: projectedBaseSupplyApy,
+        intrinsicSupplyApy: projectedIntrinsicSupplyApy,
+        supplyRewardApy: projectedSupplyRewardApy,
         borrowUsd: borrowUsdValue,
         baseBorrowApy: projectedBorrowRaw,
         intrinsicBorrowApy: projectedBorrowApy - projectedBorrowRaw,
-        borrowRewardApy: getBorrowRewardApyForCollaterals(borrow.address, [collateral.address]),
+        borrowRewardApy: getBorrowRewardApyForCollaterals(borrow.address, positiveCollateralAddresses),
         loopingRewardApy,
       })
       if (!after) {
@@ -734,16 +822,17 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       const afterCampaigns: ProjectedYieldCampaignInput[] = [
-        ...(collateralUsdValue > 0
-          ? getSupplyRewardCampaigns(collateral.address).map(campaign => ({ campaign, vaultAddress: collateral.address }))
-          : []),
+        ...supplyEntries
+          .filter(entry => entry.supplyUsd > 0)
+          .flatMap(entry => getSupplyRewardCampaigns(entry.address)
+            .map(campaign => ({ campaign, vaultAddress: entry.vault.address }))),
         ...(borrowUsdValue > 0
-          ? getBorrowRewardCampaignsForCollaterals(borrow.address, [collateral.address])
+          ? getBorrowRewardCampaignsForCollaterals(borrow.address, positiveCollateralAddresses)
               .map(campaign => ({ campaign, vaultAddress: borrow.address }))
           : []),
         ...getEligibleLoopingRewardCampaignsForCollaterals(
           borrow.address,
-          [collateral.address],
+          positiveCollateralAddresses,
           multiplier,
         ).map(campaign => ({ campaign, vaultAddress: borrow.address })),
       ]
@@ -751,14 +840,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         metric: 'net-apy',
         after,
         rateLines: [
-          {
-            id: `supply:${collateral.address.toLowerCase()}`,
+          ...supplyEntries.map(entry => ({
+            id: `supply:${entry.address}`,
             label: 'Collateral lending APY',
-            symbol: collateral.asset.symbol,
-            vaultAddress: collateral.address,
-            before: currentSupplyRaw,
-            after: projectedSupplyRaw,
-          },
+            symbol: entry.vault.asset.symbol,
+            vaultAddress: entry.vault.address,
+            before: entry.currentRaw,
+            after: entry.projectedRaw,
+          })),
           {
             id: `borrow:${borrow.address.toLowerCase()}`,
             label: 'Liability borrow APY',
@@ -1189,6 +1278,9 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     pair,
     collateralVault,
     borrowVault,
+    planAccount,
+    effectiveAddress,
+    pendingSubAccount,
     () => projectionCollateralVault.value?.totalCash,
     () => projectionCollateralVault.value?.totalBorrowed,
     () => projectionBorrowVault.value?.totalCash,
