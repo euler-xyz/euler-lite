@@ -41,7 +41,7 @@ const missingCategoryLabels = computed(() =>
 )
 const partialMessage = computed(() => {
   if (feed.coverage.value?.reason) return feed.coverage.value.reason
-  if (missingCategoryLabels.value) return `Missing categories: ${missingCategoryLabels.value}.`
+  if (missingCategoryLabels.value) return `${missingCategoryLabels.value} activity may be incomplete.`
   return 'Some activity may not be included yet.'
 })
 const scopeUnsupported = computed(() =>
