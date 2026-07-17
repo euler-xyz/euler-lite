@@ -40,7 +40,7 @@ watch([owner, () => Number(chainId.value)], () => {
       class="flex flex-col items-center gap-8 rounded-12 border border-line-subtle bg-surface p-24 text-center"
     >
       <div class="text-p3 text-content-primary">
-        Connect a wallet to view account activity.
+        Connect a wallet to view position activity.
       </div>
       <div class="text-p4 text-content-secondary">
         You can also open a portfolio in spy mode to inspect its history.
