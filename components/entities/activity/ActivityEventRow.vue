@@ -106,7 +106,7 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
 </script>
 
 <template>
-  <li class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 last:border-b-0">
+  <li class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover">
     <div class="activity-event-row__summary">
       <div class="activity-event-row__event flex min-w-0 items-start gap-10 pr-48">
         <div class="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
@@ -159,11 +159,18 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
         <button
           v-if="hasExpandableMobileDetails"
           type="button"
-          class="activity-event-row__more ml-40 w-fit shrink-0 text-p4 font-medium text-content-secondary transition-colors hover:text-accent-500"
+          class="activity-event-row__more ml-40 inline-flex h-28 w-fit shrink-0 items-center gap-4 rounded-8 border border-line-subtle bg-surface px-8 text-p4 font-medium text-content-secondary transition-colors hover:border-line hover:text-content-primary"
           :aria-expanded="expanded"
+          :aria-label="`${expanded ? 'Hide' : 'Show'} additional ${eventLabel} details`"
           @click="expanded = !expanded"
         >
-          {{ expanded ? 'Hide details' : 'More details' }}
+          <span>{{ expanded ? 'Less' : 'Details' }}</span>
+          <SvgIcon
+            name="arrow-down"
+            class="!h-14 !w-14 transition-transform"
+            :class="{ 'rotate-180': expanded }"
+            aria-hidden="true"
+          />
         </button>
       </div>
     </div>
@@ -175,12 +182,15 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
         class="min-w-0"
         :class="index > 0 && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
       >
-        <div class="text-p4 text-content-tertiary">
+        <div
+          class="text-p4 text-content-tertiary"
+          :class="{ 'activity-event-row__asset-label': detail.kind === 'asset' }"
+        >
           {{ detail.label }}
         </div>
 
         <template v-if="detail.kind === 'asset'">
-          <div class="mt-2 flex min-w-0 items-center gap-8">
+          <div class="activity-event-row__asset-amount mt-2 flex min-w-0 items-center gap-8">
             <AssetAvatar
               v-if="detail.avatarAsset"
               :asset="detail.avatarAsset"
@@ -188,7 +198,7 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
             />
             <div class="min-w-0">
               <div
-                class="break-words text-p3 text-content-primary"
+                class="break-words text-p3 font-medium text-content-primary"
               >
                 {{ detail.amount }}
               </div>
@@ -202,9 +212,9 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
           </div>
           <div
             v-if="detail.address"
-            class="mt-2 flex min-w-0 items-center gap-4 text-p4"
+            class="activity-event-row__asset-address mt-2 flex min-w-0 items-center gap-4 text-p4"
           >
-            <span class="shrink-0 text-content-tertiary">{{ detail.addressKind }}</span>
+            <span class="activity-event-row__asset-address-kind shrink-0 text-content-tertiary">{{ detail.addressKind }}</span>
             <ActivityAddress
               :address="detail.address"
               :chain-id="event.chainId"
@@ -309,6 +319,19 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
   .activity-event-row__more {
     margin-left: 0;
   }
+
+  .activity-event-row__asset-label,
+  .activity-event-row__asset-address-kind {
+    display: none;
+  }
+
+  .activity-event-row__asset-amount {
+    margin-top: 0;
+  }
+
+  .activity-event-row__asset-address {
+    margin-top: 4px;
+  }
 }
 
 @container activity-feed (min-width: 900px) {
@@ -364,6 +387,19 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
 
   .activity-event-row__more {
     display: none;
+  }
+
+  .activity-event-row__asset-label {
+    display: block;
+  }
+
+  .activity-event-row__asset-address-kind {
+    display: inline;
+  }
+
+  .activity-event-row__asset-amount,
+  .activity-event-row__asset-address {
+    margin-top: 2px;
   }
 
   .activity-event-row__transaction {
