@@ -27,7 +27,7 @@ The app exposes three SDK entry points, all produced by the same factory in `com
 
 - **`getEulerSdkForChain(chainId)` — chain-aware browsing instance.** Chains listed in `ONCHAIN_SDK_CHAINS` use the onchain backend regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`; all other chains use the default browsing backend. This keeps the browsing cache policy while avoiding V3-backed account/vault/Earn adapters for the pinned chains (typically deprecated chains whose V3 data is gone). Surfaces with an explicit chain id use this entry point.
 
-- **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Entries that must be live for account discovery, such as `queryAccountVaults`, use `formStaleTimeMs: 0`; plan-critical account/vault reads use shorter form-time windows than browsing reads. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
+- **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Plan-critical account and vault reads use shorter form-time windows than browsing reads: for example, `queryAccountVaults` uses 1 minute and balance-like migration reads use 15 seconds. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
 
 All entry points share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the browsing entry points read from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -128,24 +128,28 @@ export const SDK_QUERY_POLICY = {
   queryABI:            { staleTimeMs: Infinity },
 
   // Account/vault reads
-  queryAccountVaults:  { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: 0, invalidateAfterTx: true },
+  queryAccountVaults:  { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryV3AccountPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, invalidateAfterTx: true },
 
   // Time-sensitive
-  queryPythUpdateData: { staleTimeMs: 15 * SECOND },
+  queryPythUpdateData: { staleTimeMs: 30 * SECOND },
 
   // Balances
   queryBalanceOf:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
 
-  // Position migration: external position balances and authorization state
-  // are balance-like (debt accrues per block; the user can sign or revoke
-  // authorization mid-flow), so they take short windows + post-tx eviction.
+  // Position migration
+  queryListPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryListTargets:   { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryGetPosition:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
   queryGetAuthorization: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+  queryEulerTargetVaultData:   { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE },
+  queryEulerSourceVaultAssets: { staleTimeMs: 5 * MINUTE },
 }
 ```
+
+Migration discovery (`queryListPositions`, `queryListTargets`) can reuse results for 5 minutes while browsing but refreshes after 1 minute in forms and after a successful transaction. External balances and authorization state are more volatile: debt accrues per block and authorization can be granted or revoked during the flow, so `queryGetPosition` and `queryGetAuthorization` use 1-minute browsing / 15-second form windows plus post-transaction invalidation. Euler target-vault data is governance configuration; source-vault asset addresses are effectively immutable, so those reads use longer windows.
 
 Three derived exports drop out (pre-resolved so the runtime is a flat lookup):
 

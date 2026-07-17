@@ -23,7 +23,11 @@ Oracle adapter metadata is fetched from a separate repository ([oracle-checks](h
 
 **Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels and `{baseUrl}/{chainId}/adapters/{address}.json` for oracle adapters.
 
-**Caching**: The server caches each label response for 5 minutes with in-flight request deduplication, so concurrent cache-miss callers collapse onto a single upstream fetch per `chainId:file`. On upstream failure, stale cached data is served. The client also maintains a 5-minute TTL to avoid unnecessary requests on chain switches. `server/plugins/warm-cache.ts` pre-populates the server caches at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
+**Server caching**: The server caches each label response for 5 minutes with in-flight request deduplication, so concurrent cache-miss callers collapse onto a single upstream fetch per `chainId:file`. On upstream failure, stale cached data is served. `server/plugins/warm-cache.ts` pre-populates the server caches at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
+
+**Client loading and chain changes**: `useEulerLabels().loadLabels()` loads a snapshot for the current chain. A ready snapshot is reused only while that chain remains selected. On a chain change, the composable publishes an empty snapshot while the new labels load, deduplicates concurrent fetches per `chainId`, and uses a monotonic load generation to prevent a late response from a previous chain or superseded refresh from overwriting current data. ERC-4626 wrap-pair probes use the same chain and generation checks.
+
+The browsing SDK applies a separate 5-minute stale window to its five label queries, so revisiting a chain may reuse SDK-cached data without an upstream request. This cache does not bypass the composable's current-chain publication guard. Call `loadLabels(true)` when an explicit refresh is required; it invalidates all five SDK label queries before fetching and takes precedence over any older in-flight load.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
