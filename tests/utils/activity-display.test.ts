@@ -10,6 +10,7 @@ import {
   formatActivityValuation,
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
+  getActivityAssetsForDisplay,
   getActivityChangeEntries,
   getActivityEventIcon,
   getActivityParticipants,
@@ -165,7 +166,7 @@ describe('activity display helpers', () => {
       {
         ...base,
         id: 'other-transaction',
-        groupId: 'transaction-two',
+        txHash: `0x${'2'.repeat(64)}`,
         type: 'transfer',
         rawType: 'transfer',
         assets: [{ kind: 'shares', address: SHARES, amountRaw: '100' }],
@@ -176,6 +177,69 @@ describe('activity display helpers', () => {
       'deposit',
       'independent-transfer',
       'other-transaction',
+    ])
+  })
+
+  it('hides an exact repay emitted alongside a liquidation', () => {
+    const base = {
+      chainId: 1,
+      timestamp: '2026-07-13T10:30:00.000Z',
+      blockNumber: '123',
+      txHash: `0x${'1'.repeat(64)}`,
+      source: 'v3-ponder',
+      payload: {},
+      vault: VAULT,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'repay',
+        category: 'borrowing',
+        logIndex: 1,
+        type: 'repay',
+        rawType: 'repay',
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '100' }],
+      },
+      {
+        ...base,
+        id: 'liquidation',
+        category: 'liquidations',
+        logIndex: 2,
+        type: 'liquidation',
+        rawType: 'liquidation',
+        assets: [
+          { kind: 'assets', address: ASSET, amountRaw: '100' },
+          { kind: 'collateral', address: OTHER_VAULT, amountRaw: '200' },
+        ],
+      },
+      {
+        ...base,
+        id: 'independent-repay',
+        category: 'borrowing',
+        logIndex: 3,
+        type: 'repay',
+        rawType: 'repay',
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '25' }],
+      },
+    ] as ActivityEvent[]
+
+    expect(filterActivityEventsForDisplay(events, ['repay', 'liquidation']).map(event => event.id)).toEqual([
+      'liquidation',
+      'independent-repay',
+    ])
+  })
+
+  it('shows only underlying asset amounts', () => {
+    const event = {
+      assets: [
+        { kind: 'assets', address: ASSET, amountRaw: '100' },
+        { kind: 'shares', address: VAULT, amountRaw: '90' },
+        { kind: 'collateral', address: OTHER_VAULT, amountRaw: '80' },
+      ],
+    } as Pick<ActivityEvent, 'assets'>
+
+    expect(getActivityAssetsForDisplay(event)).toEqual([
+      { kind: 'assets', address: ASSET, amountRaw: '100' },
     ])
   })
 

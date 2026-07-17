@@ -197,8 +197,36 @@ export const filterActivityEventsForDisplay = (
     'public_withdrawal',
   ])
 
+  const sameTransaction = (left: ActivityEvent, right: ActivityEvent) =>
+    left.chainId === right.chainId
+    && left.txHash.toLowerCase() === right.txHash.toLowerCase()
+
+  const hasMatchingAssetAmount = (left: ActivityEvent, right: ActivityEvent) => {
+    const leftAssets = left.assets?.filter(asset => asset.kind === 'assets') ?? []
+    const rightAssets = right.assets?.filter(asset => asset.kind === 'assets') ?? []
+    return leftAssets.some((leftAsset) => {
+      const leftAddress = leftAsset.address ?? left.vault
+      if (!leftAddress || leftAsset.amountRaw === undefined) return false
+      return rightAssets.some((rightAsset) => {
+        const rightAddress = rightAsset.address ?? right.vault
+        return rightAddress !== undefined
+          && rightAsset.amountRaw !== undefined
+          && leftAddress.toLowerCase() === rightAddress.toLowerCase()
+          && leftAsset.amountRaw === rightAsset.amountRaw
+      })
+    })
+  }
+
   return visibleEvents.filter((event) => {
-    if (event.type !== 'transfer' || !event.groupId) return true
+    if (event.type === 'repay') {
+      return !events.some(candidate =>
+        candidate.type === 'liquidation'
+        && sameTransaction(event, candidate)
+        && hasMatchingAssetAmount(event, candidate),
+      )
+    }
+
+    if (event.type !== 'transfer') return true
 
     const shareMovements = event.assets?.filter(asset => asset.kind === 'shares') ?? []
     if (shareMovements.length === 0) return true
@@ -206,7 +234,7 @@ export const filterActivityEventsForDisplay = (
     return !events.some((candidate) => {
       if (
         candidate.id === event.id
-        || candidate.groupId !== event.groupId
+        || !sameTransaction(event, candidate)
         || !pairedTypes.has(candidate.type)
       ) return false
 
@@ -376,6 +404,15 @@ export const formatActivityAssetAmount = (asset: ActivityAssetAmount): string =>
   const formatted = formatSmartAmount(amount)
   return asset.symbol ? `${formatted} ${asset.symbol}` : formatted
 }
+
+/**
+ * Activity history displays protocol operations in underlying asset units.
+ * Share and yield-balance quantities are intentionally omitted because they
+ * are not historical underlying-asset amounts.
+ */
+export const getActivityAssetsForDisplay = (
+  event: Pick<ActivityEvent, 'assets'>,
+): ActivityAssetAmount[] => (event.assets ?? []).filter(asset => asset.kind === 'assets')
 
 /**
  * Fills display-only token metadata from Lite's existing vault registry.

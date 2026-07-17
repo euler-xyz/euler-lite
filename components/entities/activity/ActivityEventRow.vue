@@ -11,6 +11,7 @@ import {
   formatActivityValuation,
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
+  getActivityAssetsForDisplay,
   getActivityCategoryLabel,
   getActivityChangeEntries,
   getActivityEventIcon,
@@ -49,7 +50,7 @@ const resolveAvatarAsset = (asset: ActivityEvent['assets'][number]) => {
 const assets = computed(() => {
   // Re-resolve when vault or token metadata arrives after the activity page.
   void registryVersion.value
-  return (event.assets ?? []).map((asset, index) => {
+  return getActivityAssetsForDisplay(event).map((asset, index) => {
     const enriched = enrichActivityAssetForDisplay(
       asset,
       event,
