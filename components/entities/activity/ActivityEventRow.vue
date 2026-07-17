@@ -107,29 +107,64 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
 
 <template>
   <li class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 last:border-b-0">
-    <div class="activity-event-row__event flex min-w-0 items-start gap-10 pr-48">
-      <div class="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
-        <SvgIcon
-          :name="eventIcon.name"
-          class="!h-18 !w-18"
-          aria-hidden="true"
-        />
+    <div class="activity-event-row__summary">
+      <div class="activity-event-row__event flex min-w-0 items-start gap-10 pr-48">
+        <div class="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
+          <SvgIcon
+            :name="eventIcon.name"
+            class="!h-18 !w-18"
+            aria-hidden="true"
+          />
+        </div>
+        <div class="min-w-0">
+          <div
+            class="truncate text-p2 font-medium text-content-primary"
+            :title="eventLabel"
+          >
+            {{ eventLabel }}
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
+            <span>{{ getActivityCategoryLabel(event.category) }}</span>
+            <span aria-hidden="true">&middot;</span>
+            <time
+              class="whitespace-nowrap"
+              :datetime="event.timestamp"
+            >{{ formatActivityTimestamp(event.timestamp) }}</time>
+          </div>
+        </div>
       </div>
-      <div class="min-w-0">
-        <div
-          class="truncate text-p2 font-medium text-content-primary"
-          :title="eventLabel"
+
+      <div class="activity-event-row__meta">
+        <div class="activity-event-row__participants flex min-w-0 flex-col gap-4 pl-40 text-p3">
+          <div
+            v-for="(participant, index) in participants"
+            :key="`${participant.label}:${participant.address}`"
+            class="min-w-0 items-center gap-4"
+            :class="[
+              index > 0 && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
+            ]"
+          >
+            <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
+            <ActivityAddress
+              :address="participant.address"
+              :chain-id="event.chainId"
+            />
+          </div>
+          <span
+            v-if="participants.length === 0"
+            class="text-p4 text-content-muted"
+          >No participants</span>
+        </div>
+
+        <button
+          v-if="hasExpandableMobileDetails"
+          type="button"
+          class="activity-event-row__more ml-40 w-fit shrink-0 text-p4 font-medium text-content-secondary transition-colors hover:text-accent-500"
+          :aria-expanded="expanded"
+          @click="expanded = !expanded"
         >
-          {{ eventLabel }}
-        </div>
-        <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
-          <span>{{ getActivityCategoryLabel(event.category) }}</span>
-          <span aria-hidden="true">&middot;</span>
-          <time
-            class="whitespace-nowrap"
-            :datetime="event.timestamp"
-          >{{ formatActivityTimestamp(event.timestamp) }}</time>
-        </div>
+          {{ expanded ? 'Hide details' : 'More details' }}
+        </button>
       </div>
     </div>
 
@@ -192,37 +227,6 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
       >No additional details</span>
     </div>
 
-    <div class="activity-event-row__participants flex min-w-0 flex-col gap-4 pl-40 text-p3">
-      <div
-        v-for="(participant, index) in participants"
-        :key="`${participant.label}:${participant.address}`"
-        class="min-w-0 items-center gap-4"
-        :class="[
-          index > 0 && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
-        ]"
-      >
-        <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
-        <ActivityAddress
-          :address="participant.address"
-          :chain-id="event.chainId"
-        />
-      </div>
-      <span
-        v-if="participants.length === 0"
-        class="text-p4 text-content-muted"
-      >No participants</span>
-    </div>
-
-    <button
-      v-if="hasExpandableMobileDetails"
-      type="button"
-      class="activity-event-row__more ml-40 w-fit text-p4 font-medium text-content-secondary transition-colors hover:text-accent-500"
-      :aria-expanded="expanded"
-      @click="expanded = !expanded"
-    >
-      {{ expanded ? 'Hide details' : 'More details' }}
-    </button>
-
     <div class="activity-event-row__transaction absolute right-0 top-8">
       <a
         :href="transactionLink"
@@ -243,6 +247,27 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
 </template>
 
 <style scoped>
+.activity-event-row__summary,
+.activity-event-row__meta {
+  display: contents;
+}
+
+.activity-event-row__event {
+  order: 1;
+}
+
+.activity-event-row__details {
+  order: 2;
+}
+
+.activity-event-row__participants {
+  order: 3;
+}
+
+.activity-event-row__more {
+  order: 4;
+}
+
 @container activity-feed (min-width: 520px) {
   .activity-event-row {
     grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.2fr);
@@ -250,13 +275,39 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
     gap: 16px;
   }
 
+  .activity-event-row__summary {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .activity-event-row__event,
+  .activity-event-row__meta {
+    order: initial;
+  }
+
+  .activity-event-row__meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+    padding-left: 40px;
+  }
+
   .activity-event-row__details {
+    order: initial;
     padding-left: 0;
   }
 
-  .activity-event-row__participants,
+  .activity-event-row__participants {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding-left: 0;
+  }
+
   .activity-event-row__more {
-    grid-column: 1 / -1;
+    margin-left: 0;
   }
 }
 
@@ -269,14 +320,38 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
       44px;
   }
 
+  .activity-event-row__summary,
+  .activity-event-row__meta {
+    display: contents;
+  }
+
+  .activity-event-row__event,
+  .activity-event-row__details,
+  .activity-event-row__participants,
+  .activity-event-row__transaction {
+    grid-row: 1;
+  }
+
+  .activity-event-row__event {
+    grid-column: 1;
+  }
+
+  .activity-event-row__details {
+    grid-column: 2;
+  }
+
+  .activity-event-row__participants {
+    grid-column: 3;
+  }
+
+  .activity-event-row__transaction {
+    grid-column: 4;
+  }
+
   .activity-event-row__event,
   .activity-event-row__participants {
     padding-left: 0;
     padding-right: 0;
-  }
-
-  .activity-event-row__participants {
-    grid-column: auto;
   }
 
   .activity-event-row__secondary-detail {
