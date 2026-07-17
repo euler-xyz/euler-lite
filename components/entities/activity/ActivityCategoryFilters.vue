@@ -2,46 +2,23 @@
 import type { ActivityFilterOption } from '~/utils/activity-display'
 
 const selected = defineModel<string[]>({ required: true })
-defineProps<{
+const props = defineProps<{
   options: readonly ActivityFilterOption[]
 }>()
 
-const selectAll = () => {
-  selected.value = []
-}
-
-const toggle = (filter: string) => {
-  selected.value = selected.value.includes(filter)
-    ? selected.value.filter(value => value !== filter)
-    : [...selected.value, filter]
-}
+const selectOptions = computed(() => props.options.map(option => ({
+  label: option.label,
+  value: option.value,
+})))
 </script>
 
 <template>
-  <div
-    class="flex max-w-full gap-8 overflow-x-auto pb-2"
-    role="group"
-    aria-label="Activity categories"
-  >
-    <button
-      type="button"
-      class="h-32 shrink-0 rounded-full px-12 text-p3 transition-colors"
-      :class="selected.length === 0 ? 'bg-accent-600 text-black hover:bg-accent-700' : 'bg-surface text-content-secondary hover:text-content-primary'"
-      :aria-pressed="selected.length === 0"
-      @click="selectAll"
-    >
-      All
-    </button>
-    <button
-      v-for="option in options"
-      :key="option.value"
-      type="button"
-      class="h-32 shrink-0 rounded-full px-12 text-p3 transition-colors"
-      :class="selected.includes(option.value) ? 'bg-accent-600 text-black hover:bg-accent-700' : 'bg-surface text-content-secondary hover:text-content-primary'"
-      :aria-pressed="selected.includes(option.value)"
-      @click="toggle(option.value)"
-    >
-      {{ option.label }}
-    </button>
-  </div>
+  <UiSelect
+    v-model="selected"
+    class="w-fit max-w-full"
+    :options="selectOptions"
+    placeholder="All activity"
+    title="Activity categories"
+    show-selected-options
+  />
 </template>
