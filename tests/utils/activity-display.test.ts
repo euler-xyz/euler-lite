@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import type { ActivityEvent } from '@eulerxyz/euler-v2-sdk'
 import {
   enrichActivityAssetForDisplay,
+  filterActivityEventsForDisplay,
   formatActivityAssetAmount,
   formatActivityAssetUsd,
   formatActivityEventLabel,
@@ -9,7 +11,9 @@ import {
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
   getActivityChangeEntries,
+  getActivityEventIcon,
   getActivityParticipants,
+  getActivityTransferDirection,
   getDisplayActivityEventTypes,
   getVaultActivityFilterOptions,
   isActivityScopeUnsupported,
@@ -20,6 +24,7 @@ import { isVaultBorrowable } from '~/utils/vault/classification'
 const ASSET = '0x0000000000000000000000000000000000000001' as const
 const VAULT = '0x0000000000000000000000000000000000000002' as const
 const SHARES = '0x0000000000000000000000000000000000000003' as const
+const OTHER_VAULT = '0x0000000000000000000000000000000000000004' as const
 
 describe('activity display helpers', () => {
   it('uses bounded scope-specific event filters without display noise', () => {
@@ -99,13 +104,88 @@ describe('activity display helpers', () => {
     expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Set supply cap')
   })
 
+  it('labels and styles share transfers by their direction for the active account', () => {
+    const sent = {
+      account: VAULT,
+      category: 'lending' as const,
+      payload: { from: VAULT, to: OTHER_VAULT },
+      type: 'transfer',
+    }
+    const received = {
+      account: VAULT,
+      category: 'lending' as const,
+      payload: { from: OTHER_VAULT, to: VAULT },
+      type: 'transfer',
+    }
+
+    expect(getActivityTransferDirection(sent)).toBe('sent')
+    expect(formatActivityEventLabel(sent)).toBe('Sent shares')
+    expect(getActivityEventIcon(sent)).toEqual({ name: 'borrow-outline' })
+    expect(getActivityTransferDirection(received)).toBe('received')
+    expect(formatActivityEventLabel(received)).toBe('Received shares')
+    expect(getActivityEventIcon(received)).toEqual({ name: 'lend-outline' })
+    expect(formatActivityEventLabel({ ...sent, label: 'Custom transfer' })).toBe('Custom transfer')
+  })
+
+  it('hides only exact paired share transfers from the same transaction', () => {
+    const base = {
+      chainId: 1,
+      category: 'lending' as const,
+      timestamp: '2026-07-13T10:30:00.000Z',
+      blockNumber: '123',
+      logIndex: 0,
+      txHash: `0x${'1'.repeat(64)}`,
+      source: 'v3-ponder',
+      payload: {},
+      vault: VAULT,
+      groupId: 'transaction-one',
+    }
+    const events = [
+      {
+        ...base,
+        id: 'deposit',
+        type: 'deposit',
+        rawType: 'deposit',
+        assets: [{ kind: 'shares', address: SHARES, amountRaw: '100' }],
+      },
+      {
+        ...base,
+        id: 'paired-transfer',
+        type: 'transfer',
+        rawType: 'transfer',
+        assets: [{ kind: 'shares', address: SHARES, amountRaw: '100' }],
+      },
+      {
+        ...base,
+        id: 'independent-transfer',
+        type: 'transfer',
+        rawType: 'transfer',
+        assets: [{ kind: 'shares', address: SHARES, amountRaw: '25' }],
+      },
+      {
+        ...base,
+        id: 'other-transaction',
+        groupId: 'transaction-two',
+        type: 'transfer',
+        rawType: 'transfer',
+        assets: [{ kind: 'shares', address: SHARES, amountRaw: '100' }],
+      },
+    ] as ActivityEvent[]
+
+    expect(filterActivityEventsForDisplay(events, ['deposit', 'transfer']).map(event => event.id)).toEqual([
+      'deposit',
+      'independent-transfer',
+      'other-transaction',
+    ])
+  })
+
   it('formats normalized and raw asset amounts without inventing USD values', () => {
     expect(formatActivityAssetAmount({ kind: 'assets', address: ASSET, amountRaw: '1234500000', amount: '1234.5', symbol: 'USDC' })).toBe('1,234.50 USDC')
     expect(formatActivityAssetAmount({ kind: 'assets', address: ASSET, amountRaw: '1500000', decimals: 6, symbol: 'USDC' })).toBe('1.5 USDC')
-    expect(formatActivityAssetAmount({ kind: 'assets', amountRaw: '1500000' })).toBe('Raw: 1,500,000')
+    expect(formatActivityAssetAmount({ kind: 'assets', amountRaw: '1500000' })).toBe('Amount unavailable')
     expect(formatActivityAssetUsd({ kind: 'assets', amountRaw: '1', amountUsd: '1234.5' })).toBe('$1.23K')
     expect(formatActivityAssetUsd({ kind: 'assets', amountRaw: '1' })).toBeNull()
-    expect(formatActivityValuation({ status: 'unavailable', reason: 'No historical price' })).toBe('USD value unavailable')
+    expect(formatActivityValuation({ status: 'unavailable', reason: 'No historical price' })).toBeNull()
     expect(formatActivityValuation({ status: 'partial', amountUsd: '1234.5' })).toBe('$1.23K (partial)')
   })
 
@@ -138,6 +218,21 @@ describe('activity display helpers', () => {
       amountRaw: '1',
       address: VAULT,
       symbol: 'Source shares',
+      decimals: 18,
+    })
+
+    expect(enrichActivityAssetForDisplay(
+      { kind: 'value', amountRaw: '100', address: ASSET },
+      { category: 'rewards' },
+      getVaultMetadata,
+      address => address === ASSET
+        ? { address: ASSET, symbol: 'EUL', decimals: 18 }
+        : undefined,
+    )).toEqual({
+      kind: 'value',
+      amountRaw: '100',
+      address: ASSET,
+      symbol: 'EUL',
       decimals: 18,
     })
 

@@ -182,10 +182,10 @@ export const useActivityFeed = ({
         throw new Error('Activity pagination cursor did not advance')
       }
 
-      const displayEvents = filterActivityEventsForDisplay(page.data, eventTypes)
-      events.value = mode === 'append'
-        ? mergeActivityEvents(events.value, displayEvents)
-        : mergeActivityEvents([], displayEvents)
+      const mergedEvents = mode === 'append'
+        ? mergeActivityEvents(events.value, page.data)
+        : mergeActivityEvents([], page.data)
+      events.value = filterActivityEventsForDisplay(mergedEvents, eventTypes)
       meta.value = page.meta
       error.value = undefined
       loadMoreError.value = undefined

@@ -29,6 +29,7 @@ interface ActivityAssetContext {
 }
 
 type ActivityVaultMetadataLookup = (address: Address) => ActivityVaultMetadata | undefined
+type ActivityTokenMetadataLookup = (address: Address) => ActivityTokenMetadata | undefined
 
 const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   lending: 'Lending',
@@ -180,12 +181,47 @@ export const getDisplayActivityEventTypes = (
     ? ACCOUNT_ACTIVITY_EVENT_TYPES
     : VAULT_ACTIVITY_EVENT_TYPES[scope.vaultType]
 
-export const filterActivityEventsForDisplay = <T extends Pick<ActivityEvent, 'type'>>(
-  events: readonly T[],
+export const filterActivityEventsForDisplay = (
+  events: readonly ActivityEvent[],
   eventTypes: readonly ActivityEvent['type'][],
-): T[] => {
+): ActivityEvent[] => {
   const displayEventTypes = new Set<string>(eventTypes)
-  return events.filter(event => displayEventTypes.has(event.type))
+  const visibleEvents = events.filter(event => displayEventTypes.has(event.type))
+  const pairedTypes = new Set<ActivityEvent['type']>([
+    'deposit',
+    'withdraw',
+    'liquidation',
+    'reallocate_supply',
+    'reallocate_withdraw',
+    'public_reallocate_to',
+    'public_withdrawal',
+  ])
+
+  return visibleEvents.filter((event) => {
+    if (event.type !== 'transfer' || !event.groupId) return true
+
+    const shareMovements = event.assets?.filter(asset => asset.kind === 'shares') ?? []
+    if (shareMovements.length === 0) return true
+
+    return !events.some((candidate) => {
+      if (
+        candidate.id === event.id
+        || candidate.groupId !== event.groupId
+        || !pairedTypes.has(candidate.type)
+      ) return false
+
+      return shareMovements.some((transferAsset) => {
+        const transferAddress = transferAsset.address ?? event.vault
+        if (!transferAddress) return false
+        return candidate.assets?.some((candidateAsset) => {
+          const candidateAddress = candidateAsset.address ?? candidate.vault
+          return candidateAddress !== undefined
+            && candidateAddress.toLowerCase() === transferAddress.toLowerCase()
+            && candidateAsset.amountRaw === transferAsset.amountRaw
+        }) ?? false
+      })
+    })
+  })
 }
 
 export interface ActivityFilterOption {
@@ -254,9 +290,62 @@ export const titleizeActivityType = (type: string): string => {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Activity'
 }
 
+type ActivityEventLabelSource = {
+  label?: string
+  type: string
+  account?: Address
+  payload?: Record<string, unknown>
+}
+
+export type ActivityTransferDirection = 'received' | 'sent' | 'unknown'
+
+export const getActivityTransferDirection = (
+  event: Pick<ActivityEventLabelSource, 'account' | 'payload' | 'type'>,
+): ActivityTransferDirection => {
+  if (event.type !== 'transfer' || !event.account) return 'unknown'
+  const account = event.account.toLowerCase()
+  const from = typeof event.payload?.from === 'string' ? event.payload.from.toLowerCase() : undefined
+  const to = typeof event.payload?.to === 'string' ? event.payload.to.toLowerCase() : undefined
+  if (from === account && to !== account) return 'sent'
+  if (to === account && from !== account) return 'received'
+  return 'unknown'
+}
+
 export const formatActivityEventLabel = (
-  event: { label?: string, type: string },
-): string => event.label?.trim() || titleizeActivityType(event.type)
+  event: ActivityEventLabelSource,
+): string => {
+  const sourceLabel = event.label?.trim()
+  if (sourceLabel) return sourceLabel
+  if (event.type === 'transfer') {
+    const direction = getActivityTransferDirection(event)
+    if (direction === 'sent') return 'Sent shares'
+    if (direction === 'received') return 'Received shares'
+    return 'Shares transferred'
+  }
+  return titleizeActivityType(event.type)
+}
+
+export interface ActivityEventIcon {
+  name: string
+}
+
+export const getActivityEventIcon = (
+  event: Pick<ActivityEventLabelSource, 'account' | 'payload' | 'type'> & { category: ActivityCategory },
+): ActivityEventIcon => {
+  if (event.type === 'transfer') {
+    const direction = getActivityTransferDirection(event)
+    if (direction === 'sent') return { name: 'borrow-outline' }
+    if (direction === 'received') return { name: 'lend-outline' }
+    return { name: 'swap-horizontal' }
+  }
+  if (['withdraw', 'borrow', 'reallocate_withdraw', 'public_withdrawal'].includes(event.type)) {
+    return { name: 'borrow-outline' }
+  }
+  if (['deposit', 'repay', 'reallocate_supply', 'public_reallocate_to'].includes(event.type)) {
+    return { name: 'lend-outline' }
+  }
+  return { name: getActivityCategoryIcon(event.category) }
+}
 
 export const formatActivityTimestamp = (timestamp: string): string => {
   const date = new Date(timestamp)
@@ -283,14 +372,7 @@ const resolveAssetAmount = (asset: ActivityAssetAmount): string | undefined => {
 
 export const formatActivityAssetAmount = (asset: ActivityAssetAmount): string => {
   const amount = resolveAssetAmount(asset)
-  if (amount === undefined) {
-    try {
-      return `Raw: ${BigInt(asset.amountRaw).toLocaleString('en-US')}`
-    }
-    catch {
-      return 'Amount unavailable'
-    }
-  }
+  if (amount === undefined) return 'Amount unavailable'
   const formatted = formatSmartAmount(amount)
   return asset.symbol ? `${formatted} ${asset.symbol}` : formatted
 }
@@ -304,6 +386,7 @@ export const enrichActivityAssetForDisplay = (
   asset: ActivityAssetAmount,
   event: ActivityAssetContext,
   getVaultMetadata: ActivityVaultMetadataLookup,
+  getTokenMetadata?: ActivityTokenMetadataLookup,
 ): ActivityAssetAmount => {
   let token: ActivityTokenMetadata | undefined
 
@@ -320,6 +403,10 @@ export const enrichActivityAssetForDisplay = (
     && asset.address
   ) {
     token = getVaultMetadata(asset.address)?.shares
+  }
+
+  if (!token && asset.address && getTokenMetadata) {
+    token = getTokenMetadata(asset.address)
   }
 
   if (!token) return asset
@@ -435,7 +522,7 @@ export const formatActivityValuation = (
   valuation: ActivityValuation | undefined,
 ): string | null => {
   if (!valuation) return null
-  if (valuation.status === 'unavailable') return 'USD value unavailable'
+  if (valuation.status === 'unavailable') return null
   if (valuation.amountUsd === undefined) {
     return valuation.status === 'partial' ? 'Partial USD valuation' : null
   }

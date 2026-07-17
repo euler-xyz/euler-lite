@@ -172,9 +172,9 @@ watch(feed.hasLoaded, (hasLoaded) => {
         class="transition-opacity"
         :class="{ 'opacity-60': feed.isRefreshing.value }"
       >
-        <div class="hidden grid-cols-[minmax(0,1.3fr)_minmax(180px,1fr)_minmax(160px,0.8fr)_40px] gap-12 border-b border-line-subtle pb-8 text-p4 text-content-tertiary laptop:grid">
-          <span>Event</span>
-          <span>Details</span>
+        <div class="hidden grid-cols-[minmax(0,1.2fr)_minmax(220px,1fr)_minmax(190px,0.8fr)_44px] gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary laptop:grid">
+          <span class="pl-40">Event</span>
+          <span>Amount / change</span>
           <span>Participants</span>
           <span class="sr-only">Transaction</span>
         </div>

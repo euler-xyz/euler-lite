@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ActivityEvent } from '@eulerxyz/euler-v2-sdk'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 import { buildActivityFeedContextKey } from '~/composables/useActivityFeed'
 
@@ -10,7 +11,8 @@ const event = (
   id: string,
   vault: typeof VAULT | typeof OTHER_VAULT = VAULT,
   type = 'deposit',
-) => ({
+  overrides: Partial<ActivityEvent> = {},
+): ActivityEvent => ({
   id,
   chainId: 1,
   type,
@@ -23,10 +25,11 @@ const event = (
   source: 'v3-ponder',
   payload: {},
   vault,
-})
+  ...overrides,
+} as ActivityEvent)
 
 const page = (
-  data: ReturnType<typeof event>[],
+  data: ActivityEvent[],
   { nextCursor = null, status = 'complete' }: {
     nextCursor?: string | null
     status?: 'complete' | 'partial' | 'unsupported' | 'syncing'
@@ -118,11 +121,21 @@ describe('useActivityFeed', () => {
 
   it('keeps display events while dropping interest accrual and paired share movements', async () => {
     const fetchVaultActivityEvents = vi.fn(async () => page([
-      event('deposit'),
+      event('deposit', VAULT, 'deposit', {
+        groupId: 'paired-transaction',
+        assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
+      }),
       event('mint-shadow', VAULT, 'mint'),
       event('evk-interest', VAULT, 'interest_accrued'),
       event('earn-interest', VAULT, 'accrue_interest'),
-      event('transfer', VAULT, 'transfer'),
+      event('transfer-shadow', VAULT, 'transfer', {
+        groupId: 'paired-transaction',
+        assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
+      }),
+      event('independent-transfer', VAULT, 'transfer', {
+        groupId: 'paired-transaction',
+        assets: [{ kind: 'shares', address: VAULT, amountRaw: '25' }],
+      }),
       event('withdraw', VAULT, 'withdraw'),
       event('burn-shadow', VAULT, 'burn'),
     ]))
@@ -139,9 +152,38 @@ describe('useActivityFeed', () => {
 
     await vi.waitFor(() => expect(feed?.events.value.map(item => item.id)).toEqual([
       'deposit',
-      'transfer',
+      'independent-transfer',
       'withdraw',
     ]))
+  })
+
+  it('removes a shadow transfer when its matching primary event arrives on an older page', async () => {
+    const shadowTransfer = event('transfer-shadow', VAULT, 'transfer', {
+      groupId: 'paired-transaction',
+      assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
+    })
+    const deposit = event('deposit', VAULT, 'deposit', {
+      groupId: 'paired-transaction',
+      assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
+    })
+    const fetchVaultActivityEvents = vi.fn()
+      .mockResolvedValueOnce(page([shadowTransfer], { nextCursor: 'next' }))
+      .mockResolvedValueOnce(page([deposit]))
+    const { useActivityFeed } = await setup(fetchVaultActivityEvents)
+    let feed: ReturnType<typeof useActivityFeed> | undefined
+    effect = effectScope()
+    effect.run(() => {
+      feed = useActivityFeed({
+        scope: { kind: 'vault', vault: VAULT, chainId: 1, vaultType: 'evk' },
+        enabled: true,
+        categories: [],
+      })
+    })
+
+    await vi.waitFor(() => expect(feed?.events.value.map(item => item.id)).toEqual(['transfer-shadow']))
+    await feed?.loadMore()
+
+    expect(feed?.events.value.map(item => item.id)).toEqual(['deposit'])
   })
 
   it('retains loaded rows without refetching when collapsed and reopened', async () => {
