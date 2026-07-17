@@ -106,8 +106,8 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
 </script>
 
 <template>
-  <li class="relative grid gap-10 border-b border-line-subtle py-12 last:border-b-0 laptop:grid-cols-[minmax(0,1.2fr)_minmax(220px,1fr)_minmax(190px,0.8fr)_44px] laptop:items-start laptop:gap-16">
-    <div class="flex min-w-0 items-start gap-10 pr-48 laptop:pr-0">
+  <li class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 last:border-b-0">
+    <div class="activity-event-row__event flex min-w-0 items-start gap-10 pr-48">
       <div class="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
         <SvgIcon
           :name="eventIcon.name"
@@ -125,17 +125,20 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
         <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
           <span>{{ getActivityCategoryLabel(event.category) }}</span>
           <span aria-hidden="true">&middot;</span>
-          <time :datetime="event.timestamp">{{ formatActivityTimestamp(event.timestamp) }}</time>
+          <time
+            class="whitespace-nowrap"
+            :datetime="event.timestamp"
+          >{{ formatActivityTimestamp(event.timestamp) }}</time>
         </div>
       </div>
     </div>
 
-    <div class="flex min-w-0 flex-col gap-6 pl-40 laptop:pl-0">
+    <div class="activity-event-row__details flex min-w-0 flex-col gap-6 pl-40">
       <div
         v-for="(detail, index) in details"
         :key="detail.key"
         class="min-w-0"
-        :class="index > 0 && !expanded ? 'hidden laptop:block' : ''"
+        :class="index > 0 && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
       >
         <div class="text-p4 text-content-tertiary">
           {{ detail.label }}
@@ -189,13 +192,13 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
       >No additional details</span>
     </div>
 
-    <div class="flex min-w-0 flex-col gap-4 pl-40 text-p3 laptop:pl-0">
+    <div class="activity-event-row__participants flex min-w-0 flex-col gap-4 pl-40 text-p3">
       <div
         v-for="(participant, index) in participants"
         :key="`${participant.label}:${participant.address}`"
         class="min-w-0 items-center gap-4"
         :class="[
-          index > 0 && !expanded ? 'hidden laptop:flex' : 'flex',
+          index > 0 && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
         ]"
       >
         <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
@@ -213,14 +216,14 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
     <button
       v-if="hasExpandableMobileDetails"
       type="button"
-      class="ml-40 w-fit text-p4 font-medium text-content-secondary transition-colors hover:text-accent-500 laptop:hidden"
+      class="activity-event-row__more ml-40 w-fit text-p4 font-medium text-content-secondary transition-colors hover:text-accent-500"
       :aria-expanded="expanded"
       @click="expanded = !expanded"
     >
       {{ expanded ? 'Hide details' : 'More details' }}
     </button>
 
-    <div class="absolute right-0 top-8 laptop:static laptop:text-right">
+    <div class="activity-event-row__transaction absolute right-0 top-8">
       <a
         :href="transactionLink"
         target="_blank"
@@ -238,3 +241,59 @@ const transactionLink = computed(() => getExplorerLink(event.txHash, event.chain
     </div>
   </li>
 </template>
+
+<style scoped>
+@container activity-feed (min-width: 520px) {
+  .activity-event-row {
+    grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.2fr);
+    align-items: start;
+    gap: 16px;
+  }
+
+  .activity-event-row__details {
+    padding-left: 0;
+  }
+
+  .activity-event-row__participants,
+  .activity-event-row__more {
+    grid-column: 1 / -1;
+  }
+}
+
+@container activity-feed (min-width: 900px) {
+  .activity-event-row {
+    grid-template-columns:
+      minmax(280px, 1.1fr)
+      minmax(260px, 1.2fr)
+      minmax(220px, 1fr)
+      44px;
+  }
+
+  .activity-event-row__event,
+  .activity-event-row__participants {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .activity-event-row__participants {
+    grid-column: auto;
+  }
+
+  .activity-event-row__secondary-detail {
+    display: block;
+  }
+
+  .activity-event-row__secondary-participant {
+    display: flex;
+  }
+
+  .activity-event-row__more {
+    display: none;
+  }
+
+  .activity-event-row__transaction {
+    position: static;
+    text-align: right;
+  }
+}
+</style>

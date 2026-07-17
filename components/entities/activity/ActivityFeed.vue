@@ -61,7 +61,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-16">
+  <div class="activity-feed flex flex-col gap-16">
     <ActivityCategoryFilters
       v-model="selectedFilters"
       :options="categoryOptions"
@@ -172,7 +172,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
         class="transition-opacity"
         :class="{ 'opacity-60': feed.isRefreshing.value }"
       >
-        <div class="hidden grid-cols-[minmax(0,1.2fr)_minmax(220px,1fr)_minmax(190px,0.8fr)_44px] gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary laptop:grid">
+        <div class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary">
           <span class="pl-40">Event</span>
           <span>Amount / change</span>
           <span>Participants</span>
@@ -213,3 +213,21 @@ watch(feed.hasLoaded, (hasLoaded) => {
     </template>
   </div>
 </template>
+
+<style scoped>
+.activity-feed {
+  container-name: activity-feed;
+  container-type: inline-size;
+}
+
+@container activity-feed (min-width: 900px) {
+  .activity-feed__header {
+    display: grid;
+    grid-template-columns:
+      minmax(280px, 1.1fr)
+      minmax(260px, 1.2fr)
+      minmax(220px, 1fr)
+      44px;
+  }
+}
+</style>
