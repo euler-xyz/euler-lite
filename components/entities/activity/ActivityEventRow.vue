@@ -24,6 +24,7 @@ const { event, showVault = false } = defineProps<{
   showVault?: boolean
 }>()
 
+const route = useRoute()
 const expanded = ref(false)
 const { getVault: getRegistryVault, registryVersion } = useVaultRegistry()
 const { getTokenByAddress } = useTokenList()
@@ -113,9 +114,15 @@ const vaultDisplay = computed(() => {
   void registryVersion.value
   const display = resolveActivityVaultDisplay(event.vault, getRegistryVault)
   if (!display) return null
+  const vault = getRegistryVault(display.address)
+  const asset = vault?.asset
   return {
     ...display,
-    link: getExplorerLink(display.address, event.chainId, true),
+    avatarAsset: asset ? { address: asset.address, symbol: asset.symbol } : null,
+    route: {
+      path: event.vaultType === 'earn' ? `/earn/${display.address}` : `/lend/${display.address}`,
+      query: { network: route.query.network },
+    },
   }
 })
 </script>
@@ -148,27 +155,27 @@ const vaultDisplay = computed(() => {
           </div>
           <div
             v-if="vaultDisplay"
-            class="mt-2 flex min-w-0 items-center gap-4 text-p4 text-content-tertiary"
+            class="mt-4 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-p4"
           >
-            <span class="shrink-0">Market</span>
-            <a
-              :href="vaultDisplay.link"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="flex min-w-0 items-center gap-4 text-accent-600 underline transition-colors hover:text-accent-500"
-              :title="vaultDisplay.address"
+            <span class="text-content-tertiary">Market</span>
+            <AssetAvatar
+              v-if="vaultDisplay.avatarAsset"
+              :asset="vaultDisplay.avatarAsset"
+              size="20"
+            />
+            <NuxtLink
+              v-if="vaultDisplay.name"
+              :to="vaultDisplay.route"
+              class="min-w-0 truncate text-content-secondary transition-colors hover:text-accent-500 hover:underline"
+              :title="vaultDisplay.name"
             >
-              <span
-                v-if="vaultDisplay.name"
-                class="truncate"
-              >{{ vaultDisplay.name }}</span>
-              <span
-                v-if="vaultDisplay.name"
-                class="shrink-0"
-                aria-hidden="true"
-              >&middot;</span>
-              <span class="shrink-0">{{ vaultDisplay.addressLabel }}</span>
-            </a>
+              {{ vaultDisplay.name }}
+            </NuxtLink>
+            <ActivityAddress
+              :address="vaultDisplay.address"
+              :chain-id="event.chainId"
+              :label="vaultDisplay.addressLabel"
+            />
           </div>
         </div>
       </div>
