@@ -27,7 +27,7 @@ const selectedFilters = ref<string[]>([])
 const selectedCategories = computed<ActivityCategory[]>(() =>
   resolveActivityFilterCategories(props.categoryOptions, selectedFilters.value),
 )
-const scopeLabel = computed(() => props.subject)
+const scopeLabel = computed(() => props.subject === 'account' ? 'position' : 'vault')
 const feed = useActivityFeed({
   scope: () => props.scope,
   enabled: () => props.enabled,

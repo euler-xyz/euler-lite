@@ -26,8 +26,10 @@ const { event, showVault = false } = defineProps<{
 
 const route = useRoute()
 const expanded = ref(false)
-const { getVault: getRegistryVault, registryVersion } = useVaultRegistry()
+const { getVault: getRegistryVault, getVaultCategory, registryVersion } = useVaultRegistry()
 const { getTokenByAddress } = useTokenList()
+const vaultAddress = computed(() => event.vault ?? '')
+const vaultProduct = useEulerProductOfVault(vaultAddress)
 
 const tokenMetadata = (address: `0x${string}`) => {
   const token = getTokenByAddress(address)
@@ -99,7 +101,7 @@ const details = computed(() => [
 const participants = computed(() => getActivityParticipants(event).map(participant => ({
   ...participant,
   label: participant.label === 'User' && event.subAccountIndex !== undefined
-    ? `User · Account ${event.subAccountIndex}`
+    ? `Position ${event.subAccountIndex}`
     : participant.label,
 })))
 const hasExpandableMobileDetails = computed(() =>
@@ -112,7 +114,10 @@ const vaultDisplay = computed(() => {
   if (!showVault) return null
   // Re-resolve when vault metadata arrives after the activity page.
   void registryVersion.value
-  const display = resolveActivityVaultDisplay(event.vault, getRegistryVault)
+  const productName = event.vault && getVaultCategory(event.vault) === 'escrow'
+    ? 'Escrowed collateral'
+    : vaultProduct.name
+  const display = resolveActivityVaultDisplay(event.vault, getRegistryVault, productName)
   if (!display) return null
   const vault = getRegistryVault(display.address)
   const asset = vault?.asset

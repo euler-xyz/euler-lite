@@ -39,17 +39,20 @@ export interface ActivityVaultDisplay {
 }
 
 /**
- * Resolves account-history market context from the vault registry. The address
- * remains part of the visible label so markets with the same share-token name
- * are still distinguishable.
+ * Resolves position-history market context from Euler Labels and the vault
+ * registry. The address remains visible so markets with the same name are
+ * still distinguishable.
  */
 export const resolveActivityVaultDisplay = (
   vaultAddress: Address | undefined,
   getVaultMetadata: ActivityVaultMetadataLookup,
+  productName?: string,
 ): ActivityVaultDisplay | null => {
   if (!vaultAddress) return null
 
-  const name = getVaultMetadata(vaultAddress)?.shares?.name?.trim() || undefined
+  const name = productName?.trim()
+    || getVaultMetadata(vaultAddress)?.shares?.name?.trim()
+    || undefined
   const addressLabel = shortenAddress(vaultAddress)
   return {
     address: vaultAddress,
@@ -63,7 +66,7 @@ const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   borrowing: 'Borrowing',
   swaps: 'Swaps',
   liquidations: 'Liquidations',
-  account: 'Account',
+  account: 'Position',
   rewards: 'Rewards',
   governance: 'Governance',
 }
@@ -71,53 +74,11 @@ const CATEGORY_LABELS: Record<ActivityCategory, string> = {
 const ACCOUNT_ACTIVITY_EVENT_TYPES = [
   'deposit',
   'withdraw',
-  'transfer',
   'borrow',
   'repay',
-  'swap',
-  'debt_socialized',
   'pull_debt',
   'liquidation',
-  'approval',
-  'balance_forwarder_status',
-  'convert_fees',
-  'reallocate_supply',
-  'reallocate_withdraw',
-  'set_fee',
-  'set_guardian',
-  'set_timelock',
-  'set_cap',
-  'set_supply_queue',
-  'set_withdraw_queue',
-  'submit_cap',
-  'submit_market_removal',
-  'revoke_pending_cap',
-  'revoke_pending_guardian',
-  'revoke_pending_timelock',
-  'revoke_pending_market_removal',
-  'frozen',
-  'unfrozen',
-  'seized',
-  'owner_registered',
-  'collateral_status',
   'operator_status',
-  'controller_status',
-  'lockdown_mode_status',
-  'nonce_status',
-  'nonce_used',
-  'permit_disabled_mode_status',
-  'reward_lock_created',
-  'reward_lock_removed',
-  'reward_transfer',
-  'reward_whitelist_status',
-  'public_reallocate_to',
-  'public_withdrawal',
-  'set_admin',
-  'set_allocation_fee',
-  'set_flow_caps',
-  'transfer_allocation_fee',
-  'buy',
-  'terms_of_use_signed',
 ] as const satisfies readonly ActivityEvent['type'][]
 
 const VAULT_ACTIVITY_EVENT_TYPES = {
@@ -340,10 +301,8 @@ export const getVaultActivityFilterOptions = (
 const ACCOUNT_ACTIVITY_CATEGORIES = [
   'lending',
   'borrowing',
-  'swaps',
   'liquidations',
   'account',
-  'rewards',
 ] as const satisfies readonly ActivityCategory[]
 
 export const getAccountActivityFilterOptions = (): ActivityFilterOption[] =>

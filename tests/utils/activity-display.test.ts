@@ -46,11 +46,15 @@ describe('activity display helpers', () => {
       expect(eventTypes).not.toEqual(expect.arrayContaining(hiddenTypes))
     }
 
-    expect(getDisplayActivityEventTypes({ kind: 'account' })).toEqual(expect.arrayContaining([
+    expect(getDisplayActivityEventTypes({ kind: 'account' })).toEqual([
       'deposit',
-      'transfer',
-      'reward_transfer',
-    ]))
+      'withdraw',
+      'borrow',
+      'repay',
+      'pull_debt',
+      'liquidation',
+      'operator_status',
+    ])
     expect(getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'evk' })).toEqual(expect.arrayContaining([
       'deposit',
       'transfer',
@@ -58,14 +62,12 @@ describe('activity display helpers', () => {
     ]))
   })
 
-  it('returns the six portfolio account category filters in display order', () => {
+  it('returns the focused portfolio position category filters in display order', () => {
     expect(getAccountActivityFilterOptions()).toEqual([
       { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'borrowing', label: 'Borrowing', categories: ['borrowing'] },
-      { value: 'swaps', label: 'Swaps', categories: ['swaps'] },
       { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
-      { value: 'account', label: 'Account', categories: ['account'] },
-      { value: 'rewards', label: 'Rewards', categories: ['rewards'] },
+      { value: 'account', label: 'Position', categories: ['account'] },
     ])
   })
 
@@ -119,11 +121,11 @@ describe('activity display helpers', () => {
       },
     })
 
-    const firstMarket = resolveActivityVaultDisplay(VAULT, getVaultMetadata)
+    const firstMarket = resolveActivityVaultDisplay(VAULT, getVaultMetadata, 'USDC Prime')
     const secondMarket = resolveActivityVaultDisplay(OTHER_VAULT, getVaultMetadata)
 
     expect(firstMarket).toMatchObject({
-      name: 'Euler USDC',
+      name: 'USDC Prime',
       addressLabel: '0x0000...0002',
     })
     expect(secondMarket).toMatchObject({
