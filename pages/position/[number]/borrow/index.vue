@@ -63,7 +63,6 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isBalanceLoading = ref(false)
 const isEstimatesLoading = ref(false)
-const isOracleUnavailable = ref(false)
 const plan = ref<TransactionPlan | null>(null)
 const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
@@ -186,7 +185,6 @@ const load = async () => {
     return
   }
   isLoading.value = true
-  isOracleUnavailable.value = false
   // `position` is a layer-aware computed; load() only seeds the one-shot
   // "before" baseline (current LTV/health/APY) off the initial real state.
   if (!position.value) {
@@ -197,12 +195,13 @@ const load = async () => {
   const borrowAddress = position.value.borrowVault?.address
   if (!collateralAddress || !borrowAddress) {
     isLoading.value = false
+    await router.replace({ path: `/position/${positionIndex}`, query: _route.query })
     return
   }
   const positionLtv = getBorrowMorePositionLtv(position.value)
   if (positionLtv === undefined) {
-    isOracleUnavailable.value = true
     isLoading.value = false
+    await router.replace({ path: `/position/${positionIndex}`, query: _route.query })
     return
   }
   userLTV.value = Number(formatNumber(ltvToPercent(nanoToValue(positionLtv, 18))))
@@ -516,14 +515,7 @@ watch([collateralAmount, borrowAmount], async () => {
       class="flex flex-col gap-16"
       @submit.prevent="submit"
     >
-      <UiAlert
-        v-if="isOracleUnavailable"
-        title="Oracle unavailable"
-        description="Oracle pricing is currently unavailable, so borrowing is temporarily disabled. You can still repay debt and supply collateral from the position page."
-        variant="warning"
-        size="compact"
-      />
-      <template v-else-if="pair">
+      <template v-if="pair">
         <VaultLabelsAndAssets
           v-if="collateralVault && borrowVault"
           :vault="collateralVault"
