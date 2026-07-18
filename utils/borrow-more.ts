@@ -18,6 +18,15 @@ export interface BorrowMoreAvailableLiquidityDisplay {
   display: string
 }
 
+export interface BorrowMoreRiskPosition {
+  userLTV?: bigint
+  currentLTV?: bigint
+}
+
+export const getBorrowMorePositionLtv = (
+  position: BorrowMoreRiskPosition,
+): bigint | undefined => position.userLTV ?? position.currentLTV
+
 export const getBorrowMoreAvailableLiquidityDisplay = (
   vault: BorrowMoreLiquidityVault | undefined,
 ): BorrowMoreAvailableLiquidityDisplay | null => {

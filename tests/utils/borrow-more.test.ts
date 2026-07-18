@@ -4,6 +4,7 @@ import {
   getBorrowMoreAvailableLiquidityDisplay,
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
+  getBorrowMorePositionLtv,
 } from '~/utils/borrow-more'
 
 const usdc = {
@@ -12,6 +13,23 @@ const usdc = {
     symbol: 'USDC',
   },
 }
+
+describe('borrow-more position risk', () => {
+  it('uses the user LTV when it is available', () => {
+    expect(getBorrowMorePositionLtv({
+      userLTV: 40n,
+      currentLTV: 30n,
+    })).toBe(40n)
+  })
+
+  it('falls back to the current LTV', () => {
+    expect(getBorrowMorePositionLtv({ currentLTV: 30n })).toBe(30n)
+  })
+
+  it('stays unavailable when oracle-derived risk is missing', () => {
+    expect(getBorrowMorePositionLtv({})).toBeUndefined()
+  })
+})
 
 describe('borrow-more liquidity display', () => {
   it('formats available liquidity for the selected borrow vault', () => {

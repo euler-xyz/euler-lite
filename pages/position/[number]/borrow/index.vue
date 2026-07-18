@@ -20,6 +20,7 @@ import {
   getBorrowMoreAvailableLiquidityDisplay,
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
+  getBorrowMorePositionLtv,
 } from '~/utils/borrow-more'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -62,6 +63,7 @@ const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isBalanceLoading = ref(false)
 const isEstimatesLoading = ref(false)
+const isOracleUnavailable = ref(false)
 const plan = ref<TransactionPlan | null>(null)
 const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
@@ -184,6 +186,7 @@ const load = async () => {
     return
   }
   isLoading.value = true
+  isOracleUnavailable.value = false
   // `position` is a layer-aware computed; load() only seeds the one-shot
   // "before" baseline (current LTV/health/APY) off the initial real state.
   if (!position.value) {
@@ -196,8 +199,9 @@ const load = async () => {
     isLoading.value = false
     return
   }
-  const positionLtv = position.value.userLTV ?? position.value.currentLTV
+  const positionLtv = getBorrowMorePositionLtv(position.value)
   if (positionLtv === undefined) {
+    isOracleUnavailable.value = true
     isLoading.value = false
     return
   }
@@ -512,7 +516,14 @@ watch([collateralAmount, borrowAmount], async () => {
       class="flex flex-col gap-16"
       @submit.prevent="submit"
     >
-      <template v-if="pair">
+      <UiAlert
+        v-if="isOracleUnavailable"
+        title="Oracle unavailable"
+        description="Oracle pricing is currently unavailable, so borrowing is temporarily disabled. You can still repay debt and supply collateral from the position page."
+        variant="warning"
+        size="compact"
+      />
+      <template v-else-if="pair">
         <VaultLabelsAndAssets
           v-if="collateralVault && borrowVault"
           :vault="collateralVault"
