@@ -480,6 +480,9 @@ watch(isConnected, () => {
 watch(address, () => {
   updateBalance()
 })
+watch(ltv, () => {
+  updateSyncEstimates()
+})
 watch([collateralAmount, borrowAmount], async () => {
   clearSimulationError()
   if (!pair.value) {
