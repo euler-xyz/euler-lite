@@ -73,6 +73,21 @@ const liquidationPrice = ref()
 const position = computed<PortfolioBorrowPosition<VaultEntity> | undefined>(() =>
   (!isConnected.value && !isSpyMode.value) ? undefined : getPositionBySubAccountIndex(+positionIndex),
 )
+// Re-seed the form only when its position baseline changes. Portfolio refreshes
+// can replace the position object without changing these values, which should
+// not wipe an amount the user is editing.
+const positionBaselineKey = computed(() => {
+  const current = position.value
+  if (!current) return ''
+  return [
+    current.subAccount,
+    current.collateralVault?.address ?? '',
+    current.borrowVault?.address ?? '',
+    current.supplied.toString(),
+    current.borrowed.toString(),
+    getBorrowMorePositionLtv(current)?.toString() ?? '',
+  ].join(':')
+})
 const userLTV = ref(0)
 const currentNetAPY = ref<number>()
 const currentHealth = ref<number>()
@@ -185,8 +200,8 @@ const load = async () => {
     return
   }
   isLoading.value = true
-  // `position` is a layer-aware computed; load() only seeds the one-shot
-  // "before" baseline (current LTV/health/APY) off the initial real state.
+  // `position` is layer-aware; load() seeds the "before" baseline for the
+  // currently active real or simulated position.
   if (!position.value) {
     isLoading.value = false
     return
@@ -472,9 +487,9 @@ const updateAsyncEstimates = useDebounceFn(async () => {
   }
 }, 500)
 
-watch(isPositionsLoaded, (val) => {
-  if (val) {
-    load()
+watch([isPositionsLoaded, positionBaselineKey], ([positionsLoaded, baselineKey]) => {
+  if (positionsLoaded && baselineKey) {
+    void load()
   }
 }, { immediate: true })
 watch(isConnected, () => {
