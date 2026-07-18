@@ -17,12 +17,12 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
     asset: {
       address: ASSET,
       symbol: 'USDC',
-      decimals: 0,
+      decimals: 6,
     },
     shares: {
       address: VAULT,
       symbol: 'eUSDC',
-      decimals: 0,
+      decimals: 6,
     },
     collaterals: [],
     convertToShares: vi.fn((assets: bigint) => assets * 2n),
@@ -105,7 +105,7 @@ vi.mock('~/utils/sdk-prices', () => ({
   getAssetOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralUsdPrice: vi.fn(async () => ({ amountOutMid: 1_000_000_000_000_000_000n })),
-  conservativePriceRatio: vi.fn(() => 1),
+  conservativePriceRatio: vi.fn(() => 1_000_000_000_000_000_000n),
   getTokenUsdPrice: vi.fn(async () => 1),
 }))
 
@@ -305,8 +305,7 @@ describe('useBorrowForm savings collateral', () => {
 
     form.collateralAmount.value = '100'
     form.borrowAmount.value = '10'
-    await nextTick()
-    form.ltv.value = 10
+    await form.onBorrowInput()
     await nextTick()
 
     expect(form.ltv.value).toBe(10)
@@ -315,8 +314,7 @@ describe('useBorrowForm savings collateral', () => {
     const initialLiquidationPrice = form.liquidationPrice.value!
 
     form.borrowAmount.value = '40'
-    await nextTick()
-    form.ltv.value = 40
+    await form.onBorrowInput()
     await nextTick()
 
     expect(form.ltv.value).toBe(40)
