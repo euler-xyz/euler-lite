@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type Account, type EVault, type IHasVaultAddress, type PortfolioBorrowPosition, type PortfolioSavingsPosition, type SwapQuote, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 
-const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted(() => {
+const { USER, SAVINGS_USER_B, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
+  const SAVINGS_USER_B = '0x0000000000000000000000000000000000000006'
   const VAULT = '0x0000000000000000000000000000000000000002'
   const ASSET = '0x0000000000000000000000000000000000000003'
   const BORROW_VAULT = '0x0000000000000000000000000000000000000004'
@@ -42,6 +43,7 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
 
   return {
     USER,
+    SAVINGS_USER_B,
     VAULT,
     sameVault,
     borrowVault,
@@ -55,6 +57,8 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
         amountField: 'amountIn' | 'amountOut'
         selectedQuote: { value: SwapQuote | null }
         effectiveQuote: { value: SwapQuote | null }
+        requestQuotes: ReturnType<typeof vi.fn>
+        reset: ReturnType<typeof vi.fn>
       }>,
       getSavingsPosition: vi.fn(),
       planRepayFromSource: vi.fn(),
@@ -138,23 +142,32 @@ vi.mock('~/composables/useEulerLabels', () => ({
 
 vi.mock('~/composables/useRepaySavingsOptions', () => ({
   useRepaySavingsOptions: () => {
-    const savingsVaults = ref([sameVault])
-    const savingsPosition = {
+    const savingsPositionA = {
       position: {},
       vault: sameVault,
       subAccount: USER,
       assets: 1_000n,
       shares: 1_000n,
     } as PortfolioSavingsPosition<VaultEntity>
+    const savingsPositionB = {
+      ...savingsPositionA,
+      subAccount: SAVINGS_USER_B,
+    } as PortfolioSavingsPosition<VaultEntity>
+    const savingsPositions = [savingsPositionA, savingsPositionB]
+    const savingsVaults = ref([sameVault, sameVault])
 
-    mocks.getSavingsPosition.mockImplementation((vaultAddress: string) =>
-      vaultAddress.toLowerCase() === VAULT.toLowerCase() ? savingsPosition : undefined,
-    )
+    mocks.getSavingsPosition.mockImplementation((vaultAddress: string, subAccount?: string) => {
+      if (vaultAddress.toLowerCase() !== VAULT.toLowerCase()) return undefined
+      return savingsPositions.find(position => !subAccount || position.subAccount === subAccount)
+    })
 
     return {
-      savingsPositions: ref([savingsPosition]),
+      savingsPositions: ref(savingsPositions),
       savingsVaults,
-      savingsOptions: ref([]),
+      savingsOptions: ref([
+        { subAccount: USER },
+        { subAccount: SAVINGS_USER_B },
+      ]),
       getSavingsPosition: mocks.getSavingsPosition,
     }
   },
@@ -168,10 +181,14 @@ vi.mock('~/composables/useSwapQuotesParallel', () => ({
     mocks.swapQuoteOptions.push(options)
     const selectedQuote = ref<SwapQuote | null>(null)
     const effectiveQuote = ref<SwapQuote | null>(null)
+    const requestQuotes = vi.fn()
+    const reset = vi.fn()
     mocks.swapQuoteInstances.push({
       amountField: options.amountField,
       selectedQuote,
       effectiveQuote,
+      requestQuotes,
+      reset,
     })
     return {
       sortedQuoteCards: ref([]),
@@ -184,8 +201,8 @@ vi.mock('~/composables/useSwapQuotesParallel', () => ({
       quoteError: ref(null),
       statusLabel: ref(null),
       getQuoteDiffPct: vi.fn(() => null),
-      reset: vi.fn(),
-      requestQuotes: vi.fn(),
+      reset,
+      requestQuotes,
       selectProvider: vi.fn(),
     }
   },
@@ -341,6 +358,49 @@ describe('useSavingsRepay', () => {
     }))
     expect(mocks.swapQuoteOptions[0]?.getPlanAccount?.()).toBe(planAccount)
     expect(plan).toEqual({ type: 'repay-plan' })
+  })
+
+  it('invalidates quotes when switching between equal-balance savings sub-accounts', async () => {
+    const repay = useSavingsRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => position.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    repay.initVault()
+    repay.amount.value = '100'
+    repay.onAmountInput()
+    await nextTick()
+
+    const exactIn = mocks.swapQuoteInstances.find(instance => instance.amountField === 'amountOut')!
+    const targetDebt = mocks.swapQuoteInstances.find(instance => instance.amountField === 'amountIn')!
+    exactIn.reset.mockClear()
+    targetDebt.reset.mockClear()
+    exactIn.requestQuotes.mockClear()
+
+    repay.onSourceVaultChange(1)
+    await nextTick()
+
+    expect(repay.selectedSavingSubAccount.value).toBe(SAVINGS_USER_B)
+    expect(repay.sourceAssets.value).toBe(1_000n)
+    expect(exactIn.reset).toHaveBeenCalledTimes(1)
+    expect(targetDebt.reset).toHaveBeenCalledTimes(1)
+    expect(exactIn.requestQuotes).toHaveBeenCalledWith(expect.objectContaining({
+      accountIn: SAVINGS_USER_B,
+      accountOut: USER,
+    }))
   })
 
   it('keeps collateral summary cleared when an in-flight snapshot resolves after invalidation', async () => {

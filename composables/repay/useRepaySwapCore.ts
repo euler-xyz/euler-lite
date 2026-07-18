@@ -61,6 +61,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     typeof options.includeCowSwap === 'function'
       ? options.includeCowSwap()
       : options.includeCowSwap === true
+  const quoteAccounts = computed(() => getQuoteAccounts())
 
   // --- State ---
   const amount = ref('')
@@ -366,7 +367,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     }
 
     const currentDebt = position.value.borrowed || 0n
-    const { accountIn, accountOut } = getQuoteAccounts()
+    const { accountIn, accountOut } = quoteAccounts.value
 
     if (direction.value === SwapperMode.EXACT_IN) {
       if (!amount.value) {
@@ -483,7 +484,14 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   })
 
   watch(
-    [sourceVault, sourceBalance, () => sourceShares?.value, slippage],
+    [
+      sourceVault,
+      sourceBalance,
+      () => sourceShares?.value,
+      slippage,
+      () => quoteAccounts.value.accountIn,
+      () => quoteAccounts.value.accountOut,
+    ],
     () => {
       clearSimulationError()
       if (amount.value || debtAmount.value) {
