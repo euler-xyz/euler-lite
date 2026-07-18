@@ -195,68 +195,99 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
 const availableLiquidity = computed(() => borrowVault.value?.availableLiquidity)
 const availableLiquidityDisplay = computed(() => getBorrowMoreAvailableLiquidityDisplay(borrowVault.value))
 
+const loadGuard = createRaceGuard()
 const load = async () => {
+  const generation = loadGuard.next()
   if (!isConnected.value && !isSpyMode.value) {
+    isLoading.value = false
     return
   }
   isLoading.value = true
   // `position` is layer-aware; load() seeds the "before" baseline for the
   // currently active real or simulated position.
-  if (!position.value) {
+  const currentPosition = position.value
+  if (!currentPosition) {
     isLoading.value = false
     return
   }
-  const collateralAddress = position.value.collateralVault?.address
-  const borrowAddress = position.value.borrowVault?.address
+  const collateralAddress = currentPosition.collateralVault?.address
+  const borrowAddress = currentPosition.borrowVault?.address
   if (!collateralAddress || !borrowAddress) {
     isLoading.value = false
     await router.replace({ path: `/position/${positionIndex}`, query: _route.query })
     return
   }
-  const positionLtv = getBorrowMorePositionLtv(position.value)
+  const positionLtv = getBorrowMorePositionLtv(currentPosition)
   if (positionLtv === undefined) {
     isLoading.value = false
     await router.replace({ path: `/position/${positionIndex}`, query: _route.query })
     return
   }
-  userLTV.value = Number(formatNumber(ltvToPercent(nanoToValue(positionLtv, 18))))
-  currentUserLTV.value = userLTV.value
-  ltv.value = userLTV.value
   try {
-    pair.value = await getBorrowVaultPair(collateralAddress as string, borrowAddress as string) as BorrowVaultPair
-    // Set collateral amount from existing position supply so LTV slider and borrow input work
+    const nextPair = await getBorrowVaultPair(collateralAddress as string, borrowAddress as string) as BorrowVaultPair
+    if (loadGuard.isStale(generation)) return
+
+    const nextUserLTV = Number(formatNumber(ltvToPercent(nanoToValue(positionLtv, 18))))
     const suppliedFixed = FixedPoint.fromValue(
-      position.value!.supplied,
-      Number(collateralVault.value!.asset.decimals),
+      currentPosition.supplied,
+      Number(nextPair.collateral.asset.decimals),
     )
-    collateralAmount.value = trimTrailingZeros(suppliedFixed.toString())
-    // Fetch fresh underlying asset balance for this specific vault
-    await updateBalance()
-    // Compute current position values for before→after display
     const currentLtvPercent = ltvToPercent(nanoToValue(positionLtv, 18))
-    currentHealth.value = currentLtvPercent <= 0
+    const nextCurrentHealth = currentLtvPercent <= 0
       ? Infinity
-      : ltvToPercent(pair.value!.ltv.liquidationLTV) / currentLtvPercent
-    currentLiquidationPrice.value = currentHealth.value < 0.1 ? Infinity : priceFixed.value.toUnsafeFloat() / currentHealth.value
-    const [collUsd, borUsd] = await Promise.all([
-      getAssetUsdValueOrZero(position.value!.supplied || 0, collateralVault.value!, 'off-chain'),
-      getAssetUsdValueOrZero(position.value!.borrowed || 0, borrowVault.value!, 'off-chain'),
-    ])
-    currentNetAPY.value = getNetAPY(
-      collUsd,
-      collateralSupplyApy.value,
-      borUsd,
-      borrowApy.value,
-      collateralSupplyRewardApy.value || null,
-      borrowRewardApy.value || null,
+      : ltvToPercent(nextPair.ltv.liquidationLTV) / currentLtvPercent
+    const nextPrice = FixedPoint.fromValue(
+      conservativePriceRatio(
+        getCollateralOraclePrice(nextPair.borrow, nextPair.collateral),
+        getAssetOraclePrice(nextPair.borrow),
+      ),
+      18,
+    ).toUnsafeFloat()
+    const nextCurrentLiquidationPrice = nextCurrentHealth < 0.1 ? Infinity : nextPrice / nextCurrentHealth
+    const nextCollateralSupplyApy = withVaultIntrinsicApy(
+      getVaultSupplyApy(nextPair.collateral),
+      nextPair.collateral,
+      enableIntrinsicApy.value,
     )
+    const nextBorrowApy = withVaultIntrinsicApy(
+      getVaultBorrowApy(nextPair.borrow),
+      nextPair.borrow,
+      enableIntrinsicApy.value,
+    )
+    const [collUsd, borUsd] = await Promise.all([
+      getAssetUsdValueOrZero(currentPosition.supplied || 0, nextPair.collateral, 'off-chain'),
+      getAssetUsdValueOrZero(currentPosition.borrowed || 0, nextPair.borrow, 'off-chain'),
+    ])
+    if (loadGuard.isStale(generation)) return
+
+    const nextCurrentNetAPY = getNetAPY(
+      collUsd,
+      nextCollateralSupplyApy,
+      borUsd,
+      nextBorrowApy,
+      getSupplyRewardApy(nextPair.collateral.address) || null,
+      getBorrowRewardApy(nextPair.borrow.address, nextPair.collateral.address) || null,
+    )
+
+    pair.value = nextPair
+    userLTV.value = nextUserLTV
+    currentUserLTV.value = nextUserLTV
+    ltv.value = nextUserLTV
+    collateralAmount.value = trimTrailingZeros(suppliedFixed.toString())
+    currentHealth.value = nextCurrentHealth
+    currentLiquidationPrice.value = nextCurrentLiquidationPrice
+    currentNetAPY.value = nextCurrentNetAPY
+    updateBalance()
   }
   catch (e) {
+    if (loadGuard.isStale(generation)) return
     showError('Unable to load Vault')
     console.warn(e)
   }
   finally {
-    isLoading.value = false
+    if (!loadGuard.isStale(generation)) {
+      isLoading.value = false
+    }
   }
 }
 // `balance` is now a reactive computed over the wallet entity; this just clears
@@ -487,10 +518,13 @@ const updateAsyncEstimates = useDebounceFn(async () => {
   }
 }, 500)
 
-watch([isPositionsLoaded, positionBaselineKey], ([positionsLoaded, baselineKey]) => {
-  if (positionsLoaded && baselineKey) {
-    void load()
+watch([isPositionsLoaded, positionBaselineKey], ([positionsLoaded]) => {
+  if (!positionsLoaded) {
+    loadGuard.next()
+    isLoading.value = false
+    return
   }
+  void load()
 }, { immediate: true })
 watch(isConnected, () => {
   updateBalance()
