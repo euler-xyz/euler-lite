@@ -130,12 +130,11 @@ const details = computed(() => [
       }]
     : []),
 ])
-const allParticipants = computed(() => getActivityParticipants(event))
 const participants = computed(() => {
   // Re-resolve participant vault names when registry metadata arrives.
   void registryVersion.value
   const viewer = viewerAddress?.toLowerCase()
-  return allParticipants.value
+  return getActivityParticipants(event)
     .filter(participant => participant.address.toLowerCase() !== viewer)
     .map((participant) => {
       // Known vaults (e.g. Earn vaults acting on underlying markets) read
@@ -203,7 +202,7 @@ const vaultDisplay = computed(() => {
         </div>
         <div class="min-w-0">
           <div
-            class="truncate text-p2 font-medium text-content-primary"
+            class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
             :title="eventLabel"
           >
             {{ eventLabel }}
@@ -265,10 +264,6 @@ const vaultDisplay = computed(() => {
               :vault-type="participant.vaultType"
             />
           </div>
-          <span
-            v-if="allParticipants.length === 0"
-            class="text-p4 text-content-muted"
-          >No participants</span>
         </div>
 
         <button
@@ -367,11 +362,6 @@ const vaultDisplay = computed(() => {
           </div>
         </template>
       </div>
-
-      <span
-        v-if="details.length === 0"
-        class="text-p4 text-content-muted"
-      >No additional details</span>
     </div>
 
     <div class="activity-event-row__transaction absolute right-0 top-8">

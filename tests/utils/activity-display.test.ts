@@ -160,6 +160,8 @@ describe('activity display helpers', () => {
   it('uses normalized labels and titleizes fallback event types', () => {
     expect(formatActivityEventLabel({ label: 'Borrowed USDC', type: 'borrow' })).toBe('Borrowed USDC')
     expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Set supply cap')
+    expect(formatActivityEventLabel({ type: 'set_ltv' })).toBe('Set LTV')
+    expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Set interest rate model')
   })
 
   it('labels and styles vault share transfers relative to the event position', () => {
@@ -432,6 +434,77 @@ describe('activity display helpers', () => {
       { field: 'ramp_duration', label: 'Ramp duration', value: '1 day 1 hour' },
       { field: 'target_timestamp', label: 'Target timestamp', value: expect.stringContaining('1 Jan 2026') },
     ])
+  })
+
+  it('orders LTV change fields and trims ramp fields on immediate changes', () => {
+    // Upstream field order is unhelpful; an immediate change never ramps, so
+    // the ramp target fields are dropped.
+    expect(getActivityChangeEntries({
+      type: 'set_ltv',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: {
+        fields: {
+          borrow_ltv: '9000',
+          ramp_duration: '0',
+          initial_liquidation_ltv: '0',
+          liquidation_ltv: '9300',
+          target_timestamp: '1767225600',
+          collateral: OTHER_VAULT,
+        },
+      },
+    }).map(entry => `${entry.field}:${entry.value ?? 'addresses'}`)).toEqual([
+      'collateral:addresses',
+      'borrow_ltv:90%',
+      'liquidation_ltv:93%',
+      'ramp_duration:Immediately',
+    ])
+  })
+
+  it('decodes config flag bitmasks and renders zero addresses as None', () => {
+    const configFlagEntries = (newConfigFlags: string) => getActivityChangeEntries({
+      type: 'set_config_flags',
+      change: { fields: { new_config_flags: newConfigFlags } },
+    })
+    expect(configFlagEntries('0')).toEqual([
+      { field: 'new_config_flags', label: 'New config flags', value: 'Debt socialization enabled' },
+    ])
+    expect(configFlagEntries('1')).toEqual([
+      { field: 'new_config_flags', label: 'New config flags', value: 'Debt socialization disabled' },
+    ])
+    // Unknown bit combinations fall back to the raw bitmask.
+    expect(configFlagEntries('5')).toEqual([
+      { field: 'new_config_flags', label: 'New config flags', value: '5' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'set_governor_admin',
+      change: { fields: { new_governor_admin: '0x0000000000000000000000000000000000000000' } },
+    })).toEqual([
+      { field: 'new_governor_admin', label: 'New governor admin', value: 'None' },
+    ])
+  })
+
+  it('formats EVK config amounts as percentages and empty hooked ops as None', () => {
+    expect(getActivityChangeEntries({
+      type: 'set_interest_fee',
+      change: { fields: { new_fee: '500' } },
+    })).toEqual([{ field: 'new_fee', label: 'New fee', value: '5%' }])
+
+    expect(getActivityChangeEntries({
+      type: 'set_max_liquidation_discount',
+      change: { fields: { new_discount: '350' } },
+    })).toEqual([{ field: 'new_discount', label: 'New discount', value: '3.5%' }])
+
+    expect(getActivityChangeEntries({
+      type: 'set_hook_config',
+      change: { fields: { new_hooked_ops: '0' } },
+    })).toEqual([{ field: 'new_hooked_ops', label: 'New hooked ops', value: 'None' }])
+    // Non-empty bitmasks stay raw — the operation names are not decoded.
+    expect(getActivityChangeEntries({
+      type: 'set_hook_config',
+      change: { fields: { new_hooked_ops: '4096' } },
+    })).toEqual([{ field: 'new_hooked_ops', label: 'New hooked ops', value: '4096' }])
   })
 
   it('links protocol addresses externally and user identities through spy mode', () => {

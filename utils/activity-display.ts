@@ -8,8 +8,9 @@ import type {
   ActivityValuation,
   ActivityVaultType,
 } from '@eulerxyz/euler-v2-sdk'
-import { formatUnits, isAddress, maxUint256, type Address } from 'viem'
+import { formatUnits, isAddress, maxUint256, zeroAddress, type Address } from 'viem'
 import { formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
+import { CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
 
 interface ActivityTokenMetadata {
   address: Address
@@ -312,6 +313,11 @@ export const getAccountActivityFilterOptions = (): ActivityFilterOption[] =>
     categories: [category],
   }))
 
+const applyActivityAcronyms = (label: string): string => label
+  .replace(/\bltv\b/gi, 'LTV')
+  .replace(/\birm\b/gi, 'IRM')
+  .replace(/\busd\b/gi, 'USD')
+
 export const titleizeActivityType = (type: string): string => {
   const words = type
     .replace(/[_-]+/g, ' ')
@@ -352,7 +358,7 @@ export const formatActivityEventLabel = (
     if (direction === 'received') return 'Received shares'
     return 'Shares transferred'
   }
-  return titleizeActivityType(event.type)
+  return applyActivityAcronyms(titleizeActivityType(event.type))
 }
 
 export interface ActivityEventIcon {
@@ -674,10 +680,60 @@ const formatActivityUnixTimestamp = (value: ActivityChangeValue): string | null 
   return formatActivityTimestamp(date.toISOString())
 }
 
-const formatActivityChangeLabel = (field: string): string => titleizeActivityType(field)
-  .replace(/\bltv\b/gi, 'LTV')
-  .replace(/\birm\b/gi, 'IRM')
-  .replace(/\busd\b/gi, 'USD')
+const formatActivityChangeLabel = (field: string): string =>
+  applyActivityAcronyms(titleizeActivityType(field))
+
+/** Decodes the EVK configFlags bitmask — CFG_DONT_SOCIALIZE_DEBT is the only
+ *  publicly-defined bit today. Unknown bit combinations fall back to raw. */
+const formatActivityConfigFlags = (value: ActivityChangeValue): string | null => {
+  const mask = parseActivityInteger(value)
+  if (mask === 0n) return 'Debt socialization enabled'
+  if (mask === CFG_DONT_SOCIALIZE_DEBT) return 'Debt socialization disabled'
+  return null
+}
+
+const isZeroAddressValue = (value: ActivityChangeValue): boolean => {
+  const values = Array.isArray(value) ? value : [value]
+  return values.length > 0 && values.every(item =>
+    typeof item === 'string' && item.toLowerCase() === zeroAddress,
+  )
+}
+
+/** Display order for change fields whose upstream order is unhelpful. */
+const CHANGE_FIELD_PRIORITY: Partial<Record<ActivityEvent['type'], readonly string[]>> = {
+  set_ltv: [
+    'collateral',
+    'borrow_ltv',
+    'liquidation_ltv',
+    'ramp_duration',
+    'initial_liquidation_ltv',
+    'target_timestamp',
+  ],
+}
+
+const orderedActivityChangeFields = (
+  event: ActivityChangeEventSource,
+): [string, ActivityChangeValue][] => {
+  let fields = Object.entries(event.change?.fields ?? {})
+
+  // An immediate LTV change never ramps — the ramp target fields are noise.
+  if (
+    event.type === 'set_ltv'
+    && parseActivityInteger(event.change?.fields.ramp_duration ?? null) === 0n
+  ) {
+    fields = fields.filter(([field]) =>
+      field !== 'initial_liquidation_ltv' && field !== 'target_timestamp',
+    )
+  }
+
+  const priority = CHANGE_FIELD_PRIORITY[event.type]
+  if (!priority) return fields
+  const rank = (field: string) => {
+    const index = priority.indexOf(field)
+    return index === -1 ? priority.length : index
+  }
+  return fields.sort((left, right) => rank(left[0]) - rank(right[0]))
+}
 
 const resolveChangeAddresses = (
   event: ActivityChangeEventSource,
@@ -707,7 +763,12 @@ const resolveChangeAddresses = (
 export const getActivityChangeEntries = (
   event: ActivityChangeEventSource,
   getVaultMetadata?: ActivityVaultMetadataLookup,
-): ActivityChangeEntry[] => Object.entries(event.change?.fields ?? {}).map(([field, value]) => {
+): ActivityChangeEntry[] => orderedActivityChangeFields(event).map(([field, value]) => {
+  // The zero address reads better as an explicit "None" than as a linked,
+  // copyable 0x0000…0000 (e.g. a renounced governor or cleared receiver).
+  if (isZeroAddressValue(value)) {
+    return { field, label: formatActivityChangeLabel(field), value: 'None' }
+  }
   const addresses = resolveChangeAddresses(event, field, value, getVaultMetadata)
   if (addresses) return { field, label: formatActivityChangeLabel(field), addresses }
 
@@ -746,6 +807,32 @@ export const getActivityChangeEntries = (
   }
   else if (event.type === 'set_ltv' && field.endsWith('_ltv')) {
     formatted = formatActivityBps(value)
+  }
+  else if (
+    event.type === 'set_config_flags'
+    && (field === 'config_flags' || field === 'new_config_flags')
+  ) {
+    formatted = formatActivityConfigFlags(value)
+  }
+  // EVK ConfigAmounts are scaled over 1e4 — 500 reads as 5%, 350 as 3.5%.
+  else if (
+    event.type === 'set_interest_fee'
+    && ['fee', 'new_fee', 'interest_fee', 'new_interest_fee'].includes(field)
+  ) {
+    formatted = formatActivityBps(value)
+  }
+  else if (
+    event.type === 'set_max_liquidation_discount'
+    && ['discount', 'new_discount', 'max_liquidation_discount', 'new_max_liquidation_discount'].includes(field)
+  ) {
+    formatted = formatActivityBps(value)
+  }
+  else if (
+    event.type === 'set_hook_config'
+    && (field === 'hooked_ops' || field === 'new_hooked_ops')
+    && parseActivityInteger(value) === 0n
+  ) {
+    formatted = 'None'
   }
   else if (field === 'target_timestamp') {
     formatted = formatActivityUnixTimestamp(value)
