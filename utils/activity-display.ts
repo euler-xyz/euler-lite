@@ -79,7 +79,6 @@ const ACCOUNT_ACTIVITY_EVENT_TYPES = [
   'repay',
   'pull_debt',
   'liquidation',
-  'operator_status',
 ] as const satisfies readonly ActivityEvent['type'][]
 
 const VAULT_ACTIVITY_EVENT_TYPES = {
@@ -299,11 +298,14 @@ export const getVaultActivityFilterOptions = (
   return options
 }
 
+// The `account` category (controller/collateral/operator status, ToS
+// signatures, …) is deliberately absent: none of its event types are
+// displayed on Lite, so offering the filter would only surface an
+// always-empty view.
 const ACCOUNT_ACTIVITY_CATEGORIES = [
   'lending',
   'borrowing',
   'liquidations',
-  'account',
 ] as const satisfies readonly ActivityCategory[]
 
 export const getAccountActivityFilterOptions = (): ActivityFilterOption[] =>

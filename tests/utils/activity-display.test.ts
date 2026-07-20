@@ -57,7 +57,6 @@ describe('activity display helpers', () => {
       'repay',
       'pull_debt',
       'liquidation',
-      'operator_status',
     ])
     expect(getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'evk' })).toEqual(expect.arrayContaining([
       'deposit',
@@ -71,11 +70,12 @@ describe('activity display helpers', () => {
   })
 
   it('returns the focused portfolio position category filters in display order', () => {
+    // No `account` option: none of that category's event types are displayed
+    // on Lite, so the filter would always come back empty.
     expect(getAccountActivityFilterOptions()).toEqual([
       { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'borrowing', label: 'Borrowing', categories: ['borrowing'] },
       { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
-      { value: 'account', label: 'Position', categories: ['account'] },
     ])
   })
 
