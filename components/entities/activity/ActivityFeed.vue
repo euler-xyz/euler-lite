@@ -47,6 +47,11 @@ const partialMessage = computed(() => {
 const scopeUnsupported = computed(() =>
   isActivityScopeUnsupported(feed.coverage.value?.status, selectedFilters.value),
 )
+// When the active filter narrows the feed to a single category, the rows'
+// category label would just restate the selected chip.
+const impliedCategory = computed(() =>
+  selectedCategories.value.length === 1 ? selectedCategories.value[0] : undefined,
+)
 
 watch(
   () => props.categoryOptions.map(option => option.value),
@@ -190,6 +195,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
             :event="event"
             :show-vault="subject === 'account'"
             :viewer-address="scope.kind === 'account' ? scope.owner : undefined"
+            :hidden-category="impliedCategory"
           />
         </ul>
       </div>

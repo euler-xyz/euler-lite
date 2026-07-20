@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ActivityEvent } from '@eulerxyz/euler-v2-sdk'
+import type { ActivityCategory, ActivityEvent } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getExplorerLink } from '~/utils/block-explorer'
 import {
@@ -21,11 +21,13 @@ import {
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event, showVault = false, viewerAddress } = defineProps<{
+const { event, showVault = false, viewerAddress, hiddenCategory } = defineProps<{
   event: ActivityEvent
   showVault?: boolean
   /** Account whose feed is being viewed — hidden from participants to avoid repeating it on every row. */
   viewerAddress?: string
+  /** Category already implied by the active filter — omitted from the row to avoid restating it. */
+  hiddenCategory?: ActivityCategory
 }>()
 
 const route = useRoute()
@@ -211,8 +213,10 @@ const vaultDisplay = computed(() => {
         {{ eventLabel }}
       </div>
       <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
-        <span>{{ getActivityCategoryLabel(event.category) }}</span>
-        <span aria-hidden="true">&middot;</span>
+        <template v-if="event.category !== hiddenCategory">
+          <span>{{ getActivityCategoryLabel(event.category) }}</span>
+          <span aria-hidden="true">&middot;</span>
+        </template>
         <time
           class="whitespace-nowrap"
           :datetime="event.timestamp"
@@ -270,7 +274,7 @@ const vaultDisplay = computed(() => {
             <AssetAvatar
               v-if="detail.avatarAsset"
               :asset="detail.avatarAsset"
-              size="28"
+              size="20"
             />
             <div class="min-w-0">
               <div
@@ -403,7 +407,7 @@ const vaultDisplay = computed(() => {
      participants line stack top-down beside the icon. */
   .activity-event-row {
     grid-template-columns: 32px minmax(180px, 1fr) minmax(240px, 1.2fr) 40px;
-    gap: 12px 16px;
+    gap: 8px 16px;
   }
 
   .activity-event-row__icon,
