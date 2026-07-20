@@ -119,7 +119,15 @@ const isBorrowSimulatedModified = computed(() =>
 const isCollateralSimulatedModified = (vault: EVault | SecuritizeCollateralVault) =>
   modifiedBalanceKeys.value.has(batchPositionKey(vault.address))
 const hasNoBorrow = computed(() => (position.value?.borrowed ?? 0n) === 0n)
-const hasQueryFailure = computed(() => !borrowVault.value || !collateralVault.value)
+const positionLTVPercent = computed(() => {
+  if (!position.value) return null
+  return getBorrowPositionUserLTVPercent(position.value) ?? null
+})
+const hasQueryFailure = computed(() =>
+  !borrowVault.value
+  || !collateralVault.value
+  || (!hasNoBorrow.value && positionLTVPercent.value === null),
+)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
 const effectiveLiquidationLTVPercent = computed(() => {
   if (!position.value) return null
@@ -129,10 +137,6 @@ const effectiveLiquidationLTVPercent = computed(() => {
 const effectiveLiquidationLTVDisplay = computed(() =>
   effectiveLiquidationLTVPercent.value === null ? '-' : `${effectiveLiquidationLTVPercent.value}%`,
 )
-const positionLTVPercent = computed(() => {
-  if (!position.value) return null
-  return getBorrowPositionUserLTVPercent(position.value) ?? null
-})
 const positionLTVDisplay = computed(() => {
   if (positionLTVPercent.value === null) return ''
   return Number.isFinite(positionLTVPercent.value) ? formatNumber(positionLTVPercent.value, 2) : '∞'

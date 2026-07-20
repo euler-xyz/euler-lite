@@ -18,8 +18,13 @@ import { createRaceGuard } from '~/utils/race-guard'
 import {
   formatBorrowMoreInputAmount,
   getBorrowMoreAvailableLiquidityDisplay,
+  getBorrowMoreDraftReconciliation,
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
+  getBorrowMorePositionIdentityKey,
+  getBorrowMorePositionLtv,
+  getBorrowMoreProjectedLtv,
+  reconcileBorrowMoreDraftBeforeYieldRefresh,
 } from '~/utils/borrow-more'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -48,7 +53,8 @@ const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getBorrowVaultPair } = useVaults()
 const { isConnected, address } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
+const { chainId } = useEulerAddresses()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()
 const { getBalance } = useWallets()
@@ -85,11 +91,35 @@ const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
 const netAPY = ref()
 const liquidationPrice = ref()
+const isProjectedRiskAvailable = ref(true)
 // Layer-aware: tracks the active batch layer's portfolio so the form reflects
 // simulated debt/collateral (a one-shot ref would freeze at the real state).
 const position = computed<PortfolioBorrowPosition<VaultEntity> | undefined>(() =>
   (!isConnected.value && !isSpyMode.value) ? undefined : getPositionBySubAccountIndex(+positionIndex),
 )
+const positionIdentityKey = computed(() => {
+  const current = position.value
+  if (!current) return ''
+  return getBorrowMorePositionIdentityKey({
+    chainId: chainId.value,
+    account: spyAddress.value || address.value,
+    subAccount: current.subAccount,
+    collateralVaultAddress: current.collateralVault?.address,
+    borrowVaultAddress: current.borrowVault?.address,
+  })
+})
+// Same-position baseline refreshes preserve manual input. Identity changes are
+// part of the key so an amount cannot carry into another account or vault pair.
+const positionBaselineKey = computed(() => {
+  const current = position.value
+  if (!current) return ''
+  return [
+    positionIdentityKey.value,
+    current.supplied.toString(),
+    current.borrowed.toString(),
+    getBorrowMorePositionLtv(current)?.toString() ?? '',
+  ].join(':')
+})
 const userLTV = ref(0)
 const currentNetAPY = ref<number>()
 const currentHealth = ref<number>()
@@ -147,7 +177,7 @@ const isSubmitDisabled = computed(() => {
     : 0n
 
   return (additionalCollateralNeeded > 0n && balance.value < additionalCollateralNeeded)
-    || isLoading.value || !(+collateralAmount.value)
+    || isLoading.value || !isProjectedRiskAvailable.value || !(+collateralAmount.value)
     || ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals))
 })
 const isGeoBlocked = computed(() => {
@@ -163,6 +193,7 @@ const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestri
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (!isProjectedRiskAvailable.value) return { message: 'Projected risk estimates are unavailable', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
@@ -214,6 +245,9 @@ const _collateralProduct = useEulerProductOfVault(computed(() => collateralVault
 const availableLiquidity = computed(() => borrowVault.value?.availableLiquidity)
 const availableLiquidityDisplay = computed(() => getBorrowMoreAvailableLiquidityDisplay(borrowVault.value))
 
+const loadGuard = createRaceGuard()
+const asyncEstimatesGuard = createRaceGuard()
+let loadedPositionIdentityKey = ''
 const currentYieldGuard = createRaceGuard()
 const refreshCurrentYield = async () => {
   const gen = currentYieldGuard.next()
@@ -265,56 +299,120 @@ const refreshCurrentYield = async () => {
     multiplier,
   )
 }
-
 const load = async () => {
+  const generation = loadGuard.next()
+  currentYieldGuard.next()
+  asyncEstimatesGuard.next()
   if (!isConnected.value && !isSpyMode.value) {
+    loadedPositionIdentityKey = ''
+    isLoading.value = false
     return
   }
   isLoading.value = true
-  // `position` is a layer-aware computed; load() only seeds the one-shot
-  // "before" baseline (current LTV/health/APY) off the initial real state.
-  if (!position.value) {
+  // `position` is layer-aware; load() seeds the "before" baseline for the
+  // currently active real or simulated position.
+  const currentPosition = position.value
+  if (!currentPosition) {
+    loadedPositionIdentityKey = ''
     isLoading.value = false
     return
   }
-  const collateralAddress = position.value.collateralVault?.address
-  const borrowAddress = position.value.borrowVault?.address
+  const nextPositionIdentityKey = positionIdentityKey.value
+  const collateralAddress = currentPosition.collateralVault?.address
+  const borrowAddress = currentPosition.borrowVault?.address
   if (!collateralAddress || !borrowAddress) {
     isLoading.value = false
+    await router.replace({ path: `/position/${positionIndex}`, query: _route.query })
     return
   }
-  const positionLtv = position.value.userLTV ?? position.value.currentLTV
+  const positionLtv = getBorrowMorePositionLtv(currentPosition)
   if (positionLtv === undefined) {
     isLoading.value = false
+    await router.replace({ path: `/position/${positionIndex}`, query: _route.query })
     return
   }
-  userLTV.value = Number(formatNumber(ltvToPercent(nanoToValue(positionLtv, 18))))
-  currentUserLTV.value = userLTV.value
-  ltv.value = userLTV.value
   try {
-    pair.value = await getBorrowVaultPair(collateralAddress as string, borrowAddress as string) as BorrowVaultPair
-    // Set collateral amount from existing position supply so LTV slider and borrow input work
+    const nextPair = await getBorrowVaultPair(collateralAddress as string, borrowAddress as string) as BorrowVaultPair
+    if (loadGuard.isStale(generation)) return
+
+    const nextUserLTV = Number(formatNumber(ltvToPercent(nanoToValue(positionLtv, 18))))
     const suppliedFixed = FixedPoint.fromValue(
-      position.value!.supplied,
-      Number(collateralVault.value!.asset.decimals),
+      currentPosition.supplied,
+      Number(nextPair.collateral.asset.decimals),
     )
-    collateralAmount.value = trimTrailingZeros(suppliedFixed.toString())
-    // Fetch fresh underlying asset balance for this specific vault
-    await updateBalance()
-    // Compute current position values for before→after display
     const currentLtvPercent = ltvToPercent(nanoToValue(positionLtv, 18))
-    currentHealth.value = currentLtvPercent <= 0
+    const nextCurrentHealth = currentLtvPercent <= 0
       ? Infinity
-      : ltvToPercent(pair.value!.ltv.liquidationLTV) / currentLtvPercent
-    currentLiquidationPrice.value = currentHealth.value < 0.1 ? Infinity : priceFixed.value.toUnsafeFloat() / currentHealth.value
-    await refreshCurrentYield()
+      : ltvToPercent(nextPair.ltv.liquidationLTV) / currentLtvPercent
+    const nextPrice = FixedPoint.fromValue(
+      conservativePriceRatio(
+        getCollateralOraclePrice(nextPair.borrow, nextPair.collateral),
+        getAssetOraclePrice(nextPair.borrow),
+      ),
+      18,
+    ).toUnsafeFloat()
+    const nextCurrentLiquidationPrice = nextCurrentHealth < 0.1 ? Infinity : nextPrice / nextCurrentHealth
+
+    const nextDraft = getBorrowMoreDraftReconciliation({
+      loadedPositionIdentityKey,
+      nextPositionIdentityKey,
+      isLtvDriven: isLtvDriven.value,
+      borrowAmount: borrowAmount.value,
+      borrowed: currentPosition.borrowed,
+      borrowDecimals: nextPair.borrow.shares.decimals,
+      totalCollateral: getTotalCollateralValue(currentPosition),
+      baselineLtv: nextUserLTV,
+    })
+
+    pair.value = nextPair
+    userLTV.value = nextUserLTV
+    currentUserLTV.value = nextUserLTV
+    collateralAmount.value = trimTrailingZeros(suppliedFixed.toString())
+    currentHealth.value = nextCurrentHealth
+    currentLiquidationPrice.value = nextCurrentLiquidationPrice
+    loadedPositionIdentityKey = nextPositionIdentityKey
+    updateBalance()
+
+    await reconcileBorrowMoreDraftBeforeYieldRefresh({
+      draft: nextDraft,
+      commitDraft: (draft) => {
+        isProjectedRiskAvailable.value = true
+        isLtvDriven.value = draft.isLtvDriven
+        borrowAmount.value = draft.borrowAmount
+        ltv.value = draft.ltv
+        if (draft.retained) {
+          updateSyncEstimates()
+          netAPY.value = undefined
+          projectedYieldDetails.value = undefined
+          isEstimatesLoading.value = true
+        }
+        else {
+          health.value = nextCurrentHealth
+          liquidationPrice.value = nextCurrentLiquidationPrice
+          netAPY.value = undefined
+          projectedYieldDetails.value = undefined
+          isEstimatesLoading.value = false
+        }
+      },
+      refreshYield: refreshCurrentYield,
+      onYieldError: (e) => {
+        if (!loadGuard.isStale(generation)) logWarn('borrow-more/currentYield', e)
+      },
+    })
+    if (loadGuard.isStale(generation)) return
+    if (nextDraft.retained) {
+      queueAsyncEstimates()
+    }
   }
   catch (e) {
-    showError('Unable to load Vault')
+    if (loadGuard.isStale(generation)) return
+    error('Unable to load Vault')
     console.warn(e)
   }
   finally {
-    isLoading.value = false
+    if (!loadGuard.isStale(generation)) {
+      isLoading.value = false
+    }
   }
 }
 // `balance` is now a reactive computed over the wallet entity; this just clears
@@ -324,7 +422,7 @@ const updateBalance = () => {
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value) return
+  if (isPreparing.value || reviewBorrowDisabled.value) return
   isPreparing.value = true
   try {
     if (!borrowVault.value || !collateralVault.value) {
@@ -473,15 +571,36 @@ const onBorrowInput = async () => {
   isLtvDriven.value = false
   await nextTick()
   if (!position.value) return
-  const totalCollateral = getTotalCollateralValue(position.value)
-  if (!totalCollateral || totalCollateral <= 0) return
-  const totalBorrow = nanoToValue(position.value.borrowed, borrowVault.value?.shares.decimals || 18) + (+borrowAmount.value || 0)
-  ltv.value = +((totalBorrow / totalCollateral) * 100).toFixed(2)
+  const projectedLtv = getBorrowMoreProjectedLtv({
+    borrowed: position.value.borrowed,
+    borrowDecimals: borrowVault.value?.shares.decimals || 18,
+    additionalBorrowAmount: borrowAmount.value,
+    totalCollateral: getTotalCollateralValue(position.value),
+  })
+  if (projectedLtv !== undefined) {
+    isProjectedRiskAvailable.value = true
+    ltv.value = projectedLtv
+  }
+  else {
+    isProjectedRiskAvailable.value = false
+    asyncEstimatesGuard.next()
+    health.value = undefined
+    liquidationPrice.value = undefined
+    netAPY.value = undefined
+    projectedYieldDetails.value = undefined
+    isEstimatesLoading.value = false
+  }
 }
 const onLtvInput = () => {
+  isProjectedRiskAvailable.value = true
   isLtvDriven.value = true
 }
 const updateSyncEstimates = () => {
+  if (!isProjectedRiskAvailable.value) {
+    health.value = undefined
+    liquidationPrice.value = undefined
+    return
+  }
   if (!pair.value) return
   try {
     const newLtvFloat = ltvFixed.value.toUnsafeFloat()
@@ -497,9 +616,14 @@ const updateSyncEstimates = () => {
   }
 }
 
-const asyncEstimatesGuard = createRaceGuard()
 const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
   if (asyncEstimatesGuard.isStale(gen)) return
+  if (!isProjectedRiskAvailable.value) {
+    netAPY.value = undefined
+    projectedYieldDetails.value = undefined
+    isEstimatesLoading.value = false
+    return
+  }
   const currentPair = pair.value
   const currentBorrowVault = projectionBorrowVault.value
   const currentCollateralVault = projectionCollateralVault.value
@@ -613,7 +737,7 @@ const queueAsyncEstimates = () => {
   const gen = asyncEstimatesGuard.next()
   netAPY.value = undefined
   projectedYieldDetails.value = undefined
-  if (!pair.value || !position.value || !(+borrowAmount.value > 0)) {
+  if (!isProjectedRiskAvailable.value || !pair.value || !position.value || !(+borrowAmount.value > 0)) {
     isEstimatesLoading.value = false
     return
   }
@@ -621,16 +745,24 @@ const queueAsyncEstimates = () => {
   updateAsyncEstimates(gen)
 }
 
-watch(isPositionsLoaded, (val) => {
-  if (val) {
-    load()
+watch([isPositionsLoaded, positionBaselineKey], ([positionsLoaded]) => {
+  if (!positionsLoaded) {
+    loadGuard.next()
+    currentYieldGuard.next()
+    asyncEstimatesGuard.next()
+    isLoading.value = false
+    return
   }
+  void load()
 }, { immediate: true })
 watch(isConnected, () => {
   updateBalance()
 })
 watch(address, () => {
   updateBalance()
+})
+watch(ltv, () => {
+  updateSyncEstimates()
 })
 watch([collateralAmount, borrowAmount], async () => {
   clearSimulationError()

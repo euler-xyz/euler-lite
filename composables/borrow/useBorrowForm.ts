@@ -1273,6 +1273,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   )
 
   // --- Watchers ---
+  watch(ltv, () => {
+    updateSyncEstimates()
+  })
+
   watch([collateralAmount, borrowAmount], () => {
     clearBorrowSimulationError()
     if (!pair.value) {

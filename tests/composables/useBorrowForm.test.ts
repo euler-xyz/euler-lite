@@ -129,7 +129,7 @@ vi.mock('~/utils/sdk-prices', () => ({
   getAssetOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralOraclePrice: vi.fn(() => ({ amountOutMid: 1n })),
   getCollateralUsdPrice: vi.fn(async () => ({ amountOutMid: 1_000_000_000_000_000_000n })),
-  conservativePriceRatio: vi.fn(() => 1),
+  conservativePriceRatio: vi.fn(() => 1_000_000_000_000_000_000n),
   getTokenUsdPrice: vi.fn(async () => 1),
 }))
 
@@ -247,6 +247,7 @@ describe('useBorrowForm savings collateral', () => {
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
     vi.stubGlobal('watchEffect', watchEffect)
+    vi.stubGlobal('nextTick', nextTick)
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
     vi.stubGlobal('useEulerTx', () => ({
       planBorrow: mocks.planBorrow,
@@ -311,11 +312,11 @@ describe('useBorrowForm savings collateral', () => {
     vi.stubGlobal('valueToNano', (value: string | number, decimals = 0) => {
       return BigInt(Math.round(Number(value || 0) * 10 ** Number(decimals)))
     })
+    vi.stubGlobal('ltvToPercent', (value: bigint | number) => typeof value === 'number' ? value * 100 : Number(value) / 1e16)
     vi.stubGlobal('getIsSupplyCapReached', () => false)
     vi.stubGlobal('getIsBorrowCapReached', () => false)
     vi.stubGlobal('getVaultSupplyApy', () => 0)
     vi.stubGlobal('getVaultBorrowApy', () => 0)
-    vi.stubGlobal('ltvToPercent', () => 50)
   })
 
   afterEach(() => {
@@ -366,6 +367,36 @@ describe('useBorrowForm savings collateral', () => {
     expect(form.borrowActiveBalance.value).toBe(0n)
     expect(form.errorText.value).toBe('Savings position not found')
     expect(form.isSubmitDisabled.value).toBe(true)
+  })
+
+  it('updates risk estimates when the borrow input-derived LTV changes', async () => {
+    const riskVault = {
+      ...vault,
+      asset: { ...vault.asset, decimals: 6 },
+      shares: { ...vault.shares, decimals: 6 },
+    } as EVault
+    const form = makeForm(
+      shallowRef<PortfolioSavingsPosition<VaultEntity>[]>([]),
+      shallowRef(makePair(riskVault)),
+    )
+
+    form.collateralAmount.value = '100'
+    form.borrowAmount.value = '10'
+    await form.onBorrowInput()
+    await nextTick()
+
+    expect(form.ltv.value).toBe(10)
+    expect(form.health.value).toBeCloseTo(7.5)
+    expect(form.liquidationPrice.value).toBeGreaterThan(0)
+    const initialLiquidationPrice = form.liquidationPrice.value!
+
+    form.borrowAmount.value = '40'
+    await form.onBorrowInput()
+    await nextTick()
+
+    expect(form.ltv.value).toBe(40)
+    expect(form.health.value).toBeCloseTo(1.875)
+    expect(form.liquidationPrice.value).toBeCloseTo(initialLiquidationPrice * 4, 6)
   })
 
   it('opens the review modal after a non-blocking borrow simulation', async () => {
