@@ -27,6 +27,12 @@ import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { createRaceGuard } from '~/utils/race-guard'
 import { isCowProviderOrQuote } from '~/entities/cowswap'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 const router = useRouter()
 const route = useRoute()
@@ -41,7 +47,11 @@ const { account: cachedAccount } = useFreshAccount()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault, isMarketDataResolved } = useVaults()
 const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
-const { getSupplyRewardApy } = useRewardsApy()
+const {
+  version: rewardsVersion,
+  getSupplyRewardApy,
+  getSupplyRewardCampaigns,
+} = useRewardsApy()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const vaultAddress = route.params.vault as string
@@ -66,6 +76,12 @@ const asset: Ref<VaultAsset | undefined> = ref()
 
 // Check if vault is securitize (for things like supply/borrow which securitize doesn't have)
 const isSecuritizeVaultType = computed(() => !!vault.value && isSecuritizeCollateralVault(vault.value))
+const projectionEVault = computed(() => {
+  const fallback = vault.value
+  if (!fallback || isSecuritizeCollateralVault(fallback)) return undefined
+  return getLayeredVault(fallback.address, fallback)
+})
+const yieldVault = computed(() => projectionEVault.value ?? vault.value)
 
 const withdrawWarnings = computed(() => {
   if (!vault.value || isSecuritizeVaultType.value) return []
@@ -92,7 +108,8 @@ const sharePosition = computed(() => {
 const sharesBalance = computed(() => sharePosition.value?.shares ?? 0n)
 const assetsBalance = computed(() => sharePosition.value?.assets ?? 0n)
 const delta = ref(0n)
-const estimateSupplyAPY = ref<number | bigint>(0)
+const estimateSupplyAPY = ref<number | null>(0)
+const projectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
 const estimatesError = ref('')
 
 // Withdraw & swap state
@@ -131,7 +148,10 @@ const {
   getPlanAccount: () => cachedAccount.value,
   prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
 })
-const rewardApy = computed(() => getSupplyRewardApy(vault.value?.address || ''))
+const rewardApy = computed(() => {
+  void rewardsVersion.value
+  return getSupplyRewardApy(vault.value?.address || '')
+})
 const amountFixed = computed(() => {
   return FixedPoint.fromValue(
     valueToNano(amount.value || '0', asset.value?.decimals || 0),
@@ -173,18 +193,51 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (needsSwap.value && !swapSelectedQuote.value && !amountFixed.value.isZero()) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
-const supplyAPYDisplay = computed(() => {
-  if (!vault.value) return '0.00'
-  const base = withVaultIntrinsicApy(getVaultSupplyApy(vault.value), vault.value, enableIntrinsicApy.value)
-  return formatNumber(base + rewardApy.value)
+const supplyAPY = computed(() => {
+  if (!yieldVault.value) return 0
+  return getVaultTotalSupplyApy(yieldVault.value, enableIntrinsicApy.value, rewardApy.value)
 })
-const estimateSupplyAPYDisplay = computed(() => {
-  const estimate = typeof estimateSupplyAPY.value === 'bigint'
-    ? nanoToValue(estimateSupplyAPY.value, 25)
-    : estimateSupplyAPY.value
-  const base = withVaultIntrinsicApy(estimate, vault.value, enableIntrinsicApy.value)
-  return formatNumber(base + rewardApy.value)
-})
+
+const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | null => {
+  const currentVault = projectionEVault.value
+  if (!currentVault) return null
+  const currentRaw = getVaultSupplyApy(currentVault)
+  const currentWithIntrinsic = withVaultIntrinsicApy(currentRaw, currentVault, enableIntrinsicApy.value)
+  const projectedWithIntrinsic = withVaultIntrinsicApy(rawApy, currentVault, enableIntrinsicApy.value)
+  const before = getProjectedYieldState('supply-apy', {
+    supplyUsd: 1,
+    baseSupplyApy: currentRaw,
+    intrinsicSupplyApy: currentWithIntrinsic - currentRaw,
+    supplyRewardApy: rewardApy.value,
+    borrowUsd: 0,
+    baseBorrowApy: 0,
+  })
+  const after = getProjectedYieldState('supply-apy', {
+    supplyUsd: 1,
+    baseSupplyApy: rawApy,
+    intrinsicSupplyApy: projectedWithIntrinsic - rawApy,
+    supplyRewardApy: rewardApy.value,
+    borrowUsd: 0,
+    baseBorrowApy: 0,
+  })
+  if (!after) return null
+  const campaigns = getSupplyRewardCampaigns(currentVault.address)
+    .map(campaign => ({ campaign, vaultAddress: currentVault.address }))
+  return {
+    metric: 'supply-apy',
+    before,
+    after,
+    rateLines: [{
+      id: `supply:${currentVault.address.toLowerCase()}`,
+      label: 'Lending APY',
+      symbol: currentVault.asset.symbol,
+      vaultAddress: currentVault.address,
+      before: currentRaw,
+      after: rawApy,
+    }],
+    rewards: mergeProjectedRewardCampaigns(campaigns, campaigns),
+  }
+}
 
 // Reactive USD prices for display
 const assetsBalanceUsd = ref(0)
@@ -372,11 +425,15 @@ const load = async () => {
     const isSecuritize = await isSecuritizeVault(vaultAddress)
     if (isSecuritize) {
       vault.value = await _getSecuritizeVault(vaultAddress)
-      estimateSupplyAPY.value = 0 // Securitize vaults don't have interest rate
+      estimateSupplyAPY.value = supplyAPY.value
+      projectedYieldDetails.value = null
     }
     else {
       vault.value = await getVault(vaultAddress)
-      estimateSupplyAPY.value = getVaultSupplyApy(vault.value as EVault)
+      const currentVault = projectionEVault.value ?? (vault.value as EVault)
+      const rawApy = getVaultSupplyApy(currentVault)
+      estimateSupplyAPY.value = withVaultIntrinsicApy(rawApy, currentVault, enableIntrinsicApy.value) + rewardApy.value
+      projectedYieldDetails.value = buildProjectedSupplyDetails(rawApy)
     }
 
     asset.value = vault.value?.asset
@@ -575,13 +632,13 @@ const updateSyncEstimates = () => {
 const estimatesGuard = createRaceGuard()
 
 const updateAsyncEstimates = useDebounceFn(async () => {
-  if (!vault.value || isSecuritizeVaultType.value) {
+  if (!projectionEVault.value || isSecuritizeVaultType.value) {
     isEstimatesLoading.value = false
     return
   }
   const gen = estimatesGuard.next()
   try {
-    const v = vault.value as EVault
+    const v = projectionEVault.value
     const amountNano = valueToNano(amount.value, v.shares.decimals)
     const projected = await getProjectedRates(
       v.address,
@@ -591,12 +648,21 @@ const updateAsyncEstimates = useDebounceFn(async () => {
       0n,
     )
     if (estimatesGuard.isStale(gen)) return
-    estimateSupplyAPY.value = projected?.supplyAPY ?? getVaultSupplyApy(v)
+    if (!projected) {
+      estimateSupplyAPY.value = null
+      projectedYieldDetails.value = null
+      return
+    }
+    const rawApy = nanoToValue(projected.supplyAPY, 25)
+    const details = buildProjectedSupplyDetails(rawApy)
+    estimateSupplyAPY.value = details?.after.total ?? null
+    projectedYieldDetails.value = details
   }
   catch (e) {
     if (estimatesGuard.isStale(gen)) return
     logWarn('lend-withdraw/asyncEstimates', e)
-    estimateSupplyAPY.value = getVaultSupplyApy(vault.value as EVault)
+    estimateSupplyAPY.value = null
+    projectedYieldDetails.value = null
   }
   finally {
     if (!estimatesGuard.isStale(gen)) {
@@ -604,6 +670,30 @@ const updateAsyncEstimates = useDebounceFn(async () => {
     }
   }
 }, 500)
+
+const queueAsyncEstimates = () => {
+  estimatesGuard.next()
+  estimateSupplyAPY.value = null
+  projectedYieldDetails.value = null
+  if (!vault.value) {
+    isEstimatesLoading.value = false
+    return
+  }
+  if (isSecuritizeVaultType.value) {
+    estimateSupplyAPY.value = supplyAPY.value
+    isEstimatesLoading.value = false
+    return
+  }
+  if (!(+amount.value > 0)) {
+    const rawApy = getVaultSupplyApy(projectionEVault.value)
+    estimateSupplyAPY.value = supplyAPY.value
+    projectedYieldDetails.value = buildProjectedSupplyDetails(rawApy)
+    isEstimatesLoading.value = false
+    return
+  }
+  isEstimatesLoading.value = true
+  updateAsyncEstimates()
+}
 
 load()
 
@@ -614,15 +704,20 @@ watch([isConnected, effectiveAddress, assetsBalance], () => {
 })
 watch(amount, async () => {
   updateSyncEstimates()
-  if (!vault.value) return
-  if (!isEstimatesLoading.value) {
-    isEstimatesLoading.value = true
-  }
-  updateAsyncEstimates()
+  queueAsyncEstimates()
   if (needsSwap.value) {
     resetSwapQuoteState()
     requestSwapQuote()
   }
+})
+
+watch([
+  rewardsVersion,
+  enableIntrinsicApy,
+  () => projectionEVault.value?.totalCash,
+  () => projectionEVault.value?.totalBorrowed,
+], () => {
+  queueAsyncEstimates()
 })
 
 // Fetch swap quotes when output asset changes
@@ -778,13 +873,12 @@ watch(swapSelectedQuote, () => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="Supply APY">
-              <SummaryValue
-                :before="supplyAPYDisplay"
-                :after="estimateSupplyAPYDisplay"
-                suffix="%"
-              />
-            </SummaryRow>
+            <ProjectedYieldSummaryRow
+              label="Supply APY"
+              :before="supplyAPY"
+              :after="estimateSupplyAPY"
+              :details="projectedYieldDetails"
+            />
             <SummaryRow
               v-if="!isSecuritizeVaultType"
               label="Supplied"

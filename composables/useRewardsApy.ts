@@ -61,57 +61,47 @@ export const useRewardsApy = () => {
     return getCampaignsFromRewards(vault?.rewards)
   }
 
-  const isMatchingCollateral = (campaign: RewardCampaign, collateralAddress?: string): boolean =>
-    Boolean(
-      collateralAddress
-      && campaign.collateralAddress?.toLowerCase() === collateralAddress.toLowerCase(),
-    )
+  const isMatchingAnyCollateral = (campaign: RewardCampaign, collateralAddresses: readonly string[]): boolean => {
+    const campaignAddress = campaign.collateralAddress?.toLowerCase()
+    return Boolean(campaignAddress && collateralAddresses.some(address => address.toLowerCase() === campaignAddress))
+  }
 
   const getSupplyRewardApy = (vaultAddress: string): number => {
-    if (!isEnabled.value) return 0
-    const campaigns = getCampaignsForVault(vaultAddress)
-    return campaigns
-      .filter(c => c.action === 'LEND')
+    return getSupplyRewardCampaigns(vaultAddress)
       .reduce((sum, c) => sum + rewardCampaignAprPercent(c), 0)
   }
 
-  const getBorrowRewardApy = (borrowVaultAddress: string, collateralAddress?: string): number => {
-    if (!isEnabled.value) return 0
-    const campaigns = getCampaignsForVault(borrowVaultAddress)
-
-    let total = 0
-    for (const c of campaigns) {
-      if (c.action === 'BORROW') {
-        total += rewardCampaignAprPercent(c)
-      }
-      else if (
-        c.action === 'BORROW_COLLATERAL'
-        && isMatchingCollateral(c, collateralAddress)
-      ) {
-        total += rewardCampaignAprPercent(c)
-      }
-    }
-    return total
+  const getBorrowRewardCampaignsForCollaterals = (
+    borrowVaultAddress: string,
+    collateralAddresses: readonly string[],
+  ): RewardCampaign[] => {
+    if (!isEnabled.value) return []
+    return getCampaignsForVault(borrowVaultAddress).filter((campaign) => {
+      if (campaign.action === 'BORROW') return true
+      return campaign.action === 'BORROW_COLLATERAL'
+        && isMatchingAnyCollateral(campaign, collateralAddresses)
+    })
   }
+
+  const getBorrowRewardApyForCollaterals = (borrowVaultAddress: string, collateralAddresses: readonly string[]): number => {
+    return getBorrowRewardCampaignsForCollaterals(borrowVaultAddress, collateralAddresses)
+      .reduce((sum, campaign) => sum + rewardCampaignAprPercent(campaign), 0)
+  }
+
+  const getBorrowRewardApy = (borrowVaultAddress: string, collateralAddress?: string): number =>
+    getBorrowRewardApyForCollaterals(borrowVaultAddress, collateralAddress ? [collateralAddress] : [])
 
   const hasSupplyRewards = (vaultAddress: string): boolean => {
     return getSupplyRewardApy(vaultAddress) > 0
   }
 
-  const getLoopingRewardApy = (borrowVaultAddress: string, collateralAddress?: string): number => {
-    if (!isEnabled.value) return 0
-    const campaigns = getCampaignsForVault(borrowVaultAddress)
-    let total = 0
-    for (const c of campaigns) {
-      if (
-        c.action === 'LOOPING'
-        && isMatchingCollateral(c, collateralAddress)
-      ) {
-        total += rewardCampaignAprPercent(c)
-      }
-    }
-    return total
+  const getLoopingRewardApyForCollaterals = (borrowVaultAddress: string, collateralAddresses: readonly string[]): number => {
+    return getLoopingRewardCampaignsForCollaterals(borrowVaultAddress, collateralAddresses)
+      .reduce((sum, campaign) => sum + rewardCampaignAprPercent(campaign), 0)
   }
+
+  const getLoopingRewardApy = (borrowVaultAddress: string, collateralAddress?: string): number =>
+    getLoopingRewardApyForCollaterals(borrowVaultAddress, collateralAddress ? [collateralAddress] : [])
 
   const hasBorrowRewards = (borrowVaultAddress: string, collateralAddress?: string): boolean => {
     return getBorrowRewardApy(borrowVaultAddress, collateralAddress) > 0
@@ -137,6 +127,15 @@ export const useRewardsApy = () => {
     return getLoopingRewardApy(borrowVaultAddress, collateralAddress)
   }
 
+  const getEligibleLoopingRewardApyForCollaterals = (
+    borrowVaultAddress: string,
+    collateralAddresses: readonly string[],
+    multiplier: number | null | undefined,
+  ): number => {
+    return getEligibleLoopingRewardCampaignsForCollaterals(borrowVaultAddress, collateralAddresses, multiplier)
+      .reduce((sum, campaign) => sum + rewardCampaignAprPercent(campaign), 0)
+  }
+
   const getSupplyRewardCampaigns = (vaultAddress: string): RewardCampaign[] => {
     if (!isEnabled.value) return []
     return getCampaignsForVault(vaultAddress).filter(c => c.action === 'LEND')
@@ -148,23 +147,38 @@ export const useRewardsApy = () => {
   }
 
   const getBorrowRewardCampaigns = (borrowVaultAddress: string, collateralAddress?: string): RewardCampaign[] => {
-    if (!isEnabled.value) return []
-    return getCampaignsForVault(borrowVaultAddress).filter((c) => {
-      if (c.action === 'BORROW') return true
-      if (
-        c.action === 'BORROW_COLLATERAL'
-        && isMatchingCollateral(c, collateralAddress)
-      ) return true
-      return false
-    })
+    return getBorrowRewardCampaignsForCollaterals(
+      borrowVaultAddress,
+      collateralAddress ? [collateralAddress] : [],
+    )
   }
 
-  const getLoopingRewardCampaigns = (borrowVaultAddress: string, collateralAddress?: string): RewardCampaign[] => {
+  const getLoopingRewardCampaignsForCollaterals = (
+    borrowVaultAddress: string,
+    collateralAddresses: readonly string[],
+  ): RewardCampaign[] => {
     if (!isEnabled.value) return []
     return getCampaignsForVault(borrowVaultAddress).filter(c =>
       c.action === 'LOOPING'
-      && isMatchingCollateral(c, collateralAddress),
+      && isMatchingAnyCollateral(c, collateralAddresses),
     )
+  }
+
+  const getLoopingRewardCampaigns = (borrowVaultAddress: string, collateralAddress?: string): RewardCampaign[] => {
+    return getLoopingRewardCampaignsForCollaterals(
+      borrowVaultAddress,
+      collateralAddress ? [collateralAddress] : [],
+    )
+  }
+
+  const getEligibleLoopingRewardCampaignsForCollaterals = (
+    borrowVaultAddress: string,
+    collateralAddresses: readonly string[],
+    multiplier: number | null | undefined,
+  ): RewardCampaign[] => {
+    if (multiplier === null || multiplier === undefined || !Number.isFinite(multiplier)) return []
+    return getLoopingRewardCampaignsForCollaterals(borrowVaultAddress, collateralAddresses)
+      .filter(c => (!c.minMultiplier || multiplier >= c.minMultiplier) && (!c.maxMultiplier || multiplier <= c.maxMultiplier))
   }
 
   return {
@@ -172,8 +186,12 @@ export const useRewardsApy = () => {
     version,
     getSupplyRewardApy,
     getBorrowRewardApy,
+    getBorrowRewardApyForCollaterals,
+    getBorrowRewardCampaignsForCollaterals,
     getLoopingRewardApy,
+    getLoopingRewardApyForCollaterals,
     getEligibleLoopingRewardApy,
+    getEligibleLoopingRewardApyForCollaterals,
     hasSupplyRewards,
     hasBorrowRewards,
     hasLoopingRewards,
@@ -182,5 +200,7 @@ export const useRewardsApy = () => {
     getSupplyRewardCampaignsFromVault,
     getBorrowRewardCampaigns,
     getLoopingRewardCampaigns,
+    getLoopingRewardCampaignsForCollaterals,
+    getEligibleLoopingRewardCampaignsForCollaterals,
   }
 }

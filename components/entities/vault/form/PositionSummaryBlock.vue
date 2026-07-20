@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
+import { formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import type { useCollateralForm } from '~/composables/position/useCollateralForm'
@@ -27,13 +27,12 @@ const form = props.form
     variant="card"
     class="w-full laptop:max-w-[360px]"
   >
-    <SummaryRow label="Net APY">
-      <SummaryValue
-        :before="formatNumber(form.netAPY.value)"
-        :after="formatNumber(form.estimateNetAPY.value)"
-        suffix="%"
-      />
-    </SummaryRow>
+    <ProjectedYieldSummaryRow
+      label="Net APY"
+      :before="form.netAPY.value"
+      :after="form.estimateNetAPY.value"
+      :details="form.projectedYieldDetails.value"
+    />
     <SummaryRow label="Oracle price">
       <SummaryPriceValue
         :value="!form.priceFixed.value.isZero() ? formatSmartAmount(form.priceInvert.invertValue(form.priceFixed.value.toUnsafeFloat())) : undefined"

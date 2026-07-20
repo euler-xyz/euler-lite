@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getNetAPY, getRoe } from '~/utils/vault/apy'
+import { getNetAPY, getNetAPYFromWeightedSupplySnapshot, getPositionMultiplier, getRoe } from '~/utils/vault/apy'
 
 describe('getNetAPY', () => {
   it('returns 0 when supplyUSD is 0', () => {
@@ -44,6 +44,51 @@ describe('getNetAPY', () => {
     // supply=100 at 5%, borrow=0 → netAPY = 5%
     expect(getNetAPY(100, 0.05, 0, 0)).toBeCloseTo(0.05, 6)
   })
+
+  it('does not double-count rewards already included in weighted snapshots', () => {
+    const snapshot = {
+      supplyUsd: 200,
+      weightedSupplyApy: 0.07,
+      isComplete: true,
+    }
+
+    expect(getNetAPYFromWeightedSupplySnapshot(
+      snapshot,
+      0.05,
+      100,
+      0.08,
+      0.02,
+    )).toBeCloseTo(0.03, 6)
+  })
+
+  it('falls back to separate rewards when a weighted snapshot APY is unavailable', () => {
+    const snapshot = {
+      supplyUsd: 200,
+      weightedSupplyApy: null,
+      isComplete: true,
+    }
+
+    expect(getNetAPYFromWeightedSupplySnapshot(
+      snapshot,
+      0.05,
+      100,
+      0.08,
+      0.02,
+    )).toBeCloseTo(0.03, 6)
+  })
+
+  it('does not turn an incomplete collateral snapshot into a 0% estimate', () => {
+    expect(getNetAPYFromWeightedSupplySnapshot(
+      {
+        supplyUsd: 0,
+        weightedSupplyApy: null,
+        isComplete: false,
+      },
+      0.05,
+      100,
+      0.08,
+    )).toBeNull()
+  })
 })
 
 describe('getRoe', () => {
@@ -74,5 +119,17 @@ describe('getRoe', () => {
   it('handles supply-only position', () => {
     // supply=100 at 5%, borrow=0 → equity=100, roe = 100*0.05/100 = 0.05
     expect(getRoe(100, 0.05, 0, 0)).toBeCloseTo(0.05, 6)
+  })
+})
+
+describe('getPositionMultiplier', () => {
+  it('derives leverage from supply and equity', () => {
+    expect(getPositionMultiplier(200, 100)).toBe(2)
+  })
+
+  it('returns null without positive finite equity', () => {
+    expect(getPositionMultiplier(100, 100)).toBeNull()
+    expect(getPositionMultiplier(100, 0)).toBeNull()
+    expect(getPositionMultiplier(Number.NaN, 0)).toBeNull()
   })
 })
