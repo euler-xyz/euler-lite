@@ -415,13 +415,13 @@ const vaultDisplay = computed(() => {
   grid-column: 1 / -1;
 }
 
-/* Participants render inline in the meta line only at mid width — stacked
-   and table layouts use the standalone block/column instead. */
+/* Participants render inline in the meta line everywhere except the stacked
+   mobile layout, which keeps the standalone block. */
 .activity-event-row__participant-inline {
   display: none;
 }
 
-@container activity-feed (min-width: 520px) and (max-width: 899.9px) {
+@container activity-feed (min-width: 520px) {
   .activity-event-row__participant-inline {
     display: inline-flex;
   }
@@ -457,12 +457,6 @@ const vaultDisplay = computed(() => {
     padding-left: 0;
   }
 
-  .activity-event-row__participants {
-    grid-column: 2;
-    grid-row: 2;
-    padding-left: 0;
-  }
-
   .activity-event-row__transaction {
     position: static;
     grid-column: 4;
@@ -487,32 +481,13 @@ const vaultDisplay = computed(() => {
   .activity-event-row {
     grid-template-columns:
       32px
-      minmax(240px, 1.1fr)
-      minmax(260px, 1.2fr)
-      minmax(220px, 1fr)
+      minmax(280px, 1fr)
+      minmax(320px, 1.2fr)
       44px;
-  }
-
-  .activity-event-row__details {
-    grid-column: 3;
-  }
-
-  .activity-event-row__participants {
-    grid-column: 4;
-    grid-row: 1;
-  }
-
-  .activity-event-row__transaction {
-    grid-column: 5;
-    text-align: right;
   }
 
   .activity-event-row__secondary-detail {
     display: block;
-  }
-
-  .activity-event-row__secondary-participant {
-    display: flex;
   }
 
   .activity-event-row__more {

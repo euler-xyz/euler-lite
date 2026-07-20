@@ -185,7 +185,6 @@ watch(feed.hasLoaded, (hasLoaded) => {
         <div class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary">
           <span class="activity-feed__header-event">Event</span>
           <span>Amount / change</span>
-          <span>Participants</span>
           <span class="sr-only">Transaction</span>
         </div>
         <ul>
@@ -238,9 +237,8 @@ watch(feed.hasLoaded, (hasLoaded) => {
     display: grid;
     grid-template-columns:
       32px
-      minmax(240px, 1.1fr)
-      minmax(260px, 1.2fr)
-      minmax(220px, 1fr)
+      minmax(280px, 1fr)
+      minmax(320px, 1.2fr)
       44px;
   }
 
