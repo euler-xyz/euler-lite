@@ -8,7 +8,7 @@ import {
   formatActivityAssetUsd,
   formatActivityEventLabel,
   formatActivityTimestamp,
-  formatActivityValuation,
+  formatActivityValuationForAssets,
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
   getActivityAssetsForDisplay,
@@ -26,7 +26,12 @@ const { event, showVault = false } = defineProps<{
 
 const route = useRoute()
 const expanded = ref(false)
-const { getVault: getRegistryVault, getVaultCategory, registryVersion } = useVaultRegistry()
+const {
+  getVault: getRegistryVault,
+  getType: getRegistryVaultType,
+  getVaultCategory,
+  registryVersion,
+} = useVaultRegistry()
 const { getTokenByAddress } = useTokenList()
 const vaultAddress = computed(() => event.vault ?? '')
 const vaultProduct = useEulerProductOfVault(vaultAddress)
@@ -39,6 +44,16 @@ const tokenMetadata = (address: `0x${string}`) => {
     name: token.name,
     symbol: token.symbol,
     decimals: token.decimals,
+  }
+}
+
+const activityVaultMetadata = (address: `0x${string}`) => {
+  const vault = getRegistryVault(address)
+  if (!vault) return undefined
+  return {
+    asset: vault.asset,
+    shares: vault.shares,
+    vaultType: getRegistryVaultType(address),
   }
 }
 
@@ -64,27 +79,33 @@ const assets = computed(() => {
       getRegistryVault,
       tokenMetadata,
     )
-    const amount = formatActivityAssetAmount(enriched)
+    const amount = formatActivityAssetAmount(enriched, event.type)
     return {
       kind: 'asset' as const,
       address: enriched.address,
       addressKind: getActivityAssetAddressLabel(enriched.kind, event.category),
       amount,
+      amountTitle: amount === 'Amount unavailable' ? `Raw units: ${enriched.amountRaw}` : undefined,
       avatarAsset: resolveAvatarAsset(enriched),
       key: `asset:${enriched.kind}:${enriched.address ?? 'unknown'}:${index}`,
-      label: getActivityAssetLabel(enriched.kind, event.category),
+      label: getActivityAssetLabel(enriched.kind, event.category, event.type),
       usd: formatActivityAssetUsd(enriched),
     }
   })
 })
-const changes = computed(() => getActivityChangeEntries(event.change).map(entry => ({
-  kind: 'change' as const,
-  key: `change:${entry.field}`,
-  label: entry.label,
-  value: entry.value,
-  valueTitle: entry.value,
-})))
-const valuation = computed(() => formatActivityValuation(event.valuation))
+const changes = computed(() => {
+  // Re-resolve human-readable vault names when registry metadata arrives.
+  void registryVersion.value
+  return getActivityChangeEntries(event, activityVaultMetadata).map(entry => ({
+    kind: 'change' as const,
+    key: `change:${entry.field}`,
+    label: entry.label,
+    value: entry.value,
+    valueTitle: entry.value,
+    addresses: entry.addresses,
+  }))
+})
+const valuation = computed(() => formatActivityValuationForAssets(event.valuation, event.assets ?? []))
 const details = computed(() => [
   ...assets.value,
   ...changes.value,
@@ -95,6 +116,7 @@ const details = computed(() => [
         label: 'USD value',
         value: valuation.value,
         valueTitle: event.valuation?.reason,
+        addresses: undefined,
       }]
     : []),
 ])
@@ -180,6 +202,8 @@ const vaultDisplay = computed(() => {
               :address="vaultDisplay.address"
               :chain-id="event.chainId"
               :label="vaultDisplay.addressLabel"
+              link-kind="vault"
+              :vault-type="event.vaultType"
             />
           </div>
         </div>
@@ -199,6 +223,7 @@ const vaultDisplay = computed(() => {
             <ActivityAddress
               :address="participant.address"
               :chain-id="event.chainId"
+              :link-kind="participant.linkKind"
             />
           </div>
           <span
@@ -250,6 +275,7 @@ const vaultDisplay = computed(() => {
             <div class="min-w-0">
               <div
                 class="break-words text-p3 font-medium text-content-primary"
+                :title="detail.amountTitle"
               >
                 {{ detail.amount }}
               </div>
@@ -273,13 +299,29 @@ const vaultDisplay = computed(() => {
           </div>
         </template>
 
-        <div
-          v-else
-          class="break-words text-p3 text-content-primary"
-          :title="detail.valueTitle"
-        >
-          {{ detail.value }}
-        </div>
+        <template v-else>
+          <div
+            v-if="detail.addresses?.length"
+            class="mt-2 flex min-w-0 flex-col items-start gap-2 text-p3"
+          >
+            <ActivityAddress
+              v-for="address in detail.addresses"
+              :key="address.address"
+              :address="address.address"
+              :chain-id="event.chainId"
+              :label="address.label"
+              :link-kind="address.linkKind"
+              :vault-type="address.vaultType"
+            />
+          </div>
+          <div
+            v-else
+            class="break-words text-p3 text-content-primary"
+            :title="detail.valueTitle"
+          >
+            {{ detail.value }}
+          </div>
+        </template>
       </div>
 
       <span

@@ -67,6 +67,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
 <template>
   <div class="activity-feed flex flex-col gap-16">
     <ActivityCategoryFilters
+      v-if="categoryOptions.length > 1"
       v-model="selectedFilters"
       :options="categoryOptions"
     />

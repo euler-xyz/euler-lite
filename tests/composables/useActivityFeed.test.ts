@@ -10,7 +10,7 @@ const TX_HASH = `0x${'1'.repeat(64)}` as const
 const event = (
   id: string,
   vault: typeof VAULT | typeof OTHER_VAULT = VAULT,
-  type = 'deposit',
+  type = 'set_caps',
   overrides: Partial<ActivityEvent> = {},
 ): ActivityEvent => ({
   id,
@@ -63,10 +63,13 @@ describe('useActivityFeed', () => {
     vi.restoreAllMocks()
   })
 
-  const setup = async (fetchVaultActivityEvents: ReturnType<typeof vi.fn>) => {
+  const setup = async (
+    fetchVaultActivityEvents: ReturnType<typeof vi.fn>,
+    fetchAccountActivityEvents: ReturnType<typeof vi.fn> = vi.fn(),
+  ) => {
     vi.stubGlobal('useEulerSdk', () => ({
       getEulerSdkForChain: vi.fn(async () => ({
-        activityService: { fetchVaultActivityEvents },
+        activityService: { fetchAccountActivityEvents, fetchVaultActivityEvents },
       })),
     }))
     return import('~/composables/useActivityFeed')
@@ -110,7 +113,14 @@ describe('useActivityFeed', () => {
       limit: 25,
     })
     const requestedEventTypes = fetchVaultActivityEvents.mock.calls[0]?.[0]?.eventTypes
-    expect(requestedEventTypes).toEqual(expect.arrayContaining(['deposit', 'withdraw', 'transfer']))
+    expect(requestedEventTypes).toEqual(expect.arrayContaining(['set_caps', 'set_ltv', 'liquidation']))
+    expect(requestedEventTypes).not.toEqual(expect.arrayContaining([
+      'deposit',
+      'withdraw',
+      'transfer',
+      'borrow',
+      'repay',
+    ]))
     expect(requestedEventTypes).not.toEqual(expect.arrayContaining([
       'interest_accrued',
       'accrue_interest',
@@ -119,23 +129,16 @@ describe('useActivityFeed', () => {
     ]))
   })
 
-  it('keeps display events while dropping interest accrual and paired share movements', async () => {
+  it('keeps risk and governance events while dropping noisy vault user flows', async () => {
     const fetchVaultActivityEvents = vi.fn(async () => page([
-      event('deposit', VAULT, 'deposit', {
-        groupId: 'paired-transaction',
-        assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
-      }),
+      event('set-caps', VAULT, 'set_caps'),
+      event('liquidation', VAULT, 'liquidation'),
+      event('deposit', VAULT, 'deposit'),
+      event('borrow', VAULT, 'borrow'),
       event('mint-shadow', VAULT, 'mint'),
       event('evk-interest', VAULT, 'interest_accrued'),
       event('earn-interest', VAULT, 'accrue_interest'),
-      event('transfer-shadow', VAULT, 'transfer', {
-        groupId: 'paired-transaction',
-        assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
-      }),
-      event('independent-transfer', VAULT, 'transfer', {
-        groupId: 'paired-transaction',
-        assets: [{ kind: 'shares', address: VAULT, amountRaw: '25' }],
-      }),
+      event('transfer', VAULT, 'transfer'),
       event('withdraw', VAULT, 'withdraw'),
       event('burn-shadow', VAULT, 'burn'),
     ]))
@@ -151,9 +154,8 @@ describe('useActivityFeed', () => {
     })
 
     await vi.waitFor(() => expect(feed?.events.value.map(item => item.id)).toEqual([
-      'deposit',
-      'independent-transfer',
-      'withdraw',
+      'set-caps',
+      'liquidation',
     ]))
   })
 
@@ -166,15 +168,15 @@ describe('useActivityFeed', () => {
       groupId: 'paired-transaction',
       assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
     })
-    const fetchVaultActivityEvents = vi.fn()
+    const fetchAccountActivityEvents = vi.fn()
       .mockResolvedValueOnce(page([shadowTransfer], { nextCursor: 'next' }))
       .mockResolvedValueOnce(page([deposit]))
-    const { useActivityFeed } = await setup(fetchVaultActivityEvents)
+    const { useActivityFeed } = await setup(vi.fn(), fetchAccountActivityEvents)
     let feed: ReturnType<typeof useActivityFeed> | undefined
     effect = effectScope()
     effect.run(() => {
       feed = useActivityFeed({
-        scope: { kind: 'vault', vault: VAULT, chainId: 1, vaultType: 'evk' },
+        scope: { kind: 'account', owner: VAULT, chainId: 1 },
         enabled: true,
         categories: [],
       })
