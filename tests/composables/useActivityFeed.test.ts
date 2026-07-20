@@ -113,13 +113,15 @@ describe('useActivityFeed', () => {
       limit: 25,
     })
     const requestedEventTypes = fetchVaultActivityEvents.mock.calls[0]?.[0]?.eventTypes
-    expect(requestedEventTypes).toEqual(expect.arrayContaining(['set_caps', 'set_ltv', 'liquidation']))
-    expect(requestedEventTypes).not.toEqual(expect.arrayContaining([
+    expect(requestedEventTypes).toEqual(expect.arrayContaining([
       'deposit',
       'withdraw',
       'transfer',
       'borrow',
       'repay',
+      'set_caps',
+      'set_ltv',
+      'liquidation',
     ]))
     expect(requestedEventTypes).not.toEqual(expect.arrayContaining([
       'interest_accrued',
@@ -129,7 +131,7 @@ describe('useActivityFeed', () => {
     ]))
   })
 
-  it('keeps risk and governance events while dropping noisy vault user flows', async () => {
+  it('keeps core vault operations while dropping low-level accounting noise', async () => {
     const fetchVaultActivityEvents = vi.fn(async () => page([
       event('set-caps', VAULT, 'set_caps'),
       event('liquidation', VAULT, 'liquidation'),
@@ -156,6 +158,10 @@ describe('useActivityFeed', () => {
     await vi.waitFor(() => expect(feed?.events.value.map(item => item.id)).toEqual([
       'set-caps',
       'liquidation',
+      'deposit',
+      'borrow',
+      'transfer',
+      'withdraw',
     ]))
   })
 
@@ -168,15 +174,15 @@ describe('useActivityFeed', () => {
       groupId: 'paired-transaction',
       assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],
     })
-    const fetchAccountActivityEvents = vi.fn()
+    const fetchVaultActivityEvents = vi.fn()
       .mockResolvedValueOnce(page([shadowTransfer], { nextCursor: 'next' }))
       .mockResolvedValueOnce(page([deposit]))
-    const { useActivityFeed } = await setup(vi.fn(), fetchAccountActivityEvents)
+    const { useActivityFeed } = await setup(fetchVaultActivityEvents)
     let feed: ReturnType<typeof useActivityFeed> | undefined
     effect = effectScope()
     effect.run(() => {
       feed = useActivityFeed({
-        scope: { kind: 'account', owner: VAULT, chainId: 1 },
+        scope: { kind: 'vault', vault: VAULT, chainId: 1, vaultType: 'evk' },
         enabled: true,
         categories: [],
       })

@@ -96,9 +96,9 @@ export const useSpyMode = () => {
     watch(
       () => route.query.spy,
       (spy) => {
-        if (spy && typeof spy === 'string' && isValidAddress(spy) && !spyAddress.value && !explicitlyCleared) {
-          activateSpyMode(spy)
-        }
+        if (!spy || typeof spy !== 'string' || !isValidAddress(spy)) return
+        const nextAddress = normalizeAddress(spy)
+        if (nextAddress !== spyAddress.value) activateSpyMode(nextAddress)
       },
       { immediate: true },
     )

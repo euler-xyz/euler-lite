@@ -69,12 +69,15 @@ const open = () => {
   <div
     :class="['ui-select', { 'ui-select--chips': chipOptions && chipOptions.length > 0 }]"
   >
-    <div
+    <button
+      type="button"
       class="ui-select__field"
       data-id="filter-trigger"
       :data-filter-title="title || placeholder || 'Select'"
       :data-filter-placeholder="placeholder || 'Select'"
       :data-selected-count="model.length"
+      :aria-label="title || placeholder || 'Select'"
+      aria-haspopup="dialog"
       @click="open"
     >
       <UiIcon
@@ -92,7 +95,7 @@ const open = () => {
         name="arrow-down"
         class="ui-select__arrow"
       />
-    </div>
+    </button>
     <template v-if="chipOptions && chipOptions.length > 0">
       <div
         v-for="option in chipOptions"

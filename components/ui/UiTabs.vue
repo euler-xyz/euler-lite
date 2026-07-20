@@ -85,24 +85,40 @@ const checkScrollPosition = () => {
   scrollPosition.value = scrollLeft
   maxPosition.value = scrollWidth - offsetWidth
 }
+const scrollItemIntoView = (index: number, behavior: ScrollBehavior = 'smooth') => {
+  const wrapper = scrollableRef.value
+  const el = listRef.value?.querySelectorAll('.ui-tabs__item')[index]
+  if (!wrapper || !el) return
+
+  const padding = props.pills ? 4 : 20
+  const itemLeft = el.offsetLeft
+  const itemRight = itemLeft + el.offsetWidth
+  const visibleLeft = wrapper.scrollLeft
+  const visibleRight = visibleLeft + wrapper.clientWidth
+  let left: number | undefined
+  if (itemLeft < visibleLeft + padding) {
+    left = itemLeft - padding
+  }
+  else if (itemRight > visibleRight - padding) {
+    left = itemRight - wrapper.clientWidth + padding
+  }
+  if (left === undefined) return
+
+  wrapper.scroll({
+    left: Math.max(0, left),
+    top: 0,
+    behavior,
+  })
+}
 const onSelect = (value: string | number | undefined, index: number) => {
   model.value = value
-
-  const el = listRef.value ? listRef.value.querySelectorAll('.ui-tabs__item')[index] : undefined
-  if (el) {
-    const isOutside = el.offsetLeft < scrollableRef.value.scrollLeft
-      || el.offsetLeft + el.offsetWidth > scrollableRef.value.scrollLeft + scrollableRef.value.clientWidth
-    const offset = props.pills && index === 0 ? -4 : -20
-    scrollableRef.value.scroll({
-      left: isOutside ? el.offsetLeft + offset : undefined,
-      top: 0,
-      behavior: 'smooth',
-    })
-  }
+  scrollItemIntoView(index)
 }
 
-watch(currentIdx, () => {
+watch(currentIdx, async (index) => {
+  await nextTick()
   updateBlockStyles()
+  scrollItemIntoView(index, 'auto')
 })
 watch(() => props.list.length, async () => {
   await nextTick()
@@ -111,12 +127,18 @@ watch(() => props.list.length, async () => {
   // without changing the list element's own size — the ResizeObserver doesn't
   // fire and the active-pill block keeps its stale width/offset. Recompute it.
   updateBlockStyles()
+  scrollItemIntoView(currentIdx.value, 'auto')
   checkScrollPosition()
 })
 
 onMounted(() => {
-  resizeObserver = new ResizeObserver(updateBlockStyles)
+  resizeObserver = new ResizeObserver(() => {
+    updateBlockStyles()
+    scrollItemIntoView(currentIdx.value, 'auto')
+  })
   resizeObserver.observe(listRef.value)
+  updateBlockStyles()
+  scrollItemIntoView(currentIdx.value, 'auto')
   checkScrollPosition()
 })
 onBeforeUnmount(() => {

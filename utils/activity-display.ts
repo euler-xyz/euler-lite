@@ -74,58 +74,25 @@ const CATEGORY_LABELS: Record<ActivityCategory, string> = {
 const ACCOUNT_ACTIVITY_EVENT_TYPES = [
   'deposit',
   'withdraw',
-  'transfer',
   'borrow',
   'repay',
-  'swap',
-  'debt_socialized',
   'pull_debt',
   'liquidation',
-  'approval',
-  'balance_forwarder_status',
-  'convert_fees',
-  'reallocate_supply',
-  'reallocate_withdraw',
-  'set_fee',
-  'set_guardian',
-  'set_timelock',
-  'set_cap',
-  'set_supply_queue',
-  'set_withdraw_queue',
-  'submit_cap',
-  'submit_market_removal',
-  'revoke_pending_cap',
-  'revoke_pending_guardian',
-  'revoke_pending_timelock',
-  'revoke_pending_market_removal',
-  'frozen',
-  'unfrozen',
-  'seized',
-  'owner_registered',
-  'collateral_status',
   'operator_status',
-  'controller_status',
-  'lockdown_mode_status',
-  'nonce_status',
-  'nonce_used',
-  'permit_disabled_mode_status',
-  'reward_lock_created',
-  'reward_lock_removed',
-  'reward_transfer',
-  'reward_whitelist_status',
-  'public_reallocate_to',
-  'public_withdrawal',
-  'set_admin',
-  'set_allocation_fee',
-  'set_flow_caps',
-  'transfer_allocation_fee',
-  'buy',
-  'terms_of_use_signed',
 ] as const satisfies readonly ActivityEvent['type'][]
 
 const VAULT_ACTIVITY_EVENT_TYPES = {
   evk: [
+    'deposit',
+    'withdraw',
+    'transfer',
+    'borrow',
+    'repay',
+    'debt_socialized',
+    'pull_debt',
     'liquidation',
+    'approval',
+    'balance_forwarder_status',
     'convert_fees',
     'set_caps',
     'set_ltv',
@@ -139,6 +106,12 @@ const VAULT_ACTIVITY_EVENT_TYPES = {
     'set_max_liquidation_discount',
   ],
   earn: [
+    'deposit',
+    'withdraw',
+    'transfer',
+    'update_last_total_assets',
+    'update_lost_assets',
+    'approval',
     'reallocate_supply',
     'reallocate_withdraw',
     'set_name',
@@ -170,6 +143,10 @@ const VAULT_ACTIVITY_EVENT_TYPES = {
     'transfer_allocation_fee',
   ],
   securitize: [
+    'deposit',
+    'withdraw',
+    'transfer',
+    'approval',
     'seized',
     'frozen',
     'unfrozen',
@@ -304,30 +281,28 @@ export const getActivityCategoryIcon = (category: ActivityCategory): string =>
 export const getVaultActivityFilterOptions = (
   vaultType: ActivityVaultType,
 ): ActivityFilterOption[] => {
-  if (vaultType === 'evk') {
-    return [
-      { value: 'governance', label: 'Governance', categories: ['governance'] },
-      { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
-    ]
-  }
-  if (vaultType === 'earn') {
-    return [
-      { value: 'governance', label: 'Governance', categories: ['governance'] },
-    ]
-  }
-  return [
-    { value: 'controls', label: 'Controls', categories: ['account'] },
+  const lendingCategories: ActivityCategory[] = vaultType === 'evk'
+    ? ['lending', 'borrowing']
+    : ['lending']
+  const options: ActivityFilterOption[] = [
+    {
+      value: vaultType === 'evk' ? 'lending-borrowing' : 'lending',
+      label: vaultType === 'evk' ? 'Lending and borrowing' : 'Lending',
+      categories: lendingCategories,
+    },
     { value: 'governance', label: 'Governance', categories: ['governance'] },
   ]
+  if (vaultType === 'evk') {
+    options.push({ value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] })
+  }
+  return options
 }
 
 const ACCOUNT_ACTIVITY_CATEGORIES = [
   'lending',
   'borrowing',
-  'swaps',
   'liquidations',
   'account',
-  'rewards',
 ] as const satisfies readonly ActivityCategory[]
 
 export const getAccountActivityFilterOptions = (): ActivityFilterOption[] =>

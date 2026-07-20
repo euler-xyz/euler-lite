@@ -1,4 +1,4 @@
-import { nextTick, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const FIRST = '0x0000000000000000000000000000000000000001'
@@ -36,6 +36,29 @@ describe('useSpyMode', () => {
 
     expect(spy.activateSpyMode(SECOND)).toBe(true)
     expect(spy.spyAddress.value.toLowerCase()).toBe(SECOND)
+  })
+
+  it('follows valid spy query changes from browser history', async () => {
+    const route = reactive({
+      path: '/portfolio/activity',
+      query: { spy: FIRST },
+      hash: '',
+    })
+    vi.stubGlobal('window', { location: { search: `?spy=${FIRST}` } })
+    vi.stubGlobal('useRoute', () => route)
+
+    const { useSpyMode } = await import('~/composables/useSpyMode')
+    const spy = useSpyMode()
+
+    expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+
+    route.query.spy = SECOND
+    await nextTick()
+    expect(spy.spyAddress.value.toLowerCase()).toBe(SECOND)
+
+    route.query.spy = FIRST
+    await nextTick()
+    expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
   })
 
   it('ignores an owner resolution for a superseded spy address', async () => {

@@ -48,25 +48,23 @@ describe('activity display helpers', () => {
       expect(eventTypes).not.toEqual(expect.arrayContaining(hiddenTypes))
     }
 
-    expect(getDisplayActivityEventTypes({ kind: 'account' })).toEqual(expect.arrayContaining([
+    expect(getDisplayActivityEventTypes({ kind: 'account' })).toEqual([
       'deposit',
-      'transfer',
+      'withdraw',
       'borrow',
-      'swap',
-      'approval',
-      'reward_transfer',
-    ]))
+      'repay',
+      'pull_debt',
+      'liquidation',
+      'operator_status',
+    ])
     expect(getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'evk' })).toEqual(expect.arrayContaining([
+      'deposit',
+      'withdraw',
+      'borrow',
+      'repay',
       'set_caps',
       'set_ltv',
       'liquidation',
-    ]))
-    expect(getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'evk' })).not.toEqual(expect.arrayContaining([
-      'deposit',
-      'withdraw',
-      'transfer',
-      'borrow',
-      'repay',
     ]))
   })
 
@@ -74,39 +72,46 @@ describe('activity display helpers', () => {
     expect(getAccountActivityFilterOptions()).toEqual([
       { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'borrowing', label: 'Borrowing', categories: ['borrowing'] },
-      { value: 'swaps', label: 'Swaps', categories: ['swaps'] },
       { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
       { value: 'account', label: 'Position', categories: ['account'] },
-      { value: 'rewards', label: 'Rewards', categories: ['rewards'] },
     ])
   })
 
   it('returns vault-specific category filters with category-accurate labels', () => {
     expect(getVaultActivityFilterOptions('evk')).toEqual([
+      { value: 'lending-borrowing', label: 'Lending and borrowing', categories: ['lending', 'borrowing'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
       { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
     ])
     expect(getVaultActivityFilterOptions('earn')).toEqual([
+      { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
     ])
     expect(getVaultActivityFilterOptions('securitize')).toEqual([
-      { value: 'controls', label: 'Controls', categories: ['account'] },
+      { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
     ])
 
     const options = getVaultActivityFilterOptions('evk')
     expect(resolveActivityFilterCategories(options, [])).toEqual([
+      'borrowing',
       'governance',
+      'lending',
       'liquidations',
     ])
-    expect(resolveActivityFilterCategories(options, ['liquidations'])).toEqual(['liquidations'])
+    expect(resolveActivityFilterCategories(options, ['lending-borrowing'])).toEqual([
+      'borrowing',
+      'lending',
+    ])
   })
 
-  it('keeps vault governance and liquidation filters independent of current borrowability', () => {
+  it('keeps historical borrowing filters for a currently non-borrowable EVK', () => {
     expect(isVaultBorrowable({ isBorrowable: false, totalBorrowed: 0n })).toBe(false)
 
     expect(resolveActivityFilterCategories(getVaultActivityFilterOptions('evk'), [])).toEqual([
+      'borrowing',
       'governance',
+      'lending',
       'liquidations',
     ])
   })
