@@ -161,8 +161,12 @@ const participants = computed(() => {
       }
     })
 })
+// Collapsing behind a "Details" toggle only pays off when it hides more than
+// one row — with exactly two entries, showing both is shorter than the button.
+const COLLAPSED_ENTRY_COUNT = 2
 const hasExpandableMobileDetails = computed(() =>
-  details.value.length > 1 || participants.value.length > 1,
+  details.value.length > COLLAPSED_ENTRY_COUNT
+  || participants.value.length > COLLAPSED_ENTRY_COUNT,
 )
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => formatActivityEventLabel(event))
@@ -190,7 +194,10 @@ const vaultDisplay = computed(() => {
 </script>
 
 <template>
-  <li class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover">
+  <li
+    class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover"
+    :class="{ 'activity-event-row--static': !hasExpandableMobileDetails }"
+  >
     <div class="activity-event-row__summary">
       <div class="activity-event-row__event flex min-w-0 items-center gap-10 pr-48">
         <div class="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
@@ -252,7 +259,7 @@ const vaultDisplay = computed(() => {
             :key="`${participant.label}:${participant.address}`"
             class="min-w-0 items-center gap-4"
             :class="[
-              index > 0 && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
+              index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
             ]"
           >
             <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
@@ -290,7 +297,7 @@ const vaultDisplay = computed(() => {
         v-for="(detail, index) in details"
         :key="detail.key"
         class="min-w-0"
-        :class="index > 0 && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
+        :class="index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
       >
         <div
           v-if="detail.label"
@@ -412,6 +419,12 @@ const vaultDisplay = computed(() => {
     gap: 16px;
   }
 
+  /* Without an expand toggle the summary reads better centered against the
+     (usually taller) details column. */
+  .activity-event-row--static {
+    align-items: center;
+  }
+
   .activity-event-row__summary {
     display: flex;
     min-width: 0;
@@ -462,12 +475,15 @@ const vaultDisplay = computed(() => {
 }
 
 @container activity-feed (min-width: 900px) {
+  /* The expand toggle never renders at table width, so middle-align every
+     row's cells like a conventional table. */
   .activity-event-row {
     grid-template-columns:
       minmax(280px, 1.1fr)
       minmax(260px, 1.2fr)
       minmax(220px, 1fr)
       44px;
+    align-items: center;
   }
 
   .activity-event-row__summary,
