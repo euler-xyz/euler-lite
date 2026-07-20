@@ -638,6 +638,7 @@ async function buildMigrationPlan(
 async function buildMigrationSimulation(
   input: OutgoingMigrationInput,
   migrationPosition: MigrationPosition,
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
   account?: Account<IHasVaultAddress>,
 ) {
   if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
@@ -650,6 +651,7 @@ async function buildMigrationSimulation(
     positionRef: input.target.ref,
     source: input.source,
     externalTarget: input.externalTarget,
+    authorizationRequest,
     removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
     account,
     cleanupEulerPosition: input.cleanupEulerPosition,
@@ -711,6 +713,7 @@ async function prepareOutgoingMigrationPreview(
   const promise = (async () => {
     const owner = migrationOwner.value
     if (!owner) throw new Error('Migration inputs are incomplete')
+    const useSignatures = signaturesEnabled.value
     const input = buildMigrationInput(target)
 
     // Resolve the external position once and thread it through every SDK
@@ -723,10 +726,25 @@ async function prepareOutgoingMigrationPreview(
       positionRef: input.target.ref,
     })
 
+    // Match the inbound migration flow: resolve the exact authorization form
+    // first, then pass it into simulation. In no-signature mode this must be a
+    // standalone transaction request so the review can list its grant/revoke
+    // rows instead of receiving the SDK's default typed-data request.
+    const authorizationRequest = await getAuthorizationRequest(
+      input,
+      migrationPosition,
+      planAccount.value,
+      useSignatures,
+    )
     // One batch build returns both plans: the simulation plan (auth item
     // stripped, replaced by state overrides) and the stub-signed preview
-    // plan for calldata display — plus the resolved authorization request.
-    const simulationResult = await buildMigrationSimulation(input, migrationPosition, planAccount.value)
+    // plan for calldata display.
+    const simulationResult = await buildMigrationSimulation(
+      input,
+      migrationPosition,
+      authorizationRequest,
+      planAccount.value,
+    )
 
     // Resolve plugin payloads (Pyth Hermes pull, Keyring reads, TOS) once,
     // then run both prepares in parallel against the shared prefetch.
@@ -743,7 +761,7 @@ async function prepareOutgoingMigrationPreview(
     // calldata that executes — no stub-signed preview plan needed.
     const [tenderlyPrepared, previewPrepared] = await Promise.all([
       prepareTransactionPlan(simulationResult.plan, prepareOptions),
-      signaturesEnabled.value
+      useSignatures
         ? prepareTransactionPlan(simulationResult.previewPlan, prepareOptions)
         : Promise.resolve(undefined),
     ])
@@ -763,8 +781,8 @@ async function prepareOutgoingMigrationPreview(
         stateOverrides: simulationResult.stateOverrides,
       },
       calldataPrepared,
-      ...(simulationResult.authorizationRequest
-        ? { authorizationRequest: simulationResult.authorizationRequest }
+      ...(authorizationRequest
+        ? { authorizationRequest }
         : {}),
     }
     outgoingPreviews.value = { ...outgoingPreviews.value, [key]: preview }
@@ -984,7 +1002,18 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
           stateOverrides: preview.tenderlySimulation.stateOverrides,
         }
       }
-      const simulationResult = await buildMigrationSimulation(input, migrationPosition, account)
+      const simulationAuthorizationRequest = await getAuthorizationRequest(
+        input,
+        migrationPosition,
+        account,
+        useSignatures,
+      )
+      const simulationResult = await buildMigrationSimulation(
+        input,
+        migrationPosition,
+        simulationAuthorizationRequest,
+        account,
+      )
       return {
         plan: simulationResult.plan,
         stateOverrides: simulationResult.stateOverrides,
