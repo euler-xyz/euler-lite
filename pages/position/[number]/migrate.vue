@@ -35,7 +35,7 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
-  type PlainTxRequest,
+  type MigrationAuthorizationRevoke,
 } from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -872,7 +872,7 @@ async function sendMigration(target: OutgoingMigrationTarget) {
     // An undefined request means the grant is already live on-chain: nothing to
     // sign, nothing to grant, and nothing of ours to revoke afterwards.
     let authorization: SignedMigrationAuthorization | undefined
-    const revokeTxs: PlainTxRequest[] = []
+    const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
       if (authorizationRequest) {
         if (useSignatures) {

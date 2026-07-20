@@ -45,6 +45,7 @@ import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import {
   encodeMigrationAuthorizationTxs,
+  type MigrationAuthorizationRevoke,
   type PlainTxRequest,
 } from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
@@ -57,7 +58,10 @@ import {
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
 } from '~/utils/safeWalletTransactions'
-import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import {
+  assertWalletExecutionContext,
+  type WalletExecutionContext,
+} from '~/utils/walletExecutionContext'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -1224,15 +1228,22 @@ export const useEulerTx = () => {
    */
   const sendPlainTransactions = async (
     txs: readonly PlainTxRequest[],
-    options?: { onBroadcast?: (index: number) => void },
+    options?: {
+      onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
+      walletContext?: WalletExecutionContext
+    },
   ): Promise<TransactionReceipt[]> => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
     if (!txs.length) return []
 
-    const owner = requireOwner()
-    const cid = requireChainId()
+    const walletContext = options?.walletContext ?? {
+      account: requireOwner(),
+      chainId: requireChainId(),
+    }
+    const owner = walletContext.account
+    const cid = walletContext.chainId
     const sdk = await getEulerSdkFresh()
     const provider = sdk.providerService?.getProvider(cid)
     if (!provider) {
@@ -1258,7 +1269,7 @@ export const useEulerTx = () => {
         lastBroadcastData = tx.data
         // Once a hash exists the transaction may land even if receipt polling
         // fails, so cleanup must start tracking it before awaiting confirmation.
-        options?.onBroadcast?.(index)
+        options?.onBroadcast?.(index, walletContext)
         const receipt = safeWalletProvider
           ? (await waitForSafeTransactionExecution({
               submittedHash: hash,
@@ -1294,13 +1305,15 @@ export const useEulerTx = () => {
    */
   const executeMigrationAuthorizationGrants = async (
     request: MigrationAuthorizationRequest,
-    broadcastRevokes: PlainTxRequest[] = [],
-  ): Promise<PlainTxRequest[]> => {
+    broadcastRevokes: MigrationAuthorizationRevoke[] = [],
+  ): Promise<MigrationAuthorizationRevoke[]> => {
     const { grants, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
     await sendPlainTransactions(grants, {
-      onBroadcast: (index) => {
+      onBroadcast: (index, walletContext) => {
         const revoke = revokesByGrant[index]
-        if (revoke) broadcastRevokes.unshift(revoke)
+        if (revoke) {
+          broadcastRevokes.unshift({ transaction: revoke, walletContext })
+        }
       },
     })
     return broadcastRevokes
@@ -1308,11 +1321,15 @@ export const useEulerTx = () => {
 
   /** Best-effort revoke; never throws. Returns false when it did not complete. */
   const sendMigrationAuthorizationRevokes = async (
-    revokes: readonly PlainTxRequest[],
+    revokes: readonly MigrationAuthorizationRevoke[],
   ): Promise<boolean> => {
     if (!revokes.length) return true
     try {
-      await sendPlainTransactions(revokes)
+      for (const revoke of revokes) {
+        await sendPlainTransactions([revoke.transaction], {
+          walletContext: revoke.walletContext,
+        })
+      }
       return true
     }
     catch (err) {

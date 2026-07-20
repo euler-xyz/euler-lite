@@ -1,5 +1,10 @@
 import { getAddress, type Address } from 'viem'
 
+export interface WalletExecutionContext {
+  account: Address
+  chainId: number
+}
+
 export class WalletExecutionContextChangedError extends Error {
   readonly kind: 'account' | 'chain'
 

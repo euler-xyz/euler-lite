@@ -19,6 +19,8 @@ import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 export interface BatchWalletChange {
   token: string
@@ -2134,25 +2136,35 @@ export const useTxBatch = () => {
    * one already on-chain and resolves to no prerequisite at all.
    */
   const sendExecutionPrerequisites = async (
-    grantedRevokes: BatchEntryExternalTx[],
+    grantedRevokes: MigrationAuthorizationRevoke[],
   ): Promise<void> => {
     for (const [index, entry] of entries.value.entries()) {
       if (!entry.buildExecutionPrerequisites) continue
       const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
       if (!prerequisites) continue
+      let grantWalletContext: WalletExecutionContext | undefined
       if (prerequisites.preTxs.length) {
         await sendPlainTransactions(prerequisites.preTxs, {
-          onBroadcast: (preTxIndex) => {
+          onBroadcast: (preTxIndex, walletContext) => {
+            grantWalletContext = walletContext
             const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
-            if (revoke) grantedRevokes.unshift(revoke)
+            if (revoke) {
+              grantedRevokes.unshift({ transaction: revoke, walletContext })
+            }
           },
         })
       }
       // Entries without a one-to-one mapping retain the original all-or-nothing
       // behavior. Migration entries always provide postTxsByPreTx so partial or
       // receipt-ambiguous grant sequences can unwind precisely.
-      if (!prerequisites.postTxsByPreTx) {
-        grantedRevokes.push(...prerequisites.postTxs)
+      if (!prerequisites.postTxsByPreTx && prerequisites.postTxs.length) {
+        if (!grantWalletContext) {
+          throw new Error('Cannot restore prerequisite transactions without their wallet context')
+        }
+        grantedRevokes.push(...prerequisites.postTxs.map(transaction => ({
+          transaction,
+          walletContext: grantWalletContext,
+        })))
       }
     }
   }
@@ -2170,7 +2182,7 @@ export const useTxBatch = () => {
     if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
     execError.value = undefined
     isExecuting.value = true
-    const grantedRevokes: BatchEntryExternalTx[] = []
+    const grantedRevokes: MigrationAuthorizationRevoke[] = []
     try {
       // Final on-chain gas estimate before asking the user to sign. If the batch
       // would revert (against the current chain state, which may have moved since

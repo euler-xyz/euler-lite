@@ -1,5 +1,5 @@
 import { useToast } from '~/components/ui/composables/useToast'
-import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
+import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 
 /**
  * Every connector throws its own "<protocol> ... for the Euler SwapVerifier is
@@ -23,13 +23,13 @@ export const useMigrationAuthorizationFlow = () => {
   const { sendMigrationAuthorizationRevokes } = useEulerTx()
   const { warning: showWarning } = useToast()
 
-  const revokeAfterSuccess = async (revokes: readonly PlainTxRequest[]) => {
+  const revokeAfterSuccess = async (revokes: readonly MigrationAuthorizationRevoke[]) => {
     if (!revokes.length) return
     if (await sendMigrationAuthorizationRevokes(revokes)) return
     showWarning('Migration succeeded, but restoring your previous authorization failed or was cancelled. You can restore it manually later.')
   }
 
-  const revokeAfterAbort = async (revokes: readonly PlainTxRequest[]) => {
+  const revokeAfterAbort = async (revokes: readonly MigrationAuthorizationRevoke[]) => {
     if (!revokes.length) return
     if (await sendMigrationAuthorizationRevokes(revokes)) return
     showWarning('The temporary authorization granted for this migration is still standing. Retry the migration or restore your previous authorization manually.')

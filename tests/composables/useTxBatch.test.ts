@@ -4,6 +4,8 @@ import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type 
 import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -25,12 +27,15 @@ const eulerTxMocks = {
   estimateGasForPlan: vi.fn(),
   sendPlainTransactions: vi.fn(),
 }
-type PlainTxSendOptions = { onBroadcast?: (index: number) => void }
+const grantWalletContext: WalletExecutionContext = { account: owner, chainId: 1 }
+type PlainTxSendOptions = {
+  onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
+}
 const broadcastAllTransactions = async (
   txs: Array<{ data: Hex }>,
   options?: PlainTxSendOptions,
 ) => {
-  txs.forEach((_tx, index) => options?.onBroadcast?.(index))
+  txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
   return []
 }
 const migrationFlowMocks = {
@@ -761,6 +766,10 @@ describe('useTxBatch execution errors', () => {
 describe('useTxBatch execution prerequisites', () => {
   const grantTx = { to: aToken, data: '0xgrant' as Hex }
   const revokeTx = { to: aToken, data: '0xrevoke' as Hex }
+  const trackedRevoke = (transaction: typeof revokeTx) => ({
+    transaction,
+    walletContext: grantWalletContext,
+  })
 
   const addMigrationEntryWithPrerequisites = async (
     batch: ReturnType<typeof useTxBatch>,
@@ -809,7 +818,7 @@ describe('useTxBatch execution prerequisites', () => {
     // First entry's grant lands; the second is rejected in the wallet.
     eulerTxMocks.sendPlainTransactions.mockImplementation(async (txs: { data: Hex }[], options?: PlainTxSendOptions) => {
       if (txs[0]?.data === secondGrantTx.data) throw new Error('User rejected the request.')
-      txs.forEach((_tx, index) => options?.onBroadcast?.(index))
+      txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
       return []
     })
 
@@ -825,7 +834,7 @@ describe('useTxBatch execution prerequisites', () => {
 
     // The first grant is mined and standing. Leaving it would orphan the
     // allowance: a retry sees it already granted, so it registers no revoke.
-    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([revokeTx])
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     expect(batch.entryCount.value).toBe(2)
   })
@@ -841,7 +850,7 @@ describe('useTxBatch execution prerequisites', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     eulerTxMocks.sendPlainTransactions.mockImplementation(async (txs: { data: Hex }[], options?: PlainTxSendOptions) => {
       calls.push('sendPlainTransactions')
-      txs.forEach((_tx, index) => options?.onBroadcast?.(index))
+      txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
       return []
     })
     eulerTxMocks.estimateGasForPlan.mockImplementation(async () => void calls.push('estimateGasForPlan'))
@@ -867,7 +876,7 @@ describe('useTxBatch execution prerequisites', () => {
       [grantTx],
       expect.objectContaining({ onBroadcast: expect.any(Function) }),
     )
-    expect(migrationFlowMocks.revokeAfterSuccess).toHaveBeenCalledWith([revokeTx])
+    expect(migrationFlowMocks.revokeAfterSuccess).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(migrationFlowMocks.revokeAfterAbort).not.toHaveBeenCalled()
   })
 
@@ -890,7 +899,7 @@ describe('useTxBatch execution prerequisites', () => {
     const secondGrantTx = { to: morphoBlue, data: '0xgrant2' as Hex }
     const secondRevokeTx = { to: morphoBlue, data: '0xrevoke2' as Hex }
     eulerTxMocks.sendPlainTransactions.mockImplementation(async (_txs: { data: Hex }[], options?: PlainTxSendOptions) => {
-      options?.onBroadcast?.(0)
+      options?.onBroadcast?.(0, grantWalletContext)
       throw new Error('Receipt provider unavailable')
     })
 
@@ -901,24 +910,27 @@ describe('useTxBatch execution prerequisites', () => {
     })
     await batch.executeBatch()
 
-    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([revokeTx])
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     expect(batch.entryCount.value).toBe(1)
   })
 
-  it('revokes the granted authorization when the batch itself fails', async () => {
-    const batch = useTxBatch()
-    eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
-    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
-    eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('User rejected the request.'))
+  it.each(['account', 'chain'] as const)(
+    'retains the grant context when the batch detects %s drift',
+    async (kind) => {
+      const batch = useTxBatch()
+      eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
+      eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+      eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+      eulerTxMocks.executePreparedPlan.mockRejectedValue(new WalletExecutionContextChangedError(kind))
 
-    await addGrantingMigrationEntry(batch)
-    await batch.executeBatch()
+      await addGrantingMigrationEntry(batch)
+      await batch.executeBatch()
 
-    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([revokeTx])
-    expect(batch.entryCount.value).toBe(1)
-  })
+      expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+      expect(batch.entryCount.value).toBe(1)
+    },
+  )
 
   it('sends no transactions when an entry reports no prerequisites', async () => {
     const batch = useTxBatch()

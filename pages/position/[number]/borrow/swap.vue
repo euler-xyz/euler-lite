@@ -53,7 +53,7 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
-  type PlainTxRequest,
+  type MigrationAuthorizationRevoke,
 } from '~/utils/migrationAuthorizationTxs'
 import {
   COWSWAP_ORDER_DEADLINE_SECONDS,
@@ -2305,7 +2305,7 @@ const buildInboundExternalMigrationCalldataPreview = async (
  */
 const resolveInboundExternalMigrationAuthorization = async (
   input: InboundExternalMigrationInput,
-  revokeTxs: PlainTxRequest[],
+  revokeTxs: MigrationAuthorizationRevoke[],
   useSignatures: boolean,
 ): Promise<SignedMigrationAuthorization | undefined> => {
   const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
@@ -2885,7 +2885,7 @@ const sendInboundExternalMigration = async () => {
     // Resolve the input once so the authorization and the plan are built from
     // the same position snapshot.
     const input = await buildInboundExternalMigrationInput()
-    const revokeTxs: PlainTxRequest[] = []
+    const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
       const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)
       inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)

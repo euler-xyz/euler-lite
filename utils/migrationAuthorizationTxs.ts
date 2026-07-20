@@ -1,6 +1,7 @@
 import { encodeFunctionData, type Address, type Hex } from 'viem'
 import type { MigrationAuthorizationCall, MigrationAuthorizationRequest } from '@eulerxyz/euler-v2-sdk'
 import type { DisplayStep } from '~/utils/stepDecoding'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 /**
  * Presentation and encoding for the SDK's transaction-form migration
@@ -17,6 +18,12 @@ export interface PlainTxRequest {
   to: Address
   data: Hex
   value?: bigint
+}
+
+/** A restoration transaction bound to the wallet context that sent its grant. */
+export interface MigrationAuthorizationRevoke {
+  transaction: PlainTxRequest
+  walletContext: WalletExecutionContext
 }
 
 export interface MigrationAuthorizationTxs {
