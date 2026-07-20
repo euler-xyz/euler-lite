@@ -389,7 +389,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     if (!isConnected.value && !isSpyMode.value) return false
     if (!fromVault.value?.asset || !toVault.value?.asset) return true
     if (isSameAsset.value) {
-      return isLoading.value || !(+fromAmount.value) || !!errorText.value || isSameVault.value
+      return isLoading.value || !(+fromAmount.value) || !!errorText.value || isSameVault.value || additionalErrors.some(err => !!err.value)
     }
     if (!selectedQuote.value) return true
     const amountOut = getQuoteAmount(selectedQuote.value, 'amountOut')
