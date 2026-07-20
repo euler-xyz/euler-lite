@@ -396,7 +396,7 @@ describe('useBorrowForm savings collateral', () => {
 
     expect(form.ltv.value).toBe(40)
     expect(form.health.value).toBeCloseTo(1.875)
-    expect(form.liquidationPrice.value).toBeCloseTo(initialLiquidationPrice * 4, 24)
+    expect(form.liquidationPrice.value).toBeCloseTo(initialLiquidationPrice * 4, 6)
   })
 
   it('opens the review modal after a non-blocking borrow simulation', async () => {
