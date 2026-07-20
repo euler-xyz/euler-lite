@@ -2,6 +2,7 @@ import type { Hash, TransactionReceipt } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 import {
   getSafeWalletProvider,
+  SafeTransactionStatusUnknownError,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
   type WalletProviderLike,
@@ -180,5 +181,32 @@ describe('waitForSafeTransactionExecution', () => {
       publicClient,
       pollingIntervalMs: 0,
     })).rejects.toThrow(message)
+  })
+
+  it('stops with an unknown status when neither provider returns a receipt', async () => {
+    vi.useFakeTimers()
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({ status: 100 }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('Transaction receipt not found')),
+    }
+
+    try {
+      const pending = waitForSafeTransactionExecution({
+        submittedHash: SAFE_HASH,
+        walletProvider,
+        publicClient,
+        pollingIntervalMs: 1_000,
+        timeoutMs: 5_000,
+      })
+      const rejection = expect(pending).rejects.toBeInstanceOf(SafeTransactionStatusUnknownError)
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      await rejection
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 })

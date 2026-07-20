@@ -57,6 +57,7 @@ import {
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
 } from '~/utils/safeWalletTransactions'
+import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -1173,17 +1174,33 @@ export const useEulerTx = () => {
     })
   }
 
-  const buildSendTransaction = (
-    isOkx: boolean,
-    resolveHash?: (hash: Hash) => Promise<Hash>,
-  ) => {
+  const buildSendTransaction = ({
+    isOkx,
+    expectedAccount,
+    expectedChainId,
+    resolveHash,
+  }: {
+    isOkx: boolean
+    expectedAccount: Address
+    expectedChainId: number
+    resolveHash?: (hash: Hash) => Promise<Hash>
+  }) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
       if (okxDelayPending) {
         await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
         okxDelayPending = false
       }
+      const currentAccount = getAccount(config)
+      assertWalletExecutionContext({
+        expectedAccount,
+        expectedChainId,
+        currentAccount: currentAccount.address,
+        currentChainId: currentAccount.chainId,
+      })
       const hash = await sendTransactionAsync({
+        account: expectedAccount,
+        chainId: expectedChainId,
         to,
         data: data as Hex,
         value: value ?? 0n,
@@ -1214,6 +1231,7 @@ export const useEulerTx = () => {
     }
     if (!txs.length) return []
 
+    const owner = requireOwner()
     const cid = requireChainId()
     const sdk = await getEulerSdkFresh()
     const provider = sdk.providerService?.getProvider(cid)
@@ -1226,7 +1244,11 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
-    const send = buildSendTransaction(isOkx)
+    const send = buildSendTransaction({
+      isOkx,
+      expectedAccount: owner,
+      expectedChainId: cid,
+    })
 
     const receipts: TransactionReceipt[] = []
     let lastBroadcastData: Hex | undefined
@@ -1350,16 +1372,18 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
-    const sendTransaction = buildSendTransaction(
+    const sendTransaction = buildSendTransaction({
       isOkx,
-      safeWalletProvider
+      expectedAccount: owner,
+      expectedChainId: cid,
+      resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
           walletProvider: safeWalletProvider,
           publicClient: provider as ReceiptClientLike,
         })).hash
         : undefined,
-    )
+    })
 
     const result = await sdk.executionService.executeTransactionPlan({
       plan,
@@ -1392,16 +1416,21 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
-    const sendTransaction = buildSendTransaction(
+    const preparedOwner = typeof prepared.account === 'string'
+      ? getAddress(prepared.account)
+      : getAddress(prepared.account.owner)
+    const sendTransaction = buildSendTransaction({
       isOkx,
-      safeWalletProvider
+      expectedAccount: preparedOwner,
+      expectedChainId: prepared.chainId,
+      resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
           walletProvider: safeWalletProvider,
           publicClient: provider as ReceiptClientLike,
         })).hash
         : undefined,
-    )
+    })
 
     const result = await sdk.executionService.executePreparedTransactionPlan({
       prepared,

@@ -1,6 +1,7 @@
 import type { Hash, Transaction, TransactionReceipt } from 'viem'
 
 const SAFE_STATUS_POLL_INTERVAL_MS = 2_000
+const SAFE_STATUS_POLL_TIMEOUT_MS = 5 * 60_000
 
 interface ProviderRequest {
   method: string
@@ -35,6 +36,18 @@ interface SafeCallsStatus {
 export interface SafeTransactionExecution {
   hash: Hash
   receipt: TransactionReceipt
+}
+
+export class SafeTransactionStatusUnknownError extends Error {
+  readonly submittedHash: Hash
+
+  constructor(submittedHash: Hash, reason: 'timeout' | 'aborted') {
+    super(reason === 'timeout'
+      ? 'Safe transaction confirmation timed out. Its execution status is unknown; verify it in Safe before retrying.'
+      : 'Safe transaction confirmation was interrupted. Its execution status is unknown; verify it in Safe before retrying.')
+    this.name = 'SafeTransactionStatusUnknownError'
+    this.submittedHash = submittedHash
+  }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -183,71 +196,130 @@ export const waitForSafeTransactionExecution = async ({
   walletProvider,
   publicClient,
   pollingIntervalMs = SAFE_STATUS_POLL_INTERVAL_MS,
+  timeoutMs = SAFE_STATUS_POLL_TIMEOUT_MS,
+  signal,
 }: {
   submittedHash: Hash
   walletProvider: WalletProviderLike
   publicClient: ReceiptClientLike
   pollingIntervalMs?: number
+  timeoutMs?: number
+  signal?: AbortSignal
 }): Promise<SafeTransactionExecution> => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError('Safe transaction polling timeout must be a positive finite number')
+  }
+
   let executionHash = submittedHash
   let callsStatusSupported = true
+  let stopReason: 'timeout' | 'aborted' = 'timeout'
+  const deadlineAt = Date.now() + timeoutMs
+  const stopController = new AbortController()
+  const onExternalAbort = () => {
+    stopReason = 'aborted'
+    stopController.abort()
+  }
+  if (signal?.aborted) onExternalAbort()
+  else signal?.addEventListener('abort', onExternalAbort, { once: true })
 
-  while (true) {
-    const receipt = await getPublicReceipt(publicClient, executionHash)
-    if (receipt) return { hash: executionHash, receipt }
+  const timeoutId = setTimeout(() => {
+    stopReason = 'timeout'
+    stopController.abort()
+  }, timeoutMs)
+  const statusUnknownError = () => new SafeTransactionStatusUnknownError(submittedHash, stopReason)
+  const withStopSignal = <T>(promise: Promise<T>): Promise<T> => {
+    if (stopController.signal.aborted) return Promise.reject(statusUnknownError())
 
-    if (callsStatusSupported) {
-      try {
-        const rawStatus = await walletProvider.request({
-          method: 'wallet_getCallsStatus',
-          params: [submittedHash],
-        })
-        const callsStatus = parseCallsStatus(rawStatus)
-        const status = parseStatus(callsStatus?.status)
-
-        if (status === 400) {
-          throw new Error('Safe transaction was cancelled')
-        }
-        if (status !== undefined && status >= 500) {
-          throw new Error('Safe transaction failed')
-        }
-
-        const resolvedHash = callsStatus?.receipts
-          ?.map(item => item.transactionHash)
-          .find(isHash)
-        if (resolvedHash) executionHash = resolvedHash
+    return new Promise<T>((resolve, reject) => {
+      const onStop = () => {
+        cleanup()
+        reject(statusUnknownError())
       }
-      catch (error) {
-        if (error instanceof Error && (
-          error.message === 'Safe transaction was cancelled'
-          || error.message === 'Safe transaction failed'
-        )) {
-          throw error
-        }
-        if (isUnsupportedMethodError(error)) callsStatusSupported = false
-        // Safe's gateway can briefly report "Transaction not found" before it
-        // indexes a newly submitted Safe hash. Treat that as pending.
+      const cleanup = () => stopController.signal.removeEventListener('abort', onStop)
+      stopController.signal.addEventListener('abort', onStop, { once: true })
+      promise.then(
+        (value) => {
+          cleanup()
+          resolve(value)
+        },
+        (error) => {
+          cleanup()
+          reject(error)
+        },
+      )
+    })
+  }
+
+  try {
+    while (true) {
+      if (Date.now() >= deadlineAt) {
+        stopReason = 'timeout'
+        stopController.abort()
+        throw statusUnknownError()
       }
+
+      const receipt = await withStopSignal(getPublicReceipt(publicClient, executionHash))
+      if (receipt) return { hash: executionHash, receipt }
+
+      if (callsStatusSupported) {
+        try {
+          const rawStatus = await withStopSignal(walletProvider.request({
+            method: 'wallet_getCallsStatus',
+            params: [submittedHash],
+          }))
+          const callsStatus = parseCallsStatus(rawStatus)
+          const status = parseStatus(callsStatus?.status)
+
+          if (status === 400) {
+            throw new Error('Safe transaction was cancelled')
+          }
+          if (status !== undefined && status >= 500) {
+            throw new Error('Safe transaction failed')
+          }
+
+          const resolvedHash = callsStatus?.receipts
+            ?.map(item => item.transactionHash)
+            .find(isHash)
+          if (resolvedHash) executionHash = resolvedHash
+        }
+        catch (error) {
+          if (error instanceof SafeTransactionStatusUnknownError) throw error
+          if (error instanceof Error && (
+            error.message === 'Safe transaction was cancelled'
+            || error.message === 'Safe transaction failed'
+          )) {
+            throw error
+          }
+          if (isUnsupportedMethodError(error)) callsStatusSupported = false
+          // Safe's gateway can briefly report "Transaction not found" before it
+          // indexes a newly submitted Safe hash. Treat that as pending.
+        }
+      }
+
+      if (!callsStatusSupported) {
+        try {
+          const walletReceipt = await withStopSignal(walletProvider.request({
+            method: 'eth_getTransactionReceipt',
+            params: [submittedHash],
+          }))
+          const resolvedHash = await withStopSignal(getExecutionHashFromWalletReceipt(
+            walletReceipt,
+            submittedHash,
+            publicClient,
+          ))
+          if (resolvedHash) executionHash = resolvedHash
+        }
+        catch (error) {
+          if (error instanceof SafeTransactionStatusUnknownError) throw error
+          // Still pending, or the connector does not expose receipt lookup.
+        }
+      }
+
+      await withStopSignal(waitForNextPoll(pollingIntervalMs))
     }
-
-    if (!callsStatusSupported) {
-      try {
-        const walletReceipt = await walletProvider.request({
-          method: 'eth_getTransactionReceipt',
-          params: [submittedHash],
-        })
-        const resolvedHash = await getExecutionHashFromWalletReceipt(
-          walletReceipt,
-          submittedHash,
-          publicClient,
-        )
-        if (resolvedHash) executionHash = resolvedHash
-      }
-      catch {
-        // Still pending, or the connector does not expose receipt lookup.
-      }
-    }
-
-    await waitForNextPoll(pollingIntervalMs)
+  }
+  finally {
+    clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', onExternalAbort)
   }
 }
