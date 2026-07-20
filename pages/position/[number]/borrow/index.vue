@@ -18,11 +18,13 @@ import { createRaceGuard } from '~/utils/race-guard'
 import {
   formatBorrowMoreInputAmount,
   getBorrowMoreAvailableLiquidityDisplay,
+  getBorrowMoreDraftReconciliation,
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
   getBorrowMorePositionIdentityKey,
   getBorrowMorePositionLtv,
   getBorrowMoreProjectedLtv,
+  reconcileBorrowMoreDraftBeforeYieldRefresh,
 } from '~/utils/borrow-more'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -175,7 +177,7 @@ const isSubmitDisabled = computed(() => {
     : 0n
 
   return (additionalCollateralNeeded > 0n && balance.value < additionalCollateralNeeded)
-    || isLoading.value || !(+collateralAmount.value)
+    || isLoading.value || !isProjectedRiskAvailable.value || !(+collateralAmount.value)
     || ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals))
 })
 const isGeoBlocked = computed(() => {
@@ -191,6 +193,7 @@ const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestri
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (!isProjectedRiskAvailable.value) return { message: 'Projected risk estimates are unavailable', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
   return undefined
@@ -350,19 +353,16 @@ const load = async () => {
     ).toUnsafeFloat()
     const nextCurrentLiquidationPrice = nextCurrentHealth < 0.1 ? Infinity : nextPrice / nextCurrentHealth
 
-    const retainedBorrowAmount = borrowAmount.value
-    const canRetainManualAmount = loadedPositionIdentityKey !== ''
-      && loadedPositionIdentityKey === nextPositionIdentityKey
-      && !isLtvDriven.value
-      && (+retainedBorrowAmount || 0) > 0
-    const retainedProjectedLtv = canRetainManualAmount
-      ? getBorrowMoreProjectedLtv({
-          borrowed: currentPosition.borrowed,
-          borrowDecimals: nextPair.borrow.shares.decimals,
-          additionalBorrowAmount: retainedBorrowAmount,
-          totalCollateral: getTotalCollateralValue(currentPosition),
-        })
-      : undefined
+    const nextDraft = getBorrowMoreDraftReconciliation({
+      loadedPositionIdentityKey,
+      nextPositionIdentityKey,
+      isLtvDriven: isLtvDriven.value,
+      borrowAmount: borrowAmount.value,
+      borrowed: currentPosition.borrowed,
+      borrowDecimals: nextPair.borrow.shares.decimals,
+      totalCollateral: getTotalCollateralValue(currentPosition),
+      baselineLtv: nextUserLTV,
+    })
 
     pair.value = nextPair
     userLTV.value = nextUserLTV
@@ -372,25 +372,36 @@ const load = async () => {
     currentLiquidationPrice.value = nextCurrentLiquidationPrice
     loadedPositionIdentityKey = nextPositionIdentityKey
     updateBalance()
-    await refreshCurrentYield()
-    if (loadGuard.isStale(generation)) return
 
-    if (retainedProjectedLtv !== undefined) {
-      isProjectedRiskAvailable.value = true
-      ltv.value = retainedProjectedLtv
-      updateSyncEstimates()
+    await reconcileBorrowMoreDraftBeforeYieldRefresh({
+      draft: nextDraft,
+      commitDraft: (draft) => {
+        isProjectedRiskAvailable.value = true
+        isLtvDriven.value = draft.isLtvDriven
+        borrowAmount.value = draft.borrowAmount
+        ltv.value = draft.ltv
+        if (draft.retained) {
+          updateSyncEstimates()
+          netAPY.value = undefined
+          projectedYieldDetails.value = undefined
+          isEstimatesLoading.value = true
+        }
+        else {
+          health.value = nextCurrentHealth
+          liquidationPrice.value = nextCurrentLiquidationPrice
+          netAPY.value = undefined
+          projectedYieldDetails.value = undefined
+          isEstimatesLoading.value = false
+        }
+      },
+      refreshYield: refreshCurrentYield,
+      onYieldError: (e) => {
+        if (!loadGuard.isStale(generation)) logWarn('borrow-more/currentYield', e)
+      },
+    })
+    if (loadGuard.isStale(generation)) return
+    if (nextDraft.retained) {
       queueAsyncEstimates()
-    }
-    else {
-      isProjectedRiskAvailable.value = true
-      isLtvDriven.value = true
-      borrowAmount.value = ''
-      ltv.value = nextUserLTV
-      health.value = nextCurrentHealth
-      liquidationPrice.value = nextCurrentLiquidationPrice
-      netAPY.value = undefined
-      projectedYieldDetails.value = undefined
-      isEstimatesLoading.value = false
     }
   }
   catch (e) {
@@ -411,7 +422,7 @@ const updateBalance = () => {
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value) return
+  if (isPreparing.value || reviewBorrowDisabled.value) return
   isPreparing.value = true
   try {
     if (!borrowVault.value || !collateralVault.value) {

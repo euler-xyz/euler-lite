@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   formatBorrowMoreInputAmount,
   getBorrowMoreAvailableLiquidityDisplay,
+  getBorrowMoreDraftReconciliation,
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
   getBorrowMorePositionIdentityKey,
   getBorrowMorePositionLtv,
   getBorrowMoreProjectedLtv,
+  reconcileBorrowMoreDraftBeforeYieldRefresh,
 } from '~/utils/borrow-more'
 
 const usdc = {
@@ -68,6 +70,36 @@ describe('borrow-more position risk', () => {
     expect(getBorrowMorePositionIdentityKey({ ...positionA, subAccount: '0xSubAccountB' })).not.toBe(keyA)
     expect(getBorrowMorePositionIdentityKey({ ...positionA, collateralVaultAddress: '0xCollateralB' })).not.toBe(keyA)
     expect(getBorrowMorePositionIdentityKey({ ...positionA, borrowVaultAddress: '0xBorrowB' })).not.toBe(keyA)
+  })
+
+  it('reconciles an A draft to B before optional yield enrichment can fail', async () => {
+    const nextDraft = getBorrowMoreDraftReconciliation({
+      loadedPositionIdentityKey: 'chain:account-a:sub-account:vault-a:debt-a',
+      nextPositionIdentityKey: 'chain:account-b:sub-account:vault-b:debt-b',
+      isLtvDriven: false,
+      borrowAmount: '20',
+      borrowed: 100_000_000n,
+      borrowDecimals: 6,
+      totalCollateral: 400,
+      baselineLtv: 25,
+    })
+
+    let visibleDraft: ReturnType<typeof getBorrowMoreDraftReconciliation> | undefined
+    let yieldError: unknown
+    await reconcileBorrowMoreDraftBeforeYieldRefresh({
+      draft: nextDraft,
+      commitDraft: (draft) => { visibleDraft = draft },
+      refreshYield: () => Promise.reject(new Error('yield unavailable')),
+      onYieldError: (error) => { yieldError = error },
+    })
+
+    expect(visibleDraft).toEqual({
+      borrowAmount: '',
+      isLtvDriven: true,
+      ltv: 25,
+      retained: false,
+    })
+    expect(yieldError).toEqual(new Error('yield unavailable'))
   })
 })
 

@@ -64,6 +64,70 @@ export const getBorrowMoreProjectedLtv = ({
   return +((totalBorrow / totalCollateral) * 100).toFixed(2)
 }
 
+export interface BorrowMoreDraftReconciliation {
+  borrowAmount: string
+  isLtvDriven: boolean
+  ltv: number
+  retained: boolean
+}
+
+export const getBorrowMoreDraftReconciliation = ({
+  loadedPositionIdentityKey,
+  nextPositionIdentityKey,
+  isLtvDriven,
+  borrowAmount,
+  borrowed,
+  borrowDecimals,
+  totalCollateral,
+  baselineLtv,
+}: {
+  loadedPositionIdentityKey: string
+  nextPositionIdentityKey: string
+  isLtvDriven: boolean
+  borrowAmount: string
+  borrowed: bigint
+  borrowDecimals: Decimals
+  totalCollateral: number
+  baselineLtv: number
+}): BorrowMoreDraftReconciliation => {
+  const canRetain = loadedPositionIdentityKey !== ''
+    && loadedPositionIdentityKey === nextPositionIdentityKey
+    && !isLtvDriven
+    && (+borrowAmount || 0) > 0
+  const retainedProjectedLtv = canRetain
+    ? getBorrowMoreProjectedLtv({
+        borrowed,
+        borrowDecimals,
+        additionalBorrowAmount: borrowAmount,
+        totalCollateral,
+      })
+    : undefined
+
+  return retainedProjectedLtv === undefined
+    ? { borrowAmount: '', isLtvDriven: true, ltv: baselineLtv, retained: false }
+    : { borrowAmount, isLtvDriven: false, ltv: retainedProjectedLtv, retained: true }
+}
+
+export const reconcileBorrowMoreDraftBeforeYieldRefresh = async ({
+  draft,
+  commitDraft,
+  refreshYield,
+  onYieldError,
+}: {
+  draft: BorrowMoreDraftReconciliation
+  commitDraft: (draft: BorrowMoreDraftReconciliation) => void
+  refreshYield: () => Promise<void>
+  onYieldError: (error: unknown) => void
+}): Promise<void> => {
+  commitDraft(draft)
+  try {
+    await refreshYield()
+  }
+  catch (error) {
+    onYieldError(error)
+  }
+}
+
 export const getBorrowMoreAvailableLiquidityDisplay = (
   vault: BorrowMoreLiquidityVault | undefined,
 ): BorrowMoreAvailableLiquidityDisplay | null => {
