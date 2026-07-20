@@ -178,7 +178,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
         :class="{ 'opacity-60': feed.isRefreshing.value }"
       >
         <div class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary">
-          <span class="pl-40">Event</span>
+          <span class="activity-feed__header-event">Event</span>
           <span>Amount / change</span>
           <span>Participants</span>
           <span class="sr-only">Transaction</span>
@@ -231,10 +231,16 @@ watch(feed.hasLoaded, (hasLoaded) => {
   .activity-feed__header {
     display: grid;
     grid-template-columns:
-      minmax(280px, 1.1fr)
+      32px
+      minmax(240px, 1.1fr)
       minmax(260px, 1.2fr)
       minmax(220px, 1fr)
       44px;
+  }
+
+  /* Skip the icon column so the label aligns with the event titles. */
+  .activity-feed__header-event {
+    grid-column: 2;
   }
 }
 </style>

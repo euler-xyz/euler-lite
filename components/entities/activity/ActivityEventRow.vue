@@ -195,84 +195,55 @@ const vaultDisplay = computed(() => {
 </script>
 
 <template>
-  <li class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover">
-    <div class="activity-event-row__summary">
-      <div class="activity-event-row__event flex min-w-0 items-center gap-10 pr-48">
-        <div class="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
-          <SvgIcon
-            :name="eventIcon.name"
-            class="!h-18 !w-18"
-            aria-hidden="true"
-          />
-        </div>
-        <div class="min-w-0">
-          <div
-            class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
-            :title="eventLabel"
-          >
-            {{ eventLabel }}
-          </div>
-          <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
-            <span>{{ getActivityCategoryLabel(event.category) }}</span>
-            <span aria-hidden="true">&middot;</span>
-            <time
-              class="whitespace-nowrap"
-              :datetime="event.timestamp"
-              :title="formatActivityTimestamp(event.timestamp)"
-            >{{ formatActivityRelativeTimestamp(event.timestamp) }}</time>
-          </div>
-          <div
-            v-if="vaultDisplay"
-            class="mt-4 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-p4"
-          >
-            <span class="text-content-tertiary">Market</span>
-            <AssetAvatar
-              v-if="vaultDisplay.avatarAsset"
-              :asset="vaultDisplay.avatarAsset"
-              size="20"
-            />
-            <NuxtLink
-              v-if="vaultDisplay.name"
-              :to="vaultDisplay.route"
-              class="min-w-0 truncate text-content-secondary transition-colors hover:text-accent-500 hover:underline"
-              :title="vaultDisplay.name"
-            >
-              {{ vaultDisplay.name }}
-            </NuxtLink>
-            <ActivityAddress
-              :address="vaultDisplay.address"
-              :chain-id="event.chainId"
-              :label="vaultDisplay.addressLabel"
-              link-kind="vault"
-              :vault-type="event.vaultType"
-            />
-          </div>
-        </div>
-      </div>
-
+  <li class="activity-event-row relative grid items-center gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover">
+    <div class="activity-event-row__icon flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
+      <SvgIcon
+        :name="eventIcon.name"
+        class="!h-18 !w-18"
+        aria-hidden="true"
+      />
+    </div>
+    <div class="activity-event-row__title min-w-0 pr-48">
       <div
-        v-if="participants.length > 0"
-        class="activity-event-row__meta"
+        class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
+        :title="eventLabel"
       >
-        <div class="activity-event-row__participants flex min-w-0 flex-col gap-4 pl-40 text-p3">
-          <div
-            v-for="(participant, index) in participants"
-            :key="`${participant.label}:${participant.address}`"
-            class="min-w-0 items-center gap-4"
-            :class="[
-              index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
-            ]"
-          >
-            <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
-            <ActivityAddress
-              :address="participant.address"
-              :chain-id="event.chainId"
-              :label="participant.addressLabel"
-              :link-kind="participant.linkKind"
-              :vault-type="participant.vaultType"
-            />
-          </div>
-        </div>
+        {{ eventLabel }}
+      </div>
+      <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
+        <span>{{ getActivityCategoryLabel(event.category) }}</span>
+        <span aria-hidden="true">&middot;</span>
+        <time
+          class="whitespace-nowrap"
+          :datetime="event.timestamp"
+          :title="formatActivityTimestamp(event.timestamp)"
+        >{{ formatActivityRelativeTimestamp(event.timestamp) }}</time>
+      </div>
+      <div
+        v-if="vaultDisplay"
+        class="mt-4 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-p4"
+      >
+        <span class="text-content-tertiary">Market</span>
+        <AssetAvatar
+          v-if="vaultDisplay.avatarAsset"
+          :asset="vaultDisplay.avatarAsset"
+          size="20"
+        />
+        <NuxtLink
+          v-if="vaultDisplay.name"
+          :to="vaultDisplay.route"
+          class="min-w-0 truncate text-content-secondary transition-colors hover:text-accent-500 hover:underline"
+          :title="vaultDisplay.name"
+        >
+          {{ vaultDisplay.name }}
+        </NuxtLink>
+        <ActivityAddress
+          :address="vaultDisplay.address"
+          :chain-id="event.chainId"
+          :label="vaultDisplay.addressLabel"
+          link-kind="vault"
+          :vault-type="event.vaultType"
+        />
       </div>
     </div>
 
@@ -372,6 +343,29 @@ const vaultDisplay = computed(() => {
       </button>
     </div>
 
+    <div
+      v-if="participants.length > 0"
+      class="activity-event-row__participants flex min-w-0 flex-col gap-4 pl-40 text-p3"
+    >
+      <div
+        v-for="(participant, index) in participants"
+        :key="`${participant.label}:${participant.address}`"
+        class="min-w-0 items-center gap-4"
+        :class="[
+          index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
+        ]"
+      >
+        <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
+        <ActivityAddress
+          :address="participant.address"
+          :chain-id="event.chainId"
+          :label="participant.addressLabel"
+          :link-kind="participant.linkKind"
+          :vault-type="participant.vaultType"
+        />
+      </div>
+    </div>
+
     <div class="activity-event-row__transaction absolute right-0 top-8">
       <a
         :href="transactionLink"
@@ -392,73 +386,53 @@ const vaultDisplay = computed(() => {
 </template>
 
 <style scoped>
-.activity-event-row__summary,
-.activity-event-row__meta {
-  display: contents;
+/* Stacked (narrow) layout: icon + title on the first line, details and
+   participants as full-width lines underneath. */
+.activity-event-row {
+  grid-template-columns: 32px minmax(0, 1fr);
 }
 
-.activity-event-row__event {
-  order: 1;
-}
-
-.activity-event-row__details {
-  order: 2;
-}
-
+.activity-event-row__details,
 .activity-event-row__participants {
-  order: 3;
+  grid-column: 1 / -1;
 }
 
 @container activity-feed (min-width: 520px) {
-  /* One alignment rule for every row: event summary, details, and the
-     transaction link share the first grid row and center against each
-     other; participants get their own row underneath. */
+  /* One rule for every row: the icon, details column, and transaction link
+     center against the full card height, while the title line and the
+     participants line stack top-down beside the icon. */
   .activity-event-row {
-    grid-template-columns: minmax(200px, 1fr) minmax(240px, 1.2fr) 40px;
-    align-items: center;
+    grid-template-columns: 32px minmax(180px, 1fr) minmax(240px, 1.2fr) 40px;
     gap: 12px 16px;
   }
 
-  .activity-event-row__summary {
-    display: contents;
+  .activity-event-row__icon,
+  .activity-event-row__details,
+  .activity-event-row__transaction {
+    grid-row: 1 / -1;
   }
 
-  .activity-event-row__event {
-    order: initial;
-    grid-column: 1;
+  .activity-event-row__title {
+    grid-column: 2;
     grid-row: 1;
     padding-right: 0;
   }
 
   .activity-event-row__details {
-    order: initial;
+    grid-column: 3;
+    padding-left: 0;
+  }
+
+  .activity-event-row__participants {
     grid-column: 2;
-    grid-row: 1;
+    grid-row: 2;
     padding-left: 0;
   }
 
   .activity-event-row__transaction {
     position: static;
-    grid-column: 3;
-    grid-row: 1;
+    grid-column: 4;
     justify-self: end;
-  }
-
-  .activity-event-row__meta {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 12px;
-    padding-left: 40px;
-    order: initial;
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-
-  .activity-event-row__participants {
-    min-width: 0;
-    flex: 1 1 auto;
-    padding-left: 0;
   }
 
   .activity-event-row__asset-label,
@@ -476,49 +450,27 @@ const vaultDisplay = computed(() => {
 }
 
 @container activity-feed (min-width: 900px) {
-  /* The expand toggle never renders at table width, so middle-align every
-     row's cells like a conventional table. */
   .activity-event-row {
     grid-template-columns:
-      minmax(280px, 1.1fr)
+      32px
+      minmax(240px, 1.1fr)
       minmax(260px, 1.2fr)
       minmax(220px, 1fr)
       44px;
-    align-items: center;
-  }
-
-  .activity-event-row__summary,
-  .activity-event-row__meta {
-    display: contents;
-  }
-
-  .activity-event-row__event,
-  .activity-event-row__details,
-  .activity-event-row__participants,
-  .activity-event-row__transaction {
-    grid-row: 1;
-  }
-
-  .activity-event-row__event {
-    grid-column: 1;
   }
 
   .activity-event-row__details {
-    grid-column: 2;
-  }
-
-  .activity-event-row__participants {
     grid-column: 3;
   }
 
-  .activity-event-row__transaction {
+  .activity-event-row__participants {
     grid-column: 4;
+    grid-row: 1;
   }
 
-  .activity-event-row__event,
-  .activity-event-row__participants {
-    padding-left: 0;
-    padding-right: 0;
+  .activity-event-row__transaction {
+    grid-column: 5;
+    text-align: right;
   }
 
   .activity-event-row__secondary-detail {
@@ -544,10 +496,6 @@ const vaultDisplay = computed(() => {
   .activity-event-row__asset-amount,
   .activity-event-row__asset-address {
     margin-top: 2px;
-  }
-
-  .activity-event-row__transaction {
-    text-align: right;
   }
 }
 </style>
