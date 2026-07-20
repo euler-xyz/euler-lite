@@ -227,10 +227,6 @@ const vaultDisplay = computed(() => {
           :key="`inline:${participant.label}:${participant.address}`"
           class="activity-event-row__participant-inline min-w-0 items-center gap-4"
         >
-          <span
-            aria-hidden="true"
-            class="mr-4"
-          >&middot;</span>
           <span class="shrink-0">{{ participant.label }}</span>
           <ActivityAddress
             :address="participant.address"
