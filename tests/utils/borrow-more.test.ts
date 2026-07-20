@@ -5,6 +5,7 @@ import {
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
   getBorrowMorePositionLtv,
+  getBorrowMoreProjectedLtv,
 } from '~/utils/borrow-more'
 
 const usdc = {
@@ -28,6 +29,26 @@ describe('borrow-more position risk', () => {
 
   it('stays unavailable when oracle-derived risk is missing', () => {
     expect(getBorrowMorePositionLtv({})).toBeUndefined()
+  })
+
+  it('recomputes a retained manual amount from the refreshed position baseline', () => {
+    const input = {
+      borrowDecimals: 6,
+      additionalBorrowAmount: '20',
+      totalCollateral: 400,
+    }
+
+    expect(getBorrowMoreProjectedLtv({ ...input, borrowed: 100_000_000n })).toBe(30)
+    expect(getBorrowMoreProjectedLtv({ ...input, borrowed: 160_000_000n })).toBe(45)
+  })
+
+  it('does not project risk without collateral value', () => {
+    expect(getBorrowMoreProjectedLtv({
+      borrowed: 100_000_000n,
+      borrowDecimals: 6,
+      additionalBorrowAmount: '20',
+      totalCollateral: 0,
+    })).toBeUndefined()
   })
 })
 

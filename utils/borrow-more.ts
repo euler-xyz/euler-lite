@@ -27,6 +27,23 @@ export const getBorrowMorePositionLtv = (
   position: BorrowMoreRiskPosition,
 ): bigint | undefined => position.userLTV ?? position.currentLTV
 
+export const getBorrowMoreProjectedLtv = ({
+  borrowed,
+  borrowDecimals,
+  additionalBorrowAmount,
+  totalCollateral,
+}: {
+  borrowed: bigint
+  borrowDecimals: Decimals
+  additionalBorrowAmount: string
+  totalCollateral: number
+}): number | undefined => {
+  if (!Number.isFinite(totalCollateral) || totalCollateral <= 0) return undefined
+
+  const totalBorrow = nanoToValue(borrowed, borrowDecimals) + (+additionalBorrowAmount || 0)
+  return +((totalBorrow / totalCollateral) * 100).toFixed(2)
+}
+
 export const getBorrowMoreAvailableLiquidityDisplay = (
   vault: BorrowMoreLiquidityVault | undefined,
 ): BorrowMoreAvailableLiquidityDisplay | null => {

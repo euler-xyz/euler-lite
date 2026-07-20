@@ -21,6 +21,7 @@ import {
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
   getBorrowMorePositionLtv,
+  getBorrowMoreProjectedLtv,
 } from '~/utils/borrow-more'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -196,8 +197,10 @@ const availableLiquidity = computed(() => borrowVault.value?.availableLiquidity)
 const availableLiquidityDisplay = computed(() => getBorrowMoreAvailableLiquidityDisplay(borrowVault.value))
 
 const loadGuard = createRaceGuard()
+const asyncEstimatesGuard = createRaceGuard()
 const load = async () => {
   const generation = loadGuard.next()
+  asyncEstimatesGuard.next()
   if (!isConnected.value && !isSpyMode.value) {
     isLoading.value = false
     return
@@ -259,6 +262,17 @@ const load = async () => {
       getAssetUsdValueOrZero(currentPosition.borrowed || 0, nextPair.borrow, 'off-chain'),
     ])
     if (loadGuard.isStale(generation)) return
+    asyncEstimatesGuard.next()
+
+    const retainedBorrowAmount = borrowAmount.value
+    const retainedProjectedLtv = !isLtvDriven.value && (+retainedBorrowAmount || 0) > 0
+      ? getBorrowMoreProjectedLtv({
+          borrowed: currentPosition.borrowed,
+          borrowDecimals: nextPair.borrow.shares.decimals,
+          additionalBorrowAmount: retainedBorrowAmount,
+          totalCollateral: getTotalCollateralValue(currentPosition),
+        })
+      : undefined
 
     const nextCurrentNetAPY = getNetAPY(
       collUsd,
@@ -272,12 +286,28 @@ const load = async () => {
     pair.value = nextPair
     userLTV.value = nextUserLTV
     currentUserLTV.value = nextUserLTV
-    ltv.value = nextUserLTV
     collateralAmount.value = trimTrailingZeros(suppliedFixed.toString())
     currentHealth.value = nextCurrentHealth
     currentLiquidationPrice.value = nextCurrentLiquidationPrice
     currentNetAPY.value = nextCurrentNetAPY
     updateBalance()
+
+    if (retainedProjectedLtv !== undefined) {
+      ltv.value = retainedProjectedLtv
+      updateSyncEstimates()
+      netAPY.value = undefined
+      isEstimatesLoading.value = true
+      updateAsyncEstimates()
+    }
+    else {
+      isLtvDriven.value = true
+      borrowAmount.value = ''
+      ltv.value = nextUserLTV
+      health.value = nextCurrentHealth
+      liquidationPrice.value = nextCurrentLiquidationPrice
+      netAPY.value = nextCurrentNetAPY
+      isEstimatesLoading.value = false
+    }
   }
   catch (e) {
     if (loadGuard.isStale(generation)) return
@@ -446,10 +476,15 @@ const onBorrowInput = async () => {
   isLtvDriven.value = false
   await nextTick()
   if (!position.value) return
-  const totalCollateral = getTotalCollateralValue(position.value)
-  if (!totalCollateral || totalCollateral <= 0) return
-  const totalBorrow = nanoToValue(position.value.borrowed, borrowVault.value?.shares.decimals || 18) + (+borrowAmount.value || 0)
-  ltv.value = +((totalBorrow / totalCollateral) * 100).toFixed(2)
+  const projectedLtv = getBorrowMoreProjectedLtv({
+    borrowed: position.value.borrowed,
+    borrowDecimals: borrowVault.value?.shares.decimals || 18,
+    additionalBorrowAmount: borrowAmount.value,
+    totalCollateral: getTotalCollateralValue(position.value),
+  })
+  if (projectedLtv !== undefined) {
+    ltv.value = projectedLtv
+  }
 }
 const onLtvInput = () => {
   isLtvDriven.value = true
@@ -470,7 +505,6 @@ const updateSyncEstimates = () => {
   }
 }
 
-const asyncEstimatesGuard = createRaceGuard()
 const updateAsyncEstimates = useDebounceFn(async () => {
   if (!pair.value || !borrowVault.value || !collateralVault.value) return
   const gen = asyncEstimatesGuard.next()
