@@ -16,6 +16,7 @@ const spyAddress = ref('')
 let watchersInitialized = false
 let ownerResolved = false
 let explicitlyCleared = false
+let ownerResolutionRequestId = 0
 
 /** Lightweight accessor for middleware — avoids useRoute() */
 export const getSpyModeState = () => ({
@@ -35,19 +36,20 @@ export const useSpyMode = () => {
     explicitlyCleared = false
     spyAddress.value = normalizeAddress(address)
     ownerResolved = false
+    ownerResolutionRequestId += 1
     return true
   }
 
   // Try to pick up ?spy= — route.query may not be populated yet, so read from window.location
-  if (!spyAddress.value && !explicitlyCleared && import.meta.client) {
+  if (!spyAddress.value && !explicitlyCleared && typeof window !== 'undefined') {
     const spy = new URLSearchParams(window.location.search).get('spy')
       || (route.query.spy as string | undefined)
     if (spy && isValidAddress(spy)) {
-      spyAddress.value = normalizeAddress(spy)
+      activateSpyMode(spy)
     }
   }
 
-  if (!watchersInitialized && import.meta.client) {
+  if (!watchersInitialized && typeof window !== 'undefined') {
     watchersInitialized = true
 
     const { eulerCoreAddresses, chainId } = useEulerAddresses()
@@ -76,7 +78,9 @@ export const useSpyMode = () => {
       return address
     }
 
-    const applyResolved = (resolved: string) => {
+    const applyResolved = (sourceAddress: string, resolved: string, requestId: number) => {
+      if (requestId !== ownerResolutionRequestId || spyAddress.value !== sourceAddress) return
+
       if (resolved !== spyAddress.value) {
         spyAddress.value = resolved
         router.replace({
@@ -93,8 +97,7 @@ export const useSpyMode = () => {
       () => route.query.spy,
       (spy) => {
         if (spy && typeof spy === 'string' && isValidAddress(spy) && !spyAddress.value && !explicitlyCleared) {
-          spyAddress.value = normalizeAddress(spy)
-          ownerResolved = false
+          activateSpyMode(spy)
         }
       },
       { immediate: true },
@@ -105,7 +108,8 @@ export const useSpyMode = () => {
       [() => spyAddress.value, () => eulerCoreAddresses.value?.evc],
       ([addr, evc]) => {
         if (addr && evc && !ownerResolved) {
-          resolveOwner(addr).then(applyResolved)
+          const requestId = ++ownerResolutionRequestId
+          resolveOwner(addr).then(resolved => applyResolved(addr, resolved, requestId))
         }
       },
       { immediate: true },
@@ -126,6 +130,7 @@ export const useSpyMode = () => {
     explicitlyCleared = true
     spyAddress.value = ''
     ownerResolved = false
+    ownerResolutionRequestId += 1
     const { spy: _spy, ...rest } = route.query
     await router.replace({
       path: route.path,
