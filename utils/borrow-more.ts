@@ -27,6 +27,26 @@ export const getBorrowMorePositionLtv = (
   position: BorrowMoreRiskPosition,
 ): bigint | undefined => position.userLTV ?? position.currentLTV
 
+export const getBorrowMorePositionIdentityKey = ({
+  chainId,
+  account,
+  subAccount,
+  collateralVaultAddress,
+  borrowVaultAddress,
+}: {
+  chainId: number | undefined
+  account: string | undefined
+  subAccount: string
+  collateralVaultAddress: string | undefined
+  borrowVaultAddress: string | undefined
+}): string => [
+  chainId ?? '',
+  account ?? '',
+  subAccount,
+  collateralVaultAddress ?? '',
+  borrowVaultAddress ?? '',
+].map(value => value.toString().toLowerCase()).join(':')
+
 export const getBorrowMoreProjectedLtv = ({
   borrowed,
   borrowDecimals,

@@ -20,6 +20,7 @@ import {
   getBorrowMoreAvailableLiquidityDisplay,
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
+  getBorrowMorePositionIdentityKey,
   getBorrowMorePositionLtv,
   getBorrowMoreProjectedLtv,
 } from '~/utils/borrow-more'
@@ -40,7 +41,8 @@ const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getBorrowVaultPair } = useVaults()
 const { isConnected, address } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { isSpyMode, spyAddress } = useSpyMode()
+const { chainId } = useEulerAddresses()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()
 const { getBalance } = useWallets()
@@ -69,21 +71,30 @@ const pair: Ref<BorrowVaultPair | undefined> = ref()
 const health = ref()
 const netAPY = ref()
 const liquidationPrice = ref()
+const isProjectedRiskAvailable = ref(true)
 // Layer-aware: tracks the active batch layer's portfolio so the form reflects
 // simulated debt/collateral (a one-shot ref would freeze at the real state).
 const position = computed<PortfolioBorrowPosition<VaultEntity> | undefined>(() =>
   (!isConnected.value && !isSpyMode.value) ? undefined : getPositionBySubAccountIndex(+positionIndex),
 )
-// Re-seed the form only when its position baseline changes. Portfolio refreshes
-// can replace the position object without changing these values, which should
-// not wipe an amount the user is editing.
+const positionIdentityKey = computed(() => {
+  const current = position.value
+  if (!current) return ''
+  return getBorrowMorePositionIdentityKey({
+    chainId: chainId.value,
+    account: spyAddress.value || address.value,
+    subAccount: current.subAccount,
+    collateralVaultAddress: current.collateralVault?.address,
+    borrowVaultAddress: current.borrowVault?.address,
+  })
+})
+// Same-position baseline refreshes preserve manual input. Identity changes are
+// part of the key so an amount cannot carry into another account or vault pair.
 const positionBaselineKey = computed(() => {
   const current = position.value
   if (!current) return ''
   return [
-    current.subAccount,
-    current.collateralVault?.address ?? '',
-    current.borrowVault?.address ?? '',
+    positionIdentityKey.value,
     current.supplied.toString(),
     current.borrowed.toString(),
     getBorrowMorePositionLtv(current)?.toString() ?? '',
@@ -198,10 +209,12 @@ const availableLiquidityDisplay = computed(() => getBorrowMoreAvailableLiquidity
 
 const loadGuard = createRaceGuard()
 const asyncEstimatesGuard = createRaceGuard()
+let loadedPositionIdentityKey = ''
 const load = async () => {
   const generation = loadGuard.next()
   asyncEstimatesGuard.next()
   if (!isConnected.value && !isSpyMode.value) {
+    loadedPositionIdentityKey = ''
     isLoading.value = false
     return
   }
@@ -210,9 +223,11 @@ const load = async () => {
   // currently active real or simulated position.
   const currentPosition = position.value
   if (!currentPosition) {
+    loadedPositionIdentityKey = ''
     isLoading.value = false
     return
   }
+  const nextPositionIdentityKey = positionIdentityKey.value
   const collateralAddress = currentPosition.collateralVault?.address
   const borrowAddress = currentPosition.borrowVault?.address
   if (!collateralAddress || !borrowAddress) {
@@ -265,7 +280,11 @@ const load = async () => {
     asyncEstimatesGuard.next()
 
     const retainedBorrowAmount = borrowAmount.value
-    const retainedProjectedLtv = !isLtvDriven.value && (+retainedBorrowAmount || 0) > 0
+    const canRetainManualAmount = loadedPositionIdentityKey !== ''
+      && loadedPositionIdentityKey === nextPositionIdentityKey
+      && !isLtvDriven.value
+      && (+retainedBorrowAmount || 0) > 0
+    const retainedProjectedLtv = canRetainManualAmount
       ? getBorrowMoreProjectedLtv({
           borrowed: currentPosition.borrowed,
           borrowDecimals: nextPair.borrow.shares.decimals,
@@ -290,9 +309,11 @@ const load = async () => {
     currentHealth.value = nextCurrentHealth
     currentLiquidationPrice.value = nextCurrentLiquidationPrice
     currentNetAPY.value = nextCurrentNetAPY
+    loadedPositionIdentityKey = nextPositionIdentityKey
     updateBalance()
 
     if (retainedProjectedLtv !== undefined) {
+      isProjectedRiskAvailable.value = true
       ltv.value = retainedProjectedLtv
       updateSyncEstimates()
       netAPY.value = undefined
@@ -300,6 +321,7 @@ const load = async () => {
       updateAsyncEstimates()
     }
     else {
+      isProjectedRiskAvailable.value = true
       isLtvDriven.value = true
       borrowAmount.value = ''
       ltv.value = nextUserLTV
@@ -311,7 +333,7 @@ const load = async () => {
   }
   catch (e) {
     if (loadGuard.isStale(generation)) return
-    showError('Unable to load Vault')
+    error('Unable to load Vault')
     console.warn(e)
   }
   finally {
@@ -483,13 +505,28 @@ const onBorrowInput = async () => {
     totalCollateral: getTotalCollateralValue(position.value),
   })
   if (projectedLtv !== undefined) {
+    isProjectedRiskAvailable.value = true
     ltv.value = projectedLtv
+  }
+  else {
+    isProjectedRiskAvailable.value = false
+    asyncEstimatesGuard.next()
+    health.value = undefined
+    liquidationPrice.value = undefined
+    netAPY.value = undefined
+    isEstimatesLoading.value = false
   }
 }
 const onLtvInput = () => {
+  isProjectedRiskAvailable.value = true
   isLtvDriven.value = true
 }
 const updateSyncEstimates = () => {
+  if (!isProjectedRiskAvailable.value) {
+    health.value = undefined
+    liquidationPrice.value = undefined
+    return
+  }
   if (!pair.value) return
   try {
     const newLtvFloat = ltvFixed.value.toUnsafeFloat()
@@ -506,6 +543,11 @@ const updateSyncEstimates = () => {
 }
 
 const updateAsyncEstimates = useDebounceFn(async () => {
+  if (!isProjectedRiskAvailable.value) {
+    netAPY.value = undefined
+    isEstimatesLoading.value = false
+    return
+  }
   if (!pair.value || !borrowVault.value || !collateralVault.value) return
   const gen = asyncEstimatesGuard.next()
   try {

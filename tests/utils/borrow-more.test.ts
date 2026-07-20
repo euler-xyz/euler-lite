@@ -4,6 +4,7 @@ import {
   getBorrowMoreAvailableLiquidityDisplay,
   getBorrowMoreLtvHeadroomAmount,
   getBorrowMoreMaxBorrowAmount,
+  getBorrowMorePositionIdentityKey,
   getBorrowMorePositionLtv,
   getBorrowMoreProjectedLtv,
 } from '~/utils/borrow-more'
@@ -49,6 +50,24 @@ describe('borrow-more position risk', () => {
       additionalBorrowAmount: '20',
       totalCollateral: 0,
     })).toBeUndefined()
+  })
+
+  it('scopes retained input to the same chain, account, sub-account, and vault pair', () => {
+    const positionA = {
+      chainId: 56,
+      account: '0xAccountA',
+      subAccount: '0xSubAccountA',
+      collateralVaultAddress: '0xCollateral',
+      borrowVaultAddress: '0xBorrow',
+    }
+    const keyA = getBorrowMorePositionIdentityKey(positionA)
+
+    expect(getBorrowMorePositionIdentityKey({ ...positionA, account: '0xaccounta' })).toBe(keyA)
+    expect(getBorrowMorePositionIdentityKey({ ...positionA, chainId: 1 })).not.toBe(keyA)
+    expect(getBorrowMorePositionIdentityKey({ ...positionA, account: '0xAccountB' })).not.toBe(keyA)
+    expect(getBorrowMorePositionIdentityKey({ ...positionA, subAccount: '0xSubAccountB' })).not.toBe(keyA)
+    expect(getBorrowMorePositionIdentityKey({ ...positionA, collateralVaultAddress: '0xCollateralB' })).not.toBe(keyA)
+    expect(getBorrowMorePositionIdentityKey({ ...positionA, borrowVaultAddress: '0xBorrowB' })).not.toBe(keyA)
   })
 })
 
