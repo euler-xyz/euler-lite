@@ -195,10 +195,7 @@ const vaultDisplay = computed(() => {
 </script>
 
 <template>
-  <li
-    class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover"
-    :class="{ 'activity-event-row--static': !hasExpandableMobileDetails }"
-  >
+  <li class="activity-event-row relative grid gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover">
     <div class="activity-event-row__summary">
       <div class="activity-event-row__event flex min-w-0 items-center gap-10 pr-48">
         <div class="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
@@ -413,34 +410,38 @@ const vaultDisplay = computed(() => {
 }
 
 @container activity-feed (min-width: 520px) {
+  /* One alignment rule for every row: event summary, details, and the
+     transaction link share the first grid row and center against each
+     other; participants get their own row underneath. */
   .activity-event-row {
-    grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.2fr);
-    align-items: start;
-    gap: 16px;
-  }
-
-  /* Without an expand toggle the summary reads better centered against the
-     (usually taller) details column. Expandable rows stay top-anchored so
-     nothing jumps when they grow. */
-  .activity-event-row--static {
+    grid-template-columns: minmax(200px, 1fr) minmax(240px, 1.2fr) 40px;
     align-items: center;
-  }
-
-  .activity-event-row--static .activity-event-row__transaction {
-    top: 50%;
-    transform: translateY(-50%);
+    gap: 12px 16px;
   }
 
   .activity-event-row__summary {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 12px;
+    display: contents;
   }
 
-  .activity-event-row__event,
-  .activity-event-row__meta {
+  .activity-event-row__event {
     order: initial;
+    grid-column: 1;
+    grid-row: 1;
+    padding-right: 0;
+  }
+
+  .activity-event-row__details {
+    order: initial;
+    grid-column: 2;
+    grid-row: 1;
+    padding-left: 0;
+  }
+
+  .activity-event-row__transaction {
+    position: static;
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
   }
 
   .activity-event-row__meta {
@@ -449,11 +450,9 @@ const vaultDisplay = computed(() => {
     align-items: center;
     gap: 12px;
     padding-left: 40px;
-  }
-
-  .activity-event-row__details {
     order: initial;
-    padding-left: 0;
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .activity-event-row__participants {
@@ -548,9 +547,7 @@ const vaultDisplay = computed(() => {
   }
 
   .activity-event-row__transaction {
-    position: static;
     text-align: right;
-    transform: none;
   }
 }
 </style>
