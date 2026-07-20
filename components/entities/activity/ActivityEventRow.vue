@@ -253,7 +253,10 @@ const vaultDisplay = computed(() => {
         </div>
       </div>
 
-      <div class="activity-event-row__meta">
+      <div
+        v-if="participants.length > 0"
+        class="activity-event-row__meta"
+      >
         <div class="activity-event-row__participants flex min-w-0 flex-col gap-4 pl-40 text-p3">
           <div
             v-for="(participant, index) in participants"
@@ -417,9 +420,15 @@ const vaultDisplay = computed(() => {
   }
 
   /* Without an expand toggle the summary reads better centered against the
-     (usually taller) details column. */
+     (usually taller) details column. Expandable rows stay top-anchored so
+     nothing jumps when they grow. */
   .activity-event-row--static {
     align-items: center;
+  }
+
+  .activity-event-row--static .activity-event-row__transaction {
+    top: 50%;
+    transform: translateY(-50%);
   }
 
   .activity-event-row__summary {
@@ -541,6 +550,7 @@ const vaultDisplay = computed(() => {
   .activity-event-row__transaction {
     position: static;
     text-align: right;
+    transform: none;
   }
 }
 </style>
