@@ -52,6 +52,11 @@ import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
+import {
+  getSafeWalletProvider,
+  waitForSafeTransactionExecution,
+  type ReceiptClientLike,
+} from '~/utils/safeWalletTransactions'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -1168,7 +1173,10 @@ export const useEulerTx = () => {
     })
   }
 
-  const buildSendTransaction = (isOkx: boolean) => {
+  const buildSendTransaction = (
+    isOkx: boolean,
+    resolveHash?: (hash: Hash) => Promise<Hash>,
+  ) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
       if (okxDelayPending) {
@@ -1183,7 +1191,8 @@ export const useEulerTx = () => {
       if (isOkx && (data as Hex).toLowerCase().startsWith(ERC20_APPROVE_SELECTOR)) {
         okxDelayPending = true
       }
-      return hash as Hash
+      const submittedHash = hash as Hash
+      return resolveHash ? resolveHash(submittedHash) : submittedHash
     }
     return send
   }
@@ -1212,7 +1221,11 @@ export const useEulerTx = () => {
       throw new Error('No provider available to confirm the transaction')
     }
 
-    const isOkx = await isOkxWallet(getAccount(config).connector)
+    const connector = getAccount(config).connector
+    const [isOkx, safeWalletProvider] = await Promise.all([
+      isOkxWallet(connector),
+      getSafeWalletProvider(connector),
+    ])
     const send = buildSendTransaction(isOkx)
 
     const receipts: TransactionReceipt[] = []
@@ -1224,7 +1237,13 @@ export const useEulerTx = () => {
         // Once a hash exists the transaction may land even if receipt polling
         // fails, so cleanup must start tracking it before awaiting confirmation.
         options?.onBroadcast?.(index)
-        const receipt = await provider.waitForTransactionReceipt({ hash })
+        const receipt = safeWalletProvider
+          ? (await waitForSafeTransactionExecution({
+              submittedHash: hash,
+              walletProvider: safeWalletProvider,
+              publicClient: provider,
+            })).receipt
+          : await provider.waitForTransactionReceipt({ hash })
         if (receipt.status !== 'success') {
           throw new Error('Authorization transaction reverted')
         }
@@ -1321,9 +1340,26 @@ export const useEulerTx = () => {
     // and post-tx wait-for-receipts use the on-chain path.
     // executeTransactionPlan runs processPlanPlugins internally for TOS/Keyring.
     const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(cid)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
 
-    const isOkx = await isOkxWallet(getAccount(config).connector)
-    const sendTransaction = buildSendTransaction(isOkx)
+    const connector = getAccount(config).connector
+    const [isOkx, safeWalletProvider] = await Promise.all([
+      isOkxWallet(connector),
+      getSafeWalletProvider(connector),
+    ])
+    const sendTransaction = buildSendTransaction(
+      isOkx,
+      safeWalletProvider
+        ? async submittedHash => (await waitForSafeTransactionExecution({
+          submittedHash,
+          walletProvider: safeWalletProvider,
+          publicClient: provider as ReceiptClientLike,
+        })).hash
+        : undefined,
+    )
 
     const result = await sdk.executionService.executeTransactionPlan({
       plan,
@@ -1347,8 +1383,25 @@ export const useEulerTx = () => {
       throw new Error('Transactions are disabled in spy mode')
     }
     const sdk = await getEulerSdkFresh()
-    const isOkx = await isOkxWallet(getAccount(config).connector)
-    const sendTransaction = buildSendTransaction(isOkx)
+    const provider = sdk.providerService?.getProvider(prepared.chainId)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
+    const connector = getAccount(config).connector
+    const [isOkx, safeWalletProvider] = await Promise.all([
+      isOkxWallet(connector),
+      getSafeWalletProvider(connector),
+    ])
+    const sendTransaction = buildSendTransaction(
+      isOkx,
+      safeWalletProvider
+        ? async submittedHash => (await waitForSafeTransactionExecution({
+          submittedHash,
+          walletProvider: safeWalletProvider,
+          publicClient: provider as ReceiptClientLike,
+        })).hash
+        : undefined,
+    )
 
     const result = await sdk.executionService.executePreparedTransactionPlan({
       prepared,
