@@ -1539,7 +1539,7 @@ export const useTxBatch = () => {
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
   const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
-  const { revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
+  const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
     try {
@@ -2184,6 +2184,7 @@ export const useTxBatch = () => {
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     try {
+      if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
       // would revert (against the current chain state, which may have moved since
       // the last simulation), surface the decoded reason and don't send.

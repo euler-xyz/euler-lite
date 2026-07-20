@@ -98,7 +98,10 @@ describe('useEulerTx migration authorization cleanup', () => {
     await executeMigrationAuthorizationGrants(authorizationRequest, revokes)
     driftWallet()
 
-    await expect(sendMigrationAuthorizationRevokes(revokes)).resolves.toBe(false)
+    await expect(sendMigrationAuthorizationRevokes(revokes)).resolves.toEqual({
+      restored: [],
+      failed: revokes,
+    })
     expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(1)
     expect(revokes).toEqual([{
       transaction: {
@@ -111,5 +114,31 @@ describe('useEulerTx migration authorization cleanup', () => {
       },
       walletContext: { account: OWNER, chainId: 1 },
     }])
+  })
+
+  it('attempts every revoke and reports partial cleanup', async () => {
+    const { sendMigrationAuthorizationRevokes } = useEulerTx()
+    const transaction = {
+      to: TOKEN,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [SWAP_VERIFIER, 0n],
+      }),
+    }
+    const blocked = {
+      transaction,
+      walletContext: { account: OTHER_OWNER, chainId: 1 },
+    }
+    const restorable = {
+      transaction,
+      walletContext: { account: OWNER, chainId: 1 },
+    }
+
+    await expect(sendMigrationAuthorizationRevokes([blocked, restorable])).resolves.toEqual({
+      restored: [restorable],
+      failed: [blocked],
+    })
+    expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(1)
   })
 })

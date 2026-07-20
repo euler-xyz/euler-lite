@@ -1319,23 +1319,28 @@ export const useEulerTx = () => {
     return broadcastRevokes
   }
 
-  /** Best-effort revoke; never throws. Returns false when it did not complete. */
+  /** Attempt every revoke and return the successful and failed subsets. */
   const sendMigrationAuthorizationRevokes = async (
     revokes: readonly MigrationAuthorizationRevoke[],
-  ): Promise<boolean> => {
-    if (!revokes.length) return true
-    try {
-      for (const revoke of revokes) {
+  ): Promise<{
+    restored: MigrationAuthorizationRevoke[]
+    failed: MigrationAuthorizationRevoke[]
+  }> => {
+    const restored: MigrationAuthorizationRevoke[] = []
+    const failed: MigrationAuthorizationRevoke[] = []
+    for (const revoke of revokes) {
+      try {
         await sendPlainTransactions([revoke.transaction], {
           walletContext: revoke.walletContext,
         })
+        restored.push(revoke)
       }
-      return true
+      catch (err) {
+        logWarn('useEulerTx/migrationRevoke', err)
+        failed.push(revoke)
+      }
     }
-    catch (err) {
-      logWarn('useEulerTx/migrationRevoke', err)
-      return false
-    }
+    return { restored, failed }
   }
 
   const runPostTxSubgraphSync = async (cid: number, targetBlock: bigint) => {

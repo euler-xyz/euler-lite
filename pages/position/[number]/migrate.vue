@@ -112,7 +112,12 @@ const {
   prefetchPluginData,
 } = useEulerTx()
 const { signaturesEnabled } = useSignaturePreference()
-const { revokeAfterSuccess, revokeAfterAbort, toMigrationExecutionError } = useMigrationAuthorizationFlow()
+const {
+  restorePendingBeforeRetry,
+  revokeAfterSuccess,
+  revokeAfterAbort,
+  toMigrationExecutionError,
+} = useMigrationAuthorizationFlow()
 const {
   addEntry: addBatchEntry,
   entryCount: batchEntryCount,
@@ -861,6 +866,7 @@ async function sendMigration(target: OutgoingMigrationTarget) {
   submittingTargetId.value = target.id
   clearSimulationError()
   try {
+    if (!await restorePendingBeforeRetry()) return
     const useSignatures = signaturesEnabled.value
     const input = buildMigrationInput(target)
     // Reuse the cached preview's resolved position (its addresses are static);

@@ -104,7 +104,12 @@ const {
   prefetchPluginData,
 } = useEulerTx()
 const { signaturesEnabled } = useSignaturePreference()
-const { revokeAfterSuccess, revokeAfterAbort, toMigrationExecutionError } = useMigrationAuthorizationFlow()
+const {
+  restorePendingBeforeRetry,
+  revokeAfterSuccess,
+  revokeAfterAbort,
+  toMigrationExecutionError,
+} = useMigrationAuthorizationFlow()
 const { addEntry: addBatchEntry, entryCount: batchEntryCount } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
@@ -2879,6 +2884,7 @@ const sendInboundExternalMigration = async () => {
   isSubmitting.value = true
   clearSimulationError()
   try {
+    if (!await restorePendingBeforeRetry()) return
     inboundExternalPreparedPlan.value = null
     const migrationChainId = externalPosition.value?.chainId
     const useSignatures = signaturesEnabled.value

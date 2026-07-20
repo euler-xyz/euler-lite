@@ -39,6 +39,7 @@ const broadcastAllTransactions = async (
   return []
 }
 const migrationFlowMocks = {
+  restorePendingBeforeRetry: vi.fn(),
   revokeAfterSuccess: vi.fn(),
   revokeAfterAbort: vi.fn(),
   toMigrationExecutionError: vi.fn((err: unknown) => err),
@@ -306,6 +307,8 @@ beforeEach(() => {
   eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
   migrationFlowMocks.revokeAfterSuccess.mockReset()
   migrationFlowMocks.revokeAfterAbort.mockReset()
+  migrationFlowMocks.restorePendingBeforeRetry.mockReset()
+  migrationFlowMocks.restorePendingBeforeRetry.mockResolvedValue(true)
   scheduleExternalMigrationRefreshes.mockReset()
   routerReplace.mockReset()
   routeQuery.network = '1'
@@ -856,6 +859,10 @@ describe('useTxBatch execution prerequisites', () => {
     eulerTxMocks.estimateGasForPlan.mockImplementation(async () => void calls.push('estimateGasForPlan'))
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
     eulerTxMocks.executePreparedPlan.mockImplementation(async () => void calls.push('executePreparedPlan'))
+    migrationFlowMocks.restorePendingBeforeRetry.mockImplementation(async () => {
+      calls.push('restorePendingBeforeRetry')
+      return true
+    })
     migrationFlowMocks.revokeAfterSuccess.mockImplementation(async () => void calls.push('revokeAfterSuccess'))
 
     await addGrantingMigrationEntry(batch)
@@ -866,6 +873,7 @@ describe('useTxBatch execution prerequisites', () => {
     // The grant must be mined before the plan is built: the connector reads the
     // live allowance to decide whether the batch needs an authorization item.
     expect(calls).toEqual([
+      'restorePendingBeforeRetry',
       'sendPlainTransactions',
       'mergePlans',
       'estimateGasForPlan',
@@ -931,6 +939,27 @@ describe('useTxBatch execution prerequisites', () => {
       expect(batch.entryCount.value).toBe(1)
     },
   )
+
+  it('blocks a batch retry until failed cleanup is restored', async () => {
+    const batch = useTxBatch()
+    migrationFlowMocks.restorePendingBeforeRetry
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+    eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('User rejected the request.'))
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+    await batch.executeBatch()
+
+    expect(migrationFlowMocks.restorePendingBeforeRetry).toHaveBeenCalledTimes(2)
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledTimes(1)
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+    expect(batch.entryCount.value).toBe(1)
+  })
 
   it('sends no transactions when an entry reports no prerequisites', async () => {
     const batch = useTxBatch()
