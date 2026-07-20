@@ -160,7 +160,7 @@ describe('activity display helpers', () => {
     expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Set supply cap')
   })
 
-  it('labels and styles share transfers by their direction for the active account', () => {
+  it('labels and styles vault share transfers relative to the event position', () => {
     const sent = {
       account: VAULT,
       category: 'lending' as const,
@@ -183,7 +183,7 @@ describe('activity display helpers', () => {
     expect(formatActivityEventLabel({ ...sent, label: 'Custom transfer' })).toBe('Custom transfer')
   })
 
-  it('hides only exact paired share transfers from the same transaction', () => {
+  it('hides only exact paired vault share transfers from the same transaction', () => {
     const base = {
       chainId: 1,
       category: 'lending' as const,

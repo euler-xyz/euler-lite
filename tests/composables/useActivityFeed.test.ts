@@ -165,7 +165,7 @@ describe('useActivityFeed', () => {
     ]))
   })
 
-  it('removes a shadow transfer when its matching primary event arrives on an older page', async () => {
+  it('removes a vault shadow transfer when its matching primary event arrives on an older page', async () => {
     const shadowTransfer = event('transfer-shadow', VAULT, 'transfer', {
       groupId: 'paired-transaction',
       assets: [{ kind: 'shares', address: VAULT, amountRaw: '100' }],

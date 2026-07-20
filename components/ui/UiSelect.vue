@@ -40,6 +40,19 @@ const plusText = computed(() => {
   return `+${props.showSelectedOptions ? model.value.length - 2 : model.value.length}`
 })
 
+const accessibleLabel = computed(() => {
+  const label = props.title || props.placeholder || 'Select'
+  if (model.value.length === 0) return `${label}: ${displayText.value}`
+
+  const selectedLabels = [...props.options, ...(props.quickFilters ?? [])]
+    .filter(option => model.value.includes(option.value))
+    .map(option => option.label)
+  const selection = selectedLabels.length > 0
+    ? selectedLabels.join(', ')
+    : `${model.value.length} selected`
+  return `${label}: ${selection}`
+})
+
 const toggleOption = (value: string) => {
   if (model.value.includes(value)) {
     model.value = model.value.filter(v => v !== value)
@@ -76,7 +89,7 @@ const open = () => {
       :data-filter-title="title || placeholder || 'Select'"
       :data-filter-placeholder="placeholder || 'Select'"
       :data-selected-count="model.length"
-      :aria-label="title || placeholder || 'Select'"
+      :aria-label="accessibleLabel"
       aria-haspopup="dialog"
       @click="open"
     >

@@ -110,15 +110,26 @@ const scrollItemIntoView = (index: number, behavior: ScrollBehavior = 'smooth') 
     behavior,
   })
 }
+const observeTabSizes = () => {
+  if (!resizeObserver || !listRef.value) return
+  resizeObserver.disconnect()
+  resizeObserver.observe(listRef.value)
+  listRef.value.querySelectorAll('.ui-tabs__item').forEach((item: Element) => {
+    resizeObserver?.observe(item)
+  })
+}
 const onSelect = (value: string | number | undefined, index: number) => {
+  if (model.value === value) {
+    scrollItemIntoView(index)
+    return
+  }
   model.value = value
-  scrollItemIntoView(index)
 }
 
 watch(currentIdx, async (index) => {
   await nextTick()
   updateBlockStyles()
-  scrollItemIntoView(index, 'auto')
+  scrollItemIntoView(index)
 })
 watch(() => props.list.length, async () => {
   await nextTick()
@@ -126,6 +137,7 @@ watch(() => props.list.length, async () => {
   // tab appearing/disappearing on account switch) resizes the remaining tabs
   // without changing the list element's own size — the ResizeObserver doesn't
   // fire and the active-pill block keeps its stale width/offset. Recompute it.
+  observeTabSizes()
   updateBlockStyles()
   scrollItemIntoView(currentIdx.value, 'auto')
   checkScrollPosition()
@@ -136,14 +148,14 @@ onMounted(() => {
     updateBlockStyles()
     scrollItemIntoView(currentIdx.value, 'auto')
   })
-  resizeObserver.observe(listRef.value)
+  observeTabSizes()
   updateBlockStyles()
   scrollItemIntoView(currentIdx.value, 'auto')
   checkScrollPosition()
 })
 onBeforeUnmount(() => {
   if (resizeObserver) {
-    resizeObserver.unobserve(listRef.value)
+    resizeObserver.disconnect()
     resizeObserver = null
   }
 })
