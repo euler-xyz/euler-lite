@@ -197,7 +197,7 @@ const vaultDisplay = computed(() => {
 </script>
 
 <template>
-  <li class="activity-event-row relative grid items-center gap-10 border-b border-line-subtle py-12 transition-colors last:border-b-0 hover:bg-card-hover">
+  <li class="activity-event-row relative -mx-12 grid items-center gap-10 rounded-8 border-b border-line-subtle px-12 py-12 transition-colors last:border-b-0 hover:bg-card-hover">
     <div class="activity-event-row__icon flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
       <SvgIcon
         :name="eventIcon.name"
