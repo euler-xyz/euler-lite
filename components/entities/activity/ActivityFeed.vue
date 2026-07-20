@@ -27,7 +27,13 @@ const selectedFilters = ref<string[]>([])
 const selectedCategories = computed<ActivityCategory[]>(() =>
   resolveActivityFilterCategories(props.categoryOptions, selectedFilters.value),
 )
-const scopeLabel = computed(() => props.subject === 'account' ? 'position' : 'vault')
+const scopeLabel = computed(() => props.subject === 'account' ? 'account' : 'vault')
+// Coverage is complete here — the account/vault genuinely has no events, so
+// don't blame indexing. Accounts mention the network since switching chains
+// is the usual reason a wallet's history looks empty.
+const emptyMessage = computed(() => props.subject === 'account'
+  ? 'No activity for this account on this network yet.'
+  : 'No activity for this vault yet.')
 const feed = useActivityFeed({
   scope: () => props.scope,
   enabled: () => props.enabled,
@@ -174,7 +180,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
       v-else-if="feed.isEmpty.value"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      {{ selectedFilters.length ? 'No activity matches the selected categories.' : `No activity has been indexed for this ${scopeLabel} yet.` }}
+      {{ selectedFilters.length ? 'No activity matches the selected categories.' : emptyMessage }}
     </div>
 
     <template v-else-if="feed.events.value.length">
