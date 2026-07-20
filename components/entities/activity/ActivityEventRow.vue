@@ -161,13 +161,14 @@ const participants = computed(() => {
       }
     })
 })
-// Collapsing behind a "Details" toggle only pays off when it hides more than
-// one row — with exactly two entries, showing both is shorter than the button.
+// Collapsing behind a toggle only pays off when it hides more than one row —
+// with exactly two entries, showing both is shorter than the button.
 const COLLAPSED_ENTRY_COUNT = 2
-const hasExpandableMobileDetails = computed(() =>
-  details.value.length > COLLAPSED_ENTRY_COUNT
-  || participants.value.length > COLLAPSED_ENTRY_COUNT,
+const hiddenEntryCount = computed(() =>
+  Math.max(0, details.value.length - COLLAPSED_ENTRY_COUNT)
+  + Math.max(0, participants.value.length - COLLAPSED_ENTRY_COUNT),
 )
+const hasExpandableMobileDetails = computed(() => hiddenEntryCount.value > 0)
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => formatActivityEventLabel(event))
 const transactionLink = computed(() => getExplorerLink(event.txHash, event.chainId))
@@ -272,23 +273,6 @@ const vaultDisplay = computed(() => {
             />
           </div>
         </div>
-
-        <button
-          v-if="hasExpandableMobileDetails"
-          type="button"
-          class="activity-event-row__more ml-40 inline-flex h-28 w-fit shrink-0 items-center gap-4 rounded-8 border border-line-subtle bg-surface px-8 text-p4 font-medium text-content-secondary transition-colors hover:border-line hover:text-content-primary"
-          :aria-expanded="expanded"
-          :aria-label="`${expanded ? 'Hide' : 'Show'} additional ${eventLabel} details`"
-          @click="expanded = !expanded"
-        >
-          <span>{{ expanded ? 'Less' : 'Details' }}</span>
-          <SvgIcon
-            name="arrow-down"
-            class="!h-14 !w-14 transition-transform"
-            :class="{ 'rotate-180': expanded }"
-            aria-hidden="true"
-          />
-        </button>
       </div>
     </div>
 
@@ -369,6 +353,23 @@ const vaultDisplay = computed(() => {
           </div>
         </template>
       </div>
+
+      <button
+        v-if="hasExpandableMobileDetails"
+        type="button"
+        class="activity-event-row__more inline-flex w-fit items-center gap-4 text-p4 text-content-tertiary transition-colors hover:text-content-primary"
+        :aria-expanded="expanded"
+        :aria-label="`${expanded ? 'Hide' : 'Show'} additional ${eventLabel} details`"
+        @click="expanded = !expanded"
+      >
+        <span>{{ expanded ? 'Show less' : `+${hiddenEntryCount} more` }}</span>
+        <SvgIcon
+          name="arrow-down"
+          class="!h-12 !w-12 transition-transform"
+          :class="{ 'rotate-180': expanded }"
+          aria-hidden="true"
+        />
+      </button>
     </div>
 
     <div class="activity-event-row__transaction absolute right-0 top-8">
@@ -406,10 +407,6 @@ const vaultDisplay = computed(() => {
 
 .activity-event-row__participants {
   order: 3;
-}
-
-.activity-event-row__more {
-  order: 4;
 }
 
 @container activity-feed (min-width: 520px) {
@@ -454,10 +451,6 @@ const vaultDisplay = computed(() => {
     min-width: 0;
     flex: 1 1 auto;
     padding-left: 0;
-  }
-
-  .activity-event-row__more {
-    margin-left: 0;
   }
 
   .activity-event-row__asset-label,
