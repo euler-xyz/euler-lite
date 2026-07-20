@@ -222,6 +222,24 @@ const vaultDisplay = computed(() => {
           :datetime="event.timestamp"
           :title="formatActivityTimestamp(event.timestamp)"
         >{{ formatActivityRelativeTimestamp(event.timestamp) }}</time>
+        <span
+          v-for="participant in participants"
+          :key="`inline:${participant.label}:${participant.address}`"
+          class="activity-event-row__participant-inline min-w-0 items-center gap-4"
+        >
+          <span
+            aria-hidden="true"
+            class="mr-4"
+          >&middot;</span>
+          <span class="shrink-0">{{ participant.label }}</span>
+          <ActivityAddress
+            :address="participant.address"
+            :chain-id="event.chainId"
+            :label="participant.addressLabel"
+            :link-kind="participant.linkKind"
+            :vault-type="participant.vaultType"
+          />
+        </span>
       </div>
       <div
         v-if="vaultDisplay"
@@ -399,6 +417,22 @@ const vaultDisplay = computed(() => {
 .activity-event-row__details,
 .activity-event-row__participants {
   grid-column: 1 / -1;
+}
+
+/* Participants render inline in the meta line only at mid width — stacked
+   and table layouts use the standalone block/column instead. */
+.activity-event-row__participant-inline {
+  display: none;
+}
+
+@container activity-feed (min-width: 520px) and (max-width: 899.9px) {
+  .activity-event-row__participant-inline {
+    display: inline-flex;
+  }
+
+  .activity-event-row__participants {
+    display: none;
+  }
 }
 
 @container activity-feed (min-width: 520px) {
