@@ -56,7 +56,7 @@ watch(feedScope, () => {
     title="Activity"
     :default-open="defaultOpen"
     :keep-mounted="true"
-    content-class="flex flex-col gap-16"
+    content-class="flex flex-col gap-16 pt-8"
     @update:open="isOpen = $event"
   >
     <div

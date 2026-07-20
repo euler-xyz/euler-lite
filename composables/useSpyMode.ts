@@ -30,6 +30,14 @@ export const useSpyMode = () => {
   const isSpyMode = computed(() => Boolean(spyAddress.value))
   const spyShortAddress = computed(() => spyAddress.value ? truncate(spyAddress.value) : '')
 
+  const activateSpyMode = (address: string): boolean => {
+    if (!isValidAddress(address)) return false
+    explicitlyCleared = false
+    spyAddress.value = normalizeAddress(address)
+    ownerResolved = false
+    return true
+  }
+
   // Try to pick up ?spy= — route.query may not be populated yet, so read from window.location
   if (!spyAddress.value && !explicitlyCleared && import.meta.client) {
     const spy = new URLSearchParams(window.location.search).get('spy')
@@ -105,10 +113,7 @@ export const useSpyMode = () => {
   }
 
   const setSpyMode = async (address: string) => {
-    if (!isValidAddress(address)) return
-    explicitlyCleared = false
-    spyAddress.value = normalizeAddress(address)
-    ownerResolved = false
+    if (!activateSpyMode(address)) return
 
     await router.replace({
       path: route.path,
@@ -133,6 +138,7 @@ export const useSpyMode = () => {
     spyAddress: computed(() => spyAddress.value),
     isSpyMode,
     spyShortAddress,
+    activateSpyMode,
     setSpyMode,
     clearSpyMode,
   }

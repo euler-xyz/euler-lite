@@ -77,6 +77,7 @@ export const useActivityFeed = ({
   limit = 25,
 }: UseActivityFeedOptions) => {
   const events = shallowRef<ActivityEvent[]>([])
+  const rawEvents = shallowRef<ActivityEvent[]>([])
   const meta = shallowRef<ActivityEventsMeta>()
   const error = shallowRef<Error>()
   const loadMoreError = shallowRef<Error>()
@@ -109,6 +110,7 @@ export const useActivityFeed = ({
 
   const resetForContext = () => {
     events.value = []
+    rawEvents.value = []
     meta.value = undefined
     error.value = undefined
     loadMoreError.value = undefined
@@ -182,10 +184,10 @@ export const useActivityFeed = ({
         throw new Error('Activity pagination cursor did not advance')
       }
 
-      const mergedEvents = mode === 'append'
-        ? mergeActivityEvents(events.value, page.data)
+      rawEvents.value = mode === 'append'
+        ? mergeActivityEvents(rawEvents.value, page.data)
         : mergeActivityEvents([], page.data)
-      events.value = filterActivityEventsForDisplay(mergedEvents, eventTypes)
+      events.value = filterActivityEventsForDisplay(rawEvents.value, eventTypes)
       meta.value = page.meta
       error.value = undefined
       loadMoreError.value = undefined

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ActivityEvent } from '@eulerxyz/euler-v2-sdk'
+import { maxUint256, type Address } from 'viem'
 import {
+  decodeEvkAmountCap,
   enrichActivityAssetForDisplay,
   filterActivityEventsForDisplay,
   formatActivityAssetAmount,
@@ -8,6 +10,8 @@ import {
   formatActivityEventLabel,
   formatActivityTimestamp,
   formatActivityValuation,
+  formatActivityValuationForAssets,
+  getAccountActivityFilterOptions,
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
   getActivityAssetsForDisplay,
@@ -19,6 +23,7 @@ import {
   getVaultActivityFilterOptions,
   isActivityScopeUnsupported,
   resolveActivityFilterCategories,
+  resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 
@@ -46,52 +51,97 @@ describe('activity display helpers', () => {
     expect(getDisplayActivityEventTypes({ kind: 'account' })).toEqual(expect.arrayContaining([
       'deposit',
       'transfer',
+      'borrow',
+      'swap',
+      'approval',
       'reward_transfer',
     ]))
     expect(getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'evk' })).toEqual(expect.arrayContaining([
-      'deposit',
-      'transfer',
       'set_caps',
+      'set_ltv',
+      'liquidation',
     ]))
+    expect(getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'evk' })).not.toEqual(expect.arrayContaining([
+      'deposit',
+      'withdraw',
+      'transfer',
+      'borrow',
+      'repay',
+    ]))
+  })
+
+  it('returns the focused portfolio position category filters in display order', () => {
+    expect(getAccountActivityFilterOptions()).toEqual([
+      { value: 'lending', label: 'Lending', categories: ['lending'] },
+      { value: 'borrowing', label: 'Borrowing', categories: ['borrowing'] },
+      { value: 'swaps', label: 'Swaps', categories: ['swaps'] },
+      { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
+      { value: 'account', label: 'Position', categories: ['account'] },
+      { value: 'rewards', label: 'Rewards', categories: ['rewards'] },
+    ])
   })
 
   it('returns vault-specific category filters with category-accurate labels', () => {
     expect(getVaultActivityFilterOptions('evk')).toEqual([
-      { value: 'lending-borrowing', label: 'Lending and borrowing', categories: ['lending', 'borrowing'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
       { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
     ])
     expect(getVaultActivityFilterOptions('earn')).toEqual([
-      { value: 'lending', label: 'Lending', categories: ['lending'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
     ])
     expect(getVaultActivityFilterOptions('securitize')).toEqual([
-      { value: 'lending', label: 'Lending', categories: ['lending'] },
+      { value: 'controls', label: 'Controls', categories: ['account'] },
       { value: 'governance', label: 'Governance', categories: ['governance'] },
     ])
 
     const options = getVaultActivityFilterOptions('evk')
     expect(resolveActivityFilterCategories(options, [])).toEqual([
-      'borrowing',
       'governance',
-      'lending',
       'liquidations',
     ])
-    expect(resolveActivityFilterCategories(options, ['lending-borrowing'])).toEqual([
-      'borrowing',
-      'lending',
-    ])
+    expect(resolveActivityFilterCategories(options, ['liquidations'])).toEqual(['liquidations'])
   })
 
-  it('keeps historical borrowing filters for a currently non-borrowable EVK', () => {
+  it('keeps vault governance and liquidation filters independent of current borrowability', () => {
     expect(isVaultBorrowable({ isBorrowable: false, totalBorrowed: 0n })).toBe(false)
 
     expect(resolveActivityFilterCategories(getVaultActivityFilterOptions('evk'), [])).toEqual([
-      'borrowing',
       'governance',
-      'lending',
       'liquidations',
     ])
+  })
+
+  it('distinguishes same-token account activity from different markets', () => {
+    const getVaultMetadata = (address: Address) => ({
+      asset: { address: ASSET, name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+      shares: {
+        address,
+        name: 'Euler USDC',
+        symbol: 'eUSDC',
+        decimals: 18,
+      },
+    })
+
+    const firstMarket = resolveActivityVaultDisplay(VAULT, getVaultMetadata, 'USDC Prime')
+    const secondMarket = resolveActivityVaultDisplay(OTHER_VAULT, getVaultMetadata)
+
+    expect(firstMarket).toMatchObject({
+      name: 'USDC Prime',
+      addressLabel: '0x0000...0002',
+    })
+    expect(secondMarket).toMatchObject({
+      name: 'Euler USDC',
+      addressLabel: '0x0000...0004',
+    })
+    expect(firstMarket?.addressLabel).not.toBe(secondMarket?.addressLabel)
+  })
+
+  it('falls back to a shortened market address when registry metadata is unavailable', () => {
+    expect(resolveActivityVaultDisplay(VAULT, () => undefined)).toEqual({
+      address: VAULT,
+      addressLabel: '0x0000...0002',
+    })
+    expect(resolveActivityVaultDisplay(undefined, () => undefined)).toBeNull()
   })
 
   it('treats only explicit-All unsupported coverage as scope-wide', () => {
@@ -251,6 +301,13 @@ describe('activity display helpers', () => {
     expect(formatActivityAssetUsd({ kind: 'assets', amountRaw: '1' })).toBeNull()
     expect(formatActivityValuation({ status: 'unavailable', reason: 'No historical price' })).toBeNull()
     expect(formatActivityValuation({ status: 'partial', amountUsd: '1234.5' })).toBe('$1.23K (partial)')
+    expect(formatActivityAssetAmount({ kind: 'assets', amountRaw: maxUint256.toString(), decimals: 18, symbol: 'USDC' }, 'approval')).toBe('Unlimited')
+    expect(formatActivityAssetAmount({ kind: 'assets', amountRaw: '0', decimals: 18, symbol: 'USDC' }, 'approval')).toBe('Revoked')
+    expect(getActivityAssetLabel('assets', 'account', 'approval')).toBe('Allowance')
+    expect(formatActivityValuationForAssets(
+      { status: 'available', amountUsd: '1234.5' },
+      [{ kind: 'assets', amountRaw: '1', amountUsd: '1234.5' }],
+    )).toBeNull()
   })
 
   it('enriches raw amounts from registry metadata without overriding source fields', () => {
@@ -308,12 +365,99 @@ describe('activity display helpers', () => {
     expect(unpriced.amountUsd).toBeUndefined()
   })
 
+  it('decodes EVK caps and formats vault configuration changes semantically', () => {
+    const getVaultMetadata = (address: Address) => address.toLowerCase() === VAULT.toLowerCase()
+      ? {
+          asset: { address: ASSET, name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+          shares: { address: VAULT, name: 'Euler USDC', symbol: 'eUSDC', decimals: 18 },
+        }
+      : address.toLowerCase() === OTHER_VAULT.toLowerCase()
+        ? {
+            asset: { address: ASSET, name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+            shares: { address: OTHER_VAULT, name: 'Collateral vault', symbol: 'eUSDC', decimals: 18 },
+            vaultType: 'evk' as const,
+          }
+        : undefined
+
+    expect(decodeEvkAmountCap('43213')).toBe(67_500_000_000_000n)
+    expect(decodeEvkAmountCap('65536')).toBeNull()
+    expect(getActivityChangeEntries({
+      type: 'set_caps',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: {
+        fields: {
+          supply_cap: '48013',
+          borrow_cap: '43213',
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      { field: 'supply_cap', label: 'Supply cap', value: '75,000,000.00 USDC' },
+      { field: 'borrow_cap', label: 'Borrow cap', value: '67,500,000.00 USDC' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'set_ltv',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: {
+        fields: {
+          collateral: OTHER_VAULT,
+          borrow_ltv: '8500',
+          liquidation_ltv: '9000',
+          ramp_duration: '90000',
+          target_timestamp: '1767225600',
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      {
+        field: 'collateral',
+        label: 'Collateral',
+        addresses: [{
+          address: OTHER_VAULT,
+          label: 'Collateral vault',
+          linkKind: 'vault',
+          vaultType: 'evk',
+        }],
+      },
+      { field: 'borrow_ltv', label: 'Borrow LTV', value: '85%' },
+      { field: 'liquidation_ltv', label: 'Liquidation LTV', value: '90%' },
+      { field: 'ramp_duration', label: 'Ramp duration', value: '1 day 1 hour' },
+      { field: 'target_timestamp', label: 'Target timestamp', value: expect.stringContaining('1 Jan 2026') },
+    ])
+  })
+
+  it('links protocol addresses externally and user identities through spy mode', () => {
+    expect(getActivityChangeEntries({
+      type: 'set_interest_rate_model',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: { fields: { new_interest_rate_model: OTHER_VAULT } },
+    })).toEqual([{
+      field: 'new_interest_rate_model',
+      label: 'New interest rate model',
+      addresses: [{ address: OTHER_VAULT, linkKind: 'explorer' }],
+    }])
+
+    expect(getActivityParticipants({
+      category: 'lending',
+      account: VAULT,
+      actor: ASSET,
+    })).toEqual([
+      { label: 'User', address: VAULT, linkKind: 'spy' },
+      { label: 'Actor', address: ASSET, linkKind: 'explorer' },
+    ])
+  })
+
   it('formats all governance changes and category-specific liquidation details', () => {
     expect(getActivityChangeEntries({
-      fields: {
-        supply_cap: '2000',
-        is_allocator: true,
-        queue: ['one', 'two'],
+      type: 'set_config_flags',
+      change: {
+        fields: {
+          supply_cap: '2000',
+          is_allocator: true,
+          queue: ['one', 'two'],
+        },
       },
     })).toEqual([
       { field: 'supply_cap', label: 'Supply cap', value: '2000' },
@@ -330,8 +474,8 @@ describe('activity display helpers', () => {
       actor: ASSET,
       counterparty: '0x0000000000000000000000000000000000000002',
     })).toEqual([
-      { label: 'Liquidator', address: ASSET },
-      { label: 'Violator', address: '0x0000000000000000000000000000000000000002' },
+      { label: 'Liquidator', address: ASSET, linkKind: 'explorer' },
+      { label: 'Violator', address: '0x0000000000000000000000000000000000000002', linkKind: 'spy' },
     ])
   })
 

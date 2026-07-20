@@ -10,11 +10,14 @@ import {
   type ActivityFilterOption,
 } from '~/utils/activity-display'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   scope: ActivityFeedScope
   enabled: boolean
   categoryOptions: readonly ActivityFilterOption[]
-}>()
+  subject?: 'account' | 'vault'
+}>(), {
+  subject: 'vault',
+})
 const emit = defineEmits<{
   'settled': []
   'update:unsupported': [unsupported: boolean]
@@ -24,6 +27,7 @@ const selectedFilters = ref<string[]>([])
 const selectedCategories = computed<ActivityCategory[]>(() =>
   resolveActivityFilterCategories(props.categoryOptions, selectedFilters.value),
 )
+const scopeLabel = computed(() => props.subject === 'account' ? 'position' : 'vault')
 const feed = useActivityFeed({
   scope: () => props.scope,
   enabled: () => props.enabled,
@@ -37,7 +41,7 @@ const missingCategoryLabels = computed(() =>
 )
 const partialMessage = computed(() => {
   if (feed.coverage.value?.reason) return feed.coverage.value.reason
-  if (missingCategoryLabels.value) return `Missing categories: ${missingCategoryLabels.value}.`
+  if (missingCategoryLabels.value) return `${missingCategoryLabels.value} activity may be incomplete.`
   return 'Some activity may not be included yet.'
 })
 const scopeUnsupported = computed(() =>
@@ -63,6 +67,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
 <template>
   <div class="activity-feed flex flex-col gap-16">
     <ActivityCategoryFilters
+      v-if="categoryOptions.length > 1"
       v-model="selectedFilters"
       :options="categoryOptions"
     />
@@ -143,7 +148,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
       v-else-if="feed.isUnsupported.value"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      {{ selectedFilters.length ? 'Activity is not available for the selected categories.' : feed.coverage.value?.reason || 'Activity is not available for this vault.' }}
+      {{ selectedFilters.length ? 'Activity is not available for the selected categories.' : feed.coverage.value?.reason || `Activity is not available for this ${scopeLabel}.` }}
     </div>
 
     <div
@@ -164,7 +169,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
       v-else-if="feed.isEmpty.value"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      {{ selectedFilters.length ? 'No activity matches the selected categories.' : 'No activity has been indexed for this vault yet.' }}
+      {{ selectedFilters.length ? 'No activity matches the selected categories.' : `No activity has been indexed for this ${scopeLabel} yet.` }}
     </div>
 
     <template v-else-if="feed.events.value.length">
@@ -183,6 +188,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
             v-for="event in feed.events.value"
             :key="event.id"
             :event="event"
+            :show-vault="subject === 'account'"
           />
         </ul>
       </div>

@@ -2,18 +2,18 @@ import type {
   ActivityAssetAmount,
   ActivityAssetKind,
   ActivityCategory,
-  ActivityChange,
   ActivityChangeValue,
   ActivityCoverageStatus,
   ActivityEvent,
   ActivityValuation,
   ActivityVaultType,
 } from '@eulerxyz/euler-v2-sdk'
-import { formatUnits, type Address } from 'viem'
-import { formatCompactUsdValue, formatSmartAmount } from '~/utils/string-utils'
+import { formatUnits, isAddress, maxUint256, type Address } from 'viem'
+import { formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
 
 interface ActivityTokenMetadata {
   address: Address
+  name?: string
   symbol: string
   decimals: number
 }
@@ -21,6 +21,7 @@ interface ActivityTokenMetadata {
 interface ActivityVaultMetadata {
   asset?: ActivityTokenMetadata
   shares?: ActivityTokenMetadata
+  vaultType?: ActivityVaultType
 }
 
 interface ActivityAssetContext {
@@ -31,12 +32,41 @@ interface ActivityAssetContext {
 type ActivityVaultMetadataLookup = (address: Address) => ActivityVaultMetadata | undefined
 type ActivityTokenMetadataLookup = (address: Address) => ActivityTokenMetadata | undefined
 
+export interface ActivityVaultDisplay {
+  address: Address
+  addressLabel: string
+  name?: string
+}
+
+/**
+ * Resolves position-history market context from Euler Labels and the vault
+ * registry. The address remains visible so markets with the same name are
+ * still distinguishable.
+ */
+export const resolveActivityVaultDisplay = (
+  vaultAddress: Address | undefined,
+  getVaultMetadata: ActivityVaultMetadataLookup,
+  productName?: string,
+): ActivityVaultDisplay | null => {
+  if (!vaultAddress) return null
+
+  const name = productName?.trim()
+    || getVaultMetadata(vaultAddress)?.shares?.name?.trim()
+    || undefined
+  const addressLabel = shortenAddress(vaultAddress)
+  return {
+    address: vaultAddress,
+    addressLabel,
+    ...(name ? { name } : {}),
+  }
+}
+
 const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   lending: 'Lending',
   borrowing: 'Borrowing',
   swaps: 'Swaps',
   liquidations: 'Liquidations',
-  account: 'Account',
+  account: 'Position',
   rewards: 'Rewards',
   governance: 'Governance',
 }
@@ -95,16 +125,7 @@ const ACCOUNT_ACTIVITY_EVENT_TYPES = [
 
 const VAULT_ACTIVITY_EVENT_TYPES = {
   evk: [
-    'deposit',
-    'withdraw',
-    'transfer',
-    'borrow',
-    'repay',
-    'debt_socialized',
-    'pull_debt',
     'liquidation',
-    'approval',
-    'balance_forwarder_status',
     'convert_fees',
     'set_caps',
     'set_ltv',
@@ -118,12 +139,6 @@ const VAULT_ACTIVITY_EVENT_TYPES = {
     'set_max_liquidation_discount',
   ],
   earn: [
-    'deposit',
-    'withdraw',
-    'transfer',
-    'update_last_total_assets',
-    'update_lost_assets',
-    'approval',
     'reallocate_supply',
     'reallocate_withdraw',
     'set_name',
@@ -155,10 +170,6 @@ const VAULT_ACTIVITY_EVENT_TYPES = {
     'transfer_allocation_fee',
   ],
   securitize: [
-    'deposit',
-    'withdraw',
-    'transfer',
-    'approval',
     'seized',
     'frozen',
     'unfrozen',
@@ -293,22 +304,38 @@ export const getActivityCategoryIcon = (category: ActivityCategory): string =>
 export const getVaultActivityFilterOptions = (
   vaultType: ActivityVaultType,
 ): ActivityFilterOption[] => {
-  const lendingCategories: ActivityCategory[] = vaultType === 'evk'
-    ? ['lending', 'borrowing']
-    : ['lending']
-  const options: ActivityFilterOption[] = [
-    {
-      value: vaultType === 'evk' ? 'lending-borrowing' : 'lending',
-      label: vaultType === 'evk' ? 'Lending and borrowing' : 'Lending',
-      categories: lendingCategories,
-    },
+  if (vaultType === 'evk') {
+    return [
+      { value: 'governance', label: 'Governance', categories: ['governance'] },
+      { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
+    ]
+  }
+  if (vaultType === 'earn') {
+    return [
+      { value: 'governance', label: 'Governance', categories: ['governance'] },
+    ]
+  }
+  return [
+    { value: 'controls', label: 'Controls', categories: ['account'] },
     { value: 'governance', label: 'Governance', categories: ['governance'] },
   ]
-  if (vaultType === 'evk') {
-    options.push({ value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] })
-  }
-  return options
 }
+
+const ACCOUNT_ACTIVITY_CATEGORIES = [
+  'lending',
+  'borrowing',
+  'swaps',
+  'liquidations',
+  'account',
+  'rewards',
+] as const satisfies readonly ActivityCategory[]
+
+export const getAccountActivityFilterOptions = (): ActivityFilterOption[] =>
+  ACCOUNT_ACTIVITY_CATEGORIES.map(category => ({
+    value: category,
+    label: getActivityCategoryLabel(category),
+    categories: [category],
+  }))
 
 export const titleizeActivityType = (type: string): string => {
   const words = type
@@ -398,7 +425,20 @@ const resolveAssetAmount = (asset: ActivityAssetAmount): string | undefined => {
   }
 }
 
-export const formatActivityAssetAmount = (asset: ActivityAssetAmount): string => {
+export const formatActivityAssetAmount = (
+  asset: ActivityAssetAmount,
+  eventType?: ActivityEvent['type'],
+): string => {
+  if (eventType === 'approval') {
+    try {
+      const allowance = BigInt(asset.amountRaw)
+      if (allowance === maxUint256) return 'Unlimited'
+      if (allowance === 0n) return 'Revoked'
+    }
+    catch {
+      return 'Amount unavailable'
+    }
+  }
   const amount = resolveAssetAmount(asset)
   if (amount === undefined) return 'Amount unavailable'
   const formatted = formatSmartAmount(amount)
@@ -471,7 +511,9 @@ const ASSET_KIND_LABELS: Record<ActivityAssetKind, string> = {
 export const getActivityAssetLabel = (
   kind: ActivityAssetKind,
   category: ActivityCategory,
+  eventType?: ActivityEvent['type'],
 ): string => {
+  if (eventType === 'approval') return 'Allowance'
   if (category === 'liquidations' && kind === 'assets') return 'Debt repaid'
   if (category === 'liquidations' && (kind === 'collateral' || kind === 'yield')) {
     return 'Collateral seized'
@@ -497,23 +539,211 @@ export const formatActivityChangeValue = (value: ActivityChangeValue): string =>
   return String(value)
 }
 
+export type ActivityAddressLinkKind = 'explorer' | 'spy' | 'vault'
+
+export interface ActivityChangeAddress {
+  address: Address
+  label?: string
+  linkKind: Exclude<ActivityAddressLinkKind, 'spy'>
+  vaultType?: ActivityVaultType
+}
+
 export interface ActivityChangeEntry {
   field: string
   label: string
-  value: string
+  value?: string
+  addresses?: ActivityChangeAddress[]
+}
+
+type ActivityChangeEventSource = Pick<ActivityEvent, 'change' | 'type' | 'vault' | 'vaultType'>
+
+const VAULT_ADDRESS_FIELDS_BY_EVENT: Partial<Record<ActivityEvent['type'], readonly string[]>> = {
+  liquidation: ['collateral'],
+  public_reallocate_to: ['market', 'strategy', 'to', 'vault'],
+  public_withdrawal: ['market', 'strategy', 'from', 'vault'],
+  reallocate_supply: ['market', 'strategy', 'to', 'vault'],
+  reallocate_withdraw: ['market', 'strategy', 'from', 'vault'],
+  revoke_pending_cap: ['market', 'strategy', 'vault'],
+  revoke_pending_market_removal: ['market', 'strategy', 'vault'],
+  set_cap: ['market', 'strategy', 'vault'],
+  set_flow_caps: ['market', 'strategy', 'from', 'to', 'vault'],
+  set_ltv: ['collateral'],
+  set_supply_queue: ['queue', 'supply_queue', 'new_supply_queue'],
+  set_withdraw_queue: ['queue', 'withdraw_queue', 'new_withdraw_queue'],
+  submit_cap: ['market', 'strategy', 'vault'],
+  submit_market_removal: ['market', 'strategy', 'vault'],
+}
+
+const parseActivityInteger = (value: ActivityChangeValue): bigint | null => {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  try {
+    return BigInt(value)
+  }
+  catch {
+    return null
+  }
+}
+
+/** Decodes the EVK AmountCap uint16 encoding into underlying token units. */
+export const decodeEvkAmountCap = (value: ActivityChangeValue): bigint | null => {
+  const raw = parseActivityInteger(value)
+  if (raw === null || raw < 0n || raw > 65_535n) return null
+  if (raw === 0n) return 0n
+  const exponent = raw & 0x3fn
+  const mantissa = raw >> 6n
+  return (mantissa * 10n ** exponent) / 100n
+}
+
+const formatActivityCap = (
+  value: ActivityChangeValue,
+  vault: Address | undefined,
+  getVaultMetadata: ActivityVaultMetadataLookup | undefined,
+): string | null => {
+  const decoded = decodeEvkAmountCap(value)
+  const asset = vault && getVaultMetadata?.(vault)?.asset
+  if (decoded === null || !asset) return null
+  const amount = formatSmartAmount(formatUnits(decoded, asset.decimals))
+  return `${amount} ${asset.symbol}`
+}
+
+const formatActivityTokenAmount = (
+  value: ActivityChangeValue,
+  token: ActivityTokenMetadata | undefined,
+): string | null => {
+  const amount = parseActivityInteger(value)
+  if (amount === null || !token) return null
+  return `${formatSmartAmount(formatUnits(amount, token.decimals))} ${token.symbol}`
+}
+
+const formatActivityBps = (value: ActivityChangeValue): string | null => {
+  const bps = parseActivityInteger(value)
+  if (bps === null) return null
+  const whole = bps / 100n
+  const fraction = (bps % 100n).toString().padStart(2, '0').replace(/0+$/, '')
+  return `${whole}${fraction ? `.${fraction}` : ''}%`
+}
+
+const formatActivityDuration = (value: ActivityChangeValue): string | null => {
+  const seconds = parseActivityInteger(value)
+  if (seconds === null || seconds < 0n) return null
+  if (seconds === 0n) return 'Immediately'
+  const units = [
+    { label: 'day', seconds: 86_400n },
+    { label: 'hour', seconds: 3_600n },
+    { label: 'minute', seconds: 60n },
+    { label: 'second', seconds: 1n },
+  ]
+  let remaining = seconds
+  const parts: string[] = []
+  for (const unit of units) {
+    const count = remaining / unit.seconds
+    if (count === 0n) continue
+    parts.push(`${count} ${unit.label}${count === 1n ? '' : 's'}`)
+    remaining %= unit.seconds
+    if (parts.length === 2) break
+  }
+  return parts.join(' ')
+}
+
+const formatActivityUnixTimestamp = (value: ActivityChangeValue): string | null => {
+  const seconds = parseActivityInteger(value)
+  if (seconds === null || seconds < 0n || seconds > BigInt(Number.MAX_SAFE_INTEGER)) return null
+  const date = new Date(Number(seconds) * 1_000)
+  if (!Number.isFinite(date.getTime())) return null
+  return formatActivityTimestamp(date.toISOString())
+}
+
+const formatActivityChangeLabel = (field: string): string => titleizeActivityType(field)
+  .replace(/\bltv\b/gi, 'LTV')
+  .replace(/\birm\b/gi, 'IRM')
+  .replace(/\busd\b/gi, 'USD')
+
+const resolveChangeAddresses = (
+  event: ActivityChangeEventSource,
+  field: string,
+  value: ActivityChangeValue,
+  getVaultMetadata: ActivityVaultMetadataLookup | undefined,
+): ActivityChangeAddress[] | null => {
+  const values = Array.isArray(value) ? value : [value]
+  if (!values.length || !values.every(item => typeof item === 'string' && isAddress(item))) return null
+
+  const isVaultAddress = VAULT_ADDRESS_FIELDS_BY_EVENT[event.type]?.includes(field) ?? false
+  return values.map((item) => {
+    const address = item as Address
+    if (!isVaultAddress) return { address, linkKind: 'explorer' as const }
+    const display = getVaultMetadata
+      ? resolveActivityVaultDisplay(address, getVaultMetadata)
+      : null
+    return {
+      address,
+      linkKind: 'vault' as const,
+      label: display?.name ?? display?.addressLabel,
+      vaultType: getVaultMetadata?.(address)?.vaultType ?? event.vaultType,
+    }
+  })
 }
 
 export const getActivityChangeEntries = (
-  change: ActivityChange | undefined,
-): ActivityChangeEntry[] => Object.entries(change?.fields ?? {}).map(([field, value]) => ({
-  field,
-  label: titleizeActivityType(field),
-  value: formatActivityChangeValue(value),
-}))
+  event: ActivityChangeEventSource,
+  getVaultMetadata?: ActivityVaultMetadataLookup,
+): ActivityChangeEntry[] => Object.entries(event.change?.fields ?? {}).map(([field, value]) => {
+  const addresses = resolveChangeAddresses(event, field, value, getVaultMetadata)
+  if (addresses) return { field, label: formatActivityChangeLabel(field), addresses }
+
+  let formatted: string | null = null
+  const vaultMetadata = event.vault ? getVaultMetadata?.(event.vault) : undefined
+  const strategy = event.change?.fields.strategy
+  const strategyMetadata = typeof strategy === 'string' && isAddress(strategy)
+    ? getVaultMetadata?.(strategy)?.shares
+    : undefined
+  if (event.type === 'set_caps' && (field === 'supply_cap' || field === 'borrow_cap')) {
+    formatted = formatActivityCap(value, event.vault, getVaultMetadata)
+  }
+  else if (
+    (event.type === 'set_cap' || event.type === 'submit_cap')
+    && field === 'cap'
+  ) {
+    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset)
+  }
+  else if (
+    event.type === 'set_supply_cap'
+    && (field === 'cap' || field === 'supply_cap' || field === 'new_supply_cap')
+  ) {
+    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset)
+  }
+  else if (
+    (event.type === 'reallocate_supply' || event.type === 'reallocate_withdraw')
+    && (field === 'supplied_assets' || field === 'withdrawn_assets')
+  ) {
+    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset)
+  }
+  else if (
+    (event.type === 'reallocate_supply' || event.type === 'reallocate_withdraw')
+    && (field === 'supplied_shares' || field === 'withdrawn_shares')
+  ) {
+    formatted = formatActivityTokenAmount(value, strategyMetadata)
+  }
+  else if (event.type === 'set_ltv' && field.endsWith('_ltv')) {
+    formatted = formatActivityBps(value)
+  }
+  else if (field === 'target_timestamp') {
+    formatted = formatActivityUnixTimestamp(value)
+  }
+  else if (field === 'ramp_duration' || field.endsWith('_timelock') || field.endsWith('_cool_off_time')) {
+    formatted = formatActivityDuration(value)
+  }
+
+  return {
+    field,
+    label: formatActivityChangeLabel(field),
+    value: formatted ?? formatActivityChangeValue(value),
+  }
+})
 
 export interface ActivityParticipant {
   address: Address
   label: string
+  linkKind: Exclude<ActivityAddressLinkKind, 'vault'>
 }
 
 interface ActivityParticipantSource {
@@ -528,30 +758,33 @@ export const getActivityParticipants = (
   event: ActivityParticipantSource,
 ): ActivityParticipant[] => {
   const participants: ActivityParticipant[] = []
-  const add = (label: string, address: Address | undefined) => {
+  const add = (
+    label: string,
+    address: Address | undefined,
+    linkKind: ActivityParticipant['linkKind'],
+  ) => {
     if (
       !address
       || participants.some(participant => participant.address.toLowerCase() === address.toLowerCase())
     ) return
-    participants.push({ label, address })
+    participants.push({ label, address, linkKind })
   }
 
   if (event.category === 'liquidations') {
-    add('Liquidator', event.actor)
-    add('Violator', event.counterparty)
+    add('Liquidator', event.actor, 'explorer')
+    add('Violator', event.counterparty, 'spy')
     return participants
   }
 
   if (event.category === 'governance') {
-    add('Actor', event.actor)
-    add('Target', event.counterparty)
+    add('Actor', event.actor, 'explorer')
+    add('Target', event.counterparty, 'explorer')
     return participants
   }
 
-  const user = event.account ?? event.owner ?? event.actor
-  add('User', user)
-  add('Actor', event.actor)
-  add('Counterparty', event.counterparty)
+  add('User', event.account ?? event.owner, 'spy')
+  add('Actor', event.actor, 'explorer')
+  add('Counterparty', event.counterparty, 'explorer')
   return participants
 }
 
@@ -565,4 +798,15 @@ export const formatActivityValuation = (
   }
   const amount = formatCompactUsdValue(valuation.amountUsd)
   return valuation.status === 'partial' ? `${amount} (partial)` : amount
+}
+
+export const formatActivityValuationForAssets = (
+  valuation: ActivityValuation | undefined,
+  assets: readonly ActivityAssetAmount[],
+): string | null => {
+  if (
+    valuation?.status === 'available'
+    && assets.some(asset => asset.amountUsd !== undefined)
+  ) return null
+  return formatActivityValuation(valuation)
 }

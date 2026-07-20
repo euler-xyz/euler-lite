@@ -26,7 +26,7 @@ const { rewards } = useSdkRewards()
 const { locks, refreshLocks } = useREULLocks()
 const { isConnected, address, spyAddress, effectiveAddress, isSpyMode } = useEffectiveAddress()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
-const { eulerLensAddresses } = useEulerAddresses()
+const { chainId, eulerLensAddresses } = useEulerAddresses()
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 const showAllLabelEntries = useShowAllLabelEntries()
 const {
@@ -35,6 +35,12 @@ const {
   error: migrationError,
   hasLoaded: hasMigrationLoaded,
 } = useExternalMigrationPositions()
+const activityAvailability = useActivityAvailability({ kind: 'account' }, chainId)
+const activityRuntimeSupport = usePortfolioActivityRuntimeSupport(effectiveAddress, chainId)
+const showActivityTab = computed(() => shouldShowPortfolioActivityTab(
+  activityAvailability.shouldRender.value,
+  activityRuntimeSupport.isRuntimeUnsupported.value,
+))
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
 const hasShownMigrationTab = ref(false)
@@ -107,6 +113,13 @@ const tabs = computed(() => {
     },
   ]
 
+  if (showActivityTab.value) {
+    items.push({
+      label: 'Activity',
+      value: 'portfolio-activity',
+    })
+  }
+
   if (showMigrationTab.value) {
     items.push({
       label: 'Migrate',
@@ -132,6 +145,21 @@ watch([() => route.name, showMigrationTab, hasMigrationLoaded, isMigrationLoadin
     router.replace({ name: 'portfolio', query: route.query })
   }
 })
+
+watch([
+  () => route.name,
+  showActivityTab,
+  activityAvailability.isChecking,
+  activityAvailability.reason,
+], () => {
+  if (shouldLeavePortfolioActivityRoute({
+    routeName: route.name,
+    isChecking: activityAvailability.isChecking.value,
+    shouldShow: showActivityTab.value,
+  })) {
+    router.replace({ name: 'portfolio', query: route.query })
+  }
+}, { immediate: true })
 
 const portfolioNetApyDisplay = computed(() =>
   Number.isFinite(portfolioNetApy.value) ? `${formatNumber(portfolioNetApy.value)}%` : '-',
