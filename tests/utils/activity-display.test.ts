@@ -8,10 +8,12 @@ import {
   formatActivityAssetAmount,
   formatActivityAssetUsd,
   formatActivityEventLabel,
+  formatActivityRelativeTimestamp,
   formatActivityTimestamp,
   formatActivityValuation,
   formatActivityValuationForAssets,
   getAccountActivityFilterOptions,
+  getActivityAmountDirection,
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
   getActivityAssetsForDisplay,
@@ -487,5 +489,36 @@ describe('activity display helpers', () => {
   it('formats timestamps', () => {
     expect(formatActivityTimestamp('not-a-date')).toBe('-')
     expect(formatActivityTimestamp('2026-07-13T10:30:00.000Z')).toContain('13 Jul 2026')
+  })
+
+  it('formats recent timestamps relatively and older ones as dates', () => {
+    const now = Date.parse('2026-07-13T10:30:00.000Z')
+    expect(formatActivityRelativeTimestamp('not-a-date', now)).toBe('-')
+    expect(formatActivityRelativeTimestamp('2026-07-13T10:29:40.000Z', now)).toBe('Just now')
+    expect(formatActivityRelativeTimestamp('2026-07-13T10:05:00.000Z', now)).toBe('25 min ago')
+    expect(formatActivityRelativeTimestamp('2026-07-13T04:30:00.000Z', now)).toBe('6 h ago')
+    expect(formatActivityRelativeTimestamp('2026-07-10T10:30:00.000Z', now)).toBe('3 d ago')
+    expect(formatActivityRelativeTimestamp('2026-07-01T10:30:00.000Z', now)).toBe('1 Jul 2026')
+    // Future timestamps (clock skew) fall back to the absolute date.
+    expect(formatActivityRelativeTimestamp('2026-07-14T10:30:00.000Z', now)).toBe('14 Jul 2026')
+  })
+
+  it('derives asset flow direction from the event type and transfer sides', () => {
+    expect(getActivityAmountDirection({ type: 'deposit' })).toBe('in')
+    expect(getActivityAmountDirection({ type: 'repay' })).toBe('in')
+    expect(getActivityAmountDirection({ type: 'withdraw' })).toBe('out')
+    expect(getActivityAmountDirection({ type: 'borrow' })).toBe('out')
+    expect(getActivityAmountDirection({ type: 'set_caps' })).toBeUndefined()
+    expect(getActivityAmountDirection({
+      account: VAULT,
+      payload: { from: VAULT, to: OTHER_VAULT },
+      type: 'transfer',
+    })).toBe('out')
+    expect(getActivityAmountDirection({
+      account: VAULT,
+      payload: { from: OTHER_VAULT, to: VAULT },
+      type: 'transfer',
+    })).toBe('in')
+    expect(getActivityAmountDirection({ type: 'transfer' })).toBeUndefined()
   })
 })

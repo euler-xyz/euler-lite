@@ -359,21 +359,37 @@ export interface ActivityEventIcon {
   name: string
 }
 
+const OUTFLOW_EVENT_TYPES: readonly string[] = ['withdraw', 'borrow', 'reallocate_withdraw', 'public_withdrawal']
+const INFLOW_EVENT_TYPES: readonly string[] = ['deposit', 'repay', 'reallocate_supply', 'public_reallocate_to']
+
+export type ActivityAmountDirection = 'in' | 'out'
+
+/**
+ * Direction of the asset flow relative to the vault: `in` for events that add
+ * assets (deposit, repay), `out` for events that remove them (withdraw,
+ * borrow). Undefined when the event has no clear single direction.
+ */
+export const getActivityAmountDirection = (
+  event: Pick<ActivityEventLabelSource, 'account' | 'payload' | 'type'>,
+): ActivityAmountDirection | undefined => {
+  if (event.type === 'transfer') {
+    const direction = getActivityTransferDirection(event)
+    if (direction === 'sent') return 'out'
+    if (direction === 'received') return 'in'
+    return undefined
+  }
+  if (OUTFLOW_EVENT_TYPES.includes(event.type)) return 'out'
+  if (INFLOW_EVENT_TYPES.includes(event.type)) return 'in'
+  return undefined
+}
+
 export const getActivityEventIcon = (
   event: Pick<ActivityEventLabelSource, 'account' | 'payload' | 'type'> & { category: ActivityCategory },
 ): ActivityEventIcon => {
-  if (event.type === 'transfer') {
-    const direction = getActivityTransferDirection(event)
-    if (direction === 'sent') return { name: 'borrow-outline' }
-    if (direction === 'received') return { name: 'lend-outline' }
-    return { name: 'swap-horizontal' }
-  }
-  if (['withdraw', 'borrow', 'reallocate_withdraw', 'public_withdrawal'].includes(event.type)) {
-    return { name: 'borrow-outline' }
-  }
-  if (['deposit', 'repay', 'reallocate_supply', 'public_reallocate_to'].includes(event.type)) {
-    return { name: 'lend-outline' }
-  }
+  const direction = getActivityAmountDirection(event)
+  if (direction === 'out') return { name: 'borrow-outline' }
+  if (direction === 'in') return { name: 'lend-outline' }
+  if (event.type === 'transfer') return { name: 'swap-horizontal' }
   return { name: getActivityCategoryIcon(event.category) }
 }
 
@@ -386,6 +402,36 @@ export const formatActivityTimestamp = (timestamp: string): string => {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+  }).format(date)
+}
+
+const RELATIVE_TIMESTAMP_CUTOFF_MS = 7 * 24 * 60 * 60 * 1_000
+
+/**
+ * Compact feed timestamp: relative within the last seven days, date-only
+ * beyond that. The full absolute timestamp stays available via
+ * `formatActivityTimestamp` (rendered as the hover title).
+ */
+export const formatActivityRelativeTimestamp = (
+  timestamp: string,
+  nowMs: number = Date.now(),
+): string => {
+  const date = new Date(timestamp)
+  if (!Number.isFinite(date.getTime())) return '-'
+  const elapsedMs = nowMs - date.getTime()
+  if (elapsedMs >= 0 && elapsedMs < RELATIVE_TIMESTAMP_CUTOFF_MS) {
+    const minutes = Math.floor(elapsedMs / 60_000)
+    if (minutes < 1) return 'Just now'
+    if (minutes < 60) return `${minutes} min ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours} h ago`
+    const days = Math.floor(hours / 24)
+    return `${days} d ago`
+  }
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
   }).format(date)
 }
 

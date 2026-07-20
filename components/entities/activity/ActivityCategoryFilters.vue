@@ -19,7 +19,7 @@ const toggle = (filter: string) => {
 
 <template>
   <div
-    class="flex max-w-full gap-8 overflow-x-auto pb-2"
+    class="flex max-w-full flex-wrap gap-8"
     role="group"
     aria-label="Activity categories"
   >

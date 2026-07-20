@@ -7,8 +7,10 @@ import {
   formatActivityAssetAmount,
   formatActivityAssetUsd,
   formatActivityEventLabel,
+  formatActivityRelativeTimestamp,
   formatActivityTimestamp,
   formatActivityValuationForAssets,
+  getActivityAmountDirection,
   getActivityAssetAddressLabel,
   getActivityAssetLabel,
   getActivityAssetsForDisplay,
@@ -19,9 +21,11 @@ import {
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event, showVault = false } = defineProps<{
+const { event, showVault = false, viewerAddress } = defineProps<{
   event: ActivityEvent
   showVault?: boolean
+  /** Account whose feed is being viewed — hidden from participants to avoid repeating it on every row. */
+  viewerAddress?: string
 }>()
 
 const route = useRoute()
@@ -72,6 +76,7 @@ const resolveAvatarAsset = (asset: ActivityEvent['assets'][number]) => {
 const assets = computed(() => {
   // Re-resolve when vault or token metadata arrives after the activity page.
   void registryVersion.value
+  const direction = event.type === 'approval' ? undefined : getActivityAmountDirection(event)
   return getActivityAssetsForDisplay(event).map((asset, index) => {
     const enriched = enrichActivityAssetForDisplay(
       asset,
@@ -80,15 +85,20 @@ const assets = computed(() => {
       tokenMetadata,
     )
     const amount = formatActivityAssetAmount(enriched, event.type)
+    const signed = amount !== 'Amount unavailable' && direction
+    const label = getActivityAssetLabel(enriched.kind, event.category, event.type)
     return {
       kind: 'asset' as const,
       address: enriched.address,
       addressKind: getActivityAssetAddressLabel(enriched.kind, event.category),
-      amount,
+      amount: signed ? `${direction === 'in' ? '+' : '−'}${amount}` : amount,
+      amountClass: signed && direction === 'in' ? 'text-accent-600' : 'text-content-primary',
       amountTitle: amount === 'Amount unavailable' ? `Raw units: ${enriched.amountRaw}` : undefined,
       avatarAsset: resolveAvatarAsset(enriched),
       key: `asset:${enriched.kind}:${enriched.address ?? 'unknown'}:${index}`,
-      label: getActivityAssetLabel(enriched.kind, event.category, event.type),
+      // The generic "Assets" label restates what the amount already shows —
+      // keep only informative labels (Allowance, Debt repaid, …).
+      label: label === 'Assets' ? undefined : label,
       usd: formatActivityAssetUsd(enriched),
     }
   })
@@ -120,12 +130,38 @@ const details = computed(() => [
       }]
     : []),
 ])
-const participants = computed(() => getActivityParticipants(event).map(participant => ({
-  ...participant,
-  label: participant.label === 'User' && event.subAccountIndex !== undefined
-    ? `Position ${event.subAccountIndex}`
-    : participant.label,
-})))
+const allParticipants = computed(() => getActivityParticipants(event))
+const participants = computed(() => {
+  // Re-resolve participant vault names when registry metadata arrives.
+  void registryVersion.value
+  const viewer = viewerAddress?.toLowerCase()
+  return allParticipants.value
+    .filter(participant => participant.address.toLowerCase() !== viewer)
+    .map((participant) => {
+      // Known vaults (e.g. Earn vaults acting on underlying markets) read
+      // better as named vault links than as spy-mode "User 0x…" addresses.
+      const vaultDisplay = getRegistryVault(participant.address)
+        ? resolveActivityVaultDisplay(participant.address, getRegistryVault)
+        : null
+      if (vaultDisplay) {
+        return {
+          ...participant,
+          label: participant.label === 'User' ? 'Vault' : participant.label,
+          linkKind: 'vault' as const,
+          addressLabel: vaultDisplay.name,
+          vaultType: getRegistryVaultType(participant.address),
+        }
+      }
+      return {
+        ...participant,
+        label: participant.label === 'User' && event.subAccountIndex !== undefined
+          ? `Position ${event.subAccountIndex}`
+          : participant.label,
+        addressLabel: undefined,
+        vaultType: undefined,
+      }
+    })
+})
 const hasExpandableMobileDetails = computed(() =>
   details.value.length > 1 || participants.value.length > 1,
 )
@@ -178,7 +214,8 @@ const vaultDisplay = computed(() => {
             <time
               class="whitespace-nowrap"
               :datetime="event.timestamp"
-            >{{ formatActivityTimestamp(event.timestamp) }}</time>
+              :title="formatActivityTimestamp(event.timestamp)"
+            >{{ formatActivityRelativeTimestamp(event.timestamp) }}</time>
           </div>
           <div
             v-if="vaultDisplay"
@@ -223,11 +260,13 @@ const vaultDisplay = computed(() => {
             <ActivityAddress
               :address="participant.address"
               :chain-id="event.chainId"
+              :label="participant.addressLabel"
               :link-kind="participant.linkKind"
+              :vault-type="participant.vaultType"
             />
           </div>
           <span
-            v-if="participants.length === 0"
+            v-if="allParticipants.length === 0"
             class="text-p4 text-content-muted"
           >No participants</span>
         </div>
@@ -259,6 +298,7 @@ const vaultDisplay = computed(() => {
         :class="index > 0 && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
       >
         <div
+          v-if="detail.label"
           class="text-p4 text-content-tertiary"
           :class="{ 'activity-event-row__asset-label': detail.kind === 'asset' }"
         >
@@ -266,7 +306,10 @@ const vaultDisplay = computed(() => {
         </div>
 
         <template v-if="detail.kind === 'asset'">
-          <div class="activity-event-row__asset-amount mt-2 flex min-w-0 items-center gap-8">
+          <div
+            class="activity-event-row__asset-amount mt-2 flex min-w-0 items-center gap-8"
+            :title="detail.address"
+          >
             <AssetAvatar
               v-if="detail.avatarAsset"
               :asset="detail.avatarAsset"
@@ -274,7 +317,8 @@ const vaultDisplay = computed(() => {
             />
             <div class="min-w-0">
               <div
-                class="break-words text-p3 font-medium text-content-primary"
+                class="break-words text-p3 font-medium"
+                :class="detail.amountClass"
                 :title="detail.amountTitle"
               >
                 {{ detail.amount }}
@@ -288,7 +332,7 @@ const vaultDisplay = computed(() => {
             </div>
           </div>
           <div
-            v-if="detail.address"
+            v-if="detail.address && detail.addressKind !== 'Asset'"
             class="activity-event-row__asset-address mt-2 flex min-w-0 items-center gap-4 text-p4"
           >
             <span class="activity-event-row__asset-address-kind shrink-0 text-content-tertiary">{{ detail.addressKind }}</span>
