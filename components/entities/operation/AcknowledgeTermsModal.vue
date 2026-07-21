@@ -104,6 +104,9 @@ const onAccept = () => {
 
       <div
         ref="termsContainer"
+        tabindex="0"
+        role="region"
+        aria-label="Terms to review before accepting"
         class="bg-surface-secondary rounded-12 overflow-y-auto flex-1 styled-scrollbar"
         @scroll="checkScrolledToEnd"
       >
