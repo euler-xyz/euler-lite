@@ -254,7 +254,11 @@ const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => portfolioPosition.value
   ? `${portfolioPosition.value.label} liquidated`
   : formatActivityEventLabel(event))
+const { getPositionBySubAccountIndex } = useEulerAccount()
+// A fully liquidated (closed) position no longer renders on /position/:n —
+// only link while the position still exists.
 const positionRoute = computed(() => portfolioPosition.value
+  && getPositionBySubAccountIndex(portfolioPosition.value.index)
   ? { path: `/position/${portfolioPosition.value.index}`, query: route.query }
   : null)
 const transactionLink = computed(() => getExplorerLink(event.txHash, event.chainId))
