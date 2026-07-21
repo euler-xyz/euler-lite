@@ -41,7 +41,7 @@ const toggle = (filter: string) => {
       :aria-pressed="selected.includes(option.value)"
       @click="toggle(option.value)"
     >
-      {{ option.label }}
+      {{ option.count !== undefined ? `${option.label} (${option.count})` : option.label }}
     </button>
   </div>
 </template>

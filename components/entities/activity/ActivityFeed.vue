@@ -18,6 +18,8 @@ const props = withDefaults(defineProps<{
   scope: ActivityFeedScope
   enabled: boolean
   categoryOptions: readonly ActivityFilterOption[]
+  /** Categories queried when no filter chip is selected — defaults to the union of the option categories. */
+  unfilteredCategories?: readonly ActivityCategory[]
   subject?: 'account' | 'vault'
 }>(), {
   subject: 'vault',
@@ -29,7 +31,9 @@ const emit = defineEmits<{
 
 const selectedFilters = ref<string[]>([])
 const selectedCategories = computed<ActivityCategory[]>(() =>
-  resolveActivityFilterCategories(props.categoryOptions, selectedFilters.value),
+  selectedFilters.value.length === 0 && props.unfilteredCategories
+    ? [...props.unfilteredCategories].sort()
+    : resolveActivityFilterCategories(props.categoryOptions, selectedFilters.value),
 )
 const activityNowMs = useActivityNowMs()
 const scopeLabel = computed(() => props.subject === 'account' ? 'account' : 'vault')
@@ -44,6 +48,30 @@ const feed = useActivityFeed({
   enabled: () => props.enabled,
   categories: selectedCategories,
 })
+
+// A dedicated bounded query keeps the liquidation chip count honest — the
+// main feed only knows about the pages loaded so far.
+const LIQUIDATION_COUNT_LIMIT = 100
+const liquidationCountFeed = useActivityFeed({
+  scope: () => props.scope,
+  enabled: () => props.enabled && props.subject === 'account',
+  categories: () => ['liquidations'],
+  limit: LIQUIDATION_COUNT_LIMIT,
+})
+const liquidationCount = computed<number | string | undefined>(() => {
+  if (
+    props.subject !== 'account'
+    || !liquidationCountFeed.hasLoaded.value
+    || liquidationCountFeed.error.value
+  ) return undefined
+  const count = liquidationCountFeed.events.value.length
+  return liquidationCountFeed.hasMore.value ? `${count}+` : count
+})
+const displayCategoryOptions = computed(() => props.categoryOptions.map(option =>
+  option.value === 'liquidations' && liquidationCount.value !== undefined
+    ? { ...option, count: liquidationCount.value }
+    : option,
+))
 
 const missingCategoryLabels = computed(() =>
   feed.coverage.value?.missingCategories
@@ -106,9 +134,9 @@ watch(feed.hasLoaded, (hasLoaded) => {
 <template>
   <div class="activity-feed flex flex-col gap-16">
     <ActivityCategoryFilters
-      v-if="categoryOptions.length > 1"
+      v-if="categoryOptions.length > 0"
       v-model="selectedFilters"
-      :options="categoryOptions"
+      :options="displayCategoryOptions"
     />
 
     <div

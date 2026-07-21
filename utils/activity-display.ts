@@ -295,6 +295,8 @@ export interface ActivityFilterOption {
   value: string
   label: string
   categories: readonly ActivityCategory[]
+  /** Optional event count rendered after the label, e.g. "Liquidations (2)". */
+  count?: number | string
 }
 
 export const resolveActivityFilterCategories = (
@@ -351,20 +353,29 @@ export const getVaultActivityFilterOptions = (
 
 // The `account` category (controller/collateral/operator status, ToS
 // signatures, …) is deliberately absent: none of its event types are
-// displayed on Lite, so offering the filter would only surface an
-// always-empty view.
+// displayed on Lite, so querying it would only surface empty results.
 const ACCOUNT_ACTIVITY_CATEGORIES = [
   'lending',
   'borrowing',
   'liquidations',
 ] as const satisfies readonly ActivityCategory[]
 
-export const getAccountActivityFilterOptions = (): ActivityFilterOption[] =>
-  ACCOUNT_ACTIVITY_CATEGORIES.map(category => ({
-    value: category,
-    label: getActivityCategoryLabel(category),
-    categories: [category],
-  }))
+/** Categories the unfiltered portfolio feed queries. */
+export const getAccountActivityCategories = (): readonly ActivityCategory[] =>
+  ACCOUNT_ACTIVITY_CATEGORIES
+
+/**
+ * The portfolio chip row exposes only liquidations: event verbs and
+ * transaction grouping already communicate lending/borrowing, while "was I
+ * ever liquidated?" deserves a one-click answer.
+ */
+export const getAccountActivityFilterOptions = (): ActivityFilterOption[] => [
+  {
+    value: 'liquidations',
+    label: getActivityCategoryLabel('liquidations'),
+    categories: ['liquidations'],
+  },
+]
 
 const applyActivityAcronyms = (label: string): string => label
   .replace(/\bltv\b/gi, 'LTV')

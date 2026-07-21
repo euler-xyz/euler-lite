@@ -2,7 +2,7 @@
 import type { Address } from 'viem'
 import { getAddress, isAddress } from 'viem'
 import type { ActivityFeedScope } from '~/composables/useActivityFeed'
-import { getAccountActivityFilterOptions } from '~/utils/activity-display'
+import { getAccountActivityCategories, getAccountActivityFilterOptions } from '~/utils/activity-display'
 
 defineOptions({
   name: 'PortfolioActivityPage',
@@ -18,6 +18,7 @@ const owner = computed<Address | undefined>(() => {
 const availability = useActivityAvailability({ kind: 'account' }, chainId)
 const runtimeSupport = usePortfolioActivityRuntimeSupport(owner, chainId)
 const categoryOptions = getAccountActivityFilterOptions()
+const unfilteredCategories = getAccountActivityCategories()
 const isActive = computed(() => route.name === 'portfolio-activity')
 const feedScope = computed<ActivityFeedScope | undefined>(() => owner.value
   ? {
@@ -82,6 +83,7 @@ watch([owner, () => Number(chainId.value)], () => {
       :scope="feedScope"
       :enabled="isActive"
       :category-options="categoryOptions"
+      :unfiltered-categories="unfilteredCategories"
       subject="account"
       @update:unsupported="runtimeSupport.setRuntimeUnsupported"
     />

@@ -12,6 +12,7 @@ import {
   formatActivityTimestamp,
   formatActivityValuation,
   formatActivityValuationForAssets,
+  getAccountActivityCategories,
   getAccountActivityFilterOptions,
   getActivityAmountDirection,
   getActivityAssetAddressLabel,
@@ -90,13 +91,14 @@ describe('activity display helpers', () => {
   })
 
   it('returns the focused portfolio position category filters in display order', () => {
-    // No `account` option: none of that category's event types are displayed
-    // on Lite, so the filter would always come back empty.
+    // Only liquidations is exposed as a chip — verbs and transaction grouping
+    // already communicate lending/borrowing — while the unfiltered feed still
+    // queries every displayable category. No `account` category anywhere:
+    // none of its event types are displayed on Lite.
     expect(getAccountActivityFilterOptions()).toEqual([
-      { value: 'lending', label: 'Lending', categories: ['lending'] },
-      { value: 'borrowing', label: 'Borrowing', categories: ['borrowing'] },
       { value: 'liquidations', label: 'Liquidations', categories: ['liquidations'] },
     ])
+    expect(getAccountActivityCategories()).toEqual(['lending', 'borrowing', 'liquidations'])
   })
 
   it('returns vault-specific category filters with category-accurate labels', () => {
