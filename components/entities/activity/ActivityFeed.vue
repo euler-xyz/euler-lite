@@ -225,6 +225,23 @@ watch(feed.hasLoaded, (hasLoaded) => {
       {{ selectedFilters.length ? 'No activity matches the selected categories.' : emptyMessage }}
     </div>
 
+    <div
+      v-else-if="feed.hasLoaded.value && feed.events.value.length === 0 && feed.hasMore.value"
+      class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center"
+    >
+      <div class="text-p3 text-content-secondary">
+        Nothing to show in the most recent history — older activity is available.
+      </div>
+      <button
+        type="button"
+        class="ui-button ui-button--medium ui-button--secondary"
+        :disabled="feed.isLoadingMore.value"
+        @click="feed.loadMore"
+      >
+        {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+      </button>
+    </div>
+
     <template v-else-if="feed.events.value.length">
       <div
         class="transition-opacity"

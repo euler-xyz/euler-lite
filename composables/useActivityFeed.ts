@@ -35,6 +35,10 @@ interface UseActivityFeedOptions {
 
 type ActivityLoadMode = 'initial' | 'refresh' | 'append'
 
+/** Bounded number of automatic follow-up pages fetched when display
+ *  filtering strips everything on the pages loaded so far. */
+const AUTO_DISPLAY_FILL_PAGE_LIMIT = 3
+
 const normalizedCategories = (categories: readonly ActivityCategory[]): ActivityCategory[] =>
   [...new Set(categories)].sort()
 
@@ -89,6 +93,8 @@ export const useActivityFeed = ({
   let lastHeadLoadedAt: number | undefined
   let pendingInvalidationRefresh = false
   let pendingResumeRefresh = false
+  let pendingDisplayFill = false
+  let pendingDisplayFillPages = 0
 
   const contextKey = computed(() =>
     buildActivityFeedContextKey(toValue(scope), toValue(categories)),
@@ -105,7 +111,8 @@ export const useActivityFeed = ({
     hasLoaded.value
     && !error.value
     && coverage.value?.status === 'complete'
-    && events.value.length === 0,
+    && events.value.length === 0
+    && !hasMore.value,
   )
 
   const resetForContext = () => {
@@ -121,6 +128,8 @@ export const useActivityFeed = ({
     lastHeadLoadedAt = undefined
     pendingInvalidationRefresh = false
     pendingResumeRefresh = false
+    pendingDisplayFill = false
+    pendingDisplayFillPages = 0
   }
 
   const isHeadStale = () =>
@@ -195,7 +204,23 @@ export const useActivityFeed = ({
       error.value = undefined
       loadMoreError.value = undefined
       hasLoaded.value = true
-      if (mode !== 'append') lastHeadLoadedAt = Date.now()
+      if (mode !== 'append') {
+        lastHeadLoadedAt = Date.now()
+        pendingDisplayFillPages = AUTO_DISPLAY_FILL_PAGE_LIMIT
+      }
+      // Display filtering can strip an entire page (e.g. zero-value
+      // liquidations), presenting a false empty state while older pages hold
+      // visible rows. Keep fetching a bounded number of pages until something
+      // is displayable.
+      if (
+        events.value.length === 0
+        && page.meta.hasMore
+        && page.meta.nextCursor
+        && pendingDisplayFillPages > 0
+      ) {
+        pendingDisplayFillPages -= 1
+        pendingDisplayFill = true
+      }
     }
     catch (caught) {
       if (requestId !== activeRequestId || requestContext !== contextKey.value || !isEnabled.value) return
@@ -210,6 +235,10 @@ export const useActivityFeed = ({
         isLoadingMore.value = false
         if (pendingInvalidationRefresh && isEnabled.value && hasLoaded.value) {
           void fetchPage('refresh')
+        }
+        else if (pendingDisplayFill && isEnabled.value) {
+          pendingDisplayFill = false
+          void fetchPage('append')
         }
       }
     }

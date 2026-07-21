@@ -103,11 +103,13 @@ export const useSpyMode = () => {
       { immediate: true },
     )
 
-    // Resolve owner once both spy address AND EVC are available
+    // Resolve owner once the spy address, EVC, and RPC client are all
+    // available — resolving without a client would silently accept a
+    // sub-account as the inspected owner.
     watch(
-      [() => spyAddress.value, () => eulerCoreAddresses.value?.evc],
-      ([addr, evc]) => {
-        if (addr && evc && !ownerResolved) {
+      [() => spyAddress.value, () => eulerCoreAddresses.value?.evc, rpcClient],
+      ([addr, evc, client]) => {
+        if (addr && evc && client && !ownerResolved) {
           const requestId = ++ownerResolutionRequestId
           resolveOwner(addr).then(resolved => applyResolved(addr, resolved, requestId))
         }

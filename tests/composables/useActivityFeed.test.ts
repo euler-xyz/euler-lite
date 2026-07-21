@@ -207,6 +207,44 @@ describe('useActivityFeed', () => {
     ]))
   })
 
+  it('auto-fetches older pages when display filtering empties the visible page', async () => {
+    const zero = (id: string) => event(id, VAULT, 'liquidation', {
+      category: 'liquidations',
+      assets: [
+        { kind: 'assets', amountRaw: '0' },
+        { kind: 'collateral', amountRaw: '0', address: OTHER_VAULT },
+      ],
+    })
+    const real = event('real-liquidation', VAULT, 'liquidation', {
+      category: 'liquidations',
+      assets: [
+        { kind: 'assets', amountRaw: '5' },
+        { kind: 'collateral', amountRaw: '6', address: OTHER_VAULT },
+      ],
+    })
+    const pages = [
+      page([zero('zero-one')], { nextCursor: 'cursor-1' }),
+      page([zero('zero-two')], { nextCursor: 'cursor-2' }),
+      page([real]),
+    ]
+    const fetchVaultActivityEvents = vi.fn(async () => pages.shift() ?? page([]))
+    const { useActivityFeed } = await setup(fetchVaultActivityEvents)
+    let feed: ReturnType<typeof useActivityFeed> | undefined
+    effect = effectScope()
+    effect.run(() => {
+      feed = useActivityFeed({
+        scope: { kind: 'vault', vault: VAULT, chainId: 1, vaultType: 'evk' },
+        enabled: true,
+        categories: ['liquidations'],
+      })
+    })
+
+    await vi.waitFor(() => expect(feed?.events.value.map(item => item.id)).toEqual(['real-liquidation']))
+    expect(fetchVaultActivityEvents).toHaveBeenCalledTimes(3)
+    // The intermediate all-filtered pages never presented an empty state.
+    expect(feed?.isEmpty.value).toBe(false)
+  })
+
   it('removes a vault shadow transfer when its matching primary event arrives on an older page', async () => {
     const shadowTransfer = event('transfer-shadow', VAULT, 'transfer', {
       groupId: 'paired-transaction',

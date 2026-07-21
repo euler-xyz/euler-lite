@@ -1,9 +1,11 @@
 import { getAddress, isAddress, type Address } from 'viem'
-import { reactive } from 'vue'
+import { computed, reactive } from 'vue'
 import { evcGetAccountOwnerAbi } from '~/abis/evc'
 import { logWarn } from '~/utils/errorHandling'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+const RETRY_DELAY_MS = 5_000
+const MAX_ATTEMPTS = 3
 
 /**
  * Chain-scoped EVC account-owner cache.
@@ -19,6 +21,7 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
  */
 const owners = reactive(new Map<string, Address | null>())
 const pending = new Set<string>()
+const attempts = new Map<string, number>()
 
 const cacheKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
 
@@ -26,17 +29,27 @@ export const useEvcAccountOwners = () => {
   const { eulerCoreAddresses, chainId: activeChainId } = useEulerAddresses()
   const { client: rpcClient } = useRpcClient()
 
+  /**
+   * Callers should include this in the watch that issues `requestOwner` calls:
+   * requests made before the EVC address and RPC client are available are
+   * dropped, and only re-firing on readiness picks them back up.
+   */
+  const resolverReady = computed(() =>
+    Boolean(eulerCoreAddresses.value?.evc && rpcClient.value))
+
   const requestOwner = (chainId: number, address: string) => {
     const normalized = address.toLowerCase() as `0x${string}`
     if (!isAddress(normalized)) return
     const key = cacheKey(chainId, address)
     if (owners.has(key) || pending.has(key)) return
+    if ((attempts.get(key) ?? 0) >= MAX_ATTEMPTS) return
 
     const evcAddress = eulerCoreAddresses.value?.evc
     const client = rpcClient.value
     if (!evcAddress || !client || Number(activeChainId.value) !== chainId) return
 
     pending.add(key)
+    attempts.set(key, (attempts.get(key) ?? 0) + 1)
     client.readContract({
       address: evcAddress as Address,
       abi: evcGetAccountOwnerAbi,
@@ -53,8 +66,12 @@ export const useEvcAccountOwners = () => {
         )
       })
       .catch((err) => {
-        // Fail closed: the address stays hidden, and the next request retries.
+        // Fail closed: the address stays hidden. Retry a bounded number of
+        // times — nothing else re-triggers a request for the same address.
         logWarn('useEvcAccountOwners/requestOwner', err)
+        if ((attempts.get(key) ?? 0) < MAX_ATTEMPTS && typeof window !== 'undefined') {
+          window.setTimeout(() => requestOwner(chainId, address), RETRY_DELAY_MS)
+        }
       })
       .finally(() => pending.delete(key))
   }
@@ -66,5 +83,5 @@ export const useEvcAccountOwners = () => {
   const getResolvedOwner = (chainId: number, address: string): Address | null | undefined =>
     owners.get(cacheKey(chainId, address))
 
-  return { requestOwner, getResolvedOwner }
+  return { requestOwner, getResolvedOwner, resolverReady }
 }

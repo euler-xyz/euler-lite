@@ -176,11 +176,17 @@ const details = computed(() => [
 const portfolioPosition = computed(() => showVault
   ? getPortfolioActivityPositionParticipant(event)
   : null)
-const { requestOwner, getResolvedOwner } = useEvcAccountOwners()
+const { requestOwner, getResolvedOwner, resolverReady } = useEvcAccountOwners()
 const rawParticipants = computed(() => showVault ? [] : getActivityParticipants(event))
-watch(() => rawParticipants.value.map(participant => participant.address), (addresses) => {
-  for (const address of addresses) requestOwner(event.chainId, address)
-}, { immediate: true })
+// resolverReady matters: requests issued before the RPC client and EVC address
+// are available get dropped, and only this watcher re-issues them.
+watch(
+  [() => rawParticipants.value.map(participant => participant.address), resolverReady],
+  ([addresses]) => {
+    for (const address of addresses) requestOwner(event.chainId, address)
+  },
+  { immediate: true },
+)
 const participants = computed(() => {
   // Re-resolve participant vault names when registry metadata arrives.
   void registryVersion.value
@@ -269,11 +275,14 @@ const vaultDisplay = computed(() => {
   const display = resolveActivityVaultDisplay(event.vault, getRegistryVault, productName)
   if (!display) return null
   const vault = getRegistryVault(display.address)
+  // `event.vaultType` is optional on SDK events — prefer what the registry
+  // knows so Earn vaults never route to the lend page.
+  const vaultType = getRegistryVaultType(display.address) ?? event.vaultType
   return {
     ...display,
     vault,
     route: {
-      path: event.vaultType === 'earn' ? `/earn/${display.address}` : `/lend/${display.address}`,
+      path: vaultType === 'earn' ? `/earn/${display.address}` : `/lend/${display.address}`,
       query: { network: route.query.network },
     },
   }
