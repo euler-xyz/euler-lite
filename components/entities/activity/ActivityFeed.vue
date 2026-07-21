@@ -340,10 +340,10 @@ watch(feed.hasLoaded, (hasLoaded) => {
 
 <style scoped>
 /* Flat vault feeds render each event as its own section — the separator has
-   to live between the sections. Emphasis strength: the accordion card surface
-   sits close to the default border color. */
+   to live between the sections. Same rule the portfolio transaction bundles
+   use between their rows. */
 .activity-feed__flat-event + .activity-feed__flat-event {
-  border-top: 1px solid var(--border-emphasis);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .activity-feed {
