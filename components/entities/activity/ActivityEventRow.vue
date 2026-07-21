@@ -311,6 +311,7 @@ const vaultDisplay = computed(() => {
             v-if="vaultDisplay.vault"
             :vault="vaultDisplay.vault"
             :assets="[vaultDisplay.vault.asset]"
+            size="small"
           />
           <span
             v-else
@@ -564,9 +565,11 @@ const vaultDisplay = computed(() => {
   column-gap: 6px;
 }
 
+/* Indent the verb and stacked details to the identity text (32px avatar +
+   10px gap). */
 .activity-event-row--portfolio .activity-event-row__event-summary--with-vault,
 .activity-event-row--portfolio .activity-event-row__details--with-vault {
-  padding-left: 50px;
+  padding-left: 42px;
 }
 
 .activity-event-row--portfolio .activity-event-row__meta {
@@ -640,6 +643,12 @@ const vaultDisplay = computed(() => {
     padding-left: 0;
   }
 
+  /* Details live in their own column here — the stacked-layout indent would
+     only waste width. */
+  .activity-event-row--portfolio .activity-event-row__details--with-vault {
+    padding-left: 0;
+  }
+
   .activity-event-row--portfolio .activity-event-row__transaction {
     grid-column: 3;
   }
@@ -667,10 +676,12 @@ const vaultDisplay = computed(() => {
       44px;
   }
 
+  /* Events carry two text lines against a short amount — give them the
+     larger share so the amount column doesn't trail off into dead space. */
   .activity-event-row--portfolio {
     grid-template-columns:
+      minmax(320px, 1.4fr)
       minmax(280px, 1fr)
-      minmax(320px, 1.2fr)
       44px;
   }
 

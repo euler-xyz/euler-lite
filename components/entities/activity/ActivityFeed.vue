@@ -244,7 +244,10 @@ watch(feed.hasLoaded, (hasLoaded) => {
         class="transition-opacity"
         :class="{ 'opacity-60': feed.isRefreshing.value }"
       >
-        <div class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary">
+        <div
+          class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary"
+          :class="{ 'activity-feed__header--portfolio': subject === 'account' }"
+        >
           <span class="activity-feed__header-event">Event</span>
           <span>Amount / change</span>
           <span class="sr-only">Transaction</span>
@@ -253,11 +256,11 @@ watch(feed.hasLoaded, (hasLoaded) => {
           <section
             v-for="group in eventGroups"
             :key="group.id"
-            :class="group.events.length > 1 ? 'my-8 rounded-12 border border-line-subtle bg-surface px-12' : ''"
+            :class="group.events.length > 1 ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-subtle bg-surface px-12' : ''"
           >
             <div
               v-if="group.events.length > 1"
-              class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 pl-44 text-p4 text-content-tertiary"
+              class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 pl-[42px] text-p4 text-content-tertiary"
             >
               <div class="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
                 <span class="font-medium text-content-secondary">Transaction</span>
@@ -368,6 +371,20 @@ watch(feed.hasLoaded, (hasLoaded) => {
   /* Skip the icon column so the label aligns with the event titles. */
   .activity-feed__header-event {
     grid-column: 2;
+  }
+
+  /* Portfolio rows drop the icon column and lead with the vault identity —
+     mirror their grid so both header labels sit over their columns. */
+  .activity-feed__header--portfolio {
+    grid-template-columns:
+      minmax(320px, 1.4fr)
+      minmax(280px, 1fr)
+      44px;
+  }
+
+  .activity-feed__header--portfolio .activity-feed__header-event {
+    grid-column: 1;
+    padding-left: 42px;
   }
 }
 </style>
