@@ -62,8 +62,8 @@ describe('rewardCampaignDisplay', () => {
     rewardTokenSymbol: 'WMON',
   }
 
-  it('falls back to the Merkl Euler opportunities page when sourceUrl is missing', () => {
-    expect(rewardCampaignDisplay(baseCampaign).sourceUrl).toBe('https://app.merkl.xyz/?protocol=euler')
+  it('does not link Merkl campaigns without an exact opportunity URL', () => {
+    expect(rewardCampaignDisplay(baseCampaign).sourceUrl).toBeUndefined()
   })
 
   it('keeps provider sourceUrl when the campaign supplies one', () => {

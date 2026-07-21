@@ -57,7 +57,6 @@ export const PROVIDER_LOGOS: Record<string, string> = {
 const TURTLE_DASHBOARD_ORGANIZATION_ID = '52974bc3-2c43-4576-ac18-107d92b6e0c7'
 
 export const PROVIDER_SOURCE_URLS: Partial<Record<RewardCampaign['source'], string>> = {
-  merkl: 'https://app.merkl.xyz/?protocol=euler',
   brevis: 'https://incentra.brevis.network/',
   fuul: 'https://www.fuul.xyz/',
 }
@@ -104,10 +103,13 @@ export const rewardCampaignToken = (campaign: RewardCampaign): RewardCampaignDis
   icon: campaign.rewardTokenIcon || '',
 })
 
-export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined =>
-  campaign.sourceUrl || (campaign.source === 'turtle'
+export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined => {
+  if (campaign.sourceUrl) return campaign.sourceUrl
+  if (campaign.source === 'merkl') return undefined
+  return campaign.source === 'turtle'
     ? `https://dashboard.turtle.xyz/organizations/${TURTLE_DASHBOARD_ORGANIZATION_ID}/incentives/streams/${campaign.campaignId}`
-    : PROVIDER_SOURCE_URLS[campaign.source])
+    : PROVIDER_SOURCE_URLS[campaign.source]
+}
 
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
   const parts = [
