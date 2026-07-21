@@ -10,6 +10,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
+import { getAuthorizationStepDisplay } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { formatNumber } from '~/utils/string-utils'
 
@@ -139,19 +140,21 @@ const postStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   return out
 })
 
-/**
- * Signature-mode rows are wallet messages; without signatures the same slot
- * carries standalone authorization transactions.
- */
 const signatureStepsHeading = (entryId: string): string =>
-  (signatureStepsByEntryId.value[entryId] ?? []).some(step => step.isSeparateTx)
-    ? 'Authorization transactions'
-    : 'Signatures'
+  getAuthorizationStepDisplay(
+    (signatureStepsByEntryId.value[entryId] ?? []).some(step => step.isSeparateTx),
+  ).detailHeading
 
-const signatureRows = computed(() =>
+const authorizationRows = computed(() =>
   entries.value.flatMap(entry =>
     (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
   ),
+)
+const authorizationSummaryGroups = computed(() =>
+  [true, false].map((isSeparateTx) => {
+    const rows = authorizationRows.value.filter(({ step }) => step.isSeparateTx === isSeparateTx)
+    return { rows, display: getAuthorizationStepDisplay(isSeparateTx) }
+  }).filter(({ rows }) => rows.length),
 )
 
 // Unverified vaults the batch touches — surfaced as a warning. A vault is the
@@ -410,28 +413,33 @@ const handleClose = () => {
     <!-- Separator under the modal title -->
     <div class="-mx-16 mb-16 border-t border-line-default" />
     <div class="flex flex-col gap-20">
-      <!-- Off-chain signatures captured by operations such as migrations. -->
-      <div v-if="signatureRows.length">
-        <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
-          Signatures needed
-        </p>
-        <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
-          <div
-            v-for="({ entry, step }, i) in signatureRows"
-            :key="`${entry.id}-${i}`"
-            class="flex items-center justify-between gap-12 py-10"
-          >
-            <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
-              <SvgIcon
-                name="check-circle"
-                class="!w-16 !h-16 text-accent-500 shrink-0"
-              />
-              <span class="truncate">{{ step.label }}</span>
-            </span>
-            <span class="text-p3 text-content-tertiary shrink-0">1 signature</span>
+      <!-- Wallet authorizations captured by operations such as migrations. -->
+      <template
+        v-for="group in authorizationSummaryGroups"
+        :key="group.display.summaryHeading"
+      >
+        <div>
+          <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
+            {{ group.display.summaryHeading }}
+          </p>
+          <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
+            <div
+              v-for="({ entry, step }, i) in group.rows"
+              :key="`${entry.id}-${i}`"
+              class="flex items-center justify-between gap-12 py-10"
+            >
+              <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
+                <SvgIcon
+                  name="check-circle"
+                  class="!w-16 !h-16 text-accent-500 shrink-0"
+                />
+                <span class="truncate">{{ step.label }}</span>
+              </span>
+              <span class="text-p3 text-content-tertiary shrink-0">{{ group.display.itemCountLabel }}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
 
       <!-- Approvals -->
       <div v-if="approvals.length">
