@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useResizeObserver } from '@vueuse/core'
+import { isScrolledToEnd } from './termsScrollGate'
+
 const props = defineProps<{
   onAccept?: () => void
   onReject?: () => void
@@ -33,6 +36,27 @@ const terms = [
     text: `I acknowledge that Safe Harbor programs have separate rules, and by using the Protocol, I consent to the Whitehat Agreement terms, including eligible fund rescues, bounty deductions, associated risks (including loss and taxes), and holding Euler Community Members harmless.`,
   },
 ]
+
+// Gate the Accept button until the user has scrolled the terms to the bottom,
+// so it can only be clicked after the full text has been surfaced. Once the end
+// has been reached it stays unlocked, even if the user scrolls back up.
+const termsContainer = ref<HTMLElement | null>(null)
+const hasScrolledToEnd = ref(false)
+
+const checkScrolledToEnd = () => {
+  const el = termsContainer.value
+  if (!el || hasScrolledToEnd.value) {
+    return
+  }
+  if (isScrolledToEnd(el)) {
+    hasScrolledToEnd.value = true
+  }
+}
+
+// Re-evaluate on mount and whenever the container is resized (e.g. viewport
+// changes) so a non-overflowing list unlocks the button immediately.
+useResizeObserver(termsContainer, checkScrolledToEnd)
+onMounted(() => nextTick(checkScrolledToEnd))
 
 const onReject = () => {
   if (props.onReject) {
@@ -78,7 +102,11 @@ const onAccept = () => {
         I further represent and warrant:
       </div>
 
-      <div class="bg-surface-secondary rounded-12 overflow-y-auto flex-1 styled-scrollbar">
+      <div
+        ref="termsContainer"
+        class="bg-surface-secondary rounded-12 overflow-y-auto flex-1 styled-scrollbar"
+        @scroll="checkScrolledToEnd"
+      >
         <div
           v-for="(term, index) in terms"
           :key="index"
@@ -110,6 +138,7 @@ const onAccept = () => {
           variant="primary"
           size="xlarge"
           rounded
+          :disabled="!hasScrolledToEnd"
           @click="onAccept"
         >
           Accept
