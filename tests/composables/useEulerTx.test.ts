@@ -56,6 +56,20 @@ const authorizationRequest = {
   },
 } as unknown as MigrationAuthorizationRequest
 
+const typedAuthorizationRequest = {
+  kind: 'typedData',
+  connectorId: 'aave',
+  protocol: 'Aave V3',
+  chainId: 1,
+  owner: OWNER,
+  typedData: {
+    domain: {},
+    types: {},
+    primaryType: 'Authorization',
+    message: {},
+  },
+} as unknown as MigrationAuthorizationRequest
+
 describe('useEulerTx migration authorization cleanup', () => {
   let currentAccount = OWNER
   let currentChainId = 1
@@ -114,6 +128,18 @@ describe('useEulerTx migration authorization cleanup', () => {
       .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind })
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
     expect(revokes).toEqual([])
+  })
+
+  it.each([
+    ['account', () => { currentAccount = OTHER_OWNER }],
+    ['chain', () => { currentChainId = 8453 }],
+  ] as const)('does not sign a reviewed migration authorization after %s drift', async (kind, driftWallet) => {
+    const { signMigrationAuthorization } = useEulerTx()
+    driftWallet()
+
+    await expect(signMigrationAuthorization(typedAuthorizationRequest))
+      .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind })
+    expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
   })
 
   it('prepares the transaction plan with the caller-pinned signature mode', async () => {

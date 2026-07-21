@@ -1004,6 +1004,13 @@ export const useEulerTx = () => {
     if (request.kind !== 'typedData') {
       throw new Error('Transaction-based migration authorization is not supported in this flow')
     }
+    const currentAccount = getAccount(config)
+    assertWalletExecutionContext({
+      expectedAccount: request.owner,
+      expectedChainId: request.chainId,
+      currentAccount: currentAccount.address,
+      currentChainId: currentAccount.chainId,
+    })
     const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
     const postMigrationAuthorization = request.postMigrationAuthorization
       ? await signMigrationAuthorization(request.postMigrationAuthorization)

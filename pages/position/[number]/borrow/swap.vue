@@ -81,6 +81,7 @@ import {
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
+import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 import type { CollateralOption } from '~/types/collateral-option'
 import {
   getProjectedYieldState,
@@ -96,7 +97,7 @@ const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error: showError } = useToast()
-const { isConnected, address } = useWagmi()
+const { isConnected, address, chainId: walletChainId } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
 const { chainId: currentChainId, eulerPeripheryAddresses } = useEulerAddresses()
@@ -2623,6 +2624,7 @@ type InboundExternalMigrationPreview = {
   key: string
   useSignatures: boolean
   input: InboundExternalMigrationInput
+  account: Account<IHasVaultAddress>
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
   authorizationRequest?: MigrationAuthorizationRequest
@@ -2792,6 +2794,7 @@ const buildInboundExternalMigrationExecutionPlan = async (
 
 const buildInboundExternalMigrationCalldataPreview = async (
   input: InboundExternalMigrationInput,
+  account: Account<IHasVaultAddress>,
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
   prefetch?: PluginPrefetchData,
@@ -2818,7 +2821,7 @@ const buildInboundExternalMigrationCalldataPreview = async (
     operationName: `${input.source.connectorId}ToEulerMigration`,
   })
   return prepareTransactionPlan(plan, {
-    account: currentPlanAccount(),
+    account,
     chainId: migrationChainId,
     prefetch,
     usePermit2: useSignatures,
@@ -2877,9 +2880,10 @@ const buildInboundExternalMigrationSimulationResult = async (
 
 const prefetchInboundExternalMigrationPlugins = async (
   plan: TransactionPlan,
+  account: Account<IHasVaultAddress>,
 ): Promise<PluginPrefetchData | undefined> => {
   try {
-    return await prefetchPluginData(plan, { account: currentPlanAccount() })
+    return await prefetchPluginData(plan, { account })
   }
   catch (err) {
     logWarn('externalMigration/prefetchPluginData', err)
@@ -2902,21 +2906,23 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
   const promise = (async () => {
     const useSignatures = signaturesEnabled.value
     const input = await buildInboundExternalMigrationInput()
+    const account = currentPlanAccount()
+    if (!account) throw new Error('Migration inputs are incomplete')
     const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-    const simulationResult = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, undefined, useSignatures)
-    const prefetch = await prefetchInboundExternalMigrationPlugins(simulationResult.plan)
+    const simulationResult = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures)
+    const prefetch = await prefetchInboundExternalMigrationPlugins(simulationResult.plan, account)
     // Without signatures the authorization is granted by a standalone tx, so the
     // simulation plan (authorization item filtered out) is already the exact
     // calldata that executes — no stub-signed preview plan needed.
     const [tenderlyPrepared, previewPrepared] = await Promise.all([
       prepareTransactionPlan(simulationResult.plan, {
-        account: currentPlanAccount(),
+        account,
         chainId: input.position.chainId,
         prefetch,
         usePermit2: useSignatures,
       }),
       useSignatures
-        ? buildInboundExternalMigrationCalldataPreview(input, authorizationRequest, useSignatures, prefetch)
+        ? buildInboundExternalMigrationCalldataPreview(input, account, authorizationRequest, useSignatures, prefetch)
         : Promise.resolve(undefined),
     ])
     const calldataPrepared = previewPrepared ?? tenderlyPrepared
@@ -2929,6 +2935,7 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
       key,
       useSignatures,
       input,
+      account,
       tenderlySimulation: {
         plan: simulationResult.plan,
         prepared: tenderlyPrepared,
@@ -3317,8 +3324,7 @@ const submitCowSwapCollateralSwap = async () => {
   })
 }
 
-function schedulePostMigrationRefreshes() {
-  const refreshAddress = address.value || inboundExternalOwner.value || ''
+function schedulePostMigrationRefreshes(refreshAddress: Address) {
   scheduleExternalMigrationRefreshes()
   for (const delay of POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS) {
     setTimeout(() => {
@@ -3369,7 +3375,7 @@ const reviewInboundExternalMigration = async () => {
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
         onConfirm: async () => {
-          await sendInboundExternalMigration(preview.useSignatures)
+          await sendInboundExternalMigration(preview)
         },
         submittingLabel: 'Migrating...',
       },
@@ -3384,22 +3390,26 @@ const reviewInboundExternalMigration = async () => {
   }
 }
 
-const sendInboundExternalMigration = async (useSignatures: boolean) => {
+const sendInboundExternalMigration = async (preview: InboundExternalMigrationPreview) => {
   isSubmitting.value = true
   clearSimulationError()
   try {
+    const { input, account, useSignatures } = preview
+    const migrationChainId = input.position.chainId
+    assertWalletExecutionContext({
+      expectedAccount: input.owner,
+      expectedChainId: migrationChainId,
+      currentAccount: address.value as Address | undefined,
+      currentChainId: walletChainId.value,
+    })
     if (!await restorePendingBeforeRetry()) return
     inboundExternalPreparedPlan.value = null
-    const migrationChainId = externalPosition.value?.chainId
-    // Resolve the input once so the authorization and the plan are built from
-    // the same position snapshot.
-    const input = await buildInboundExternalMigrationInput()
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
       const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)
       inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
       inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, {
-        account: currentPlanAccount(),
+        account,
         chainId: migrationChainId,
         usePermit2: useSignatures,
       })
@@ -3419,13 +3429,13 @@ const sendInboundExternalMigration = async (useSignatures: boolean) => {
     }
 
     await revokeAfterSuccess(revokeTxs)
-    schedulePostMigrationRefreshes()
+    schedulePostMigrationRefreshes(input.owner)
     modal.close()
     // Land on the Positions (or Deposits) list rather than returning to the
     // external migration route, which no longer has a source position after tx.
-    const redirectPath = targetDebtVault.value
+    const redirectPath = input.eulerTarget.borrowVault
       ? '/portfolio'
-      : targetCollateralVault.value
+      : input.eulerTarget.collateralVault
         ? '/portfolio/saving'
         : '/portfolio'
     setTimeout(() => {
