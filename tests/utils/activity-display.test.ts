@@ -20,7 +20,6 @@ import {
   getActivityAssetsForDisplay,
   getActivityChangeEntries,
   getActivityEventIcon,
-  getActivityParticipants,
   getPortfolioActivityPositionParticipant,
   getActivityTransferDirection,
   getDisplayActivityEventTypes,
@@ -663,64 +662,6 @@ describe('activity display helpers', () => {
       label: 'New interest rate model',
       addresses: [{ address: OTHER_VAULT, linkKind: 'explorer' }],
     }])
-
-    // Undecoded actors and counterparties are omitted — only transfers keep
-    // their counterparty, and governance events list no participants at all.
-    expect(getActivityParticipants({
-      category: 'lending',
-      account: VAULT,
-      actor: ASSET,
-      counterparty: OTHER_VAULT,
-      type: 'deposit',
-    })).toEqual([
-      { label: 'User', address: VAULT, linkKind: 'spy' },
-    ])
-    expect(getActivityParticipants({
-      category: 'lending',
-      account: VAULT,
-      counterparty: OTHER_VAULT,
-      type: 'transfer',
-    })).toEqual([
-      { label: 'User', address: VAULT, linkKind: 'spy' },
-      { label: 'Counterparty', address: OTHER_VAULT, linkKind: 'explorer' },
-    ])
-    expect(getActivityParticipants({
-      category: 'governance',
-      actor: ASSET,
-      counterparty: OTHER_VAULT,
-      type: 'convert_fees',
-    })).toEqual([])
-  })
-
-  it('never exposes sub-account addresses in participants', () => {
-    const owner = '0x00000000000000000000000000000000000000a0' as const
-    const subAccount = '0x00000000000000000000000000000000000000a7' as const
-
-    expect(getActivityParticipants({
-      category: 'lending',
-      owner,
-      account: subAccount,
-      subAccountIndex: 7,
-    })).toEqual([{ label: 'User', address: owner, linkKind: 'spy' }])
-
-    expect(getActivityParticipants({
-      category: 'liquidations',
-      owner,
-      account: subAccount,
-      subAccountIndex: 7,
-      actor: ASSET,
-      counterparty: subAccount,
-    })).toEqual([
-      { label: 'Liquidator', address: ASSET, linkKind: 'explorer' },
-      { label: 'Violator', address: owner, linkKind: 'spy' },
-    ])
-
-    // Without a known owner the sub-account participant is dropped entirely.
-    expect(getActivityParticipants({
-      category: 'lending',
-      account: subAccount,
-      subAccountIndex: 7,
-    })).toEqual([])
   })
 
   it('represents a viewed liquidated subaccount only as an internal position', () => {
@@ -762,15 +703,6 @@ describe('activity display helpers', () => {
     expect(getActivityAssetLabel('collateral', 'liquidations')).toBe('Collateral shares seized')
     expect(getActivityAssetAddressLabel('assets', 'liquidations')).toBe('Asset')
     expect(getActivityAssetAddressLabel('collateral', 'liquidations')).toBe('Collateral vault')
-
-    expect(getActivityParticipants({
-      category: 'liquidations',
-      actor: ASSET,
-      counterparty: '0x0000000000000000000000000000000000000002',
-    })).toEqual([
-      { label: 'Liquidator', address: ASSET, linkKind: 'explorer' },
-      { label: 'Violator', address: '0x0000000000000000000000000000000000000002', linkKind: 'spy' },
-    ])
   })
 
   it('formats timestamps', () => {

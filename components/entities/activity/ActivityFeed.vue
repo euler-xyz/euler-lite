@@ -314,7 +314,6 @@ watch(feed.hasLoaded, (hasLoaded) => {
                 :key="event.id"
                 :event="event"
                 :show-vault="subject === 'account'"
-                :viewer-address="scope.kind === 'account' ? scope.owner : undefined"
                 :hide-category="subject === 'account'"
                 :hide-timestamp="group.events.length > 1"
                 :grouped="group.events.length > 1"

@@ -921,12 +921,6 @@ export const getActivityChangeEntries = (
   }
 })
 
-export interface ActivityParticipant {
-  address: Address
-  label: string
-  linkKind: Exclude<ActivityAddressLinkKind, 'vault'>
-}
-
 interface ActivityParticipantSource {
   account?: Address
   actor?: Address
@@ -981,55 +975,6 @@ export const getActivityResolvableVaultAddresses = (
     }
   }
   return [...addresses]
-}
-
-export const getActivityParticipants = (
-  event: ActivityParticipantSource,
-): ActivityParticipant[] => {
-  const participants: ActivityParticipant[] = []
-  // Sub-account addresses must never be displayed (or copied) anywhere in the
-  // app — funds sent to one are unrecoverable. Substitute the owner wallet,
-  // which spy links resolve to anyway, and drop the participant when the
-  // owner is unknown.
-  const isSubAccountAddress = (address: Address) =>
-    (event.subAccountIndex ?? 0) !== 0
-    && event.account !== undefined
-    && address.toLowerCase() === event.account.toLowerCase()
-  const add = (
-    label: string,
-    rawAddress: Address | undefined,
-    linkKind: ActivityParticipant['linkKind'],
-  ) => {
-    const address = rawAddress && isSubAccountAddress(rawAddress)
-      ? event.owner
-      : rawAddress
-    if (
-      !address
-      || participants.some(participant => participant.address.toLowerCase() === address.toLowerCase())
-    ) return
-    participants.push({ label, address, linkKind })
-  }
-
-  if (event.category === 'liquidations') {
-    add('Liquidator', event.actor, 'explorer')
-    add('Violator', event.counterparty, 'spy')
-    return participants
-  }
-
-  // Governance actors (governor multisigs, keepers) read as unexplained raw
-  // addresses — the change entries already carry the meaningful content.
-  if (event.category === 'governance') {
-    return participants
-  }
-
-  add('User', event.account ?? event.owner, 'spy')
-  // Actors and counterparties (swappers, routers, receivers) are undecoded
-  // noise on most events; the counterparty only carries signal on transfers,
-  // where it is the other side of the movement.
-  if (event.type === 'transfer') {
-    add('Counterparty', event.counterparty, 'explorer')
-  }
-  return participants
 }
 
 export const formatActivityValuation = (

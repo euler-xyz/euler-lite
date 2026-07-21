@@ -17,17 +17,14 @@ import {
   getActivityCategoryLabel,
   getActivityChangeEntries,
   getActivityEventIcon,
-  getActivityParticipants,
   getActivityResolvableVaultAddresses,
   getPortfolioActivityPositionParticipant,
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event, showVault = false, viewerAddress, hideCategory = false, hideTimestamp = false, grouped = false, hiddenCategory, showTransactionLink = true, nowMs } = defineProps<{
+const { event, showVault = false, hideCategory = false, hideTimestamp = false, grouped = false, hiddenCategory, showTransactionLink = true, nowMs } = defineProps<{
   event: ActivityEvent
   showVault?: boolean
-  /** Account whose feed is being viewed — hidden from participants to avoid repeating it on every row. */
-  viewerAddress?: string
   /** Portfolio groups make the category redundant, while vault filters may still need it. */
   hideCategory?: boolean
   /** Transaction groups own their shared timestamp instead of repeating it on every event. */
@@ -176,82 +173,11 @@ const details = computed(() => [
 const portfolioPosition = computed(() => showVault
   ? getPortfolioActivityPositionParticipant(event)
   : null)
-const { requestOwner, getResolvedOwner, resolverReady } = useEvcAccountOwners()
-const rawParticipants = computed(() => showVault ? [] : getActivityParticipants(event))
-// resolverReady matters: requests issued before the RPC client and EVC address
-// are available get dropped, and only this watcher re-issues them.
-watch(
-  [() => rawParticipants.value.map(participant => participant.address), resolverReady],
-  ([addresses]) => {
-    for (const address of addresses) requestOwner(event.chainId, address)
-  },
-  { immediate: true },
-)
-const participants = computed(() => {
-  // Re-resolve participant vault names when registry metadata arrives.
-  void registryVersion.value
-
-  if (showVault) {
-    // The only safe portfolio participant is promoted into the liquidation
-    // title, where it is useful instead of reading as trailing metadata.
-    return []
-  }
-
-  const viewer = viewerAddress?.toLowerCase()
-  const seenAddresses = new Set<string>()
-  return rawParticipants.value
-    .map((participant) => {
-      // Vault-scope events don't say whether an account is a sub-account, so
-      // every address stays hidden until the EVC owner lookup settles —
-      // sub-accounts render as their owner wallet, never as themselves.
-      const resolvedOwner = getResolvedOwner(event.chainId, participant.address)
-      if (resolvedOwner === undefined) return null
-      return { ...participant, address: resolvedOwner ?? participant.address }
-    })
-    .filter((participant): participant is NonNullable<typeof participant> => participant !== null)
-    .filter(participant => participant.address.toLowerCase() !== viewer)
-    .filter((participant) => {
-      const key = participant.address.toLowerCase()
-      if (seenAddresses.has(key)) return false
-      seenAddresses.add(key)
-      return true
-    })
-    .map((participant) => {
-      // Known vaults (e.g. Earn vaults acting on underlying markets) read
-      // better as named vault links than as spy-mode "User 0x…" addresses.
-      const vaultDisplay = getRegistryVault(participant.address)
-        ? resolveActivityVaultDisplay(participant.address, getRegistryVault)
-        : null
-      if (vaultDisplay) {
-        return {
-          ...participant,
-          label: participant.label === 'User' ? 'Vault' : participant.label,
-          linkKind: 'vault' as const,
-          addressLabel: vaultDisplay.name,
-          vaultType: getRegistryVaultType(participant.address),
-          route: undefined,
-          key: `${participant.label}:${participant.address}`,
-        }
-      }
-      return {
-        ...participant,
-        label: participant.label === 'User' && event.subAccountIndex !== undefined
-          ? `Position ${event.subAccountIndex}`
-          : participant.label,
-        addressLabel: undefined,
-        vaultType: undefined,
-        route: undefined,
-        key: `${participant.label}:${participant.address}`,
-      }
-    })
-})
 // Collapsing behind a toggle only pays off when it hides more than one row —
 // with exactly two entries, showing both is shorter than the button.
 const COLLAPSED_ENTRY_COUNT = 2
 const hiddenEntryCount = computed(() =>
-  Math.max(0, details.value.length - COLLAPSED_ENTRY_COUNT)
-  + Math.max(0, participants.value.length - COLLAPSED_ENTRY_COUNT),
-)
+  Math.max(0, details.value.length - COLLAPSED_ENTRY_COUNT))
 const hasExpandableMobileDetails = computed(() => hiddenEntryCount.value > 0)
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => portfolioPosition.value
@@ -368,29 +294,6 @@ const vaultDisplay = computed(() => {
             :datetime="event.timestamp"
             :title="formatActivityTimestamp(event.timestamp)"
           >{{ formatActivityRelativeTimestamp(event.timestamp, nowMs) }}</time>
-          <span
-            v-for="participant in participants"
-            :key="`inline:${participant.key}`"
-            class="activity-event-row__participant-inline min-w-0 items-center gap-4"
-          >
-            <NuxtLink
-              v-if="participant.route"
-              :to="participant.route"
-              class="font-medium text-content-secondary transition-colors hover:text-accent-500 hover:underline"
-            >
-              {{ participant.label }}
-            </NuxtLink>
-            <template v-else-if="participant.address">
-              <span class="shrink-0">{{ participant.label }}</span>
-              <ActivityAddress
-                :address="participant.address"
-                :chain-id="event.chainId"
-                :label="participant.addressLabel"
-                :link-kind="participant.linkKind"
-                :vault-type="participant.vaultType"
-              />
-            </template>
-          </span>
         </div>
       </div>
     </div>
@@ -497,38 +400,6 @@ const vaultDisplay = computed(() => {
     </div>
 
     <div
-      v-if="participants.length > 0"
-      class="activity-event-row__participants flex min-w-0 flex-col gap-4 pl-40 text-p3"
-    >
-      <div
-        v-for="(participant, index) in participants"
-        :key="participant.key"
-        class="min-w-0 items-center gap-4"
-        :class="[
-          index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
-        ]"
-      >
-        <NuxtLink
-          v-if="participant.route"
-          :to="participant.route"
-          class="font-medium text-content-secondary transition-colors hover:text-accent-500 hover:underline"
-        >
-          {{ participant.label }}
-        </NuxtLink>
-        <template v-else-if="participant.address">
-          <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
-          <ActivityAddress
-            :address="participant.address"
-            :chain-id="event.chainId"
-            :label="participant.addressLabel"
-            :link-kind="participant.linkKind"
-            :vault-type="participant.vaultType"
-          />
-        </template>
-      </div>
-    </div>
-
-    <div
       v-if="showTransactionLink"
       class="activity-event-row__transaction absolute right-0 top-8"
     >
@@ -551,8 +422,8 @@ const vaultDisplay = computed(() => {
 </template>
 
 <style scoped>
-/* Stacked (narrow) layout: icon + title on the first line, details and
-   participants as full-width lines underneath. */
+/* Stacked (narrow) layout: icon + title on the first line, details as
+   full-width lines underneath. */
 .activity-event-row {
   grid-template-columns: 32px minmax(0, 1fr);
 }
@@ -586,31 +457,13 @@ const vaultDisplay = computed(() => {
   column-gap: 6px;
 }
 
-.activity-event-row__details,
-.activity-event-row__participants {
+.activity-event-row__details {
   grid-column: 1 / -1;
-}
-
-/* Participants render inline in the meta line everywhere except the stacked
-   mobile layout, which keeps the standalone block. */
-.activity-event-row__participant-inline {
-  display: none;
-}
-
-@container activity-feed (min-width: 520px) {
-  .activity-event-row__participant-inline {
-    display: inline-flex;
-  }
-
-  .activity-event-row__participants {
-    display: none;
-  }
 }
 
 @container activity-feed (min-width: 520px) {
   /* One rule for every row: the icon, details column, and transaction link
-     center against the full card height, while the title line and the
-     participants line stack top-down beside the icon. */
+     center against the full card height beside the title line. */
   .activity-event-row {
     grid-template-columns: 32px minmax(200px, 1.4fr) minmax(180px, 1fr) 40px;
     gap: 8px 16px;
