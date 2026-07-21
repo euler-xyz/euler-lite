@@ -7,6 +7,8 @@ import { getChainById } from '~/entities/chainRegistry'
 const props = defineProps<{
   flowState: KeyringFlowState
   credentialCost?: number
+  checkingStatus?: boolean
+  statusMessage?: string
   errorMessage?: string
 }>()
 
@@ -47,21 +49,22 @@ defineEmits<{
       <p class="text-p3 text-content-secondary text-center">
         The Keyring browser extension is required to complete verification.
       </p>
-      <a
-        href="https://app.keyring.network/connect"
-        target="_blank"
-        rel="noopener noreferrer"
+      <UiButton
+        variant="primary"
+        size="large"
+        @click="$emit('launch')"
       >
-        <UiButton
-          variant="primary"
-          size="large"
-        >
-          Install Keyring Extension
-        </UiButton>
-      </a>
+        Install Keyring Extension
+      </UiButton>
     </template>
 
     <template v-else-if="flowState === KeyringFlowState.Start">
+      <p
+        v-if="statusMessage"
+        class="text-p3 text-content-secondary text-center"
+      >
+        {{ statusMessage }}
+      </p>
       <UiButton
         variant="primary"
         size="large"
@@ -75,10 +78,17 @@ defineEmits<{
       <p class="text-p3 text-content-secondary text-center">
         Complete the verification in the Keyring extension, then check your status.
       </p>
+      <p
+        v-if="statusMessage"
+        class="text-p3 text-content-secondary text-center"
+      >
+        {{ statusMessage }}
+      </p>
       <div class="flex flex-col gap-8">
         <UiButton
           variant="primary"
           size="large"
+          :loading="checkingStatus"
           @click="$emit('check')"
         >
           Check Status
@@ -120,7 +130,7 @@ defineEmits<{
           class="!w-20 !h-20 text-error-500"
         />
         <p class="text-p3 text-error-600">
-          {{ errorMessage ?? 'Verification failed. Please try again.' }}
+          {{ errorMessage || 'Verification failed. Please try again.' }}
         </p>
       </div>
       <UiButton

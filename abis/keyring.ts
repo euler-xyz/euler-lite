@@ -24,11 +24,12 @@ export const keyringHookTargetAbi = [
   // Integrator-supplied hook targets (e.g. HookTargetAccessControlKeyringUnwind)
   // expose the same values behind `get`-prefixed getters instead of the public
   // immutables above. useKeyring falls back to these when policyId()/keyring()
-  // revert. Declared uint256 as a safe superset — the value is coerced to Number.
+  // revert. getPolicyId() is uint32 on the verified integrator ABI, matching the
+  // native policyId() getter (so viem returns a plain number, no coercion).
   {
     inputs: [],
     name: 'getPolicyId',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    outputs: [{ internalType: 'uint32', name: '', type: 'uint32' }],
     stateMutability: 'view',
     type: 'function',
   },
