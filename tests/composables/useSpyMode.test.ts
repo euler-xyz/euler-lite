@@ -14,6 +14,11 @@ const deferred = <T>() => {
   return { promise, resolve }
 }
 
+const ZERO = '0x0000000000000000000000000000000000000000'
+
+/** EVC answering "never registered" — the address is safe as itself. */
+const selfOwnedClient = () => ({ readContract: vi.fn(async () => ZERO) })
+
 describe('useSpyMode', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -27,15 +32,22 @@ describe('useSpyMode', () => {
     vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
   })
 
-  it('replaces the active spy address synchronously for internal account links', async () => {
+  it('engages spy mode immediately but only consumes verified addresses', async () => {
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(selfOwnedClient()) }))
     const { useSpyMode } = await import('~/composables/useSpyMode')
     const spy = useSpyMode()
 
     expect(spy.activateSpyMode(FIRST)).toBe(true)
-    expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+    // Spy context is active, but the unverified candidate is not consumable.
+    expect(spy.isSpyMode.value).toBe(true)
+    expect(spy.isSpyResolving.value).toBe(true)
+    expect(spy.spyAddress.value).toBe('')
+    await vi.waitFor(() => expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST))
+    expect(spy.isSpyResolving.value).toBe(false)
 
     expect(spy.activateSpyMode(SECOND)).toBe(true)
-    expect(spy.spyAddress.value.toLowerCase()).toBe(SECOND)
+    expect(spy.spyAddress.value).toBe('')
+    await vi.waitFor(() => expect(spy.spyAddress.value.toLowerCase()).toBe(SECOND))
   })
 
   it('follows valid spy query changes from browser history', async () => {
@@ -46,19 +58,20 @@ describe('useSpyMode', () => {
     })
     vi.stubGlobal('window', { location: { search: `?spy=${FIRST}` } })
     vi.stubGlobal('useRoute', () => route)
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(selfOwnedClient()) }))
 
     const { useSpyMode } = await import('~/composables/useSpyMode')
     const spy = useSpyMode()
 
-    expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+    await vi.waitFor(() => expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST))
 
     route.query.spy = SECOND
     await nextTick()
-    expect(spy.spyAddress.value.toLowerCase()).toBe(SECOND)
+    await vi.waitFor(() => expect(spy.spyAddress.value.toLowerCase()).toBe(SECOND))
 
     route.query.spy = FIRST
     await nextTick()
-    expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+    await vi.waitFor(() => expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST))
   })
 
   it('ignores an owner resolution for a superseded spy address', async () => {
@@ -78,6 +91,7 @@ describe('useSpyMode', () => {
     expect(readContract).toHaveBeenCalledTimes(1)
 
     spy.activateSpyMode(SECOND)
+    await vi.waitFor(() => expect(spy.spyAddress.value.toLowerCase()).toBe(SECOND))
     firstOwner.resolve(FIRST_OWNER)
     await firstOwner.promise
     await nextTick()
@@ -98,9 +112,10 @@ describe('useSpyMode', () => {
 
     spy.activateSpyMode(FIRST)
     await nextTick()
-    // No client yet — nothing to resolve with, and nothing accepted.
+    // No client yet — nothing to resolve with, and nothing consumable.
     expect(readContract).not.toHaveBeenCalled()
-    expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+    expect(spy.spyAddress.value).toBe('')
+    expect(spy.isSpyResolving.value).toBe(true)
 
     client.value = { readContract }
     await nextTick()
@@ -121,8 +136,9 @@ describe('useSpyMode', () => {
       spy.activateSpyMode(FIRST)
       await vi.waitFor(() => expect(readContract).toHaveBeenCalledTimes(1))
       await Promise.resolve()
-      // The failed lookup must not be accepted as a resolution.
-      expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+      // The failed lookup keeps the candidate pending — never consumable.
+      expect(spy.spyAddress.value).toBe('')
+      expect(spy.isSpyResolving.value).toBe(true)
 
       await vi.advanceTimersByTimeAsync(5_000)
       await vi.waitFor(() => expect(readContract).toHaveBeenCalledTimes(2))

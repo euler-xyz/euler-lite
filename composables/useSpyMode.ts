@@ -14,30 +14,41 @@ const isValidAddress = (value: string): boolean =>
 const normalizeAddress = (value: string): string =>
   getAddress(value.toLowerCase() as `0x${string}`)
 
+/** Owner-verified address — the only value consumers may query or display. */
 const spyAddress = ref('')
+/** Unverified candidate awaiting EVC owner resolution. Never consumed. */
+const pendingSpyAddress = ref('')
 let watchersInitialized = false
-let ownerResolved = false
 let explicitlyCleared = false
 let ownerResolutionRequestId = 0
 
 /** Lightweight accessor for middleware — avoids useRoute() */
 export const getSpyModeState = () => ({
   spyAddress: computed(() => spyAddress.value),
-  isSpyMode: computed(() => Boolean(spyAddress.value)),
+  /** Value to persist in the URL: the verified address, or the user-supplied
+   *  candidate while resolution is still pending. Never render this. */
+  spyQueryValue: computed(() => spyAddress.value || pendingSpyAddress.value),
+  isSpyMode: computed(() => Boolean(spyAddress.value || pendingSpyAddress.value)),
 })
 
 export const useSpyMode = () => {
   const route = useRoute()
   const router = useRouter()
 
-  const isSpyMode = computed(() => Boolean(spyAddress.value))
+  const isSpyMode = computed(() => Boolean(spyAddress.value || pendingSpyAddress.value))
+  const isSpyResolving = computed(() => Boolean(pendingSpyAddress.value))
   const spyShortAddress = computed(() => spyAddress.value ? truncate(spyAddress.value) : '')
 
   const activateSpyMode = (address: string): boolean => {
     if (!isValidAddress(address)) return false
     explicitlyCleared = false
-    spyAddress.value = normalizeAddress(address)
-    ownerResolved = false
+    const normalized = normalizeAddress(address)
+    // Already verified — re-verification would only blank the UI.
+    if (normalized === spyAddress.value && !pendingSpyAddress.value) return true
+    // Fail closed: the candidate stays out of `spyAddress` (and therefore out
+    // of every query and display surface) until the EVC confirms its owner.
+    pendingSpyAddress.value = normalized
+    spyAddress.value = ''
     ownerResolutionRequestId += 1
     return true
   }
@@ -90,15 +101,15 @@ export const useSpyMode = () => {
       requestId: number,
       attempt = 0,
     ) => {
-      if (requestId !== ownerResolutionRequestId || spyAddress.value !== sourceAddress) return
+      if (requestId !== ownerResolutionRequestId || pendingSpyAddress.value !== sourceAddress) return
 
       if (resolved === null) {
-        // Fail closed: a failed lookup never counts as resolution — a
-        // transient RPC error must not accept a possible sub-account as the
-        // inspected owner. Retry while this spy session is still active.
+        // Fail closed: a failed lookup never counts as resolution — the
+        // candidate stays pending (unconsumed, undisplayed). Retry while this
+        // spy session is still active.
         if (attempt < OWNER_RESOLUTION_MAX_RETRIES) {
           setTimeout(() => {
-            if (requestId !== ownerResolutionRequestId || spyAddress.value !== sourceAddress) return
+            if (requestId !== ownerResolutionRequestId || pendingSpyAddress.value !== sourceAddress) return
             resolveOwner(sourceAddress).then(nextResolved =>
               applyResolved(sourceAddress, nextResolved, requestId, attempt + 1))
           }, OWNER_RESOLUTION_RETRY_DELAY_MS)
@@ -106,15 +117,15 @@ export const useSpyMode = () => {
         return
       }
 
-      if (resolved !== spyAddress.value) {
-        spyAddress.value = resolved
+      pendingSpyAddress.value = ''
+      spyAddress.value = resolved
+      if (resolved !== sourceAddress || route.query.spy !== resolved) {
         router.replace({
           path: route.path,
           query: { ...route.query, spy: resolved },
           hash: route.hash,
         })
       }
-      ownerResolved = true
     }
 
     // Watch route query to pick up ?spy= on initial load and navigation
@@ -123,20 +134,22 @@ export const useSpyMode = () => {
       (spy) => {
         if (!spy || typeof spy !== 'string' || !isValidAddress(spy)) return
         const nextAddress = normalizeAddress(spy)
-        if (nextAddress !== spyAddress.value) activateSpyMode(nextAddress)
+        if (nextAddress !== spyAddress.value && nextAddress !== pendingSpyAddress.value) {
+          activateSpyMode(nextAddress)
+        }
       },
       { immediate: true },
     )
 
-    // Resolve owner once the spy address, EVC, and RPC client are all
-    // available — resolving without a client would silently accept a
-    // sub-account as the inspected owner.
+    // Resolve the pending candidate once the EVC and RPC client are both
+    // available — resolution is the only path that promotes a candidate into
+    // the consumable spyAddress.
     watch(
-      [() => spyAddress.value, () => eulerCoreAddresses.value?.evc, rpcClient],
-      ([addr, evc, client]) => {
-        if (addr && evc && client && !ownerResolved) {
+      [() => pendingSpyAddress.value, () => eulerCoreAddresses.value?.evc, rpcClient],
+      ([candidate, evc, client]) => {
+        if (candidate && evc && client) {
           const requestId = ++ownerResolutionRequestId
-          resolveOwner(addr).then(resolved => applyResolved(addr, resolved, requestId))
+          resolveOwner(candidate).then(resolved => applyResolved(candidate, resolved, requestId))
         }
       },
       { immediate: true },
@@ -148,7 +161,9 @@ export const useSpyMode = () => {
 
     await router.replace({
       path: route.path,
-      query: { ...route.query, spy: spyAddress.value },
+      // The candidate is what was just activated; the verified address only
+      // exists when activation short-circuited on an already-verified value.
+      query: { ...route.query, spy: pendingSpyAddress.value || spyAddress.value },
       hash: route.hash,
     })
   }
@@ -156,7 +171,7 @@ export const useSpyMode = () => {
   const clearSpyMode = async () => {
     explicitlyCleared = true
     spyAddress.value = ''
-    ownerResolved = false
+    pendingSpyAddress.value = ''
     ownerResolutionRequestId += 1
     const { spy: _spy, ...rest } = route.query
     await router.replace({
@@ -169,6 +184,7 @@ export const useSpyMode = () => {
   return {
     spyAddress: computed(() => spyAddress.value),
     isSpyMode,
+    isSpyResolving,
     spyShortAddress,
     activateSpyMode,
     setSpyMode,
