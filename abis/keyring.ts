@@ -21,6 +21,24 @@ export const keyringHookTargetAbi = [
     stateMutability: 'view',
     type: 'function',
   },
+  // Integrator-supplied hook targets (e.g. HookTargetAccessControlKeyringUnwind)
+  // expose the same values behind `get`-prefixed getters instead of the public
+  // immutables above. useKeyring falls back to these when policyId()/keyring()
+  // revert. Declared uint256 as a safe superset — the value is coerced to Number.
+  {
+    inputs: [],
+    name: 'getPolicyId',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'getKeyring',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const
 
 // Keyring credentials contract ABI — credential creation and expiration

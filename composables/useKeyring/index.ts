@@ -24,24 +24,43 @@ export enum KeyringFlowState {
   Error = 'error',
 }
 
-const readHookTargetField = async <T>(
+// Read a hook-target view value, trying each getter name in order. Euler's
+// native HookTargetAccessControlKeyring exposes public-immutable getters
+// (`policyId()`, `keyring()`), while integrator-supplied variants such as
+// HookTargetAccessControlKeyringUnwind expose `getPolicyId()` / `getKeyring()`.
+// Returns the first name that resolves. If every candidate reverts, logs the
+// underlying error loudly: a silently-swallowed read here is exactly what made
+// this failure undiagnosable (policyId stayed undefined and Start Verification
+// no-op'd with no console output).
+// Exported for unit testing the native/integrator getter-name fallback.
+export const readHookTargetValue = async <T>(
   rpcUrl: string,
   hookTarget: Address,
-  functionName: string,
+  functionNames: readonly string[],
 ): Promise<T | undefined> => {
-  try {
-    const client = getPublicClient(rpcUrl)
-    return await client.readContract({
-      address: hookTarget,
-      abi: keyringHookTargetAbi,
-      functionName: functionName as 'policyId' | 'keyring' | 'checkKeyringCredentialOrWildCard',
-      authorizationList: undefined,
-    }) as T
+  const client = getPublicClient(rpcUrl)
+  let lastError: unknown
+  for (const functionName of functionNames) {
+    try {
+      return await client.readContract({
+        address: hookTarget,
+        abi: keyringHookTargetAbi,
+        functionName: functionName as 'policyId' | 'getPolicyId' | 'keyring' | 'getKeyring' | 'checkKeyringCredentialOrWildCard',
+        authorizationList: undefined,
+      }) as T
+    }
+    catch (error) {
+      // Getter absent on this hook target implementation — try the next name.
+      lastError = error
+    }
   }
-  catch (err) {
-    logWarn(`useKeyring: Failed to read ${functionName} from hookTarget ${hookTarget}`, err)
-    return undefined
-  }
+  logWarn(
+    `useKeyring: hook target ${hookTarget} responds to none of [${functionNames.join(', ')}] — `
+    + 'keyring policy could not be resolved and verification cannot start',
+    lastError,
+    { severity: 'error' },
+  )
+  return undefined
 }
 
 export const useKeyring = (vaultAddress: string | Ref<string>) => {
@@ -97,10 +116,14 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     try {
       const client = getPublicClient(rpcUrl.value)
 
-      // Read policyId and keyring contract address from hookTarget
-      const [pid, kca, hasCredential] = await Promise.all([
-        readHookTargetField<number>(rpcUrl.value, ht, 'policyId'),
-        readHookTargetField<Address>(rpcUrl.value, ht, 'keyring'),
+      // Read policyId and keyring contract address from the hook target,
+      // trying native (policyId/keyring) then integrator (getPolicyId/getKeyring)
+      // getter names. policyId may decode as uint256 on the integrator variant,
+      // so coerce to a Number to match the rest of the flow (extension config,
+      // credential matching) which expects a plain number.
+      const [rawPolicyId, kca, hasCredential] = await Promise.all([
+        readHookTargetValue<number | bigint>(rpcUrl.value, ht, ['policyId', 'getPolicyId']),
+        readHookTargetValue<Address>(rpcUrl.value, ht, ['keyring', 'getKeyring']),
         client.readContract({
           address: ht,
           abi: keyringHookTargetAbi,
@@ -110,6 +133,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
         }).catch(() => false) as Promise<boolean>,
       ])
 
+      const pid = rawPolicyId === undefined ? undefined : Number(rawPolicyId)
       policyId.value = pid
       keyringContractAddress.value = kca
       hasValidCredential.value = hasCredential === true
@@ -118,23 +142,29 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
         flowState.value = KeyringFlowState.Idle
         credentialData.value = null
       }
+      else if (pid === undefined || !kca) {
+        // Neither policyId()/getPolicyId() nor keyring()/getKeyring() resolved on
+        // this hook target, so we cannot build a verification request or inject a
+        // credential. Surface an error instead of a dead "Start Verification"
+        // button (readHookTargetValue has already logged the underlying revert).
+        flowState.value = KeyringFlowState.Error
+        error.value = 'Could not read the Keyring policy for this vault. Verification is unavailable — please try again later or contact support.'
+      }
       else {
-        // Check if there's an expired credential
-        if (kca && pid !== undefined) {
-          try {
-            const { keyringContractAbi: kAbi } = await import('~/abis/keyring')
-            const exp = await client.readContract({
-              address: kca,
-              abi: kAbi,
-              functionName: 'entityExp',
-              authorizationList: undefined,
-              args: [BigInt(pid), user],
-            })
-            expiration.value = exp as bigint
-          }
-          catch {
-            expiration.value = undefined
-          }
+        // Surface an expired credential (if any) so the alert copy can explain it.
+        try {
+          const { keyringContractAbi: kAbi } = await import('~/abis/keyring')
+          const exp = await client.readContract({
+            address: kca,
+            abi: kAbi,
+            functionName: 'entityExp',
+            authorizationList: undefined,
+            args: [BigInt(pid), user],
+          })
+          expiration.value = exp as bigint
+        }
+        catch {
+          expiration.value = undefined
         }
         flowState.value = KeyringFlowState.Loading
         await initExtensionState()
@@ -181,7 +211,15 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   }
 
   const launchExtension = async () => {
-    if (!userAddress.value || !chainId.value || policyId.value === undefined) return
+    if (!userAddress.value || !chainId.value || policyId.value === undefined) {
+      // Previously a silent no-op — the reason "Start Verification" appeared to
+      // do nothing. Log which prerequisite is missing so it is diagnosable.
+      logWarn(
+        'useKeyring: cannot start verification, prerequisites missing',
+        `userAddress=${Boolean(userAddress.value)} chainId=${chainId.value ?? 'none'} policyId=${policyId.value ?? 'undefined'}`,
+      )
+      return
+    }
 
     const config: ExtensionSDKConfig = {
       app_url: window.location.origin,

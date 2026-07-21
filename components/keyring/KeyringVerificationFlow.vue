@@ -7,6 +7,7 @@ import { getChainById } from '~/entities/chainRegistry'
 const props = defineProps<{
   flowState: KeyringFlowState
   credentialCost?: number
+  errorMessage?: string
 }>()
 
 const chainId = useChainId()
@@ -119,7 +120,7 @@ defineEmits<{
           class="!w-20 !h-20 text-error-500"
         />
         <p class="text-p3 text-error-600">
-          Verification failed. Please try again.
+          {{ errorMessage ?? 'Verification failed. Please try again.' }}
         </p>
       </div>
       <UiButton

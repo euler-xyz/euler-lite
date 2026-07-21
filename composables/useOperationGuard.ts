@@ -43,6 +43,7 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
     isExpired: keyring.isExpired,
     flowState: keyring.flowState,
     credentialData: keyring.credentialData,
+    error: keyring.error,
     launchExtension: keyring.launchExtension,
     checkStatus: keyring.checkStatus,
     cancelVerification: keyring.cancelVerification,
