@@ -40,6 +40,7 @@ import {
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
+import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
 import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -875,6 +876,10 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
   submittingTargetId.value = target.id
   clearSimulationError()
   try {
+    assertReviewedExecutionCurrent({
+      reviewedKey: preview.key,
+      currentKey: outgoingPreviewKeyFor(target),
+    })
     assertWalletExecutionContext({
       expectedAccount: reviewedInput.owner,
       expectedChainId: target.chainId,
@@ -882,10 +887,7 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
       currentChainId: walletChainId.value,
     })
     if (!await restorePendingBeforeRetry()) return
-    // Rebuild mutable amounts, but retain the owner and mode shown in review.
-    // If the wallet changes during later awaits, the request-bound send guard
-    // rejects before broadcasting a grant or migration transaction.
-    const input = buildMigrationInput(target, useSignatures, reviewedInput.owner)
+    const input = reviewedInput
     const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, reviewedAccount, useSignatures)
 
     // An undefined request means the grant is already live on-chain: nothing to
