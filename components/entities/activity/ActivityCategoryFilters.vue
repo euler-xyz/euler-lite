@@ -25,8 +25,8 @@ const toggle = (filter: string) => {
   >
     <button
       type="button"
-      class="h-32 shrink-0 rounded-full px-12 text-p3 transition-colors"
-      :class="selected.length === 0 ? 'bg-accent-600 text-black hover:bg-accent-700' : 'bg-surface text-content-secondary hover:text-content-primary'"
+      class="h-32 shrink-0 rounded-full border px-12 text-p3 transition-colors"
+      :class="selected.length === 0 ? 'border-transparent bg-accent-600 text-black hover:bg-accent-700' : 'border-line-default bg-surface text-content-secondary hover:border-line-emphasis hover:text-content-primary'"
       :aria-pressed="selected.length === 0"
       @click="selectAll"
     >
@@ -36,8 +36,8 @@ const toggle = (filter: string) => {
       v-for="option in options"
       :key="option.value"
       type="button"
-      class="h-32 shrink-0 rounded-full px-12 text-p3 transition-colors"
-      :class="selected.includes(option.value) ? 'bg-accent-600 text-black hover:bg-accent-700' : 'bg-surface text-content-secondary hover:text-content-primary'"
+      class="h-32 shrink-0 rounded-full border px-12 text-p3 transition-colors"
+      :class="selected.includes(option.value) ? 'border-transparent bg-accent-600 text-black hover:bg-accent-700' : 'border-line-default bg-surface text-content-secondary hover:border-line-emphasis hover:text-content-primary'"
       :aria-pressed="selected.includes(option.value)"
       @click="toggle(option.value)"
     >
