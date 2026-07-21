@@ -18,6 +18,7 @@ import {
   getActivityChangeEntries,
   getActivityEventIcon,
   getActivityParticipants,
+  getActivityResolvableVaultAddresses,
   getPortfolioActivityPositionParticipant,
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
@@ -58,14 +59,10 @@ const collateralVaultAddress = computed(() =>
 )
 const collateralProduct = useEulerProductOfVault(collateralVaultAddress)
 
-const metadataVaultAddresses = computed(() => showVault
-  ? [...new Set([
-      event.vault,
-      ...(event.assets ?? [])
-        .filter(asset => asset.kind === 'collateral' && asset.address)
-        .map(asset => asset.address),
-    ].filter((address): address is `0x${string}` => Boolean(address)))]
-  : [])
+// Resolve registry metadata for every vault address the row may render —
+// collateral vaults, share tokens, and vault-typed governance change fields —
+// so none of them fall back to a raw shortened address.
+const metadataVaultAddresses = computed(() => getActivityResolvableVaultAddresses(event))
 
 watch(metadataVaultAddresses, (addresses) => {
   for (const address of addresses) void getOrFetchRegistryVault(address)
@@ -402,7 +399,6 @@ const vaultDisplay = computed(() => {
         <div
           v-if="detail.label"
           class="text-p4 text-content-tertiary"
-          :class="{ 'activity-event-row__asset-label': detail.kind === 'asset' }"
         >
           {{ detail.label }}
         </div>
@@ -437,7 +433,7 @@ const vaultDisplay = computed(() => {
             v-if="detail.address && detail.addressKind !== 'Asset'"
             class="activity-event-row__asset-address mt-2 flex min-w-0 items-center gap-4 text-p4"
           >
-            <span class="activity-event-row__asset-address-kind shrink-0 text-content-tertiary">{{ detail.addressKind }}</span>
+            <span class="shrink-0 text-content-tertiary">{{ detail.addressKind }}</span>
             <ActivityAddress
               :address="detail.address"
               :chain-id="event.chainId"
@@ -657,11 +653,6 @@ const vaultDisplay = computed(() => {
     grid-column: 3;
   }
 
-  .activity-event-row__asset-label,
-  .activity-event-row__asset-address-kind {
-    display: none;
-  }
-
   .activity-event-row__asset-amount {
     margin-top: 0;
   }
@@ -695,14 +686,6 @@ const vaultDisplay = computed(() => {
 
   .activity-event-row__more {
     display: none;
-  }
-
-  .activity-event-row__asset-label {
-    display: block;
-  }
-
-  .activity-event-row__asset-address-kind {
-    display: inline;
   }
 
   .activity-event-row__asset-amount,

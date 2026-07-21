@@ -475,12 +475,11 @@ export const formatActivityTimestamp = (timestamp: string): string => {
   }).format(date)
 }
 
-const RELATIVE_TIMESTAMP_CUTOFF_MS = 7 * 24 * 60 * 60 * 1_000
-
 /**
- * Compact feed timestamp: relative within the last seven days, date-only
- * beyond that. The full absolute timestamp stays available via
- * `formatActivityTimestamp` (rendered as the hover title).
+ * Compact relative feed timestamp, used consistently across the vault and
+ * portfolio feeds. The full absolute timestamp stays available via
+ * `formatActivityTimestamp` (rendered as the hover title). Future timestamps
+ * (clock skew) fall back to the absolute date.
  */
 export const formatActivityRelativeTimestamp = (
   timestamp: string,
@@ -489,20 +488,25 @@ export const formatActivityRelativeTimestamp = (
   const date = new Date(timestamp)
   if (!Number.isFinite(date.getTime())) return '-'
   const elapsedMs = nowMs - date.getTime()
-  if (elapsedMs >= 0 && elapsedMs < RELATIVE_TIMESTAMP_CUTOFF_MS) {
-    const minutes = Math.floor(elapsedMs / 60_000)
-    if (minutes < 1) return 'Just now'
-    if (minutes < 60) return `${minutes} min ago`
-    const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours} h ago`
-    const days = Math.floor(hours / 24)
-    return `${days} d ago`
+  if (elapsedMs < 0) {
+    return new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(date)
   }
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(date)
+  const minutes = Math.floor(elapsedMs / 60_000)
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days} d ago`
+  const weeks = Math.floor(days / 7)
+  if (weeks < 5) return `${weeks} w ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months} mo ago`
+  return `${Math.max(1, Math.floor(days / 365))} y ago`
 }
 
 const resolveAssetAmount = (asset: ActivityAssetAmount): string | undefined => {
@@ -927,6 +931,7 @@ interface ActivityParticipantSource {
   counterparty?: Address
   owner?: Address
   subAccountIndex?: number
+  type?: ActivityEvent['type']
 }
 
 export interface PortfolioActivityPositionParticipant {
@@ -949,6 +954,30 @@ export const getPortfolioActivityPositionParticipant = (
     index: event.subAccountIndex,
     label: `Position ${event.subAccountIndex}`,
   }
+}
+
+/**
+ * Vault registry lookups worth attempting for an event: the event's vault,
+ * share/collateral asset addresses, and vault-typed change fields. Resolving
+ * these turns raw addresses into named vault links.
+ */
+export const getActivityResolvableVaultAddresses = (
+  event: Pick<ActivityEvent, 'vault' | 'type' | 'assets' | 'change'>,
+): Address[] => {
+  const addresses = new Set<Address>()
+  if (event.vault) addresses.add(event.vault)
+  for (const asset of event.assets ?? []) {
+    if (asset.address && ['collateral', 'shares', 'yield'].includes(asset.kind)) {
+      addresses.add(asset.address)
+    }
+  }
+  for (const field of VAULT_ADDRESS_FIELDS_BY_EVENT[event.type] ?? []) {
+    const value = event.change?.fields[field]
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (typeof item === 'string' && isAddress(item)) addresses.add(item as Address)
+    }
+  }
+  return [...addresses]
 }
 
 export const getActivityParticipants = (
@@ -984,15 +1013,19 @@ export const getActivityParticipants = (
     return participants
   }
 
+  // Governance actors (governor multisigs, keepers) read as unexplained raw
+  // addresses — the change entries already carry the meaningful content.
   if (event.category === 'governance') {
-    add('Actor', event.actor, 'explorer')
-    add('Target', event.counterparty, 'explorer')
     return participants
   }
 
   add('User', event.account ?? event.owner, 'spy')
-  add('Actor', event.actor, 'explorer')
-  add('Counterparty', event.counterparty, 'explorer')
+  // Actors and counterparties (swappers, routers, receivers) are undecoded
+  // noise on most events; the counterparty only carries signal on transfers,
+  // where it is the other side of the movement.
+  if (event.type === 'transfer') {
+    add('Counterparty', event.counterparty, 'explorer')
+  }
   return participants
 }
 

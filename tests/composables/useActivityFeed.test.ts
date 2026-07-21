@@ -165,7 +165,7 @@ describe('useActivityFeed', () => {
     ]))
   })
 
-  it('suppresses zero-value liquidation artifacts only in portfolio activity', async () => {
+  it('suppresses zero-value liquidation artifacts on every scope', async () => {
     const zeroLiquidation = event('zero-liquidation', VAULT, 'liquidation', {
       category: 'liquidations',
       assets: [
@@ -200,7 +200,6 @@ describe('useActivityFeed', () => {
     })
 
     await vi.waitFor(() => expect(vaultFeed?.events.value.map(item => item.id)).toEqual([
-      'zero-liquidation',
       'liquidation',
     ]))
     await vi.waitFor(() => expect(accountFeed?.events.value.map(item => item.id)).toEqual([

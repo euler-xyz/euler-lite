@@ -187,8 +187,9 @@ export const useActivityFeed = ({
       rawEvents.value = mode === 'append'
         ? mergeActivityEvents(rawEvents.value, page.data)
         : mergeActivityEvents([], page.data)
+      // Zero-value liquidation rows are no-op artifacts on every scope.
       events.value = filterActivityEventsForDisplay(rawEvents.value, eventTypes, {
-        hideZeroLiquidations: requestScope.kind === 'account',
+        hideZeroLiquidations: true,
       })
       meta.value = page.meta
       error.value = undefined

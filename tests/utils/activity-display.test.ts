@@ -630,14 +630,32 @@ describe('activity display helpers', () => {
       addresses: [{ address: OTHER_VAULT, linkKind: 'explorer' }],
     }])
 
+    // Undecoded actors and counterparties are omitted — only transfers keep
+    // their counterparty, and governance events list no participants at all.
     expect(getActivityParticipants({
       category: 'lending',
       account: VAULT,
       actor: ASSET,
+      counterparty: OTHER_VAULT,
+      type: 'deposit',
     })).toEqual([
       { label: 'User', address: VAULT, linkKind: 'spy' },
-      { label: 'Actor', address: ASSET, linkKind: 'explorer' },
     ])
+    expect(getActivityParticipants({
+      category: 'lending',
+      account: VAULT,
+      counterparty: OTHER_VAULT,
+      type: 'transfer',
+    })).toEqual([
+      { label: 'User', address: VAULT, linkKind: 'spy' },
+      { label: 'Counterparty', address: OTHER_VAULT, linkKind: 'explorer' },
+    ])
+    expect(getActivityParticipants({
+      category: 'governance',
+      actor: ASSET,
+      counterparty: OTHER_VAULT,
+      type: 'convert_fees',
+    })).toEqual([])
   })
 
   it('never exposes sub-account addresses in participants', () => {
@@ -726,14 +744,16 @@ describe('activity display helpers', () => {
     expect(formatActivityTimestamp('2026-07-13T10:30:00.000Z')).toContain('13 Jul 2026')
   })
 
-  it('formats recent timestamps relatively and older ones as dates', () => {
+  it('formats timestamps relatively at every age', () => {
     const now = Date.parse('2026-07-13T10:30:00.000Z')
     expect(formatActivityRelativeTimestamp('not-a-date', now)).toBe('-')
     expect(formatActivityRelativeTimestamp('2026-07-13T10:29:40.000Z', now)).toBe('Just now')
     expect(formatActivityRelativeTimestamp('2026-07-13T10:05:00.000Z', now)).toBe('25 min ago')
     expect(formatActivityRelativeTimestamp('2026-07-13T04:30:00.000Z', now)).toBe('6 h ago')
     expect(formatActivityRelativeTimestamp('2026-07-10T10:30:00.000Z', now)).toBe('3 d ago')
-    expect(formatActivityRelativeTimestamp('2026-07-01T10:30:00.000Z', now)).toBe('1 Jul 2026')
+    expect(formatActivityRelativeTimestamp('2026-07-01T10:30:00.000Z', now)).toBe('1 w ago')
+    expect(formatActivityRelativeTimestamp('2026-05-13T10:30:00.000Z', now)).toBe('2 mo ago')
+    expect(formatActivityRelativeTimestamp('2024-07-13T10:30:00.000Z', now)).toBe('2 y ago')
     // Future timestamps (clock skew) fall back to the absolute date.
     expect(formatActivityRelativeTimestamp('2026-07-14T10:30:00.000Z', now)).toBe('14 Jul 2026')
   })
