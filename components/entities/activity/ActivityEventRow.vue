@@ -300,7 +300,7 @@ const vaultDisplay = computed(() => {
     <div class="activity-event-row__title min-w-0 pr-48">
       <div
         v-if="vaultDisplay"
-        class="mb-8 min-w-0"
+        class="mb-4 min-w-0"
       >
         <NuxtLink
           :to="vaultDisplay.route"

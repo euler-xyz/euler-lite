@@ -260,7 +260,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
           >
             <div
               v-if="group.events.length > 1"
-              class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 pl-[42px] text-p4 text-content-tertiary"
+              class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 text-p4 text-content-tertiary"
             >
               <div class="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
                 <span class="font-medium text-content-secondary">Transaction</span>
