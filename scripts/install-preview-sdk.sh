@@ -106,7 +106,7 @@ mkdir -p "$SDK_PACK_DIR"
 npm pack --ignore-scripts ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
 
 cd /usr/src/app
-npm install --no-save --package-lock=false --ignore-scripts "$SDK_PACK_DIR"/*.tgz
+npm install --no-save --ignore-scripts "$SDK_PACK_DIR"/*.tgz
 if ! npm ls @eulerxyz/euler-v2-sdk --depth=0; then
   echo "npm ls reported a version mismatch for the preview SDK tarball; validating runtime exports instead."
 fi
