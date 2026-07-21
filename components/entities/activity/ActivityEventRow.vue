@@ -282,10 +282,14 @@ const vaultDisplay = computed(() => {
 
 <template>
   <li
-    class="activity-event-row relative -mx-12 grid items-center gap-10 rounded-8 border-b border-line-subtle px-12 py-12 transition-colors last:border-b-0 hover:bg-card-hover"
+    class="activity-event-row relative -mx-12 grid items-center gap-10 rounded-8 border-b px-12 py-12 transition-colors last:border-b-0 hover:bg-card-hover"
     :class="{
       'activity-event-row--grouped': grouped,
       'activity-event-row--portfolio': showVault,
+      /* Flat vault feeds sit on the page background, where the subtle border
+         disappears; grouped rows sit on the lighter card surface. */
+      'border-line-subtle': grouped,
+      'border-line-default': !grouped,
     }"
   >
     <div
