@@ -27,6 +27,7 @@ const selectedFilters = ref<string[]>([])
 const selectedCategories = computed<ActivityCategory[]>(() =>
   resolveActivityFilterCategories(props.categoryOptions, selectedFilters.value),
 )
+const activityNowMs = useActivityNowMs()
 const scopeLabel = computed(() => props.subject === 'account' ? 'account' : 'vault')
 // Coverage is complete here — the account/vault genuinely has no events, so
 // don't blame indexing. Accounts mention the network since switching chains
@@ -201,6 +202,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
             :show-vault="subject === 'account'"
             :viewer-address="scope.kind === 'account' ? scope.owner : undefined"
             :hidden-category="impliedCategory"
+            :now-ms="activityNowMs"
           />
         </ul>
       </div>

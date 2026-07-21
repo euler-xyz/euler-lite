@@ -21,13 +21,15 @@ import {
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event, showVault = false, viewerAddress, hiddenCategory } = defineProps<{
+const { event, showVault = false, viewerAddress, hiddenCategory, nowMs } = defineProps<{
   event: ActivityEvent
   showVault?: boolean
   /** Account whose feed is being viewed — hidden from participants to avoid repeating it on every row. */
   viewerAddress?: string
   /** Category already implied by the active filter — omitted from the row to avoid restating it. */
   hiddenCategory?: ActivityCategory
+  /** Feed-owned reactive clock shared by every visible event row. */
+  nowMs: number
 }>()
 
 const route = useRoute()
@@ -221,7 +223,7 @@ const vaultDisplay = computed(() => {
           class="whitespace-nowrap"
           :datetime="event.timestamp"
           :title="formatActivityTimestamp(event.timestamp)"
-        >{{ formatActivityRelativeTimestamp(event.timestamp) }}</time>
+        >{{ formatActivityRelativeTimestamp(event.timestamp, nowMs) }}</time>
         <span
           v-for="participant in participants"
           :key="`inline:${participant.label}:${participant.address}`"
