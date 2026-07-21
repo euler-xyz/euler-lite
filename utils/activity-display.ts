@@ -781,6 +781,13 @@ const CHANGE_FIELD_PRIORITY: Partial<Record<ActivityEvent['type'], readonly stri
   ],
 }
 
+const REALLOCATION_EVENT_TYPES: readonly ActivityEvent['type'][] = [
+  'reallocate_supply',
+  'reallocate_withdraw',
+  'public_reallocate_to',
+  'public_withdrawal',
+]
+
 const orderedActivityChangeFields = (
   event: ActivityChangeEventSource,
 ): [string, ActivityChangeValue][] => {
@@ -794,6 +801,12 @@ const orderedActivityChangeFields = (
     fields = fields.filter(([field]) =>
       field !== 'initial_liquidation_ltv' && field !== 'target_timestamp',
     )
+  }
+
+  // Reallocations report the same movement in underlying assets and in
+  // strategy shares — the share amount is redundant next to the asset amount.
+  if (REALLOCATION_EVENT_TYPES.includes(event.type)) {
+    fields = fields.filter(([field]) => field !== 'shares' && !field.endsWith('_shares'))
   }
 
   const priority = CHANGE_FIELD_PRIORITY[event.type]
@@ -844,10 +857,6 @@ export const getActivityChangeEntries = (
 
   let formatted: string | null = null
   const vaultMetadata = event.vault ? getVaultMetadata?.(event.vault) : undefined
-  const strategy = event.change?.fields.strategy
-  const strategyMetadata = typeof strategy === 'string' && isAddress(strategy)
-    ? getVaultMetadata?.(strategy)?.shares
-    : undefined
   if (event.type === 'set_caps' && (field === 'supply_cap' || field === 'borrow_cap')) {
     formatted = formatActivityCap(value, event.vault, getVaultMetadata)
   }
@@ -868,12 +877,6 @@ export const getActivityChangeEntries = (
     && (field === 'supplied_assets' || field === 'withdrawn_assets')
   ) {
     formatted = formatActivityTokenAmount(value, vaultMetadata?.asset)
-  }
-  else if (
-    (event.type === 'reallocate_supply' || event.type === 'reallocate_withdraw')
-    && (field === 'supplied_shares' || field === 'withdrawn_shares')
-  ) {
-    formatted = formatActivityTokenAmount(value, strategyMetadata)
   }
   else if (event.type === 'set_ltv' && field.endsWith('_ltv')) {
     formatted = formatActivityBps(value)

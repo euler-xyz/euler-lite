@@ -41,7 +41,10 @@ const setRuntimeUnsupported = (unsupported: boolean) => {
   if (unsupported) isOpen.value = false
 }
 
-watch(feedScope, () => {
+// Compare by the string key, not the scope object: the computed produces a
+// fresh object whenever the page's vault prop refreshes, and resetting on
+// identity alone hid an already-settled section forever.
+watch(feedContextKey, () => {
   hasCheckedRuntimeSupport.value = false
   isRuntimeUnsupported.value = false
   isOpen.value = props.defaultOpen

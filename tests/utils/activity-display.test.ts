@@ -596,6 +596,40 @@ describe('activity display helpers', () => {
     ])
   })
 
+  it('drops redundant share amounts from reallocation change entries', () => {
+    const getVaultMetadata = () => ({
+      asset: { address: ASSET, name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+      shares: { address: SHARES, name: 'Euler USDC', symbol: 'eUSDC', decimals: 18 },
+      vaultType: 'evk' as const,
+    })
+
+    // The share amount restates the asset amount in strategy share units.
+    expect(getActivityChangeEntries({
+      type: 'reallocate_supply',
+      vault: VAULT,
+      vaultType: 'earn',
+      change: {
+        fields: {
+          strategy: OTHER_VAULT,
+          supplied_assets: '20003',
+          supplied_shares: '20003',
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      {
+        field: 'strategy',
+        label: 'Strategy',
+        addresses: [{
+          address: OTHER_VAULT,
+          label: 'Euler USDC',
+          linkKind: 'vault',
+          vaultType: 'evk',
+        }],
+      },
+      { field: 'supplied_assets', label: 'Supplied assets', value: '0.02 USDC' },
+    ])
+  })
+
   it('formats EVK config amounts as percentages and empty hooked ops as None', () => {
     expect(getActivityChangeEntries({
       type: 'set_interest_fee',
