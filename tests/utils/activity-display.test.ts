@@ -67,6 +67,24 @@ describe('activity display helpers', () => {
       'set_ltv',
       'liquidation',
     ]))
+
+    const earnEventTypes = getDisplayActivityEventTypes({ kind: 'vault', vaultType: 'earn' })
+    expect(earnEventTypes).toEqual(expect.arrayContaining([
+      'deposit',
+      'withdraw',
+      'transfer',
+      'reallocate_supply',
+      'reallocate_withdraw',
+      'public_reallocate_to',
+      'public_withdrawal',
+      'set_cap',
+      'set_fee',
+    ]))
+    expect(earnEventTypes).not.toEqual(expect.arrayContaining([
+      'approval',
+      'update_last_total_assets',
+      'update_lost_assets',
+    ]))
   })
 
   it('returns the focused portfolio position category filters in display order', () => {
