@@ -187,7 +187,9 @@ export const useActivityFeed = ({
       rawEvents.value = mode === 'append'
         ? mergeActivityEvents(rawEvents.value, page.data)
         : mergeActivityEvents([], page.data)
-      events.value = filterActivityEventsForDisplay(rawEvents.value, eventTypes)
+      events.value = filterActivityEventsForDisplay(rawEvents.value, eventTypes, {
+        hideZeroLiquidations: requestScope.kind === 'account',
+      })
       meta.value = page.meta
       error.value = undefined
       loadMoreError.value = undefined

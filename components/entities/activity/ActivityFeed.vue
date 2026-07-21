@@ -5,6 +5,8 @@ import type {
 import type { ActivityFeedScope } from '~/composables/useActivityFeed'
 import { getExplorerLink } from '~/utils/block-explorer'
 import {
+  formatActivityRelativeTimestamp,
+  formatActivityTimestamp,
   getActivityCategoryLabel,
   groupActivityEventsByTransaction,
   isActivityScopeUnsupported,
@@ -61,15 +63,29 @@ const scopeUnsupported = computed(() =>
 const impliedCategory = computed(() =>
   selectedCategories.value.length === 1 ? selectedCategories.value[0] : undefined,
 )
+const COLLAPSED_GROUP_EVENT_COUNT = 3
+const expandedGroupIds = ref(new Set<string>())
 const eventGroups = computed(() => props.subject === 'account'
   ? groupActivityEventsByTransaction(feed.events.value)
   : feed.events.value.map(event => ({
       id: event.id,
       chainId: event.chainId,
       txHash: event.txHash,
+      timestamp: event.timestamp,
       events: [event],
     })),
 )
+const isGroupExpanded = (groupId: string) => expandedGroupIds.value.has(groupId)
+const visibleGroupEvents = (group: (typeof eventGroups.value)[number]) =>
+  group.events.length > COLLAPSED_GROUP_EVENT_COUNT && !isGroupExpanded(group.id)
+    ? group.events.slice(0, COLLAPSED_GROUP_EVENT_COUNT)
+    : group.events
+const toggleGroup = (groupId: string) => {
+  const next = new Set(expandedGroupIds.value)
+  if (next.has(groupId)) next.delete(groupId)
+  else next.add(groupId)
+  expandedGroupIds.value = next
+}
 
 watch(
   () => props.categoryOptions.map(option => option.value),
@@ -213,9 +229,18 @@ watch(feed.hasLoaded, (hasLoaded) => {
           >
             <div
               v-if="group.events.length > 1"
-              class="flex items-center justify-between border-b border-line-subtle py-8 pl-44 text-p4 text-content-tertiary"
+              class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 pl-44 text-p4 text-content-tertiary"
             >
-              <span>{{ group.events.length }} events in one transaction</span>
+              <div class="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+                <span class="font-medium text-content-secondary">Transaction</span>
+                <span aria-hidden="true">&middot;</span>
+                <time
+                  :datetime="group.timestamp"
+                  :title="formatActivityTimestamp(group.timestamp)"
+                >{{ formatActivityRelativeTimestamp(group.timestamp, activityNowMs) }}</time>
+                <span aria-hidden="true">&middot;</span>
+                <span>{{ group.events.length }} events</span>
+              </div>
               <a
                 :href="getExplorerLink(group.txHash, group.chainId)"
                 target="_blank"
@@ -233,17 +258,38 @@ watch(feed.hasLoaded, (hasLoaded) => {
             </div>
             <ul>
               <ActivityEventRow
-                v-for="event in group.events"
+                v-for="event in visibleGroupEvents(group)"
                 :key="event.id"
                 :event="event"
                 :show-vault="subject === 'account'"
                 :viewer-address="scope.kind === 'account' ? scope.owner : undefined"
                 :hide-category="subject === 'account'"
+                :hide-timestamp="group.events.length > 1"
+                :grouped="group.events.length > 1"
                 :hidden-category="impliedCategory"
                 :show-transaction-link="group.events.length === 1"
                 :now-ms="activityNowMs"
               />
             </ul>
+            <button
+              v-if="group.events.length > COLLAPSED_GROUP_EVENT_COUNT"
+              type="button"
+              class="flex w-full items-center justify-center gap-4 border-t border-line-subtle py-10 text-p4 font-medium text-content-secondary transition-colors hover:text-content-primary"
+              :aria-expanded="isGroupExpanded(group.id)"
+              @click="toggleGroup(group.id)"
+            >
+              <span>
+                {{ isGroupExpanded(group.id)
+                  ? 'Show fewer events'
+                  : `Show ${group.events.length - COLLAPSED_GROUP_EVENT_COUNT} more events` }}
+              </span>
+              <SvgIcon
+                name="arrow-down"
+                class="!h-12 !w-12 transition-transform"
+                :class="{ 'rotate-180': isGroupExpanded(group.id) }"
+                aria-hidden="true"
+              />
+            </button>
           </section>
         </div>
       </div>

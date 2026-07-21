@@ -22,13 +22,17 @@ import {
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event, showVault = false, viewerAddress, hideCategory = false, hiddenCategory, showTransactionLink = true, nowMs } = defineProps<{
+const { event, showVault = false, viewerAddress, hideCategory = false, hideTimestamp = false, grouped = false, hiddenCategory, showTransactionLink = true, nowMs } = defineProps<{
   event: ActivityEvent
   showVault?: boolean
   /** Account whose feed is being viewed — hidden from participants to avoid repeating it on every row. */
   viewerAddress?: string
   /** Portfolio groups make the category redundant, while vault filters may still need it. */
   hideCategory?: boolean
+  /** Transaction groups own their shared timestamp instead of repeating it on every event. */
+  hideTimestamp?: boolean
+  /** Applies the tighter visual treatment used inside transaction groups. */
+  grouped?: boolean
   /** Category already implied by the active filter — omitted from the row to avoid restating it. */
   hiddenCategory?: ActivityCategory
   /** Composite portfolio operations link the transaction once at group level. */
@@ -112,7 +116,10 @@ const assets = computed(() => {
       tokenMetadata,
     )
     const amount = formatActivityAssetAmount(enriched, event.type)
-    const signed = amount !== 'Amount unavailable' && direction
+    // Portfolio event verbs already communicate direction. Signs there make
+    // borrow/repay read backwards, while vault history still benefits from
+    // explicit inflow/outflow direction.
+    const signed = !showVault && amount !== 'Amount unavailable' && direction
     const label = getActivityAssetLabel(enriched.kind, event.category, event.type)
     const collateralVaultDisplay = event.category === 'liquidations'
       && enriched.kind === 'collateral'
@@ -129,7 +136,9 @@ const assets = computed(() => {
       amount: signed ? `${direction === 'in' ? '+' : '−'}${amount}` : amount,
       amountClass: signed && direction === 'in' ? 'text-accent-600' : 'text-content-primary',
       amountTitle: amount === 'Amount unavailable' ? `Raw units: ${enriched.amountRaw}` : undefined,
-      avatarAsset: resolveAvatarAsset(enriched),
+      avatarAsset: showVault && event.category !== 'liquidations'
+        ? null
+        : resolveAvatarAsset(enriched),
       key: `asset:${enriched.kind}:${enriched.address ?? 'unknown'}:${index}`,
       // The generic "Assets" label restates what the amount already shows —
       // keep only informative labels (Allowance, Debt repaid, …).
@@ -167,26 +176,17 @@ const details = computed(() => [
       }]
     : []),
 ])
+const portfolioPosition = computed(() => showVault
+  ? getPortfolioActivityPositionParticipant(event)
+  : null)
 const participants = computed(() => {
   // Re-resolve participant vault names when registry metadata arrives.
   void registryVersion.value
 
   if (showVault) {
-    const position = getPortfolioActivityPositionParticipant(event)
-    return position
-      ? [{
-          key: `position:${position.index}`,
-          label: position.label,
-          address: undefined,
-          addressLabel: undefined,
-          linkKind: undefined,
-          vaultType: undefined,
-          route: {
-            path: `/position/${position.index}`,
-            query: route.query,
-          },
-        }]
-      : []
+    // The only safe portfolio participant is promoted into the liquidation
+    // title, where it is useful instead of reading as trailing metadata.
+    return []
   }
 
   const viewer = viewerAddress?.toLowerCase()
@@ -230,7 +230,12 @@ const hiddenEntryCount = computed(() =>
 )
 const hasExpandableMobileDetails = computed(() => hiddenEntryCount.value > 0)
 const eventIcon = computed(() => getActivityEventIcon(event))
-const eventLabel = computed(() => formatActivityEventLabel(event))
+const eventLabel = computed(() => portfolioPosition.value
+  ? `${portfolioPosition.value.label} liquidated`
+  : formatActivityEventLabel(event))
+const positionRoute = computed(() => portfolioPosition.value
+  ? { path: `/position/${portfolioPosition.value.index}`, query: route.query }
+  : null)
 const transactionLink = computed(() => getExplorerLink(event.txHash, event.chainId))
 const vaultDisplay = computed(() => {
   if (!showVault) return null
@@ -254,7 +259,10 @@ const vaultDisplay = computed(() => {
 </script>
 
 <template>
-  <li class="activity-event-row relative -mx-12 grid items-center gap-10 rounded-8 border-b border-line-subtle px-12 py-12 transition-colors last:border-b-0 hover:bg-card-hover">
+  <li
+    class="activity-event-row relative -mx-12 grid items-center gap-10 rounded-8 border-b border-line-subtle px-12 py-12 transition-colors last:border-b-0 hover:bg-card-hover"
+    :class="{ 'activity-event-row--grouped': grouped }"
+  >
     <div class="activity-event-row__icon flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
       <SvgIcon
         :name="eventIcon.name"
@@ -263,7 +271,16 @@ const vaultDisplay = computed(() => {
       />
     </div>
     <div class="activity-event-row__title min-w-0 pr-48">
+      <NuxtLink
+        v-if="positionRoute"
+        :to="positionRoute"
+        class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
+        :title="eventLabel"
+      >
+        {{ eventLabel }}
+      </NuxtLink>
       <div
+        v-else
         class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
         :title="eventLabel"
       >
@@ -272,9 +289,13 @@ const vaultDisplay = computed(() => {
       <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
         <template v-if="!hideCategory && event.category !== hiddenCategory">
           <span>{{ getActivityCategoryLabel(event.category) }}</span>
-          <span aria-hidden="true">&middot;</span>
+          <span
+            v-if="!hideTimestamp"
+            aria-hidden="true"
+          >&middot;</span>
         </template>
         <time
+          v-if="!hideTimestamp"
           class="whitespace-nowrap"
           :datetime="event.timestamp"
           :title="formatActivityTimestamp(event.timestamp)"
@@ -485,6 +506,12 @@ const vaultDisplay = computed(() => {
    participants as full-width lines underneath. */
 .activity-event-row {
   grid-template-columns: 32px minmax(0, 1fr);
+}
+
+.activity-event-row--grouped {
+  border-radius: 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
 .activity-event-row__details,

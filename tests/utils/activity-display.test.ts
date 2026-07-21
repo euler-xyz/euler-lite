@@ -308,6 +308,53 @@ describe('activity display helpers', () => {
     ])
   })
 
+  it('suppresses zero-value liquidation artifacts but keeps unknown and non-zero rows', () => {
+    const base = {
+      chainId: 1,
+      category: 'liquidations' as const,
+      timestamp: '2026-07-13T10:30:00.000Z',
+      blockNumber: '123',
+      logIndex: 0,
+      txHash: `0x${'a'.repeat(64)}`,
+      type: 'liquidation' as const,
+      rawType: 'liquidation',
+      source: 'v3-ponder',
+      payload: {},
+    }
+    const events = [
+      {
+        ...base,
+        id: 'zero',
+        assets: [
+          { kind: 'assets' as const, amountRaw: '0' },
+          { kind: 'collateral' as const, amountRaw: '0' },
+        ],
+      },
+      {
+        ...base,
+        id: 'non-zero',
+        logIndex: 1,
+        assets: [
+          { kind: 'assets' as const, amountRaw: '1' },
+          { kind: 'collateral' as const, amountRaw: '0' },
+        ],
+      },
+      { ...base, id: 'unknown', logIndex: 2 },
+    ] as ActivityEvent[]
+
+    expect(filterActivityEventsForDisplay(events, ['liquidation'], {
+      hideZeroLiquidations: true,
+    }).map(event => event.id)).toEqual([
+      'non-zero',
+      'unknown',
+    ])
+    expect(filterActivityEventsForDisplay(events, ['liquidation']).map(event => event.id)).toEqual([
+      'zero',
+      'non-zero',
+      'unknown',
+    ])
+  })
+
   it('groups composite portfolio operations by chain and transaction hash', () => {
     const base = {
       chainId: 1,
@@ -627,7 +674,7 @@ describe('activity display helpers', () => {
       { field: 'queue', label: 'Queue', value: 'one, two' },
     ])
     expect(getActivityAssetLabel('assets', 'liquidations')).toBe('Debt repaid')
-    expect(getActivityAssetLabel('collateral', 'liquidations')).toBe('Collateral seized')
+    expect(getActivityAssetLabel('collateral', 'liquidations')).toBe('Collateral shares seized')
     expect(getActivityAssetAddressLabel('assets', 'liquidations')).toBe('Asset')
     expect(getActivityAssetAddressLabel('collateral', 'liquidations')).toBe('Collateral vault')
 

@@ -165,6 +165,49 @@ describe('useActivityFeed', () => {
     ]))
   })
 
+  it('suppresses zero-value liquidation artifacts only in portfolio activity', async () => {
+    const zeroLiquidation = event('zero-liquidation', VAULT, 'liquidation', {
+      category: 'liquidations',
+      assets: [
+        { kind: 'assets', amountRaw: '0' },
+        { kind: 'collateral', amountRaw: '0', address: OTHER_VAULT },
+      ],
+    })
+    const liquidation = event('liquidation', VAULT, 'liquidation', {
+      category: 'liquidations',
+      assets: [
+        { kind: 'assets', amountRaw: '1' },
+        { kind: 'collateral', amountRaw: '2', address: OTHER_VAULT },
+      ],
+    })
+    const fetchVaultActivityEvents = vi.fn(async () => page([zeroLiquidation, liquidation]))
+    const fetchAccountActivityEvents = vi.fn(async () => page([zeroLiquidation, liquidation]))
+    const { useActivityFeed } = await setup(fetchVaultActivityEvents, fetchAccountActivityEvents)
+    let vaultFeed: ReturnType<typeof useActivityFeed> | undefined
+    let accountFeed: ReturnType<typeof useActivityFeed> | undefined
+    effect = effectScope()
+    effect.run(() => {
+      vaultFeed = useActivityFeed({
+        scope: { kind: 'vault', vault: VAULT, chainId: 1, vaultType: 'evk' },
+        enabled: true,
+        categories: ['liquidations'],
+      })
+      accountFeed = useActivityFeed({
+        scope: { kind: 'account', owner: VAULT, chainId: 1 },
+        enabled: true,
+        categories: ['liquidations'],
+      })
+    })
+
+    await vi.waitFor(() => expect(vaultFeed?.events.value.map(item => item.id)).toEqual([
+      'zero-liquidation',
+      'liquidation',
+    ]))
+    await vi.waitFor(() => expect(accountFeed?.events.value.map(item => item.id)).toEqual([
+      'liquidation',
+    ]))
+  })
+
   it('removes a vault shadow transfer when its matching primary event arrives on an older page', async () => {
     const shadowTransfer = event('transfer-shadow', VAULT, 'transfer', {
       groupId: 'paired-transaction',

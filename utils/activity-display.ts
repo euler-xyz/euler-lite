@@ -169,9 +169,32 @@ export const getDisplayActivityEventTypes = (
 export const filterActivityEventsForDisplay = (
   events: readonly ActivityEvent[],
   eventTypes: readonly ActivityEvent['type'][],
+  { hideZeroLiquidations = false }: { hideZeroLiquidations?: boolean } = {},
 ): ActivityEvent[] => {
   const displayEventTypes = new Set<string>(eventTypes)
-  const visibleEvents = events.filter(event => displayEventTypes.has(event.type))
+  const hasMeaningfulLiquidationAmount = (event: ActivityEvent) => {
+    if (event.type !== 'liquidation') return true
+
+    const relevantAssets = event.assets?.filter(asset =>
+      asset.kind === 'assets' || asset.kind === 'collateral',
+    ) ?? []
+    if (relevantAssets.length === 0) return true
+
+    return relevantAssets.some((asset) => {
+      try {
+        return BigInt(asset.amountRaw) !== 0n
+      }
+      catch {
+        // Keep malformed/unknown values visible rather than silently losing
+        // potentially meaningful history.
+        return true
+      }
+    })
+  }
+  const visibleEvents = events.filter(event =>
+    displayEventTypes.has(event.type)
+    && (!hideZeroLiquidations || hasMeaningfulLiquidationAmount(event)),
+  )
   const pairedTypes = new Set<ActivityEvent['type']>([
     'deposit',
     'withdraw',
@@ -241,6 +264,7 @@ export interface ActivityTransactionGroup {
   id: string
   chainId: number
   txHash: string
+  timestamp: string
   events: ActivityEvent[]
 }
 
@@ -258,6 +282,7 @@ export const groupActivityEventsByTransaction = (
         id,
         chainId: event.chainId,
         txHash: event.txHash,
+        timestamp: event.timestamp,
         events: [event],
       })
     }
@@ -501,9 +526,9 @@ export const formatActivityAssetAmount = (
 }
 
 /**
- * Activity history displays protocol operations in underlying asset units.
- * Share and yield-balance quantities are intentionally omitted because they
- * are not historical underlying-asset amounts.
+ * Routine activity displays underlying asset units and omits share movements.
+ * Liquidations also expose the normalized collateral-share quantity because
+ * the historical underlying collateral amount is not available.
  */
 export const getActivityAssetsForDisplay = (
   event: Pick<ActivityEvent, 'assets' | 'category'>,
@@ -574,7 +599,7 @@ export const getActivityAssetLabel = (
   if (eventType === 'approval') return 'Allowance'
   if (category === 'liquidations' && kind === 'assets') return 'Debt repaid'
   if (category === 'liquidations' && (kind === 'collateral' || kind === 'yield')) {
-    return 'Collateral seized'
+    return 'Collateral shares seized'
   }
   return ASSET_KIND_LABELS[kind]
 }
