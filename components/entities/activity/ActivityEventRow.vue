@@ -603,7 +603,7 @@ const vaultDisplay = computed(() => {
      center against the full card height, while the title line and the
      participants line stack top-down beside the icon. */
   .activity-event-row {
-    grid-template-columns: 32px minmax(180px, 1fr) minmax(240px, 1.2fr) 40px;
+    grid-template-columns: 32px minmax(200px, 1.4fr) minmax(180px, 1fr) 40px;
     gap: 8px 16px;
   }
 
@@ -631,7 +631,7 @@ const vaultDisplay = computed(() => {
   }
 
   .activity-event-row--portfolio {
-    grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.2fr) 40px;
+    grid-template-columns: minmax(220px, 1.4fr) minmax(200px, 1fr) 40px;
   }
 
   .activity-event-row--portfolio .activity-event-row__title {
@@ -666,8 +666,8 @@ const vaultDisplay = computed(() => {
   .activity-event-row {
     grid-template-columns:
       32px
+      minmax(320px, 1.4fr)
       minmax(280px, 1fr)
-      minmax(320px, 1.2fr)
       44px;
   }
 

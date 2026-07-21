@@ -349,8 +349,8 @@ watch(feed.hasLoaded, (hasLoaded) => {
     display: grid;
     grid-template-columns:
       32px
+      minmax(320px, 1.4fr)
       minmax(280px, 1fr)
-      minmax(320px, 1.2fr)
       44px;
   }
 
