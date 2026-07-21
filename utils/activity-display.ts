@@ -237,6 +237,35 @@ export const filterActivityEventsForDisplay = (
   })
 }
 
+export interface ActivityTransactionGroup {
+  id: string
+  chainId: number
+  txHash: string
+  events: ActivityEvent[]
+}
+
+export const groupActivityEventsByTransaction = (
+  events: readonly ActivityEvent[],
+): ActivityTransactionGroup[] => {
+  const groups = new Map<string, ActivityTransactionGroup>()
+
+  for (const event of events) {
+    const id = `${event.chainId}:${event.txHash.toLowerCase()}`
+    const existing = groups.get(id)
+    if (existing) existing.events.push(event)
+    else {
+      groups.set(id, {
+        id,
+        chainId: event.chainId,
+        txHash: event.txHash,
+        events: [event],
+      })
+    }
+  }
+
+  return [...groups.values()]
+}
+
 export interface ActivityFilterOption {
   value: string
   label: string
@@ -477,8 +506,11 @@ export const formatActivityAssetAmount = (
  * are not historical underlying-asset amounts.
  */
 export const getActivityAssetsForDisplay = (
-  event: Pick<ActivityEvent, 'assets'>,
-): ActivityAssetAmount[] => (event.assets ?? []).filter(asset => asset.kind === 'assets')
+  event: Pick<ActivityEvent, 'assets' | 'category'>,
+): ActivityAssetAmount[] => (event.assets ?? []).filter(asset =>
+  asset.kind === 'assets'
+  || (event.category === 'liquidations' && asset.kind === 'collateral'),
+)
 
 /**
  * Fills display-only token metadata from Lite's existing vault registry.
@@ -551,7 +583,6 @@ export const getActivityAssetAddressLabel = (
   kind: ActivityAssetKind,
   category: ActivityCategory,
 ): string => {
-  if (category === 'liquidations' && kind === 'assets') return 'Debt vault'
   if (category === 'liquidations' && (kind === 'collateral' || kind === 'yield')) {
     return 'Collateral vault'
   }
@@ -859,6 +890,29 @@ interface ActivityParticipantSource {
   category: ActivityCategory
   counterparty?: Address
   owner?: Address
+  subAccountIndex?: number
+}
+
+export interface PortfolioActivityPositionParticipant {
+  index: number
+  label: string
+}
+
+export const getPortfolioActivityPositionParticipant = (
+  event: ActivityParticipantSource,
+): PortfolioActivityPositionParticipant | null => {
+  if (
+    event.category !== 'liquidations'
+    || event.subAccountIndex === undefined
+    || !event.account
+    || !event.counterparty
+    || event.account.toLowerCase() !== event.counterparty.toLowerCase()
+  ) return null
+
+  return {
+    index: event.subAccountIndex,
+    label: `Position ${event.subAccountIndex}`,
+  }
 }
 
 export const getActivityParticipants = (

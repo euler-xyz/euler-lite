@@ -20,9 +20,11 @@ import {
   getActivityChangeEntries,
   getActivityEventIcon,
   getActivityParticipants,
+  getPortfolioActivityPositionParticipant,
   getActivityTransferDirection,
   getDisplayActivityEventTypes,
   getVaultActivityFilterOptions,
+  groupActivityEventsByTransaction,
   isActivityScopeUnsupported,
   resolveActivityFilterCategories,
   resolveActivityVaultDisplay,
@@ -306,18 +308,60 @@ describe('activity display helpers', () => {
     ])
   })
 
+  it('groups composite portfolio operations by chain and transaction hash', () => {
+    const base = {
+      chainId: 1,
+      category: 'lending' as const,
+      timestamp: '2026-07-13T10:30:00.000Z',
+      blockNumber: '123',
+      logIndex: 0,
+      txHash: `0x${'a'.repeat(64)}`,
+      source: 'v3-ponder',
+      payload: {},
+    }
+    const events = [
+      { ...base, id: 'deposit', type: 'deposit', rawType: 'deposit' },
+      { ...base, id: 'borrow', type: 'borrow', rawType: 'borrow', txHash: base.txHash.toUpperCase() },
+      { ...base, id: 'withdraw', type: 'withdraw', rawType: 'withdraw', txHash: `0x${'b'.repeat(64)}` },
+    ] as ActivityEvent[]
+
+    expect(groupActivityEventsByTransaction(events).map(group => group.events.map(event => event.id))).toEqual([
+      ['deposit', 'borrow'],
+      ['withdraw'],
+    ])
+  })
+
   it('shows only underlying asset amounts', () => {
     const event = {
+      category: 'lending',
       assets: [
         { kind: 'assets', address: ASSET, amountRaw: '100' },
         { kind: 'shares', address: VAULT, amountRaw: '90' },
         { kind: 'collateral', address: OTHER_VAULT, amountRaw: '80' },
       ],
-    } as Pick<ActivityEvent, 'assets'>
+    } as Pick<ActivityEvent, 'assets' | 'category'>
 
     expect(getActivityAssetsForDisplay(event)).toEqual([
       { kind: 'assets', address: ASSET, amountRaw: '100' },
     ])
+  })
+
+  it('includes collateral seized by liquidations without relabeling the debt token as a vault', () => {
+    const event = {
+      category: 'liquidations',
+      assets: [
+        { kind: 'assets', address: ASSET, amountRaw: '100' },
+        { kind: 'collateral', address: OTHER_VAULT, amountRaw: '80' },
+        { kind: 'shares', address: VAULT, amountRaw: '70' },
+      ],
+    } as Pick<ActivityEvent, 'assets' | 'category'>
+
+    expect(getActivityAssetsForDisplay(event)).toEqual([
+      { kind: 'assets', address: ASSET, amountRaw: '100' },
+      { kind: 'collateral', address: OTHER_VAULT, amountRaw: '80' },
+    ])
+    expect(getActivityAssetAddressLabel('assets', 'liquidations')).toBe('Asset')
+    expect(getActivityAssetAddressLabel('collateral', 'liquidations')).toBe('Collateral vault')
   })
 
   it('formats normalized and raw asset amounts without inventing USD values', () => {
@@ -547,6 +591,26 @@ describe('activity display helpers', () => {
     ])
   })
 
+  it('represents a viewed liquidated subaccount only as an internal position', () => {
+    expect(getPortfolioActivityPositionParticipant({
+      account: VAULT,
+      actor: ASSET,
+      category: 'liquidations',
+      counterparty: VAULT,
+      owner: OTHER_VAULT,
+      subAccountIndex: 7,
+    })).toEqual({ index: 7, label: 'Position 7' })
+
+    expect(getPortfolioActivityPositionParticipant({
+      account: VAULT,
+      actor: OTHER_VAULT,
+      category: 'liquidations',
+      counterparty: ASSET,
+      owner: VAULT,
+      subAccountIndex: 0,
+    })).toBeNull()
+  })
+
   it('formats all governance changes and category-specific liquidation details', () => {
     expect(getActivityChangeEntries({
       type: 'set_config_flags',
@@ -564,7 +628,7 @@ describe('activity display helpers', () => {
     ])
     expect(getActivityAssetLabel('assets', 'liquidations')).toBe('Debt repaid')
     expect(getActivityAssetLabel('collateral', 'liquidations')).toBe('Collateral seized')
-    expect(getActivityAssetAddressLabel('assets', 'liquidations')).toBe('Debt vault')
+    expect(getActivityAssetAddressLabel('assets', 'liquidations')).toBe('Asset')
     expect(getActivityAssetAddressLabel('collateral', 'liquidations')).toBe('Collateral vault')
 
     expect(getActivityParticipants({

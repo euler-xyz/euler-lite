@@ -18,16 +18,21 @@ import {
   getActivityChangeEntries,
   getActivityEventIcon,
   getActivityParticipants,
+  getPortfolioActivityPositionParticipant,
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event, showVault = false, viewerAddress, hiddenCategory, nowMs } = defineProps<{
+const { event, showVault = false, viewerAddress, hideCategory = false, hiddenCategory, showTransactionLink = true, nowMs } = defineProps<{
   event: ActivityEvent
   showVault?: boolean
   /** Account whose feed is being viewed — hidden from participants to avoid repeating it on every row. */
   viewerAddress?: string
+  /** Portfolio groups make the category redundant, while vault filters may still need it. */
+  hideCategory?: boolean
   /** Category already implied by the active filter — omitted from the row to avoid restating it. */
   hiddenCategory?: ActivityCategory
+  /** Composite portfolio operations link the transaction once at group level. */
+  showTransactionLink?: boolean
   /** Feed-owned reactive clock shared by every visible event row. */
   nowMs: number
 }>()
@@ -38,11 +43,29 @@ const {
   getVault: getRegistryVault,
   getType: getRegistryVaultType,
   getVaultCategory,
+  getOrFetch: getOrFetchRegistryVault,
   registryVersion,
 } = useVaultRegistry()
 const { getTokenByAddress } = useTokenList()
 const vaultAddress = computed(() => event.vault ?? '')
 const vaultProduct = useEulerProductOfVault(vaultAddress)
+const collateralVaultAddress = computed(() =>
+  event.assets?.find(asset => asset.kind === 'collateral')?.address ?? '',
+)
+const collateralProduct = useEulerProductOfVault(collateralVaultAddress)
+
+const metadataVaultAddresses = computed(() => showVault
+  ? [...new Set([
+      event.vault,
+      ...(event.assets ?? [])
+        .filter(asset => asset.kind === 'collateral' && asset.address)
+        .map(asset => asset.address),
+    ].filter((address): address is `0x${string}` => Boolean(address)))]
+  : [])
+
+watch(metadataVaultAddresses, (addresses) => {
+  for (const address of addresses) void getOrFetchRegistryVault(address)
+}, { immediate: true })
 
 const tokenMetadata = (address: `0x${string}`) => {
   const token = getTokenByAddress(address)
@@ -91,10 +114,18 @@ const assets = computed(() => {
     const amount = formatActivityAssetAmount(enriched, event.type)
     const signed = amount !== 'Amount unavailable' && direction
     const label = getActivityAssetLabel(enriched.kind, event.category, event.type)
+    const collateralVaultDisplay = event.category === 'liquidations'
+      && enriched.kind === 'collateral'
+      && enriched.address
+      ? resolveActivityVaultDisplay(enriched.address, getRegistryVault, collateralProduct.name)
+      : null
     return {
       kind: 'asset' as const,
       address: enriched.address,
       addressKind: getActivityAssetAddressLabel(enriched.kind, event.category),
+      addressLabel: collateralVaultDisplay?.name,
+      addressLinkKind: collateralVaultDisplay ? 'vault' as const : undefined,
+      addressVaultType: enriched.address ? getRegistryVaultType(enriched.address) : undefined,
       amount: signed ? `${direction === 'in' ? '+' : '−'}${amount}` : amount,
       amountClass: signed && direction === 'in' ? 'text-accent-600' : 'text-content-primary',
       amountTitle: amount === 'Amount unavailable' ? `Raw units: ${enriched.amountRaw}` : undefined,
@@ -110,14 +141,16 @@ const assets = computed(() => {
 const changes = computed(() => {
   // Re-resolve human-readable vault names when registry metadata arrives.
   void registryVersion.value
-  return getActivityChangeEntries(event, activityVaultMetadata).map(entry => ({
-    kind: 'change' as const,
-    key: `change:${entry.field}`,
-    label: entry.label,
-    value: entry.value,
-    valueTitle: entry.value,
-    addresses: entry.addresses,
-  }))
+  return getActivityChangeEntries(event, activityVaultMetadata)
+    .filter(entry => event.category !== 'liquidations' || entry.field !== 'collateral')
+    .map(entry => ({
+      kind: 'change' as const,
+      key: `change:${entry.field}`,
+      label: entry.label,
+      value: entry.value,
+      valueTitle: entry.value,
+      addresses: entry.addresses,
+    }))
 })
 const valuation = computed(() => formatActivityValuationForAssets(event.valuation, event.assets ?? []))
 const details = computed(() => [
@@ -137,6 +170,25 @@ const details = computed(() => [
 const participants = computed(() => {
   // Re-resolve participant vault names when registry metadata arrives.
   void registryVersion.value
+
+  if (showVault) {
+    const position = getPortfolioActivityPositionParticipant(event)
+    return position
+      ? [{
+          key: `position:${position.index}`,
+          label: position.label,
+          address: undefined,
+          addressLabel: undefined,
+          linkKind: undefined,
+          vaultType: undefined,
+          route: {
+            path: `/position/${position.index}`,
+            query: route.query,
+          },
+        }]
+      : []
+  }
+
   const viewer = viewerAddress?.toLowerCase()
   return getActivityParticipants(event)
     .filter(participant => participant.address.toLowerCase() !== viewer)
@@ -153,6 +205,8 @@ const participants = computed(() => {
           linkKind: 'vault' as const,
           addressLabel: vaultDisplay.name,
           vaultType: getRegistryVaultType(participant.address),
+          route: undefined,
+          key: `${participant.label}:${participant.address}`,
         }
       }
       return {
@@ -162,6 +216,8 @@ const participants = computed(() => {
           : participant.label,
         addressLabel: undefined,
         vaultType: undefined,
+        route: undefined,
+        key: `${participant.label}:${participant.address}`,
       }
     })
 })
@@ -186,10 +242,9 @@ const vaultDisplay = computed(() => {
   const display = resolveActivityVaultDisplay(event.vault, getRegistryVault, productName)
   if (!display) return null
   const vault = getRegistryVault(display.address)
-  const asset = vault?.asset
   return {
     ...display,
-    avatarAsset: asset ? { address: asset.address, symbol: asset.symbol } : null,
+    vault,
     route: {
       path: event.vaultType === 'earn' ? `/earn/${display.address}` : `/lend/${display.address}`,
       query: { network: route.query.network },
@@ -215,7 +270,7 @@ const vaultDisplay = computed(() => {
         {{ eventLabel }}
       </div>
       <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
-        <template v-if="event.category !== hiddenCategory">
+        <template v-if="!hideCategory && event.category !== hiddenCategory">
           <span>{{ getActivityCategoryLabel(event.category) }}</span>
           <span aria-hidden="true">&middot;</span>
         </template>
@@ -226,44 +281,49 @@ const vaultDisplay = computed(() => {
         >{{ formatActivityRelativeTimestamp(event.timestamp, nowMs) }}</time>
         <span
           v-for="participant in participants"
-          :key="`inline:${participant.label}:${participant.address}`"
+          :key="`inline:${participant.key}`"
           class="activity-event-row__participant-inline min-w-0 items-center gap-4"
         >
-          <span class="shrink-0">{{ participant.label }}</span>
-          <ActivityAddress
-            :address="participant.address"
-            :chain-id="event.chainId"
-            :label="participant.addressLabel"
-            :link-kind="participant.linkKind"
-            :vault-type="participant.vaultType"
-          />
+          <NuxtLink
+            v-if="participant.route"
+            :to="participant.route"
+            class="font-medium text-content-secondary transition-colors hover:text-accent-500 hover:underline"
+          >
+            {{ participant.label }}
+          </NuxtLink>
+          <template v-else-if="participant.address">
+            <span class="shrink-0">{{ participant.label }}</span>
+            <ActivityAddress
+              :address="participant.address"
+              :chain-id="event.chainId"
+              :label="participant.addressLabel"
+              :link-kind="participant.linkKind"
+              :vault-type="participant.vaultType"
+            />
+          </template>
         </span>
       </div>
       <div
         v-if="vaultDisplay"
-        class="mt-4 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-p4"
+        class="mt-8 min-w-0"
       >
-        <span class="text-content-tertiary">Market</span>
-        <AssetAvatar
-          v-if="vaultDisplay.avatarAsset"
-          :asset="vaultDisplay.avatarAsset"
-          size="20"
-        />
         <NuxtLink
-          v-if="vaultDisplay.name"
           :to="vaultDisplay.route"
-          class="min-w-0 truncate text-content-secondary transition-colors hover:text-accent-500 hover:underline"
-          :title="vaultDisplay.name"
+          class="inline-flex max-w-full rounded-8 transition-opacity hover:opacity-80"
+          :title="vaultDisplay.name || vaultDisplay.addressLabel"
         >
-          {{ vaultDisplay.name }}
+          <VaultLabelsAndAssets
+            v-if="vaultDisplay.vault"
+            :vault="vaultDisplay.vault"
+            :assets="[vaultDisplay.vault.asset]"
+          />
+          <span
+            v-else
+            class="truncate text-p4 text-content-secondary hover:text-accent-500 hover:underline"
+          >
+            {{ vaultDisplay.name || vaultDisplay.addressLabel }}
+          </span>
         </NuxtLink>
-        <ActivityAddress
-          :address="vaultDisplay.address"
-          :chain-id="event.chainId"
-          :label="vaultDisplay.addressLabel"
-          link-kind="vault"
-          :vault-type="event.vaultType"
-        />
       </div>
     </div>
 
@@ -316,6 +376,9 @@ const vaultDisplay = computed(() => {
             <ActivityAddress
               :address="detail.address"
               :chain-id="event.chainId"
+              :label="detail.addressLabel"
+              :link-kind="detail.addressLinkKind"
+              :vault-type="detail.addressVaultType"
             />
           </div>
         </template>
@@ -369,24 +432,36 @@ const vaultDisplay = computed(() => {
     >
       <div
         v-for="(participant, index) in participants"
-        :key="`${participant.label}:${participant.address}`"
+        :key="participant.key"
         class="min-w-0 items-center gap-4"
         :class="[
           index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-participant hidden' : 'flex',
         ]"
       >
-        <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
-        <ActivityAddress
-          :address="participant.address"
-          :chain-id="event.chainId"
-          :label="participant.addressLabel"
-          :link-kind="participant.linkKind"
-          :vault-type="participant.vaultType"
-        />
+        <NuxtLink
+          v-if="participant.route"
+          :to="participant.route"
+          class="font-medium text-content-secondary transition-colors hover:text-accent-500 hover:underline"
+        >
+          {{ participant.label }}
+        </NuxtLink>
+        <template v-else-if="participant.address">
+          <span class="shrink-0 text-p4 text-content-tertiary">{{ participant.label }}</span>
+          <ActivityAddress
+            :address="participant.address"
+            :chain-id="event.chainId"
+            :label="participant.addressLabel"
+            :link-kind="participant.linkKind"
+            :vault-type="participant.vaultType"
+          />
+        </template>
       </div>
     </div>
 
-    <div class="activity-event-row__transaction absolute right-0 top-8">
+    <div
+      v-if="showTransactionLink"
+      class="activity-event-row__transaction absolute right-0 top-8"
+    >
       <a
         :href="transactionLink"
         target="_blank"

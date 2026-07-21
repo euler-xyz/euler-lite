@@ -3,8 +3,10 @@ import type {
   ActivityCategory,
 } from '@eulerxyz/euler-v2-sdk'
 import type { ActivityFeedScope } from '~/composables/useActivityFeed'
+import { getExplorerLink } from '~/utils/block-explorer'
 import {
   getActivityCategoryLabel,
+  groupActivityEventsByTransaction,
   isActivityScopeUnsupported,
   resolveActivityFilterCategories,
   type ActivityFilterOption,
@@ -58,6 +60,15 @@ const scopeUnsupported = computed(() =>
 // category label would just restate the selected chip.
 const impliedCategory = computed(() =>
   selectedCategories.value.length === 1 ? selectedCategories.value[0] : undefined,
+)
+const eventGroups = computed(() => props.subject === 'account'
+  ? groupActivityEventsByTransaction(feed.events.value)
+  : feed.events.value.map(event => ({
+      id: event.id,
+      chainId: event.chainId,
+      txHash: event.txHash,
+      events: [event],
+    })),
 )
 
 watch(
@@ -194,17 +205,47 @@ watch(feed.hasLoaded, (hasLoaded) => {
           <span>Amount / change</span>
           <span class="sr-only">Transaction</span>
         </div>
-        <ul>
-          <ActivityEventRow
-            v-for="event in feed.events.value"
-            :key="event.id"
-            :event="event"
-            :show-vault="subject === 'account'"
-            :viewer-address="scope.kind === 'account' ? scope.owner : undefined"
-            :hidden-category="impliedCategory"
-            :now-ms="activityNowMs"
-          />
-        </ul>
+        <div>
+          <section
+            v-for="group in eventGroups"
+            :key="group.id"
+            :class="group.events.length > 1 ? 'my-8 rounded-12 border border-line-subtle bg-surface px-12' : ''"
+          >
+            <div
+              v-if="group.events.length > 1"
+              class="flex items-center justify-between border-b border-line-subtle py-8 pl-44 text-p4 text-content-tertiary"
+            >
+              <span>{{ group.events.length }} events in one transaction</span>
+              <a
+                :href="getExplorerLink(group.txHash, group.chainId)"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex h-32 w-32 items-center justify-center rounded-8 text-content-secondary transition-colors hover:bg-card-hover hover:text-accent-500"
+                aria-label="View grouped transaction"
+                title="View transaction"
+              >
+                <SvgIcon
+                  name="arrow-top-right"
+                  class="!h-16 !w-16"
+                  aria-hidden="true"
+                />
+              </a>
+            </div>
+            <ul>
+              <ActivityEventRow
+                v-for="event in group.events"
+                :key="event.id"
+                :event="event"
+                :show-vault="subject === 'account'"
+                :viewer-address="scope.kind === 'account' ? scope.owner : undefined"
+                :hide-category="subject === 'account'"
+                :hidden-category="impliedCategory"
+                :show-transaction-link="group.events.length === 1"
+                :now-ms="activityNowMs"
+              />
+            </ul>
+          </section>
+        </div>
       </div>
 
       <div
