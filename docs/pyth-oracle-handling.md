@@ -26,7 +26,7 @@ Feeds are deduplicated by `pythAddress:feedId`.
 
 ## Hermes Updates
 
-`fetchPythUpdateData(feedIds, endpoint)` fetches binary update payloads through the server-side `/api/internal/pyth/updates` proxy. The proxy forwards to the configured Hermes endpoint and keeps browser clients away from upstream URL details.
+`fetchPythUpdateData(feedIds, endpoint)` fetches binary update payloads through the server-side `/api/internal/pyth/updates` proxy. The proxy authenticates to `https://hermes.pyth.network` with `PYTH_API_KEY` and keeps the credential out of the browser.
 
 The client helper:
 
