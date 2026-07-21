@@ -87,4 +87,49 @@ describe('useSpyMode', () => {
       query: expect.objectContaining({ spy: FIRST_OWNER }),
     }))
   })
+
+  it('resolves the owner once the RPC client becomes available', async () => {
+    const client = ref<null | { readContract: ReturnType<typeof vi.fn> }>(null)
+    const readContract = vi.fn(async () => FIRST_OWNER)
+    vi.stubGlobal('useRpcClient', () => ({ client }))
+
+    const { useSpyMode } = await import('~/composables/useSpyMode')
+    const spy = useSpyMode()
+
+    spy.activateSpyMode(FIRST)
+    await nextTick()
+    // No client yet — nothing to resolve with, and nothing accepted.
+    expect(readContract).not.toHaveBeenCalled()
+    expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+
+    client.value = { readContract }
+    await nextTick()
+    await vi.waitFor(() => expect(spy.spyAddress.value).toBe(FIRST_OWNER))
+  })
+
+  it('retries a rejected owner lookup instead of accepting the address', async () => {
+    vi.useFakeTimers()
+    try {
+      const readContract = vi.fn()
+        .mockRejectedValueOnce(new Error('rpc down'))
+        .mockResolvedValue(FIRST_OWNER)
+      vi.stubGlobal('useRpcClient', () => ({ client: ref({ readContract }) }))
+
+      const { useSpyMode } = await import('~/composables/useSpyMode')
+      const spy = useSpyMode()
+
+      spy.activateSpyMode(FIRST)
+      await vi.waitFor(() => expect(readContract).toHaveBeenCalledTimes(1))
+      await Promise.resolve()
+      // The failed lookup must not be accepted as a resolution.
+      expect(spy.spyAddress.value.toLowerCase()).toBe(FIRST)
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      await vi.waitFor(() => expect(readContract).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(spy.spyAddress.value).toBe(FIRST_OWNER))
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
 })

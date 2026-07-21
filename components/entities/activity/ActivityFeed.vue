@@ -206,16 +206,34 @@ watch(feed.hasLoaded, (hasLoaded) => {
 
     <div
       v-else-if="feed.isSyncing.value && feed.events.value.length === 0"
-      class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
+      class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
     >
-      Activity is still indexing. Events will appear here shortly.
+      <div>Activity is still indexing. Events will appear here shortly.</div>
+      <button
+        v-if="feed.hasMore.value"
+        type="button"
+        class="ui-button ui-button--medium ui-button--secondary"
+        :disabled="feed.isLoadingMore.value"
+        @click="feed.loadMore"
+      >
+        {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+      </button>
     </div>
 
     <div
       v-else-if="feed.isPartial.value && feed.events.value.length === 0"
-      class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
+      class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
     >
-      No activity is available from the indexed sources. This history may be incomplete.
+      <div>No activity is available from the indexed sources. This history may be incomplete.</div>
+      <button
+        v-if="feed.hasMore.value"
+        type="button"
+        class="ui-button ui-button--medium ui-button--secondary"
+        :disabled="feed.isLoadingMore.value"
+        @click="feed.loadMore"
+      >
+        {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+      </button>
     </div>
 
     <div

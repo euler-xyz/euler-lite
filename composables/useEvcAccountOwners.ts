@@ -69,8 +69,8 @@ export const useEvcAccountOwners = () => {
         // Fail closed: the address stays hidden. Retry a bounded number of
         // times — nothing else re-triggers a request for the same address.
         logWarn('useEvcAccountOwners/requestOwner', err)
-        if ((attempts.get(key) ?? 0) < MAX_ATTEMPTS && typeof window !== 'undefined') {
-          window.setTimeout(() => requestOwner(chainId, address), RETRY_DELAY_MS)
+        if ((attempts.get(key) ?? 0) < MAX_ATTEMPTS) {
+          setTimeout(() => requestOwner(chainId, address), RETRY_DELAY_MS)
         }
       })
       .finally(() => pending.delete(key))

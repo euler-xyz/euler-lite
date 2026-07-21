@@ -4,6 +4,8 @@ import { logWarn } from '~/utils/errorHandling'
 import { evcGetAccountOwnerAbi } from '~/abis/evc'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+const OWNER_RESOLUTION_RETRY_DELAY_MS = 4_000
+const OWNER_RESOLUTION_MAX_RETRIES = 5
 
 /** viem's isAddress validates EIP-55 checksum on mixed-case input — normalize to lowercase first */
 const isValidAddress = (value: string): boolean =>
@@ -55,10 +57,11 @@ export const useSpyMode = () => {
     const { eulerCoreAddresses, chainId } = useEulerAddresses()
     const { client: rpcClient } = useRpcClient()
 
-    const resolveOwner = async (address: string): Promise<string> => {
+    /** `null` = the lookup could not run or failed — NOT an answer. */
+    const resolveOwner = async (address: string): Promise<string | null> => {
       try {
         const evcAddress = eulerCoreAddresses.value?.evc
-        if (!evcAddress || !chainId.value || !rpcClient.value) return address
+        if (!evcAddress || !chainId.value || !rpcClient.value) return null
 
         const owner = await rpcClient.value.readContract({
           address: evcAddress as `0x${string}`,
@@ -71,15 +74,37 @@ export const useSpyMode = () => {
         if (owner && owner !== ZERO_ADDRESS && getAddress(owner) !== getAddress(address)) {
           return getAddress(owner)
         }
+        // Authoritative answer: the address is its own owner (or was never
+        // EVC-registered, in which case it cannot be a sub-account).
+        return address
       }
       catch (err) {
         logWarn('useSpyMode/resolveOwner', err)
+        return null
       }
-      return address
     }
 
-    const applyResolved = (sourceAddress: string, resolved: string, requestId: number) => {
+    const applyResolved = (
+      sourceAddress: string,
+      resolved: string | null,
+      requestId: number,
+      attempt = 0,
+    ) => {
       if (requestId !== ownerResolutionRequestId || spyAddress.value !== sourceAddress) return
+
+      if (resolved === null) {
+        // Fail closed: a failed lookup never counts as resolution — a
+        // transient RPC error must not accept a possible sub-account as the
+        // inspected owner. Retry while this spy session is still active.
+        if (attempt < OWNER_RESOLUTION_MAX_RETRIES) {
+          setTimeout(() => {
+            if (requestId !== ownerResolutionRequestId || spyAddress.value !== sourceAddress) return
+            resolveOwner(sourceAddress).then(nextResolved =>
+              applyResolved(sourceAddress, nextResolved, requestId, attempt + 1))
+          }, OWNER_RESOLUTION_RETRY_DELAY_MS)
+        }
+        return
+      }
 
       if (resolved !== spyAddress.value) {
         spyAddress.value = resolved
