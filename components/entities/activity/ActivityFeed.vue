@@ -78,10 +78,9 @@ const missingCategoryLabels = computed(() =>
     ?.map(getActivityCategoryLabel)
     .join(', '),
 )
-const partialMessage = computed(() => {
-  if (missingCategoryLabels.value) return `${missingCategoryLabels.value} activity may be incomplete.`
-  return 'Some activity may not be included yet.'
-})
+const partialMessage = computed(() => missingCategoryLabels.value
+  ? `${missingCategoryLabels.value} activity may be incomplete.`
+  : undefined)
 const scopeUnsupported = computed(() =>
   isActivityScopeUnsupported(feed.coverage.value?.status, selectedFilters.value),
 )
@@ -139,7 +138,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
     />
 
     <div
-      v-if="feed.isPartial.value"
+      v-if="feed.isPartial.value && partialMessage"
       class="flex items-start gap-8 rounded-12 bg-warning-100 p-12 text-p4 text-warning-500"
     >
       <SvgIcon
@@ -148,18 +147,6 @@ watch(feed.hasLoaded, (hasLoaded) => {
         aria-hidden="true"
       />
       <span>{{ partialMessage }}</span>
-    </div>
-
-    <div
-      v-if="feed.isSyncing.value"
-      class="flex items-start gap-8 rounded-12 bg-surface p-12 text-p4 text-content-secondary"
-    >
-      <SvgIcon
-        name="refresh"
-        class="!h-18 !w-18 shrink-0"
-        aria-hidden="true"
-      />
-      <span>Activity indexing is catching up. Recent events may appear shortly.</span>
     </div>
 
     <div
@@ -221,7 +208,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
       v-else-if="feed.isSyncing.value && feed.events.value.length === 0"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      No indexed activity is available yet.
+      Activity is still indexing. Events will appear here shortly.
     </div>
 
     <div
