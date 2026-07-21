@@ -261,9 +261,15 @@ const vaultDisplay = computed(() => {
 <template>
   <li
     class="activity-event-row relative -mx-12 grid items-center gap-10 rounded-8 border-b border-line-subtle px-12 py-12 transition-colors last:border-b-0 hover:bg-card-hover"
-    :class="{ 'activity-event-row--grouped': grouped }"
+    :class="{
+      'activity-event-row--grouped': grouped,
+      'activity-event-row--portfolio': showVault,
+    }"
   >
-    <div class="activity-event-row__icon flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary">
+    <div
+      v-if="!showVault"
+      class="activity-event-row__icon flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-surface text-content-secondary"
+    >
       <SvgIcon
         :name="eventIcon.name"
         class="!h-18 !w-18"
@@ -293,62 +299,74 @@ const vaultDisplay = computed(() => {
           </span>
         </NuxtLink>
       </div>
-      <NuxtLink
-        v-if="positionRoute"
-        :to="positionRoute"
-        class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
-        :title="eventLabel"
-      >
-        {{ eventLabel }}
-      </NuxtLink>
       <div
-        v-else
-        class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
-        :title="eventLabel"
+        class="activity-event-row__event-summary"
+        :class="{ 'activity-event-row__event-summary--with-vault': showVault && vaultDisplay?.vault }"
       >
-        {{ eventLabel }}
-      </div>
-      <div class="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
-        <template v-if="!hideCategory && event.category !== hiddenCategory">
-          <span>{{ getActivityCategoryLabel(event.category) }}</span>
+        <NuxtLink
+          v-if="positionRoute"
+          :to="positionRoute"
+          class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
+          :title="eventLabel"
+        >
+          {{ eventLabel }}
+        </NuxtLink>
+        <div
+          v-else
+          class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
+          :title="eventLabel"
+        >
+          {{ eventLabel }}
+        </div>
+        <div class="activity-event-row__meta mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-p4 text-content-tertiary">
           <span
-            v-if="!hideTimestamp"
+            v-if="showVault && !hideTimestamp"
             aria-hidden="true"
           >&middot;</span>
-        </template>
-        <time
-          v-if="!hideTimestamp"
-          class="whitespace-nowrap"
-          :datetime="event.timestamp"
-          :title="formatActivityTimestamp(event.timestamp)"
-        >{{ formatActivityRelativeTimestamp(event.timestamp, nowMs) }}</time>
-        <span
-          v-for="participant in participants"
-          :key="`inline:${participant.key}`"
-          class="activity-event-row__participant-inline min-w-0 items-center gap-4"
-        >
-          <NuxtLink
-            v-if="participant.route"
-            :to="participant.route"
-            class="font-medium text-content-secondary transition-colors hover:text-accent-500 hover:underline"
-          >
-            {{ participant.label }}
-          </NuxtLink>
-          <template v-else-if="participant.address">
-            <span class="shrink-0">{{ participant.label }}</span>
-            <ActivityAddress
-              :address="participant.address"
-              :chain-id="event.chainId"
-              :label="participant.addressLabel"
-              :link-kind="participant.linkKind"
-              :vault-type="participant.vaultType"
-            />
+          <template v-if="!hideCategory && event.category !== hiddenCategory">
+            <span>{{ getActivityCategoryLabel(event.category) }}</span>
+            <span
+              v-if="!hideTimestamp"
+              aria-hidden="true"
+            >&middot;</span>
           </template>
-        </span>
+          <time
+            v-if="!hideTimestamp"
+            class="whitespace-nowrap"
+            :datetime="event.timestamp"
+            :title="formatActivityTimestamp(event.timestamp)"
+          >{{ formatActivityRelativeTimestamp(event.timestamp, nowMs) }}</time>
+          <span
+            v-for="participant in participants"
+            :key="`inline:${participant.key}`"
+            class="activity-event-row__participant-inline min-w-0 items-center gap-4"
+          >
+            <NuxtLink
+              v-if="participant.route"
+              :to="participant.route"
+              class="font-medium text-content-secondary transition-colors hover:text-accent-500 hover:underline"
+            >
+              {{ participant.label }}
+            </NuxtLink>
+            <template v-else-if="participant.address">
+              <span class="shrink-0">{{ participant.label }}</span>
+              <ActivityAddress
+                :address="participant.address"
+                :chain-id="event.chainId"
+                :label="participant.addressLabel"
+                :link-kind="participant.linkKind"
+                :vault-type="participant.vaultType"
+              />
+            </template>
+          </span>
+        </div>
       </div>
     </div>
 
-    <div class="activity-event-row__details flex min-w-0 flex-col gap-6 pl-40">
+    <div
+      class="activity-event-row__details flex min-w-0 flex-col gap-6 pl-40"
+      :class="{ 'activity-event-row__details--with-vault': showVault && vaultDisplay?.vault }"
+    >
       <div
         v-for="(detail, index) in details"
         :key="detail.key"
@@ -508,10 +526,31 @@ const vaultDisplay = computed(() => {
   grid-template-columns: 32px minmax(0, 1fr);
 }
 
+.activity-event-row--portfolio {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .activity-event-row--grouped {
   border-radius: 0;
   padding-top: 10px;
   padding-bottom: 10px;
+}
+
+.activity-event-row--portfolio .activity-event-row__event-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+}
+
+.activity-event-row--portfolio .activity-event-row__event-summary--with-vault,
+.activity-event-row--portfolio .activity-event-row__details--with-vault {
+  padding-left: 50px;
+}
+
+.activity-event-row--portfolio .activity-event-row__meta {
+  margin-top: 0;
+  column-gap: 6px;
 }
 
 .activity-event-row__details,
@@ -567,6 +606,23 @@ const vaultDisplay = computed(() => {
     justify-self: end;
   }
 
+  .activity-event-row--portfolio {
+    grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.2fr) 40px;
+  }
+
+  .activity-event-row--portfolio .activity-event-row__title {
+    grid-column: 1;
+  }
+
+  .activity-event-row--portfolio .activity-event-row__details {
+    grid-column: 2;
+    padding-left: 0;
+  }
+
+  .activity-event-row--portfolio .activity-event-row__transaction {
+    grid-column: 3;
+  }
+
   .activity-event-row__asset-label,
   .activity-event-row__asset-address-kind {
     display: none;
@@ -585,6 +641,13 @@ const vaultDisplay = computed(() => {
   .activity-event-row {
     grid-template-columns:
       32px
+      minmax(280px, 1fr)
+      minmax(320px, 1.2fr)
+      44px;
+  }
+
+  .activity-event-row--portfolio {
+    grid-template-columns:
       minmax(280px, 1fr)
       minmax(320px, 1.2fr)
       44px;
