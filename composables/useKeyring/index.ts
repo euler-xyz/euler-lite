@@ -5,6 +5,7 @@ import {
   KeyringConnect,
   type CredentialData,
   type ExtensionSDKConfig,
+  type ExtensionState,
 } from '@keyringnetwork/keyring-connect-sdk'
 import { keyringHookTargetAbi } from '~/abis/keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
@@ -23,6 +24,19 @@ export enum KeyringFlowState {
   Ready = 'ready',
   Error = 'error',
 }
+
+export const isCredentialForContext = (
+  credential: CredentialData | null | undefined,
+  trader: string | undefined,
+  policyId: number | undefined,
+  chainId: number | undefined,
+): credential is CredentialData => Boolean(
+  credential
+  && trader
+  && credential.trader?.toLowerCase() === trader.toLowerCase()
+  && credential.policyId === policyId
+  && credential.chainId === chainId,
+)
 
 const readHookTargetField = async <T>(
   rpcUrl: string,
@@ -60,8 +74,9 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   const credentialData = ref<CredentialData | null>(null)
   const flowState = ref<KeyringFlowState>(KeyringFlowState.Idle)
   const error = ref<string>()
+  const isCheckingStatus = ref(false)
+  const statusMessage = ref<string>()
 
-  let statusCheckInterval: ReturnType<typeof setInterval> | null = null
   let unsubscribeExtension: (() => void) | null = null
 
   const isKeyringVault = computed(() => isVaultKeyring(addressRef.value))
@@ -76,8 +91,9 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
 
   const isVerificationRequired = computed(() =>
     isKeyringVault.value
-    && !isLoading.value
+    && Boolean(userAddress.value)
     && !hasValidCredential.value
+    && flowState.value !== KeyringFlowState.Idle
     && flowState.value !== KeyringFlowState.Ready,
   )
 
@@ -94,6 +110,9 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     if (!ht || !user || !rpcUrl.value) return
 
     isLoading.value = true
+    flowState.value = KeyringFlowState.Loading
+    error.value = undefined
+    statusMessage.value = undefined
     try {
       const client = getPublicClient(rpcUrl.value)
 
@@ -160,14 +179,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
 
       const state = await KeyringConnect.getExtensionState()
       const cred = state?.credentialData
-      // The extension echoes the trader address in its own casing — compare
-      // case-insensitively so a casing difference doesn't force a re-auth.
-      if (
-        cred
-        && cred.trader?.toLowerCase() === userAddress.value?.toLowerCase()
-        && cred.policyId === policyId.value
-        && cred.chainId === chainId.value
-      ) {
+      if (isCredentialForContext(cred, userAddress.value, policyId.value, chainId.value)) {
         credentialData.value = cred
         flowState.value = KeyringFlowState.Ready
       }
@@ -196,6 +208,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
 
     flowState.value = KeyringFlowState.Progress
     credentialData.value = null
+    error.value = undefined
+    statusMessage.value = undefined
 
     try {
       await KeyringConnect.launchExtension(config)
@@ -208,51 +222,90 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     }
   }
 
-  const startStatusPolling = () => {
-    stopStatusPolling()
-    // Use subscribeToExtensionState if available, otherwise poll
-    unsubscribeExtension = KeyringConnect.subscribeToExtensionState((state) => {
-      if (!state) return
-      if (state.credentialData) {
-        credentialData.value = state.credentialData
-        flowState.value = KeyringFlowState.Ready
-        stopStatusPolling()
-      }
-      else if (state.user?.credential_status === 'valid') {
-        hasValidCredential.value = true
-        flowState.value = KeyringFlowState.Idle
-        stopStatusPolling()
-      }
-    })
-  }
-
   const stopStatusPolling = () => {
-    if (statusCheckInterval) {
-      clearInterval(statusCheckInterval)
-      statusCheckInterval = null
-    }
     if (unsubscribeExtension) {
       unsubscribeExtension()
       unsubscribeExtension = null
     }
   }
 
+  const handleExtensionState = async (state: ExtensionState | null, manualCheck = false) => {
+    if (!state) {
+      credentialData.value = null
+      flowState.value = KeyringFlowState.Install
+      statusMessage.value = undefined
+      stopStatusPolling()
+      return
+    }
+
+    const cred = state.credentialData
+    if (cred) {
+      if (isCredentialForContext(cred, userAddress.value, policyId.value, chainId.value)) {
+        credentialData.value = cred
+        flowState.value = KeyringFlowState.Ready
+        statusMessage.value = undefined
+      }
+      else {
+        credentialData.value = null
+        flowState.value = KeyringFlowState.Start
+        statusMessage.value = 'Restart verification for the connected wallet, policy, and network.'
+      }
+      stopStatusPolling()
+      return
+    }
+
+    if (state.status === 'error' || state.status === 'prove_error') {
+      credentialData.value = null
+      flowState.value = KeyringFlowState.Error
+      error.value = state.error || 'Keyring verification failed'
+      statusMessage.value = undefined
+      stopStatusPolling()
+      return
+    }
+
+    const extensionUserMatches = state.user?.wallet_address?.toLowerCase() === userAddress.value?.toLowerCase()
+    if (extensionUserMatches && state.user?.credential_status === 'valid') {
+      await checkCredential()
+      if (flowState.value === KeyringFlowState.Idle || flowState.value === KeyringFlowState.Ready) {
+        stopStatusPolling()
+      }
+      return
+    }
+
+    if (state.status === 'proving') {
+      flowState.value = KeyringFlowState.Progress
+      statusMessage.value = 'Verification is still in progress in the Keyring extension.'
+      return
+    }
+
+    if (manualCheck) {
+      flowState.value = KeyringFlowState.Start
+      statusMessage.value = 'Verification is not complete yet. Continue in the Keyring extension.'
+      stopStatusPolling()
+    }
+  }
+
+  const startStatusPolling = () => {
+    stopStatusPolling()
+    unsubscribeExtension = KeyringConnect.subscribeToExtensionState((state) => {
+      void handleExtensionState(state)
+    })
+  }
+
   const checkStatus = async () => {
+    isCheckingStatus.value = true
     try {
       const state = await KeyringConnect.getExtensionState()
-      if (state?.credentialData) {
-        credentialData.value = state.credentialData
-        flowState.value = KeyringFlowState.Ready
-        stopStatusPolling()
-      }
-      else if (state?.user?.credential_status === 'valid') {
-        hasValidCredential.value = true
-        flowState.value = KeyringFlowState.Idle
-        stopStatusPolling()
-      }
+      await handleExtensionState(state, true)
     }
     catch (err) {
       logWarn('useKeyring: Failed to check extension status', err)
+      flowState.value = KeyringFlowState.Error
+      error.value = 'Failed to check Keyring extension status'
+      statusMessage.value = undefined
+    }
+    finally {
+      isCheckingStatus.value = false
     }
   }
 
@@ -260,6 +313,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     stopStatusPolling()
     flowState.value = KeyringFlowState.Start
     credentialData.value = null
+    error.value = undefined
+    statusMessage.value = undefined
   }
 
   // Re-check extension state when user returns to the tab (e.g. after installing the extension)
@@ -289,11 +344,14 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     () => {
       credentialData.value = null
       hasValidCredential.value = false
-      if (isKeyringVault.value && hookTarget.value && userAddress.value) {
-        checkCredential()
-      }
-      else if (!isKeyringVault.value) {
+      if (!isKeyringVault.value || !userAddress.value) {
         flowState.value = KeyringFlowState.Idle
+      }
+      else if (hookTarget.value) {
+        void checkCredential()
+      }
+      else {
+        flowState.value = KeyringFlowState.Loading
       }
     },
     { immediate: true },
@@ -319,6 +377,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     credentialData,
     flowState,
     error,
+    isCheckingStatus,
+    statusMessage,
     launchExtension,
     checkStatus,
     cancelVerification,

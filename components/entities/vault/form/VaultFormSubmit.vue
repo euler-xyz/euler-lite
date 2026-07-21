@@ -17,6 +17,9 @@ interface KeyringGuardState {
   isExpired: boolean
   flowState: KeyringFlowState
   credentialData: CredentialData | null
+  isCheckingStatus: boolean
+  statusMessage?: string
+  error?: string
   launchExtension: () => Promise<void>
   checkStatus: () => Promise<void>
   cancelVerification: () => void
@@ -299,6 +302,9 @@ const handleAddToBatch = () => {
           <KeyringVerificationFlow
             :flow-state="keyringGuard.flowState"
             :credential-cost="keyringGuard.credentialData?.cost"
+            :checking-status="keyringGuard.isCheckingStatus"
+            :status-message="keyringGuard.statusMessage"
+            :error-message="keyringGuard.error"
             @launch="keyringGuard.launchExtension()"
             @check="keyringGuard.checkStatus()"
             @cancel="keyringGuard.cancelVerification()"

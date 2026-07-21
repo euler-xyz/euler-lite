@@ -1,7 +1,7 @@
 import { computed, isRef, watch, onUnmounted, provide, reactive, type Ref } from 'vue'
 import { useChainId } from '@wagmi/vue'
 import type { Address } from 'viem'
-import { useKeyring, KeyringFlowState } from '~/composables/useKeyring'
+import { useKeyring } from '~/composables/useKeyring'
 import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
 import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
@@ -30,12 +30,7 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
 
   const keyring = useKeyring(keyringVaultAddress)
 
-  const needsVerification = computed(() =>
-    keyring.isKeyringVault.value
-    && !keyring.hasValidCredential.value
-    && keyring.flowState.value !== KeyringFlowState.Idle
-    && keyring.flowState.value !== KeyringFlowState.Ready,
-  )
+  const needsVerification = computed(() => keyring.isVerificationRequired.value)
 
   // Provide keyring state to descendant components (VaultFormSubmit)
   provide('keyring-guard', reactive({
@@ -43,6 +38,9 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
     isExpired: keyring.isExpired,
     flowState: keyring.flowState,
     credentialData: keyring.credentialData,
+    isCheckingStatus: keyring.isCheckingStatus,
+    statusMessage: keyring.statusMessage,
+    error: keyring.error,
     launchExtension: keyring.launchExtension,
     checkStatus: keyring.checkStatus,
     cancelVerification: keyring.cancelVerification,
