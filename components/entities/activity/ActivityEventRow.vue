@@ -271,6 +271,28 @@ const vaultDisplay = computed(() => {
       />
     </div>
     <div class="activity-event-row__title min-w-0 pr-48">
+      <div
+        v-if="vaultDisplay"
+        class="mb-8 min-w-0"
+      >
+        <NuxtLink
+          :to="vaultDisplay.route"
+          class="inline-flex max-w-full rounded-8 transition-opacity hover:opacity-80"
+          :title="vaultDisplay.name || vaultDisplay.addressLabel"
+        >
+          <VaultLabelsAndAssets
+            v-if="vaultDisplay.vault"
+            :vault="vaultDisplay.vault"
+            :assets="[vaultDisplay.vault.asset]"
+          />
+          <span
+            v-else
+            class="truncate text-p4 text-content-secondary hover:text-accent-500 hover:underline"
+          >
+            {{ vaultDisplay.name || vaultDisplay.addressLabel }}
+          </span>
+        </NuxtLink>
+      </div>
       <NuxtLink
         v-if="positionRoute"
         :to="positionRoute"
@@ -323,28 +345,6 @@ const vaultDisplay = computed(() => {
             />
           </template>
         </span>
-      </div>
-      <div
-        v-if="vaultDisplay"
-        class="mt-8 min-w-0"
-      >
-        <NuxtLink
-          :to="vaultDisplay.route"
-          class="inline-flex max-w-full rounded-8 transition-opacity hover:opacity-80"
-          :title="vaultDisplay.name || vaultDisplay.addressLabel"
-        >
-          <VaultLabelsAndAssets
-            v-if="vaultDisplay.vault"
-            :vault="vaultDisplay.vault"
-            :assets="[vaultDisplay.vault.asset]"
-          />
-          <span
-            v-else
-            class="truncate text-p4 text-content-secondary hover:text-accent-500 hover:underline"
-          >
-            {{ vaultDisplay.name || vaultDisplay.addressLabel }}
-          </span>
-        </NuxtLink>
       </div>
     </div>
 
