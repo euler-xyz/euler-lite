@@ -242,7 +242,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
           <section
             v-for="group in eventGroups"
             :key="group.id"
-            :class="subject === 'account' ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-default bg-card px-12 shadow-card' : ''"
+            :class="subject === 'account' ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-default bg-card px-12 shadow-card' : 'activity-feed__flat-event'"
           >
             <div
               v-if="group.events.length > 1"
@@ -339,6 +339,13 @@ watch(feed.hasLoaded, (hasLoaded) => {
 </template>
 
 <style scoped>
+/* Flat vault feeds render each event as its own section — the separator has
+   to live between the sections. Emphasis strength: the accordion card surface
+   sits close to the default border color. */
+.activity-feed__flat-event + .activity-feed__flat-event {
+  border-top: 1px solid var(--border-emphasis);
+}
+
 .activity-feed {
   container-name: activity-feed;
   container-type: inline-size;
