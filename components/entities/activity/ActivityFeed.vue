@@ -79,7 +79,6 @@ const missingCategoryLabels = computed(() =>
     .join(', '),
 )
 const partialMessage = computed(() => {
-  if (feed.coverage.value?.reason) return feed.coverage.value.reason
   if (missingCategoryLabels.value) return `${missingCategoryLabels.value} activity may be incomplete.`
   return 'Some activity may not be included yet.'
 })
@@ -160,7 +159,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
         class="!h-18 !w-18 shrink-0"
         aria-hidden="true"
       />
-      <span>{{ feed.coverage.value?.reason || 'Activity indexing is catching up. Recent events may appear shortly.' }}</span>
+      <span>Activity indexing is catching up. Recent events may appear shortly.</span>
     </div>
 
     <div
@@ -215,7 +214,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
       v-else-if="feed.isUnsupported.value"
       class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
     >
-      {{ selectedFilters.length ? 'Activity is not available for the selected categories.' : feed.coverage.value?.reason || `Activity is not available for this ${scopeLabel}.` }}
+      {{ selectedFilters.length ? 'Activity is not available for the selected categories.' : `Activity is not available for this ${scopeLabel}.` }}
     </div>
 
     <div
