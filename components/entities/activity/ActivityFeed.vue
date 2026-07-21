@@ -256,7 +256,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
           <section
             v-for="group in eventGroups"
             :key="group.id"
-            :class="group.events.length > 1 ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-subtle bg-surface px-12' : ''"
+            :class="group.events.length > 1 ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-default bg-card px-12 shadow-card' : ''"
           >
             <div
               v-if="group.events.length > 1"
