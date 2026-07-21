@@ -944,11 +944,22 @@ export const getActivityParticipants = (
   event: ActivityParticipantSource,
 ): ActivityParticipant[] => {
   const participants: ActivityParticipant[] = []
+  // Sub-account addresses must never be displayed (or copied) anywhere in the
+  // app — funds sent to one are unrecoverable. Substitute the owner wallet,
+  // which spy links resolve to anyway, and drop the participant when the
+  // owner is unknown.
+  const isSubAccountAddress = (address: Address) =>
+    (event.subAccountIndex ?? 0) !== 0
+    && event.account !== undefined
+    && address.toLowerCase() === event.account.toLowerCase()
   const add = (
     label: string,
-    address: Address | undefined,
+    rawAddress: Address | undefined,
     linkKind: ActivityParticipant['linkKind'],
   ) => {
+    const address = rawAddress && isSubAccountAddress(rawAddress)
+      ? event.owner
+      : rawAddress
     if (
       !address
       || participants.some(participant => participant.address.toLowerCase() === address.toLowerCase())

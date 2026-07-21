@@ -638,6 +638,37 @@ describe('activity display helpers', () => {
     ])
   })
 
+  it('never exposes sub-account addresses in participants', () => {
+    const owner = '0x00000000000000000000000000000000000000a0' as const
+    const subAccount = '0x00000000000000000000000000000000000000a7' as const
+
+    expect(getActivityParticipants({
+      category: 'lending',
+      owner,
+      account: subAccount,
+      subAccountIndex: 7,
+    })).toEqual([{ label: 'User', address: owner, linkKind: 'spy' }])
+
+    expect(getActivityParticipants({
+      category: 'liquidations',
+      owner,
+      account: subAccount,
+      subAccountIndex: 7,
+      actor: ASSET,
+      counterparty: subAccount,
+    })).toEqual([
+      { label: 'Liquidator', address: ASSET, linkKind: 'explorer' },
+      { label: 'Violator', address: owner, linkKind: 'spy' },
+    ])
+
+    // Without a known owner the sub-account participant is dropped entirely.
+    expect(getActivityParticipants({
+      category: 'lending',
+      account: subAccount,
+      subAccountIndex: 7,
+    })).toEqual([])
+  })
+
   it('represents a viewed liquidated subaccount only as an internal position', () => {
     expect(getPortfolioActivityPositionParticipant({
       account: VAULT,

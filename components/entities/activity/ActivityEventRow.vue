@@ -179,6 +179,11 @@ const details = computed(() => [
 const portfolioPosition = computed(() => showVault
   ? getPortfolioActivityPositionParticipant(event)
   : null)
+const { requestOwner, getResolvedOwner } = useEvcAccountOwners()
+const rawParticipants = computed(() => showVault ? [] : getActivityParticipants(event))
+watch(() => rawParticipants.value.map(participant => participant.address), (addresses) => {
+  for (const address of addresses) requestOwner(event.chainId, address)
+}, { immediate: true })
 const participants = computed(() => {
   // Re-resolve participant vault names when registry metadata arrives.
   void registryVersion.value
@@ -190,8 +195,24 @@ const participants = computed(() => {
   }
 
   const viewer = viewerAddress?.toLowerCase()
-  return getActivityParticipants(event)
+  const seenAddresses = new Set<string>()
+  return rawParticipants.value
+    .map((participant) => {
+      // Vault-scope events don't say whether an account is a sub-account, so
+      // every address stays hidden until the EVC owner lookup settles —
+      // sub-accounts render as their owner wallet, never as themselves.
+      const resolvedOwner = getResolvedOwner(event.chainId, participant.address)
+      if (resolvedOwner === undefined) return null
+      return { ...participant, address: resolvedOwner ?? participant.address }
+    })
+    .filter((participant): participant is NonNullable<typeof participant> => participant !== null)
     .filter(participant => participant.address.toLowerCase() !== viewer)
+    .filter((participant) => {
+      const key = participant.address.toLowerCase()
+      if (seenAddresses.has(key)) return false
+      seenAddresses.add(key)
+      return true
+    })
     .map((participant) => {
       // Known vaults (e.g. Earn vaults acting on underlying markets) read
       // better as named vault links than as spy-mode "User 0x…" addresses.
