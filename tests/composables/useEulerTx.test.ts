@@ -1,6 +1,6 @@
 import { ref } from 'vue'
-import { encodeFunctionData, erc20Abi, getAddress, type Address, type Hash, type TransactionReceipt } from 'viem'
-import type { MigrationAuthorizationRequest, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { encodeFunctionData, erc20Abi, getAddress, type Address, type Hash, type Hex, type TransactionReceipt } from 'viem'
+import type { MigrationAuthorizationRequest, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -126,6 +126,35 @@ describe('useEulerTx migration authorization cleanup', () => {
     await prepareTransactionPlan([] as TransactionPlan, { usePermit2: false })
 
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
+  })
+
+  it('does not broadcast a reviewed migration after account drift', async () => {
+    const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction }: {
+      sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
+    }) => {
+      await sendTransaction({ to: TOKEN, data: '0x1234' })
+      return { receipts: [] }
+    })
+    const provider = { waitForTransactionReceipt: vi.fn() }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+    walletAddress.value = OTHER_OWNER
+    currentAccount = OTHER_OWNER
+
+    await expect(executePreparedPlan(prepared))
+      .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind: 'account' })
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
   })
 
   it.each([

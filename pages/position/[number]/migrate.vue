@@ -40,6 +40,7 @@ import {
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
+import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 
@@ -71,6 +72,7 @@ type OutgoingMigrationPreview = {
   key: string
   useSignatures: boolean
   input: OutgoingMigrationInput
+  account: Account<IHasVaultAddress>
   position: MigrationPosition
   authorizationRequest?: MigrationAuthorizationRequest
   tenderlySimulation: PreparedMigrationTenderlySimulation
@@ -92,7 +94,7 @@ const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error: showError } = useToast()
-const { isConnected, address } = useWagmi()
+const { isConnected, address, chainId: walletChainId } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
 const { chainId } = useEulerAddresses()
@@ -567,8 +569,9 @@ function canAddToBatchTarget(target: OutgoingMigrationTarget) {
 function buildMigrationInput(
   target: OutgoingMigrationTarget,
   useSignatures = signaturesEnabled.value,
+  owner = migrationOwner.value,
 ) {
-  if (!chainId.value || !migrationOwner.value || !migrationAccount.value || !sourceDebtVault.value || !sourceCollateralEVault.value) {
+  if (!chainId.value || !owner || !migrationAccount.value || !sourceDebtVault.value || !sourceCollateralEVault.value) {
     throw new Error('Migration inputs are incomplete')
   }
 
@@ -586,6 +589,7 @@ function buildMigrationInput(
   const removeAuthorizationAfterMigration = target.connectorId === MORPHO_CONNECTOR_ID && useSignatures
   const cleanupEulerPosition = true
   return {
+    owner,
     target,
     source,
     externalTarget,
@@ -600,13 +604,12 @@ async function getAuthorizationRequest(
   account?: Account<IHasVaultAddress>,
   useSignatures = signaturesEnabled.value,
 ): Promise<MigrationAuthorizationRequest | undefined> {
-  if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'euler-to-external',
     connectorId: input.target.connectorId,
     chainId: input.target.chainId,
-    owner: migrationOwner.value,
+    owner: input.owner,
     position: migrationPosition,
     positionRef: input.target.ref,
     source: input.source,
@@ -626,12 +629,11 @@ async function buildMigrationPlan(
   migrationPosition?: MigrationPosition,
   account: Account<IHasVaultAddress> | undefined = planAccount.value,
 ): Promise<TransactionPlan> {
-  if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
   return planCrossProtocolMigration({
     direction: 'euler-to-external',
     connectorId: input.target.connectorId,
     chainId: input.target.chainId,
-    owner: migrationOwner.value,
+    owner: input.owner,
     position: migrationPosition,
     positionRef: input.target.ref,
     source: input.source,
@@ -650,12 +652,11 @@ async function buildMigrationSimulation(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   account?: Account<IHasVaultAddress>,
 ) {
-  if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
   return planCrossProtocolMigrationSimulation({
     direction: 'euler-to-external',
     connectorId: input.target.connectorId,
     chainId: input.target.chainId,
-    owner: migrationOwner.value,
+    owner: input.owner,
     position: migrationPosition,
     positionRef: input.target.ref,
     source: input.source,
@@ -702,11 +703,6 @@ const outgoingPreviewKeyFor = (target: OutgoingMigrationTarget) => {
   return base ? `${base}|${target.id}` : ''
 }
 
-const getCachedOutgoingPreview = (target: OutgoingMigrationTarget): OutgoingMigrationPreview | undefined => {
-  const key = outgoingPreviewKeyFor(target)
-  return key ? outgoingPreviews.value[key] : undefined
-}
-
 async function prepareOutgoingMigrationPreview(
   target: OutgoingMigrationTarget,
 ): Promise<OutgoingMigrationPreview> {
@@ -720,10 +716,10 @@ async function prepareOutgoingMigrationPreview(
 
   const epoch = outgoingPreviewEpoch
   const promise = (async () => {
-    const owner = migrationOwner.value
-    if (!owner) throw new Error('Migration inputs are incomplete')
     const useSignatures = signaturesEnabled.value
     const input = buildMigrationInput(target, useSignatures)
+    const account = planAccount.value
+    if (!account) throw new Error('Migration inputs are incomplete')
 
     // Resolve the external position once and thread it through every SDK
     // call below — without it each plan/authorization call re-resolves the
@@ -731,7 +727,7 @@ async function prepareOutgoingMigrationPreview(
     const migrationPosition = await getMigrationPosition({
       connectorId: input.target.connectorId,
       chainId: input.target.chainId,
-      owner,
+      owner: input.owner,
       positionRef: input.target.ref,
     })
 
@@ -742,7 +738,7 @@ async function prepareOutgoingMigrationPreview(
     const authorizationRequest = await getAuthorizationRequest(
       input,
       migrationPosition,
-      planAccount.value,
+      account,
       useSignatures,
     )
     // One batch build returns both plans: the simulation plan (auth item
@@ -752,20 +748,20 @@ async function prepareOutgoingMigrationPreview(
       input,
       migrationPosition,
       authorizationRequest,
-      planAccount.value,
+      account,
     )
 
     // Resolve plugin payloads (Pyth Hermes pull, Keyring reads, TOS) once,
     // then run both prepares in parallel against the shared prefetch.
     let prefetch: PluginPrefetchData | undefined
     try {
-      prefetch = await prefetchPluginData(simulationResult.plan, { account: planAccount.value })
+      prefetch = await prefetchPluginData(simulationResult.plan, { account })
     }
     catch (err) {
       logWarn('positionMigration/prefetchPluginData', err)
     }
     const prepareOptions = {
-      account: planAccount.value,
+      account,
       chainId: input.target.chainId,
       prefetch,
       usePermit2: useSignatures,
@@ -789,6 +785,7 @@ async function prepareOutgoingMigrationPreview(
       key,
       useSignatures,
       input,
+      account,
       position: migrationPosition,
       tenderlySimulation: {
         plan: simulationResult.plan,
@@ -857,7 +854,7 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
         onConfirm: async () => {
-          await sendMigration(preview.input.target, preview.useSignatures)
+          await sendMigration(preview)
         },
         submittingLabel: 'Migrating...',
       },
@@ -872,17 +869,24 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   }
 }
 
-async function sendMigration(target: OutgoingMigrationTarget, useSignatures: boolean) {
+async function sendMigration(preview: OutgoingMigrationPreview) {
+  const { input: reviewedInput, account: reviewedAccount, position: migrationPosition, useSignatures } = preview
+  const { target } = reviewedInput
   submittingTargetId.value = target.id
   clearSimulationError()
   try {
+    assertWalletExecutionContext({
+      expectedAccount: reviewedInput.owner,
+      expectedChainId: target.chainId,
+      currentAccount: address.value as Address | undefined,
+      currentChainId: walletChainId.value,
+    })
     if (!await restorePendingBeforeRetry()) return
-    const input = buildMigrationInput(target, useSignatures)
-    // Reuse the cached preview's resolved position (its addresses are static);
-    // amounts, the authorization request, and the executed plan are still
-    // rebuilt fresh here for execution safety.
-    const migrationPosition = getCachedOutgoingPreview(target)?.position
-    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, planAccount.value, useSignatures)
+    // Rebuild mutable amounts, but retain the owner and mode shown in review.
+    // If the wallet changes during later awaits, the request-bound send guard
+    // rejects before broadcasting a grant or migration transaction.
+    const input = buildMigrationInput(target, useSignatures, reviewedInput.owner)
+    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, reviewedAccount, useSignatures)
 
     // An undefined request means the grant is already live on-chain: nothing to
     // sign, nothing to grant, and nothing of ours to revoke afterwards.
@@ -899,9 +903,9 @@ async function sendMigration(target: OutgoingMigrationTarget, useSignatures: boo
           await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs)
         }
       }
-      const plan = await buildMigrationPlan(input, authorization, migrationPosition)
+      const plan = await buildMigrationPlan(input, authorization, migrationPosition, reviewedAccount)
       const prepared = await prepareTransactionPlan(plan, {
-        account: planAccount.value,
+        account: reviewedAccount,
         chainId: input.target.chainId,
         usePermit2: useSignatures,
       })
