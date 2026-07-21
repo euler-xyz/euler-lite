@@ -1,11 +1,12 @@
 import { ref } from 'vue'
-import { encodeFunctionData, erc20Abi, getAddress, type Hash, type TransactionReceipt } from 'viem'
-import type { MigrationAuthorizationRequest } from '@eulerxyz/euler-v2-sdk'
+import { encodeFunctionData, erc20Abi, getAddress, type Address, type Hash, type TransactionReceipt } from 'viem'
+import type { MigrationAuthorizationRequest, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
-import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
+import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 
 const wagmiMocks = vi.hoisted(() => ({
   sendTransactionAsync: vi.fn(),
@@ -58,17 +59,23 @@ const authorizationRequest = {
 describe('useEulerTx migration authorization cleanup', () => {
   let currentAccount = OWNER
   let currentChainId = 1
+  let walletAddress = ref<Address | undefined>(OWNER)
+  let walletChainId = ref<number | undefined>(1)
+  let addressesChainId = ref<number | undefined>(1)
 
   beforeEach(() => {
     vi.clearAllMocks()
     currentAccount = OWNER
     currentChainId = 1
+    walletAddress = ref(OWNER)
+    walletChainId = ref(1)
+    addressesChainId = ref(1)
 
-    vi.stubGlobal('useWagmi', () => ({ address: ref(OWNER), chainId: ref(1) }))
+    vi.stubGlobal('useWagmi', () => ({ address: walletAddress, chainId: walletChainId }))
     vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
     vi.stubGlobal('useSignaturePreference', () => ({ signaturesEnabled: ref(true) }))
     vi.stubGlobal('usePortfolioRefresh', () => ({ triggerPortfolioRefresh: vi.fn() }))
-    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: addressesChainId }))
 
     vi.mocked(getAccount).mockImplementation(() => ({
       address: currentAccount,
@@ -86,6 +93,39 @@ describe('useEulerTx migration authorization cleanup', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue({
       providerService: { getProvider: vi.fn(() => provider) },
     } as never)
+  })
+
+  it.each([
+    ['account', () => {
+      walletAddress.value = OTHER_OWNER
+      currentAccount = OTHER_OWNER
+    }],
+    ['chain', () => {
+      walletChainId.value = 8453
+      addressesChainId.value = 8453
+      currentChainId = 8453
+    }],
+  ] as const)('does not retarget a prepared grant after %s drift', async (kind, driftWallet) => {
+    const { executeMigrationAuthorizationGrants } = useEulerTx()
+    const revokes: MigrationAuthorizationRevoke[] = []
+    driftWallet()
+
+    await expect(executeMigrationAuthorizationGrants(authorizationRequest, revokes))
+      .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind })
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+    expect(revokes).toEqual([])
+  })
+
+  it('prepares the transaction plan with the caller-pinned signature mode', async () => {
+    const prepare = vi.fn().mockResolvedValue({ kind: 'prepared' })
+    vi.mocked(getEulerSdkForChain).mockResolvedValue({
+      executionService: { prepareTransactionPlan: prepare },
+    } as never)
+    const { prepareTransactionPlan } = useEulerTx()
+
+    await prepareTransactionPlan([] as TransactionPlan, { usePermit2: false })
+
+    expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
   })
 
   it.each([

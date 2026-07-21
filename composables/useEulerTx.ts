@@ -1121,6 +1121,7 @@ export const useEulerTx = () => {
       account?: PrefetchPluginAccount
       chainId?: number
       prefetch?: PluginPrefetchData
+      usePermit2?: boolean
     },
   ): Promise<TransactionPlanPrepared> => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
@@ -1131,7 +1132,7 @@ export const useEulerTx = () => {
         plan,
         chainId: cid,
         account: options?.account ?? owner,
-        usePermit2: signaturesEnabled.value,
+        usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
         prefetch: options?.prefetch,
       })
     })
@@ -1309,6 +1310,9 @@ export const useEulerTx = () => {
   ): Promise<MigrationAuthorizationRevoke[]> => {
     const { grants, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
     await sendPlainTransactions(grants, {
+      // The request was prepared for this exact owner/network. Do not let a
+      // wallet switch during the preceding SDK reads retarget the grant.
+      walletContext: { account: request.owner, chainId: request.chainId },
       onBroadcast: (index, walletContext) => {
         const revoke = revokesByGrant[index]
         if (revoke) {

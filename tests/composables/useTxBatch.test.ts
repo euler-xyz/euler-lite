@@ -31,12 +31,13 @@ const eulerTxMocks = {
 const grantWalletContext: WalletExecutionContext = { account: owner, chainId: 1 }
 type PlainTxSendOptions = {
   onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
+  walletContext?: WalletExecutionContext
 }
 const broadcastAllTransactions = async (
   txs: Array<{ data: Hex }>,
   options?: PlainTxSendOptions,
 ) => {
-  txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
+  txs.forEach((_tx, index) => options?.onBroadcast?.(index, options?.walletContext ?? grantWalletContext))
   return []
 }
 const migrationFlowMocks = {
@@ -930,6 +931,7 @@ describe('useTxBatch execution prerequisites', () => {
     batch: ReturnType<typeof useTxBatch>,
     prerequisites: {
       preTxs: typeof grantTx[]
+      walletContext: WalletExecutionContext
       postTxs: typeof revokeTx[]
       postTxsByPreTx?: Array<typeof revokeTx | undefined>
     } | undefined,
@@ -945,6 +947,7 @@ describe('useTxBatch execution prerequisites', () => {
   const addGrantingMigrationEntry = (batch: ReturnType<typeof useTxBatch>) =>
     addMigrationEntryWithPrerequisites(batch, {
       preTxs: [grantTx],
+      walletContext: grantWalletContext,
       postTxs: [revokeTx],
       postTxsByPreTx: [revokeTx],
     })
@@ -980,6 +983,7 @@ describe('useTxBatch execution prerequisites', () => {
     await addGrantingMigrationEntry(batch)
     await addMigrationEntryWithPrerequisites(batch, {
       preTxs: [secondGrantTx],
+      walletContext: grantWalletContext,
       postTxs: [secondRevokeTx],
       postTxsByPreTx: [secondRevokeTx],
     })
@@ -1034,7 +1038,10 @@ describe('useTxBatch execution prerequisites', () => {
     ])
     expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledWith(
       [grantTx],
-      expect.objectContaining({ onBroadcast: expect.any(Function) }),
+      expect.objectContaining({
+        walletContext: grantWalletContext,
+        onBroadcast: expect.any(Function),
+      }),
     )
     expect(migrationFlowMocks.revokeAfterSuccess).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(migrationFlowMocks.revokeAfterAbort).not.toHaveBeenCalled()
@@ -1065,6 +1072,7 @@ describe('useTxBatch execution prerequisites', () => {
 
     await addMigrationEntryWithPrerequisites(batch, {
       preTxs: [grantTx, secondGrantTx],
+      walletContext: grantWalletContext,
       postTxs: [secondRevokeTx, revokeTx],
       postTxsByPreTx: [revokeTx, secondRevokeTx],
     })

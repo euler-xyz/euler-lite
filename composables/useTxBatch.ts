@@ -74,6 +74,8 @@ export interface BatchEntryExternalTx {
 export interface BatchEntryExecutionPrerequisites {
   /** Sent and mined before the merged plan is built. */
   preTxs: BatchEntryExternalTx[]
+  /** Wallet context used to build the prerequisite request. */
+  walletContext: WalletExecutionContext
   /** Sent after the batch executes. Failures are non-fatal. */
   postTxs: BatchEntryExternalTx[]
   /** Revoke paired with each pre-transaction, in pre-transaction order. */
@@ -2208,6 +2210,7 @@ export const useTxBatch = () => {
       let grantWalletContext: WalletExecutionContext | undefined
       if (prerequisites.preTxs.length) {
         await sendPlainTransactions(prerequisites.preTxs, {
+          walletContext: prerequisites.walletContext,
           onBroadcast: (preTxIndex, walletContext) => {
             grantWalletContext = walletContext
             const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]

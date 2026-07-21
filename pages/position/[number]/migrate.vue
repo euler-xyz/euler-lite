@@ -69,6 +69,7 @@ type OutgoingMigrationInput = ReturnType<typeof buildMigrationInput>
 
 type OutgoingMigrationPreview = {
   key: string
+  useSignatures: boolean
   input: OutgoingMigrationInput
   position: MigrationPosition
   authorizationRequest?: MigrationAuthorizationRequest
@@ -563,7 +564,10 @@ function canAddToBatchTarget(target: OutgoingMigrationTarget) {
   return canUseTarget(target)
 }
 
-function buildMigrationInput(target: OutgoingMigrationTarget) {
+function buildMigrationInput(
+  target: OutgoingMigrationTarget,
+  useSignatures = signaturesEnabled.value,
+) {
   if (!chainId.value || !migrationOwner.value || !migrationAccount.value || !sourceDebtVault.value || !sourceCollateralEVault.value) {
     throw new Error('Migration inputs are incomplete')
   }
@@ -579,7 +583,7 @@ function buildMigrationInput(target: OutgoingMigrationTarget) {
   }
   // The SDK's post-migration disable is a second signed authorization appended
   // to the batch. Without signatures the revoke is a plain tx sent afterwards.
-  const removeAuthorizationAfterMigration = target.connectorId === MORPHO_CONNECTOR_ID && signaturesEnabled.value
+  const removeAuthorizationAfterMigration = target.connectorId === MORPHO_CONNECTOR_ID && useSignatures
   const cleanupEulerPosition = true
   return {
     target,
@@ -719,7 +723,7 @@ async function prepareOutgoingMigrationPreview(
     const owner = migrationOwner.value
     if (!owner) throw new Error('Migration inputs are incomplete')
     const useSignatures = signaturesEnabled.value
-    const input = buildMigrationInput(target)
+    const input = buildMigrationInput(target, useSignatures)
 
     // Resolve the external position once and thread it through every SDK
     // call below — without it each plan/authorization call re-resolves the
@@ -760,7 +764,12 @@ async function prepareOutgoingMigrationPreview(
     catch (err) {
       logWarn('positionMigration/prefetchPluginData', err)
     }
-    const prepareOptions = { account: planAccount.value, chainId: input.target.chainId, prefetch }
+    const prepareOptions = {
+      account: planAccount.value,
+      chainId: input.target.chainId,
+      prefetch,
+      usePermit2: useSignatures,
+    }
     // Without signatures the authorization is granted by a standalone tx, so the
     // simulation plan (authorization item filtered out) is already the exact
     // calldata that executes — no stub-signed preview plan needed.
@@ -778,6 +787,7 @@ async function prepareOutgoingMigrationPreview(
 
     const preview: OutgoingMigrationPreview = {
       key,
+      useSignatures,
       input,
       position: migrationPosition,
       tenderlySimulation: {
@@ -839,15 +849,15 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         type: 'migration',
         asset: sourceDebtVault.value.asset,
         amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
-        signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest),
-        postSteps: buildRevokeSteps(preview.authorizationRequest),
+        signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest, preview.useSignatures),
+        postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures),
         calldataPrepared: preview.calldataPrepared,
-        calldataUsesPlaceholderSignatures: signaturesEnabled.value && !!preview.authorizationRequest,
+        calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
         onConfirm: async () => {
-          await sendMigration(preview.input.target)
+          await sendMigration(preview.input.target, preview.useSignatures)
         },
         submittingLabel: 'Migrating...',
       },
@@ -862,13 +872,12 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   }
 }
 
-async function sendMigration(target: OutgoingMigrationTarget) {
+async function sendMigration(target: OutgoingMigrationTarget, useSignatures: boolean) {
   submittingTargetId.value = target.id
   clearSimulationError()
   try {
     if (!await restorePendingBeforeRetry()) return
-    const useSignatures = signaturesEnabled.value
-    const input = buildMigrationInput(target)
+    const input = buildMigrationInput(target, useSignatures)
     // Reuse the cached preview's resolved position (its addresses are static);
     // amounts, the authorization request, and the executed plan are still
     // rebuilt fresh here for execution safety.
@@ -891,7 +900,11 @@ async function sendMigration(target: OutgoingMigrationTarget) {
         }
       }
       const plan = await buildMigrationPlan(input, authorization, migrationPosition)
-      const prepared = await prepareTransactionPlan(plan, { account: planAccount.value, chainId: input.target.chainId })
+      const prepared = await prepareTransactionPlan(plan, {
+        account: planAccount.value,
+        chainId: input.target.chainId,
+        usePermit2: useSignatures,
+      })
       const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
       if (!ok) {
         await revokeAfterAbort(revokeTxs)
@@ -943,15 +956,11 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
     throw new Error('Migration inputs are incomplete')
   }
 
-  const { input, position: migrationPosition, authorizationRequest } = preview
+  const { input, position: migrationPosition, authorizationRequest, useSignatures } = preview
   const sourceDebtAsset = sourceDebtVault.value.asset
   const sourceDebtSymbol = sourceDebtAsset.symbol
   const sourceCollateralSymbol = sourceCollateralEVault.value.asset.symbol
   const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
-  // Pin the mode: the captured review rows cannot follow a later toggle, and
-  // `input` was already built against this value.
-  const useSignatures = signaturesEnabled.value
-
   const batchEntry = {
     label: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetProtocolDisplay(input.target)}`,
     nameOverride: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
@@ -973,7 +982,12 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
             const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
             if (!request) return undefined
             const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
-            return { preTxs: grants, postTxs: revokes, postTxsByPreTx: revokesByGrant }
+            return {
+              preTxs: grants,
+              walletContext: { account: request.owner, chainId: request.chainId },
+              postTxs: revokes,
+              postTxsByPreTx: revokesByGrant,
+            }
           },
         }),
     stateOverrides: preview.tenderlySimulation.stateOverrides,
@@ -987,8 +1001,8 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       type: 'migration',
       asset: sourceDebtAsset,
       amount: debtAmount,
-      signatureSteps: buildSignatureSteps(input.target, authorizationRequest),
-      postSteps: buildRevokeSteps(authorizationRequest),
+      signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures),
+      postSteps: buildRevokeSteps(authorizationRequest, useSignatures),
       displayPlan: preview.calldataPrepared.plan,
     },
   }
@@ -1042,9 +1056,13 @@ function flattenAuthorizationRequests(request: MigrationAuthorizationRequest | u
   ]
 }
 
-function buildSignatureSteps(target: OutgoingMigrationTarget | undefined, authorizationRequest: MigrationAuthorizationRequest | undefined): DisplayStep[] {
+function buildSignatureSteps(
+  target: OutgoingMigrationTarget | undefined,
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+): DisplayStep[] {
   if (!authorizationRequest || !target) return []
-  if (!signaturesEnabled.value) {
+  if (!useSignatures) {
     return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant')
   }
   if (target.connectorId === AAVE_CONNECTOR_ID) {
@@ -1064,8 +1082,11 @@ function buildSignatureSteps(target: OutgoingMigrationTarget | undefined, author
 }
 
 /** Rows for the revoke transactions sent after the batch settles. */
-function buildRevokeSteps(authorizationRequest: MigrationAuthorizationRequest | undefined): DisplayStep[] {
-  if (!authorizationRequest || signaturesEnabled.value) return []
+function buildRevokeSteps(
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+): DisplayStep[] {
+  if (!authorizationRequest || useSignatures) return []
   return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke')
 }
 
