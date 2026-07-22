@@ -21,6 +21,7 @@ interface KeyringGuardState {
   statusMessage?: string
   error?: string
   launchExtension: () => Promise<void>
+  retryVerification: () => Promise<void>
   checkStatus: () => Promise<void>
   cancelVerification: () => void
 }
@@ -306,6 +307,7 @@ const handleAddToBatch = () => {
             :status-message="keyringGuard.statusMessage"
             :error-message="keyringGuard.error"
             @launch="keyringGuard.launchExtension()"
+            @retry="keyringGuard.retryVerification()"
             @check="keyringGuard.checkStatus()"
             @cancel="keyringGuard.cancelVerification()"
           />

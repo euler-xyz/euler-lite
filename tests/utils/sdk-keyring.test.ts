@@ -1,0 +1,94 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Address } from 'viem'
+import type { CredentialData } from '@keyringnetwork/keyring-connect-sdk'
+import {
+  clearSdkKeyringCredential,
+  getSdkKeyringCredential,
+  setSdkKeyringCredential,
+} from '~/utils/sdk-keyring'
+
+const ACCOUNT = '0x1111111111111111111111111111111111111111' as Address
+const HOOK_TARGET = '0x2222222222222222222222222222222222222222' as Address
+const KEYRING = '0x3333333333333333333333333333333333333333' as Address
+const OTHER_KEYRING = '0x4444444444444444444444444444444444444444' as Address
+const RPC_URL = '/api/internal/rpc/1'
+
+const { getPublicClient, resolveKeyringContractAddress } = vi.hoisted(() => ({
+  getPublicClient: vi.fn(),
+  resolveKeyringContractAddress: vi.fn(),
+}))
+
+vi.mock('~/utils/public-client', () => ({ getPublicClient }))
+vi.mock('~/utils/keyring-hook-target', () => ({ resolveKeyringContractAddress }))
+
+const credential = (validUntil = 2_000_000_000): CredentialData => ({
+  trader: ACCOUNT,
+  policyId: 7,
+  chainId: 1,
+  validUntil,
+  cost: 1,
+  key: '0x01',
+  signature: '0x02',
+  backdoor: '0x03',
+})
+
+const key = {
+  chainId: 1,
+  account: ACCOUNT,
+  hookTarget: HOOK_TARGET,
+  policyId: 7,
+}
+
+describe('SDK Keyring credential cache', () => {
+  beforeEach(() => {
+    getPublicClient.mockReset()
+    resolveKeyringContractAddress.mockReset()
+    getPublicClient.mockReturnValue({})
+    resolveKeyringContractAddress.mockResolvedValue(KEYRING)
+  })
+
+  afterEach(() => {
+    clearSdkKeyringCredential(key)
+  })
+
+  it('returns a current credential when the hook target still resolves to the cached Keyring contract', async () => {
+    setSdkKeyringCredential({
+      ...key,
+      keyringContractAddress: KEYRING,
+      rpcUrl: RPC_URL,
+      credential: credential(),
+    })
+
+    await expect(getSdkKeyringCredential(key)).resolves.toMatchObject({
+      trader: ACCOUNT,
+      policyId: 7,
+      chainId: 1,
+    })
+    expect(getPublicClient).toHaveBeenCalledWith(RPC_URL)
+    expect(resolveKeyringContractAddress).toHaveBeenCalledWith({}, HOOK_TARGET)
+  })
+
+  it('rejects a cached credential when the hook target resolves to a different Keyring contract', async () => {
+    setSdkKeyringCredential({
+      ...key,
+      keyringContractAddress: KEYRING,
+      rpcUrl: RPC_URL,
+      credential: credential(),
+    })
+    resolveKeyringContractAddress.mockResolvedValue(OTHER_KEYRING)
+
+    await expect(getSdkKeyringCredential(key)).resolves.toBeNull()
+  })
+
+  it('rejects an expired cached credential without reading the hook target', async () => {
+    setSdkKeyringCredential({
+      ...key,
+      keyringContractAddress: KEYRING,
+      rpcUrl: RPC_URL,
+      credential: credential(1),
+    })
+
+    await expect(getSdkKeyringCredential(key)).resolves.toBeNull()
+    expect(resolveKeyringContractAddress).not.toHaveBeenCalled()
+  })
+})

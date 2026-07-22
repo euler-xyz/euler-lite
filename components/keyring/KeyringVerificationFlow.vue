@@ -27,6 +27,7 @@ const formattedCost = computed(() => {
 
 defineEmits<{
   launch: []
+  retry: []
   check: []
   cancel: []
 }>()
@@ -136,7 +137,7 @@ defineEmits<{
       <UiButton
         variant="primary"
         size="large"
-        @click="$emit('launch')"
+        @click="$emit('retry')"
       >
         Retry Verification
       </UiButton>
