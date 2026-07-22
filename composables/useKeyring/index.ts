@@ -480,9 +480,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     }
 
     if (manualCheck) {
-      flowState.value = KeyringFlowState.Start
+      flowState.value = KeyringFlowState.Progress
       statusMessage.value = 'Verification is not complete yet. Continue in the Keyring extension.'
-      stopStatusPolling()
     }
   }
 
