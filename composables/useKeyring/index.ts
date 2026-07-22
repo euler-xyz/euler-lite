@@ -124,6 +124,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   let extensionStateVersion = 0
   let credentialExpiryTimer: ReturnType<typeof setTimeout> | null = null
   let credentialExpiryVersion = 0
+  let disposed = false
 
   const isKeyringVault = computed(() => isVaultKeyring(addressRef.value))
 
@@ -136,6 +137,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   })
 
   const captureContext = (): KeyringContext | undefined => {
+    if (disposed) return undefined
     const currentHookTarget = hookTarget.value
     const currentUser = userAddress.value
     const currentChainId = chainId.value
@@ -153,7 +155,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   }
 
   const isContextCurrent = (context: KeyringContext): boolean =>
-    context.version === contextVersion
+    !disposed
+    && context.version === contextVersion
     && addressRef.value.toLowerCase() === context.vaultAddress
     && hookTarget.value?.toLowerCase() === context.hookTarget.toLowerCase()
     && userAddress.value?.toLowerCase() === context.userAddress.toLowerCase()
@@ -594,6 +597,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   )
 
   onUnmounted(() => {
+    disposed = true
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }

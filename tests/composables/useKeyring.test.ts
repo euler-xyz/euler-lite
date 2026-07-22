@@ -19,10 +19,13 @@ const getExtensionState = vi.fn()
 const launchExtension = vi.fn()
 const subscribeToExtensionState = vi.fn()
 const vaultAvailable = ref(true)
+const { unmountCallbacks } = vi.hoisted(() => ({
+  unmountCallbacks: [] as Array<() => void>,
+}))
 
 vi.mock('vue', async importOriginal => ({
   ...await importOriginal<typeof import('vue')>(),
-  onUnmounted: vi.fn(),
+  onUnmounted: (callback: () => void) => unmountCallbacks.push(callback),
 }))
 
 vi.mock('@wagmi/vue', () => ({
@@ -80,6 +83,10 @@ const deferred = <T>() => {
   return { promise, resolve }
 }
 
+const runUnmountCallbacks = () => {
+  for (const callback of unmountCallbacks.splice(0)) callback()
+}
+
 const installContractReads = (hasCredential = false) => {
   readContract.mockImplementation(async ({ functionName }: { functionName: string }) => {
     if (functionName === 'policyId') return 7
@@ -94,6 +101,7 @@ describe('useKeyring', () => {
   let scope = effectScope()
 
   beforeEach(() => {
+    runUnmountCallbacks()
     scope.stop()
     scope = effectScope()
     userAddress.value = USER
@@ -125,6 +133,7 @@ describe('useKeyring', () => {
   })
 
   afterEach(() => {
+    runUnmountCallbacks()
     scope.stop()
     vi.useRealTimers()
     vi.unstubAllGlobals()
@@ -508,6 +517,25 @@ describe('useKeyring', () => {
     await launching
 
     expect(state.flowState.value).toBe(KeyringFlowState.Start)
+    expect(subscribeToExtensionState).not.toHaveBeenCalled()
+  })
+
+  it('does not restart polling after the Keyring scope unmounts during launch', async () => {
+    installContractReads()
+    isInstalled.mockResolvedValue(false)
+    const launch = deferred<undefined>()
+    launchExtension.mockReturnValue(launch.promise)
+
+    const { KeyringFlowState, useKeyring } = await import('~/composables/useKeyring')
+    const state = scope.run(() => useKeyring(VAULT))!
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Install))
+
+    const launching = state.launchExtension()
+    expect(state.flowState.value).toBe(KeyringFlowState.Progress)
+    runUnmountCallbacks()
+    launch.resolve(undefined)
+    await launching
+
     expect(subscribeToExtensionState).not.toHaveBeenCalled()
   })
 
