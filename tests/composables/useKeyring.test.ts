@@ -438,6 +438,48 @@ describe('useKeyring', () => {
     expect(state.flowState.value).toBe(KeyringFlowState.Progress)
   })
 
+  it('does not launch verification in a new context after an older retry resolves', async () => {
+    readContract.mockRejectedValue(new Error('temporary RPC failure'))
+    isInstalled.mockResolvedValue(false)
+    launchExtension.mockResolvedValue(undefined)
+
+    const { KeyringFlowState, useKeyring } = await import('~/composables/useKeyring')
+    const state = scope.run(() => useKeyring(VAULT))!
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Error))
+
+    const oldPolicy = deferred<number>()
+    const oldKeyring = deferred<Address>()
+    const oldCredentialCheck = deferred<boolean>()
+    let callIndex = 0
+    readContract.mockImplementation(async ({ functionName }: { functionName: string }) => {
+      callIndex += 1
+      if (callIndex === 1) return oldPolicy.promise
+      if (callIndex === 2) return oldKeyring.promise
+      if (callIndex === 3) return oldCredentialCheck.promise
+      if (functionName === 'policyId') return 8
+      if (functionName === 'keyring') return KEYRING
+      if (functionName === 'checkKeyringCredentialOrWildCard') return false
+      if (functionName === 'entityExp') return 0n
+      throw new Error(`Unexpected contract read: ${functionName}`)
+    })
+
+    const retrying = state.retryVerification()
+    await vi.waitFor(() => expect(callIndex).toBe(3))
+
+    chainId.value = 8453
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Install))
+    expect(state.policyId.value).toBe(8)
+
+    oldPolicy.resolve(7)
+    oldKeyring.resolve(KEYRING)
+    oldCredentialCheck.resolve(false)
+    await retrying
+
+    expect(launchExtension).not.toHaveBeenCalled()
+    expect(state.flowState.value).toBe(KeyringFlowState.Install)
+    expect(state.policyId.value).toBe(8)
+  })
+
   it('does not restart polling after verification is canceled during launch', async () => {
     installContractReads()
     isInstalled.mockResolvedValue(false)

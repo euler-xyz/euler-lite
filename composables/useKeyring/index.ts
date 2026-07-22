@@ -398,10 +398,16 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   }
 
   const retryVerification = async () => {
+    const context = captureContext()
+    if (!context) return
+
     if (policyId.value === undefined || !keyringContractAddress.value) {
-      await checkCredential()
+      await checkCredential(() => isContextCurrent(context))
+      if (!isContextCurrent(context)) return
       if (flowState.value !== KeyringFlowState.Start && flowState.value !== KeyringFlowState.Install) return
     }
+
+    if (!isContextCurrent(context)) return
     await launchExtension()
   }
 
