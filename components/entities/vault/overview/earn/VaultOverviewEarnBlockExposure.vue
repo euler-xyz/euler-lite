@@ -30,7 +30,7 @@ const onExposureClick = (address: string) => {
 }
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
 
-const { getOrFetch, get: registryGet } = useVaultRegistry()
+const { getOrFetch, get: registryGet, isVerifiedVault } = useVaultRegistry()
 const {
   load: loadOpenInterest,
   getOpenInterestForVault,
@@ -351,6 +351,7 @@ load()
               </div>
             </div>
             <VaultTypeBadges
+              v-if="isVerifiedVault(row.vault.address)"
               class="justify-end mt-8 mobile:order-3 mobile:basis-full mobile:justify-end mobile:mt-0 mobile:pt-4"
               :vault="row.vault"
               summary-only

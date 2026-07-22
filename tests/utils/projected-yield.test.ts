@@ -3,11 +3,19 @@ import type { RewardCampaign } from '~/entities/reward-campaign'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import {
   getCollateralSnapshotRateLines,
+  getProjectedRewardAprPresentation,
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
   projectedYieldHasRewards,
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
+
+const renderedRewardApr = (before: number | null | undefined, after: number | null | undefined) => {
+  const presentation = getProjectedRewardAprPresentation(before, after)
+  return presentation.before
+    ? `${presentation.before} → ${presentation.after}`
+    : presentation.after
+}
 
 const campaign = (overrides: Partial<RewardCampaign>): RewardCampaign => ({
   campaignId: 'campaign',
@@ -126,6 +134,30 @@ describe('mergeProjectedRewardCampaigns', () => {
       rewards: [],
     }
     expect(projectedYieldHasRewards(details)).toBe(true)
+  })
+})
+
+describe('getProjectedRewardAprPresentation', () => {
+  it('renders only the projected APR when the current campaign is missing or inapplicable', () => {
+    expect(renderedRewardApr(undefined, 7.23)).toBe('7.23%')
+    expect(renderedRewardApr(null, 7.23)).toBe('7.23%')
+  })
+
+  it('preserves a real zero current APR as an explicit transition', () => {
+    expect(renderedRewardApr(0, 7.23)).toBe('0.00% → 7.23%')
+  })
+
+  it('renders the normal transition when positive current and projected APRs differ', () => {
+    expect(renderedRewardApr(4.56, 7.23)).toBe('4.56% → 7.23%')
+  })
+
+  it('preserves the single-value presentation when current and projected APRs are equal', () => {
+    expect(renderedRewardApr(7.23, 7.23)).toBe('7.23%')
+  })
+
+  it('preserves the transition to missing when there is no projected campaign', () => {
+    expect(renderedRewardApr(7.23, undefined)).toBe('7.23% → -')
+    expect(renderedRewardApr(7.23, null)).toBe('7.23% → -')
   })
 })
 

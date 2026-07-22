@@ -1,8 +1,8 @@
 <script setup lang="ts">
-const { permit2Enabled, setPermit2Enabled } = usePermit2Preference()
+const { signaturesEnabled, setSignaturesEnabled } = useSignaturePreference()
 
 const onToggle = (value: boolean | undefined) => {
-  setPermit2Enabled(value ?? false)
+  setSignaturesEnabled(value ?? false)
 }
 </script>
 
@@ -11,14 +11,14 @@ const onToggle = (value: boolean | undefined) => {
     <div class="flex items-center justify-between">
       <div>
         <div class="text-p2">
-          permit2 approvals
+          Gasless signatures
         </div>
         <div class="text-p3 text-content-muted">
-          Use gasless token approvals
+          Use gasless message signatures instead of approval transactions
         </div>
       </div>
       <UiSwitch
-        :model-value="permit2Enabled"
+        :model-value="signaturesEnabled"
         @update:model-value="onToggle"
       />
     </div>

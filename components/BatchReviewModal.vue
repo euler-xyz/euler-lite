@@ -10,6 +10,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
+import { getAuthorizationStepDisplay } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { formatNumber } from '~/utils/string-utils'
 
@@ -78,6 +79,7 @@ const positionTag = (subAccount?: string): string | undefined => {
 type ReviewWithSteps = StepDecodingContext & {
   displayPlan?: TransactionPlan
   signatureSteps?: DisplayStep[]
+  postSteps?: DisplayStep[]
 }
 
 const isExternalProtocolMigrationReview = (review: ReviewWithSteps | undefined): boolean =>
@@ -90,6 +92,13 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? normalizeDisplaySteps(review?.signatureSteps)
+    : []
+}
+
+const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  const review = entry.review as unknown as ReviewWithSteps | undefined
+  return isExternalProtocolMigrationReview(review)
+    ? normalizeDisplaySteps(review?.postSteps)
     : []
 }
 
@@ -122,10 +131,30 @@ const signatureStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   return out
 })
 
-const signatureRows = computed(() =>
+const postStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
+  const out: Record<string, DisplayStep[]> = {}
+  for (const entry of entries.value) {
+    const steps = getEntryPostSteps(entry)
+    if (steps.length) out[entry.id] = steps
+  }
+  return out
+})
+
+const signatureStepsHeading = (entryId: string): string =>
+  getAuthorizationStepDisplay(
+    (signatureStepsByEntryId.value[entryId] ?? []).some(step => step.isSeparateTx),
+  ).detailHeading
+
+const authorizationRows = computed(() =>
   entries.value.flatMap(entry =>
     (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
   ),
+)
+const authorizationSummaryGroups = computed(() =>
+  [true, false].map((isSeparateTx) => {
+    const rows = authorizationRows.value.filter(({ step }) => step.isSeparateTx === isSeparateTx)
+    return { rows, display: getAuthorizationStepDisplay(isSeparateTx) }
+  }).filter(({ rows }) => rows.length),
 )
 
 // Unverified vaults the batch touches — surfaced as a warning. A vault is the
@@ -384,28 +413,33 @@ const handleClose = () => {
     <!-- Separator under the modal title -->
     <div class="-mx-16 mb-16 border-t border-line-default" />
     <div class="flex flex-col gap-20">
-      <!-- Off-chain signatures captured by operations such as migrations. -->
-      <div v-if="signatureRows.length">
-        <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
-          Signatures needed
-        </p>
-        <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
-          <div
-            v-for="({ entry, step }, i) in signatureRows"
-            :key="`${entry.id}-${i}`"
-            class="flex items-center justify-between gap-12 py-10"
-          >
-            <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
-              <SvgIcon
-                name="check-circle"
-                class="!w-16 !h-16 text-accent-500 shrink-0"
-              />
-              <span class="truncate">{{ step.label }}</span>
-            </span>
-            <span class="text-p3 text-content-tertiary shrink-0">1 signature</span>
+      <!-- Wallet authorizations captured by operations such as migrations. -->
+      <template
+        v-for="group in authorizationSummaryGroups"
+        :key="group.display.summaryHeading"
+      >
+        <div>
+          <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
+            {{ group.display.summaryHeading }}
+          </p>
+          <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
+            <div
+              v-for="({ entry, step }, i) in group.rows"
+              :key="`${entry.id}-${i}`"
+              class="flex items-center justify-between gap-12 py-10"
+            >
+              <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
+                <SvgIcon
+                  name="check-circle"
+                  class="!w-16 !h-16 text-accent-500 shrink-0"
+                />
+                <span class="truncate">{{ step.label }}</span>
+              </span>
+              <span class="text-p3 text-content-tertiary shrink-0">{{ group.display.itemCountLabel }}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
 
       <!-- Approvals -->
       <div v-if="approvals.length">
@@ -507,12 +541,12 @@ const handleClose = () => {
               <!-- Same decoded operation steps the per-op review modal shows
                    (the builder row's (i) icon). -->
               <div
-                v-if="signatureStepsByEntryId[entry.id]?.length || stepsByEntryId[entry.id]?.length"
+                v-if="signatureStepsByEntryId[entry.id]?.length || stepsByEntryId[entry.id]?.length || postStepsByEntryId[entry.id]?.length"
                 class="bg-card rounded-8 p-12 flex flex-col gap-8"
               >
                 <template v-if="signatureStepsByEntryId[entry.id]?.length">
                   <p class="text-p4 text-content-tertiary uppercase tracking-[0.04em]">
-                    Signatures
+                    {{ signatureStepsHeading(entry.id) }}
                   </p>
                   <OperationStepsList :steps="signatureStepsByEntryId[entry.id]" />
                   <div
@@ -528,6 +562,16 @@ const handleClose = () => {
                     Operation
                   </p>
                   <OperationStepsList :steps="stepsByEntryId[entry.id]" />
+                </template>
+                <template v-if="postStepsByEntryId[entry.id]?.length">
+                  <div
+                    v-if="signatureStepsByEntryId[entry.id]?.length || stepsByEntryId[entry.id]?.length"
+                    class="border-t border-line-default"
+                  />
+                  <p class="text-p4 text-content-tertiary uppercase tracking-[0.04em]">
+                    After execution
+                  </p>
+                  <OperationStepsList :steps="postStepsByEntryId[entry.id]" />
                 </template>
               </div>
               <p

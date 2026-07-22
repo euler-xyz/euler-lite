@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -25,6 +25,8 @@ import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 export interface BatchWalletChange {
   token: string
@@ -62,6 +64,24 @@ export interface BatchClosedPosition {
  * layer interface is unchanged.
  */
 
+export interface BatchEntryExternalTx {
+  to: Address
+  data: Hex
+  value?: bigint
+  label?: string
+}
+
+export interface BatchEntryExecutionPrerequisites {
+  /** Sent and mined before the merged plan is built. */
+  preTxs: BatchEntryExternalTx[]
+  /** Wallet context used to build the prerequisite request. */
+  walletContext: WalletExecutionContext
+  /** Sent after the batch executes. Failures are non-fatal. */
+  postTxs: BatchEntryExternalTx[]
+  /** Revoke paired with each pre-transaction, in pre-transaction order. */
+  postTxsByPreTx?: Array<BatchEntryExternalTx | undefined>
+}
+
 export interface BatchEntry {
   id: string
   label: string
@@ -69,6 +89,14 @@ export interface BatchEntry {
   plan: TransactionPlan
   /** Optional real execution payload builder for entries whose preview plan uses simulation-only state. */
   buildExecutionPlan?: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+  /** Standalone transactions this entry needs around the merged batch, resolved
+   *  at execution time. Migrations without message signatures use this to grant
+   *  their authorization before the batch and revoke it after: the grants cannot
+   *  be plan items (`mergePlans` rejects contractCall, and the EVC would be the
+   *  msg.sender), and must be mined before the plan is built. */
+  buildExecutionPrerequisites?: (
+    account: Account<IHasVaultAddress>,
+  ) => Promise<BatchEntryExecutionPrerequisites | undefined>
   /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
   stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
@@ -1548,7 +1576,8 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
-  const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan } = useEulerTx()
+  const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
+  const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
     try {
@@ -2164,6 +2193,49 @@ export const useTxBatch = () => {
   }
 
   /**
+   * Send each entry's prerequisite grants, mined, before the merged plan is
+   * built — plan builders read live on-chain allowances to decide whether their
+   * batch still needs an authorization item.
+   *
+   * Sequential on purpose: a later entry needing the same grant sees the earlier
+   * one already on-chain and resolves to no prerequisite at all.
+   */
+  const sendExecutionPrerequisites = async (
+    grantedRevokes: MigrationAuthorizationRevoke[],
+  ): Promise<void> => {
+    for (const [index, entry] of entries.value.entries()) {
+      if (!entry.buildExecutionPrerequisites) continue
+      const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
+      if (!prerequisites) continue
+      let grantWalletContext: WalletExecutionContext | undefined
+      if (prerequisites.preTxs.length) {
+        await sendPlainTransactions(prerequisites.preTxs, {
+          walletContext: prerequisites.walletContext,
+          onBroadcast: (preTxIndex, walletContext) => {
+            grantWalletContext = walletContext
+            const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
+            if (revoke) {
+              grantedRevokes.unshift({ transaction: revoke, walletContext })
+            }
+          },
+        })
+      }
+      // Entries without a one-to-one mapping retain the original all-or-nothing
+      // behavior. Migration entries always provide postTxsByPreTx so partial or
+      // receipt-ambiguous grant sequences can unwind precisely.
+      if (!prerequisites.postTxsByPreTx && prerequisites.postTxs.length) {
+        if (!grantWalletContext) {
+          throw new Error('Cannot restore prerequisite transactions without their wallet context')
+        }
+        grantedRevokes.push(...prerequisites.postTxs.map(transaction => ({
+          transaction,
+          walletContext: grantWalletContext,
+        })))
+      }
+    }
+  }
+
+  /**
    * Execute the whole batch as one atomic transaction. Entries normally reuse
    * the preview plan; entries with simulation-only preview state can rebuild a
    * signed execution plan before the merged batch is prepared and sent.
@@ -2176,21 +2248,28 @@ export const useTxBatch = () => {
     if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
     execError.value = undefined
     isExecuting.value = true
+    const grantedRevokes: MigrationAuthorizationRevoke[] = []
     try {
+      if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
       // would revert (against the current chain state, which may have moved since
       // the last simulation), surface the decoded reason and don't send.
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
+      await sendExecutionPrerequisites(grantedRevokes)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
       const prepared = await prepareTransactionPlan(executionPlan)
       await executePreparedPlan(prepared)
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+      await revokeAfterSuccess(grantedRevokes)
       await redirectAfterBatchExecution()
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
+      // The batch never landed, so no granted authorization should be left
+      // standing. Entries stay in the cart for a retry, which re-grants.
+      await revokeAfterAbort(grantedRevokes)
       execError.value = await describeExecError(error)
     }
     finally {
