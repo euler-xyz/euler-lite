@@ -126,6 +126,7 @@ describe('useKeyring', () => {
 
   afterEach(() => {
     scope.stop()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
@@ -233,6 +234,105 @@ describe('useKeyring', () => {
     expect(state.flowState.value).toBe(KeyringFlowState.Ready)
   })
 
+  it('discards a manual status response older than a subscribed credential event', async () => {
+    installContractReads()
+    isInstalled.mockResolvedValue(true)
+    getExtensionState.mockResolvedValueOnce(extensionState())
+    launchExtension.mockResolvedValue(undefined)
+
+    const { KeyringFlowState, useKeyring } = await import('~/composables/useKeyring')
+    const state = scope.run(() => useKeyring(VAULT))!
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Start))
+
+    await state.launchExtension()
+    const onExtensionState = subscribeToExtensionState.mock.calls[0][0] as (state: ExtensionState | null) => void
+    const manualState = deferred<ExtensionState | null>()
+    getExtensionState.mockReturnValueOnce(manualState.promise)
+
+    const checkingStatus = state.checkStatus()
+    onExtensionState(extensionState({ credentialData: credential() }))
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Ready))
+
+    manualState.resolve(extensionState({ status: 'mounted' }))
+    await checkingStatus
+
+    expect(state.flowState.value).toBe(KeyringFlowState.Ready)
+    expect(state.credentialData.value).toEqual(credential())
+  })
+
+  it('discards an on-chain credential recheck older than a subscribed credential event', async () => {
+    installContractReads()
+    isInstalled.mockResolvedValue(true)
+    getExtensionState.mockResolvedValueOnce(extensionState())
+    launchExtension.mockResolvedValue(undefined)
+
+    const { KeyringFlowState, useKeyring } = await import('~/composables/useKeyring')
+    const state = scope.run(() => useKeyring(VAULT))!
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Start))
+    await state.launchExtension()
+    const onExtensionState = subscribeToExtensionState.mock.calls[0][0] as (state: ExtensionState | null) => void
+
+    const onChainCredential = deferred<boolean>()
+    readContract.mockImplementation(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'policyId') return 7
+      if (functionName === 'keyring') return KEYRING
+      if (functionName === 'checkKeyringCredentialOrWildCard') return onChainCredential.promise
+      if (functionName === 'entityExp') return 0n
+      throw new Error(`Unexpected contract read: ${functionName}`)
+    })
+
+    onExtensionState(extensionState({
+      user: {
+        attestation_status: 'attestation_ready',
+        credential_status: 'valid',
+        wallet_address: USER,
+        user_id: 'user-1',
+        entity_id: 'entity-1',
+      },
+    }))
+    await vi.waitFor(() => expect(state.isLoading.value).toBe(true))
+
+    onExtensionState(extensionState({ credentialData: credential() }))
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Ready))
+
+    onChainCredential.resolve(false)
+    await vi.waitFor(() => expect(state.isLoading.value).toBe(false))
+
+    expect(state.flowState.value).toBe(KeyringFlowState.Ready)
+    expect(state.credentialData.value).toEqual(credential())
+  })
+
+  it('restores the verification guard when an accepted credential expires', async () => {
+    installContractReads()
+    isInstalled.mockResolvedValue(true)
+    getExtensionState.mockResolvedValueOnce(extensionState())
+    launchExtension.mockResolvedValue(undefined)
+
+    const { KeyringFlowState, useKeyring } = await import('~/composables/useKeyring')
+    const state = scope.run(() => useKeyring(VAULT))!
+    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Start))
+    await state.launchExtension()
+    const onExtensionState = subscribeToExtensionState.mock.calls[0][0] as (state: ExtensionState | null) => void
+
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    onExtensionState(extensionState({
+      credentialData: credential({ validUntil: 1_800_000_001 }),
+    }))
+    await nextTick()
+
+    expect(state.flowState.value).toBe(KeyringFlowState.Ready)
+    expect(state.isVerificationRequired.value).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await nextTick()
+
+    expect(state.flowState.value).toBe(KeyringFlowState.Start)
+    expect(state.credentialData.value).toBeNull()
+    expect(state.isVerificationRequired.value).toBe(true)
+    expect(state.statusMessage.value).toContain('expired')
+  })
+
   it('keeps transient extension timeouts retryable and recovers on the next state', async () => {
     installContractReads()
     isInstalled.mockResolvedValue(true)
@@ -250,55 +350,40 @@ describe('useKeyring', () => {
 
     expect(state.flowState.value).toBe(KeyringFlowState.Progress)
     expect(state.statusMessage.value).toContain('Retrying')
+    expect(isInstalled).toHaveBeenCalledOnce()
 
     await state.checkStatus()
     expect(state.flowState.value).toBe(KeyringFlowState.Progress)
     expect(state.statusMessage.value).toContain('still in progress')
   })
 
-  it('does not let a delayed timeout probe overwrite a newer credential state', async () => {
+  it('keeps polling after a transient extension timeout and accepts the next credential state', async () => {
     installContractReads()
     isInstalled.mockResolvedValue(true)
     getExtensionState.mockResolvedValueOnce(extensionState())
     launchExtension.mockResolvedValue(undefined)
+    const unsubscribe = vi.fn()
+    subscribeToExtensionState.mockReturnValue(unsubscribe)
 
     const { KeyringFlowState, useKeyring } = await import('~/composables/useKeyring')
     const state = scope.run(() => useKeyring(VAULT))!
     await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Start))
 
-    const installedCheck = deferred<boolean>()
-    isInstalled.mockReturnValueOnce(installedCheck.promise)
     await state.launchExtension()
     const onExtensionState = subscribeToExtensionState.mock.calls[0][0] as (state: ExtensionState | null) => void
 
     onExtensionState(null)
+    await nextTick()
+    expect(state.flowState.value).toBe(KeyringFlowState.Progress)
+    expect(state.statusMessage.value).toContain('Retrying')
+    expect(isInstalled).toHaveBeenCalledOnce()
+    expect(unsubscribe).not.toHaveBeenCalled()
+
     onExtensionState(extensionState({ credentialData: credential() }))
     await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Ready))
-
-    installedCheck.resolve(true)
-    await nextTick()
-
     expect(state.flowState.value).toBe(KeyringFlowState.Ready)
     expect(state.credentialData.value).toEqual(credential())
-  })
-
-  it('returns to install only after confirming the extension is absent', async () => {
-    installContractReads()
-    isInstalled
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false)
-    getExtensionState
-      .mockResolvedValueOnce(extensionState())
-      .mockResolvedValueOnce(null)
-
-    const { KeyringFlowState, useKeyring } = await import('~/composables/useKeyring')
-    const state = scope.run(() => useKeyring(VAULT))!
-    await vi.waitFor(() => expect(state.flowState.value).toBe(KeyringFlowState.Start))
-
-    state.flowState.value = KeyringFlowState.Progress
-    await state.checkStatus()
-
-    expect(state.flowState.value).toBe(KeyringFlowState.Install)
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
 
   it('reports an incomplete manual status check instead of silently staying in progress', async () => {

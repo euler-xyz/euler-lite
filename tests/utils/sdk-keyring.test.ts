@@ -13,13 +13,15 @@ const KEYRING = '0x3333333333333333333333333333333333333333' as Address
 const OTHER_KEYRING = '0x4444444444444444444444444444444444444444' as Address
 const RPC_URL = '/api/internal/rpc/1'
 
-const { getPublicClient, resolveKeyringContractAddress } = vi.hoisted(() => ({
+const { getPublicClient, logWarn, resolveKeyringContractAddress } = vi.hoisted(() => ({
   getPublicClient: vi.fn(),
+  logWarn: vi.fn(),
   resolveKeyringContractAddress: vi.fn(),
 }))
 
 vi.mock('~/utils/public-client', () => ({ getPublicClient }))
 vi.mock('~/utils/keyring-hook-target', () => ({ resolveKeyringContractAddress }))
+vi.mock('~/utils/errorHandling', () => ({ logWarn }))
 
 const credential = (validUntil = 2_000_000_000): CredentialData => ({
   trader: ACCOUNT,
@@ -42,6 +44,7 @@ const key = {
 describe('SDK Keyring credential cache', () => {
   beforeEach(() => {
     getPublicClient.mockReset()
+    logWarn.mockReset()
     resolveKeyringContractAddress.mockReset()
     getPublicClient.mockReturnValue({})
     resolveKeyringContractAddress.mockResolvedValue(KEYRING)
@@ -78,6 +81,28 @@ describe('SDK Keyring credential cache', () => {
     resolveKeyringContractAddress.mockResolvedValue(OTHER_KEYRING)
 
     await expect(getSdkKeyringCredential(key)).resolves.toBeNull()
+  })
+
+  it('fails closed on a transient resolution error and retains the credential for retry', async () => {
+    setSdkKeyringCredential({
+      ...key,
+      keyringContractAddress: KEYRING,
+      rpcUrl: RPC_URL,
+      credential: credential(),
+    })
+    const resolutionError = new Error('temporary RPC failure')
+    resolveKeyringContractAddress
+      .mockRejectedValueOnce(resolutionError)
+      .mockResolvedValueOnce(KEYRING)
+
+    await expect(getSdkKeyringCredential(key)).resolves.toBeNull()
+    expect(logWarn).toHaveBeenCalledWith('sdkKeyring/resolveKeyringContractAddress', resolutionError)
+
+    await expect(getSdkKeyringCredential(key)).resolves.toMatchObject({
+      trader: ACCOUNT,
+      policyId: 7,
+      chainId: 1,
+    })
   })
 
   it('rejects an expired cached credential without reading the hook target', async () => {

@@ -122,6 +122,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   let credentialCheckVersion = 0
   let verificationAttempt = 0
   let extensionStateVersion = 0
+  let credentialExpiryTimer: ReturnType<typeof setTimeout> | null = null
+  let credentialExpiryVersion = 0
 
   const isKeyringVault = computed(() => isVaultKeyring(addressRef.value))
 
@@ -164,6 +166,43 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   const isAttemptCurrent = (context: KeyringContext, attempt: number): boolean =>
     isContextCurrent(context) && attempt === verificationAttempt
 
+  const clearCredentialExpiryTimer = () => {
+    credentialExpiryVersion += 1
+    if (credentialExpiryTimer !== null) {
+      clearTimeout(credentialExpiryTimer)
+      credentialExpiryTimer = null
+    }
+  }
+
+  const clearCredentialData = () => {
+    clearCredentialExpiryTimer()
+    credentialData.value = null
+  }
+
+  const scheduleCredentialExpiry = (credential: CredentialData, context: KeyringContext) => {
+    clearCredentialExpiryTimer()
+    const expiryVersion = credentialExpiryVersion
+    const expiresAt = credential.validUntil * 1000
+
+    const checkExpiry = () => {
+      credentialExpiryTimer = null
+      if (!isContextCurrent(context) || expiryVersion !== credentialExpiryVersion) return
+
+      const remaining = expiresAt - Date.now()
+      if (remaining > 0) {
+        credentialExpiryTimer = setTimeout(checkExpiry, Math.min(remaining, 2_147_483_647))
+        return
+      }
+
+      clearCredentialData()
+      hasValidCredential.value = false
+      flowState.value = KeyringFlowState.Start
+      statusMessage.value = 'Your Keyring credential has expired. Restart verification to continue.'
+    }
+
+    checkExpiry()
+  }
+
   const isVerificationRequired = computed(() =>
     isKeyringVault.value
     && Boolean(userAddress.value)
@@ -179,10 +218,11 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     && expiration.value > 0n,
   )
 
-  const checkCredential = async () => {
+  const checkCredential = async (requestIsCurrent: () => boolean = () => true) => {
     const context = captureContext()
     if (!context) return
     const checkVersion = ++credentialCheckVersion
+    const isCurrent = () => isCheckCurrent(context, checkVersion) && requestIsCurrent()
 
     isLoading.value = true
     flowState.value = KeyringFlowState.Loading
@@ -207,7 +247,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
         }).catch(() => false) as Promise<boolean>,
       ])
 
-      if (!isCheckCurrent(context, checkVersion)) return
+      if (!isCurrent()) return
 
       policyId.value = pid
       hasValidCredential.value = hasCredential === true
@@ -216,7 +256,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
         keyringContractAddress.value = rawKeyringAddress
         expiration.value = undefined
         flowState.value = KeyringFlowState.Idle
-        credentialData.value = null
+        clearCredentialData()
         return
       }
 
@@ -234,7 +274,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
         }
       }
 
-      if (!isCheckCurrent(context, checkVersion)) return
+      if (!isCurrent()) return
       keyringContractAddress.value = validatedKeyringAddress
 
       if (pid === undefined || !validatedKeyringAddress) {
@@ -254,19 +294,19 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
             authorizationList: undefined,
             args: [BigInt(pid), context.userAddress],
           })
-          if (!isCheckCurrent(context, checkVersion)) return
+          if (!isCurrent()) return
           expiration.value = exp as bigint
         }
         catch {
-          if (!isCheckCurrent(context, checkVersion)) return
+          if (!isCurrent()) return
           expiration.value = undefined
         }
         flowState.value = KeyringFlowState.Loading
-        await initExtensionState(context, checkVersion)
+        await initExtensionState(context, checkVersion, requestIsCurrent)
       }
     }
     catch (err) {
-      if (!isCheckCurrent(context, checkVersion)) return
+      if (!isCurrent()) return
       logWarn('useKeyring: Failed to check credential', err)
       flowState.value = KeyringFlowState.Error
       error.value = 'Failed to check keyring credential'
@@ -281,23 +321,27 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   const initExtensionState = async (
     context: KeyringContext,
     checkVersion = credentialCheckVersion,
+    requestIsCurrent: () => boolean = () => true,
   ) => {
+    const isCurrent = () => isCheckCurrent(context, checkVersion) && requestIsCurrent()
     try {
       const installed = await KeyringConnect.isKeyringConnectInstalled()
-      if (!isCheckCurrent(context, checkVersion)) return
+      if (!isCurrent()) return
       if (!installed) {
         flowState.value = KeyringFlowState.Install
         return
       }
 
       const state = await KeyringConnect.getExtensionState()
-      if (!isCheckCurrent(context, checkVersion)) return
+      if (!isCurrent()) return
       const cred = state?.credentialData
       if (isCredentialForContext(cred, context.userAddress, policyId.value, context.chainId)) {
         credentialData.value = cred
+        scheduleCredentialExpiry(cred, context)
         flowState.value = KeyringFlowState.Ready
       }
       else {
+        clearCredentialData()
         flowState.value = KeyringFlowState.Start
         if (isCredentialIdentityForContext(cred, context.userAddress, policyId.value, context.chainId)) {
           statusMessage.value = 'Your previous Keyring credential has expired. Restart verification to continue.'
@@ -305,7 +349,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
       }
     }
     catch {
-      if (!isCheckCurrent(context, checkVersion)) return
+      if (!isCurrent()) return
       flowState.value = KeyringFlowState.Start
     }
   }
@@ -336,7 +380,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     }
 
     flowState.value = KeyringFlowState.Progress
-    credentialData.value = null
+    clearCredentialData()
     error.value = undefined
     statusMessage.value = undefined
 
@@ -372,31 +416,15 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     state: ExtensionState | null,
     context: KeyringContext,
     attempt: number,
+    stateVersion: number,
     manualCheck = false,
   ) => {
-    if (!isAttemptCurrent(context, attempt)) return
-    const stateVersion = ++extensionStateVersion
+    if (!isAttemptCurrent(context, attempt) || stateVersion !== extensionStateVersion) return
 
     if (!state) {
-      let installed: boolean | undefined
-      try {
-        installed = await KeyringConnect.isKeyringConnectInstalled()
-      }
-      catch (err) {
-        logWarn('useKeyring: Failed to confirm Keyring extension installation', err)
-      }
-
-      if (!isAttemptCurrent(context, attempt) || stateVersion !== extensionStateVersion) return
-      credentialData.value = null
-      if (installed === false) {
-        flowState.value = KeyringFlowState.Install
-        statusMessage.value = undefined
-        stopStatusPolling()
-      }
-      else {
-        flowState.value = KeyringFlowState.Progress
-        statusMessage.value = 'Could not reach the Keyring extension. Retrying…'
-      }
+      clearCredentialData()
+      flowState.value = KeyringFlowState.Progress
+      statusMessage.value = 'Could not reach the Keyring extension. Retrying…'
       return
     }
 
@@ -404,11 +432,12 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     if (cred) {
       if (isCredentialForContext(cred, context.userAddress, policyId.value, context.chainId)) {
         credentialData.value = cred
+        scheduleCredentialExpiry(cred, context)
         flowState.value = KeyringFlowState.Ready
         statusMessage.value = undefined
       }
       else {
-        credentialData.value = null
+        clearCredentialData()
         flowState.value = KeyringFlowState.Start
         statusMessage.value = isCredentialIdentityForContext(cred, context.userAddress, policyId.value, context.chainId)
           ? 'Your previous Keyring credential has expired. Restart verification to continue.'
@@ -419,7 +448,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     }
 
     if (state.status === 'error' || state.status === 'prove_error') {
-      credentialData.value = null
+      clearCredentialData()
       flowState.value = KeyringFlowState.Error
       error.value = state.error || 'Keyring verification failed'
       statusMessage.value = undefined
@@ -429,8 +458,9 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
 
     const extensionUserMatches = state.user?.wallet_address?.toLowerCase() === context.userAddress.toLowerCase()
     if (extensionUserMatches && state.user?.credential_status === 'valid') {
-      await checkCredential()
+      await checkCredential(() => isAttemptCurrent(context, attempt) && stateVersion === extensionStateVersion)
       if (isAttemptCurrent(context, attempt)
+        && stateVersion === extensionStateVersion
         && (flowState.value === KeyringFlowState.Idle || flowState.value === KeyringFlowState.Ready)) {
         stopStatusPolling()
       }
@@ -450,10 +480,21 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     }
   }
 
+  const processExtensionState = (
+    state: ExtensionState | null,
+    context: KeyringContext,
+    attempt: number,
+    manualCheck = false,
+  ) => {
+    if (!isAttemptCurrent(context, attempt)) return
+    const stateVersion = ++extensionStateVersion
+    return handleExtensionState(state, context, attempt, stateVersion, manualCheck)
+  }
+
   const startStatusPolling = (context: KeyringContext, attempt: number) => {
     stopStatusPolling()
     unsubscribeExtension = KeyringConnect.subscribeToExtensionState((state) => {
-      void handleExtensionState(state, context, attempt)
+      void processExtensionState(state, context, attempt)
     })
   }
 
@@ -461,15 +502,16 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     const context = captureContext()
     const attempt = verificationAttempt
     if (!context || !isAttemptCurrent(context, attempt)) return
+    const stateVersion = extensionStateVersion
 
     isCheckingStatus.value = true
     try {
       const state = await KeyringConnect.getExtensionState()
-      if (!isAttemptCurrent(context, attempt)) return
-      await handleExtensionState(state, context, attempt, true)
+      if (!isAttemptCurrent(context, attempt) || stateVersion !== extensionStateVersion) return
+      await processExtensionState(state, context, attempt, true)
     }
     catch (err) {
-      if (!isAttemptCurrent(context, attempt)) return
+      if (!isAttemptCurrent(context, attempt) || stateVersion !== extensionStateVersion) return
       logWarn('useKeyring: Failed to check extension status', err)
       flowState.value = KeyringFlowState.Error
       error.value = 'Failed to check Keyring extension status'
@@ -487,7 +529,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
     stopStatusPolling()
     isCheckingStatus.value = false
     flowState.value = KeyringFlowState.Start
-    credentialData.value = null
+    clearCredentialData()
     error.value = undefined
     statusMessage.value = undefined
   }
@@ -522,6 +564,8 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
       credentialCheckVersion += 1
       verificationAttempt += 1
       stopStatusPolling()
+      extensionStateVersion += 1
+      clearCredentialExpiryTimer()
       isLoading.value = false
       isCheckingStatus.value = false
       credentialData.value = null
@@ -549,6 +593,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
     stopStatusPolling()
+    clearCredentialExpiryTimer()
   })
 
   return {

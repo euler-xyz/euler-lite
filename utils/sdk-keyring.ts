@@ -5,6 +5,7 @@ import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getVaultHookTarget } from '~/utils/vault-hooks'
 import { getPublicClient } from '~/utils/public-client'
 import { resolveKeyringContractAddress } from '~/utils/keyring-hook-target'
+import { logWarn } from '~/utils/errorHandling'
 
 type CredentialKey = `${number}:${string}:${string}:${number}`
 
@@ -72,7 +73,8 @@ export const getSdkKeyringCredential: KeyringPluginConfig['getCredentialData'] =
     if (currentKeyringAddress !== cached.keyringContractAddress) return null
     return cached.credential
   }
-  catch {
+  catch (error) {
+    logWarn('sdkKeyring/resolveKeyringContractAddress', error)
     return null
   }
 }
