@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { formatNumber } from '~/utils/string-utils'
 import { PROVIDER_LABELS, PROVIDER_LOGOS } from '~/entities/reward-campaign'
-import type { ProjectedYieldDetails, ProjectedYieldRateLine } from '~/utils/projected-yield'
+import {
+  getProjectedRewardAprPresentation,
+  type ProjectedYieldDetails,
+  type ProjectedYieldRateLine,
+  type ProjectedYieldRewardLine,
+} from '~/utils/projected-yield'
 
 const emit = defineEmits<{ close: [] }>()
 const {
@@ -60,6 +65,8 @@ const duplicateRateIdentities = computed(() => {
 })
 const showRateVaultAddress = (rate: ProjectedYieldRateLine) =>
   Boolean(rate.vaultAddress && duplicateRateIdentities.value.has(rateIdentity(rate)))
+const rewardAprPresentation = (reward: ProjectedYieldRewardLine) =>
+  getProjectedRewardAprPresentation(reward.beforeApr, reward.afterApr)
 </script>
 
 <template>
@@ -193,12 +200,12 @@ const showRateVaultAddress = (rate: ProjectedYieldRateLine) =>
           </div>
         </div>
         <p class="text-p2 whitespace-nowrap">
-          <template v-if="showTransition(reward.beforeApr, reward.afterApr) || reward.beforeApr == null || reward.afterApr == null">
-            <span class="text-content-tertiary">{{ displayPercent(reward.beforeApr) }}</span>
-            &rarr; {{ displayPercent(reward.afterApr) }}
+          <template v-if="rewardAprPresentation(reward).before != null">
+            <span class="text-content-tertiary">{{ rewardAprPresentation(reward).before }}</span>
+            &rarr; {{ rewardAprPresentation(reward).after }}
           </template>
           <template v-else>
-            {{ displayPercent(reward.afterApr) }}
+            {{ rewardAprPresentation(reward).after }}
           </template>
         </p>
       </div>

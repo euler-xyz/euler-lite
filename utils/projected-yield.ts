@@ -2,6 +2,7 @@ import type { YieldApyBreakdown } from '@eulerxyz/euler-v2-sdk'
 import type { RewardCampaign, RewardAction, RewardSource } from '~/entities/reward-campaign'
 import { rewardCampaignDisplay, rewardCampaignKey } from '~/entities/reward-campaign'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import { formatNumber } from '~/utils/string-utils'
 
 export type ProjectedYieldMetric = 'net-apy' | 'roe' | 'supply-apy'
 
@@ -51,12 +52,38 @@ export interface ProjectedYieldRewardLine {
   afterApr?: number | null
 }
 
+export interface ProjectedRewardAprPresentation {
+  before?: string
+  after: string
+}
+
 export interface ProjectedYieldDetails {
   metric: ProjectedYieldMetric
   before?: ProjectedYieldState | null
   after: ProjectedYieldState
   rateLines: ProjectedYieldRateLine[]
   rewards: ProjectedYieldRewardLine[]
+}
+
+/**
+ * Format a projected campaign row without treating an inapplicable current
+ * campaign as a negative-looking dash. A numeric zero remains a real current
+ * APR, while a campaign that no longer applies keeps its transition to "-".
+ */
+export const getProjectedRewardAprPresentation = (
+  before: number | null | undefined,
+  after: number | null | undefined,
+): ProjectedRewardAprPresentation => {
+  const display = (value: number | null | undefined) =>
+    value == null ? '-' : `${formatNumber(value)}%`
+  const beforeDisplay = display(before)
+  const afterDisplay = display(after)
+
+  if (before != null && (after == null || beforeDisplay !== afterDisplay)) {
+    return { before: beforeDisplay, after: afterDisplay }
+  }
+
+  return { after: afterDisplay }
 }
 
 const zeroBreakdown = (): YieldApyBreakdown => ({
