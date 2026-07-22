@@ -96,6 +96,10 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryV3RewardsApyPage: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryVaultInfoERC4626: { staleTimeMs: DEFAULT_STALE_TIME_MS },
 
+  // === Activity feeds ===
+  queryAccountActivityEvents: { staleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryVaultActivityEvents: { staleTimeMs: MINUTE, invalidateAfterTx: true },
+
   // === Plan-critical chain reads ===
   queryAccountVaults: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },

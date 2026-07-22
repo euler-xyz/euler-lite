@@ -28,6 +28,7 @@ import {
   EMPTY_INTRINSIC_APY,
   getVaultIntrinsicApy,
   getVaultIntrinsicApyInfo,
+  withProjectedVaultIntrinsicApy,
   withVaultIntrinsicApy,
 } from '~/utils/vault-intrinsic-apy'
 
@@ -148,6 +149,22 @@ describe('withVaultIntrinsicApy', () => {
     const supply = withVaultIntrinsicApy(5, vaultWith(apyInfo(2)), true)
     const borrow = withVaultIntrinsicApy(5, vaultWith(apyInfo(2)), true)
     expect(supply).toBe(borrow)
+  })
+})
+
+describe('withProjectedVaultIntrinsicApy', () => {
+  it('recomputes compounding from the projected raw APY', () => {
+    const vault = vaultWith(apyInfo(4))
+
+    expect(withProjectedVaultIntrinsicApy(5, 8, vault, true))
+      .toBeCloseTo(8 + (1 + 8 / 100) * 4)
+  })
+
+  it('falls back to the current raw APY when projection is unavailable', () => {
+    const vault = vaultWith(apyInfo(4))
+
+    expect(withProjectedVaultIntrinsicApy(5, null, vault, true))
+      .toBe(withVaultIntrinsicApy(5, vault, true))
   })
 })
 

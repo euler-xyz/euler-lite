@@ -305,8 +305,10 @@ watch(
                   && selectedHeader?.axis === 'column'
                   ? 'text-accent-500 shadow-[inset_0_0_0_9999px_rgba(var(--accent-rgb),0.10)]'
                   : isColumnHighlighted(col.address)
-                    ? 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]'
-                    : 'text-content-primary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]'
+                    ? (col.isExternal ? 'text-content-tertiary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]' : 'text-content-primary shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.06)]')
+                    : (col.isExternal
+                      ? 'text-content-tertiary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]'
+                      : 'text-content-primary hover:shadow-[inset_0_0_0_9999px_rgba(255,255,255,0.04)]')
               "
               @click.stop="$emit('selectHeader', col.address, 'column')"
             >

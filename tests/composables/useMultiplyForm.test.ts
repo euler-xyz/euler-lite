@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
+import type { RewardCampaign } from '~/entities/reward-campaign'
 
 const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
@@ -58,9 +59,18 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
         message: 'The supply cap has been reached. New deposits will fail.',
       })),
       getBorrowCapWarning: vi.fn(() => null),
+      getProjectedRatesBatch: vi.fn(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n }))),
+      getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
+      getSupplyRewardApy: vi.fn(() => 0),
+      getBorrowRewardApyForCollaterals: vi.fn(() => 0),
+      getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
+      getSupplyRewardCampaigns: vi.fn(() => [] as RewardCampaign[]),
+      getBorrowRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
+      getEligibleLoopingRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
     },
   }
 })
+const rewardsVersion = ref(0)
 
 vi.mock('#components', () => ({
   OperationReviewModal: {},
@@ -127,7 +137,7 @@ vi.mock('~/composables/borrow/useMultiplyCowSwap', () => ({
 
 vi.mock('~/utils/sdk-prices', () => ({
   getAssetUsdValue: vi.fn(async () => 0),
-  getAssetUsdValueOrZero: vi.fn(async () => 0),
+  getAssetUsdValueForEstimate: mocks.getAssetUsdValueForEstimate,
   getAssetOraclePrice: vi.fn(() => ({ amountOutMid: 1n, amountOutAsk: 1n })),
   getCollateralOraclePrice: vi.fn(() => ({ amountOutMid: 1n, amountOutBid: 1n })),
   getCollateralShareOraclePrice: vi.fn(() => ({ amountIn: 1n })),
@@ -135,14 +145,21 @@ vi.mock('~/utils/sdk-prices', () => ({
 }))
 
 vi.mock('~/utils/vault/apy', () => ({
+  areProjectedRatesComplete: (projectedRates: unknown[], expectedCount: number) =>
+    projectedRates.length === expectedCount && projectedRates.every(projected => projected !== null),
   getProjectedRates: vi.fn(async () => null),
+  getProjectedRatesBatch: mocks.getProjectedRatesBatch,
+  getPositionMultiplier: vi.fn(() => 1),
 }))
 
 vi.mock('~/utils/multiply-math', () => ({
   computeLeverageDebt: vi.fn(() => 1n),
   computeMaxMultiplier: vi.fn(() => 5),
   computeMinMultiplier: vi.fn(() => 1),
-  computeWeightedSupplyApy: vi.fn(() => 0),
+  computeWeightedSupplyApy: vi.fn((supplyUsd: number, supplyApy: number, longUsd: number | null, longApy: number | null) => {
+    if (!longUsd || longUsd <= 0 || longApy === null) return supplyApy
+    return (supplyUsd * supplyApy + longUsd * longApy) / (supplyUsd + longUsd)
+  }),
 }))
 
 vi.mock('~/utils/swapRouteItems', () => ({
@@ -154,7 +171,6 @@ vi.mock('~/utils/priceImpact', () => ({
 }))
 
 vi.mock('~/utils/repayUtils', () => ({
-  calculateRoe: vi.fn(() => 0),
   computeNextHealth: vi.fn(() => null),
   computeLiquidationPrice: vi.fn(() => null),
 }))
@@ -207,6 +223,15 @@ const makeForm = (vault: EVault) => useMultiplyForm({
 describe('useMultiplyForm cap validation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n })))
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
+    mocks.getSupplyRewardApy.mockReturnValue(0)
+    mocks.getBorrowRewardApyForCollaterals.mockReturnValue(0)
+    mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(0)
+    mocks.getSupplyRewardCampaigns.mockReturnValue([])
+    mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([])
+    mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([])
+    rewardsVersion.value = 0
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -254,8 +279,13 @@ describe('useMultiplyForm cap validation', () => {
       finalizeTxAndRedirect: vi.fn(),
     }))
     vi.stubGlobal('useRewardsApy', () => ({
-      getSupplyRewardApy: vi.fn(async () => 0),
-      getBorrowRewardApy: vi.fn(async () => 0),
+      version: rewardsVersion,
+      getSupplyRewardApy: mocks.getSupplyRewardApy,
+      getBorrowRewardApyForCollaterals: mocks.getBorrowRewardApyForCollaterals,
+      getEligibleLoopingRewardApyForCollaterals: mocks.getEligibleLoopingRewardApyForCollaterals,
+      getSupplyRewardCampaigns: mocks.getSupplyRewardCampaigns,
+      getBorrowRewardCampaignsForCollaterals: mocks.getBorrowRewardCampaignsForCollaterals,
+      getEligibleLoopingRewardCampaignsForCollaterals: mocks.getEligibleLoopingRewardCampaignsForCollaterals,
     }))
     vi.stubGlobal('useUserSettings', () => ({
       settings: ref({ enableIntrinsicApy: false }),
@@ -307,5 +337,141 @@ describe('useMultiplyForm cap validation', () => {
       title: 'Supply cap reached',
       message: 'The supply cap has been reached. New deposits will fail.',
     })
+  })
+
+  it('projects only the borrowed long deposit for savings collateral', async () => {
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.isMultiplySavingCollateral.value = true
+    form.multiplyInputAmount.value = '5'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
+    const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{ cashDelta: bigint }>
+    expect(requests[0]?.cashDelta).toBe(1n)
+  })
+
+  it('derives projected Net APY, ROE, and rate transitions from one breakdown', async () => {
+    const rateUnit = 10n ** 25n
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(100)
+    mocks.getProjectedRatesBatch.mockResolvedValue([
+      { supplyAPY: 2n * rateUnit, borrowAPY: 0n },
+      { supplyAPY: 0n, borrowAPY: rateUnit },
+    ])
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(form.multiplyNetApyAfter.value).toBe(1.5))
+    expect(form.multiplyRoeAfter.value).toBe(3)
+    expect(form.projectedYieldDetails.value?.netApy.after.total).toBe(form.multiplyNetApyAfter.value)
+    expect(form.projectedYieldDetails.value?.roe.after.total).toBe(form.multiplyRoeAfter.value)
+    expect(form.projectedYieldDetails.value?.netApy.rateLines).toMatchObject([
+      { label: 'Collateral lending APY', before: 0, after: 2 },
+      { label: 'Liability borrow APY', before: 0, after: 1 },
+    ])
+  })
+
+  it('hides projected APY when a requested rate is unavailable', async () => {
+    mocks.getProjectedRatesBatch.mockResolvedValueOnce([null])
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
+    expect(form.multiplyNetApyAfter.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+  })
+
+  it('hides projected metrics when a positive leg has no USD price', async () => {
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(undefined)
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalled())
+    expect(form.multiplySupplyValueUsd.value).toBeNull()
+    expect(form.multiplyLongValueUsd.value).toBeNull()
+    expect(form.multiplyBorrowValueUsd.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+  })
+
+  it('keeps projected risk metrics unavailable while long-collateral pricing is pending', async () => {
+    let resolveLongValue!: (value: number) => void
+    const pendingLongValue = new Promise<number>((resolve) => {
+      resolveLongValue = resolve
+    })
+    let priceCall = 0
+    mocks.getAssetUsdValueForEstimate.mockImplementation(async () => {
+      priceCall++
+      if (priceCall === 2) return pendingLongValue
+      return 100
+    })
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledTimes(3))
+    expect(form.multiplyLongValueUsd.value).toBeNull()
+    expect(form.multiplyTotalSupplyUsd.value).toBeNull()
+    expect(form.multiplyNextLtv.value).toBeNull()
+    expect(form.projectedYieldDetails.value).toBeNull()
+
+    resolveLongValue(100)
+
+    await vi.waitFor(() => expect(form.multiplyTotalSupplyUsd.value).toBe(200))
+    expect(form.multiplyNextLtv.value).toBe(50)
+    expect(form.projectedYieldDetails.value).not.toBeNull()
+  })
+
+  it('preserves each after-eligible reward campaign and its token identity', async () => {
+    const campaigns = {
+      supply: {
+        campaignId: 'supply', source: 'merkl', action: 'LEND', apr: 0.02,
+        rewardTokenSymbol: 'SUP', rewardTokenIcon: '/sup.png',
+      } as RewardCampaign,
+      borrow: {
+        campaignId: 'borrow', source: 'brevis', action: 'BORROW', apr: 0.03,
+        rewardTokenSymbol: 'BRW', rewardTokenIcon: '/brw.png',
+      } as RewardCampaign,
+      looping: {
+        campaignId: 'looping', source: 'fuul', action: 'LOOPING', apr: 0.04,
+        rewardTokenSymbol: 'LOOP', rewardTokenIcon: '/loop.png',
+      } as RewardCampaign,
+    }
+    mocks.getAssetUsdValueForEstimate.mockResolvedValue(100)
+    mocks.getSupplyRewardApy.mockReturnValue(2)
+    mocks.getBorrowRewardApyForCollaterals.mockReturnValue(3)
+    mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(4)
+    mocks.getSupplyRewardCampaigns.mockReturnValue([campaigns.supply])
+    mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([campaigns.borrow])
+    mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([campaigns.looping])
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await vi.waitFor(() => expect(form.projectedYieldDetails.value?.netApy.rewards).toHaveLength(3))
+
+    expect(form.projectedYieldDetails.value?.netApy.after.breakdown.rewards).toBe(5.5)
+    expect(form.projectedYieldDetails.value?.netApy.rewards.map(reward => ({
+      symbol: reward.rewardToken.symbol,
+      icon: reward.rewardToken.icon,
+      afterApr: reward.afterApr,
+    }))).toEqual([
+      { symbol: 'BRW', icon: '/brw.png', afterApr: 3 },
+      { symbol: 'LOOP', icon: '/loop.png', afterApr: 4 },
+      { symbol: 'SUP', icon: '/sup.png', afterApr: 2 },
+    ])
   })
 })

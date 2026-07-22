@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { getNetAPY } from '~/utils/vault/apy'
-import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getPositionMultiplier, type ProjectedRates } from '~/utils/vault/apy'
+import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
+import { createRaceGuard } from '~/utils/race-guard'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isRoeStateApplicable, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
 import { isCowProviderOrQuote } from '~/entities/cowswap'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
-import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
+import { formatLiquidationBuffer as formatLiqBuffer, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { computeMaxMultiplier } from '~/utils/multiply-math'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -25,6 +26,14 @@ import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { reportClientEvent } from '~/utils/client-observability'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldCampaignInput,
+  type ProjectedYieldDetails,
+  type ProjectedYieldMetric,
+} from '~/utils/projected-yield'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,7 +47,13 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { eulerLensAddresses, chainId } = useEulerAddresses()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const {
+  getBorrowRewardApyForCollaterals,
+  getEligibleLoopingRewardApyForCollaterals,
+  getBorrowRewardCampaignsForCollaterals,
+  getEligibleLoopingRewardCampaignsForCollaterals,
+} = useRewardsApy()
+const { getCollateralApySnapshot } = usePositionCollateralApy()
 const { getTokenCategoryTags } = useTokenList()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -116,9 +131,14 @@ const projectedMultiplyCollateralVaults = computed(() =>
     multiplyLongVault.value,
   ]),
 )
-const isMultiplyRoeApplicable = computed(() =>
-  positionRoeCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(projectedMultiplyCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+const isCurrentMultiplyRoeApplicable = computed(() =>
+  isRoeStateApplicable(positionRoeCollateralVaults.value, multiplyShortVault.value, getTokenCategoryTags),
+)
+const isNextMultiplyRoeApplicable = computed(() =>
+  isRoeStateApplicable({
+    vaults: projectedMultiplyCollateralVaults.value,
+    isComplete: positionRoeCollateralVaults.value.isComplete,
+  }, multiplyShortVault.value, getTokenCategoryTags),
 )
 const correlatedBadgeTitle = computed(() => {
   const category = getTokenAddressesCorrelationCategoryLabel(
@@ -159,28 +179,6 @@ const multiplyRouteEmptyMessage = computed(() => {
     return 'Increase multiplier to fetch quotes'
   }
   return 'No quotes found'
-})
-
-const multiplySupplyApy = computed(() => {
-  if (!multiplySupplyVault.value) {
-    return null
-  }
-  const base = getVaultSupplyApy(multiplySupplyVault.value)
-  return withVaultIntrinsicApy(base, multiplySupplyVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(multiplySupplyVault.value.address)
-})
-const multiplyLongApy = computed(() => {
-  if (!multiplyLongVault.value) {
-    return null
-  }
-  const base = getVaultSupplyApy(multiplyLongVault.value)
-  return withVaultIntrinsicApy(base, multiplyLongVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(multiplyLongVault.value.address)
-})
-const multiplyBorrowApy = computed(() => {
-  if (!multiplyShortVault.value) {
-    return null
-  }
-  const base = getVaultBorrowApy(multiplyShortVault.value)
-  return withVaultIntrinsicApy(base, multiplyShortVault.value, enableIntrinsicApy.value) - getBorrowRewardApy(multiplyShortVault.value.address, multiplySupplyVault.value?.address)
 })
 
 const multiplyDebtAmountNano = computed(() => {
@@ -225,6 +223,16 @@ const multiplyCurrentMultiple = computed(() => {
   const rounded = Math.max(1, Math.round(rawMultiple * 100) / 100)
   return Math.min(rounded, multiplyMaxMultiplier.value || rounded)
 })
+const projectedBorrowRates = ref<ProjectedRates | null>(null)
+const projectedBorrowRatesComplete = ref(false)
+const multiplyBorrowApy = computed(() => {
+  if (!multiplyShortVault.value || !projectedBorrowRatesComplete.value) {
+    return null
+  }
+  const currentRaw = getVaultBorrowApy(multiplyShortVault.value)
+  const projectedRaw = projectedBorrowRates.value ? nanoToValue(projectedBorrowRates.value.borrowAPY, 25) : null
+  return withProjectedVaultIntrinsicApy(currentRaw, projectedRaw, multiplyShortVault.value, enableIntrinsicApy.value)
+})
 const multiplyMinMultiplier = computed(() => {
   const current = multiplyCurrentMultiple.value
   if (!current || !Number.isFinite(current)) {
@@ -262,117 +270,301 @@ const multiplySwapReady = computed(() => {
   }
   return Boolean(multiplyEffectiveQuote.value || (multiplyIsSameAsset.value && multiplyDebtAmountNano.value > 0n))
 })
-const multiplyLongValueUsd = ref<number | null>(null)
-watchEffect(async () => {
-  if (!multiplyLongVault.value) {
-    multiplyLongValueUsd.value = null
-    return
-  }
-  if (!multiplySwapAmountOut.value) {
-    multiplyLongValueUsd.value = null
-    return
-  }
-  multiplyLongValueUsd.value = (await getAssetUsdValue(multiplySwapAmountOut.value, multiplyLongVault.value, 'off-chain')) ?? null
-})
 const multiplyBorrowValueUsd = ref<number | null>(null)
+const multiplyBorrowValueGuard = createRaceGuard()
 watchEffect(async () => {
-  if (!multiplyShortVault.value) {
+  const gen = multiplyBorrowValueGuard.next()
+  multiplyBorrowValueUsd.value = null
+  const vault = multiplyShortVault.value
+  const amount = multiplyDebtAmountNano.value
+  if (!vault || !amount) {
     multiplyBorrowValueUsd.value = null
     return
   }
-  if (!multiplyDebtAmountNano.value) {
-    multiplyBorrowValueUsd.value = null
-    return
-  }
-  multiplyBorrowValueUsd.value = (await getAssetUsdValue(multiplyDebtAmountNano.value, multiplyShortVault.value, 'off-chain')) ?? null
+  const value = (await getAssetUsdValueForEstimate(amount, vault, 'off-chain')) ?? null
+  if (!multiplyBorrowValueGuard.isStale(gen)) multiplyBorrowValueUsd.value = value
 })
 const currentSupplyValueUsd = ref<number | null>(null)
+const currentWeightedSupplyApy = ref<number | null>(null)
+const currentSnapshotCollateralAddresses = ref<string[]>([])
+const currentCollateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
+const currentSupplySnapshotGuard = createRaceGuard()
 watchEffect(async () => {
-  if (!position.value || !multiplyLongVault.value) {
+  const gen = currentSupplySnapshotGuard.next()
+  currentSupplyValueUsd.value = null
+  currentWeightedSupplyApy.value = null
+  currentSnapshotCollateralAddresses.value = []
+  currentCollateralSnapshot.value = null
+  if (!position.value || !multiplyShortVault.value) {
     currentSupplyValueUsd.value = null
+    currentWeightedSupplyApy.value = null
+    currentSnapshotCollateralAddresses.value = []
+    currentCollateralSnapshot.value = null
     return
   }
-  currentSupplyValueUsd.value = (await getAssetUsdValue(position.value.supplied, multiplyLongVault.value, 'off-chain')) ?? null
+  const snapshot = await getCollateralApySnapshot(position.value, multiplyShortVault.value)
+  if (currentSupplySnapshotGuard.isStale(gen)) return
+  currentSupplyValueUsd.value = snapshot.supplyUsd
+  currentWeightedSupplyApy.value = snapshot.weightedSupplyApy
+  currentSnapshotCollateralAddresses.value = snapshot.collateralAddresses ?? position.value.collateralVaults ?? []
+  currentCollateralSnapshot.value = snapshot.isComplete ? snapshot : null
 })
 const currentBorrowValueUsd = ref<number | null>(null)
+const currentBorrowValueGuard = createRaceGuard()
 watchEffect(async () => {
-  if (!position.value || !multiplyShortVault.value) {
+  const gen = currentBorrowValueGuard.next()
+  currentBorrowValueUsd.value = null
+  const currentPosition = position.value
+  const vault = multiplyShortVault.value
+  if (!currentPosition || !vault) {
     currentBorrowValueUsd.value = null
     return
   }
-  currentBorrowValueUsd.value = (await getAssetUsdValue(position.value.borrowed, multiplyShortVault.value, 'off-chain')) ?? null
+  const value = (await getAssetUsdValueForEstimate(currentPosition.borrowed, vault, 'off-chain')) ?? null
+  if (!currentBorrowValueGuard.isStale(gen)) currentBorrowValueUsd.value = value
 })
-const nextSupplyValueUsd = computed(() => {
-  if (currentSupplyValueUsd.value === null) {
-    return null
+const nextSupplyValueUsd = ref<number | null>(null)
+const multiplyWeightedSupplyApy = ref<number | null>(null)
+const nextSnapshotCollateralAddresses = ref<string[]>([])
+const nextCollateralSnapshot = shallowRef<CollateralApySnapshot | null>(null)
+const nextSupplySnapshotGuard = createRaceGuard()
+watchEffect(async () => {
+  const gen = nextSupplySnapshotGuard.next()
+  const currentPosition = position.value
+  const shortVault = multiplyShortVault.value
+  const longVault = multiplyLongVault.value
+  const debtNano = multiplyDebtAmountNano.value
+  const swapAmountOut = multiplySwapAmountOut.value
+  const fallbackCollateralAddresses = projectedMultiplyCollateralVaults.value.map(vault => vault.address)
+  nextSupplyValueUsd.value = null
+  multiplyWeightedSupplyApy.value = null
+  nextSnapshotCollateralAddresses.value = []
+  nextCollateralSnapshot.value = null
+  projectedBorrowRates.value = null
+  projectedBorrowRatesComplete.value = false
+  if (!currentPosition || !shortVault || !longVault || debtNano <= 0n) {
+    nextSupplyValueUsd.value = null
+    multiplyWeightedSupplyApy.value = null
+    nextSnapshotCollateralAddresses.value = []
+    nextCollateralSnapshot.value = null
+    return
   }
-  return currentSupplyValueUsd.value + (multiplyLongValueUsd.value || 0)
+  const snapshot = await getCollateralApySnapshot(currentPosition, shortVault, {
+    deltas: [{
+      vaultAddress: longVault.address,
+      assetsDelta: swapAmountOut,
+      projectRates: true,
+    }],
+    liabilityRateDelta: {
+      cashDelta: -debtNano,
+      borrowsDelta: debtNano,
+    },
+  })
+  if (nextSupplySnapshotGuard.isStale(gen)) return
+  nextSupplyValueUsd.value = snapshot.supplyUsd
+  multiplyWeightedSupplyApy.value = snapshot.weightedSupplyApy
+  nextSnapshotCollateralAddresses.value = snapshot.collateralAddresses ?? fallbackCollateralAddresses
+  nextCollateralSnapshot.value = snapshot.isComplete ? snapshot : null
+  projectedBorrowRates.value = snapshot.liabilityProjectedRates
+  projectedBorrowRatesComplete.value = snapshot.isComplete && snapshot.liabilityProjectedRates !== null
 })
 const nextBorrowValueUsd = computed(() => {
-  if (currentBorrowValueUsd.value === null) {
+  if (currentBorrowValueUsd.value === null || multiplyBorrowValueUsd.value === null) {
     return null
   }
-  return currentBorrowValueUsd.value + (multiplyBorrowValueUsd.value || 0)
+  return currentBorrowValueUsd.value + multiplyBorrowValueUsd.value
 })
-const multiplyWeightedSupplyApy = computed(() => {
-  if (currentSupplyValueUsd.value === null || multiplyLongApy.value === null) {
-    return null
-  }
-  const longUsd = multiplyLongValueUsd.value || 0
-  const total = currentSupplyValueUsd.value + longUsd
-  if (!Number.isFinite(total) || total <= 0) {
-    return null
-  }
-  const supplyApy = multiplySupplyApy.value ?? multiplyLongApy.value
-  return (currentSupplyValueUsd.value * supplyApy + longUsd * multiplyLongApy.value) / total
-})
-const multiplyRoeBefore = computed(() => {
-  return calculateRoe(
-    currentSupplyValueUsd.value,
-    currentBorrowValueUsd.value,
-    multiplyLongApy.value,
-    multiplyBorrowApy.value,
+// Borrow APY at current utilization — "before" figures must not include the
+// projected post-transaction rate delta baked into multiplyBorrowApy.
+const multiplyCurrentBorrowApy = computed(() => {
+  if (!multiplyShortVault.value) return null
+  return withVaultIntrinsicApy(
+    getVaultBorrowApy(multiplyShortVault.value),
+    multiplyShortVault.value,
+    enableIntrinsicApy.value,
   )
 })
-const multiplyRoeAfter = computed(() => {
-  return calculateRoe(
-    nextSupplyValueUsd.value,
-    nextBorrowValueUsd.value,
-    multiplyWeightedSupplyApy.value,
-    multiplyBorrowApy.value,
+const currentCollateralAddresses = computed(() => currentSnapshotCollateralAddresses.value.length
+  ? currentSnapshotCollateralAddresses.value
+  : position.value?.collateralVaults ?? [])
+const nextCollateralAddresses = computed(() => nextSnapshotCollateralAddresses.value.length
+  ? nextSnapshotCollateralAddresses.value
+  : projectedMultiplyCollateralVaults.value.map(vault => vault.address))
+const currentBorrowRewardApy = computed(() => multiplyShortVault.value
+  ? getBorrowRewardApyForCollaterals(multiplyShortVault.value.address, currentCollateralAddresses.value)
+  : 0)
+const nextBorrowRewardApy = computed(() => multiplyShortVault.value
+  ? getBorrowRewardApyForCollaterals(multiplyShortVault.value.address, nextCollateralAddresses.value)
+  : 0)
+const currentLoopingRewardApy = computed(() => multiplyShortVault.value
+  ? getEligibleLoopingRewardApyForCollaterals(
+      multiplyShortVault.value.address,
+      currentCollateralAddresses.value,
+      getPositionMultiplier(currentSupplyValueUsd.value, currentBorrowValueUsd.value),
+    )
+  : 0)
+const nextLoopingRewardApy = computed(() => multiplyShortVault.value
+  ? getEligibleLoopingRewardApyForCollaterals(
+      multiplyShortVault.value.address,
+      nextCollateralAddresses.value,
+      getPositionMultiplier(nextSupplyValueUsd.value, nextBorrowValueUsd.value),
+    )
+  : 0)
+
+const buildMultiplyYieldState = (
+  metric: ProjectedYieldMetric,
+  snapshot: CollateralApySnapshot | null,
+  borrowUsd: number | null,
+  borrowApyWithIntrinsic: number | null,
+  baseBorrowApy: number | null,
+  borrowRewardApy: number,
+  loopingRewardApy: number,
+) => {
+  if (!snapshot || !snapshot.isComplete || borrowUsd === null || borrowApyWithIntrinsic === null || baseBorrowApy === null) return null
+  return getProjectedYieldState(metric, {
+    supplyUsd: snapshot.supplyUsd,
+    baseSupplyApy: snapshot.weightedBaseSupplyApy ?? snapshot.weightedSupplyApy ?? 0,
+    intrinsicSupplyApy: snapshot.weightedIntrinsicSupplyApy ?? 0,
+    supplyRewardApy: snapshot.weightedSupplyRewardApy ?? 0,
+    borrowUsd,
+    baseBorrowApy,
+    intrinsicBorrowApy: borrowApyWithIntrinsic - baseBorrowApy,
+    borrowRewardApy,
+    loopingRewardApy,
+  })
+}
+
+const currentBorrowRawApy = computed(() => multiplyShortVault.value
+  ? getVaultBorrowApy(multiplyShortVault.value)
+  : null)
+const projectedBorrowRawApy = computed(() => projectedBorrowRatesComplete.value && projectedBorrowRates.value
+  ? nanoToValue(projectedBorrowRates.value.borrowAPY, 25)
+  : null)
+const currentRoeState = computed(() => buildMultiplyYieldState(
+  'roe',
+  currentCollateralSnapshot.value,
+  currentBorrowValueUsd.value,
+  multiplyCurrentBorrowApy.value,
+  currentBorrowRawApy.value,
+  currentBorrowRewardApy.value,
+  currentLoopingRewardApy.value,
+))
+const nextRoeState = computed(() => buildMultiplyYieldState(
+  'roe',
+  nextCollateralSnapshot.value,
+  nextBorrowValueUsd.value,
+  multiplyBorrowApy.value,
+  projectedBorrowRawApy.value,
+  nextBorrowRewardApy.value,
+  nextLoopingRewardApy.value,
+))
+const currentNetApyState = computed(() => buildMultiplyYieldState(
+  'net-apy',
+  currentCollateralSnapshot.value,
+  currentBorrowValueUsd.value,
+  multiplyCurrentBorrowApy.value,
+  currentBorrowRawApy.value,
+  currentBorrowRewardApy.value,
+  currentLoopingRewardApy.value,
+))
+const nextNetApyState = computed(() => buildMultiplyYieldState(
+  'net-apy',
+  nextCollateralSnapshot.value,
+  nextBorrowValueUsd.value,
+  multiplyBorrowApy.value,
+  projectedBorrowRawApy.value,
+  nextBorrowRewardApy.value,
+  nextLoopingRewardApy.value,
+))
+const multiplyRoeBefore = computed(() => currentRoeState.value?.total ?? null)
+const multiplyRoeAfter = computed(() => nextRoeState.value?.total ?? null)
+const multiplyNetApyBefore = computed(() => currentNetApyState.value?.total ?? null)
+const multiplyNetApyAfter = computed(() => nextNetApyState.value?.total ?? null)
+
+const getRewardCampaignInputs = (
+  snapshot: CollateralApySnapshot,
+  borrowVaultAddress: string,
+  multiplier: number | null,
+): ProjectedYieldCampaignInput[] => [
+  ...snapshot.entries
+    .filter(entry => entry.supplyUsd > 0)
+    .flatMap(entry => entry.supplyCampaigns.map(campaign => ({ campaign, vaultAddress: entry.address }))),
+  ...getBorrowRewardCampaignsForCollaterals(borrowVaultAddress, snapshot.collateralAddresses)
+    .map(campaign => ({ campaign, vaultAddress: borrowVaultAddress })),
+  ...getEligibleLoopingRewardCampaignsForCollaterals(
+    borrowVaultAddress,
+    snapshot.collateralAddresses,
+    multiplier,
+  ).map(campaign => ({ campaign, vaultAddress: borrowVaultAddress })),
+]
+
+const projectedYieldDetails = computed<ProjectedYieldDetails | null>(() => {
+  const currentSnapshot = currentCollateralSnapshot.value
+  const nextSnapshot = nextCollateralSnapshot.value
+  const short = multiplyShortVault.value
+  if (!multiplySwapReady.value || !currentSnapshot || !nextSnapshot || !short) return null
+
+  const usesRoe = isCurrentMultiplyRoeApplicable.value || isNextMultiplyRoeApplicable.value
+  const before = usesRoe
+    ? isCurrentMultiplyRoeApplicable.value ? currentRoeState.value : null
+    : currentNetApyState.value
+  const after = usesRoe
+    ? isNextMultiplyRoeApplicable.value ? nextRoeState.value : null
+    : nextNetApyState.value
+  if (!after) return null
+
+  const entriesByAddress = new Map<string, { before?: number, after?: number, symbol?: string }>()
+  currentSnapshot.entries.forEach((entry) => {
+    entriesByAddress.set(entry.address.toLowerCase(), {
+      before: entry.baseSupplyApy,
+      symbol: entry.vault.asset.symbol,
+    })
+  })
+  nextSnapshot.entries.forEach((entry) => {
+    const key = entry.address.toLowerCase()
+    entriesByAddress.set(key, {
+      ...entriesByAddress.get(key),
+      after: entry.baseSupplyApy,
+      symbol: entry.vault.asset.symbol,
+    })
+  })
+  const rateLines = [...entriesByAddress.entries()]
+    .filter(([, rates]) => rates.before !== rates.after)
+    .map(([address, rates]) => ({
+      id: `supply:${address}`,
+      label: 'Collateral lending APY',
+      symbol: rates.symbol,
+      vaultAddress: address,
+      before: rates.before,
+      after: rates.after,
+    }))
+  rateLines.push({
+    id: `borrow:${short.address.toLowerCase()}`,
+    label: 'Borrow APY',
+    symbol: short.asset.symbol,
+    vaultAddress: short.address,
+    before: currentBorrowRawApy.value,
+    after: projectedBorrowRawApy.value,
+  })
+
+  const beforeCampaigns = getRewardCampaignInputs(
+    currentSnapshot,
+    short.address,
+    getPositionMultiplier(currentSupplyValueUsd.value, currentBorrowValueUsd.value),
   )
-})
-const multiplyNetApyBefore = computed(() => {
-  if (
-    currentSupplyValueUsd.value === null
-    || currentBorrowValueUsd.value === null
-    || multiplyLongApy.value === null
-    || multiplyBorrowApy.value === null
-  ) {
-    return null
+  const afterCampaigns = getRewardCampaignInputs(
+    nextSnapshot,
+    short.address,
+    getPositionMultiplier(nextSupplyValueUsd.value, nextBorrowValueUsd.value),
+  )
+
+  return {
+    metric: usesRoe ? 'roe' : 'net-apy',
+    before,
+    after,
+    rateLines,
+    rewards: mergeProjectedRewardCampaigns(beforeCampaigns, afterCampaigns),
   }
-  return getNetAPY(
-    currentSupplyValueUsd.value,
-    multiplyLongApy.value,
-    currentBorrowValueUsd.value,
-    multiplyBorrowApy.value,
-  )
-})
-const multiplyNetApyAfter = computed(() => {
-  if (
-    nextSupplyValueUsd.value === null
-    || nextBorrowValueUsd.value === null
-    || multiplyWeightedSupplyApy.value === null
-    || multiplyBorrowApy.value === null
-  ) {
-    return null
-  }
-  return getNetAPY(
-    nextSupplyValueUsd.value,
-    multiplyWeightedSupplyApy.value,
-    nextBorrowValueUsd.value,
-    multiplyBorrowApy.value,
-  )
 })
 const multiplyLiquidationLtv = computed(() => {
   if (!multiplySupplyVault.value || !multiplyShortVault.value) {
@@ -976,7 +1168,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
         >
           <template #symbol-trailing>
             <CorrelatedPairBadge
-              v-if="isMultiplyRoeApplicable"
+              v-if="isNextMultiplyRoeApplicable"
               compact
               :title="correlatedBadgeTitle"
             />
@@ -1077,26 +1269,20 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow
-              v-if="isMultiplyRoeApplicable"
+            <ProjectedYieldSummaryRow
+              v-if="isCurrentMultiplyRoeApplicable || isNextMultiplyRoeApplicable"
               label="ROE"
-            >
-              <SummaryValue
-                :before="multiplyRoeBefore !== null ? formatNumber(multiplyRoeBefore) : undefined"
-                :after="multiplyRoeAfter !== null && multiplySwapReady ? formatNumber(multiplyRoeAfter) : undefined"
-                suffix="%"
-              />
-            </SummaryRow>
-            <SummaryRow
+              :before="isCurrentMultiplyRoeApplicable ? multiplyRoeBefore : null"
+              :after="isNextMultiplyRoeApplicable && multiplySwapReady ? multiplyRoeAfter : null"
+              :details="projectedYieldDetails"
+            />
+            <ProjectedYieldSummaryRow
               v-else
               label="Net APY"
-            >
-              <SummaryValue
-                :before="multiplyNetApyBefore !== null ? formatNumber(multiplyNetApyBefore) : undefined"
-                :after="multiplyNetApyAfter !== null && multiplySwapReady ? formatNumber(multiplyNetApyAfter) : undefined"
-                suffix="%"
-              />
-            </SummaryRow>
+              :before="multiplyNetApyBefore"
+              :after="multiplySwapReady ? multiplyNetApyAfter : null"
+              :details="projectedYieldDetails"
+            />
             <SummaryRow
               label="Swap price"
               align-top
