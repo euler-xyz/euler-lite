@@ -24,10 +24,7 @@ const afterDisplay = computed(() => props.after != null ? formatNumber(props.aft
 </script>
 
 <template>
-  <SummaryRow
-    class="mobile:flex-col mobile:!items-stretch"
-    :label="label"
-  >
+  <SummaryRow :label="label">
     <template #label>
       <span class="inline-flex items-center gap-4">
         <span>{{ label }}</span>
