@@ -775,21 +775,36 @@ describe('activity display helpers', () => {
       repayUsd: '$0.72',
       collateralAmount: '0.85 wM',
       collateralUsd: '$0.85',
-      bonusUsd: '$0.13',
+      bonusUsd: '+$0.13',
+      bonusTone: 'positive',
     })
 
     // Symbol lookup misses keep the bare converted quantity.
     expect(getActivityLiquidationDisplayDetails(record).collateralAmount).toBe('0.85')
 
-    // Unprofitable liquidations show an explicitly negative bonus.
+    // Money values pad cents — "$2.70", never "$2.7".
     expect(getActivityLiquidationDisplayDetails({
       ...record,
+      repayAssetsUsd: 2.7,
+    }).repayUsd).toBe('$2.70')
+
+    // Unprofitable liquidations show an explicitly negative, danger-toned bonus.
+    const unprofitable = getActivityLiquidationDisplayDetails({
+      ...record,
       bonusUsd: -0.25,
-    }).bonusUsd).toBe('−$0.25')
+    })
+    expect(unprofitable.bonusUsd).toBe('−$0.25')
+    expect(unprofitable.bonusTone).toBe('negative')
     expect(getActivityLiquidationDisplayDetails({
       ...record,
       bonusUsd: -0.001,
     }).bonusUsd).toBe('−<$0.01')
+    const breakeven = getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: 0,
+    })
+    expect(breakeven.bonusUsd).toBe('$0.00')
+    expect(breakeven.bonusTone).toBeUndefined()
 
     // Fields the endpoint could not reconstruct stay absent, leaving the
     // event's own share-quantity display in place.

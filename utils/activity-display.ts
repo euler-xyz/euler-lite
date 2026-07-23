@@ -594,10 +594,24 @@ export const enrichActivityAssetForDisplay = (
   }
 }
 
+/**
+ * Money-style USD for activity details: cents pad to two decimals below
+ * $1000 ("$2.70", never "$2.7"), compact notation and the `<$0.01` forms
+ * apply above and below those bounds.
+ */
+export const formatActivityUsd = (value: string | number): string => {
+  const numeric = Number(value)
+  const abs = Math.abs(numeric)
+  if (!Number.isFinite(numeric) || abs >= 1000 || (abs > 0 && abs < 0.01)) {
+    return formatCompactUsdValue(value)
+  }
+  return numeric < 0 ? `-$${abs.toFixed(2)}` : `$${abs.toFixed(2)}`
+}
+
 export const formatActivityAssetUsd = (asset: ActivityAssetAmount): string | null =>
   asset.amountUsd === undefined
     ? null
-    : formatCompactUsdValue(asset.amountUsd)
+    : formatActivityUsd(asset.amountUsd)
 
 export interface ActivityLiquidationDisplayDetails {
   /** Event-time USD value of the repaid debt. */
@@ -607,6 +621,8 @@ export interface ActivityLiquidationDisplayDetails {
   collateralUsd?: string
   /** Signed event-time bonus — negative when the liquidation was unprofitable. */
   bonusUsd?: string
+  /** Rendering tone for the signed bonus. Absent for a zero bonus. */
+  bonusTone?: 'positive' | 'negative'
 }
 
 /**
@@ -620,7 +636,7 @@ export const getActivityLiquidationDisplayDetails = (
 ): ActivityLiquidationDisplayDetails => {
   const details: ActivityLiquidationDisplayDetails = {}
   if (record.repayAssetsUsd !== undefined) {
-    details.repayUsd = formatCompactUsdValue(record.repayAssetsUsd)
+    details.repayUsd = formatActivityUsd(record.repayAssetsUsd)
   }
   if (
     record.collateralAssets !== undefined
@@ -640,12 +656,21 @@ export const getActivityLiquidationDisplayDetails = (
     }
   }
   if (record.collateralAssetsUsd !== undefined) {
-    details.collateralUsd = formatCompactUsdValue(record.collateralAssetsUsd)
+    details.collateralUsd = formatActivityUsd(record.collateralAssetsUsd)
   }
   if (record.bonusUsd !== undefined) {
-    details.bonusUsd = record.bonusUsd < 0
-      ? `−${formatCompactUsdValue(Math.abs(record.bonusUsd))}`
-      : formatCompactUsdValue(record.bonusUsd)
+    // The bonus is the row's P&L figure — signed and toned like one.
+    if (record.bonusUsd < 0) {
+      details.bonusUsd = `−${formatActivityUsd(Math.abs(record.bonusUsd))}`
+      details.bonusTone = 'negative'
+    }
+    else if (record.bonusUsd > 0) {
+      details.bonusUsd = `+${formatActivityUsd(record.bonusUsd)}`
+      details.bonusTone = 'positive'
+    }
+    else {
+      details.bonusUsd = formatActivityUsd(0)
+    }
   }
   return details
 }
@@ -1037,7 +1062,7 @@ export const formatActivityValuation = (
   if (valuation.amountUsd === undefined) {
     return valuation.status === 'partial' ? 'Partial USD valuation' : null
   }
-  const amount = formatCompactUsdValue(valuation.amountUsd)
+  const amount = formatActivityUsd(valuation.amountUsd)
   return valuation.status === 'partial' ? `${amount} (partial)` : amount
 }
 

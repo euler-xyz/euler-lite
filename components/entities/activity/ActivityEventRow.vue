@@ -138,18 +138,9 @@ const assets = computed(() => {
     const label = converted
       ? 'Collateral seized'
       : getActivityAssetLabel(enriched.kind, event.category, event.type)
-    const collateralVaultDisplay = event.category === 'liquidations'
-      && enriched.kind === 'collateral'
-      && enriched.address
-      ? resolveActivityVaultDisplay(enriched.address, getRegistryVault, collateralProduct.name)
-      : null
     return {
       kind: 'asset' as const,
       address: enriched.address,
-      addressKind: getActivityAssetAddressLabel(enriched.kind, event.category),
-      addressLabel: collateralVaultDisplay?.name,
-      addressLinkKind: collateralVaultDisplay ? 'vault' as const : undefined,
-      addressVaultType: enriched.address ? getRegistryVaultType(enriched.address) : undefined,
       amount: signed ? `${direction === 'in' ? '+' : '−'}${amount}` : amount,
       amountClass: signed && direction === 'in' ? 'text-accent-600' : 'text-content-primary',
       amountTitle: amount === 'Amount unavailable' ? `Raw units: ${enriched.amountRaw}` : undefined,
@@ -182,26 +173,52 @@ const changes = computed(() => {
       addresses: entry.addresses,
     }))
 })
+// The seized collateral vault trails the numbers as its own metadata line, so
+// the amounts and the bonus read uninterrupted.
+const collateralVaultEntry = computed(() => {
+  if (event.category !== 'liquidations') return null
+  const address = event.assets?.find(asset => asset.kind === 'collateral')?.address
+  if (!address) return null
+  void registryVersion.value
+  const display = resolveActivityVaultDisplay(address, getRegistryVault, collateralProduct.name)
+  return {
+    kind: 'address' as const,
+    key: 'collateral-vault',
+    label: undefined,
+    inlineLabel: getActivityAssetAddressLabel('collateral', event.category),
+    address,
+    addressLabel: display?.name,
+    addressLinkKind: display ? 'vault' as const : undefined,
+    addressVaultType: getRegistryVaultType(address),
+  }
+})
 const valuation = computed(() => formatActivityValuationForAssets(event.valuation, event.assets ?? []))
 const details = computed(() => [
   ...assets.value,
-  ...changes.value,
   ...(liquidationDisplay.value?.bonusUsd
     ? [{
         kind: 'valuation' as const,
         key: 'liquidation-bonus',
         label: 'Liquidator bonus',
         value: liquidationDisplay.value.bonusUsd,
+        valueClass: liquidationDisplay.value.bonusTone === 'positive'
+          ? 'text-accent-600'
+          : liquidationDisplay.value.bonusTone === 'negative'
+            ? 'text-error-500'
+            : undefined,
         valueTitle: 'Collateral seized minus debt repaid, valued at the liquidation',
         addresses: undefined,
       }]
     : []),
+  ...changes.value,
+  ...(collateralVaultEntry.value ? [collateralVaultEntry.value] : []),
   ...(valuation.value
     ? [{
         kind: 'valuation' as const,
         key: 'valuation',
         label: 'USD value',
         value: valuation.value,
+        valueClass: undefined,
         valueTitle: event.valuation?.reason,
         addresses: undefined,
       }]
@@ -362,36 +379,33 @@ const vaultDisplay = computed(() => {
               :asset="detail.avatarAsset"
               size="20"
             />
-            <div class="min-w-0">
-              <div
-                class="break-words text-p3 font-medium"
-                :class="detail.amountClass"
-                :title="detail.amountTitle"
-              >
-                {{ detail.amount }}
-              </div>
-              <div
+            <div
+              class="min-w-0 break-words text-p3 font-medium"
+              :class="detail.amountClass"
+              :title="detail.amountTitle"
+            >
+              {{ detail.amount }}
+              <span
                 v-if="detail.usd"
-                class="text-p4 text-content-tertiary"
-              >
-                {{ detail.usd }}
-              </div>
+                class="whitespace-nowrap text-p4 font-normal text-content-tertiary"
+              >&middot; {{ detail.usd }}</span>
             </div>
           </div>
-          <div
-            v-if="detail.address && detail.addressKind !== 'Asset'"
-            class="activity-event-row__asset-address mt-2 flex min-w-0 items-center gap-4 text-p4"
-          >
-            <span class="shrink-0 text-content-tertiary">{{ detail.addressKind }}</span>
-            <ActivityAddress
-              :address="detail.address"
-              :chain-id="event.chainId"
-              :label="detail.addressLabel"
-              :link-kind="detail.addressLinkKind"
-              :vault-type="detail.addressVaultType"
-            />
-          </div>
         </template>
+
+        <div
+          v-else-if="detail.kind === 'address'"
+          class="activity-event-row__asset-address flex min-w-0 items-center gap-4 text-p4"
+        >
+          <span class="shrink-0 text-content-tertiary">{{ detail.inlineLabel }}</span>
+          <ActivityAddress
+            :address="detail.address"
+            :chain-id="event.chainId"
+            :label="detail.addressLabel"
+            :link-kind="detail.addressLinkKind"
+            :vault-type="detail.addressVaultType"
+          />
+        </div>
 
         <template v-else>
           <div
@@ -410,7 +424,8 @@ const vaultDisplay = computed(() => {
           </div>
           <div
             v-else
-            class="break-words text-p3 text-content-primary"
+            class="break-words text-p3"
+            :class="detail.kind === 'valuation' && detail.valueClass ? detail.valueClass : 'text-content-primary'"
             :title="detail.valueTitle"
           >
             {{ detail.value }}
