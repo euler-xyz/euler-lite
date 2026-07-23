@@ -30,29 +30,39 @@ const afterDisplay = computed(() => props.after != null ? formatNumber(props.aft
         <span>{{ label }}</span>
         <UiModalPreviewTrigger
           v-if="details"
-          class="inline-flex min-w-24 min-h-24 items-center justify-center gap-2"
+          class="inline-flex min-w-24 min-h-24 items-center justify-center"
           :component="ProjectedYieldBreakdownModal"
           :modal-data="modalData"
-          :aria-label="`Show ${label} projection${hasRewards ? ' and reward' : ''} breakdown`"
+          :aria-label="`Show ${label} projection breakdown`"
           popover-width="wide"
         >
           <SvgIcon
             class="!w-16 !h-16 text-content-muted hover:text-content-secondary transition-colors"
             name="info-circle"
           />
-          <SvgIcon
-            v-if="hasRewards"
-            class="!w-16 !h-16 text-accent-500"
-            name="sparks"
-          />
         </UiModalPreviewTrigger>
       </span>
     </template>
-    <SummaryValue
-      :before="beforeDisplay"
-      :after="afterDisplay"
-      suffix="%"
-      :estimate-only="estimateOnly"
-    />
+    <div class="inline-flex items-center gap-4">
+      <UiModalPreviewTrigger
+        v-if="details && hasRewards"
+        class="inline-flex min-w-24 min-h-24 items-center justify-center"
+        :component="ProjectedYieldBreakdownModal"
+        :modal-data="modalData"
+        :aria-label="`Show ${label} reward breakdown`"
+        popover-width="wide"
+      >
+        <SvgIcon
+          class="!w-16 !h-16 text-accent-500"
+          name="sparks"
+        />
+      </UiModalPreviewTrigger>
+      <SummaryValue
+        :before="beforeDisplay"
+        :after="afterDisplay"
+        suffix="%"
+        :estimate-only="estimateOnly"
+      />
+    </div>
   </SummaryRow>
 </template>
