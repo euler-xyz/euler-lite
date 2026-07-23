@@ -20,6 +20,7 @@ import {
   getActivityAssetsForDisplay,
   getActivityChangeEntries,
   getActivityEventIcon,
+  getActivityLiquidationDisplayDetails,
   getPortfolioActivityPositionParticipant,
   getActivityTransferDirection,
   getDisplayActivityEventTypes,
@@ -741,5 +742,69 @@ describe('activity display helpers', () => {
       type: 'transfer',
     })).toBe('in')
     expect(getActivityAmountDirection({ type: 'transfer' })).toBeUndefined()
+  })
+
+  it('formats historical liquidation valuations for display', () => {
+    const record = {
+      chainId: 1,
+      vault: VAULT as Address,
+      violator: ASSET as Address,
+      liquidator: OTHER_VAULT as Address,
+      collateral: SHARES as Address,
+      repayAssets: '724612',
+      yieldBalance: '812035276912150036',
+      debtAsset: ASSET as Address,
+      debtAssetDecimals: 6,
+      repayAssetsUsd: 0.7245298289992,
+      collateralAsset: ASSET as Address,
+      collateralAssetDecimals: 18,
+      collateralAssets: '852576641882433905',
+      collateralAssetsUsd: 0.8525394439635485,
+      bonusUsd: 0.12800961496434857,
+      valuation: { status: 'available' as const },
+      blockNumber: '25562800',
+      txHash: `0x${'ab'.repeat(32)}` as `0x${string}`,
+      timestamp: '2026-07-18T23:13:35.000Z',
+    }
+
+    expect(getActivityLiquidationDisplayDetails(record, address =>
+      address === ASSET
+        ? { address: ASSET as Address, symbol: 'wM', decimals: 18 }
+        : undefined,
+    )).toEqual({
+      repayUsd: '$0.72',
+      collateralAmount: '0.85 wM',
+      collateralUsd: '$0.85',
+      bonusUsd: '$0.13',
+    })
+
+    // Symbol lookup misses keep the bare converted quantity.
+    expect(getActivityLiquidationDisplayDetails(record).collateralAmount).toBe('0.85')
+
+    // Unprofitable liquidations show an explicitly negative bonus.
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: -0.25,
+    }).bonusUsd).toBe('−$0.25')
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: -0.001,
+    }).bonusUsd).toBe('−<$0.01')
+
+    // Fields the endpoint could not reconstruct stay absent, leaving the
+    // event's own share-quantity display in place.
+    const sparse = getActivityLiquidationDisplayDetails({
+      ...record,
+      debtAsset: undefined,
+      debtAssetDecimals: undefined,
+      repayAssetsUsd: undefined,
+      collateralAsset: undefined,
+      collateralAssetDecimals: undefined,
+      collateralAssets: undefined,
+      collateralAssetsUsd: undefined,
+      bonusUsd: undefined,
+      valuation: { status: 'unavailable' as const },
+    })
+    expect(sparse).toEqual({})
   })
 })

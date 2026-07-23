@@ -16,6 +16,7 @@ const GET_ONLY_PATHS = new Set([
   '/v3/evk/vaults/bad-debt',
   '/v3/evk/vaults/open-interest',
   '/v3/evk/vaults/open-interest/by-collateral',
+  '/v3/liquidations',
   '/v3/prices',
   '/v3/rewards/breakdown',
   '/v3/tokens',
@@ -178,6 +179,14 @@ export function buildV3ProxyLogFields(requestUrl: URL): Record<string, string> {
     && parts[2] === 'vaults'
     && parts[3] === 'open-interest'
   ) {
+    const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
+    if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
+  }
+
+  if (parts.length === 2 && parts[0] === 'v3' && parts[1] === 'liquidations') {
+    fields.v3ActivityScope = 'liquidations'
+    // Violator and liquidator filters identify wallets and are intentionally
+    // omitted; the vault filter is enough to diagnose upstream failures.
     const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
     if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
   }

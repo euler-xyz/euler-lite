@@ -43,6 +43,7 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/totals`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest/by-collateral')).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/liquidations')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/prices')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/resolve/vaults')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/rewards/breakdown')).toBe(true)
@@ -55,6 +56,8 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/bad-debt/history')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults-admin')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/apys/unknown')).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/liquidations/admin')).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/liquidations-extra')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/resolve')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/activity/accounts/not-an-address/events')).toBe(false)
     expect(isV3ProxyPathAllowed(`/v3/activity/accounts/${ACCOUNT}/events/admin`)).toBe(false)
@@ -99,6 +102,10 @@ describe('v3 proxy utilities', () => {
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/activity/vaults/1/${VAULT}/events?vaultType=evk&category=governance`),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/liquidations?chainId=1&vault=${VAULT}&violator=${ACCOUNT}&from=1782380000&to=1782984800&limit=100&offset=0`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
@@ -190,6 +197,20 @@ describe('v3 proxy utilities', () => {
       v3Limit: '25',
       v3VaultAddress: VAULT,
       v3VaultKind: 'securitize',
+    })
+  })
+
+  it('logs liquidations context without violator or liquidator addresses', () => {
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/liquidations?chainId=1&vault=${VAULT}&violator=${ACCOUNT}&liquidator=${ACCOUNT}&from=1782380000&to=1782984800&limit=100&offset=0`),
+    )).toEqual({
+      v3ActivityScope: 'liquidations',
+      v3ChainId: '1',
+      v3From: '1782380000',
+      v3Limit: '100',
+      v3Offset: '0',
+      v3To: '1782984800',
+      v3VaultAddress: VAULT,
     })
   })
 

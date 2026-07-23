@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ActivityCategory, ActivityEvent } from '@eulerxyz/euler-v2-sdk'
+import type { ActivityCategory, ActivityEvent, LiquidationRecord } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getExplorerLink } from '~/utils/block-explorer'
 import {
@@ -17,12 +17,13 @@ import {
   getActivityCategoryLabel,
   getActivityChangeEntries,
   getActivityEventIcon,
+  getActivityLiquidationDisplayDetails,
   getActivityResolvableVaultAddresses,
   getPortfolioActivityPositionParticipant,
   resolveActivityVaultDisplay,
 } from '~/utils/activity-display'
 
-const { event, showVault = false, hideCategory = false, hideTimestamp = false, grouped = false, hiddenCategory, showTransactionLink = true, nowMs } = defineProps<{
+const { event, showVault = false, hideCategory = false, hideTimestamp = false, grouped = false, hiddenCategory, showTransactionLink = true, nowMs, liquidationDetails } = defineProps<{
   event: ActivityEvent
   showVault?: boolean
   /** Portfolio groups make the category redundant, while vault filters may still need it. */
@@ -37,6 +38,8 @@ const { event, showVault = false, hideCategory = false, hideTimestamp = false, g
   showTransactionLink?: boolean
   /** Feed-owned reactive clock shared by every visible event row. */
   nowMs: number
+  /** Matching historical valuation record — enriches liquidation rows only. */
+  liquidationDetails?: LiquidationRecord
 }>()
 
 const route = useRoute()
@@ -98,6 +101,20 @@ const resolveAvatarAsset = (asset: ActivityEvent['assets'][number]) => {
   return asset.address ? { address: asset.address, symbol: asset.symbol ?? '' } : null
 }
 
+// Historical liquidation valuations resolve the collateral symbol from the
+// token list first, then from the seized collateral vault's registry asset.
+const liquidationDisplay = computed(() => {
+  if (!liquidationDetails || event.type !== 'liquidation') return null
+  void registryVersion.value
+  return getActivityLiquidationDisplayDetails(liquidationDetails, (address) => {
+    const token = tokenMetadata(address)
+    if (token) return token
+    const vaultAsset = getRegistryVault(liquidationDetails.collateral)?.asset
+    return vaultAsset && vaultAsset.address.toLowerCase() === address.toLowerCase()
+      ? vaultAsset
+      : undefined
+  })
+})
 const assets = computed(() => {
   // Re-resolve when vault or token metadata arrives after the activity page.
   void registryVersion.value
@@ -109,12 +126,18 @@ const assets = computed(() => {
       getRegistryVault,
       tokenMetadata,
     )
-    const amount = formatActivityAssetAmount(enriched, event.type)
+    const converted = enriched.kind === 'collateral'
+      ? liquidationDisplay.value?.collateralAmount
+      : undefined
+    const amount = converted ?? formatActivityAssetAmount(enriched, event.type)
     // Portfolio event verbs already communicate direction. Signs there make
     // borrow/repay read backwards, while vault history still benefits from
     // explicit inflow/outflow direction.
     const signed = !showVault && amount !== 'Amount unavailable' && direction
-    const label = getActivityAssetLabel(enriched.kind, event.category, event.type)
+    // Once converted to underlying units the quantity is no longer in shares.
+    const label = converted
+      ? 'Collateral seized'
+      : getActivityAssetLabel(enriched.kind, event.category, event.type)
     const collateralVaultDisplay = event.category === 'liquidations'
       && enriched.kind === 'collateral'
       && enriched.address
@@ -137,7 +160,11 @@ const assets = computed(() => {
       // The generic "Assets" label restates what the amount already shows —
       // keep only informative labels (Allowance, Debt repaid, …).
       label: label === 'Assets' ? undefined : label,
-      usd: formatActivityAssetUsd(enriched),
+      usd: formatActivityAssetUsd(enriched)
+        ?? (enriched.kind === 'assets'
+          ? liquidationDisplay.value?.repayUsd
+          : liquidationDisplay.value?.collateralUsd)
+        ?? null,
     }
   })
 })
@@ -159,6 +186,16 @@ const valuation = computed(() => formatActivityValuationForAssets(event.valuatio
 const details = computed(() => [
   ...assets.value,
   ...changes.value,
+  ...(liquidationDisplay.value?.bonusUsd
+    ? [{
+        kind: 'valuation' as const,
+        key: 'liquidation-bonus',
+        label: 'Liquidator bonus',
+        value: liquidationDisplay.value.bonusUsd,
+        valueTitle: 'Collateral seized minus debt repaid, valued at the liquidation',
+        addresses: undefined,
+      }]
+    : []),
   ...(valuation.value
     ? [{
         kind: 'valuation' as const,

@@ -112,6 +112,9 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   // === Activity: V3-indexed event history ===
   queryAccountActivityEvents: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
   queryVaultActivityEvents: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+  // Historical liquidation valuations are immutable once indexed, but new
+  // liquidations append — same freshness window as the feeds they enrich.
+  queryLiquidations: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
 
   // === Position migration (SDK 1.1.3) ===
   // Discovery lists are heavier connector reads (GraphQL + balance

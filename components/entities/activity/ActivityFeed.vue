@@ -48,6 +48,12 @@ const feed = useActivityFeed({
   enabled: () => props.enabled,
   categories: selectedCategories,
 })
+// Joins displayed liquidation events with their historical valuations
+// (event-time USD amounts, underlying collateral units, liquidator bonus).
+const { getLiquidationDetails } = useActivityLiquidationDetails({
+  events: () => feed.events.value,
+  enabled: () => props.enabled,
+})
 
 // A dedicated bounded query keeps the liquidation chip count honest — the
 // main feed only knows about the pages loaded so far.
@@ -320,6 +326,7 @@ watch(feed.hasLoaded, (hasLoaded) => {
                 :hidden-category="impliedCategory"
                 :show-transaction-link="group.events.length === 1"
                 :now-ms="activityNowMs"
+                :liquidation-details="getLiquidationDetails(event)"
               />
             </ul>
             <button

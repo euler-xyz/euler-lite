@@ -7,6 +7,7 @@ import type {
   ActivityEvent,
   ActivityValuation,
   ActivityVaultType,
+  LiquidationRecord,
 } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits, isAddress, maxUint256, zeroAddress, type Address } from 'viem'
 import { formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
@@ -542,8 +543,8 @@ export const formatActivityAssetAmount = (
 
 /**
  * Routine activity displays underlying asset units and omits share movements.
- * Liquidations also expose the normalized collateral-share quantity because
- * the historical underlying collateral amount is not available.
+ * Liquidations also expose the collateral quantity — shown as shares until the
+ * historical underlying conversion arrives from `/v3/liquidations`.
  */
 export const getActivityAssetsForDisplay = (
   event: Pick<ActivityEvent, 'assets' | 'category'>,
@@ -597,6 +598,57 @@ export const formatActivityAssetUsd = (asset: ActivityAssetAmount): string | nul
   asset.amountUsd === undefined
     ? null
     : formatCompactUsdValue(asset.amountUsd)
+
+export interface ActivityLiquidationDisplayDetails {
+  /** Event-time USD value of the repaid debt. */
+  repayUsd?: string
+  /** Seized collateral converted to underlying units, with symbol when known. */
+  collateralAmount?: string
+  collateralUsd?: string
+  /** Signed event-time bonus — negative when the liquidation was unprofitable. */
+  bonusUsd?: string
+}
+
+/**
+ * Formats a `/v3/liquidations` record for display on the matching liquidation
+ * event row. Every field is optional: the endpoint omits historical values it
+ * cannot reconstruct, and missing pieces leave the event's own display as-is.
+ */
+export const getActivityLiquidationDisplayDetails = (
+  record: LiquidationRecord,
+  getTokenMetadata?: ActivityTokenMetadataLookup,
+): ActivityLiquidationDisplayDetails => {
+  const details: ActivityLiquidationDisplayDetails = {}
+  if (record.repayAssetsUsd !== undefined) {
+    details.repayUsd = formatCompactUsdValue(record.repayAssetsUsd)
+  }
+  if (
+    record.collateralAssets !== undefined
+    && record.collateralAssetDecimals !== undefined
+  ) {
+    try {
+      const amount = formatSmartAmount(
+        formatUnits(BigInt(record.collateralAssets), record.collateralAssetDecimals),
+      )
+      const symbol = record.collateralAsset
+        ? getTokenMetadata?.(record.collateralAsset)?.symbol
+        : undefined
+      details.collateralAmount = symbol ? `${amount} ${symbol}` : amount
+    }
+    catch {
+      // Malformed conversion — keep the event's share-quantity display.
+    }
+  }
+  if (record.collateralAssetsUsd !== undefined) {
+    details.collateralUsd = formatCompactUsdValue(record.collateralAssetsUsd)
+  }
+  if (record.bonusUsd !== undefined) {
+    details.bonusUsd = record.bonusUsd < 0
+      ? `−${formatCompactUsdValue(Math.abs(record.bonusUsd))}`
+      : formatCompactUsdValue(record.bonusUsd)
+  }
+  return details
+}
 
 const ASSET_KIND_LABELS: Record<ActivityAssetKind, string> = {
   assets: 'Assets',
