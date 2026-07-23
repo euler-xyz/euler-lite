@@ -75,7 +75,8 @@
     "vue-tsc": "3.3.7"
   },
   "overrides": {
-    "@wagmi/connectors": "8.0.20",
+    "@base-org/account": "2.5.1",
+    "@wagmi/connectors": "8.0.22",
     "serialize-javascript": "7.0.4",
     "unhead": "2.1.15"
   },
