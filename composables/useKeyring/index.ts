@@ -122,6 +122,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   let credentialCheckVersion = 0
   let verificationAttempt = 0
   let extensionStateVersion = 0
+  let statusPollingVersion = 0
   let credentialExpiryTimer: ReturnType<typeof setTimeout> | null = null
   let credentialExpiryVersion = 0
   let disposed = false
@@ -415,6 +416,7 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
   }
 
   const stopStatusPolling = () => {
+    statusPollingVersion += 1
     if (unsubscribeExtension) {
       unsubscribeExtension()
       unsubscribeExtension = null
@@ -501,7 +503,9 @@ export const useKeyring = (vaultAddress: string | Ref<string>) => {
 
   const startStatusPolling = (context: KeyringContext, attempt: number) => {
     stopStatusPolling()
+    const pollingVersion = statusPollingVersion
     unsubscribeExtension = KeyringConnect.subscribeToExtensionState((state) => {
+      if (pollingVersion !== statusPollingVersion) return
       void processExtensionState(state, context, attempt)
     })
   }
