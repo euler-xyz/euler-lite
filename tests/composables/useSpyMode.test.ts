@@ -230,6 +230,33 @@ describe('useSpyMode', () => {
     expect(readContract.mock.calls.length).toBe(callsAfterFirst)
   })
 
+  it('keeps the in-flight resolution when the pending address is re-activated', async () => {
+    const owner = deferred<string>()
+    const readContract = vi.fn(() => owner.promise)
+    vi.stubGlobal('useRpcClient', () => ({ client: ref({ readContract }) }))
+
+    const { useSpyMode } = await import('~/composables/useSpyMode')
+    const spy = useSpyMode()
+
+    spy.activateSpyMode(FIRST)
+    await nextTick()
+    expect(readContract).toHaveBeenCalledTimes(1)
+
+    // An Activity click activates spy mode, then another consumer re-reads
+    // the same ?spy= value while the owner lookup is still in flight. The
+    // same-value ref write cannot re-trigger the watcher, so invalidating
+    // the request id here would discard the only pending result and strand
+    // the candidate unresolved forever.
+    expect(spy.activateSpyMode(FIRST)).toBe(true)
+    await nextTick()
+    expect(readContract).toHaveBeenCalledTimes(1)
+    expect(spy.isSpyResolving.value).toBe(true)
+
+    owner.resolve(FIRST_OWNER)
+    await vi.waitFor(() => expect(spy.spyAddress.value).toBe(FIRST_OWNER))
+    expect(spy.isSpyResolving.value).toBe(false)
+  })
+
   it('rejects invalid input without touching spy state', async () => {
     vi.stubGlobal('useRpcClient', () => ({ client: ref(selfOwnedClient()) }))
     const { useSpyMode } = await import('~/composables/useSpyMode')

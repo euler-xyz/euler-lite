@@ -45,6 +45,10 @@ export const useSpyMode = () => {
     const normalized = normalizeAddress(address)
     // Already verified — re-verification would only blank the UI.
     if (normalized === spyAddress.value && !pendingSpyAddress.value) return true
+    // Already pending — the in-flight owner resolution stays authoritative.
+    // Bumping the request id here would discard its result and strand the
+    // candidate in the unresolved state forever.
+    if (normalized === pendingSpyAddress.value) return true
     // Fail closed: the candidate stays out of `spyAddress` (and therefore out
     // of every query and display surface) until the EVC confirms its owner.
     pendingSpyAddress.value = normalized
