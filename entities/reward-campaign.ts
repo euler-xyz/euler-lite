@@ -6,6 +6,7 @@ import type {
   RewardSource as SdkRewardSource,
   UserReward as SdkUserReward,
 } from '@eulerxyz/euler-v2-sdk'
+import { safeExternalHttpUrl } from '~/utils/external-url'
 
 export type { RewardAction }
 
@@ -104,7 +105,10 @@ export const rewardCampaignToken = (campaign: RewardCampaign): RewardCampaignDis
 })
 
 export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined => {
-  if (campaign.sourceUrl) return campaign.sourceUrl
+  // `sourceUrl` is passed through verbatim from the rewards API response and
+  // ends up in `:href` on ~16 modal links, so the scheme is checked here rather
+  // than at each binding.
+  if (campaign.sourceUrl) return safeExternalHttpUrl(campaign.sourceUrl)
   if (campaign.source === 'merkl') return undefined
   return campaign.source === 'turtle'
     ? `https://dashboard.turtle.xyz/organizations/${TURTLE_DASHBOARD_ORGANIZATION_ID}/incentives/streams/${campaign.campaignId}`

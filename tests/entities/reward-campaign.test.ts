@@ -80,4 +80,25 @@ describe('rewardCampaignDisplay', () => {
       source: 'turtle',
     }).sourceUrl).toBe('https://dashboard.turtle.xyz/organizations/52974bc3-2c43-4576-ac18-107d92b6e0c7/incentives/streams/557af9e9-88e8-4233-95e1-630b8b37b613')
   })
+
+  // sourceUrl arrives verbatim from the rewards API and is bound to :href in
+  // the APY/RoE modals, where Vue does no scheme filtering.
+  it.each([
+    'javascript:alert(document.domain)',
+    'data:text/html,<script>alert(1)</script>',
+    'vbscript:msgbox(1)',
+    '//evil.example.com/drainer',
+  ])('drops a non-http(s) sourceUrl (%s) rather than binding it to :href', (sourceUrl) => {
+    expect(rewardCampaignDisplay({ ...baseCampaign, sourceUrl }).sourceUrl).toBeUndefined()
+  })
+
+  it('does not fall back to the provider default when a supplied sourceUrl is unsafe', () => {
+    // A rejected URL must yield no link at all — silently substituting the
+    // provider homepage would make a poisoned campaign look verified.
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      source: 'turtle',
+      sourceUrl: 'javascript:alert(1)',
+    }).sourceUrl).toBeUndefined()
+  })
 })
