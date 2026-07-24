@@ -12,11 +12,25 @@
  * docs/architecture.md (Clickjacking & Framing Defenses) first.
  */
 import { describe, it, expect } from 'vitest'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import type { H3Event } from 'h3'
 import { buildCsp } from '~/server/plugins/csp'
 import { applySecurityHeaders } from '~/server/middleware/security-headers'
 import { ANTI_CLICKJACK_SCRIPT } from '~/server/plugins/00-anti-clickjack'
 import { escapeScriptJson } from '~/server/plugins/app-config'
+
+const SERVER_DIR = join(process.cwd(), 'server')
+
+const collectServerTsFiles = (dir: string): string[] => {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) out.push(...collectServerTsFiles(full))
+    else if (full.endsWith('.ts')) out.push(full)
+  }
+  return out
+}
 
 describe('buildCsp', () => {
   const csp = buildCsp('test-nonce', [], { connect: [] }, [])
@@ -177,5 +191,27 @@ describe('escapeScriptJson (inline __APP_CONFIG__ payload)', () => {
     // The unicode escapes are interpreted by the JS/JSON parser, yielding
     // the original characters back inside the string values.
     expect(JSON.parse(escaped)).toEqual(original)
+  })
+})
+
+describe('server-side logging never bypasses the redacting pino serializer', () => {
+  /**
+   * `server/utils/logger.ts` reduces viem errors to a host-only `url` because
+   * RPC/subgraph URLs carry the provider API key in the path. A bare
+   * `console.*` prints the raw error instead — `message`, `stack` and
+   * `metaMessages` all embed the full URL — which ships the key to stdout and
+   * on into the log aggregator. Use `logger` and let the `err` serializer
+   * handle it.
+   */
+  const offenders = collectServerTsFiles(SERVER_DIR).flatMap(file =>
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .map((line, i) => ({ line, i }))
+      .filter(({ line }) => /(?<![\w.])console\.(log|warn|error|info|debug|trace)\s*\(/.test(line))
+      .map(({ i }) => `${file.replace(process.cwd(), '.')}:${i + 1}`),
+  )
+
+  it('no file under server/ calls console.*', () => {
+    expect(offenders).toEqual([])
   })
 })

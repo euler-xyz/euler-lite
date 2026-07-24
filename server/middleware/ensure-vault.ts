@@ -2,6 +2,7 @@ import { getRequestURL, sendRedirect } from 'h3'
 import { VaultType } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, isAddress, type Address } from 'viem'
 import { withWallClock } from '../utils/fetchWithTimeout'
+import { logger } from '../utils/logger'
 import { getServerSdk } from '../utils/sdk-server'
 
 /**
@@ -26,7 +27,11 @@ const resolveVaultTypes = async (
     )
   }
   catch (err) {
-    console.warn('[ensure-vault] failed to validate vault route', err)
+    // Must go through pino, not console: the server SDK talks to the raw
+    // RPC_URL_<chainId> upstream, and viem transport errors carry that full URL
+    // (API key in the path for Alchemy/Infura/Chainstack) in `message`, `stack`
+    // and `metaMessages`. The `err` serializer reduces it to the host.
+    logger.warn({ ctx: 'ensure-vault', chainId, err }, 'failed to validate vault route')
     return undefined
   }
 }
