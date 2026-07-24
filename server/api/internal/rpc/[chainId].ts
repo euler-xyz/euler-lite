@@ -123,13 +123,17 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  rateLimiter.consume(event)
+  const batchSize = isBatch ? body.length : 1
+
+  // Cost the batch by the number of upstream calls it fans out to, not by the
+  // single HTTP request. Charging 1 unit for a MAX_BATCH_SIZE batch would let a
+  // client drive 100x the intended upstream volume against the paid provider.
+  rateLimiter.consume(event, batchSize)
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   const startedAt = Date.now()
   const methods = rpcMethods(body)
-  const batchSize = isBatch ? body.length : 1
   const upstreamHost = urlHost(rpcUrl)
 
   try {
