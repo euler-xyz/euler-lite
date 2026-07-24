@@ -2,13 +2,16 @@
 import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 
-const { isConnected, address } = useWagmi()
+const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { borrowPositions, removedBorrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
 const { isReady } = useVaults()
 
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
-const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
+// portfolioAddress is already the spy-safe acting address; a wallet
+// fallback here would compute wrong position indices while a spy
+// candidate is still verifying.
+const ownerAddress = computed(() => portfolioAddress.value)
 
 const sortedBorrowPositions = computed(() => {
   const positions = [...removedBorrowPositions.value, ...borrowPositions.value]
