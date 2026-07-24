@@ -124,7 +124,7 @@ Non-finite inputs return `null`. A zero or negative denominator returns a zero b
 `ProjectedYieldDetails` carries:
 
 - optional `before` and required `after` metric states;
-- only the market-rate rows that changed; and
+- market-rate rows relevant to the operation (the collateral snapshot helper filters unchanged rows); and
 - reward campaigns from both states.
 
 Reward rows retain vault, collateral, action, provider, and reward-token identity. A newly applicable campaign shows only its projected APR; an existing `0%` campaign is preserved as a real before value; a campaign that stops applying shows a transition to `-`.
