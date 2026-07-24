@@ -82,6 +82,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
 import type { CollateralOption } from '~/types/collateral-option'
 import {
   getProjectedYieldState,
@@ -3396,6 +3397,10 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
   try {
     const { input, account, useSignatures } = preview
     const migrationChainId = input.position.chainId
+    assertReviewedExecutionCurrent({
+      reviewedKey: preview.key,
+      currentKey: inboundExternalMigrationPreviewKey.value,
+    })
     assertWalletExecutionContext({
       expectedAccount: input.owner,
       expectedChainId: migrationChainId,

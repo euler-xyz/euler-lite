@@ -1,5 +1,5 @@
 import { provide, reactive } from 'vue'
-import type { Address } from 'viem'
+import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { tosSignerReadAbi } from '~/abis/tos'
 import { getTosData, type TosData } from '~/composables/useTosData'
@@ -20,9 +20,32 @@ interface TosRequirementState {
   tosLoadFailed: boolean
 }
 
+type TosSessionAcceptanceMap = Record<string, true>
+
 export const TOS_ACCEPTANCE_PENDING_REASON = 'Checking Terms of Use acceptance'
 export const TOS_LOAD_FAILED_REASON = 'Unable to load Terms of Use'
 export const TOS_ACCEPTANCE_REQUIRED_REASON = 'Terms of Use acceptance required'
+
+export const getTosSessionAcceptanceKey = ({
+  chainId,
+  address,
+}: {
+  chainId?: number
+  address?: Address | string
+}): string | undefined => {
+  if (!chainId || !address) return undefined
+  return `${chainId}:${getAddress(address as Address)}`
+}
+
+export const hasTosSessionAcceptance = (
+  accepted: TosSessionAcceptanceMap,
+  key: string | undefined,
+): boolean => !!key && accepted[key] === true
+
+export const withTosSessionAcceptance = (
+  accepted: TosSessionAcceptanceMap,
+  key: string | undefined,
+): TosSessionAcceptanceMap => key ? { ...accepted, [key]: true } : accepted
 
 export const isTosAcceptanceRequired = ({
   hasWalletAddress,
@@ -58,9 +81,15 @@ export const useTosGuard = () => {
   const { enableTosSignature } = useDeployConfig()
 
   const hasSigned = useState<boolean | null>('tosGuardHasSigned', () => null)
-  const sessionAccepted = useState<boolean>('tosGuardSessionAccepted', () => false)
+  const sessionAcceptances = useState<TosSessionAcceptanceMap>('tosGuardSessionAcceptances', () => ({}))
   const tosLoadFailed = useState<boolean>('tosGuardLoadFailed', () => false)
   const tosData = ref<TosData | null>(null)
+  const tosSessionAcceptanceKey = computed(() =>
+    getTosSessionAcceptanceKey({ chainId: chainId.value, address: address.value }),
+  )
+  const sessionAccepted = computed(() =>
+    hasTosSessionAcceptance(sessionAcceptances.value, tosSessionAcceptanceKey.value),
+  )
 
   const tosRequirementState = computed<TosRequirementState>(() => ({
     hasWalletAddress: !!address.value,
@@ -137,7 +166,10 @@ export const useTosGuard = () => {
   }
 
   const acceptTerms = () => {
-    sessionAccepted.value = true
+    sessionAcceptances.value = withTosSessionAcceptance(
+      sessionAcceptances.value,
+      tosSessionAcceptanceKey.value,
+    )
   }
 
   // Publish the accepted TOS signature to the SDK TOS plugin store. The SDK
@@ -148,7 +180,7 @@ export const useTosGuard = () => {
     const user = address.value
     const cid = chainId.value
 
-    if (sessionAccepted.value && !hasSigned.value && data && user && cid) {
+    if (sessionAccepted.value && hasSigned.value === false && data && user && cid) {
       setLiteTosSignature({
         chainId: cid,
         account: user as Address,
@@ -175,7 +207,6 @@ export const useTosGuard = () => {
 
   watch(address, (next, prev) => {
     hasSigned.value = null
-    sessionAccepted.value = false
     if (prev && chainId.value) clearLiteTosSignature({ chainId: chainId.value, account: prev as Address })
     if (enableTosSignature) {
       void checkHasSigned()
@@ -184,7 +215,6 @@ export const useTosGuard = () => {
 
   watch(chainId, (next, prev) => {
     hasSigned.value = null
-    sessionAccepted.value = false
     if (prev && address.value) clearLiteTosSignature({ chainId: prev, account: address.value as Address })
     if (enableTosSignature) {
       void checkHasSigned()
@@ -198,11 +228,10 @@ export const useTosGuard = () => {
     }
   })
 
-  // NOTE: deliberately no signature clear on unmount. The acceptance is
-  // session-scoped per (chain, account) — `sessionAccepted` survives navigation
-  // — and the batch flow executes from the drawer/portfolio after the form page
-  // (and its guard) is gone. Clearing here would strip signTermsOfUse from the
-  // prepared batch. Account/chain switches are handled by the watches above.
+  // NOTE: deliberately no signature clear on unmount. Acceptance keys are
+  // session-scoped per (chain, account), and the batch flow executes from the
+  // drawer/portfolio after the form page (and its guard) is gone. Clearing here
+  // would strip signTermsOfUse from the prepared batch.
   onUnmounted(() => {
     unregisterOperationBlocker('tos')
   })

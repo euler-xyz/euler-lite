@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getTosSessionAcceptanceKey,
   getTosBlockReason,
+  hasTosSessionAcceptance,
   isTosAcceptanceRequired,
   TOS_ACCEPTANCE_PENDING_REASON,
   TOS_ACCEPTANCE_REQUIRED_REASON,
   TOS_LOAD_FAILED_REASON,
+  withTosSessionAcceptance,
 } from '~/composables/guards/useTosGuard'
 
 const unsignedAccount = {
@@ -46,6 +49,45 @@ describe('isTosAcceptanceRequired', () => {
       ...unsignedAccount,
       tosLoadFailed: true,
     })).toBe(false)
+  })
+})
+
+describe('TOS session acceptance scoping', () => {
+  const accountA = '0x1000000000000000000000000000000000000000'
+  const accountB = '0x2000000000000000000000000000000000000000'
+
+  it('scopes session acceptance to the accepting chain and account', () => {
+    const accepted = withTosSessionAcceptance(
+      {},
+      getTosSessionAcceptanceKey({ chainId: 1, address: accountA }),
+    )
+
+    expect(hasTosSessionAcceptance(
+      accepted,
+      getTosSessionAcceptanceKey({ chainId: 1, address: accountA }),
+    )).toBe(true)
+    expect(hasTosSessionAcceptance(
+      accepted,
+      getTosSessionAcceptanceKey({ chainId: 1, address: accountB }),
+    )).toBe(false)
+    expect(hasTosSessionAcceptance(
+      accepted,
+      getTosSessionAcceptanceKey({ chainId: 8453, address: accountA }),
+    )).toBe(false)
+  })
+
+  it('normalizes address casing before checking session acceptance', () => {
+    const mixedCase = '0x8A54C278D117854486db0F6460D901a180Fff517'
+    const lowerCase = mixedCase.toLowerCase()
+    const accepted = withTosSessionAcceptance(
+      {},
+      getTosSessionAcceptanceKey({ chainId: 1, address: mixedCase }),
+    )
+
+    expect(hasTosSessionAcceptance(
+      accepted,
+      getTosSessionAcceptanceKey({ chainId: 1, address: lowerCase }),
+    )).toBe(true)
   })
 })
 
