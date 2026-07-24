@@ -11,6 +11,7 @@ import { logger } from '~/server/utils/logger'
 import { safePathTemplate, searchKeys, urlHost } from '~/server/utils/observability'
 import { isAllowedMerklProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
 import { buildMerklProxyRequestHeaders } from '~/server/utils/merkl-proxy'
+import { isAbortError } from '~/utils/errorHandling'
 
 /**
  * Server-side proxy for Merkl v4 opportunity / user-reward endpoints.
@@ -83,6 +84,7 @@ export default defineEventHandler(async (event) => {
     targetUrl.searchParams.set('type', 'TOKEN')
   }
   const target = targetUrl.toString()
+  const startedAt = Date.now()
 
   let upstream: Response
   try {
@@ -92,12 +94,29 @@ export default defineEventHandler(async (event) => {
     })
   }
   catch (err) {
+    const durationMs = Date.now() - startedAt
+    if (isAbortError(err)) {
+      logger.info(
+        {
+          ctx: 'merkl-proxy',
+          upstreamHost: urlHost(target),
+          pathTemplate: safePathTemplate(targetUrl.pathname),
+          searchKeys: searchKeys(targetUrl.searchParams),
+          durationMs,
+          reason: 'upstream-timeout',
+        },
+        'upstream timed out',
+      )
+      throw createError({ statusCode: 504, statusMessage: 'Merkl upstream timed out' })
+    }
     logger.warn(
       {
         ctx: 'merkl-proxy',
         upstreamHost: urlHost(target),
         pathTemplate: safePathTemplate(targetUrl.pathname),
         searchKeys: searchKeys(targetUrl.searchParams),
+        durationMs,
+        reason: 'upstream-error',
         err,
       },
       'upstream fetch failed',

@@ -12,6 +12,45 @@ export interface TosGuardState {
   acceptTerms: () => void
 }
 
+interface TosRequirementState {
+  hasWalletAddress: boolean
+  enableTosSignature: boolean
+  hasSigned: boolean | null
+  sessionAccepted: boolean
+  tosLoadFailed: boolean
+}
+
+export const TOS_ACCEPTANCE_PENDING_REASON = 'Checking Terms of Use acceptance'
+export const TOS_LOAD_FAILED_REASON = 'Unable to load Terms of Use'
+export const TOS_ACCEPTANCE_REQUIRED_REASON = 'Terms of Use acceptance required'
+
+export const isTosAcceptanceRequired = ({
+  hasWalletAddress,
+  enableTosSignature,
+  hasSigned,
+  sessionAccepted,
+  tosLoadFailed,
+}: TosRequirementState): boolean =>
+  hasWalletAddress
+  && enableTosSignature
+  && hasSigned === false
+  && !sessionAccepted
+  && !tosLoadFailed
+
+export const getTosBlockReason = ({
+  hasWalletAddress,
+  enableTosSignature,
+  hasSigned,
+  sessionAccepted,
+  tosLoadFailed,
+}: TosRequirementState): string | undefined => {
+  if (!hasWalletAddress || !enableTosSignature) return undefined
+  if (tosLoadFailed) return TOS_LOAD_FAILED_REASON
+  if (hasSigned === null) return TOS_ACCEPTANCE_PENDING_REASON
+  if (hasSigned === false && !sessionAccepted) return TOS_ACCEPTANCE_REQUIRED_REASON
+  return undefined
+}
+
 export const useTosGuard = () => {
   const { address } = useWagmi()
   const { eulerPeripheryAddresses, isReady, loadEulerConfig, chainId } = useEulerAddresses()
@@ -23,9 +62,15 @@ export const useTosGuard = () => {
   const tosLoadFailed = useState<boolean>('tosGuardLoadFailed', () => false)
   const tosData = ref<TosData | null>(null)
 
-  const isTermsRequired = computed(() =>
-    enableTosSignature && hasSigned.value === false && !sessionAccepted.value && !tosLoadFailed.value,
-  )
+  const tosRequirementState = computed<TosRequirementState>(() => ({
+    hasWalletAddress: !!address.value,
+    enableTosSignature,
+    hasSigned: hasSigned.value,
+    sessionAccepted: sessionAccepted.value,
+    tosLoadFailed: tosLoadFailed.value,
+  }))
+  const isTermsRequired = computed(() => isTosAcceptanceRequired(tosRequirementState.value))
+  const tosBlockReason = computed(() => getTosBlockReason(tosRequirementState.value))
 
   const tosSignerAddress = computed(() =>
     eulerPeripheryAddresses.value?.termsOfUseSigner as Address | undefined,
@@ -116,27 +161,17 @@ export const useTosGuard = () => {
     }
   }
 
-  // Register/unregister blocker — fail closed
-  const updateBlockerRegistration = () => {
-    if (enableTosSignature && tosLoadFailed.value) {
-      registerOperationBlocker('tos', 'Unable to load Terms of Use')
-    }
-    else if (isTermsRequired.value) {
-      registerOperationBlocker('tos', 'Terms of Use acceptance required')
-    }
-    else {
-      unregisterOperationBlocker('tos')
-    }
-  }
-
   watch([sessionAccepted, hasSigned, tosSignerAddress, () => tosData.value, address, chainId], () => {
     updateSdkSignature()
-    updateBlockerRegistration()
   }, { immediate: true })
 
-  watch(isTermsRequired, () => {
-    updateBlockerRegistration()
-  })
+  // Keep execution fail-closed while the connected account's signature state
+  // is pending or TOS data is unavailable, without showing the acceptance UI
+  // until the account is confirmed unsigned.
+  watch(tosBlockReason, (reason) => {
+    if (reason) registerOperationBlocker('tos', reason)
+    else unregisterOperationBlocker('tos')
+  }, { immediate: true })
 
   watch(address, (next, prev) => {
     hasSigned.value = null
