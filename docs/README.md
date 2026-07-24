@@ -29,6 +29,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Pyth oracle simulation for price reads
 - SDK/V3-populated intrinsic APY for yield-bearing assets
 
+### 📐 [Projected Yield](./projected-yield.md)
+
+- Utilization-aware supply and borrow rate projections
+- USD-weighted multi-collateral snapshots
+- Net APY, ROE, intrinsic yield, and reward breakdowns
+- Transaction-batch layer consistency and fail-closed estimates
+
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
 
 - Position discovery and categorization
