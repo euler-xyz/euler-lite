@@ -215,3 +215,28 @@ describe('server-side logging never bypasses the redacting pino serializer', () 
     expect(offenders).toEqual([])
   })
 })
+
+describe('inline window.__*__ config injections are script-escaped', () => {
+  /**
+   * Both Nitro plugins embed JSON into an inline `<script>` in the HTML head.
+   * `JSON.stringify` does not escape `<`, so any payload field that ever
+   * carries a string could close the tag. Escaping has to hold structurally,
+   * not just for the fields that happen to be numeric today.
+   */
+  const injectionLines = collectServerTsFiles(SERVER_DIR).flatMap(file =>
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .map((line, i) => ({ file, line, i }))
+      .filter(({ line }) => line.includes('<script>window.__')),
+  )
+
+  it('finds the known injection sites', () => {
+    expect(injectionLines.length).toBeGreaterThanOrEqual(2)
+  })
+
+  for (const { file, line, i } of injectionLines) {
+    it(`${file.replace(process.cwd(), '.')}:${i + 1} routes its payload through escapeScriptJson`, () => {
+      expect(line).toContain('escapeScriptJson(')
+    })
+  }
+})

@@ -9,6 +9,7 @@
 import { parseChainIds } from '../../utils/parseChainIds'
 import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds } from '~/utils/chain-env'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
+import { escapeScriptJson } from '~/server/utils/escape-script-json'
 import { logger } from '~/server/utils/logger'
 import { parseEVaultFetchChunkChainIds } from '~/utils/eVaultFetchChunkConfig'
 
@@ -42,7 +43,10 @@ export default defineNitroPlugin((nitroApp) => {
   const onchainSdkChainIds = parseChainIds(process.env.ONCHAIN_SDK_CHAINS, enabledSet)
   const eVaultFetchChunkChainIds = parseEVaultFetchChunkChainIds(process.env, enabledSet)
 
-  const scriptTag = `<script>window.__CHAIN_CONFIG__=${JSON.stringify({ enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues })}</script>`
+  // Same escaping as __APP_CONFIG__. The payload is chain IDs only today, but
+  // the escaping has to be structural: nothing stops a future field from
+  // carrying an env-derived string that could close the script tag.
+  const scriptTag = `<script>window.__CHAIN_CONFIG__=${escapeScriptJson(JSON.stringify({ enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }))}</script>`
 
   nitroApp.hooks.hook('render:html', (html) => {
     html.head.push(scriptTag)

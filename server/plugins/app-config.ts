@@ -14,6 +14,9 @@ import {
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
+import { escapeScriptJson } from '~/server/utils/escape-script-json'
+
+export { escapeScriptJson }
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -27,18 +30,6 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
-}
-
-// JSON.stringify does not escape `<`, so a config value containing `</script>`
-// would break out of the inline script context. Escaping `<` (and the U+2028 /
-// U+2029 line separators, which are invalid in JS string literals) as unicode
-// escapes keeps the payload inside the script tag while preserving identical
-// JSON/JS semantics — `<` parses back to `<` inside string values.
-export function escapeScriptJson(json: string): string {
-  return json
-    .replace(/</g, '\\u003c')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029')
 }
 
 function env(key: string, ...fallbackKeys: string[]): string {
