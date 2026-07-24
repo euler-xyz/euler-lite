@@ -114,7 +114,7 @@ SUBGRAPH_URL_1=https://your-subgraph.com
 ### Pyth Network
 
 - **Purpose**: Pull-based oracle price feeds
-- **Integration**: Hermes API (`PYTH_HERMES_URL`)
+- **Integration**: Hermes API (`PYTH_API_KEY`)
 - **Data Source**: Real-time price updates for oracle feeds
 
 ### Merkl

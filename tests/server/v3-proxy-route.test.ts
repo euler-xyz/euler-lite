@@ -330,6 +330,28 @@ describe('/api/internal/v3 proxy route', () => {
     expect(JSON.stringify(logRecord)).not.toContain(cursor)
   })
 
+  it('classifies aborts as upstream timeouts without forwarding client-controlled error fields', async () => {
+    mocks.fetchWithTimeout.mockRejectedValueOnce(new DOMException('attacker-controlled text', 'AbortError'))
+    const event = makeEvent('GET', `https://app.example/api/internal/v3/rewards/breakdown?chainId=1&account=${ACCOUNT}`)
+
+    await expect(handler(event)).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream unavailable',
+    })
+
+    expect(mocks.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ctx: 'v3-proxy',
+        pathTemplate: '/v3/rewards/breakdown',
+        reason: 'upstream-timeout',
+      }),
+      'upstream timed out',
+    )
+    const [fields] = mocks.warn.mock.calls[0]
+    expect(fields).not.toHaveProperty('err')
+    expect(JSON.stringify(fields)).not.toContain('attacker-controlled text')
+  })
+
   it('shares cooldown across dynamic account position paths', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('timeout'))
     const first = makeEvent('GET', `https://app.example/api/internal/v3/accounts/${ACCOUNT}/positions?chainId=1`)

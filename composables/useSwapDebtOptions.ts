@@ -5,12 +5,15 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { buildCollateralOption, computeBorrowApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
+import { activeLayerVaultsRef, getLayeredVault } from '~/composables/useLayeredVaults'
 
 export const useSwapDebtOptions = ({
   collateralVault,
+  collateralAddresses,
   currentBorrowVault,
 }: {
   collateralVault: Ref<EVault | SecuritizeCollateralVault | undefined>
+  collateralAddresses?: Readonly<Ref<readonly string[]>>
   currentBorrowVault?: Ref<EVault | undefined>
 }) => {
   const { getVerifiedEVaults } = useVaultRegistry()
@@ -18,6 +21,10 @@ export const useSwapDebtOptions = ({
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const enableRewardsApy = computed(() => settings.value.enableRewardsApy)
   const { viewer } = useApyVisibility()
+  const rewardCollateralAddresses = computed(() => {
+    if (collateralAddresses?.value.length) return collateralAddresses.value
+    return collateralVault.value?.address ? [collateralVault.value.address] : []
+  })
 
   const allBorrowVaults = computed(() => {
     const currentBorrowAddress = currentBorrowVault?.value
@@ -55,27 +62,28 @@ export const useSwapDebtOptions = ({
   })
 
   const buildBorrowOption = async (vault: EVault) => {
+    const currentVault = getLayeredVault(vault.address, vault)!
     const apy = computeBorrowApy(
-      vault,
+      currentVault,
       viewer.value,
       {
         enableIntrinsicApy: enableIntrinsicApy.value,
         enableRewardsApy: enableRewardsApy.value,
       },
-      collateralVault?.value?.address,
+      rewardCollateralAddresses.value,
     )
-    return buildCollateralOption({ vault, type: 'vault', amount: 0, priceAmount: 0, apy, tagContext: 'swap-target', showBalance: false })
+    return buildCollateralOption({ vault: currentVault, type: 'vault', amount: 0, priceAmount: 0, apy, tagContext: 'swap-target', showBalance: false })
   }
 
   const borrowOptions = useReactiveMap(
     borrowVaults,
-    [viewer, enableIntrinsicApy, enableRewardsApy],
+    [viewer, enableIntrinsicApy, enableRewardsApy, rewardCollateralAddresses, activeLayerVaultsRef],
     buildBorrowOption,
   )
 
   const allBorrowOptions = useReactiveMap(
     allBorrowVaults,
-    [viewer, enableIntrinsicApy, enableRewardsApy, collateralVault],
+    [viewer, enableIntrinsicApy, enableRewardsApy, collateralVault, rewardCollateralAddresses, activeLayerVaultsRef],
     buildBorrowOption,
   )
 

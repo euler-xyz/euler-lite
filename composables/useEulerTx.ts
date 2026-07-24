@@ -43,11 +43,25 @@ import type {
 import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
+import {
+  encodeMigrationAuthorizationTxs,
+  type MigrationAuthorizationRevoke,
+  type PlainTxRequest,
+} from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
+import {
+  getSafeWalletProvider,
+  waitForSafeTransactionExecution,
+  type ReceiptClientLike,
+} from '~/utils/safeWalletTransactions'
+import {
+  assertWalletExecutionContext,
+  type WalletExecutionContext,
+} from '~/utils/walletExecutionContext'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -424,7 +438,7 @@ export interface PlanWithdrawOrRedeemInput {
 export const useEulerTx = () => {
   const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
-  const { permit2Enabled } = usePermit2Preference()
+  const { signaturesEnabled } = useSignaturePreference()
   const { sendTransactionAsync } = useSendTransaction()
   const { signTypedDataAsync } = useSignTypedData()
   const config = useConfig()
@@ -990,6 +1004,13 @@ export const useEulerTx = () => {
     if (request.kind !== 'typedData') {
       throw new Error('Transaction-based migration authorization is not supported in this flow')
     }
+    const currentAccount = getAccount(config)
+    assertWalletExecutionContext({
+      expectedAccount: request.owner,
+      expectedChainId: request.chainId,
+      currentAccount: currentAccount.address,
+      currentChainId: currentAccount.chainId,
+    })
     const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
     const postMigrationAuthorization = request.postMigrationAuthorization
       ? await signMigrationAuthorization(request.postMigrationAuthorization)
@@ -1107,6 +1128,7 @@ export const useEulerTx = () => {
       account?: PrefetchPluginAccount
       chainId?: number
       prefetch?: PluginPrefetchData
+      usePermit2?: boolean
     },
   ): Promise<TransactionPlanPrepared> => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
@@ -1117,7 +1139,7 @@ export const useEulerTx = () => {
         plan,
         chainId: cid,
         account: options?.account ?? owner,
-        usePermit2: permit2Enabled.value,
+        usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
         prefetch: options?.prefetch,
       })
     })
@@ -1164,14 +1186,33 @@ export const useEulerTx = () => {
     })
   }
 
-  const buildSendTransaction = (isOkx: boolean) => {
+  const buildSendTransaction = ({
+    isOkx,
+    expectedAccount,
+    expectedChainId,
+    resolveHash,
+  }: {
+    isOkx: boolean
+    expectedAccount: Address
+    expectedChainId: number
+    resolveHash?: (hash: Hash) => Promise<Hash>
+  }) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
       if (okxDelayPending) {
         await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
         okxDelayPending = false
       }
+      const currentAccount = getAccount(config)
+      assertWalletExecutionContext({
+        expectedAccount,
+        expectedChainId,
+        currentAccount: currentAccount.address,
+        currentChainId: currentAccount.chainId,
+      })
       const hash = await sendTransactionAsync({
+        account: expectedAccount,
+        chainId: expectedChainId,
         to,
         data: data as Hex,
         value: value ?? 0n,
@@ -1179,9 +1220,138 @@ export const useEulerTx = () => {
       if (isOkx && (data as Hex).toLowerCase().startsWith(ERC20_APPROVE_SELECTOR)) {
         okxDelayPending = true
       }
-      return hash as Hash
+      const submittedHash = hash as Hash
+      return resolveHash ? resolveHash(submittedHash) : submittedHash
     }
     return send
+  }
+
+  /**
+   * Send standalone transactions sequentially, waiting for each to be mined.
+   *
+   * Used for migration authorization grants and revokes, which cannot live in
+   * the EVC batch (the EVC forwards batch items as itself, so a msg.sender-based
+   * grant would be attributed to the EVC) and cannot be merged into the plan
+   * (`mergePlans` rejects contractCall items).
+   */
+  const sendPlainTransactions = async (
+    txs: readonly PlainTxRequest[],
+    options?: {
+      onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
+      walletContext?: WalletExecutionContext
+    },
+  ): Promise<TransactionReceipt[]> => {
+    if (isSpyMode.value) {
+      throw new Error('Transactions are disabled in spy mode')
+    }
+    if (!txs.length) return []
+
+    const walletContext = options?.walletContext ?? {
+      account: requireOwner(),
+      chainId: requireChainId(),
+    }
+    const owner = walletContext.account
+    const cid = walletContext.chainId
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(cid)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
+
+    const connector = getAccount(config).connector
+    const [isOkx, safeWalletProvider] = await Promise.all([
+      isOkxWallet(connector),
+      getSafeWalletProvider(connector),
+    ])
+    const send = buildSendTransaction({
+      isOkx,
+      expectedAccount: owner,
+      expectedChainId: cid,
+    })
+
+    const receipts: TransactionReceipt[] = []
+    let lastBroadcastData: Hex | undefined
+    try {
+      for (const [index, tx] of txs.entries()) {
+        const hash = await send(tx)
+        lastBroadcastData = tx.data
+        // Once a hash exists the transaction may land even if receipt polling
+        // fails, so cleanup must start tracking it before awaiting confirmation.
+        options?.onBroadcast?.(index, walletContext)
+        const receipt = safeWalletProvider
+          ? (await waitForSafeTransactionExecution({
+              submittedHash: hash,
+              walletProvider: safeWalletProvider,
+              publicClient: provider,
+            })).receipt
+          : await provider.waitForTransactionReceipt({ hash })
+        if (receipt.status !== 'success') {
+          throw new Error('Authorization transaction reverted')
+        }
+        receipts.push(receipt)
+      }
+    }
+    finally {
+      // buildSendTransaction only applies its post-approve delay to the next send
+      // from the same closure. The batch or abort cleanup builds another closure,
+      // so flush a trailing broadcast approve even when receipt polling failed.
+      if (isOkx && lastBroadcastData?.toLowerCase().startsWith(ERC20_APPROVE_SELECTOR)) {
+        await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
+      }
+    }
+
+    return receipts
+  }
+
+  /**
+   * Grant a migration authorization on-chain instead of signing it, and return
+   * the revoke transactions to send once the batch has settled.
+   *
+   * The grants must be mined before the migration plan is built: the SDK
+   * connectors read the live allowance to decide whether the batch needs a
+   * permit item, and throw when it does but no signature was supplied.
+   */
+  const executeMigrationAuthorizationGrants = async (
+    request: MigrationAuthorizationRequest,
+    broadcastRevokes: MigrationAuthorizationRevoke[] = [],
+  ): Promise<MigrationAuthorizationRevoke[]> => {
+    const { grants, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+    await sendPlainTransactions(grants, {
+      // The request was prepared for this exact owner/network. Do not let a
+      // wallet switch during the preceding SDK reads retarget the grant.
+      walletContext: { account: request.owner, chainId: request.chainId },
+      onBroadcast: (index, walletContext) => {
+        const revoke = revokesByGrant[index]
+        if (revoke) {
+          broadcastRevokes.unshift({ transaction: revoke, walletContext })
+        }
+      },
+    })
+    return broadcastRevokes
+  }
+
+  /** Attempt every revoke and return the successful and failed subsets. */
+  const sendMigrationAuthorizationRevokes = async (
+    revokes: readonly MigrationAuthorizationRevoke[],
+  ): Promise<{
+    restored: MigrationAuthorizationRevoke[]
+    failed: MigrationAuthorizationRevoke[]
+  }> => {
+    const restored: MigrationAuthorizationRevoke[] = []
+    const failed: MigrationAuthorizationRevoke[] = []
+    for (const revoke of revokes) {
+      try {
+        await sendPlainTransactions([revoke.transaction], {
+          walletContext: revoke.walletContext,
+        })
+        restored.push(revoke)
+      }
+      catch (err) {
+        logWarn('useEulerTx/migrationRevoke', err)
+        failed.push(revoke)
+      }
+    }
+    return { restored, failed }
   }
 
   const runPostTxSubgraphSync = async (cid: number, targetBlock: bigint) => {
@@ -1225,15 +1395,34 @@ export const useEulerTx = () => {
     // and post-tx wait-for-receipts use the on-chain path.
     // executeTransactionPlan runs processPlanPlugins internally for TOS/Keyring.
     const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(cid)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
 
-    const isOkx = await isOkxWallet(getAccount(config).connector)
-    const sendTransaction = buildSendTransaction(isOkx)
+    const connector = getAccount(config).connector
+    const [isOkx, safeWalletProvider] = await Promise.all([
+      isOkxWallet(connector),
+      getSafeWalletProvider(connector),
+    ])
+    const sendTransaction = buildSendTransaction({
+      isOkx,
+      expectedAccount: owner,
+      expectedChainId: cid,
+      resolveHash: safeWalletProvider
+        ? async submittedHash => (await waitForSafeTransactionExecution({
+          submittedHash,
+          walletProvider: safeWalletProvider,
+          publicClient: provider as ReceiptClientLike,
+        })).hash
+        : undefined,
+    })
 
     const result = await sdk.executionService.executeTransactionPlan({
       plan,
       chainId: cid,
       account: owner,
-      usePermit2: permit2Enabled.value,
+      usePermit2: signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
@@ -1251,8 +1440,30 @@ export const useEulerTx = () => {
       throw new Error('Transactions are disabled in spy mode')
     }
     const sdk = await getEulerSdkFresh()
-    const isOkx = await isOkxWallet(getAccount(config).connector)
-    const sendTransaction = buildSendTransaction(isOkx)
+    const provider = sdk.providerService?.getProvider(prepared.chainId)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
+    const connector = getAccount(config).connector
+    const [isOkx, safeWalletProvider] = await Promise.all([
+      isOkxWallet(connector),
+      getSafeWalletProvider(connector),
+    ])
+    const preparedOwner = typeof prepared.account === 'string'
+      ? getAddress(prepared.account)
+      : getAddress(prepared.account.owner)
+    const sendTransaction = buildSendTransaction({
+      isOkx,
+      expectedAccount: preparedOwner,
+      expectedChainId: prepared.chainId,
+      resolveHash: safeWalletProvider
+        ? async submittedHash => (await waitForSafeTransactionExecution({
+          submittedHash,
+          walletProvider: safeWalletProvider,
+          publicClient: provider as ReceiptClientLike,
+        })).hash
+        : undefined,
+    })
 
     const result = await sdk.executionService.executePreparedTransactionPlan({
       prepared,
@@ -1317,6 +1528,9 @@ export const useEulerTx = () => {
     getMigrationAuthorization,
     signMigrationAuthorization,
     buildPlaceholderMigrationAuthorization,
+    executeMigrationAuthorizationGrants,
+    sendMigrationAuthorizationRevokes,
+    sendPlainTransactions,
     planCrossProtocolMigration,
     planCrossProtocolMigrationSimulation,
     planWithdrawOrRedeem,

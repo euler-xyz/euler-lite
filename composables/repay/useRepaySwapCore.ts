@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EVault, PluginPrefetchData, PortfolioBorrowPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getAssetUsdValue } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { COWSWAP_ORDER_DEADLINE_SECONDS, COWSWAP_PROVIDER_EXTRA_DATA, buildClosePositionQuoteAppData, getCowSwapChainConfig } from '~/entities/cowswap'
 import { useSwapRepayQuotes } from '~/composables/repay/useSwapRepayQuotes'
@@ -8,6 +8,7 @@ import { valueToNano } from '~/utils/crypto-utils'
 import { trimTrailingZeros } from '~/utils/string-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { amountToPercent, percentToAmountNano } from '~/utils/repayUtils'
+import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { type Address, formatUnits, zeroAddress } from 'viem'
 import type { Ref, ComputedRef } from 'vue'
@@ -21,7 +22,7 @@ export interface UseRepaySwapCoreOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
   borrowVault: ComputedRef<EVault | undefined>
   sourceVault: Ref<EVault | undefined>
-  sourceAssets?: Readonly<Ref<bigint>>
+  sourceAssets: Readonly<Ref<bigint>>
   sourceShares?: Readonly<Ref<bigint>>
   sourceBalance: ComputedRef<bigint>
   formTab: Ref<string>
@@ -60,6 +61,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     typeof options.includeCowSwap === 'function'
       ? options.includeCowSwap()
       : options.includeCowSwap === true
+  const quoteAccounts = computed(() => getQuoteAccounts())
 
   // --- State ---
   const amount = ref('')
@@ -99,9 +101,20 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       }
       return null
     }
-    if (!quotes.quote.value) return null
+    const quote = quotes.quote.value
+    if (!quote) return null
     try {
-      return BigInt(quotes.quote.value.amountIn || 0)
+      // Validate with the SDK's strict bigint semantics before using the UI
+      // helper, which intentionally parses display data defensively.
+      const amountIn = BigInt(quote.amountIn || 0)
+      const amountInMax = BigInt(quote.amountInMax || 0)
+      if (amountIn < 0n || amountInMax < 0n) return null
+      const requestedInput = getSwapInputAmount(quote, direction.value)
+      const availableAssets = sourceAssets.value > 0n ? sourceAssets.value : 0n
+      // The SDK withdraw is capped by the live source-position assets. If even
+      // the quoted (pre-slippage) input is unavailable, no after-state exists.
+      if (amountIn > availableAssets) return null
+      return requestedInput < availableAssets ? requestedInput : availableAssets
     }
     catch { return null }
   })
@@ -122,7 +135,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
       }
       return null
     }
-    if (!quotes.quote.value) return null
+    if (!quotes.quote.value || spent.value === null) return null
     try {
       return BigInt(quotes.quote.value.amountOut || 0)
     }
@@ -151,12 +164,12 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const sourceValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!sourceVault.value) {
-      sourceValueUsd.value = null
-      return
-    }
     const gen = sourceUsdGuard.next()
-    const result = (await getAssetUsdValue(sourceBalance.value, sourceVault.value, 'off-chain')) ?? null
+    const currentSourceVault = sourceVault.value
+    const currentSourceBalance = sourceBalance.value
+    sourceValueUsd.value = null
+    if (!currentSourceVault) return
+    const result = (await getAssetUsdValueForEstimate(currentSourceBalance, currentSourceVault, 'off-chain')) ?? null
     if (sourceUsdGuard.isStale(gen)) return
     sourceValueUsd.value = result
   })
@@ -165,12 +178,12 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const borrowValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!borrowVault.value || !position.value) {
-      borrowValueUsd.value = null
-      return
-    }
     const gen = borrowUsdGuard.next()
-    const result = (await getAssetUsdValue(position.value.borrowed, borrowVault.value, 'off-chain')) ?? null
+    const currentBorrowVault = borrowVault.value
+    const currentPosition = position.value
+    borrowValueUsd.value = null
+    if (!currentBorrowVault || !currentPosition) return
+    const result = (await getAssetUsdValueForEstimate(currentPosition.borrowed, currentBorrowVault, 'off-chain')) ?? null
     if (borrowUsdGuard.isStale(gen)) return
     borrowValueUsd.value = result
   })
@@ -179,13 +192,14 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   const nextBorrowValueUsd = ref<number | null>(null)
 
   watchEffect(async () => {
-    if (!borrowVault.value || !position.value || debtRepaid.value === null) {
-      nextBorrowValueUsd.value = null
-      return
-    }
     const gen = nextBorrowUsdGuard.next()
-    const nextBorrow = position.value.borrowed - debtRepaid.value
-    const result = (await getAssetUsdValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value, 'off-chain')) ?? null
+    const currentBorrowVault = borrowVault.value
+    const currentPosition = position.value
+    const currentDebtRepaid = debtRepaid.value
+    nextBorrowValueUsd.value = null
+    if (!currentBorrowVault || !currentPosition || currentDebtRepaid === null) return
+    const nextBorrow = currentPosition.borrowed - currentDebtRepaid
+    const result = (await getAssetUsdValueForEstimate(nextBorrow > 0n ? nextBorrow : 0n, currentBorrowVault, 'off-chain')) ?? null
     if (nextBorrowUsdGuard.isStale(gen)) return
     nextBorrowValueUsd.value = result
   })
@@ -195,6 +209,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     clearSimulationError()
     debtAmount.value = ''
     direction.value = SwapperMode.EXACT_IN
+    quotes.reset()
     requestQuote()
   }
 
@@ -202,6 +217,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     clearSimulationError()
     amount.value = ''
     direction.value = SwapperMode.TARGET_DEBT
+    quotes.reset()
     const currentDebt = getCurrentDebt()
     let amountNano: bigint
     try {
@@ -218,11 +234,11 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     clearSimulationError()
     amount.value = ''
     direction.value = SwapperMode.TARGET_DEBT
+    quotes.reset()
     const currentDebt = getCurrentDebt()
     if (!borrowVault.value || currentDebt <= 0n) {
       debtAmount.value = ''
       debtPercent.value = 0
-      quotes.reset()
       return
     }
     const amountNano = percentToAmountNano(debtPercent.value, currentDebt)
@@ -259,6 +275,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     if (!sourceVault.value || !borrowVault.value) return
     const currentDebt = getCurrentDebt()
     if (currentDebt <= 0n) return
+    quotes.reset()
 
     const sourceDecimals = Number(sourceVault.value.asset.decimals)
     const borrowDecimals = Number(borrowVault.value.asset.decimals)
@@ -307,7 +324,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     if (!sourceVault.value || sourceBalance.value <= 0n) return 0n
 
     const sharesValue = sourceShares?.value ?? 0n
-    const assetsValue = sourceAssets?.value ?? 0n
+    const assetsValue = sourceAssets.value
 
     if (sourceBalance.value < assetsValue) {
       // Cash-limited withdraw — need to convert the balance to shares.
@@ -350,7 +367,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     }
 
     const currentDebt = position.value.borrowed || 0n
-    const { accountIn, accountOut } = getQuoteAccounts()
+    const { accountIn, accountOut } = quoteAccounts.value
 
     if (direction.value === SwapperMode.EXACT_IN) {
       if (!amount.value) {
@@ -467,10 +484,18 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
   })
 
   watch(
-    [sourceVault, sourceBalance, () => sourceShares?.value, slippage],
+    [
+      sourceVault,
+      sourceBalance,
+      () => sourceShares?.value,
+      slippage,
+      () => quoteAccounts.value.accountIn,
+      () => quoteAccounts.value.accountOut,
+    ],
     () => {
       clearSimulationError()
       if (amount.value || debtAmount.value) {
+        quotes.reset()
         requestQuote()
       }
     },

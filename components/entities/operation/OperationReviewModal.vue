@@ -22,7 +22,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -46,6 +46,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   displayPlan?: TransactionPlan
   /** Optional wallet-signature rows shown separately before transaction rows. */
   signatureSteps?: DisplayStep[]
+  /** Standalone transactions sent after the plan, e.g. migration authorization revokes. */
+  postSteps?: DisplayStep[]
   supplyingAssetForBorrow?: VaultAsset
   supplyingAmount?: number | string
   swapFromAsset?: VaultAsset
@@ -283,6 +285,11 @@ const signatureSteps = computed((): DisplayStep[] =>
   ).map((step, idx) => ({ ...step, index: idx + 1 })),
 )
 
+// Numbered from 1 like the other groups; the divider separates them.
+const postExecutionSteps = computed((): DisplayStep[] =>
+  (postSteps ?? []).map((step, idx) => ({ ...step, index: idx + 1 })),
+)
+
 const copyCalldata = async () => {
   const currentPlan = calldataPlan.value
   if (!currentPlan?.length) return
@@ -432,7 +439,7 @@ const confirmLabel = computed(() => {
           </span>
         </div>
         <div
-          v-if="signatureSteps.length || displaySteps.length"
+          v-if="signatureSteps.length || displaySteps.length || postExecutionSteps.length"
           class="w-full rounded-8 bg-card p-12"
         >
           <div class="flex w-full flex-col gap-8">
@@ -448,6 +455,16 @@ const confirmLabel = computed(() => {
               v-if="displaySteps.length"
               :steps="displaySteps"
             />
+            <template v-if="postExecutionSteps.length">
+              <div
+                v-if="signatureSteps.length || displaySteps.length"
+                class="border-t border-border-primary my-4"
+              />
+              <div class="text-p3 text-content-muted">
+                After execution
+              </div>
+              <OperationStepsList :steps="postExecutionSteps" />
+            </template>
           </div>
         </div>
       </div>

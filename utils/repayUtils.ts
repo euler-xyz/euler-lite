@@ -60,23 +60,3 @@ export const computeLiquidationPrice = (
   if (health < 1) return null
   return priceRatio / health
 }
-
-export const calculateRoe = (
-  supplyUsd: number | null,
-  borrowUsd: number | null,
-  supplyApy: number | null,
-  borrowApy: number | null,
-): number | null => {
-  if (supplyUsd === null || borrowUsd === null || supplyApy === null || borrowApy === null) {
-    return null
-  }
-  const equity = supplyUsd - borrowUsd
-  if (!Number.isFinite(equity) || equity <= 0) {
-    return null
-  }
-  const net = supplyUsd * supplyApy - borrowUsd * borrowApy
-  if (!Number.isFinite(net)) {
-    return null
-  }
-  return net / equity
-}

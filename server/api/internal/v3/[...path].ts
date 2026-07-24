@@ -26,6 +26,7 @@ import {
   readForwardedV3ResponseHeaders,
   validateV3ProxyUrl,
 } from '~/server/utils/v3-proxy'
+import { isAbortError } from '~/utils/errorHandling'
 
 const ALLOWED_METHODS = new Set(['GET', 'POST'])
 
@@ -78,6 +79,7 @@ export default defineEventHandler(async (event) => {
     })
   }
   catch (err) {
+    const timedOut = isAbortError(err)
     logger.warn(
       {
         ctx: 'v3-proxy',
@@ -87,9 +89,12 @@ export default defineEventHandler(async (event) => {
         upstreamHost,
         bodyBytes: body?.length,
         durationMs: Date.now() - startedAt,
-        err: safeErrorLogFields(err),
+        reason: timedOut ? 'upstream-timeout' : 'upstream-error',
+        // Sanitized fields only — raw transport errors can embed request
+        // URLs (addresses, cursors) and abort text is client-controlled.
+        ...(!timedOut ? { err: safeErrorLogFields(err) } : {}),
       },
-      'upstream fetch failed',
+      timedOut ? 'upstream timed out' : 'upstream fetch failed',
     )
     recordV3ProxyBackoff(backoffKey)
     setResponseHeader(event, 'retry-after', Math.ceil(V3_PROXY_FAILURE_BACKOFF_MS / 1_000))

@@ -155,6 +155,7 @@ const borrow = useBorrowForm({
   formTab,
   savingPositions,
   balance,
+  pendingSubAccount,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,
@@ -826,13 +827,12 @@ watch(
                   :loading="borrow.isEstimatesLoading.value"
                   variant="card"
                 >
-                  <SummaryRow label="Net APY">
-                    <SummaryValue
-                      :after="borrow.netAPY.value ? formatNumber(borrow.netAPY.value) : undefined"
-                      suffix="%"
-                      estimate-only
-                    />
-                  </SummaryRow>
+                  <ProjectedYieldSummaryRow
+                    label="Net APY"
+                    :after="borrow.netAPY.value"
+                    :details="borrow.projectedYieldDetails.value"
+                    estimate-only
+                  />
                   <SummaryRow label="Oracle price">
                     <SummaryPriceValue
                       :value="!borrow.priceFixed.value.isZero() ? formatSmartAmount(borrow.borrowPriceInvert.invertValue(borrow.priceFixed.value.toUnsafeFloat())) : undefined"
@@ -984,13 +984,20 @@ watch(
                       :loading="multiply.isMultiplyQuoteLoading.value"
                       variant="card"
                     >
-                      <SummaryRow label="ROE">
-                        <SummaryValue
-                          :after="multiply.multiplyRoeAfter.value !== null && multiply.multiplySwapReady.value ? formatNumber(multiply.multiplyRoeAfter.value) : (multiply.multiplyRoeBefore.value !== null ? formatNumber(multiply.multiplyRoeBefore.value) : undefined)"
-                          suffix="%"
-                          estimate-only
-                        />
-                      </SummaryRow>
+                      <ProjectedYieldSummaryRow
+                        v-if="showMultiplyRoe"
+                        label="ROE"
+                        :after="multiply.multiplyRoeAfter.value !== null && multiply.multiplySwapReady.value ? multiply.multiplyRoeAfter.value : multiply.multiplyRoeBefore.value"
+                        :details="multiply.multiplySwapReady.value ? multiply.projectedYieldDetails.value?.roe : null"
+                        estimate-only
+                      />
+                      <ProjectedYieldSummaryRow
+                        v-else
+                        label="Net APY"
+                        :after="multiply.multiplyNetApyAfter.value !== null && multiply.multiplySwapReady.value ? multiply.multiplyNetApyAfter.value : null"
+                        :details="multiply.multiplySwapReady.value ? multiply.projectedYieldDetails.value?.netApy : null"
+                        estimate-only
+                      />
                       <SummaryRow
                         label="Swap price"
                         align-top

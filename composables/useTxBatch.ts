@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -13,12 +13,20 @@ import type {
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
+import {
+  activeLayerVaultsRef,
+  collectAccountVaults,
+  mergeLayeredVaults,
+  type LayeredVaultMap,
+} from '~/composables/useLayeredVaults'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { buildPlanMarketLabel } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 export interface BatchWalletChange {
   token: string
@@ -56,6 +64,24 @@ export interface BatchClosedPosition {
  * layer interface is unchanged.
  */
 
+export interface BatchEntryExternalTx {
+  to: Address
+  data: Hex
+  value?: bigint
+  label?: string
+}
+
+export interface BatchEntryExecutionPrerequisites {
+  /** Sent and mined before the merged plan is built. */
+  preTxs: BatchEntryExternalTx[]
+  /** Wallet context used to build the prerequisite request. */
+  walletContext: WalletExecutionContext
+  /** Sent after the batch executes. Failures are non-fatal. */
+  postTxs: BatchEntryExternalTx[]
+  /** Revoke paired with each pre-transaction, in pre-transaction order. */
+  postTxsByPreTx?: Array<BatchEntryExternalTx | undefined>
+}
+
 export interface BatchEntry {
   id: string
   label: string
@@ -63,6 +89,14 @@ export interface BatchEntry {
   plan: TransactionPlan
   /** Optional real execution payload builder for entries whose preview plan uses simulation-only state. */
   buildExecutionPlan?: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
+  /** Standalone transactions this entry needs around the merged batch, resolved
+   *  at execution time. Migrations without message signatures use this to grant
+   *  their authorization before the batch and revoke it after: the grants cannot
+   *  be plan items (`mergePlans` rejects contractCall, and the EVC would be the
+   *  msg.sender), and must be mined before the plan is built. */
+  buildExecutionPrerequisites?: (
+    account: Account<IHasVaultAddress>,
+  ) => Promise<BatchEntryExecutionPrerequisites | undefined>
   /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
   stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
@@ -123,6 +157,8 @@ export interface BatchLayer {
   portfolio?: Portfolio<VaultEntity>
   /** All-positions projection (for the "Show all" view). */
   portfolioAll?: Portfolio<VaultEntity>
+  /** Cumulative simulated vault state for utilization-aware projections. */
+  vaults?: LayeredVaultMap
   /**
    * Stitched wallet ERC20 balances (lowercased token → absolute balance) for the
    * assets the batch touched, at this layer: the real wallet balance with this
@@ -475,6 +511,22 @@ export const buildWalletBalanceLayers = (
   })
 }
 
+/**
+ * Align optional SDK vault snapshots with account layers. The only proven
+ * shapes are no snapshots, one snapshot per operation, or a base snapshot plus
+ * one per operation. Any other non-empty cardinality is ambiguous and must not
+ * be indexed into earlier layers.
+ */
+export const normalizeSimulatedVaultLayers = <T>(
+  rawLayers: T[][],
+  operationCount: number,
+): T[][] | null => {
+  if (rawLayers.length === 0) return []
+  if (rawLayers.length === operationCount) return [[], ...rawLayers]
+  if (rawLayers.length === operationCount + 1) return rawLayers
+  return null
+}
+
 type BatchSimulationWalletBalances = {
   simulatedWalletBalances?: Record<string, bigint>[]
 }
@@ -515,8 +567,20 @@ const syncOverlay = () => {
 
   // Active layer's stitched wallet balances (absolute) for touched tokens.
   activeLayerWalletBalancesRef.value = layer?.walletBalances ?? {}
+  // Active layer's cumulative simulated vault snapshots. These are kept
+  // separately from positions because a full withdrawal can remove its account
+  // position while the vault's post-withdraw utilization remains relevant.
+  activeLayerVaultsRef.value = layer?.vaults ?? {}
   // Active layer's full stitched account (for share-balance / plan-account reads).
   activeLayerAccountRef.value = layer?.account
+}
+
+const invalidateSimulationLayers = () => {
+  layers.value = []
+  activeLayer.value = 0
+  walletShortfalls.value = []
+  lastMerged = null
+  syncOverlay()
 }
 
 /**
@@ -1512,7 +1576,8 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
-  const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan } = useEulerTx()
+  const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
+  const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
     try {
@@ -1624,6 +1689,17 @@ export const useTxBatch = () => {
       const simAccounts = rawSimAccounts.length === plans.length
         ? [baseAccount, ...rawSimAccounts]
         : rawSimAccounts
+      const rawSimVaultLayers = sim.simulatedVaultsLayers ?? []
+      const normalizedSimVaultLayers = normalizeSimulatedVaultLayers(rawSimVaultLayers, plans.length)
+      const simVaultLayers = normalizedSimVaultLayers ?? []
+      if (normalizedSimVaultLayers === null) {
+        logBatchDiag('resimulate:vault-layer-cardinality-invalid', {
+          token,
+          rawVaultLayers: rawSimVaultLayers.length,
+          plans: plans.length,
+          acceptedVaultLayerCounts: [0, plans.length, plans.length + 1],
+        }, 'error')
+      }
       // A healthy sim returns exactly one account per operation on top of the
       // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1. Anything
       // else is the smoking gun for the "not loaded" symptom (getCurrentFinalLayer
@@ -1657,6 +1733,20 @@ export const useTxBatch = () => {
         }, 'error')
         simError.value = 'Batch simulation did not return per-operation state layers — the installed @eulerxyz/euler-v2-sdk build does not support the batch builder.'
       }
+
+      // Preserve the SDK's per-layer vault snapshots independently from account
+      // positions. This is the authoritative source for utilization after an
+      // operation, including a full withdrawal that removes its zeroed position
+      // from the simulated account. Older/final-only SDK shapes fall back to the
+      // vault entities carried by each touched account slice.
+      const vaultLayers: LayeredVaultMap[] = []
+      let cumulativeVaults: LayeredVaultMap = {}
+      for (let i = 0; i < simAccounts.length; i++) {
+        cumulativeVaults = mergeLayeredVaults(cumulativeVaults, collectAccountVaults(simAccounts[i]))
+        cumulativeVaults = mergeLayeredVaults(cumulativeVaults, simVaultLayers[i] ?? [])
+        vaultLayers.push(cumulativeVaults)
+      }
+
       const fullLayers: Account<IHasVaultAddress>[] = [baseAccount]
       const cumulativeClosedPositions: BatchClosedPosition[] = []
       for (let i = 1; i < simAccounts.length; i++) {
@@ -1771,6 +1861,7 @@ export const useTxBatch = () => {
           account: acc,
           portfolio: projected.visible,
           portfolioAll: projected.all,
+          vaults: vaultLayers[idx] ?? {},
           walletBalances: walletLayers[idx],
           walletBalancesSim: simWb[idx] ?? {},
           failed,
@@ -1795,6 +1886,7 @@ export const useTxBatch = () => {
       }
       logBatchDiag('resimulate:threw', { token, error: error instanceof Error ? error.message : String(error) }, 'error')
       logWarn('useTxBatch/resimulate', error)
+      invalidateSimulationLayers()
       simError.value = error instanceof Error ? error.message : String(error)
     }
     finally {
@@ -2101,6 +2193,49 @@ export const useTxBatch = () => {
   }
 
   /**
+   * Send each entry's prerequisite grants, mined, before the merged plan is
+   * built — plan builders read live on-chain allowances to decide whether their
+   * batch still needs an authorization item.
+   *
+   * Sequential on purpose: a later entry needing the same grant sees the earlier
+   * one already on-chain and resolves to no prerequisite at all.
+   */
+  const sendExecutionPrerequisites = async (
+    grantedRevokes: MigrationAuthorizationRevoke[],
+  ): Promise<void> => {
+    for (const [index, entry] of entries.value.entries()) {
+      if (!entry.buildExecutionPrerequisites) continue
+      const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
+      if (!prerequisites) continue
+      let grantWalletContext: WalletExecutionContext | undefined
+      if (prerequisites.preTxs.length) {
+        await sendPlainTransactions(prerequisites.preTxs, {
+          walletContext: prerequisites.walletContext,
+          onBroadcast: (preTxIndex, walletContext) => {
+            grantWalletContext = walletContext
+            const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
+            if (revoke) {
+              grantedRevokes.unshift({ transaction: revoke, walletContext })
+            }
+          },
+        })
+      }
+      // Entries without a one-to-one mapping retain the original all-or-nothing
+      // behavior. Migration entries always provide postTxsByPreTx so partial or
+      // receipt-ambiguous grant sequences can unwind precisely.
+      if (!prerequisites.postTxsByPreTx && prerequisites.postTxs.length) {
+        if (!grantWalletContext) {
+          throw new Error('Cannot restore prerequisite transactions without their wallet context')
+        }
+        grantedRevokes.push(...prerequisites.postTxs.map(transaction => ({
+          transaction,
+          walletContext: grantWalletContext,
+        })))
+      }
+    }
+  }
+
+  /**
    * Execute the whole batch as one atomic transaction. Entries normally reuse
    * the preview plan; entries with simulation-only preview state can rebuild a
    * signed execution plan before the merged batch is prepared and sent.
@@ -2113,21 +2248,28 @@ export const useTxBatch = () => {
     if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
     execError.value = undefined
     isExecuting.value = true
+    const grantedRevokes: MigrationAuthorizationRevoke[] = []
     try {
+      if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
       // would revert (against the current chain state, which may have moved since
       // the last simulation), surface the decoded reason and don't send.
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
+      await sendExecutionPrerequisites(grantedRevokes)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
       const prepared = await prepareTransactionPlan(executionPlan)
       await executePreparedPlan(prepared)
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+      await revokeAfterSuccess(grantedRevokes)
       await redirectAfterBatchExecution()
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
+      // The batch never landed, so no granted authorization should be left
+      // standing. Entries stay in the cart for a retry, which re-grants.
+      await revokeAfterAbort(grantedRevokes)
       execError.value = await describeExecError(error)
     }
     finally {
