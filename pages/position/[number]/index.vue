@@ -700,6 +700,10 @@ const loadCollaterals = async (sequence: number) => {
 
 const disableCollateral = async (vault: EVault) => {
   if (isPreparing.value) return
+  // Every other action on this page is gated on the same pair of checks. This
+  // one moves funds too — planTransfer sweeps the sub-account's full eToken
+  // balance — so it must not stay reachable when the position is region-blocked.
+  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return
   isPreparing.value = true
   try {
     clearDisableCollateralSimulationError()
@@ -1584,6 +1588,7 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
                   variant="primary"
                   rounded
                   :loading="isSubmitting || isPreparing"
+                  :disabled="isPositionGeoBlocked || isPairFullyRestricted"
                   @click="disableCollateral(collateral.vault as EVault)"
                 >
                   Disable collateral
