@@ -16,19 +16,16 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *     silently inherit `DEFAULT_STALE_TIME_MS`.
  *
  *   - `formStaleTimeMs` (optional): override on the plan-time/form SDK
- *     instance (`getEulerSdkFresh()`). Forms want recent chain state, so
- *     plan-critical rows carry a shorter window here than they do for
- *     browsing. It is still a stale time, not a forced refetch — only `0`
- *     bypasses the cache on every plan-time call, and no row currently needs
- *     that. Non-listed queries inherit `staleTimeMs`.
+ *     instance (`getEulerSdkFresh()`). When forms construct a transaction
+ *     plan they want the latest chain state; setting this to 0 forces the
+ *     plan-time SDK to re-fetch regardless of the cache age. Non-listed
+ *     queries inherit `staleTimeMs`.
  *
  *   - `invalidateAfterTx` (optional, boolean): evict matching cache entries
- *     after every successful transaction. Used by display surfaces (vault
- *     list, portfolio etc.) that read via the browsing SDK with a long
- *     staleTime — without explicit eviction they would serve pre-tx data for
- *     up to `staleTimeMs`. This is also the only unconditional refetch the
- *     plan-time path gets, since `formStaleTimeMs` alone can reuse a snapshot
- *     up to its window old.
+ *     at form mount and after every successful transaction. Used by display
+ *     surfaces (vault list, portfolio etc.) that read via the browsing SDK
+ *     with a long staleTime — without explicit eviction they would serve
+ *     pre-tx data for up to `staleTimeMs`.
  *
  * Stale-time classes (organising the rows below):
  *

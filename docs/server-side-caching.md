@@ -74,7 +74,9 @@ Two endpoints, same `refreshLabelFile` engine:
 - **`/api/internal/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
 - **`/api/internal/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/internal/labels`, default templates land here.
 
-Both endpoints share the same in-memory TTL cache and both read through it via `getOrRefresh` — a request that finds a fresh entry never touches upstream, whichever shape it arrives in. `refreshLabelFile` is the force-refresh primitive underneath and is reserved for warm callers (`warm-cache.ts`, `vaults-cache.ts`), which need the entry rewritten rather than re-read; see [Warm-Cache Plugin](#warm-cache-plugin). `tests/server/labels-route-cache.test.ts` covers the distinction. Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
+Both endpoints write to and fall back on the same in-memory TTL cache, but only the query-shape handler reads through it. It checks `cache.get()` first (and uses the `getOrRefresh` helper for the `assets.json` union), so a fresh entry short-circuits without touching upstream. The path-shape handler calls `refreshLabelFile` directly, and that function is the force-refresh primitive — it skips the fresh-entry check and only deduplicates while a fetch is in flight. Every path-shape request therefore reaches upstream unless it coincides with an in-flight fetch for the same key, so the warm-cache entry acts as a stale fallback on that route rather than as a read-through cache. Since the SDK's default template targets the path shape, that is the route most label traffic takes. Warm callers (`warm-cache.ts`, `vaults-cache.ts`) use `refreshLabelFile` intentionally — see [Warm-Cache Plugin](#warm-cache-plugin) for why — but the path handler's use of it is a divergence from the read-through behavior its header comment describes.
+
+Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
 
 ### V3 proxy
 
@@ -240,7 +242,7 @@ When the two intervals are equal (V3 off), the timers naturally double-warm at e
 
 Every warm task is a **direct function call** (`refreshChainVaults(chainId)`, `refreshLabelFile(...)`, etc.) that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. If we warm via HTTP, the handler short-circuits on the still-fresh previous entry (age ≈ TTL − 2 s) and the entry then expires without refresh until the next cycle — leaving a stale window per cycle. Direct calls ensure the entry is always rewritten *before* it expires.
 
-User requests arriving during a refresh continue to read the still-fresh previous entry via the handler's own `cache.get()` short-circuit, so there's no blocking on the in-flight refresh.
+User requests arriving during a refresh continue to read the still-fresh previous entry via the handler's own `cache.get()` short-circuit, so there's no blocking on the in-flight refresh. This holds for handlers that actually short-circuit — the vault snapshot endpoint and the query-shape labels endpoint. The path-shape labels endpoint calls `refreshLabelFile` instead of reading through, so a concurrent request there joins the in-flight refresh rather than being served the previous entry (see [Labels](#labels)).
 
 ### Boot behaviour
 

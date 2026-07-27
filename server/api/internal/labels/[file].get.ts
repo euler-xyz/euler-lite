@@ -189,10 +189,8 @@ export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<un
 
 // Read-through helper: cache hit → return synchronously; otherwise refresh.
 // Used by the handler's assets.json union so each source can be served from
-// its own cache entry without triggering two upstream fetches on a warm cache,
-// and by the sibling path-shape handler so the SDK's default URL template gets
-// the same TTL short-circuit instead of one upstream fetch per request.
-export async function getOrRefresh(scope: LabelScope, file: LabelFile): Promise<unknown> {
+// its own cache entry without triggering two upstream fetches on a warm cache.
+async function getOrRefresh(scope: LabelScope, file: LabelFile): Promise<unknown> {
   const hit = cache.get(`${scope}:${file}`)
   if (hit !== undefined) return hit
   return refreshLabelFile(scope, file)
@@ -229,5 +227,9 @@ export default defineEventHandler(async (event) => {
     return [...chainArr, ...globalArr]
   }
 
-  return await getOrRefresh(chainId, file as LabelFile)
+  const key = `${chainId}:${file}`
+  const cached = cache.get(key)
+  if (cached) return cached
+
+  return refreshLabelFile(chainId, file as LabelFile)
 })

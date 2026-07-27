@@ -57,17 +57,14 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *
  *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Account and vault
  *     adapters are pinned to on-chain/subgraph reads regardless of the browser
- *     source, so transaction planning never reads V3-backed account/vault data.
- *     Rewards use fallback so V3 reward rows can be paired with direct
- *     claim-proof data. Uses `sdkFreshBuildQuery`, which applies the shorter
- *     `FORM_STALE_TIMES` windows to plan-critical queries (account, vault info,
- *     balances, allowances, pyth update data) while letting catalogue / labels /
- *     prices fall through to the same QueryClient cache that the fast instance
- *     fills. Those windows are short, not zero — this instance bounds staleness,
- *     it does not guarantee a latest-block read; post-tx `invalidateAfterTx`
- *     eviction is what forces a refetch. The fresh instance's refetches write
- *     back to the shared cache, so a subsequent fast read sees the
- *     just-refreshed value within its own staleness window. Consumed by
+ *     source, so transaction planning reflects the latest block. Rewards use
+ *     fallback so V3 reward rows can be paired with direct claim-proof data.
+ *     Uses `sdkFreshBuildQuery`, which forces a zero stale time on plan-critical
+ *     queries (account, vault info, balances, allowances, pyth update data)
+ *     while letting catalogue / labels / prices fall through to the same
+ *     QueryClient cache that the fast instance fills. The fresh instance's
+ *     refetches write back to the shared cache, so a subsequent fast read sees
+ *     the just-refreshed value within its own staleness window. Consumed by
  *     `useEulerTx` planners and simulate/execute.
  */
 
