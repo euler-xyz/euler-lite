@@ -10,15 +10,18 @@
  * cross-chain `all/assets.json` file the SDK's
  * `getEulerLabelsGlobalAssetsUrl` calls). Anything else 400s.
  *
- * Reuses `refreshLabelFile` from the sibling query-shape endpoint, so
- * both paths share one in-memory TTL cache and one upstream-fetch
- * pipeline.
+ * Reuses `getOrRefresh` from the sibling query-shape endpoint, so both
+ * paths share one in-memory TTL cache and one upstream-fetch pipeline.
+ * Reading through the cache matters here: this is the route the SDK's
+ * default template hits, so calling the force-refresh primitive directly
+ * would send every SDK label read upstream and make the warm-cache
+ * prewarm useful only as a stale fallback.
  */
 import { createError, getRouterParam, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   LABEL_FILES,
-  refreshLabelFile,
+  getOrRefresh,
   type LabelFile,
   type LabelScope,
 } from '~/server/api/internal/labels/[file].get'
@@ -57,5 +60,5 @@ export default defineEventHandler(async (event) => {
   // global file via a separate `getEulerLabelsGlobalAssetsUrl()` and
   // composes the result itself.
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
-  return await refreshLabelFile(scope, file)
+  return await getOrRefresh(scope, file)
 })
