@@ -282,6 +282,12 @@ export interface ActivityTransactionGroup {
   events: ActivityEvent[]
 }
 
+export const getActivityTransactionGroupLabel = (
+  group: Pick<ActivityTransactionGroup, 'events'>,
+) => group.events.some(event => event.type === 'liquidation')
+  ? 'Liquidation transaction'
+  : 'Transaction'
+
 export const groupActivityEventsByTransaction = (
   events: readonly ActivityEvent[],
 ): ActivityTransactionGroup[] => {

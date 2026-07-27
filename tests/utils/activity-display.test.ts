@@ -23,6 +23,7 @@ import {
   getActivityLiquidationDisplayDetails,
   getPortfolioActivityPositionParticipant,
   getActivityTransferDirection,
+  getActivityTransactionGroupLabel,
   getDefaultVaultActivityFilter,
   getDisplayActivityEventTypes,
   getVaultActivityFilterOptions,
@@ -482,6 +483,18 @@ describe('activity display helpers', () => {
       ['deposit', 'borrow'],
       ['withdraw'],
     ])
+  })
+
+  it('labels transaction groups containing a liquidation', () => {
+    expect(getActivityTransactionGroupLabel({
+      events: [
+        { type: 'repay' } as ActivityEvent,
+        { type: 'liquidation' } as ActivityEvent,
+      ],
+    })).toBe('Liquidation transaction')
+    expect(getActivityTransactionGroupLabel({
+      events: [{ type: 'repay' } as ActivityEvent],
+    })).toBe('Transaction')
   })
 
   it('shows only underlying asset amounts', () => {
