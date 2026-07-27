@@ -425,7 +425,7 @@ const vaultDisplay = computed(() => {
         :aria-label="`${expanded ? 'Hide' : 'Show'} additional ${eventLabel} details`"
         @click="expanded = !expanded"
       >
-        <span>{{ expanded ? 'Show less' : 'More' }}</span>
+        <span>{{ expanded ? 'Less' : 'More' }}</span>
         <SvgIcon
           name="arrow-down"
           class="!h-12 !w-12 transition-transform"
