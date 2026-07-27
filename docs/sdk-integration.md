@@ -243,6 +243,8 @@ How fresh that snapshot actually is depends on the path taken:
 
 `attachSubAccountSnapshot` re-reads the receiver sub-account before planning, because a stale controller flag makes the planner skip `enableController` and the EVC batch reverts. That re-read goes through the same cache, so it corrects a snapshot carried over from an earlier portfolio load but is itself bounded by the same 1-minute window. A planner that needs a stronger guarantee has to invalidate the relevant rows explicitly.
 
+Note that three source comments predate the current policy values and still describe a stronger guarantee than the code provides — the `getEulerSdkFresh()` block in `composables/useEulerSdk.ts` and the `freshPlanContext` block in `composables/useEulerTx.ts` both say "zero stale time" on plan-critical reads, and the `invalidateAfterTx` bullet in `utils/sdk-query-policy.ts` says entries are evicted "at form mount". No row uses `formStaleTimeMs: 0` and nothing invalidates on mount; this document reflects the shipped behavior where they disagree.
+
 ## Where to Extend
 
 | Adding… | Where |
