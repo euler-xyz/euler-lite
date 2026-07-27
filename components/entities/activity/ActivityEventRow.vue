@@ -237,13 +237,6 @@ const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => portfolioPosition.value
   ? `${portfolioPosition.value.label} liquidated`
   : formatActivityEventLabel(event))
-const { getPositionBySubAccountIndex } = useEulerAccount()
-// A fully liquidated (closed) position no longer renders on /position/:n —
-// only link while the position still exists.
-const positionRoute = computed(() => portfolioPosition.value
-  && getPositionBySubAccountIndex(portfolioPosition.value.index)
-  ? { path: `/position/${portfolioPosition.value.index}`, query: route.query }
-  : null)
 const transactionLink = computed(() => getExplorerLink(event.txHash, event.chainId))
 const vaultDisplay = computed(() => {
   if (!showVault) return null
@@ -315,16 +308,7 @@ const vaultDisplay = computed(() => {
         class="activity-event-row__event-summary"
         :class="{ 'activity-event-row__event-summary--with-vault': showVault && vaultDisplay?.vault }"
       >
-        <NuxtLink
-          v-if="positionRoute"
-          :to="positionRoute"
-          class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
-          :title="eventLabel"
-        >
-          {{ eventLabel }}
-        </NuxtLink>
         <div
-          v-else
           class="line-clamp-2 break-words text-p2 font-medium text-content-primary"
           :title="eventLabel"
         >

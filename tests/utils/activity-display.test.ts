@@ -665,7 +665,7 @@ describe('activity display helpers', () => {
     }])
   })
 
-  it('represents a viewed liquidated subaccount only as an internal position', () => {
+  it('labels a viewed liquidated subaccount by position number', () => {
     expect(getPortfolioActivityPositionParticipant({
       account: VAULT,
       actor: ASSET,
