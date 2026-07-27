@@ -74,7 +74,7 @@ Two endpoints, same `refreshLabelFile` engine:
 - **`/api/internal/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
 - **`/api/internal/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/internal/labels`, default templates land here.
 
-Both endpoints share the same in-memory TTL cache. Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
+Both endpoints share the same in-memory TTL cache and both read through it via `getOrRefresh` — a request that finds a fresh entry never touches upstream, whichever shape it arrives in. `refreshLabelFile` is the force-refresh primitive underneath and is reserved for warm callers (`warm-cache.ts`, `vaults-cache.ts`), which need the entry rewritten rather than re-read; see [Warm-Cache Plugin](#warm-cache-plugin). `tests/server/labels-route-cache.test.ts` covers the distinction. Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
 
 ### V3 proxy
 

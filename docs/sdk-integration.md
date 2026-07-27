@@ -27,7 +27,9 @@ The app exposes three SDK entry points, all produced by the same factory in `com
 
 - **`getEulerSdkForChain(chainId)` — chain-aware browsing instance.** Chains listed in `ONCHAIN_SDK_CHAINS` use the onchain backend regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`; all other chains use the default browsing backend. This keeps the browsing cache policy while avoiding V3-backed account/vault/Earn adapters for the pinned chains (typically deprecated chains whose V3 data is gone). Surfaces with an explicit chain id use this entry point.
 
-- **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Plan-critical account and vault reads use shorter form-time windows than browsing reads: for example, `queryAccountVaults` uses 1 minute and balance-like migration reads use 15 seconds. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches a live `Account` so planner entity math reflects the latest block.
+- **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Plan-critical account and vault reads use shorter form-time windows than browsing reads: for example, `queryAccountVaults` uses 1 minute and balance-like migration reads use 15 seconds. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches an `Account` through those onchain adapters.
+
+  Pinning the adapters changes the *data source*, not the cache. `sdkFreshBuildQuery` still runs through the shared `QueryClient`, and `freshPlanContext()` does not invalidate before fetching, so a plan-time `Account` is onchain-backed but only as fresh as its `FORM_STALE_TIMES` rows allow — up to a minute old for `queryAccountVaults`. Post-tx eviction (`invalidateAfterTx`) is what forces a re-read after the user's own state changes; the fresh instance alone does not. Do not rely on this entry point for a latest-block guarantee.
 
 All entry points share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the browsing entry points read from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -36,13 +38,14 @@ All entry points share the same `QueryClient`, so a refetch driven by the fresh 
 `composables/useEulerSdk.ts` keeps a module-level `Map<string, Promise<SdkInstance>>` keyed by:
 
 ```
-freshness | backend | rpcCacheKey | staticCacheKey
+freshness | backend | rpcCacheKey | staticCacheKey | keyring:keyringCacheKey
 ```
 
 - `freshness` is `'cached'` or `'fresh'`.
 - `backend` is `'fast'` (env-driven via `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`) or `'onchain'` (forced for `ONCHAIN_SDK_CHAINS` browsing reads and the plan-time instance; `freshness` keeps the two apart in the key).
 - `rpcCacheKey` is a stable join of `chainId:rpcUrl` for the chains declared by `useEulerAddresses().allowedChainIds`.
 - `staticCacheKey` is `JSON.stringify(config)` for the rest of the SDK config (URLs, reward toggles, adapter selection).
+- `keyringCacheKey` is `JSON.stringify(buildSdkKeyringHookTargets())`. The Keyring plugin is built with the hook targets resolved at build time, so this segment keeps a target-list change from reusing an instance wired to the old targets.
 
 On a cache miss, `buildInstance({ backend, buildQuery })` does:
 
@@ -194,12 +197,14 @@ Key properties:
 
 ### Invalidation
 
-`invalidateSdkQueries(queryNames)` walks the QueryClient and invalidates any cache key whose `queryName` matches. Two callers:
+`invalidateSdkQueries(queryNames)` walks the QueryClient and invalidates any cache key whose `queryName` matches. Two callers pass the whole `INVALIDATE_AFTER_TX` list:
 
 - `composables/useEulerTx.ts:finalizeExecution` — fires after every successful tx with `[...INVALIDATE_AFTER_TX]`.
 - `composables/cowswap/useCowSwapExecutionCore.ts` — same, post-CoW-swap settlement.
 
 Both import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
+
+Other callers pass their own narrower name list for an explicit refresh: `composables/useSdkRewards.ts` (user reward rows before a portfolio rebuild), `composables/useEulerLabels.ts` (the five label queries on `loadLabels(true)`), and the lend withdraw page (wallet token balances after a swap output changes). Nothing invalidates on form mount — a form that opens within a row's stale window reads the cached value.
 
 ### Post-Tx Portfolio Refresh
 
@@ -226,7 +231,17 @@ const freshPlanContext = async () => {
 
 Plan builders call `freshPlanContext()` or receive a preloaded account from `useFreshAccount()` and pass that `account` into the SDK. `simulatePlan` and transaction execution use `getEulerSdkFresh()` directly. Prepared-plan review uses the fast SDK so plugin and vault metadata reads can hit the shared cache populated by `useFreshAccount()`.
 
-The fresh `Account` snapshot gives planners correct entity math at the moment of plan construction. Rows with shorter form-time windows keep subsequent SDK reads inside the planner bounded to the freshness required by that data class.
+The plan-time `Account` snapshot is what gives planners their entity math: `totalShares` / `totalAssets` for asset↔share conversion, sub-account positions for `getPosition`, controller flags for `isControllerEnabled`.
+
+How fresh that snapshot actually is depends on the path taken:
+
+| Path | Freshness |
+|---|---|
+| `freshPlanContext()` fetches it | Onchain adapters, but served from the shared `QueryClient` at each row's `FORM_STALE_TIMES` window — `queryAccountVaults` is 1 minute, so a snapshot up to a minute old can be reused. No invalidation happens first. |
+| Caller passes `input.account` | The `useFreshAccount()` race-replace cache, refreshed on portfolio load and after `triggerPortfolioRefresh()`. Bounded by that refresh cadence, not by `FORM_STALE_TIMES`. |
+| After a successful tx | `invalidateAfterTx` rows are evicted, so the next plan re-reads them from chain. This is the only unconditional refetch in the flow. |
+
+`attachSubAccountSnapshot` re-reads the receiver sub-account before planning, because a stale controller flag makes the planner skip `enableController` and the EVC batch reverts. That re-read goes through the same cache, so it corrects a snapshot carried over from an earlier portfolio load but is itself bounded by the same 1-minute window. A planner that needs a stronger guarantee has to invalidate the relevant rows explicitly.
 
 ## Where to Extend
 
@@ -235,6 +250,6 @@ The fresh `Account` snapshot gives planners correct entity math at the moment of
 | A new env var the SDK needs | `server/plugins/app-config.ts` (server read + `__APP_CONFIG__`), `nuxt.config.ts` (public runtime config key), `composables/useEnvConfig.ts` (resolution order + interface), then pass it into `buildSdkStaticConfig` |
 | A new SDK config field | `buildSdkStaticConfig` in `composables/useEulerSdk.ts` (it folds into the existing cache key automatically) |
 | A new stale-time policy for an existing query | One row in `SDK_QUERY_POLICY` (`utils/sdk-query-policy.ts`). Derived exports re-compute automatically. |
-| A new plan-critical query | Same row, add `formStaleTimeMs: 0` and/or `invalidateAfterTx: true`. |
+| A new plan-critical query | Same row, add a shorter `formStaleTimeMs` (`0` to bypass the plan-time cache entirely) and/or `invalidateAfterTx: true`. |
 | A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. See [server-side caching](./server-side-caching.md) for the shared `external-proxy.ts` helper. |
 | A new planner | Add the wrapper in `composables/useEulerTx.ts` using `freshPlanContext()` to get a fresh SDK + `Account` |

@@ -448,13 +448,19 @@ export const useEulerTx = () => {
   /**
    * Resolve a plan-time SDK + Account pair.
    *
-   * Uses the "fresh" SDK (always on-chain adapters, zero stale time on
-   * plan-critical reads). When the caller provides a pre-fetched Account
-   * (typically from `useFreshAccount`'s race-replace cache), it's reused
-   * verbatim — no plan-time `fetchAccount` round-trip. Otherwise the Account
-   * is fetched live so totalShares/totalAssets for asset/share conversion,
-   * sub-account positions for `getPosition`, controller flags for
-   * `isControllerEnabled`, etc. reflect the latest block.
+   * Uses the "fresh" SDK (always on-chain adapters, short `FORM_STALE_TIMES`
+   * windows on plan-critical reads). When the caller provides a pre-fetched
+   * Account (typically from `useFreshAccount`'s race-replace cache), it's
+   * reused verbatim — no plan-time `fetchAccount` round-trip. Otherwise the
+   * Account is fetched here for totalShares/totalAssets asset/share
+   * conversion, sub-account positions for `getPosition`, controller flags for
+   * `isControllerEnabled`, etc.
+   *
+   * That fetch is on-chain-backed but not a forced refetch: it goes through
+   * the shared QueryClient at each row's form stale time (a minute for
+   * `queryAccountVaults`), so a recent snapshot is reused. Post-tx
+   * `invalidateAfterTx` eviction is what guarantees a re-read after the user's
+   * own state changes.
    *
    * Cheap reads in this fetch path (labels, ABIs, deployments, prices) still
    * hit the QueryClient cache shared with the fast SDK, so the extra RPC
@@ -477,7 +483,9 @@ export const useEulerTx = () => {
   // `isControllerEnabled` to decide whether to emit `enableController` items,
   // so a stale flag here means the plan skips the enable and the EVC batch
   // reverts. Re-fetching the sub-account snapshot lets `setSubAccount` overwrite
-  // those flags with on-chain truth. Mirrors prod's pre-plan refresh.
+  // those flags from the on-chain adapters — bounded by the same form stale
+  // window as the rest of the plan-time reads, but no longer carrying whatever
+  // the portfolio load happened to cache. Mirrors prod's pre-plan refresh.
   const attachSubAccountSnapshot = async (
     sdk: Awaited<ReturnType<typeof getEulerSdkFresh>>,
     account: Account<IHasVaultAddress>,
