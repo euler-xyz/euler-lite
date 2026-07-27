@@ -23,6 +23,7 @@ import {
   getActivityLiquidationDisplayDetails,
   getPortfolioActivityPositionParticipant,
   getActivityTransferDirection,
+  getDefaultVaultActivityFilter,
   getDisplayActivityEventTypes,
   getVaultActivityFilterOptions,
   groupActivityEventsByTransaction,
@@ -127,6 +128,12 @@ describe('activity display helpers', () => {
       'borrowing',
       'lending',
     ])
+  })
+
+  it('defaults vault activity to lending and borrowing without hiding other filters', () => {
+    expect(getDefaultVaultActivityFilter('evk')).toBe('lending-borrowing')
+    expect(getDefaultVaultActivityFilter('earn')).toBe('lending')
+    expect(getDefaultVaultActivityFilter('securitize')).toBe('lending')
   })
 
   it('keeps historical borrowing filters for a currently non-borrowable EVK', () => {

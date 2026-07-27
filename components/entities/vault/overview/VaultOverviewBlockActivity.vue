@@ -8,7 +8,10 @@ import {
   buildActivityFeedContextKey,
   type ActivityFeedScope,
 } from '~/composables/useActivityFeed'
-import { getVaultActivityFilterOptions } from '~/utils/activity-display'
+import {
+  getDefaultVaultActivityFilter,
+  getVaultActivityFilterOptions,
+} from '~/utils/activity-display'
 
 const props = withDefaults(defineProps<{
   vault: VaultEntity
@@ -35,6 +38,7 @@ const feedScope = computed<ActivityFeedScope>(() => ({
 }))
 const feedContextKey = computed(() => buildActivityFeedContextKey(feedScope.value, []))
 const categoryOptions = computed(() => getVaultActivityFilterOptions(props.vaultType))
+const defaultFilter = computed(() => getDefaultVaultActivityFilter(props.vaultType))
 
 const setRuntimeUnsupported = (unsupported: boolean) => {
   isRuntimeUnsupported.value = unsupported
@@ -84,6 +88,7 @@ watch(feedContextKey, () => {
       :scope="feedScope"
       :enabled="availability.isSupported.value && (isOpen || !hasCheckedRuntimeSupport)"
       :category-options="categoryOptions"
+      :default-filter="defaultFilter"
       @settled="hasCheckedRuntimeSupport = true"
       @update:unsupported="setRuntimeUnsupported"
     />

@@ -352,6 +352,10 @@ export const getVaultActivityFilterOptions = (
   return options
 }
 
+export const getDefaultVaultActivityFilter = (
+  vaultType: ActivityVaultType,
+): string => vaultType === 'evk' ? 'lending-borrowing' : 'lending'
+
 // The `account` category (controller/collateral/operator status, ToS
 // signatures, …) is deliberately absent: none of its event types are
 // displayed on Lite, so querying it would only surface empty results.

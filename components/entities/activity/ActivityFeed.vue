@@ -18,6 +18,8 @@ const props = withDefaults(defineProps<{
   scope: ActivityFeedScope
   enabled: boolean
   categoryOptions: readonly ActivityFilterOption[]
+  /** Filter selected when the feed is first mounted. */
+  defaultFilter?: string
   /** Categories queried when no filter chip is selected — defaults to the union of the option categories. */
   unfilteredCategories?: readonly ActivityCategory[]
   subject?: 'account' | 'vault'
@@ -29,7 +31,7 @@ const emit = defineEmits<{
   'update:unsupported': [unsupported: boolean]
 }>()
 
-const selectedFilters = ref<string[]>([])
+const selectedFilters = ref<string[]>(props.defaultFilter ? [props.defaultFilter] : [])
 const selectedCategories = computed<ActivityCategory[]>(() =>
   selectedFilters.value.length === 0 && props.unfilteredCategories
     ? [...props.unfilteredCategories].sort()
