@@ -63,19 +63,25 @@ Multiple requests for the same vault in one caller batch describe one atomic aft
 
 ### Failure Contract
 
-Per-request failures resolve to `null` for that rate on both transports:
+`getProjectedRatesBatch()` reports failures two different ways, and call sites must handle both. These causes resolve to `null` for the affected rate:
 
 | Cause | Result |
 |---|---|
 | Missing chain id or vault-lens address | `null` for every request in the call |
 | Inconsistent base state across same-vault requests | `null` for the conflicting vault's requests |
 | Reverted, transport-suppressed, or short EVC batch item | `null` for that request |
-| Failed `readContract` on the non-EVC fallback | `null` for that request |
 | `queryFailure` or empty `interestRateInfo` in the result | `null` for that request |
 
-Two failures happen before any per-request work and therefore reject the returned promise instead of resolving with `null`: a rejected `getEulerSdk()` and a throwing `providerService.getProvider()`. Because the queue groups callers by chain, lens, and EVC address, that rejection reaches every caller waiting on the affected deployment group — those callers share the provider that could not be resolved, so none of them has a projectable state. Call sites must keep the projection work inside `try`/`catch` and treat a rejection the same way they treat `null`.
+These causes reject the returned promise instead:
 
-Consumers must treat any missing requested rate as an unavailable projection, not as `0%`. `areProjectedRatesComplete()` (array-level) and `getCollateralApySnapshot()` (snapshot-level) already enforce that.
+| Cause | Result |
+|---|---|
+| Rejected `getEulerSdk()` or throwing `providerService.getProvider()` | rejects every caller queued for that deployment group |
+| Any failed `readContract` on the non-EVC fallback path | rejects every caller queued for that deployment group |
+
+The rejection scope follows the queue: batches are grouped by chain, lens, and EVC address, and a group-level throw reaches every caller in that group. That is proportionate for a provider failure, because none of those callers has a reachable chain. It is not proportionate for the fallback path, which awaits `Promise.all` over per-vault `readContract` calls: one unhealthy vault read discards the projections of unrelated callers whose own reads succeeded. It also makes the two transports asymmetric — the same lens failure yields `null` under EVC batching but a rejection when no EVC address is configured. Normalizing the fallback to per-request `null` values would remove both quirks; until then, do not assume that a failed lens read resolves to `null`.
+
+So a call site must both check for `null` rates and wrap the projection in `try`/`catch`, treating a rejection exactly like a `null` rate. Any missing rate is an unavailable projection, never `0%`. `areProjectedRatesComplete()` covers the array-level check and `getCollateralApySnapshot()` catches rejections internally, returning an incomplete snapshot.
 
 ## Position Collateral Snapshots
 
@@ -150,7 +156,7 @@ Reward rows retain vault, collateral, action, provider, and reward-token identit
 1. Define current and after-state token amounts as `bigint`; do not derive utilization deltas from rounded display values.
 2. Resolve both snapshots when the operation changes a position. Pass `projectRates: true` only for collateral vaults whose cash changes.
 3. Pass a `liabilityRateDelta` whenever debt-vault cash or borrows change.
-4. Abort presentation unless every required snapshot and projected rate is complete, and catch rejections from the rate queue so a provider failure hides the estimate instead of surfacing an unhandled rejection.
+4. Abort presentation unless every required snapshot and projected rate is complete, and catch rejections from the rate queue so a group-level failure hides the estimate instead of surfacing an unhandled rejection.
 5. Convert projected 27-decimal lens APYs with `nanoToValue(rate, 25)` to the percentage units used by the UI.
 6. Build both metric states from the same collateral, debt, intrinsic, and reward inputs.
 7. Merge campaign inputs with `mergeProjectedRewardCampaigns()` and preserve vault identity in rate rows.
@@ -163,13 +169,13 @@ Current consumers include lend deposit/withdraw/swap, borrow and borrow-more, mu
 - **Projection stays hidden:** check `snapshot.isComplete`, the requested rate array, and whether positive collateral has a valid liability-context USD price.
 - **Rate ignores an earlier batch item:** resolve the vault through `useLayeredVaults()` and verify the active simulated layer contains the vault.
 - **Same vault is projected twice with no result:** both requests must use identical `currentCash` and `currentBorrows`; only their deltas may differ.
-- **Every form on the page loses its projection at once:** look for a rejected provider or SDK load rather than a per-vault lens failure; those reject the whole deployment group.
+- **Every form on the page loses its projection at once:** look for a group-level rejection — a failed SDK or provider lookup, or a failed lens read on a deployment with no EVC address — rather than a per-vault `null`.
 - **Headline and modal differ:** derive both from the same `ProjectedYieldState`; do not recalculate the headline with a separate APY helper.
 - **Rewards look duplicated:** campaign identity must include the vault and `rewardCampaignKey()`, which includes action and collateral qualification.
 
 ## Tests
 
-- `tests/utils/vault/projected-rates.test.ts` — rate batching, same-vault merging, deployment scoping, per-request failure normalization, and the provider-resolution rejection boundary
+- `tests/utils/vault/projected-rates.test.ts` — rate batching, same-vault merging, deployment scoping, and `null` rate results; the group-level rejection paths in the failure contract are not covered here
 - `tests/composables/usePositionCollateralApy.test.ts` — multi-collateral weighting, layer-aware reads, and incomplete snapshots
 - `tests/utils/projected-yield.test.ts` — metric denominators, campaign transitions, and reward indicators
 - `tests/composables/useLayeredVaults.test.ts` — simulated-vault precedence
