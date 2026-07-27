@@ -210,6 +210,18 @@ export const filterActivityEventsForDisplay = (
     left.chainId === right.chainId
     && left.txHash.toLowerCase() === right.txHash.toLowerCase()
 
+  const sameAddress = (left: string | undefined, right: string | undefined) =>
+    left !== undefined
+    && right !== undefined
+    && left.toLowerCase() === right.toLowerCase()
+
+  const getLiquidationViolator = (event: ActivityEvent) => {
+    const payloadViolator = event.payload.violator
+    return typeof payloadViolator === 'string'
+      ? payloadViolator
+      : event.counterparty
+  }
+
   const hasMatchingAssetAmount = (left: ActivityEvent, right: ActivityEvent) => {
     const leftAssets = left.assets?.filter(asset => asset.kind === 'assets') ?? []
     const rightAssets = right.assets?.filter(asset => asset.kind === 'assets') ?? []
@@ -231,6 +243,7 @@ export const filterActivityEventsForDisplay = (
       return !events.some(candidate =>
         candidate.type === 'liquidation'
         && sameTransaction(event, candidate)
+        && sameAddress(event.account, getLiquidationViolator(candidate))
         && hasMatchingAssetAmount(event, candidate),
       )
     }

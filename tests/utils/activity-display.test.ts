@@ -37,6 +37,8 @@ const ASSET = '0x0000000000000000000000000000000000000001' as const
 const VAULT = '0x0000000000000000000000000000000000000002' as const
 const SHARES = '0x0000000000000000000000000000000000000003' as const
 const OTHER_VAULT = '0x0000000000000000000000000000000000000004' as const
+const VIOLATOR = '0x0000000000000000000000000000000000000005' as const
+const LIQUIDATOR = '0x0000000000000000000000000000000000000006' as const
 
 describe('activity display helpers', () => {
   it('uses bounded scope-specific event filters without display noise', () => {
@@ -268,7 +270,113 @@ describe('activity display helpers', () => {
     ])
   })
 
-  it('hides an exact repay emitted alongside a liquidation', () => {
+  it('hides only the violator repay emitted alongside a liquidation', () => {
+    const base = {
+      chainId: 1,
+      timestamp: '2026-07-13T10:30:00.000Z',
+      blockNumber: '123',
+      txHash: '0x830d02459a26d4893b105cd7edbf4720bd2cd649f5fa382cdbed5fee4b64895c',
+      source: 'v3-ponder',
+      payload: {},
+      vault: VAULT,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'violator-repay',
+        category: 'borrowing',
+        logIndex: 259,
+        type: 'repay',
+        rawType: 'repay',
+        account: VIOLATOR,
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '2584055565' }],
+      },
+      {
+        ...base,
+        id: 'liquidator-borrow',
+        category: 'borrowing',
+        logIndex: 261,
+        type: 'borrow',
+        rawType: 'borrow',
+        account: LIQUIDATOR,
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '2584055565' }],
+      },
+      {
+        ...base,
+        id: 'liquidation',
+        category: 'liquidations',
+        logIndex: 265,
+        type: 'liquidation',
+        rawType: 'liquidation',
+        account: VIOLATOR,
+        counterparty: VIOLATOR,
+        payload: { violator: VIOLATOR },
+        assets: [
+          { kind: 'assets', address: ASSET, amountRaw: '2584055565' },
+          { kind: 'collateral', address: OTHER_VAULT, amountRaw: '200' },
+        ],
+      },
+      {
+        ...base,
+        id: 'liquidator-repay',
+        category: 'borrowing',
+        logIndex: 268,
+        type: 'repay',
+        rawType: 'repay',
+        account: LIQUIDATOR,
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '2584055565' }],
+      },
+    ] as ActivityEvent[]
+
+    expect(filterActivityEventsForDisplay(events, ['borrow', 'repay', 'liquidation']).map(event => event.id)).toEqual([
+      'liquidator-borrow',
+      'liquidation',
+      'liquidator-repay',
+    ])
+  })
+
+  it('preserves a liquidator repay when the liquidation is projected onto their account', () => {
+    const base = {
+      chainId: 1,
+      timestamp: '2026-07-13T10:30:00.000Z',
+      blockNumber: '123',
+      txHash: '0x830d02459a26d4893b105cd7edbf4720bd2cd649f5fa382cdbed5fee4b64895c',
+      source: 'v3-ponder',
+      vault: VAULT,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'liquidation',
+        category: 'liquidations',
+        logIndex: 265,
+        type: 'liquidation',
+        rawType: 'liquidation',
+        account: LIQUIDATOR,
+        counterparty: VIOLATOR,
+        payload: { violator: VIOLATOR },
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '2584055565' }],
+      },
+      {
+        ...base,
+        id: 'liquidator-repay',
+        category: 'borrowing',
+        logIndex: 268,
+        type: 'repay',
+        rawType: 'repay',
+        account: LIQUIDATOR,
+        payload: {},
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '2584055565' }],
+      },
+    ] as ActivityEvent[]
+
+    expect(filterActivityEventsForDisplay(events, ['repay', 'liquidation']).map(event => event.id)).toEqual([
+      'liquidation',
+      'liquidator-repay',
+    ])
+  })
+
+  it('keeps matching repayments when the liquidation violator is unavailable', () => {
     const base = {
       chainId: 1,
       timestamp: '2026-07-13T10:30:00.000Z',
@@ -286,6 +394,7 @@ describe('activity display helpers', () => {
         logIndex: 1,
         type: 'repay',
         rawType: 'repay',
+        account: VIOLATOR,
         assets: [{ kind: 'assets', address: ASSET, amountRaw: '100' }],
       },
       {
@@ -295,25 +404,13 @@ describe('activity display helpers', () => {
         logIndex: 2,
         type: 'liquidation',
         rawType: 'liquidation',
-        assets: [
-          { kind: 'assets', address: ASSET, amountRaw: '100' },
-          { kind: 'collateral', address: OTHER_VAULT, amountRaw: '200' },
-        ],
-      },
-      {
-        ...base,
-        id: 'independent-repay',
-        category: 'borrowing',
-        logIndex: 3,
-        type: 'repay',
-        rawType: 'repay',
-        assets: [{ kind: 'assets', address: ASSET, amountRaw: '25' }],
+        assets: [{ kind: 'assets', address: ASSET, amountRaw: '100' }],
       },
     ] as ActivityEvent[]
 
     expect(filterActivityEventsForDisplay(events, ['repay', 'liquidation']).map(event => event.id)).toEqual([
+      'repay',
       'liquidation',
-      'independent-repay',
     ])
   })
 
