@@ -26,6 +26,7 @@ describe('getProjectedRatesBatch', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    getProvider.mockImplementation((id: number) => ({ chainId: id }))
     chainId.value = 1
     eulerLensAddresses.value = { vaultLens: '0x0000000000000000000000000000000000000010' }
     eulerCoreAddresses.value = { evc: '0x0000000000000000000000000000000000000020' }
@@ -112,6 +113,60 @@ describe('getProjectedRatesBatch', () => {
 
     expect(result).toEqual([null, null])
     expect(batchLensCalls).not.toHaveBeenCalled()
+  })
+
+  it('normalizes reverted and transport-failed EVC batch items to null', async () => {
+    batchLensCalls.mockResolvedValue([
+      { success: false, result: null },
+      { success: false, result: null, transportError: true },
+      { success: true, result: { queryFailure: true, interestRateInfo: [] } },
+    ])
+
+    const projection = getProjectedRatesBatch([
+      request('0x0000000000000000000000000000000000000001'),
+      request('0x0000000000000000000000000000000000000002'),
+      request('0x0000000000000000000000000000000000000003'),
+    ])
+
+    await vi.runAllTimersAsync()
+
+    expect(await projection).toEqual([null, null, null])
+  })
+
+  it('keeps a failed fallback read scoped to its own request', async () => {
+    eulerCoreAddresses.value = {} as { evc: string }
+    const readContract = vi.fn()
+      .mockRejectedValueOnce(new Error('rpc failed'))
+      .mockResolvedValueOnce({
+        queryFailure: false,
+        interestRateInfo: [{ supplyAPY: 7n, borrowAPY: 17n }],
+      })
+    getProvider.mockReturnValue({ readContract } as never)
+
+    const first = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000001')])
+    const second = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000002')])
+
+    await vi.runAllTimersAsync()
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(batchLensCalls).not.toHaveBeenCalled()
+    expect(readContract).toHaveBeenCalledTimes(2)
+    expect(firstResult).toEqual([null])
+    expect(secondResult).toEqual([{ supplyAPY: 7n, borrowAPY: 17n }])
+  })
+
+  it('rejects every caller in a deployment group when the provider cannot be resolved', async () => {
+    getProvider.mockImplementation(() => {
+      throw new Error('unsupported chain')
+    })
+
+    const first = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000001')])
+    const second = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000002')])
+    const settled = Promise.allSettled([first, second])
+
+    await vi.runAllTimersAsync()
+
+    expect((await settled).map(result => result.status)).toEqual(['rejected', 'rejected'])
   })
 
   it('keeps queued projections scoped to their enqueue-time chain deployment', async () => {

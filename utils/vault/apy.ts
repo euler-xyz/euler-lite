@@ -2,6 +2,7 @@ import type { Address, PublicClient } from 'viem'
 import { eulerVaultLensABI } from '~/entities/euler/abis'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { batchLensCalls } from '~/utils/multicall'
+import { logger } from '~/utils/logger'
 
 export interface ProjectedRates {
   supplyAPY: bigint // 27 decimals
@@ -125,16 +126,32 @@ const executeProjectedRatesBatch = async (
     return results
   }
 
-  const fallbackResults = await Promise.all(calls.map(async call =>
-    provider.readContract({
-      address: context.vaultLens as Address,
-      abi: eulerVaultLensABI,
-      functionName: 'getVaultInterestRateModelInfo',
-      authorizationList: undefined,
-      args: call.args as [Address, bigint[], bigint[]],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
-    }) as Promise<Record<string, any>>,
-  ))
+  // A read failure stays scoped to its own request, mirroring the per-item
+  // failures the EVC path reports. One unhealthy vault read must not discard
+  // the projections queued for every other vault sharing this batch.
+  const fallbackResults = await Promise.all(calls.map(async (call, activeIndex) => {
+    try {
+      return await provider.readContract({
+        address: context.vaultLens as Address,
+        abi: eulerVaultLensABI,
+        functionName: 'getVaultInterestRateModelInfo',
+        authorizationList: undefined,
+        args: call.args as [Address, bigint[], bigint[]],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
+      }) as Record<string, any>
+    }
+    catch (err) {
+      logger.warn(
+        {
+          ctx: 'getProjectedRatesBatch',
+          vault: active[activeIndex]?.request.vaultAddress,
+          err,
+        },
+        'projected rate lens read failed',
+      )
+      return null
+    }
+  }))
 
   active.forEach((item, activeIndex) => {
     results[item.index] = parseProjectedRatesResult(fallbackResults[activeIndex])
@@ -238,7 +255,12 @@ const flushProjectedRatesBatches = async () => {
  * Coalesce projection requests created by sibling form watchers in the same
  * render turn. Position forms often project supply and borrow legs in separate
  * composables; collecting them until the next task keeps that recompute to one
- * EVC lens batch without coupling those composables together.
+ * coalesced EVC lens batch (which `batchLensCalls()` chunks at 25 calls)
+ * without coupling those composables together.
+ *
+ * Rates that cannot be produced resolve to `null` per request. Only a failure
+ * to obtain the SDK provider rejects, and it rejects every caller queued for
+ * that deployment group.
  */
 export const getProjectedRatesBatch = (
   requests: ProjectedRatesRequest[],
