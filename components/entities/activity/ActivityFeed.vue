@@ -121,6 +121,19 @@ const toggleGroup = (groupId: string) => {
   else next.add(groupId)
   expandedGroupIds.value = next
 }
+const bodyElement = ref<HTMLElement | null>(null)
+const loadingBodyHeight = ref(232)
+const bodyStyle = computed(() => feed.isLoading.value
+  ? { minHeight: `${loadingBodyHeight.value}px` }
+  : undefined)
+
+watch(feed.isLoading, (isLoading) => {
+  if (!isLoading || !bodyElement.value) return
+  loadingBodyHeight.value = Math.max(
+    232,
+    Math.ceil(bodyElement.value.getBoundingClientRect().height),
+  )
+})
 
 watch(
   () => props.categoryOptions.map(option => option.value),
@@ -179,208 +192,222 @@ watch(feed.hasLoaded, (hasLoaded) => {
     </div>
 
     <div
-      v-if="feed.isLoading.value"
-      class="flex flex-col gap-8"
-      aria-label="Loading activity"
+      ref="bodyElement"
+      class="activity-feed__body"
+      :style="bodyStyle"
     >
       <div
-        v-for="index in 3"
-        :key="index"
-        class="h-72 animate-pulse rounded-12 bg-surface"
-      />
-    </div>
-
-    <div
-      v-else-if="feed.hasColdError.value"
-      class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-24 text-center"
-    >
-      <div class="text-p3 text-content-primary">
-        Activity could not be loaded right now.
-      </div>
-      <button
-        type="button"
-        class="ui-button ui-button--medium ui-button--secondary"
-        @click="feed.refresh"
-      >
-        Retry
-      </button>
-    </div>
-
-    <div
-      v-else-if="feed.isUnsupported.value"
-      class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
-    >
-      {{ selectedFilters.length ? 'Activity is not available for the selected categories.' : `Activity is not available for this ${scopeLabel}.` }}
-    </div>
-
-    <div
-      v-else-if="feed.isSyncing.value && feed.events.value.length === 0"
-      class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
-    >
-      <div>Activity is still indexing. Events will appear here shortly.</div>
-      <button
-        v-if="feed.hasMore.value"
-        type="button"
-        class="ui-button ui-button--medium ui-button--secondary"
-        :disabled="feed.isLoadingMore.value"
-        @click="feed.loadMore"
-      >
-        {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
-      </button>
-    </div>
-
-    <div
-      v-else-if="feed.isPartial.value && feed.events.value.length === 0"
-      class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
-    >
-      <div>No activity is available from the indexed sources. This history may be incomplete.</div>
-      <button
-        v-if="feed.hasMore.value"
-        type="button"
-        class="ui-button ui-button--medium ui-button--secondary"
-        :disabled="feed.isLoadingMore.value"
-        @click="feed.loadMore"
-      >
-        {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
-      </button>
-    </div>
-
-    <div
-      v-else-if="feed.isEmpty.value"
-      class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
-    >
-      {{ selectedFilters.length ? 'No activity matches the selected categories.' : emptyMessage }}
-    </div>
-
-    <div
-      v-else-if="feed.hasLoaded.value && feed.events.value.length === 0 && feed.hasMore.value"
-      class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center"
-    >
-      <div class="text-p3 text-content-secondary">
-        Nothing to show in the most recent history — older activity is available.
-      </div>
-      <button
-        type="button"
-        class="ui-button ui-button--medium ui-button--secondary"
-        :disabled="feed.isLoadingMore.value"
-        @click="feed.loadMore"
-      >
-        {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
-      </button>
-    </div>
-
-    <template v-else-if="feed.events.value.length">
-      <div
-        class="transition-opacity"
-        :class="{ 'opacity-60': feed.isRefreshing.value }"
+        v-if="feed.isLoading.value"
+        class="flex flex-col gap-8"
+        aria-label="Loading activity"
       >
         <div
-          class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary"
-          :class="{ 'activity-feed__header--portfolio': subject === 'account' }"
-        >
-          <span class="activity-feed__header-event">Event</span>
-          <span>Amount / change</span>
-          <span class="sr-only">Transaction</span>
-        </div>
-        <div>
-          <section
-            v-for="group in eventGroups"
-            :key="group.id"
-            :class="subject === 'account' ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-default bg-card px-12 shadow-card' : 'activity-feed__flat-event'"
-          >
-            <div
-              v-if="group.events.length > 1"
-              class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 text-p4 text-content-tertiary"
-            >
-              <div class="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
-                <span class="font-medium text-content-secondary">
-                  {{ getActivityTransactionGroupLabel(group) }}
-                </span>
-                <span aria-hidden="true">&middot;</span>
-                <time
-                  :datetime="group.timestamp"
-                  :title="formatActivityTimestamp(group.timestamp)"
-                >{{ formatActivityRelativeTimestamp(group.timestamp, activityNowMs) }}</time>
-                <span aria-hidden="true">&middot;</span>
-                <span>{{ group.events.length }} events</span>
-              </div>
-              <a
-                :href="getExplorerLink(group.txHash, group.chainId)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex h-32 w-32 items-center justify-center rounded-8 text-content-secondary transition-colors hover:bg-card-hover hover:text-accent-500"
-                aria-label="View grouped transaction"
-                title="View transaction"
-              >
-                <SvgIcon
-                  name="arrow-top-right"
-                  class="!h-16 !w-16"
-                  aria-hidden="true"
-                />
-              </a>
-            </div>
-            <ul>
-              <ActivityEventRow
-                v-for="event in visibleGroupEvents(group)"
-                :key="event.id"
-                :event="event"
-                :show-vault="subject === 'account'"
-                :hide-category="subject === 'account'"
-                :hide-timestamp="group.events.length > 1"
-                :grouped="group.events.length > 1"
-                :hidden-category="impliedCategory"
-                :show-transaction-link="group.events.length === 1"
-                :now-ms="activityNowMs"
-                :liquidation-details="getLiquidationDetails(event)"
-              />
-            </ul>
-            <button
-              v-if="group.events.length > COLLAPSED_GROUP_EVENT_COUNT"
-              type="button"
-              class="flex w-full items-center justify-center gap-4 border-t border-line-subtle py-10 text-p4 font-medium text-content-secondary transition-colors hover:text-content-primary"
-              :aria-expanded="isGroupExpanded(group.id)"
-              @click="toggleGroup(group.id)"
-            >
-              <span>
-                {{ isGroupExpanded(group.id)
-                  ? 'Show fewer events'
-                  : `Show ${group.events.length - COLLAPSED_GROUP_EVENT_COUNT} more events` }}
-              </span>
-              <SvgIcon
-                name="arrow-down"
-                class="!h-12 !w-12 transition-transform"
-                :class="{ 'rotate-180': isGroupExpanded(group.id) }"
-                aria-hidden="true"
-              />
-            </button>
-          </section>
-        </div>
+          v-for="index in 3"
+          :key="index"
+          class="h-72 animate-pulse rounded-12 bg-surface"
+        />
       </div>
 
       <div
-        v-if="feed.loadMoreError.value"
-        class="flex items-center gap-8 rounded-12 bg-warning-100 p-12 text-p4 text-warning-500"
+        v-else-if="feed.hasColdError.value"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-24 text-center"
       >
-        <span class="flex-1">Older activity could not be loaded.</span>
+        <div class="text-p3 text-content-primary">
+          Activity could not be loaded right now.
+        </div>
         <button
           type="button"
-          class="font-medium underline hover:no-underline"
-          @click="feed.loadMore"
+          class="ui-button ui-button--medium ui-button--secondary"
+          @click="feed.refresh"
         >
           Retry
         </button>
       </div>
 
-      <button
-        v-if="feed.hasMore.value"
-        type="button"
-        class="ui-button ui-button--medium ui-button--secondary self-center"
-        :disabled="feed.isLoadingMore.value"
-        @click="feed.loadMore"
+      <div
+        v-else-if="feed.isUnsupported.value"
+        class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
       >
-        {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
-      </button>
-    </template>
+        {{ selectedFilters.length ? 'Activity is not available for the selected categories.' : `Activity is not available for this ${scopeLabel}.` }}
+      </div>
+
+      <div
+        v-else-if="feed.isSyncing.value && feed.events.value.length === 0"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
+      >
+        <div>Activity is still indexing. Events will appear here shortly.</div>
+        <button
+          v-if="feed.hasMore.value"
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary"
+          :disabled="feed.isLoadingMore.value"
+          @click="feed.loadMore"
+        >
+          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+        </button>
+      </div>
+
+      <div
+        v-else-if="feed.isPartial.value && feed.events.value.length === 0"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
+      >
+        <div>No activity is available from the indexed sources. This history may be incomplete.</div>
+        <button
+          v-if="feed.hasMore.value"
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary"
+          :disabled="feed.isLoadingMore.value"
+          @click="feed.loadMore"
+        >
+          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+        </button>
+      </div>
+
+      <div
+        v-else-if="feed.isEmpty.value"
+        :class="subject === 'account' ? 'flex min-h-160 flex-1 items-center justify-center' : 'rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary'"
+      >
+        <PortfolioEmptyState
+          v-if="subject === 'account'"
+          :active="true"
+          :active-text="selectedFilters.length ? 'No activity matches the selected categories' : emptyMessage"
+          inactive-text="Connect your wallet to see your activity"
+        />
+        <template v-else>
+          {{ selectedFilters.length ? 'No activity matches the selected categories.' : emptyMessage }}
+        </template>
+      </div>
+
+      <div
+        v-else-if="feed.hasLoaded.value && feed.events.value.length === 0 && feed.hasMore.value"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center"
+      >
+        <div class="text-p3 text-content-secondary">
+          Nothing to show in the most recent history — older activity is available.
+        </div>
+        <button
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary"
+          :disabled="feed.isLoadingMore.value"
+          @click="feed.loadMore"
+        >
+          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+        </button>
+      </div>
+
+      <template v-else-if="feed.events.value.length">
+        <div
+          class="transition-opacity"
+          :class="{ 'opacity-60': feed.isRefreshing.value }"
+        >
+          <div
+            class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary"
+            :class="{ 'activity-feed__header--portfolio': subject === 'account' }"
+          >
+            <span class="activity-feed__header-event">Event</span>
+            <span>Amount / change</span>
+            <span class="sr-only">Transaction</span>
+          </div>
+          <div>
+            <section
+              v-for="group in eventGroups"
+              :key="group.id"
+              :class="subject === 'account' ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-default bg-card px-12 shadow-card' : 'activity-feed__flat-event'"
+            >
+              <div
+                v-if="group.events.length > 1"
+                class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 text-p4 text-content-tertiary"
+              >
+                <div class="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+                  <span class="font-medium text-content-secondary">
+                    {{ getActivityTransactionGroupLabel(group) }}
+                  </span>
+                  <span aria-hidden="true">&middot;</span>
+                  <time
+                    :datetime="group.timestamp"
+                    :title="formatActivityTimestamp(group.timestamp)"
+                  >{{ formatActivityRelativeTimestamp(group.timestamp, activityNowMs) }}</time>
+                  <span aria-hidden="true">&middot;</span>
+                  <span>{{ group.events.length }} events</span>
+                </div>
+                <a
+                  :href="getExplorerLink(group.txHash, group.chainId)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex h-32 w-32 items-center justify-center rounded-8 text-content-secondary transition-colors hover:bg-card-hover hover:text-accent-500"
+                  aria-label="View grouped transaction"
+                  title="View transaction"
+                >
+                  <SvgIcon
+                    name="arrow-top-right"
+                    class="!h-16 !w-16"
+                    aria-hidden="true"
+                  />
+                </a>
+              </div>
+              <ul>
+                <ActivityEventRow
+                  v-for="event in visibleGroupEvents(group)"
+                  :key="event.id"
+                  :event="event"
+                  :show-vault="subject === 'account'"
+                  :hide-category="subject === 'account'"
+                  :hide-timestamp="group.events.length > 1"
+                  :grouped="group.events.length > 1"
+                  :hidden-category="impliedCategory"
+                  :show-transaction-link="group.events.length === 1"
+                  :now-ms="activityNowMs"
+                  :liquidation-details="getLiquidationDetails(event)"
+                />
+              </ul>
+              <button
+                v-if="group.events.length > COLLAPSED_GROUP_EVENT_COUNT"
+                type="button"
+                class="flex w-full items-center justify-center gap-4 border-t border-line-subtle py-10 text-p4 font-medium text-content-secondary transition-colors hover:text-content-primary"
+                :aria-expanded="isGroupExpanded(group.id)"
+                @click="toggleGroup(group.id)"
+              >
+                <span>
+                  {{ isGroupExpanded(group.id)
+                    ? 'Show fewer events'
+                    : `Show ${group.events.length - COLLAPSED_GROUP_EVENT_COUNT} more events` }}
+                </span>
+                <SvgIcon
+                  name="arrow-down"
+                  class="!h-12 !w-12 transition-transform"
+                  :class="{ 'rotate-180': isGroupExpanded(group.id) }"
+                  aria-hidden="true"
+                />
+              </button>
+            </section>
+          </div>
+        </div>
+
+        <div
+          v-if="feed.loadMoreError.value"
+          class="flex items-center gap-8 rounded-12 bg-warning-100 p-12 text-p4 text-warning-500"
+        >
+          <span class="flex-1">Older activity could not be loaded.</span>
+          <button
+            type="button"
+            class="font-medium underline hover:no-underline"
+            @click="feed.loadMore"
+          >
+            Retry
+          </button>
+        </div>
+
+        <button
+          v-if="feed.hasMore.value"
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary self-center"
+          :disabled="feed.isLoadingMore.value"
+          @click="feed.loadMore"
+        >
+          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+        </button>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -395,6 +422,10 @@ watch(feed.hasLoaded, (hasLoaded) => {
 .activity-feed {
   container-name: activity-feed;
   container-type: inline-size;
+}
+
+.activity-feed__body {
+  transition: min-height 150ms ease;
 }
 
 @container activity-feed (min-width: 900px) {

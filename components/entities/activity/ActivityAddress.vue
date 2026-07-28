@@ -10,14 +10,39 @@ const props = withDefaults(defineProps<{
   label?: string
   linkKind?: ActivityAddressLinkKind
   vaultType?: ActivityVaultType
+  compactVault?: boolean
 }>(), {
   linkKind: 'explorer',
+  compactVault: false,
 })
 
 const route = useRoute()
 const { activateSpyMode } = useSpyMode()
+const {
+  getVault,
+  getType: getVaultType,
+  getOrFetch: getOrFetchVault,
+  getVaultCategory,
+  isVerifiedVault,
+  registryVersion,
+} = useVaultRegistry()
+const addressRef = toRef(props, 'address')
+const product = useEulerProductOfVault(addressRef)
 const copyKey = computed(() => `activity-address-${props.address.toLowerCase()}`)
 const explorerLink = computed(() => getExplorerLink(props.address, props.chainId, true))
+const resolvedVault = computed(() => {
+  void registryVersion.value
+  return props.linkKind === 'vault' ? getVault(props.address) : undefined
+})
+const resolvedVaultType = computed(() =>
+  getVaultType(props.address) ?? props.vaultType)
+const compactVaultName = computed(() => {
+  if (!resolvedVault.value) return props.label || shortenAddress(props.address)
+  if (getVaultCategory(resolvedVault.value.address) === 'escrow') {
+    return 'Escrowed collateral'
+  }
+  return product.name || resolvedVault.value.shares.name
+})
 const internalLink = computed(() => {
   const query = typeof route.query.network === 'string'
     ? { network: route.query.network }
@@ -27,12 +52,20 @@ const internalLink = computed(() => {
   }
   if (props.linkKind === 'vault') {
     return {
-      path: props.vaultType === 'earn' ? `/earn/${props.address}` : `/lend/${props.address}`,
+      path: resolvedVaultType.value === 'earn' ? `/earn/${props.address}` : `/lend/${props.address}`,
       query,
     }
   }
   return null
 })
+
+watch(
+  () => [props.address, props.linkKind] as const,
+  ([address, linkKind]) => {
+    if (linkKind === 'vault') void getOrFetchVault(address)
+  },
+  { immediate: true },
+)
 
 const fallbackCopy = (text: string) => {
   const textarea = document.createElement('textarea')
@@ -75,7 +108,42 @@ const handleInternalClick = (event: MouseEvent) => {
 <template>
   <span class="inline-flex min-w-0 max-w-full items-center gap-2">
     <NuxtLink
-      v-if="internalLink"
+      v-if="internalLink && resolvedVault && compactVault"
+      :to="internalLink"
+      class="inline-flex min-w-0 max-w-full items-center gap-6 rounded-8 transition-opacity hover:opacity-80"
+      :title="address"
+    >
+      <AssetAvatar
+        :asset="[resolvedVault.asset]"
+        size="20"
+      />
+      <span
+        class="min-w-0 truncate text-p4 text-content-secondary"
+        :title="compactVaultName"
+      >
+        <VaultDisplayName
+          :name="compactVaultName"
+          :is-unverified="!isVerifiedVault(resolvedVault.address)"
+        />
+      </span>
+      <span class="shrink-0 text-p4 font-medium text-content-primary">
+        {{ resolvedVault.asset.symbol }}
+      </span>
+    </NuxtLink>
+    <NuxtLink
+      v-else-if="internalLink && resolvedVault"
+      :to="internalLink"
+      class="inline-flex min-w-0 max-w-full rounded-8 transition-opacity hover:opacity-80"
+      :title="address"
+    >
+      <VaultLabelsAndAssets
+        :vault="resolvedVault"
+        :assets="[resolvedVault.asset]"
+        size="small"
+      />
+    </NuxtLink>
+    <NuxtLink
+      v-else-if="internalLink"
       :to="internalLink"
       class="min-w-0 truncate text-content-secondary transition-colors hover:text-accent-500 hover:underline"
       :title="address"

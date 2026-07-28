@@ -40,6 +40,7 @@ const SHARES = '0x0000000000000000000000000000000000000003' as const
 const OTHER_VAULT = '0x0000000000000000000000000000000000000004' as const
 const VIOLATOR = '0x0000000000000000000000000000000000000005' as const
 const LIQUIDATOR = '0x0000000000000000000000000000000000000006' as const
+const USD_UNIT_OF_ACCOUNT = '0x0000000000000000000000000000000000000348' as const
 
 describe('activity display helpers', () => {
   it('uses bounded scope-specific event filters without display noise', () => {
@@ -211,10 +212,10 @@ describe('activity display helpers', () => {
     }
 
     expect(getActivityTransferDirection(sent)).toBe('sent')
-    expect(formatActivityEventLabel(sent)).toBe('Sent shares')
+    expect(formatActivityEventLabel(sent)).toBe('Vault shares sent')
     expect(getActivityEventIcon(sent)).toEqual({ name: 'borrow-outline' })
     expect(getActivityTransferDirection(received)).toBe('received')
-    expect(formatActivityEventLabel(received)).toBe('Received shares')
+    expect(formatActivityEventLabel(received)).toBe('Vault shares received')
     expect(getActivityEventIcon(received)).toEqual({ name: 'lend-outline' })
     expect(formatActivityEventLabel({ ...sent, label: 'Custom transfer' })).toBe('Custom transfer')
   })
@@ -766,7 +767,15 @@ describe('activity display helpers', () => {
     expect(getActivityChangeEntries({
       type: 'set_hook_config',
       change: { fields: { new_hooked_ops: '4096' } },
-    })).toEqual([{ field: 'new_hooked_ops', label: 'New hooked ops', value: '4096' }])
+    })).toEqual([{ field: 'new_hooked_ops', label: 'New hooked ops', value: 'Flash loan' }])
+    expect(getActivityChangeEntries({
+      type: 'set_hook_config',
+      change: { fields: { new_hooked_ops: '192' } },
+    })).toEqual([{ field: 'new_hooked_ops', label: 'New hooked ops', value: 'Borrow, Repay' }])
+    expect(getActivityChangeEntries({
+      type: 'set_hook_config',
+      change: { fields: { new_hooked_ops: '32768' } },
+    })).toEqual([{ field: 'new_hooked_ops', label: 'New hooked ops', value: 'Unknown flags (32768)' }])
   })
 
   it('links protocol addresses externally and user identities through spy mode', () => {
@@ -878,6 +887,7 @@ describe('activity display helpers', () => {
       collateralAssets: '852576641882433905',
       collateralAssetsUsd: 0.8525394439635485,
       bonusUsd: 0.12800961496434857,
+      unitOfAccountValuation: null,
       valuation: { status: 'available' as const },
       blockNumber: '25562800',
       txHash: `0x${'ab'.repeat(32)}` as `0x${string}`,
@@ -892,7 +902,8 @@ describe('activity display helpers', () => {
       repayUsd: '$0.72',
       collateralAmount: '0.85 wM',
       collateralUsd: '$0.85',
-      bonusUsd: '+$0.13',
+      bonus: '+$0.13',
+      bonusTitle: 'Collateral seized minus debt repaid, valued in event-time USD',
       bonusTone: 'positive',
     })
 
@@ -910,18 +921,82 @@ describe('activity display helpers', () => {
       ...record,
       bonusUsd: -0.25,
     })
-    expect(unprofitable.bonusUsd).toBe('−$0.25')
+    expect(unprofitable.bonus).toBe('−$0.25')
     expect(unprofitable.bonusTone).toBe('negative')
     expect(getActivityLiquidationDisplayDetails({
       ...record,
       bonusUsd: -0.001,
-    }).bonusUsd).toBe('−<$0.01')
+    }).bonus).toBe('−<$0.01')
     const breakeven = getActivityLiquidationDisplayDetails({
       ...record,
       bonusUsd: 0,
     })
-    expect(breakeven.bonusUsd).toBe('$0.00')
+    expect(breakeven.bonus).toBe('$0.00')
     expect(breakeven.bonusTone).toBeUndefined()
+
+    const unitOfAccountValuation = {
+      source: 'historical-protocol-oracle' as const,
+      unitOfAccount: USD_UNIT_OF_ACCOUNT as Address,
+      unitOfAccountDecimals: 18,
+      repayValue: '1000000000000000000',
+      collateralValue: '2140000000000000000',
+      bonusValue: '1140000000000000000',
+      blockNumber: record.blockNumber,
+    }
+    // Event-time USD remains authoritative when both enrichments are present.
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      unitOfAccountValuation,
+    }).bonus).toBe('+$0.13')
+
+    // Without USD, the protocol-oracle quote uses the sentinel denomination.
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: undefined,
+      unitOfAccountValuation,
+    })).toMatchObject({
+      bonus: '+1.14 USD',
+      bonusTone: 'positive',
+      bonusTitle: 'Collateral seized minus debt repaid, quoted by the protocol oracle at the liquidation',
+    })
+
+    // Ordinary unit-of-account tokens resolve through existing token metadata.
+    const negativeFallback = getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: undefined,
+      unitOfAccountValuation: {
+        ...unitOfAccountValuation,
+        unitOfAccount: ASSET as Address,
+        repayValue: '1250000',
+        collateralValue: '1000000',
+        bonusValue: '-250000',
+        unitOfAccountDecimals: 6,
+      },
+    }, address => address === ASSET
+      ? { address: ASSET as Address, symbol: 'USDC', decimals: 6 }
+      : undefined)
+    expect(negativeFallback).toMatchObject({
+      bonus: '−0.25 USDC',
+      bonusTone: 'negative',
+    })
+
+    // An unsafe raw integer is never shown without decimals or a denomination.
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: undefined,
+      unitOfAccountValuation: {
+        ...unitOfAccountValuation,
+        unitOfAccountDecimals: null,
+      },
+    }).bonus).toBeUndefined()
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: undefined,
+      unitOfAccountValuation: {
+        ...unitOfAccountValuation,
+        unitOfAccount: OTHER_VAULT as Address,
+      },
+    }).bonus).toBeUndefined()
 
     // Fields the endpoint could not reconstruct stay absent, leaving the
     // event's own share-quantity display in place.
@@ -935,6 +1010,7 @@ describe('activity display helpers', () => {
       collateralAssets: undefined,
       collateralAssetsUsd: undefined,
       bonusUsd: undefined,
+      unitOfAccountValuation: null,
       valuation: { status: 'unavailable' as const },
     })
     expect(sparse).toEqual({})

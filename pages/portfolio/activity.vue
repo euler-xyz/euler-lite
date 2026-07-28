@@ -38,14 +38,13 @@ watch([owner, () => Number(chainId.value)], () => {
   <section class="mx-16 flex flex-col gap-16">
     <div
       v-if="!owner"
-      class="flex flex-col items-center gap-8 rounded-12 border border-line-subtle bg-surface p-24 text-center"
+      class="flex min-h-160 flex-1 items-center justify-center"
     >
-      <div class="text-p3 text-content-primary">
-        Connect a wallet to view position activity.
-      </div>
-      <div class="text-p4 text-content-secondary">
-        You can also open a portfolio in spy mode to inspect its history.
-      </div>
+      <PortfolioEmptyState
+        :active="false"
+        active-text="You don't have activity yet"
+        inactive-text="Connect your wallet to see your activity"
+      />
     </div>
 
     <div

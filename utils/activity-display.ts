@@ -12,6 +12,8 @@ import type {
 import { formatUnits, isAddress, maxUint256, zeroAddress, type Address } from 'viem'
 import { formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
 import { CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
+import { decodeHookedOperationsMask, getHookedOperationMetas } from '~/utils/vault-hooks'
+import { getSpecialAddressLabel } from '~/utils/special-addresses'
 
 interface ActivityTokenMetadata {
   address: Address
@@ -33,6 +35,7 @@ interface ActivityAssetContext {
 
 type ActivityVaultMetadataLookup = (address: Address) => ActivityVaultMetadata | undefined
 type ActivityTokenMetadataLookup = (address: Address) => ActivityTokenMetadata | undefined
+type ActivityAddressLabelLookup = (address: Address) => string | undefined
 
 export interface ActivityVaultDisplay {
   address: Address
@@ -442,9 +445,9 @@ export const formatActivityEventLabel = (
   if (sourceLabel) return sourceLabel
   if (event.type === 'transfer') {
     const direction = getActivityTransferDirection(event)
-    if (direction === 'sent') return 'Sent shares'
-    if (direction === 'received') return 'Received shares'
-    return 'Shares transferred'
+    if (direction === 'sent') return 'Vault shares sent'
+    if (direction === 'received') return 'Vault shares received'
+    return 'Vault shares transferred'
   }
   return applyActivityAcronyms(titleizeActivityType(event.type))
 }
@@ -496,6 +499,8 @@ export const formatActivityTimestamp = (timestamp: string): string => {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short',
   }).format(date)
 }
 
@@ -642,10 +647,33 @@ export interface ActivityLiquidationDisplayDetails {
   /** Seized collateral converted to underlying units, with symbol when known. */
   collateralAmount?: string
   collateralUsd?: string
-  /** Signed event-time bonus — negative when the liquidation was unprofitable. */
-  bonusUsd?: string
+  /** Signed event-time bonus, preferring USD and otherwise using the protocol unit of account. */
+  bonus?: string
+  bonusTitle?: string
   /** Rendering tone for the signed bonus. Absent for a zero bonus. */
   bonusTone?: 'positive' | 'negative'
+}
+
+const formatActivitySignedUnitValue = (
+  rawValue: string,
+  decimals: number,
+  denomination: string,
+): Pick<ActivityLiquidationDisplayDetails, 'bonus' | 'bonusTone'> | null => {
+  try {
+    const value = BigInt(rawValue)
+    const amount = formatSmartAmount(formatUnits(value < 0n ? -value : value, decimals))
+    return {
+      bonus: `${value > 0n ? '+' : value < 0n ? '−' : ''}${amount} ${denomination}`,
+      ...(value > 0n
+        ? { bonusTone: 'positive' as const }
+        : value < 0n
+          ? { bonusTone: 'negative' as const }
+          : {}),
+    }
+  }
+  catch {
+    return null
+  }
 }
 
 /**
@@ -656,6 +684,7 @@ export interface ActivityLiquidationDisplayDetails {
 export const getActivityLiquidationDisplayDetails = (
   record: LiquidationRecord,
   getTokenMetadata?: ActivityTokenMetadataLookup,
+  getAddressLabel?: ActivityAddressLabelLookup,
 ): ActivityLiquidationDisplayDetails => {
   const details: ActivityLiquidationDisplayDetails = {}
   if (record.repayAssetsUsd !== undefined) {
@@ -684,15 +713,36 @@ export const getActivityLiquidationDisplayDetails = (
   if (record.bonusUsd !== undefined) {
     // The bonus is the row's P&L figure — signed and toned like one.
     if (record.bonusUsd < 0) {
-      details.bonusUsd = `−${formatActivityUsd(Math.abs(record.bonusUsd))}`
+      details.bonus = `−${formatActivityUsd(Math.abs(record.bonusUsd))}`
       details.bonusTone = 'negative'
     }
     else if (record.bonusUsd > 0) {
-      details.bonusUsd = `+${formatActivityUsd(record.bonusUsd)}`
+      details.bonus = `+${formatActivityUsd(record.bonusUsd)}`
       details.bonusTone = 'positive'
     }
     else {
-      details.bonusUsd = formatActivityUsd(0)
+      details.bonus = formatActivityUsd(0)
+    }
+    details.bonusTitle = 'Collateral seized minus debt repaid, valued in event-time USD'
+  }
+  else if (
+    record.unitOfAccountValuation
+    && record.unitOfAccountValuation.unitOfAccountDecimals !== null
+  ) {
+    const valuation = record.unitOfAccountValuation
+    const denomination = getSpecialAddressLabel(valuation.unitOfAccount)
+      ?? getTokenMetadata?.(valuation.unitOfAccount)?.symbol
+      ?? getAddressLabel?.(valuation.unitOfAccount)
+    if (denomination) {
+      const fallback = formatActivitySignedUnitValue(
+        valuation.bonusValue,
+        valuation.unitOfAccountDecimals,
+        denomination,
+      )
+      if (fallback) {
+        Object.assign(details, fallback)
+        details.bonusTitle = 'Collateral seized minus debt repaid, quoted by the protocol oracle at the liquidation'
+      }
     }
   }
   return details
@@ -862,6 +912,18 @@ const formatActivityConfigFlags = (value: ActivityChangeValue): string | null =>
   return null
 }
 
+const formatActivityHookedOperations = (value: ActivityChangeValue): string | null => {
+  const mask = parseActivityInteger(value)
+  if (mask === null || mask < 0n) return null
+  if (mask === 0n) return 'None'
+
+  const { hookedOperations, unknownMask } = decodeHookedOperationsMask(mask)
+  const names = getHookedOperationMetas(hookedOperations, { includeInternal: true })
+    .map(operation => operation.name)
+  if (unknownMask !== 0n) names.push(`Unknown flags (${unknownMask})`)
+  return names.join(', ')
+}
+
 const isZeroAddressValue = (value: ActivityChangeValue): boolean => {
   const values = Array.isArray(value) ? value : [value]
   return values.length > 0 && values.every(item =>
@@ -1003,9 +1065,8 @@ export const getActivityChangeEntries = (
   else if (
     event.type === 'set_hook_config'
     && (field === 'hooked_ops' || field === 'new_hooked_ops')
-    && parseActivityInteger(value) === 0n
   ) {
-    formatted = 'None'
+    formatted = formatActivityHookedOperations(value)
   }
   else if (field === 'target_timestamp') {
     formatted = formatActivityUnixTimestamp(value)

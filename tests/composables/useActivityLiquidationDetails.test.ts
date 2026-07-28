@@ -40,6 +40,15 @@ const liquidationRecord = () => ({
   yieldBalance: '812035276912150036',
   repayAssetsUsd: 0.72,
   bonusUsd: 0.13,
+  unitOfAccountValuation: {
+    source: 'historical-protocol-oracle' as const,
+    unitOfAccount: '0x0000000000000000000000000000000000000348',
+    unitOfAccountDecimals: 18,
+    repayValue: '720000000000000000',
+    collateralValue: '850000000000000000',
+    bonusValue: '130000000000000000',
+    blockNumber: '25562800',
+  },
   valuation: { status: 'available' as const },
   blockNumber: '25562800',
   txHash: TX,
@@ -90,7 +99,13 @@ describe('useActivityLiquidationDetails', () => {
     }))
 
     await vi.waitFor(() =>
-      expect(details.getLiquidationDetails(event)).toMatchObject({ bonusUsd: 0.13 }))
+      expect(details.getLiquidationDetails(event)).toMatchObject({
+        bonusUsd: 0.13,
+        unitOfAccountValuation: {
+          source: 'historical-protocol-oracle',
+          bonusValue: '130000000000000000',
+        },
+      }))
 
     const eventUnix = Math.floor(Date.parse(event.timestamp) / 1000)
     expect(fetchLiquidations).toHaveBeenCalledTimes(1)

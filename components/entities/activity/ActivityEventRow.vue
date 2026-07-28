@@ -2,6 +2,7 @@
 import type { ActivityCategory, ActivityEvent, LiquidationRecord } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getExplorerLink } from '~/utils/block-explorer'
+import { getActivityLiquidationBonusEntry } from '~/components/entities/activity/activityEventRowDetails'
 import {
   enrichActivityAssetForDisplay,
   formatActivityAssetAmount,
@@ -113,6 +114,19 @@ const liquidationDisplay = computed(() => {
     return vaultAsset && vaultAsset.address.toLowerCase() === address.toLowerCase()
       ? vaultAsset
       : undefined
+  }, (address) => {
+    const debtVault = getRegistryVault(liquidationDetails.vault)
+    const debtVaultUnitOfAccount = debtVault && 'unitOfAccount' in debtVault
+      ? debtVault.unitOfAccount
+      : undefined
+    if (
+      debtVaultUnitOfAccount
+      && debtVaultUnitOfAccount.address.toLowerCase() === address.toLowerCase()
+    ) {
+      return debtVaultUnitOfAccount.symbol
+    }
+    const unitOfAccountVault = getRegistryVault(address)
+    return unitOfAccountVault?.shares?.symbol
   })
 })
 const assets = computed(() => {
@@ -184,8 +198,8 @@ const collateralVaultEntry = computed(() => {
   return {
     kind: 'address' as const,
     key: 'collateral-vault',
-    label: undefined,
-    inlineLabel: getActivityAssetAddressLabel('collateral', event.category),
+    label: getActivityAssetAddressLabel('collateral', event.category),
+    inlineLabel: undefined,
     address,
     addressLabel: display?.name,
     addressLinkKind: display ? 'vault' as const : undefined,
@@ -193,23 +207,11 @@ const collateralVaultEntry = computed(() => {
   }
 })
 const valuation = computed(() => formatActivityValuationForAssets(event.valuation, event.assets ?? []))
+const liquidationBonusEntry = computed(() =>
+  getActivityLiquidationBonusEntry(liquidationDisplay.value))
 const details = computed(() => [
   ...assets.value,
-  ...(liquidationDisplay.value?.bonusUsd
-    ? [{
-        kind: 'valuation' as const,
-        key: 'liquidation-bonus',
-        label: 'Liquidator bonus',
-        value: liquidationDisplay.value.bonusUsd,
-        valueClass: liquidationDisplay.value.bonusTone === 'positive'
-          ? 'text-accent-600'
-          : liquidationDisplay.value.bonusTone === 'negative'
-            ? 'text-error-500'
-            : undefined,
-        valueTitle: 'Collateral seized minus debt repaid, valued at the liquidation',
-        addresses: undefined,
-      }]
-    : []),
+  ...(liquidationBonusEntry.value ? [liquidationBonusEntry.value] : []),
   ...changes.value,
   ...(collateralVaultEntry.value ? [collateralVaultEntry.value] : []),
   ...(valuation.value
@@ -227,12 +229,12 @@ const details = computed(() => [
 const portfolioPosition = computed(() => showVault
   ? getPortfolioActivityPositionParticipant(event)
   : null)
-// Collapsing behind a toggle only pays off when it hides more than one row —
-// with exactly two entries, showing both is shorter than the button.
-const COLLAPSED_ENTRY_COUNT = 2
+// Keep the default row scannable: the primary amount/change stays visible and
+// secondary liquidation or governance detail is available on demand.
+const COLLAPSED_ENTRY_COUNT = 1
 const hiddenEntryCount = computed(() =>
   Math.max(0, details.value.length - COLLAPSED_ENTRY_COUNT))
-const hasExpandableMobileDetails = computed(() => hiddenEntryCount.value > 0)
+const hasExpandableDetails = computed(() => hiddenEntryCount.value > 0)
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => portfolioPosition.value
   ? `${portfolioPosition.value.label} liquidated`
@@ -268,6 +270,7 @@ const vaultDisplay = computed(() => {
     :class="{
       'activity-event-row--grouped': grouped,
       'activity-event-row--portfolio': showVault,
+      'activity-event-row--expanded': expanded,
     }"
   >
     <div
@@ -338,17 +341,20 @@ const vaultDisplay = computed(() => {
 
     <div
       class="activity-event-row__details flex min-w-0 flex-col gap-6 pl-40"
-      :class="{ 'activity-event-row__details--with-vault': showVault && vaultDisplay?.vault }"
+      :class="{
+        'activity-event-row__details--with-vault': showVault && vaultDisplay?.vault,
+        'activity-event-row__details--expanded': expanded,
+      }"
     >
       <div
         v-for="(detail, index) in details"
         :key="detail.key"
-        class="min-w-0"
+        class="activity-event-row__detail min-w-0"
         :class="index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
       >
         <div
           v-if="detail.label"
-          class="text-p4 text-content-tertiary"
+          class="activity-event-row__detail-label text-p4 text-content-tertiary"
         >
           {{ detail.label }}
         </div>
@@ -381,20 +387,24 @@ const vaultDisplay = computed(() => {
           v-else-if="detail.kind === 'address'"
           class="activity-event-row__asset-address flex min-w-0 items-center gap-4 text-p4"
         >
-          <span class="shrink-0 text-content-tertiary">{{ detail.inlineLabel }}</span>
+          <span
+            v-if="detail.inlineLabel"
+            class="shrink-0 text-content-tertiary"
+          >{{ detail.inlineLabel }}</span>
           <ActivityAddress
             :address="detail.address"
             :chain-id="event.chainId"
             :label="detail.addressLabel"
             :link-kind="detail.addressLinkKind"
             :vault-type="detail.addressVaultType"
+            compact-vault
           />
         </div>
 
         <template v-else>
           <div
             v-if="detail.addresses?.length"
-            class="mt-2 flex min-w-0 flex-col items-start gap-2 text-p3"
+            class="activity-event-row__detail-addresses mt-2 flex min-w-0 flex-col items-start gap-2 text-p3"
           >
             <ActivityAddress
               v-for="address in detail.addresses"
@@ -404,6 +414,7 @@ const vaultDisplay = computed(() => {
               :label="address.label"
               :link-kind="address.linkKind"
               :vault-type="address.vaultType"
+              compact-vault
             />
           </div>
           <div
@@ -418,7 +429,7 @@ const vaultDisplay = computed(() => {
       </div>
 
       <button
-        v-if="hasExpandableMobileDetails"
+        v-if="hasExpandableDetails"
         type="button"
         class="activity-event-row__more inline-flex w-fit items-center gap-4 text-p4 text-content-tertiary transition-colors hover:text-content-primary"
         :aria-expanded="expanded"
@@ -520,6 +531,10 @@ const vaultDisplay = computed(() => {
   .activity-event-row__details {
     grid-column: 3;
     padding-left: 0;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
   }
 
   .activity-event-row__transaction {
@@ -556,7 +571,53 @@ const vaultDisplay = computed(() => {
   }
 
   .activity-event-row__asset-address {
-    margin-top: 4px;
+    margin-top: 0;
+  }
+
+  .activity-event-row__detail:not(.hidden) {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+
+  .activity-event-row__detail-addresses {
+    margin-top: 0;
+    flex-direction: row;
+  }
+
+  .activity-event-row__details--expanded {
+    flex-direction: column;
+    align-items: flex-start;
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+}
+
+@container activity-feed (min-width: 700px) {
+  .activity-event-row--portfolio.activity-event-row--expanded {
+    grid-template-columns:
+      minmax(220px, 1fr)
+      minmax(320px, 1.2fr)
+      40px;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__detail:not(.hidden) {
+    display: grid;
+    width: 100%;
+    grid-template-columns: 130px minmax(0, 1fr);
+    align-items: center;
+    column-gap: 12px;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__detail > :not(.activity-event-row__detail-label) {
+    grid-column: 2;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__more {
+    margin-left: 142px;
+    margin-top: 2px;
   }
 }
 
@@ -578,16 +639,17 @@ const vaultDisplay = computed(() => {
       44px;
   }
 
-  .activity-event-row__secondary-detail {
-    display: block;
-  }
-
-  .activity-event-row__more {
-    display: none;
-  }
-
   .activity-event-row__asset-amount,
   .activity-event-row__asset-address {
+    margin-top: 0;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__detail:not(.hidden) {
+    grid-template-columns: 150px minmax(0, 1fr);
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__more {
+    margin-left: 162px;
     margin-top: 2px;
   }
 }
