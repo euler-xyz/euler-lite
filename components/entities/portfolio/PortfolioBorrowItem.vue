@@ -31,9 +31,11 @@ import { resolveComponent, type Component } from 'vue'
 const { position, clickable = true } = defineProps<{ position: PortfolioBorrowPosition<VaultEntity>, clickable?: boolean }>()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 
-const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
-const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
+// portfolioAddress is already the spy-safe acting address; a wallet
+// fallback here would compute wrong position indices while a spy
+// candidate is still verifying.
+const ownerAddress = computed(() => portfolioAddress.value)
 const subAccountIndex = computed(() => {
   if (!ownerAddress.value || !position.subAccount) return 0
   return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))

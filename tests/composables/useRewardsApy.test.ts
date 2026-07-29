@@ -41,6 +41,7 @@ describe('useRewardsApy multi-collateral rewards', () => {
     }))
     vi.stubGlobal('useWagmi', () => ({ address: ref(undefined) }))
     vi.stubGlobal('useSpyMode', () => ({ spyAddress: ref(undefined) }))
+    vi.stubGlobal('useEffectiveAddress', () => ({ effectiveAddress: ref(undefined) }))
     vi.stubGlobal('useVaultRegistry', () => ({
       registryVersion: ref(1),
       getVault: vi.fn(() => ({

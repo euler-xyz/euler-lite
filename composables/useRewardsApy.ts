@@ -9,8 +9,7 @@ export const useRewardsApy = () => {
   const { settings } = useUserSettings()
   const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
   const { getVault, registryVersion } = useVaultRegistry()
-  const { address: connectedAddress } = useWagmi()
-  const { spyAddress } = useSpyMode()
+  const { effectiveAddress } = useEffectiveAddress()
 
   const isEnabled = computed(() => settings.value.enableRewardsApy)
 
@@ -18,9 +17,9 @@ export const useRewardsApy = () => {
   // to see what the spied user actually earns), otherwise the connected
   // wallet. When neither is set the filter is a no-op — discovery surfaces
   // keep the full "headline" APR visible to unconnected visitors.
-  const eligibilityAddress = computed(() =>
-    spyAddress.value || connectedAddress.value || undefined,
-  )
+  // `effectiveAddress` never falls back to the connected wallet while a spy
+  // candidate is still verifying — that would show the wrong user's rewards.
+  const eligibilityAddress = computed(() => effectiveAddress.value || undefined)
 
   // Reactive version counter — bumps when any underlying data or settings change.
   // Consumers should read `version.value` in the sync phase of watchEffect(async)

@@ -16,6 +16,7 @@ const GET_ONLY_PATHS = new Set([
   '/v3/evk/vaults/bad-debt',
   '/v3/evk/vaults/open-interest',
   '/v3/evk/vaults/open-interest/by-collateral',
+  '/v3/liquidations',
   '/v3/prices',
   '/v3/rewards/breakdown',
   '/v3/tokens',
@@ -23,6 +24,8 @@ const GET_ONLY_PATHS = new Set([
 
 const GET_ONLY_PATH_PATTERNS = [
   /^\/v3\/accounts\/[^/]+\/positions$/,
+  /^\/v3\/activity\/accounts\/0x[a-fA-F0-9]{40}\/events$/,
+  /^\/v3\/activity\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/events$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+\/totals$/,
   /^\/v3\/evk\/vaults\/[^/]+\/[^/]+\/totals$/,
@@ -34,8 +37,10 @@ const POST_ONLY_PATHS = new Set([
 ])
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
-const INTEGER_RE = /^[0-9]+$/
+const INTEGER_RE = /^[0-9]{1,16}$/
+const CHAIN_ID_LIST_RE = /^(?=.{1,256}$)[1-9][0-9]{0,15}(?:,[1-9][0-9]{0,15})*$/
 const DECIMAL_RE = /^[0-9]+(?:\.[0-9]+)?$/
+const ACTIVITY_FILTER_RE = /^(?=.{1,256}$)[a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*$/
 const SAFE_QUERY_FIELDS = {
   from: INTEGER_RE,
   limit: INTEGER_RE,
@@ -177,6 +182,51 @@ export function buildV3ProxyLogFields(requestUrl: URL): Record<string, string> {
     const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
     if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
   }
+
+  if (parts.length === 2 && parts[0] === 'v3' && parts[1] === 'liquidations') {
+    fields.v3ActivityScope = 'liquidations'
+    // Violator and liquidator filters identify wallets and are intentionally
+    // omitted; the vault filter is enough to diagnose upstream failures.
+    const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
+    if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
+  }
+
+  if (
+    parts.length === 5
+    && parts[0] === 'v3'
+    && parts[1] === 'activity'
+    && parts[2] === 'accounts'
+    && ADDRESS_RE.test(parts[3])
+    && parts[4] === 'events'
+  ) {
+    fields.v3ActivityScope = 'account'
+    delete fields.v3ChainId
+    // Account addresses are intentionally omitted. They identify the wallet
+    // being viewed and are not needed to diagnose upstream activity failures.
+    const activityChainIds = cleanParam(requestUrl.searchParams.get('chainId'), CHAIN_ID_LIST_RE)
+    if (activityChainIds != null) fields.v3ChainIds = activityChainIds
+  }
+
+  if (
+    parts.length === 6
+    && parts[0] === 'v3'
+    && parts[1] === 'activity'
+    && parts[2] === 'vaults'
+    && INTEGER_RE.test(parts[3])
+    && ADDRESS_RE.test(parts[4])
+    && parts[5] === 'events'
+  ) {
+    fields.v3ActivityScope = 'vault'
+    fields.v3ChainId = parts[3]
+    fields.v3VaultAddress = parts[4]
+    const vaultType = cleanParam(requestUrl.searchParams.get('vaultType'), /^(?:evk|earn|securitize)$/)
+    if (vaultType != null) fields.v3VaultKind = vaultType
+  }
+
+  const activityCategories = cleanParam(requestUrl.searchParams.get('category'), ACTIVITY_FILTER_RE)
+  if (activityCategories != null && fields.v3ActivityScope) fields.v3ActivityCategories = activityCategories
+  const activityEventTypes = cleanParam(requestUrl.searchParams.get('eventType'), ACTIVITY_FILTER_RE)
+  if (activityEventTypes != null && fields.v3ActivityScope) fields.v3ActivityEventTypes = activityEventTypes
 
   return {
     ...fields,

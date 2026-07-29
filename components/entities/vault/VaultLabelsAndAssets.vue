@@ -8,7 +8,8 @@ import { getAddress } from 'viem'
 const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
   vault?: EVault | EulerEarn | SecuritizeCollateralVault
   assets: VaultAsset[]
-  size?: 'large'
+  /** `small` renders a compact identity for list contexts (e.g. activity rows) where surrounding content carries the emphasis. */
+  size?: 'large' | 'small'
   assetsLabel?: string
   pairVault?: EVault
   back?: boolean
@@ -91,7 +92,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
 <template>
   <div
     v-if="vault"
-    :class="[size === 'large' ? 'gap-16' : 'gap-12']"
+    :class="[size === 'large' ? 'gap-16' : size === 'small' ? 'gap-10' : 'gap-12']"
     class="flex items-center min-w-0"
     data-id="vault-header"
     :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
@@ -105,11 +106,14 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
     />
     <AssetAvatar
       :asset="assets"
-      :size="size === 'large' ? '46' : '38'"
+      :size="size === 'large' ? '46' : size === 'small' ? '32' : '38'"
     />
 
     <div class="min-w-0">
-      <div class="flex flex-wrap items-center gap-8 mb-4 min-w-0">
+      <div
+        class="flex flex-wrap items-center gap-8 min-w-0"
+        :class="size === 'small' ? 'mb-2 text-p4' : 'mb-4'"
+      >
         <span
           class="block min-w-0 max-w-full truncate text-content-tertiary"
           :title="pairVault ? displayLabel : displayName"
@@ -153,7 +157,8 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
       </div>
 
       <p
-        class="flex flex-wrap items-center gap-8 text-p2 font-semibold text-content-primary min-w-0"
+        class="flex flex-wrap items-center gap-8 font-semibold text-content-primary min-w-0"
+        :class="size === 'small' ? 'text-p3' : 'text-p2'"
         data-id="data-point"
         :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
         data-field="asset-symbols"

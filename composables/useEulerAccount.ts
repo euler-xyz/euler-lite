@@ -87,9 +87,11 @@ export const useEulerAccount = () => {
   const { isReady: isLabelsReady } = useEulerLabels()
   const { isReady: isVaultsReady } = useVaults()
   const { isReady: isEulerAddressesReady, chainId } = useEulerAddresses()
-  const { address } = useWagmi()
-  const { spyAddress } = useSpyMode()
-  const portfolioAddress = computed(() => normalizeAddressOrEmpty(spyAddress.value) || normalizeAddressOrEmpty(address.value))
+  // Never falls back to the connected wallet while a spy candidate is still
+  // verifying — the portfolio must not show the connected user's positions
+  // under an active spy banner.
+  const { effectiveAddress } = useEffectiveAddress()
+  const portfolioAddress = computed(() => normalizeAddressOrEmpty(effectiveAddress.value ?? ''))
 
   const markLoaded = () => {
     isPositionsLoading.value = false
@@ -254,7 +256,9 @@ export const useEulerAccount = () => {
   }))
 
   const getPositionBySubAccountIndex = (subAccountIndex: number): PortfolioBorrowPosition<VaultEntity> | undefined => {
-    const owner = portfolioAddress.value || address.value
+    // portfolioAddress is already the spy-safe acting address (spied owner,
+    // or the connected wallet outside spy mode).
+    const owner = portfolioAddress.value
     if (!owner) return undefined
 
     return allBorrowPositions.value.find((position) => {

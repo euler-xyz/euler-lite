@@ -300,6 +300,36 @@ describe('/api/internal/v3 proxy route', () => {
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 
+  it('sanitizes owner-scoped activity transport errors before logging', async () => {
+    const cursor = 'private-opaque-cursor'
+    const requestUrl = `https://app.example/api/internal/v3/activity/accounts/${ACCOUNT}/events?chainId=1&cursor=${cursor}`
+    const cause = new TypeError(`Failed to fetch ${requestUrl}`)
+    mocks.fetchWithTimeout.mockRejectedValueOnce(Object.assign(
+      new Error(`Activity request failed for ${requestUrl}`),
+      { code: 'UND_ERR_CONNECT_TIMEOUT', cause },
+    ))
+
+    await expect(handler(makeEvent('GET', requestUrl))).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'V3 upstream unavailable',
+    })
+
+    const logRecord = mocks.warn.mock.calls.find(([, message]) => message === 'upstream fetch failed')?.[0]
+    expect(logRecord).toMatchObject({
+      ctx: 'v3-proxy',
+      pathTemplate: '/v3/activity/accounts/:address/events',
+      v3ActivityScope: 'account',
+      v3ChainIds: '1',
+      err: {
+        name: 'Error',
+        code: 'UND_ERR_CONNECT_TIMEOUT',
+        causeName: 'TypeError',
+      },
+    })
+    expect(JSON.stringify(logRecord)).not.toContain(ACCOUNT)
+    expect(JSON.stringify(logRecord)).not.toContain(cursor)
+  })
+
   it('classifies aborts as upstream timeouts without forwarding client-controlled error fields', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new DOMException('attacker-controlled text', 'AbortError'))
     const event = makeEvent('GET', `https://app.example/api/internal/v3/rewards/breakdown?chainId=1&account=${ACCOUNT}`)

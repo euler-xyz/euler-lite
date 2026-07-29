@@ -9,7 +9,7 @@ import {
 } from 'h3'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
-import { safePathTemplate, urlHost } from '~/server/utils/observability'
+import { safeErrorLogFields, safePathTemplate, urlHost } from '~/server/utils/observability'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   buildV3ProxyBackoffKey,
@@ -90,7 +90,9 @@ export default defineEventHandler(async (event) => {
         bodyBytes: body?.length,
         durationMs: Date.now() - startedAt,
         reason: timedOut ? 'upstream-timeout' : 'upstream-error',
-        ...(!timedOut ? { err } : {}),
+        // Sanitized fields only — raw transport errors can embed request
+        // URLs (addresses, cursors) and abort text is client-controlled.
+        ...(!timedOut ? { err: safeErrorLogFields(err) } : {}),
       },
       timedOut ? 'upstream timed out' : 'upstream fetch failed',
     )
