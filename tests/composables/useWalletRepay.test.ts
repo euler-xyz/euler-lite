@@ -92,6 +92,7 @@ describe('useWalletRepay projected Net APY', () => {
       executePlan: vi.fn(),
     }))
     vi.stubGlobal('usePlanAccount', () => ({ account: shallowRef(planAccount) }))
+    vi.stubGlobal('useStateOverrideOptions', () => ({ primeSlotHintsFor: vi.fn() }))
     vi.stubGlobal('useWagmi', () => ({ isConnected: ref(true) }))
     vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false) }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))

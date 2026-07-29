@@ -23,6 +23,8 @@ describe('getProjectedRatesBatch', () => {
   const eulerLensAddresses = ref({ vaultLens: '0x0000000000000000000000000000000000000010' })
   const eulerCoreAddresses = ref({ evc: '0x0000000000000000000000000000000000000020' })
   const getProvider = vi.fn((id: number) => ({ chainId: id }))
+  const vaultLensAbi = [{ type: 'function', name: 'getVaultInterestRateModelInfo' }]
+  const fetchABI = vi.fn()
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -36,7 +38,9 @@ describe('getProjectedRatesBatch', () => {
     }))
     getEulerSdk.mockResolvedValue({
       providerService: { getProvider },
+      abiService: { fetchABI },
     })
+    fetchABI.mockResolvedValue(vaultLensAbi)
     batchLensCalls.mockImplementation(async (_provider, _evc, _lens, _abi, calls: unknown[]) =>
       calls.map((_, index) => ({
         success: true,
@@ -62,6 +66,8 @@ describe('getProjectedRatesBatch', () => {
     const [firstResult, secondResult] = await Promise.all([first, second])
 
     expect(batchLensCalls).toHaveBeenCalledTimes(1)
+    expect(fetchABI).toHaveBeenCalledWith(1, 'VaultLens')
+    expect(batchLensCalls.mock.calls[0]?.[3]).toBe(vaultLensAbi)
     expect(batchLensCalls.mock.calls[0]?.[4]).toHaveLength(2)
     expect(firstResult[0]).toEqual({ supplyAPY: 1n, borrowAPY: 11n })
     expect(secondResult[0]).toEqual({ supplyAPY: 2n, borrowAPY: 12n })

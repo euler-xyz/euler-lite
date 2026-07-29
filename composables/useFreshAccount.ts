@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, watch, type Ref } from 'vue'
 import { getAddress, type Address } from 'viem'
 import type { Account, AccountFetchOptions, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { setBatchPrefetchedPlanningAccount } from '~/composables/batchPrefetchState'
 import { logWarn } from '~/utils/errorHandling'
 
 /**
@@ -45,6 +46,7 @@ const apply = (
   // Priority: fresh always replaces; fast only fills 'none'.
   if (which === 'fresh' || current === 'none') {
     account.value = result
+    setBatchPrefetchedPlanningAccount(result)
     freshnessByCursor.set(cursor, which)
   }
 }
@@ -86,6 +88,7 @@ const load = async (owner: Address, chainId: number) => {
 const reset = () => {
   loadCursor++ // invalidate any in-flight applies
   account.value = undefined
+  setBatchPrefetchedPlanningAccount(undefined)
   isLoading.value = false
 }
 
