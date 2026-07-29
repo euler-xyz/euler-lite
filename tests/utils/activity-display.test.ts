@@ -532,7 +532,8 @@ describe('activity display helpers', () => {
   })
 
   it('formats normalized and raw asset amounts without inventing USD values', () => {
-    expect(formatActivityAssetAmount({ kind: 'assets', address: ASSET, amountRaw: '1234500000', amount: '1234.5', symbol: 'USDC' })).toBe('1,234.50 USDC')
+    expect(formatActivityAssetAmount({ kind: 'assets', address: ASSET, amountRaw: '1234500000', amount: '1234.5', symbol: 'USDC' })).toBe('1.23K USDC')
+    expect(formatActivityAssetAmount({ kind: 'assets', address: ASSET, amountRaw: '100445960000', decimals: 6, symbol: 'USDC' })).toBe('100.45K USDC')
     expect(formatActivityAssetAmount({ kind: 'assets', address: ASSET, amountRaw: '1500000', decimals: 6, symbol: 'USDC' })).toBe('1.5 USDC')
     expect(formatActivityAssetAmount({ kind: 'assets', amountRaw: '1500000' })).toBe('Amount unavailable')
     expect(formatActivityAssetUsd({ kind: 'assets', amountRaw: '1', amountUsd: '1234.5' })).toBe('$1.23K')
@@ -617,7 +618,7 @@ describe('activity display helpers', () => {
           }
         : undefined
 
-    expect(decodeEvkAmountCap('43213')).toBe(67_500_000_000_000n)
+    expect(decodeEvkAmountCap('8974')).toBe(140_000_000_000_000n)
     expect(decodeEvkAmountCap('65536')).toBeNull()
     expect(getActivityChangeEntries({
       type: 'set_caps',
@@ -625,13 +626,13 @@ describe('activity display helpers', () => {
       vaultType: 'evk',
       change: {
         fields: {
-          supply_cap: '48013',
-          borrow_cap: '43213',
+          borrow_cap: '8974',
+          supply_cap: '9934',
         },
       },
     }, getVaultMetadata)).toEqual([
-      { field: 'supply_cap', label: 'Supply cap', value: '75,000,000.00 USDC' },
-      { field: 'borrow_cap', label: 'Borrow cap', value: '67,500,000.00 USDC' },
+      { field: 'borrow_cap', label: 'Borrow cap', value: '140M USDC' },
+      { field: 'supply_cap', label: 'Supply cap', value: '155M USDC' },
     ])
 
     expect(getActivityChangeEntries({
@@ -662,6 +663,45 @@ describe('activity display helpers', () => {
       { field: 'liquidation_ltv', label: 'Liquidation LTV', value: '90%' },
       { field: 'ramp_duration', label: 'Ramp duration', value: '1 day 1 hour' },
       { field: 'target_timestamp', label: 'Target timestamp', value: expect.stringContaining('1 Jan 2026') },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'submit_cap',
+      vault: VAULT,
+      vaultType: 'earn',
+      change: {
+        fields: {
+          cap: '1000000000',
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      { field: 'cap', label: 'Cap', value: '1K USDC' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'set_cap',
+      vault: VAULT,
+      vaultType: 'earn',
+      change: {
+        fields: {
+          cap: (2n ** 136n).toString(),
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      { field: 'cap', label: 'Cap', value: 'Unlimited' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'set_supply_cap',
+      vault: VAULT,
+      vaultType: 'securitize',
+      change: {
+        fields: {
+          new_supply_cap: '155000000000000',
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      { field: 'new_supply_cap', label: 'New supply cap', value: '155M USDC' },
     ])
   })
 
@@ -745,6 +785,32 @@ describe('activity display helpers', () => {
         }],
       },
       { field: 'supplied_assets', label: 'Supplied assets', value: '0.02 USDC' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'reallocate_supply',
+      vault: VAULT,
+      vaultType: 'earn',
+      change: {
+        fields: {
+          supplied_assets: '100445960000',
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      { field: 'supplied_assets', label: 'Supplied assets', value: '100.45K USDC' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'reallocate_withdraw',
+      vault: VAULT,
+      vaultType: 'earn',
+      change: {
+        fields: {
+          withdrawn_assets: '100445960000',
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      { field: 'withdrawn_assets', label: 'Withdrawn assets', value: '100.45K USDC' },
     ])
   })
 
@@ -909,6 +975,12 @@ describe('activity display helpers', () => {
 
     // Symbol lookup misses keep the bare converted quantity.
     expect(getActivityLiquidationDisplayDetails(record).collateralAmount).toBe('0.85')
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      collateralAssets: '100445960000000000000000',
+    }, address => address === ASSET
+      ? { address: ASSET as Address, symbol: 'wM', decimals: 18 }
+      : undefined).collateralAmount).toBe('100.45K wM')
 
     // Money values pad cents — "$2.70", never "$2.7".
     expect(getActivityLiquidationDisplayDetails({
@@ -979,6 +1051,18 @@ describe('activity display helpers', () => {
       bonus: '−0.25 USDC',
       bonusTone: 'negative',
     })
+    expect(getActivityLiquidationDisplayDetails({
+      ...record,
+      bonusUsd: undefined,
+      unitOfAccountValuation: {
+        ...unitOfAccountValuation,
+        unitOfAccount: ASSET as Address,
+        bonusValue: '100445960000',
+        unitOfAccountDecimals: 6,
+      },
+    }, address => address === ASSET
+      ? { address: ASSET as Address, symbol: 'USDC', decimals: 6 }
+      : undefined).bonus).toBe('+100.45K USDC')
 
     // An unsafe raw integer is never shown without decimals or a denomination.
     expect(getActivityLiquidationDisplayDetails({

@@ -10,7 +10,7 @@ import type {
   LiquidationRecord,
 } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits, isAddress, maxUint256, zeroAddress, type Address } from 'viem'
-import { formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
+import { compactNumber, formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
 import { CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
 import { decodeHookedOperationsMask, getHookedOperationMetas } from '~/utils/vault-hooks'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
@@ -75,6 +75,8 @@ const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   rewards: 'Rewards',
   governance: 'Governance',
 }
+
+const UINT136_MAX = 2n ** 136n - 1n
 
 const ACCOUNT_ACTIVITY_EVENT_TYPES = [
   'deposit',
@@ -549,6 +551,16 @@ const resolveAssetAmount = (asset: ActivityAssetAmount): string | undefined => {
   }
 }
 
+const formatActivityCompactAmount = (value: string): string => {
+  const numericValue = Number(value)
+  return Math.abs(numericValue) >= 1e15
+    ? Intl.NumberFormat('en-US', {
+        notation: 'scientific',
+        maximumFractionDigits: 2,
+      }).format(numericValue)
+    : compactNumber(value)
+}
+
 export const formatActivityAssetAmount = (
   asset: ActivityAssetAmount,
   eventType?: ActivityEvent['type'],
@@ -565,7 +577,7 @@ export const formatActivityAssetAmount = (
   }
   const amount = resolveAssetAmount(asset)
   if (amount === undefined) return 'Amount unavailable'
-  const formatted = formatSmartAmount(amount)
+  const formatted = formatActivityCompactAmount(amount)
   return asset.symbol ? `${formatted} ${asset.symbol}` : formatted
 }
 
@@ -661,7 +673,9 @@ const formatActivitySignedUnitValue = (
 ): Pick<ActivityLiquidationDisplayDetails, 'bonus' | 'bonusTone'> | null => {
   try {
     const value = BigInt(rawValue)
-    const amount = formatSmartAmount(formatUnits(value < 0n ? -value : value, decimals))
+    const amount = formatActivityCompactAmount(
+      formatUnits(value < 0n ? -value : value, decimals),
+    )
     return {
       bonus: `${value > 0n ? '+' : value < 0n ? '−' : ''}${amount} ${denomination}`,
       ...(value > 0n
@@ -695,7 +709,7 @@ export const getActivityLiquidationDisplayDetails = (
     && record.collateralAssetDecimals !== undefined
   ) {
     try {
-      const amount = formatSmartAmount(
+      const amount = formatActivityCompactAmount(
         formatUnits(BigInt(record.collateralAssets), record.collateralAssetDecimals),
       )
       const symbol = record.collateralAsset
@@ -849,17 +863,21 @@ const formatActivityCap = (
   const decoded = decodeEvkAmountCap(value)
   const asset = vault && getVaultMetadata?.(vault)?.asset
   if (decoded === null || !asset) return null
-  const amount = formatSmartAmount(formatUnits(decoded, asset.decimals))
-  return `${amount} ${asset.symbol}`
+  return formatActivityTokenAmount(decoded.toString(), asset, true)
 }
 
 const formatActivityTokenAmount = (
   value: ActivityChangeValue,
   token: ActivityTokenMetadata | undefined,
+  compact = false,
 ): string | null => {
   const amount = parseActivityInteger(value)
   if (amount === null || !token) return null
-  return `${formatSmartAmount(formatUnits(amount, token.decimals))} ${token.symbol}`
+  const formattedAmount = formatUnits(amount, token.decimals)
+  const displayAmount = compact
+    ? formatActivityCompactAmount(formattedAmount)
+    : formatSmartAmount(formattedAmount)
+  return `${displayAmount} ${token.symbol}`
 }
 
 const formatActivityBps = (value: ActivityChangeValue): string | null => {
@@ -1026,19 +1044,22 @@ export const getActivityChangeEntries = (
     (event.type === 'set_cap' || event.type === 'submit_cap')
     && field === 'cap'
   ) {
-    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset)
+    const cap = parseActivityInteger(value)
+    formatted = event.vaultType === 'earn' && cap !== null && cap >= UINT136_MAX
+      ? 'Unlimited'
+      : formatActivityTokenAmount(value, vaultMetadata?.asset, true)
   }
   else if (
     event.type === 'set_supply_cap'
     && (field === 'cap' || field === 'supply_cap' || field === 'new_supply_cap')
   ) {
-    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset)
+    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset, true)
   }
   else if (
     (event.type === 'reallocate_supply' || event.type === 'reallocate_withdraw')
     && (field === 'supplied_assets' || field === 'withdrawn_assets')
   ) {
-    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset)
+    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset, true)
   }
   else if (event.type === 'set_ltv' && field.endsWith('_ltv')) {
     formatted = formatActivityBps(value)

@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { getActivityLiquidationBonusEntry } from '~/components/entities/activity/activityEventRowDetails'
+import {
+  getActivityAddressCollectionSummary,
+  getActivityLiquidationBonusEntry,
+} from '~/components/entities/activity/activityEventRowDetails'
 
 describe('ActivityEventRow liquidation bonus details', () => {
+  it('summarizes multi-strategy queues in collapsed rows', () => {
+    expect(getActivityAddressCollectionSummary('set_withdraw_queue', 14)).toBe('14 strategies')
+    expect(getActivityAddressCollectionSummary('set_supply_queue', 4)).toBe('4 strategies')
+    expect(getActivityAddressCollectionSummary('set_withdraw_queue', 1)).toBeNull()
+  })
+
   it('renders protocol-oracle fallback text with the existing signed tone', () => {
     expect(getActivityLiquidationBonusEntry({
       bonus: '+1.14 USD',

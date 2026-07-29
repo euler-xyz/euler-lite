@@ -2,7 +2,10 @@
 import type { ActivityCategory, ActivityEvent, LiquidationRecord } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getExplorerLink } from '~/utils/block-explorer'
-import { getActivityLiquidationBonusEntry } from '~/components/entities/activity/activityEventRowDetails'
+import {
+  getActivityAddressCollectionSummary,
+  getActivityLiquidationBonusEntry,
+} from '~/components/entities/activity/activityEventRowDetails'
 import {
   enrichActivityAssetForDisplay,
   formatActivityAssetAmount,
@@ -234,7 +237,15 @@ const portfolioPosition = computed(() => showVault
 const COLLAPSED_ENTRY_COUNT = 1
 const hiddenEntryCount = computed(() =>
   Math.max(0, details.value.length - COLLAPSED_ENTRY_COUNT))
-const hasExpandableDetails = computed(() => hiddenEntryCount.value > 0)
+const addressCollectionSummary = (count: number) =>
+  getActivityAddressCollectionSummary(event.type, count)
+const detailAddressCount = (detail: (typeof details.value)[number]) =>
+  'addresses' in detail && Array.isArray(detail.addresses) ? detail.addresses.length : 0
+const hasExpandableDetails = computed(() =>
+  hiddenEntryCount.value > 0
+  || details.value
+    .slice(0, COLLAPSED_ENTRY_COUNT)
+    .some(detail => addressCollectionSummary(detailAddressCount(detail)) !== null))
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => portfolioPosition.value
   ? `${portfolioPosition.value.label} liquidated`
@@ -402,21 +413,29 @@ const vaultDisplay = computed(() => {
         </div>
 
         <template v-else>
-          <div
-            v-if="detail.addresses?.length"
-            class="activity-event-row__detail-addresses mt-2 flex min-w-0 flex-col items-start gap-2 text-p3"
-          >
-            <ActivityAddress
-              v-for="address in detail.addresses"
-              :key="address.address"
-              :address="address.address"
-              :chain-id="event.chainId"
-              :label="address.label"
-              :link-kind="address.linkKind"
-              :vault-type="address.vaultType"
-              compact-vault
-            />
-          </div>
+          <template v-if="detail.addresses?.length">
+            <div
+              v-if="!expanded && addressCollectionSummary(detail.addresses.length)"
+              class="break-words text-p3 text-content-primary"
+            >
+              {{ addressCollectionSummary(detail.addresses.length) }}
+            </div>
+            <div
+              v-else
+              class="activity-event-row__detail-addresses mt-2 flex min-w-0 flex-col items-start gap-2 text-p3"
+            >
+              <ActivityAddress
+                v-for="address in detail.addresses"
+                :key="address.address"
+                :address="address.address"
+                :chain-id="event.chainId"
+                :label="address.label"
+                :link-kind="address.linkKind"
+                :vault-type="address.vaultType"
+                compact-vault
+              />
+            </div>
+          </template>
           <div
             v-else
             class="break-words text-p3"
@@ -582,7 +601,7 @@ const vaultDisplay = computed(() => {
     gap: 4px 8px;
   }
 
-  .activity-event-row__detail-addresses {
+  .activity-event-row__details:not(.activity-event-row__details--expanded) .activity-event-row__detail-addresses {
     margin-top: 0;
     flex-direction: row;
   }

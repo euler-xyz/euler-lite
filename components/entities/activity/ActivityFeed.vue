@@ -397,15 +397,19 @@ watch(feed.hasLoaded, (hasLoaded) => {
           </button>
         </div>
 
-        <button
+        <div
           v-if="feed.hasMore.value"
-          type="button"
-          class="ui-button ui-button--medium ui-button--secondary self-center"
-          :disabled="feed.isLoadingMore.value"
-          @click="feed.loadMore"
+          class="flex justify-center"
         >
-          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
-        </button>
+          <button
+            type="button"
+            class="ui-button ui-button--medium ui-button--secondary"
+            :disabled="feed.isLoadingMore.value"
+            @click="feed.loadMore"
+          >
+            {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+          </button>
+        </div>
       </template>
     </div>
   </div>
