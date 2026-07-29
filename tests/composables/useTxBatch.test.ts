@@ -4,6 +4,12 @@ import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type 
 import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import {
+  mergeBatchPrefetchedSlotHints,
+  resetBatchPrefetchState,
+  setBatchPrefetchedBaseAccount,
+  setBatchPrefetchedPlanningAccount,
+} from '~/composables/batchPrefetchState'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
@@ -316,6 +322,7 @@ beforeEach(() => {
   routeQuery.network = '1'
   stubBatchComposableGlobals()
   vi.mocked(getEulerSdkFresh).mockResolvedValue(createMockSdk() as never)
+  resetBatchPrefetchState()
   useTxBatch().clearBatch()
 })
 
@@ -699,6 +706,153 @@ describe('normalizeSimulatedVaultLayers', () => {
 })
 
 describe('useTxBatch execution errors', () => {
+  it('reuses a supplied portfolio account for account-free reward entries', async () => {
+    const sdk = createMockSdk()
+    const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    await useTxBatch().addEntry({
+      label: 'Claim reward',
+      requiresPlanningAccount: false,
+      baseAccount: portfolioAccount,
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    await vi.waitFor(() =>
+      expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled(),
+    )
+
+    expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
+      1,
+      portfolioAccount,
+      [],
+      expect.any(Object),
+    )
+  })
+
+  it('reuses shared form-prefetched accounts and slot hints for every first-entry caller', async () => {
+    const sdk = createMockSdk()
+    const getProvider = vi.fn()
+    Object.assign(sdk, { providerService: { getProvider } })
+    const planningAccount = accountWithPosition(subAccount, subAccount, 11n)
+    const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
+    const suppliedSlotHints = {
+      [vault]: { balanceSlotIndex: 9n },
+    }
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: vault,
+      owner,
+      spender: subAccount,
+      amount: 1n,
+    }]
+    let buildAccount: Account<IHasVaultAddress> | undefined
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    setBatchPrefetchedPlanningAccount(planningAccount)
+    setBatchPrefetchedBaseAccount(portfolioAccount)
+    mergeBatchPrefetchedSlotHints(1, suppliedSlotHints)
+
+    await useTxBatch().addEntry({
+      label: 'Supply USDC',
+      buildPlan: async (account) => {
+        buildAccount = account
+        return plan
+      },
+      subAccount,
+    })
+    await vi.waitFor(() =>
+      expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled(),
+    )
+
+    expect(buildAccount).toBe(planningAccount)
+    expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
+    expect(getProvider).not.toHaveBeenCalled()
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
+      1,
+      portfolioAccount,
+      plan,
+      expect.objectContaining({
+        stateOverrideOptions: expect.objectContaining({
+          slotHints: suppliedSlotHints,
+        }),
+      }),
+    )
+  })
+
+  it('reuses supplied accounts and slot hints for the first entry and simulation', async () => {
+    const sdk = createMockSdk()
+    const getProvider = vi.fn()
+    Object.assign(sdk, { providerService: { getProvider } })
+    const planningAccount = accountWithPosition(subAccount, subAccount, 11n)
+    const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
+    const suppliedSlotHints = {
+      [vault]: { balanceSlotIndex: 9n },
+    }
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: vault,
+      owner,
+      spender: subAccount,
+      amount: 1n,
+    }]
+    let buildAccount: Account<IHasVaultAddress> | undefined
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    await useTxBatch().addEntry({
+      label: 'Deposit USDC',
+      planningAccount,
+      baseAccount: portfolioAccount,
+      slotHints: suppliedSlotHints,
+      buildPlan: async (account) => {
+        buildAccount = account
+        return plan
+      },
+      subAccount,
+    })
+    await vi.waitFor(() =>
+      expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled(),
+    )
+
+    expect(buildAccount).toBe(planningAccount)
+    expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
+    expect(getProvider).not.toHaveBeenCalled()
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
+      1,
+      portfolioAccount,
+      plan,
+      expect.objectContaining({
+        stateOverrideOptions: expect.objectContaining({
+          slotHints: suppliedSlotHints,
+        }),
+      }),
+    )
+  })
+
+  it('ignores prefetched accounts from another chain', async () => {
+    const sdk = createMockSdk()
+    const staleAccount = accountWithPosition(subAccount, subAccount, 99n)
+    staleAccount.chainId = 8453
+    let buildAccount: Account<IHasVaultAddress> | undefined
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    await useTxBatch().addEntry({
+      label: 'Deposit USDC',
+      planningAccount: staleAccount,
+      baseAccount: staleAccount,
+      buildPlan: async (account) => {
+        buildAccount = account
+        return [] as TransactionPlan
+      },
+      subAccount,
+    })
+
+    expect(sdk.accountService.fetchAccount).toHaveBeenCalledWith(1, owner, {
+      populateAll: true,
+    })
+    expect(buildAccount).not.toBe(staleAccount)
+    expect(buildAccount?.chainId).toBe(1)
+  })
+
   it('publishes per-layer simulated vault state even without an enriched account position', async () => {
     const sdk = createMockSdk()
     const simulatedVault = {

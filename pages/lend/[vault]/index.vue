@@ -79,10 +79,11 @@ const { planDeposit, planDepositWithSwap, prepareTransactionPlan, executePrepare
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
+const { portfolio } = useEulerAccount()
 // Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
 // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
 // skips per-call balanceOf + slot probing.
-const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
+const { primeSlotHintsFor, buildStateOverrideOptions, slotHints } = useStateOverrideOptions()
 const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 const lendPluginPrefetch: PluginPrefetchData = { pyth: { entries: [] } }
 const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPluginPrefetch
@@ -615,6 +616,9 @@ const addToBatch = async () => {
       if (!swapAsset) return
       await addBatchEntry({
         label: `Deposit ${asset.value.symbol}`,
+        planningAccount: planAccount.value,
+        baseAccount: portfolio.value?.account,
+        slotHints: slotHints.value,
         buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
@@ -625,6 +629,9 @@ const addToBatch = async () => {
       const supplyAmount = valueToNano(amount.value, asset.value.decimals)
       await addBatchEntry({
         label: `Deposit ${amount.value} ${asset.value.symbol}`,
+        planningAccount: planAccount.value,
+        baseAccount: portfolio.value?.account,
+        slotHints: slotHints.value,
         buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'supply', asset: asset.value, amount: amount.value },

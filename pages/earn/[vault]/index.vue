@@ -27,6 +27,7 @@ const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId } = useEulerAddresses()
+const { primeSlotHintsFor } = useStateOverrideOptions()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -62,6 +63,14 @@ const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRe
 const supplyApyBreakdown = computed(() => vault.value ? computeSupplyApyBreakdown(vault.value, viewer.value) : undefined)
 const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
 const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
+
+watch(
+  () => asset.value?.address,
+  (assetAddress) => {
+    if (assetAddress) void primeSlotHintsFor([assetAddress as Address])
+  },
+  { immediate: true },
+)
 
 const applyLoadedVault = (loadedVault: EulerEarn) => {
   vault.value = loadedVault

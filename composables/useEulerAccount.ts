@@ -4,6 +4,7 @@ import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfol
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 import { useVaults } from '~/composables/useVaults'
 import { useWallets } from '~/composables/useWallets'
+import { setBatchPrefetchedBaseAccount } from '~/composables/batchPrefetchState'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
@@ -100,6 +101,7 @@ export const useEulerAccount = () => {
   const resetLoadingState = () => {
     visiblePortfolio.value = undefined
     allPortfolio.value = undefined
+    setBatchPrefetchedBaseAccount(undefined)
     portfolioDiagnostics.value = []
     isPositionsLoaded.value = false
     isPositionsLoading.value = true
@@ -124,6 +126,7 @@ export const useEulerAccount = () => {
       if (!walletAddress) {
         visiblePortfolio.value = undefined
         allPortfolio.value = undefined
+        setBatchPrefetchedBaseAccount(undefined)
         portfolioDiagnostics.value = []
         markLoaded()
         return
@@ -156,11 +159,13 @@ export const useEulerAccount = () => {
 
       allPortfolio.value = nextAllPortfolio
       visiblePortfolio.value = nextVisiblePortfolio
+      setBatchPrefetchedBaseAccount(nextAllPortfolio.account)
       portfolioDiagnostics.value = fetched.errors
       markLoaded()
     }
     catch (error) {
       if (positionGuard.isStale(gen)) return
+      setBatchPrefetchedBaseAccount(undefined)
       logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
       portfolioDiagnostics.value = [{
         code: 'SOURCE_UNAVAILABLE',
