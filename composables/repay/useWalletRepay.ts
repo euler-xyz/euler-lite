@@ -112,10 +112,13 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   })
   const { getVault: registryGetVault } = useVaultRegistry()
 
+  // Pre-prime the repaid asset's ERC20 slot hints so later estimate/sim calls skip
+  // access-list discovery. Speculative, so it must not gate the submit button
+  // (`background: true`) — see `useStateOverrideResolution`.
   watch(
     () => borrowVault.value?.asset.address,
     (assetAddress) => {
-      if (assetAddress) void primeSlotHintsFor([assetAddress as Address])
+      if (assetAddress) void primeSlotHintsFor([assetAddress as Address], { background: true })
     },
     { immediate: true },
   )

@@ -14,8 +14,6 @@ import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import {
   getBatchPrefetchedBaseAccount,
   getBatchPrefetchedPlanningAccount,
-  getBatchPrefetchedSlotHints,
-  mergeBatchPrefetchedSlotHints,
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
@@ -143,16 +141,7 @@ type BatchEntryBuildResult = TransactionPlan | {
 
 type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
 
-interface BatchEntryPrefetchedContext {
-  /** Fresh account already loaded by the form for add-time plan construction. */
-  planningAccount?: Account<IHasVaultAddress>
-  /** Enriched portfolio account to keep as layer 0 and reuse during simulation. */
-  baseAccount?: Account<IHasVaultAddress>
-  /** Slot hints already primed by the form; avoids probing the same token again. */
-  slotHints?: SlotHints
-}
-
-export type BatchEntryInput = BatchEntryInputBase & BatchEntryPrefetchedContext & (
+export type BatchEntryInput = BatchEntryInputBase & (
   {
     /** Builds this entry once, at add-time, against the current batch end-state. */
     buildPlan: (account: Account<IHasVaultAddress>) => Promise<BatchEntryBuildResult>
@@ -463,7 +452,6 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
       }
     }))
     batchSlotHints = next
-    mergeBatchPrefetchedSlotHints(chainId, next)
   }
   catch (error) {
     logWarn('useTxBatch/primeBatchSlotHintsFor', error)
@@ -649,6 +637,31 @@ const isAccountForContext = (
   }
   catch {
     return false
+  }
+}
+
+/**
+ * Prefetched accounts the forms already loaded, valid for this wallet context.
+ *
+ * Read straight from the registry rather than accepting them per entry: the refs
+ * a page would hand over (`usePlanAccount().account`,
+ * `useEulerAccount().portfolio`) are layer-aware and resolve to the active
+ * *simulated* layer once the batch is non-empty, which must never be adopted as
+ * the batch's own layer 0. The registry only ever holds pre-overlay loader
+ * output, so chain + owner is the whole validation.
+ */
+const resolvePrefetchedAccounts = (
+  chainId: number,
+  owner: Address,
+): {
+  planningAccount?: Account<IHasVaultAddress>
+  baseAccount?: Account<IHasVaultAddress>
+} => {
+  const planningAccount = getBatchPrefetchedPlanningAccount()
+  const baseAccount = getBatchPrefetchedBaseAccount()
+  return {
+    planningAccount: isAccountForContext(planningAccount, chainId, owner) ? planningAccount : undefined,
+    baseAccount: isAccountForContext(baseAccount, chainId, owner) ? baseAccount : undefined,
   }
 }
 
@@ -1649,14 +1662,11 @@ export const useTxBatch = () => {
     try {
       const sdk = await getEulerSdkFresh()
       const ownerAddr = getAddress(o)
-      const prefetchedBaseAccount = getBatchPrefetchedBaseAccount()
       // Keep the real base state fixed for the lifetime of the cart. Entry plans
       // are immutable add-time payloads; later real-state drift should not cause
       // the whole batch to rebuild around a different base account.
       const baseAccount = baseAccountSnapshot
-        ?? (isAccountForContext(prefetchedBaseAccount, cid, ownerAddr)
-          ? prefetchedBaseAccount
-          : undefined)
+        ?? resolvePrefetchedAccounts(cid, ownerAddr).baseAccount
         ?? await fetchBaseAccountSnapshot(sdk, cid, ownerAddr)
       baseAccountSnapshot = baseAccount
 
@@ -1978,10 +1988,7 @@ export const useTxBatch = () => {
     })
   }
 
-  const getEntryPlanningAccount = async (
-    preferredPlanningAccount?: Account<IHasVaultAddress>,
-    preferredBaseAccount?: Account<IHasVaultAddress>,
-  ): Promise<Account<IHasVaultAddress>> => {
+  const getEntryPlanningAccount = async (): Promise<Account<IHasVaultAddress>> => {
     const getCurrentFinalLayer = () => (
       entries.value.length > 0 && layers.value.length === entries.value.length + 1
         ? layers.value[layers.value.length - 1]?.account
@@ -2028,33 +2035,21 @@ export const useTxBatch = () => {
       throw new Error('Account not loaded')
     }
     const ownerAddress = getAddress(o)
-    const suppliedBaseAccount = isAccountForContext(preferredBaseAccount, cid, ownerAddress)
-      ? preferredBaseAccount
-      : undefined
-    const sharedBaseAccount = getBatchPrefetchedBaseAccount()
-    const resolvedBaseAccount = suppliedBaseAccount
-      ?? (isAccountForContext(sharedBaseAccount, cid, ownerAddress)
-        ? sharedBaseAccount
-        : undefined)
-    const suppliedPlanningAccount = isAccountForContext(preferredPlanningAccount, cid, ownerAddress)
-      ? preferredPlanningAccount
-      : undefined
-    const sharedPlanningAccount = getBatchPrefetchedPlanningAccount()
-    const resolvedPlanningAccount = suppliedPlanningAccount
-      ?? (isAccountForContext(sharedPlanningAccount, cid, ownerAddress)
-        ? sharedPlanningAccount
-        : undefined)
+    // Only reachable with an empty cart (non-empty carts return the final layer
+    // above), so `baseAccountSnapshot` is null here and adopting the prefetched
+    // base cannot displace a snapshot already pinned for this cart.
+    const { planningAccount, baseAccount } = resolvePrefetchedAccounts(cid, ownerAddress)
 
-    if (resolvedBaseAccount) {
-      baseAccountSnapshot = resolvedBaseAccount
+    if (baseAccount) {
+      baseAccountSnapshot = baseAccount
     }
-    if (resolvedPlanningAccount) {
-      logBatchDiag('getEntryPlanningAccount:preferred-planning-account')
-      return resolvedPlanningAccount
+    if (planningAccount) {
+      logBatchDiag('getEntryPlanningAccount:prefetched-planning-account')
+      return planningAccount
     }
-    if (resolvedBaseAccount) {
-      logBatchDiag('getEntryPlanningAccount:preferred-base-account')
-      return resolvedBaseAccount
+    if (baseAccount) {
+      logBatchDiag('getEntryPlanningAccount:prefetched-base-account')
+      return baseAccount
     }
     if (baseAccountSnapshot) {
       logBatchDiag('getEntryPlanningAccount:base-snapshot-cached')
@@ -2082,14 +2077,14 @@ export const useTxBatch = () => {
         subAccount: entry.subAccount,
         requiresPlanningAccount: entry.requiresPlanningAccount !== false,
       })
+      // Account-free entries never reach `getEntryPlanningAccount`, so seed layer 0
+      // from the prefetched base here too — otherwise resimulate would refetch it.
       const preflightChainId = chainId.value
       const currentOwner = owner.value
-      if (!baseAccountSnapshot && preflightChainId && currentOwner && entry.baseAccount) {
+      if (!baseAccountSnapshot && preflightChainId && currentOwner) {
         try {
-          const ownerAddress = getAddress(currentOwner)
-          if (isAccountForContext(entry.baseAccount, preflightChainId, ownerAddress)) {
-            baseAccountSnapshot = entry.baseAccount
-          }
+          const { baseAccount } = resolvePrefetchedAccounts(preflightChainId, getAddress(currentOwner))
+          if (baseAccount) baseAccountSnapshot = baseAccount
         }
         catch {
           // Account-free entries can still build without a valid wallet context.
@@ -2098,19 +2093,14 @@ export const useTxBatch = () => {
       }
       const buildResult = entry.requiresPlanningAccount === false
         ? await entry.buildPlan()
-        : await entry.buildPlan(await getEntryPlanningAccount(
-            entry.planningAccount,
-            entry.baseAccount,
-          ))
+        : await entry.buildPlan(await getEntryPlanningAccount())
       const plan = Array.isArray(buildResult) ? buildResult : buildResult.plan
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
-        batchSlotHints = {
-          ...getBatchPrefetchedSlotHints(cid),
-          ...batchSlotHints,
-          ...entry.slotHints,
-        }
+        // Probe only what this batch has not resolved yet. Tokens any form already
+        // primed cost no RPC — the SDK memoises hints by `chainId:token` — but they
+        // still have to land in `batchSlotHints`, which is what the simulator reads.
         const missingSlotHintTokens = collectRequiredApprovalTokens(plan)
           .filter(token => batchSlotHints[token] === undefined)
         await primeBatchSlotHintsFor(cid, missingSlotHintTokens)
@@ -2118,9 +2108,6 @@ export const useTxBatch = () => {
       const {
         buildPlan: _buildPlan,
         requiresPlanningAccount: _requiresPlanningAccount,
-        planningAccount: _planningAccount,
-        baseAccount: _baseAccount,
-        slotHints: _slotHints,
         ...fixedEntry
       } = entry
       registerReviewAssetMeta(fixedEntry.review)

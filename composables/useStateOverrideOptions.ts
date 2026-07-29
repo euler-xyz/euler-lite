@@ -2,7 +2,6 @@ import { ref, watch } from 'vue'
 import { type Address, getAddress } from 'viem'
 import { fetchErc20SlotHints, type SlotHints, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
-import { mergeBatchPrefetchedSlotHints } from '~/composables/batchPrefetchState'
 import { logWarn } from '~/utils/errorHandling'
 
 const pendingStateOverrideHintResolutions = ref(0)
@@ -33,28 +32,43 @@ export const useStateOverrideResolution = () => ({
  * The composable exposes:
  *  - `buildStateOverrideOptions({ tokens, noBalanceOverride })` — assembles the
  *    options object for the next call.
- *  - `primeSlotHintsFor(tokens)` — fires the slot probes in the background as
- *    soon as the form knows which assets matter. The cache is module-scope so
- *    later calls reuse without re-probing.
+ *  - `primeSlotHintsFor(tokens, { background })` — fires the slot probes as soon
+ *    as the form knows which assets matter. Probes are deduped inside the SDK,
+ *    which memoises resolved hints module-scope by `chainId:token`, so repeat
+ *    calls for a token already primed anywhere in the app cost a Map lookup and
+ *    no RPC. Pass `background: true` for speculative page-load priming so the
+ *    probe does not register as pending work and gate submit buttons (see
+ *    `useStateOverrideResolution`).
  */
 export const useStateOverrideOptions = () => {
   const { balances } = useWallets()
   const { chainId } = useEulerAddresses()
 
-  // Local mirror of slot-hint state so callers can pass it explicitly and the
-  // SDK has a fast path even on the first call after probing. The module-scope
-  // cache inside the SDK is the source of truth long-term; this Map just lets
-  // us snapshot it for the very-next call.
+  // Per-instance mirror of the hints this form has primed, so
+  // `buildStateOverrideOptions` can pass them explicitly and the SDK has a fast
+  // path even on the very first call after probing. The SDK's module-scope cache
+  // is the long-term source of truth; this ref is only a snapshot of what *this*
+  // form asked for. Hints are chain-scoped, so a chain switch has to clear it —
+  // otherwise a token's slot indices from the old chain would be handed to the
+  // new chain's simulator.
   const slotHints = ref<SlotHints>({})
 
   watch(chainId, () => {
     slotHints.value = {}
   }, { flush: 'sync' })
 
-  const primeSlotHintsFor = async (tokens: Address[]): Promise<void> => {
+  const primeSlotHintsFor = async (
+    tokens: Address[],
+    options?: { background?: boolean },
+  ): Promise<void> => {
     if (!tokens.length) return
     const cid = chainId.value
     if (!cid) return
+    // Speculative page-load priming must not gate submit: the counter this
+    // guards hard-disables submit / add-to-batch across every mounted form.
+    // Skipping a cold probe only means the simulator falls back to access-list
+    // discovery, which is what it did before priming existed.
+    const tracksPendingWork = !options?.background
     try {
       const sdk = await getEulerSdkForChain(cid)
       const permit2Address = sdk.deploymentService.getDeployment(cid).addresses.coreAddrs.permit2 as Address
@@ -64,7 +78,7 @@ export const useStateOverrideOptions = () => {
       const provider = sdk.providerService?.getProvider(cid)
       if (!provider) return
       const resolvedHints: SlotHints = {}
-      pendingStateOverrideHintResolutions.value += 1
+      if (tracksPendingWork) pendingStateOverrideHintResolutions.value += 1
       try {
         await Promise.all(tokens.map(async (rawToken) => {
           try {
@@ -78,7 +92,9 @@ export const useStateOverrideOptions = () => {
             logWarn('useStateOverrideOptions/primeSlotHintsFor', e)
           }
         }))
-        mergeBatchPrefetchedSlotHints(cid, resolvedHints)
+        // Re-read after the await: a concurrent prime may have landed its own
+        // hints while these probes were in flight, and snapshotting before the
+        // await would drop them.
         if (chainId.value === cid) {
           slotHints.value = {
             ...slotHints.value,
@@ -87,7 +103,9 @@ export const useStateOverrideOptions = () => {
         }
       }
       finally {
-        pendingStateOverrideHintResolutions.value = Math.max(0, pendingStateOverrideHintResolutions.value - 1)
+        if (tracksPendingWork) {
+          pendingStateOverrideHintResolutions.value = Math.max(0, pendingStateOverrideHintResolutions.value - 1)
+        }
       }
     }
     catch (e) {

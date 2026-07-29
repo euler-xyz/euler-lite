@@ -7,6 +7,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
+import { isNativeCurrencyAddress } from '~/utils/native-currency'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -64,10 +65,14 @@ const supplyApyBreakdown = computed(() => vault.value ? computeSupplyApyBreakdow
 const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
 const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
 
+// Pre-prime ERC20 slot hints for the vault asset. One probe per token,
+// owner-/spender-agnostic; later estimate/sim calls skip access-list discovery.
+// Speculative, so it must not gate the submit button (`background: true`).
 watch(
   () => asset.value?.address,
   (assetAddress) => {
-    if (assetAddress) void primeSlotHintsFor([assetAddress as Address])
+    if (!assetAddress || isNativeCurrencyAddress(assetAddress)) return
+    void primeSlotHintsFor([assetAddress as Address], { background: true })
   },
   { immediate: true },
 )
