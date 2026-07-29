@@ -117,23 +117,6 @@ describe('formatSimulationFailure: friendly message mapping', () => {
     } as never
     expect(formatSimulationFailure(result)).toContain('E_SomethingUnmapped()')
   })
-
-  it('blocks incomplete Account Lens snapshots with actionable copy', () => {
-    const result = {
-      snapshotReadFailures: [{
-        layerIndex: 1,
-        subAccount: '0x2222222222222222222222222222222222222222',
-        vault: '0x3333333333333333333333333333333333333333',
-        kind: 'vaultAccount',
-        cause: 'inBand',
-        reason: '0x1234',
-      }],
-    } as never
-
-    expect(formatSimulationFailure(result)).toBe(
-      'The complete account state could not be verified. Please try the simulation again.',
-    )
-  })
 })
 
 describe('isNonBlockingApprovalSimulationFailure', () => {

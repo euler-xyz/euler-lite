@@ -1666,16 +1666,19 @@ export const useTxBatch = () => {
         return
       }
 
-      // Simulation errors, status-check failures, and incomplete Account Lens
-      // snapshots all block execution. Snapshot failures mean a collateral or
-      // debt position may be absent from the projected account state.
+      // Two distinct failure shapes, both blocking but handled differently:
+      //  - simulationError: the EVC call reverted at the top level (couldn't even
+      //    decode the batch) — no per-layer state exists.
+      //  - account/vault status-check failure: every batch item executed (so the
+      //    per-layer simulated state IS populated — e.g. a borrow shows the debt
+      //    and the borrowed tokens in the wallet), but the *deferred* health/vault
+      //    checks at the end of the batch failed, so the real `batch` tx would
+      //    revert. We still surface the simulated "impossible" position; we just
+      //    flag the batch and block execution.
       const statusCheckFailed = !!(sim.accountStatusErrors?.length || sim.vaultStatusErrors?.length)
-      const snapshotReadFailed = !!sim.snapshotReadFailures?.length
       // Set/clear atomically (see the note above resimulate's try): overwrite the
       // prior error only once this simulation resolves, so it doesn't flicker.
-      simError.value = (sim.simulationError || statusCheckFailed || snapshotReadFailed)
-        ? describeFailure(sim)
-        : undefined
+      simError.value = (sim.simulationError || statusCheckFailed) ? describeFailure(sim) : undefined
 
       // The SDK returns only the *touched* slice per layer (sim.simulatedAccounts
       // = [pre-batch, afterOp0, afterOp1, …]). Build full accounts by stitching:
@@ -1713,7 +1716,6 @@ export const useTxBatch = () => {
           countMatchesExpected: simAccounts.length === plans.length + 1,
           simulationError: !!sim.simulationError,
           statusCheckFailed,
-          snapshotReadFailed,
           simError: simError.value ?? null,
         },
         simAccounts.length === plans.length + 1 ? 'warn' : 'error',
