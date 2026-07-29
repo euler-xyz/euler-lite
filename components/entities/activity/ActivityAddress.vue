@@ -106,19 +106,20 @@ const handleInternalClick = (event: MouseEvent) => {
 </script>
 
 <template>
-  <span class="inline-flex min-w-0 max-w-full items-center gap-2">
+  <span class="flex w-full min-w-0 max-w-full items-center gap-2">
     <NuxtLink
       v-if="internalLink && resolvedVault && compactVault"
       :to="internalLink"
-      class="inline-flex min-w-0 max-w-full items-center gap-6 rounded-8 transition-opacity hover:opacity-80"
+      class="flex min-w-0 flex-1 items-center gap-6 overflow-hidden rounded-8 transition-opacity hover:opacity-80"
       :title="address"
     >
       <AssetAvatar
         :asset="[resolvedVault.asset]"
         size="20"
+        class="shrink-0"
       />
       <span
-        class="min-w-0 truncate text-p4 text-content-secondary"
+        class="min-w-0 flex-1 truncate text-p4 text-content-secondary"
         :title="compactVaultName"
       >
         <VaultDisplayName
