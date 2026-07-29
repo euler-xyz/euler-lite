@@ -902,7 +902,7 @@ watch(
     }
     push(vaultAsset?.address)
     push(payWith?.address)
-    if (tokens.length) void primeSlotHintsFor(tokens)
+    if (tokens.length) void primeSlotHintsFor(tokens, { background: true })
   },
   { immediate: true },
 )

@@ -4,6 +4,11 @@ import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type 
 import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import {
+  resetBatchPrefetchState,
+  setBatchPrefetchedBaseAccount,
+  setBatchPrefetchedPlanningAccount,
+} from '~/composables/batchPrefetchState'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
@@ -316,6 +321,7 @@ beforeEach(() => {
   routeQuery.network = '1'
   stubBatchComposableGlobals()
   vi.mocked(getEulerSdkFresh).mockResolvedValue(createMockSdk() as never)
+  resetBatchPrefetchState()
   useTxBatch().clearBatch()
 })
 
@@ -699,6 +705,113 @@ describe('normalizeSimulatedVaultLayers', () => {
 })
 
 describe('useTxBatch execution errors', () => {
+  it('reuses the prefetched portfolio account as layer 0 for account-free entries', async () => {
+    const sdk = createMockSdk()
+    const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    setBatchPrefetchedBaseAccount(portfolioAccount)
+
+    // `requiresPlanningAccount: false` skips getEntryPlanningAccount entirely, so
+    // this covers the addEntry preflight that seeds layer 0 on its own.
+    await useTxBatch().addEntry({
+      label: 'Claim reward',
+      requiresPlanningAccount: false,
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    await vi.waitFor(() =>
+      expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled(),
+    )
+
+    expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
+      1,
+      owner,
+      [],
+      expect.any(Object),
+    )
+    expect(useTxBatch().layers.value[0]?.account).toBe(portfolioAccount)
+  })
+
+  it('reuses prefetched accounts for the first entry without an add-time account fetch', async () => {
+    const sdk = createMockSdk()
+    const planningAccount = accountWithPosition(subAccount, subAccount, 11n)
+    const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
+    let buildAccount: Account<IHasVaultAddress> | undefined
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    setBatchPrefetchedPlanningAccount(planningAccount)
+    setBatchPrefetchedBaseAccount(portfolioAccount)
+
+    await useTxBatch().addEntry({
+      label: 'Supply USDC',
+      buildPlan: async (account) => {
+        buildAccount = account
+        return [] as TransactionPlan
+      },
+      subAccount,
+    })
+    await vi.waitFor(() =>
+      expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled(),
+    )
+
+    // The plan builds against the fresh planning account; layer 0 stays the
+    // enriched portfolio account. Neither costs a populateAll fetchAccount.
+    expect(buildAccount).toBe(planningAccount)
+    expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
+    expect(useTxBatch().layers.value[0]?.account).toBe(portfolioAccount)
+  })
+
+  it('ignores prefetched accounts from another chain', async () => {
+    const sdk = createMockSdk()
+    const staleAccount = accountWithPosition(subAccount, subAccount, 99n)
+    staleAccount.chainId = 8453
+    let buildAccount: Account<IHasVaultAddress> | undefined
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    setBatchPrefetchedPlanningAccount(staleAccount)
+    setBatchPrefetchedBaseAccount(staleAccount)
+
+    await useTxBatch().addEntry({
+      label: 'Deposit USDC',
+      buildPlan: async (account) => {
+        buildAccount = account
+        return [] as TransactionPlan
+      },
+      subAccount,
+    })
+
+    expect(sdk.accountService.fetchAccount).toHaveBeenCalledWith(1, owner, {
+      populateAll: true,
+    })
+    expect(buildAccount).not.toBe(staleAccount)
+    expect(buildAccount?.chainId).toBe(1)
+  })
+
+  it('ignores prefetched accounts belonging to another owner', async () => {
+    const sdk = createMockSdk()
+    const otherOwnerAccount = accountWithPosition(subAccount, subAccount, 99n)
+    otherOwnerAccount.owner = getAddress('0x2000000000000000000000000000000000000002')
+    let buildAccount: Account<IHasVaultAddress> | undefined
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    setBatchPrefetchedPlanningAccount(otherOwnerAccount)
+    setBatchPrefetchedBaseAccount(otherOwnerAccount)
+
+    // A wallet switch replaces the loaders' accounts asynchronously, so the batch
+    // can observe the previous wallet's snapshot with the new owner already active.
+    await useTxBatch().addEntry({
+      label: 'Deposit USDC',
+      buildPlan: async (account) => {
+        buildAccount = account
+        return [] as TransactionPlan
+      },
+      subAccount,
+    })
+
+    expect(sdk.accountService.fetchAccount).toHaveBeenCalledWith(1, owner, {
+      populateAll: true,
+    })
+    expect(buildAccount).not.toBe(otherOwnerAccount)
+    expect(buildAccount?.owner).toBe(owner)
+  })
+
   it('publishes per-layer simulated vault state even without an enriched account position', async () => {
     const sdk = createMockSdk()
     const simulatedVault = {

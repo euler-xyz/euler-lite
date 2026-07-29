@@ -69,6 +69,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const { error } = useToast()
   const { planRepayFromWallet, executePlan } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
+  const { primeSlotHintsFor } = useStateOverrideOptions()
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -110,6 +111,17 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     return FixedPoint.fromValue(0n, 18)
   })
   const { getVault: registryGetVault } = useVaultRegistry()
+
+  // Pre-prime the repaid asset's ERC20 slot hints so later estimate/sim calls skip
+  // access-list discovery. Speculative, so it must not gate the submit button
+  // (`background: true`) — see `useStateOverrideResolution`.
+  watch(
+    () => borrowVault.value?.asset.address,
+    (assetAddress) => {
+      if (assetAddress) void primeSlotHintsFor([assetAddress as Address], { background: true })
+    },
+    { immediate: true },
+  )
 
   // Wallet repay touches the liability vault (OP_REPAY). A full repay also
   // sweeps residual collateral shares back to the main account via
