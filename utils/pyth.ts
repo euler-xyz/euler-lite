@@ -582,5 +582,3 @@ export const executeBatchLensWithPythSimulation = async <T>(
 
   return results
 }
-
-export const pythAbi = PYTH_ABI
