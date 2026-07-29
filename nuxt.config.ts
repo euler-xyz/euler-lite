@@ -182,6 +182,7 @@ export default defineNuxtConfig({
       browserVaultSource: '',
       executionRecordSdkQueries: '',
       swapApiUrl: '',
+      eulerInterfacesBranch: '',
     },
   },
 
