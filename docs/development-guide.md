@@ -87,7 +87,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 
 | Endpoint | Upstream source | Cache TTL | Env var override |
 |----------|----------------|-----------|------------------|
-| `GET /api/internal/euler-chains` | `EulerChains.json` from `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` |
+| `GET /api/internal/euler-chains` | `EulerChains.json` from `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` when no interfaces branch is configured |
 | `GET /api/internal/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels (query-shape; used by Lite helpers) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/internal/labels/:chainId/:file` | `{chainId}/{file}` from euler-labels (path-shape; matches the SDK's default `eulerLabelsBaseUrl` template, shares cache with the query-shape route) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/internal/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |

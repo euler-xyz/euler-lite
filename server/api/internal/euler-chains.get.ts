@@ -19,17 +19,20 @@ const CACHE_KEY = 'euler-chains'
 const inFlight = createInFlightDedup<string, unknown[]>()
 
 function getUpstreamUrl(): string {
-  const explicitUrl = (process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL || '').trim()
-  if (explicitUrl) return explicitUrl
-
   const configuredBranch = (
     process.env.EULER_SDK_EULER_INTERFACES_BRANCH
     || process.env.NUXT_PUBLIC_EULER_INTERFACES_BRANCH
     || process.env.NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH
     || ''
   ).trim()
-  const branch = configuredBranch || DEFAULT_BRANCH
-  return `https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/${branch}/EulerChains.json`
+  if (configuredBranch) {
+    return `https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/${configuredBranch}/EulerChains.json`
+  }
+
+  const explicitUrl = (process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL || '').trim()
+  if (explicitUrl) return explicitUrl
+
+  return `https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/${DEFAULT_BRANCH}/EulerChains.json`
 }
 
 /**

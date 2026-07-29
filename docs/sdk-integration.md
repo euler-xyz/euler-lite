@@ -69,7 +69,7 @@ The runtime config fields include:
 
 - **`enableV3Backend: boolean`** — set to `!!readV3ApiUrl()` on the server and emitted via `window.__APP_CONFIG__`. The client falls back to `useRuntimeConfig().public.enableV3Backend` (`isTruthy`) for static deploys. When `false` *and* `browserVaultSource === 'fallback'`, the SDK is built with `disableV3: true`.
 - **`browserVaultSource: 'fallback' | 'onchain' | 'v3'`** — pinned by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`). Selects which adapter block (`fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig`) the fast SDK uses. The plan-time SDK ignores this — it's always `onchain`.
-- **`eulerInterfacesBranch: string`** — pinned by `EULER_SDK_EULER_INTERFACES_BRANCH` (default `master`). Lite passes it to the SDK ABI service, and `/api/internal/euler-chains` uses the same branch when no direct deployments URL is configured.
+- **`eulerInterfacesBranch: string`** — pinned by `EULER_SDK_EULER_INTERFACES_BRANCH` (default `master`). Lite passes it to the SDK ABI service, and `/api/internal/euler-chains` uses the same branch. A configured branch takes precedence over the direct deployments URL.
 
 Chain-aware browsing calls also read `useChainConfig().onchainSdkChainIds`, injected from `ONCHAIN_SDK_CHAINS`. Listed chains use the onchain backend; all other chains use `browserVaultSource`. The list is independent of `DEPRECATED_CHAINS`, which only controls chain-selector collapsing and warm-cache skipping.
 
