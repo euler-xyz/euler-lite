@@ -699,6 +699,39 @@ describe('normalizeSimulatedVaultLayers', () => {
 })
 
 describe('useTxBatch execution errors', () => {
+  it('blocks execution when the SDK reports an incomplete account snapshot', async () => {
+    const sdk = createMockSdk()
+    sdk.executionService.simulateTransactionPlan.mockResolvedValue({
+      simulatedAccounts: [accountWithPosition(subAccount, subAccount, 2n)],
+      simulatedVaultsLayers: [[]],
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+      snapshotReadFailures: [{
+        layerIndex: 1,
+        subAccount,
+        vault,
+        kind: 'vaultAccount',
+        cause: 'inBand',
+        reason: '0x1234',
+      }],
+    } as never)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Withdraw USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+
+    expect(batch.simError.value).toBe(
+      'The complete account state could not be verified. Please try the simulation again.',
+    )
+    expect(batch.canExecuteBatch.value).toBe(false)
+  })
+
   it('publishes per-layer simulated vault state even without an enriched account position', async () => {
     const sdk = createMockSdk()
     const simulatedVault = {

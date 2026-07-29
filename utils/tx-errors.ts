@@ -362,7 +362,12 @@ export const formatSimulationFailure = <T extends VaultEntity>(
       : `Vault check failed for ${shortenAddress(vaultErr.vault)}`
   }
 
-  // 4. Insufficiency diagnostics — last resort when no revert detail exists.
+  // 4. Account Lens failures leave the simulated account snapshot incomplete.
+  if (result.snapshotReadFailures?.length) {
+    return 'The complete account state could not be verified. Please try the simulation again.'
+  }
+
+  // 5. Insufficiency diagnostics — last resort when no revert detail exists.
   const insufficientWallet = formatInsufficiency('Insufficient wallet balance', result.insufficientWalletAssets)
   if (insufficientWallet) return insufficientWallet
   const insufficientPermit2 = formatInsufficiency('Insufficient Permit2 allowance', result.insufficientPermit2Allowances)

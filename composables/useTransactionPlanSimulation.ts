@@ -21,6 +21,11 @@ export const useTransactionPlanSimulation = () => {
     plan: TransactionPlan | TransactionPlanPrepared,
     result: Awaited<ReturnType<typeof simulatePlan>>,
   ) => {
+    if (result.snapshotReadFailures?.length) {
+      simulationError.value = formatSimulationFailure(result)
+      return false
+    }
+
     // canExecute is false when EITHER the simulated batch reverted OR the
     // user is just missing approvals/balances (diagnostics). We only want to
     // block Review on real reverts — the modal handles approval prompts and
