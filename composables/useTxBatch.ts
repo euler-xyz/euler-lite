@@ -1672,7 +1672,7 @@ export const useTxBatch = () => {
       lastMerged = merged
       const sim = await sdk.executionService.simulateTransactionPlan(
         cid,
-        baseAccount,
+        ownerAddr,
         merged,
         {
           stateOverrides: true,

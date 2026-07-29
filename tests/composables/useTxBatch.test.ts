@@ -706,7 +706,7 @@ describe('normalizeSimulatedVaultLayers', () => {
 })
 
 describe('useTxBatch execution errors', () => {
-  it('reuses a supplied portfolio account for account-free reward entries', async () => {
+  it('reuses a supplied portfolio account as layer 0 while keeping SDK plugins fresh', async () => {
     const sdk = createMockSdk()
     const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
@@ -724,10 +724,11 @@ describe('useTxBatch execution errors', () => {
     expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
     expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
       1,
-      portfolioAccount,
+      owner,
       [],
       expect.any(Object),
     )
+    expect(useTxBatch().layers.value[0]?.account).toBe(portfolioAccount)
   })
 
   it('reuses shared form-prefetched accounts and slot hints for every first-entry caller', async () => {
@@ -769,7 +770,7 @@ describe('useTxBatch execution errors', () => {
     expect(getProvider).not.toHaveBeenCalled()
     expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
       1,
-      portfolioAccount,
+      owner,
       plan,
       expect.objectContaining({
         stateOverrideOptions: expect.objectContaining({
@@ -818,7 +819,7 @@ describe('useTxBatch execution errors', () => {
     expect(getProvider).not.toHaveBeenCalled()
     expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
       1,
-      portfolioAccount,
+      owner,
       plan,
       expect.objectContaining({
         stateOverrideOptions: expect.objectContaining({

@@ -1,3 +1,4 @@
+import { ref, watch } from 'vue'
 import { type Address, getAddress } from 'viem'
 import { fetchErc20SlotHints, type SlotHints, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
@@ -46,6 +47,10 @@ export const useStateOverrideOptions = () => {
   // us snapshot it for the very-next call.
   const slotHints = ref<SlotHints>({})
 
+  watch(chainId, () => {
+    slotHints.value = {}
+  }, { flush: 'sync' })
+
   const primeSlotHintsFor = async (tokens: Address[]): Promise<void> => {
     if (!tokens.length) return
     const cid = chainId.value
@@ -58,7 +63,7 @@ export const useStateOverrideOptions = () => {
       // up).
       const provider = sdk.providerService?.getProvider(cid)
       if (!provider) return
-      const next: SlotHints = { ...slotHints.value }
+      const resolvedHints: SlotHints = {}
       pendingStateOverrideHintResolutions.value += 1
       try {
         await Promise.all(tokens.map(async (rawToken) => {
@@ -67,14 +72,19 @@ export const useStateOverrideOptions = () => {
             const hint = await fetchErc20SlotHints(provider, token, {
               allowanceSpender: permit2Address,
             })
-            next[token] = hint
+            resolvedHints[token] = hint
           }
           catch (e) {
             logWarn('useStateOverrideOptions/primeSlotHintsFor', e)
           }
         }))
-        slotHints.value = next
-        mergeBatchPrefetchedSlotHints(cid, next)
+        mergeBatchPrefetchedSlotHints(cid, resolvedHints)
+        if (chainId.value === cid) {
+          slotHints.value = {
+            ...slotHints.value,
+            ...resolvedHints,
+          }
+        }
       }
       finally {
         pendingStateOverrideHintResolutions.value = Math.max(0, pendingStateOverrideHintResolutions.value - 1)
