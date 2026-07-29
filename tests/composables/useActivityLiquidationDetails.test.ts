@@ -65,25 +65,6 @@ describe('useActivityLiquidationDetails', () => {
     vi.unstubAllGlobals()
   })
 
-  it('stays inert against an SDK without the liquidations surface', async () => {
-    // Contract test for the pinned package: the published SDK release does
-    // not expose fetchLiquidations, so enrichment must silently no-op —
-    // no throw, no lookup, no enrichment.
-    const activityService = {}
-    vi.stubGlobal('useEulerSdk', () => ({
-      getEulerSdkForChain: vi.fn(async () => ({ activityService })),
-    }))
-
-    const event = liquidationEvent()
-    const details = inScope(() => useActivityLiquidationDetails({
-      events: () => [event],
-    }))
-
-    // Give the (settled) fetch pipeline a beat to run.
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(details.getLiquidationDetails(event)).toBeUndefined()
-  })
-
   it('fetches per chain+vault window and joins records to their events', async () => {
     const fetchLiquidations = vi.fn(async () => ({
       data: [liquidationRecord()],

@@ -128,13 +128,8 @@ export const useActivityLiquidationDetails = ({
     try {
       const { getEulerSdkForChain } = useEulerSdk()
       const sdk = await getEulerSdkForChain(group.chainId)
-      // Optional on the override-facing service contract — older SDKs (or
-      // custom service overrides) without liquidations support simply leave
-      // the rows unenriched.
-      const fetchLiquidations = sdk.activityService.fetchLiquidations?.bind(sdk.activityService)
-      if (!fetchLiquidations) return
       for (let page = 0; page < MAX_LIQUIDATION_PAGES; page++) {
-        const result = await fetchLiquidations({
+        const result = await sdk.activityService.fetchLiquidations({
           chainId: group.chainId,
           vault: group.vault as `0x${string}`,
           from: claimed.from,
