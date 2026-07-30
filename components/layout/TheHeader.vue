@@ -37,7 +37,6 @@ const {
   enableExplorePage,
   enablePoweredByEuler,
   enableAppTitle,
-  enableSupportPanel,
 } = useDeployConfig()
 const menuItems = getMenuItems(
   enableEarnPage,
@@ -158,7 +157,6 @@ onClickOutside(wrapperRef, () => {
         >
           <div class="flex flex-col gap-4 w-full">
             <div
-              v-if="links.length || enableSupportPanel"
               class="mb-12"
             >
               <p class="mb-8 text-content-tertiary text-h6 text-left">
@@ -166,7 +164,6 @@ onClickOutside(wrapperRef, () => {
               </p>
 
               <button
-                v-if="enableSupportPanel"
                 class="flex gap-4 mb-4 text-content-primary hover:text-accent-600 transition-colors"
                 @click="onSupportClick"
               >

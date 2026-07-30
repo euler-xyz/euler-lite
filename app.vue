@@ -5,7 +5,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 
 const route = useRoute()
 const router = useRouter()
-const { announcement, enableSupportPanel } = useDeployConfig()
+const { announcement } = useDeployConfig()
 const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
 const announcementSeenToken = useLocalStorage('announcement-seen-token', '')
 const modal = useModal()
@@ -67,13 +67,6 @@ useHead({
       : []),
   ],
 })
-
-// With the in-app support panel enabled, suppress the HelpScout Beacon launcher
-// so the app has a single support surface. The rule lives in
-// assets/styles/main.scss because Beacon injects its container after window load.
-if (import.meta.client && enableSupportPanel) {
-  document.documentElement.classList.add('beacon-hidden')
-}
 
 const isMenuVisible = ref(true)
 const isHeaderVisible = ref(true)
@@ -233,7 +226,7 @@ onUnmounted(() => {
   <UiModals />
   <UiToastContainer />
   <BatchDrawer />
-  <SupportPanelHost v-if="enableSupportPanel" />
+  <SupportPanelHost />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>

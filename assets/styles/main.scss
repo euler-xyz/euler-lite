@@ -70,10 +70,13 @@ body {
   font-weight: 600;
 }
 
-// HelpScout Beacon is injected asynchronously after window load (see the
-// helpscout-beacon head script in nuxt.config.ts), so its launcher is hidden by
-// this root class — set in app.vue when the in-app support panel is enabled —
-// rather than on the element itself.
+// HelpScout Beacon injects its launcher asynchronously after window load (see
+// the helpscout-beacon head script in nuxt.config.ts), so it can only be hidden
+// via this root class, not on the element itself. Nothing sets the class today:
+// the Beacon bubble stays visible as the working ticket channel until the
+// HELPSCOUT_* credentials the in-app panel needs are configured. Add
+// `document.documentElement.classList.add('beacon-hidden')` in app.vue to
+// retire the bubble once the panel can actually send.
 html.beacon-hidden #beacon-container {
   display: none;
 }

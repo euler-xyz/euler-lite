@@ -7,14 +7,10 @@ browser never talks to HelpScout and no CSP entries are needed for it.
 
 Opens from `Support`, the first entry in the header's Resources dropdown.
 
-## Enabling it
+## Configuration
 
-Off by default. Two things are required:
-
-1. `NUXT_PUBLIC_CONFIG_ENABLE_SUPPORT_PANEL=true` — shows the Resources entry and
-   mounts the panel. While enabled, the HelpScout Beacon launcher is hidden
-   (`beacon-hidden` in `app.vue`) so there is a single support surface.
-2. Server-side HelpScout credentials:
+The panel is always mounted — there is no feature flag. It needs these
+server-side credentials to do anything useful:
 
 ```
 HELPSCOUT_DOCS_API_KEY=…            # Docs API key (Basic auth, key as username)
@@ -24,9 +20,20 @@ HELPSCOUT_APP_SECRET=…
 HELPSCOUT_MAILBOX_ID=…              # mailbox new conversations land in
 ```
 
-Without the Docs key, search returns 503 and the panel is still usable to open a
-ticket. Without the Mailbox credentials, sending returns 503 — so do not enable
-the flag before the credentials are in place.
+Until they are set the panel opens and behaves normally, but article search
+returns 503 and sending shows "The message could not be sent" — the guards in
+`docs.get.ts` and `conversations.post.ts` fail cleanly rather than calling
+HelpScout with empty credentials.
+
+**The HelpScout Beacon bubble is therefore still loaded and visible**, because it
+is the channel that actually delivers tickets today. Once the credentials above
+are in place, retire the bubble by adding
+`document.documentElement.classList.add('beacon-hidden')` in `app.vue` (the CSS
+rule already exists in `assets/styles/main.scss`), and then remove the Beacon
+loader from `nuxt.config.ts`, its `*.helpscout.net` /
+`sockjs-helpscout.pusher.com` entries from `server/plugins/csp.ts`, the
+`window.Beacon` type in `types/index.ts`, and update the Beacon assertion in
+`tests/server/security.test.ts`.
 
 ## Files
 

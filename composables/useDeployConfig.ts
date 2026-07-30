@@ -46,10 +46,6 @@ export const useDeployConfig = () => {
     enableIncentra: isEnabled(rc.configEnableIncentra),
     enableFuul: isEnabled(rc.configEnableFuul),
     enableTurtle: isEnabled(rc.configEnableTurtle),
-    // Opt-in, unlike the flags above: the in-app support panel needs HelpScout
-    // Docs/Mailbox API credentials server-side (see docs/support-panel.md), so
-    // it stays off until an operator has configured them.
-    enableSupportPanel: String(rc.configEnableSupportPanel) === 'true',
     announcement: envConfig.announcement,
 
     // External token lists (defaults in server/api/internal/token-list.get.ts)
