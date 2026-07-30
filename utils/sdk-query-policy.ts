@@ -55,6 +55,8 @@ export interface SdkQueryPolicyEntry {
 const SECOND = 1_000
 const MINUTE = 60 * SECOND
 
+export const ACTIVITY_QUERY_STALE_TIME_MS = MINUTE
+
 export const DEFAULT_STALE_TIME_MS = 5 * MINUTE
 
 export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyEntry>> = {
@@ -96,10 +98,6 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryV3RewardsApyPage: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryVaultInfoERC4626: { staleTimeMs: DEFAULT_STALE_TIME_MS },
 
-  // === Activity feeds ===
-  queryAccountActivityEvents: { staleTimeMs: MINUTE, invalidateAfterTx: true },
-  queryVaultActivityEvents: { staleTimeMs: MINUTE, invalidateAfterTx: true },
-
   // === Plan-critical chain reads ===
   queryAccountVaults: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
@@ -110,6 +108,13 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultFactories: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
+
+  // === Activity: V3-indexed event history ===
+  queryAccountActivityEvents: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+  queryVaultActivityEvents: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+  // Historical liquidation valuations are immutable once indexed, but new
+  // liquidations append — same freshness window as the feeds they enrich.
+  queryLiquidations: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
 
   // === Position migration (SDK 1.1.3) ===
   // Discovery lists are heavier connector reads (GraphQL + balance

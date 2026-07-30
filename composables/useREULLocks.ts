@@ -14,12 +14,16 @@ let interval: NodeJS.Timeout | null = null
 const lockGuard = createRaceGuard()
 
 export const useREULLocks = () => {
-  const { isConnected, address: wagmiAddress, chainId: walletChainId } = useWagmi()
+  // The connected wallet stays the transaction signer; only display/query
+  // address selection is spy-aware.
+  const { address: wagmiAddress, chainId: walletChainId } = useWagmi()
   const { eulerTokenAddresses, chainId: addressesChainId } = useEulerAddresses()
-  const { spyAddress } = useSpyMode()
+  // Never falls back to the connected wallet while a spy candidate is still
+  // verifying — locks would otherwise show the wrong user's balances.
+  const { effectiveAddress: spySafeAddress } = useEffectiveAddress()
 
-  const effectiveAddress = computed(() => spyAddress.value || wagmiAddress.value || '')
-  const isActive = computed(() => isConnected.value || Boolean(spyAddress.value))
+  const effectiveAddress = computed(() => spySafeAddress.value || '')
+  const isActive = computed(() => Boolean(effectiveAddress.value))
   const selectedChainId = computed(() => addressesChainId.value || walletChainId.value)
 
   const reulTokenContractAddress = computed(() => eulerTokenAddresses.value?.rEUL ?? '')

@@ -3,7 +3,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 
 const { asset, size, iconUrl } = defineProps<{
   asset: { address: string, symbol: string } | { address: string, symbol: string }[]
-  size?: '16' | '20' | '28' | '36' | '38' | '40' | '46'
+  size?: '16' | '20' | '28' | '32' | '36' | '38' | '40' | '46'
   iconUrl?: string
 }>()
 

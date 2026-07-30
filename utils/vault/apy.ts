@@ -1,5 +1,4 @@
 import type { Address, PublicClient } from 'viem'
-import { eulerVaultLensABI } from '~/entities/euler/abis'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { batchLensCalls } from '~/utils/multicall'
 
@@ -97,6 +96,7 @@ const executeProjectedRatesBatch = async (
   // its PublicClient is structurally similar but not identical to the app's
   // viem (2.48.x) — cast once at the boundary.
   const provider = sdk.providerService.getProvider(context.chainId) as unknown as PublicClient
+  const vaultLensAbi = await sdk.abiService.fetchABI(context.chainId, 'VaultLens')
 
   const calls = active.map(item => ({
     functionName: 'getVaultInterestRateModelInfo',
@@ -112,7 +112,7 @@ const executeProjectedRatesBatch = async (
       provider,
       context.evc,
       context.vaultLens,
-      eulerVaultLensABI,
+      vaultLensAbi,
       calls,
     )
 
@@ -128,7 +128,7 @@ const executeProjectedRatesBatch = async (
   const fallbackResults = await Promise.all(calls.map(async call =>
     provider.readContract({
       address: context.vaultLens as Address,
-      abi: eulerVaultLensABI,
+      abi: vaultLensAbi,
       functionName: 'getVaultInterestRateModelInfo',
       authorizationList: undefined,
       args: call.args as [Address, bigint[], bigint[]],

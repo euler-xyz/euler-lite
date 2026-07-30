@@ -15,9 +15,11 @@ import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
 
-const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
-const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
+// portfolioAddress is already the spy-safe acting address; a wallet
+// fallback here would compute wrong position indices while a spy
+// candidate is still verifying.
+const ownerAddress = computed(() => portfolioAddress.value)
 const subAccountIndex = computed(() => {
   if (!ownerAddress.value || !position.subAccount) return 0
   return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))

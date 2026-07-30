@@ -29,6 +29,7 @@ type BuildEulerSDKOptions = {
     eulerEarnServiceAdapter?: string
     vaultTypeAdapter?: string
     rewardsServiceAdapter?: string
+    eulerInterfacesBranch?: string
   }
   rpcUrls?: Record<number, string>
   deploymentServiceConfig?: unknown
@@ -93,6 +94,8 @@ const importUseEulerSdk = async (
   vi.stubGlobal('useEnvConfig', () => ({
     v3ApiUrl: '',
     enableV3Backend: true,
+    browserVaultSource: 'fallback',
+    eulerInterfacesBranch: 'account-lens-update',
   }))
   vi.stubGlobal('useDeployConfig', () => ({
     enableMerkl: true,
@@ -195,6 +198,7 @@ describe('useEulerSdk', () => {
       v3ApiUrl: '/api/internal',
       tokenlistApiBaseUrl: '/api/internal',
       intrinsicApyV3ApiUrl: '/api/internal',
+      eulerInterfacesBranch: 'account-lens-update',
       deploymentsUrl: '/api/internal/euler-chains',
       eulerLabelsBaseUrl: '/api/internal/labels',
       rewardsMerklApiUrl: '/api/internal/proxy/merkl',

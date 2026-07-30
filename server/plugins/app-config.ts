@@ -65,6 +65,11 @@ function readAppConfig() {
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
+    eulerInterfacesBranch: env(
+      'EULER_SDK_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
+    ) || 'master',
     announcement: buildAnnouncementConfig({
       title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
       body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),

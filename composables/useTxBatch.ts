@@ -11,6 +11,12 @@ import type {
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import {
+  getBatchPrefetchedBaseAccount,
+  getBatchPrefetchedPlanningAccount,
+  getBatchPrefetchedSlotHints,
+  mergeBatchPrefetchedSlotHints,
+} from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import {
@@ -448,6 +454,7 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
       }
     }))
     batchSlotHints = next
+    mergeBatchPrefetchedSlotHints(chainId, next)
   }
   catch (error) {
     logWarn('useTxBatch/primeBatchSlotHintsFor', error)
@@ -620,6 +627,45 @@ export const fetchBaseAccountSnapshot = async (
     populateAll: true,
   })
   return fetched.result as Account<IHasVaultAddress>
+}
+
+const isAccountForContext = (
+  account: Account<IHasVaultAddress> | undefined,
+  chainId: number,
+  owner: Address,
+): account is Account<IHasVaultAddress> => {
+  if (!account || account.chainId !== chainId) return false
+  try {
+    return getAddress(account.owner) === owner
+  }
+  catch {
+    return false
+  }
+}
+
+/**
+ * Prefetched accounts the forms already loaded, valid for this wallet context.
+ *
+ * Read straight from the registry rather than accepting them per entry: the refs
+ * a page would hand over (`usePlanAccount().account`,
+ * `useEulerAccount().portfolio`) are layer-aware and resolve to the active
+ * *simulated* layer once the batch is non-empty, which must never be adopted as
+ * the batch's own layer 0. The registry only ever holds pre-overlay loader
+ * output, so chain + owner is the whole validation.
+ */
+const resolvePrefetchedAccounts = (
+  chainId: number,
+  owner: Address,
+): {
+  planningAccount?: Account<IHasVaultAddress>
+  baseAccount?: Account<IHasVaultAddress>
+} => {
+  const planningAccount = getBatchPrefetchedPlanningAccount()
+  const baseAccount = getBatchPrefetchedBaseAccount()
+  return {
+    planningAccount: isAccountForContext(planningAccount, chainId, owner) ? planningAccount : undefined,
+    baseAccount: isAccountForContext(baseAccount, chainId, owner) ? baseAccount : undefined,
+  }
 }
 
 /**
@@ -1623,6 +1669,7 @@ export const useTxBatch = () => {
       // are immutable add-time payloads; later real-state drift should not cause
       // the whole batch to rebuild around a different base account.
       const baseAccount = baseAccountSnapshot
+        ?? resolvePrefetchedAccounts(cid, ownerAddr).baseAccount
         ?? await fetchBaseAccountSnapshot(sdk, cid, ownerAddr)
       baseAccountSnapshot = baseAccount
 
@@ -1984,20 +2031,37 @@ export const useTxBatch = () => {
       }
     }
 
-    if (baseAccountSnapshot) {
-      logBatchDiag('getEntryPlanningAccount:base-snapshot-cached')
-      return baseAccountSnapshot
-    }
-
     const o = owner.value
     const cid = chainId.value
     if (!o || !cid) {
       logBatchDiag('getEntryPlanningAccount:account-not-loaded', { owner: o, chainId: cid }, 'error')
       throw new Error('Account not loaded')
     }
+    const ownerAddress = getAddress(o)
+    // Only reachable with an empty cart (non-empty carts return the final layer
+    // above), so `baseAccountSnapshot` is null here and adopting the prefetched
+    // base cannot displace a snapshot already pinned for this cart.
+    const { planningAccount, baseAccount } = resolvePrefetchedAccounts(cid, ownerAddress)
+
+    if (baseAccount) {
+      baseAccountSnapshot = baseAccount
+    }
+    if (planningAccount) {
+      logBatchDiag('getEntryPlanningAccount:prefetched-planning-account')
+      return planningAccount
+    }
+    if (baseAccount) {
+      logBatchDiag('getEntryPlanningAccount:prefetched-base-account')
+      return baseAccount
+    }
+    if (baseAccountSnapshot) {
+      logBatchDiag('getEntryPlanningAccount:base-snapshot-cached')
+      return baseAccountSnapshot
+    }
+
     logBatchDiag('getEntryPlanningAccount:base-snapshot-fetch', { owner: o, chainId: cid })
     const sdk = await getEulerSdkFresh()
-    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, getAddress(o))
+    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, ownerAddress)
     return baseAccountSnapshot
   }
 
@@ -2016,6 +2080,20 @@ export const useTxBatch = () => {
         subAccount: entry.subAccount,
         requiresPlanningAccount: entry.requiresPlanningAccount !== false,
       })
+      // Account-free entries never reach `getEntryPlanningAccount`, so seed layer 0
+      // from the prefetched base here too — otherwise resimulate would refetch it.
+      const preflightChainId = chainId.value
+      const currentOwner = owner.value
+      if (!baseAccountSnapshot && preflightChainId && currentOwner) {
+        try {
+          const { baseAccount } = resolvePrefetchedAccounts(preflightChainId, getAddress(currentOwner))
+          if (baseAccount) baseAccountSnapshot = baseAccount
+        }
+        catch {
+          // Account-free entries can still build without a valid wallet context.
+          // The simulator will surface the normal account-loading error later.
+        }
+      }
       const buildResult = entry.requiresPlanningAccount === false
         ? await entry.buildPlan()
         : await entry.buildPlan(await getEntryPlanningAccount())
@@ -2023,9 +2101,20 @@ export const useTxBatch = () => {
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
-        await primeBatchSlotHintsFor(cid, collectRequiredApprovalTokens(plan))
+        batchSlotHints = {
+          ...getBatchPrefetchedSlotHints(cid),
+          ...batchSlotHints,
+        }
+        // Probe only what no form or earlier batch entry has resolved yet.
+        const missingSlotHintTokens = collectRequiredApprovalTokens(plan)
+          .filter(token => batchSlotHints[token] === undefined)
+        await primeBatchSlotHintsFor(cid, missingSlotHintTokens)
       }
-      const { buildPlan: _buildPlan, requiresPlanningAccount: _requiresPlanningAccount, ...fixedEntry } = entry
+      const {
+        buildPlan: _buildPlan,
+        requiresPlanningAccount: _requiresPlanningAccount,
+        ...fixedEntry
+      } = entry
       registerReviewAssetMeta(fixedEntry.review)
       entries.value = [...entries.value, {
         ...fixedEntry,

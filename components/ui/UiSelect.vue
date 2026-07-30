@@ -40,6 +40,19 @@ const plusText = computed(() => {
   return `+${props.showSelectedOptions ? model.value.length - 2 : model.value.length}`
 })
 
+const accessibleLabel = computed(() => {
+  const label = props.title || props.placeholder || 'Select'
+  if (model.value.length === 0) return `${label}: ${displayText.value}`
+
+  const selectedLabels = [...props.options, ...(props.quickFilters ?? [])]
+    .filter(option => model.value.includes(option.value))
+    .map(option => option.label)
+  const selection = selectedLabels.length > 0
+    ? selectedLabels.join(', ')
+    : `${model.value.length} selected`
+  return `${label}: ${selection}`
+})
+
 const toggleOption = (value: string) => {
   if (model.value.includes(value)) {
     model.value = model.value.filter(v => v !== value)
@@ -69,12 +82,15 @@ const open = () => {
   <div
     :class="['ui-select', { 'ui-select--chips': chipOptions && chipOptions.length > 0 }]"
   >
-    <div
+    <button
+      type="button"
       class="ui-select__field"
       data-id="filter-trigger"
       :data-filter-title="title || placeholder || 'Select'"
       :data-filter-placeholder="placeholder || 'Select'"
       :data-selected-count="model.length"
+      :aria-label="accessibleLabel"
+      aria-haspopup="dialog"
       @click="open"
     >
       <UiIcon
@@ -92,21 +108,21 @@ const open = () => {
         name="arrow-down"
         class="ui-select__arrow"
       />
-    </div>
+    </button>
     <template v-if="chipOptions && chipOptions.length > 0">
-      <div
+      <UiFilterChip
         v-for="option in chipOptions"
         :key="option.value"
-        :class="['ui-select__chip', { 'ui-select__chip--active': model.includes(option.value) }]"
+        :active="model.includes(option.value)"
         @click="toggleOption(option.value)"
       >
         {{ option.label }}
         <UiIcon
           v-if="model.includes(option.value)"
           name="close"
-          class="ui-select__chip-icon"
+          class="ui-filter-chip__icon"
         />
-      </div>
+      </UiFilterChip>
     </template>
   </div>
 </template>
@@ -186,47 +202,6 @@ const open = () => {
     height: 16px;
     margin-left: auto;
     margin-right: -4px;
-  }
-
-  &__chip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    font-size: 14px;
-    font-weight: 400;
-    background: var(--ui-select-chip-background-color);
-    border: 1px solid var(--neutral-300);
-    border-radius: 100px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s ease;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-
-    &:hover {
-      border-color: var(--neutral-400);
-      background: var(--neutral-50);
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
-    }
-
-    &--active {
-      font-weight: 600;
-      background: var(--ui-select-chip-active-background-color);
-      color: var(--ui-select-chip-active-color);
-      border-color: transparent;
-      box-shadow: var(--accent-shadow-md);
-
-      &:hover {
-        background: var(--accent-600);
-        border-color: transparent;
-        box-shadow: var(--accent-shadow-lg);
-      }
-    }
-  }
-
-  &__chip-icon {
-    width: 16px;
-    height: 16px;
   }
 }
 </style>

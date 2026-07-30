@@ -6,7 +6,7 @@ import { createInFlightDedup } from '~/server/utils/in-flight'
 import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
-const DEFAULT_URL = 'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/EulerChains.json'
+const DEFAULT_BRANCH = 'master'
 
 const rateLimiter = createRateLimiter({
   max: 1000,
@@ -19,7 +19,20 @@ const CACHE_KEY = 'euler-chains'
 const inFlight = createInFlightDedup<string, unknown[]>()
 
 function getUpstreamUrl(): string {
-  return (process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL || '').trim() || DEFAULT_URL
+  const configuredBranch = (
+    process.env.EULER_SDK_EULER_INTERFACES_BRANCH
+    || process.env.NUXT_PUBLIC_EULER_INTERFACES_BRANCH
+    || process.env.NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH
+    || ''
+  ).trim()
+  if (configuredBranch) {
+    return `https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/${configuredBranch}/EulerChains.json`
+  }
+
+  const explicitUrl = (process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL || '').trim()
+  if (explicitUrl) return explicitUrl
+
+  return `https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/${DEFAULT_BRANCH}/EulerChains.json`
 }
 
 /**

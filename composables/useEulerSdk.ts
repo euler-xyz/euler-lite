@@ -168,7 +168,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   const v3ApiUrl = buildV3ProxyApiPath()
   const labelsProxyUrl = buildLabelsProxyApiPath()
   const subgraphUrls = buildSubgraphUrlMap()
-  const { enableV3Backend, browserVaultSource } = useEnvConfig()
+  const { enableV3Backend, browserVaultSource, eulerInterfacesBranch } = useEnvConfig()
   // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins.
   // 'onchain' covers both ONCHAIN_SDK_CHAINS fast reads and the plan-time
   // instance, which exists specifically so the planner sees fresh chain
@@ -180,6 +180,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // back to v3 internally are encountered. The per-service adapter flags are
     // what actually steer reads through the fallback chain vs straight onchain.
     ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl, intrinsicApyV3ApiUrl: v3ApiUrl } : {}),
+    eulerInterfacesBranch,
     deploymentsUrl: buildAppApiPath('/api/internal/euler-chains'),
     // Labels always go through the local /api/internal/labels proxy. Server-side env
     // (`NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`/`*_REPO`) controls where the proxy

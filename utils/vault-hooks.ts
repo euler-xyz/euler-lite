@@ -19,6 +19,27 @@ export const OP_FLASHLOAN = 'flashloan' satisfies VaultOperation
 export const OP_TOUCH = 'touch' satisfies VaultOperation
 export const OP_VAULT_STATUS_CHECK = 'vaultStatusCheck' satisfies VaultOperation
 
+const VAULT_OPERATION_BITS: Record<VaultOperation, bigint> = {
+  deposit: 1n << 0n,
+  mint: 1n << 1n,
+  withdraw: 1n << 2n,
+  redeem: 1n << 3n,
+  transfer: 1n << 4n,
+  skim: 1n << 5n,
+  borrow: 1n << 6n,
+  repay: 1n << 7n,
+  repayWithShares: 1n << 8n,
+  pullDebt: 1n << 9n,
+  convertFees: 1n << 10n,
+  liquidate: 1n << 11n,
+  flashloan: 1n << 12n,
+  touch: 1n << 13n,
+  vaultStatusCheck: 1n << 14n,
+}
+
+const KNOWN_VAULT_OPERATION_MASK = Object.values(VAULT_OPERATION_BITS)
+  .reduce((mask, bit) => mask | bit, 0n)
+
 export interface VaultOpMeta {
   op: VaultOperation
   name: string
@@ -184,6 +205,16 @@ export const getHookedOperationMetas = (
   { includeInternal = false }: { includeInternal?: boolean } = {},
 ): VaultOpMeta[] =>
   VAULT_OPS.filter(meta => hookedOperations[meta.op] && (includeInternal || !meta.internal))
+
+export const decodeHookedOperationsMask = (mask: bigint): {
+  hookedOperations: EVaultHookedOperations
+  unknownMask: bigint
+} => ({
+  hookedOperations: Object.fromEntries(
+    VAULT_OPS.map(meta => [meta.op, (mask & VAULT_OPERATION_BITS[meta.op]) !== 0n]),
+  ) as EVaultHookedOperations,
+  unknownMask: mask & ~KNOWN_VAULT_OPERATION_MASK,
+})
 
 export const hasAnyHookedOperation = (
   hookedOperations: EVaultHookedOperations,

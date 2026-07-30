@@ -4,15 +4,26 @@ const props = withDefaults(defineProps<{
   defaultOpen?: boolean
   contentClass?: string
   hasActions?: boolean
+  keepMounted?: boolean
 }>(), {
   defaultOpen: true,
   contentClass: 'flex flex-col gap-24',
   hasActions: true,
+  keepMounted: false,
 })
+const emit = defineEmits<{
+  'update:open': [open: boolean]
+}>()
 
 const isOpen = ref(props.defaultOpen)
 const panelId = useId()
 const sectionEl = ref<HTMLElement>()
+
+const setOpen = (open: boolean) => {
+  if (isOpen.value === open) return
+  isOpen.value = open
+  emit('update:open', open)
+}
 
 const expandIfOnlySection = () => {
   const parentEl = sectionEl.value?.parentElement
@@ -20,7 +31,7 @@ const expandIfOnlySection = () => {
 
   const sections = Array.from(parentEl.querySelectorAll<HTMLElement>(':scope > [data-vault-overview-accordion-section]'))
   if (sections.length === 1) {
-    isOpen.value = true
+    setOpen(true)
     return
   }
 
@@ -28,12 +39,12 @@ const expandIfOnlySection = () => {
     section.querySelector('button[aria-expanded="false"]'),
   )
   if (collapsedSections.length === 1 && collapsedSections[0] === sectionEl.value) {
-    isOpen.value = true
+    setOpen(true)
   }
 }
 
 const toggle = () => {
-  isOpen.value = !isOpen.value
+  setOpen(!isOpen.value)
 }
 
 onMounted(async () => {
@@ -86,7 +97,8 @@ onMounted(async () => {
     </div>
 
     <div
-      v-if="isOpen"
+      v-if="isOpen || keepMounted"
+      v-show="isOpen"
       :id="panelId"
       class="px-24 pb-24"
     >
