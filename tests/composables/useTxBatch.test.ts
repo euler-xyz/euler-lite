@@ -706,6 +706,54 @@ describe('normalizeSimulatedVaultLayers', () => {
 })
 
 describe('useTxBatch execution errors', () => {
+  it('rejects incomplete account snapshots before publishing or reusing their layers', async () => {
+    const sdk = createMockSdk()
+    sdk.executionService.simulateTransactionPlan.mockResolvedValue({
+      simulatedAccounts: [accountWithPosition(subAccount, subAccount, 2n)],
+      simulatedVaultsLayers: [[]],
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+      snapshotReadFailures: [{
+        layerIndex: 1,
+        subAccount,
+        vault,
+        kind: 'vaultAccount',
+        cause: 'inBand',
+        reason: '0x1234',
+      }],
+    } as never)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Withdraw USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+    await vi.waitFor(() => expect(batch.simError.value).toBe(
+      'The complete account state could not be verified. Please try the simulation again.',
+    ))
+
+    expect(batch.layers.value).toEqual([])
+    expect(batch.activeLayer.value).toBe(0)
+    expect(batch.isSimulated.value).toBe(false)
+    expect(batch.canExecuteBatch.value).toBe(false)
+    expect(activeLayerVaultsRef.value).toEqual({})
+
+    const nextBuildPlan = vi.fn(async () => [] as TransactionPlan)
+    await expect(batch.addEntry({
+      label: 'Borrow USDC',
+      buildPlan: nextBuildPlan,
+      subAccount,
+    })).rejects.toThrow(
+      'The complete account state could not be verified. Please try the simulation again.',
+    )
+    expect(nextBuildPlan).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(1)
+  })
+
   it('reuses the prefetched portfolio account as layer 0 for account-free entries', async () => {
     const sdk = createMockSdk()
     const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)

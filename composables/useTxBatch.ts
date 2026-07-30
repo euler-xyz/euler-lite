@@ -1713,6 +1713,21 @@ export const useTxBatch = () => {
         return
       }
 
+      // Account Lens read failures leave one or more simulated account layers
+      // incomplete. Do not publish or reuse those layers: stitching can preserve
+      // stale pre-operation debt/collateral, and the next entry would otherwise
+      // plan against that stale projection. Invalidating the layers also makes
+      // getEntryPlanningAccount fail closed while the affected entry remains.
+      if (sim.snapshotReadFailures?.length) {
+        invalidateSimulationLayers()
+        simError.value = describeFailure(sim)
+        logBatchDiag('resimulate:snapshot-read-failed', {
+          token,
+          failures: sim.snapshotReadFailures.length,
+        }, 'error')
+        return
+      }
+
       // Two distinct failure shapes, both blocking but handled differently:
       //  - simulationError: the EVC call reverted at the top level (couldn't even
       //    decode the batch) — no per-layer state exists.

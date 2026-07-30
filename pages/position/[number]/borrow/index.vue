@@ -52,8 +52,7 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getBorrowVaultPair } = useVaults()
-const { isConnected, address } = useWagmi()
-const { isSpyMode, spyAddress } = useSpyMode()
+const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId } = useEulerAddresses()
 const { isPositionsLoading, isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
 const positionIndex = usePositionIndex()
@@ -102,7 +101,7 @@ const positionIdentityKey = computed(() => {
   if (!current) return ''
   return getBorrowMorePositionIdentityKey({
     chainId: chainId.value,
-    account: spyAddress.value || address.value,
+    account: effectiveAddress.value,
     subAccount: current.subAccount,
     collateralVaultAddress: current.collateralVault?.address,
     borrowVaultAddress: current.borrowVault?.address,
