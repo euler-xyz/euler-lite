@@ -28,6 +28,7 @@ const {
 } = useVaultRegistry()
 const addressRef = toRef(props, 'address')
 const product = useEulerProductOfVault(addressRef)
+const { getTokenByAddress } = useTokenList()
 const copyKey = computed(() => `activity-address-${props.address.toLowerCase()}`)
 const explorerLink = computed(() => getExplorerLink(props.address, props.chainId, true))
 const resolvedVault = computed(() => {
@@ -42,6 +43,11 @@ const compactVaultName = computed(() => {
     return 'Escrowed collateral'
   }
   return product.name || resolvedVault.value.shares.name
+})
+const compactAssetName = computed(() => {
+  const asset = resolvedVault.value?.asset
+  if (!asset) return ''
+  return getTokenByAddress(asset.address)?.name || asset.name || asset.symbol
 })
 const internalLink = computed(() => {
   const query = typeof route.query.network === 'string'
@@ -110,25 +116,30 @@ const handleInternalClick = (event: MouseEvent) => {
     <NuxtLink
       v-if="internalLink && resolvedVault && compactVault"
       :to="internalLink"
-      class="flex min-w-0 flex-1 items-center gap-6 overflow-hidden rounded-8 transition-opacity hover:opacity-80"
+      class="flex min-w-0 flex-1 items-center gap-10 overflow-hidden rounded-8 transition-opacity hover:opacity-80"
       :title="address"
     >
       <AssetAvatar
         :asset="[resolvedVault.asset]"
-        size="20"
+        size="32"
         class="shrink-0"
       />
-      <span
-        class="min-w-0 flex-1 truncate text-p4 text-content-secondary"
-        :title="compactVaultName"
-      >
-        <VaultDisplayName
-          :name="compactVaultName"
-          :is-unverified="!isVerifiedVault(resolvedVault.address)"
-        />
-      </span>
-      <span class="shrink-0 text-p4 font-medium text-content-primary">
-        {{ resolvedVault.asset.symbol }}
+      <span class="min-w-0 flex-1">
+        <span
+          class="block truncate text-p4 text-content-secondary"
+          :title="compactVaultName"
+        >
+          <VaultDisplayName
+            :name="compactVaultName"
+            :is-unverified="!isVerifiedVault(resolvedVault.address)"
+          />
+        </span>
+        <span
+          class="block truncate text-p4 font-medium text-content-primary"
+          :title="compactAssetName"
+        >
+          {{ compactAssetName }}
+        </span>
       </span>
     </NuxtLink>
     <NuxtLink
