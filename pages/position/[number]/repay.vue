@@ -2,14 +2,11 @@
 import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { maxUint256, type Address } from 'viem'
 import type { VaultAsset } from '~/types/asset'
-import { getNetAPY } from '~/utils/vault/apy'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, SwapTokenSelector } from '#components'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { createRaceGuard } from '~/utils/race-guard'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -18,9 +15,10 @@ import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
+import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
+import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
 import { isCowProvider } from '~/entities/cowswap'
 
 const _route = useRoute()
@@ -35,10 +33,7 @@ const { planRepayFromWallet } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
-const { settings } = useUserSettings()
-const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -105,40 +100,16 @@ const liqPriceFromHealth = (health: number | null | undefined): number | null =>
 }
 
 // --- APYs ---
-const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
-const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
-const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
-  getVaultSupplyApy(collateralVault.value),
-  collateralVault.value,
-  enableIntrinsicApy.value,
-))
-const borrowApy = computed(() => withVaultIntrinsicApy(
-  getVaultBorrowApy(borrowVault.value),
-  borrowVault.value,
-  enableIntrinsicApy.value,
-))
-
-const netApyGuard = createRaceGuard()
-const netAPY = ref(0)
-watchEffect(async () => {
-  if (!position.value || !collateralVault.value || !borrowVault.value) {
-    netAPY.value = 0
-    return
-  }
-  const gen = netApyGuard.next()
-  const [supplyUsd, borrowUsd] = await Promise.all([
-    getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
-    getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
-  ])
-  if (netApyGuard.isStale(gen)) return
-  netAPY.value = getNetAPY(
-    supplyUsd,
-    collateralSupplyApy.value,
-    borrowUsd,
-    borrowApy.value,
-    collateralSupplyRewardApy.value || null,
-    borrowRewardApy.value || null,
-  )
+const {
+  netAPY,
+  collateralSupplyApy,
+  borrowApy,
+  collateralSupplyRewardApy,
+  borrowRewardApy,
+} = useRepayNetApy({
+  position,
+  borrowVault,
+  collateralVault,
 })
 
 // --- Tab composables ---
@@ -179,6 +150,12 @@ const walletSwap = useWalletSwapRepay({
   borrowRewardApy,
   oraclePriceRatio,
 })
+const walletEstimateNetAPY = computed(() =>
+  walletSwap.needsSwap.value ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value,
+)
+const walletProjectedYieldDetails = computed(() =>
+  walletSwap.needsSwap.value ? walletSwap.projectedYieldDetails.value : wallet.projectedYieldDetails.value,
+)
 
 // Add the current repay (any tab) to the batch. CoW orders can't be merged
 // into an EVC batch, so swap routes via CoW are excluded.
@@ -419,16 +396,36 @@ const savings = useSavingsRepay({
   getCurrentDebt,
   collateralSupplyApy,
   borrowApy,
+  borrowRewardApy,
 })
 
 const isPositionRoeApplicable = computed(() =>
-  positionCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
+  isRoeStateApplicable(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
 )
-const isCollateralRepayRoeApplicable = computed(() =>
-  positionCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
+const nextCollateralRepayRoeVaults = computed(() => {
+  const nextState = resolveRoeCollateralVaultsByAddresses(
+    collateral.nextCollateralAddresses.value,
+    positionCollateralVaults.value.vaults,
+  )
+  return {
+    ...nextState,
+    isComplete: collateral.nextCollateralSnapshotComplete.value && nextState.isComplete,
+  }
+})
+const isCurrentCollateralRepayRoeApplicable = computed(() =>
+  isRoeStateApplicable(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
 )
+const isNextCollateralRepayRoeApplicable = computed(() =>
+  isRoeStateApplicable(nextCollateralRepayRoeVaults.value, borrowVault.value, getTokenCategoryTags),
+)
+const collateralProjectedYieldDetails = computed(() => {
+  const details = collateral.projectedYieldDetails.value
+  if (!details || !isNextCollateralRepayRoeApplicable.value) return null
+  return {
+    ...details,
+    before: isCurrentCollateralRepayRoeApplicable.value ? details.before : null,
+  }
+})
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
@@ -787,13 +784,12 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow label="Net APY">
-                <SummaryValue
-                  :before="formatNumber(netAPY)"
-                  :after="formatNumber(walletSwap.needsSwap.value ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value)"
-                  suffix="%"
-                />
-              </SummaryRow>
+              <ProjectedYieldSummaryRow
+                label="Net APY"
+                :before="netAPY"
+                :after="walletEstimateNetAPY"
+                :details="walletProjectedYieldDetails"
+              />
               <SummaryRow label="Oracle price">
                 <SummaryPriceValue
                   :value="oraclePriceRatio != null ? formatSmartAmount(walletPriceInvert.invertValue(oraclePriceRatio)!) : undefined"
@@ -959,16 +955,13 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow
-                v-if="isCollateralRepayRoeApplicable"
+              <ProjectedYieldSummaryRow
+                v-if="isCurrentCollateralRepayRoeApplicable || isNextCollateralRepayRoeApplicable"
                 label="ROE"
-              >
-                <SummaryValue
-                  :before="collateral.roeBefore.value !== null ? formatNumber(collateral.roeBefore.value) : undefined"
-                  :after="collateral.roeAfter.value !== null && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? formatNumber(collateral.roeAfter.value) : undefined"
-                  suffix="%"
-                />
-              </SummaryRow>
+                :before="isCurrentCollateralRepayRoeApplicable ? collateral.roeBefore.value : null"
+                :after="isNextCollateralRepayRoeApplicable && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? collateral.roeAfter.value : null"
+                :details="collateralProjectedYieldDetails"
+              />
               <template v-if="!collateral.isSameAsset.value">
                 <SummaryRow
                   label="Swap price"
@@ -1139,16 +1132,13 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow
+              <ProjectedYieldSummaryRow
                 v-if="isPositionRoeApplicable"
                 label="ROE"
-              >
-                <SummaryValue
-                  :before="savings.roeBefore.value !== null ? formatNumber(savings.roeBefore.value) : undefined"
-                  :after="savings.roeAfter.value !== null && (savings.quotes.quote.value || savings.isSameAsset.value) ? formatNumber(savings.roeAfter.value) : undefined"
-                  suffix="%"
-                />
-              </SummaryRow>
+                :before="savings.roeBefore.value"
+                :after="savings.quotes.quote.value || savings.isSameAsset.value ? savings.roeAfter.value : null"
+                :details="savings.projectedYieldDetails.value"
+              />
               <template v-if="!savings.isSameAsset.value">
                 <SummaryRow
                   label="Swap price"

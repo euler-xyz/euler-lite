@@ -29,6 +29,21 @@ const lastFetchChainId = ref<number | null>(null)
 const lastFetchAddress = ref<string | null>(null)
 let fetchPromise: Promise<void> | null = null
 
+// Connector-reported addresses are not guaranteed to be EIP-55 checksummed
+// (WalletConnect wallets commonly report lowercase), while lastFetchAddress
+// stores the checksummed form. Address identity must therefore be compared
+// case-insensitively — a cased string compare here kept needsFetch() true
+// forever and refetched balances in an unbounded loop, hanging the tab.
+const isSameAddress = (a?: string | null, b?: string | null) =>
+  (a ?? '').toLowerCase() === (b ?? '').toLowerCase()
+
+// Safety valve for the follow-up refetch in updateBalances' finally block:
+// legitimate follow-ups (chain/address changed mid-fetch) settle within a
+// couple of rounds; anything past the cap indicates a needsFetch() invariant
+// that can never be satisfied.
+const MAX_CONSECUTIVE_AUTO_REFETCHES = 3
+let consecutiveAutoRefetches = 0
+
 // Reference-counted flag: when >0, updateBalances includes the full token list
 // (all Uniswap/DefiLlama entries — thousands of tokens on mainnet) so pages
 // with the "pay with" token selector can show non-zero balances first.
@@ -188,9 +203,22 @@ export const useWallets = () => {
     finally {
       isFetching.value = false
       fetchPromise = null
-      // If dependencies changed while we were fetching, schedule a follow-up run
+      // If dependencies changed while we were fetching, schedule a follow-up run.
+      // Capped: if needsFetch() can never settle (an invariant bug), an
+      // uncapped follow-up chain refetches forever and hangs the tab.
       if (needsFetch()) {
-        fetchPromise = updateBalances()
+        if (consecutiveAutoRefetches < MAX_CONSECUTIVE_AUTO_REFETCHES) {
+          consecutiveAutoRefetches++
+          fetchPromise = updateBalances()
+        }
+        else {
+          logWarn('wallets/fetchBalances', 'auto-refetch cap reached — needsFetch() never settled', {
+            data: { chainId: currentChainId, address: balanceAddress.value },
+          })
+        }
+      }
+      else {
+        consecutiveAutoRefetches = 0
       }
     }
   }
@@ -200,7 +228,7 @@ export const useWallets = () => {
     return (isConnected.value || isSpyMode.value)
       && loadedChainId.value === chainId.value
       && !!balanceAddress.value
-      && (lastFetchChainId.value !== chainId.value || !isLoaded.value || lastFetchAddress.value !== balanceAddress.value)
+      && (lastFetchChainId.value !== chainId.value || !isLoaded.value || !isSameAddress(lastFetchAddress.value, balanceAddress.value))
       && !isFetching.value
   }
 
@@ -227,6 +255,7 @@ export const useWallets = () => {
     lastFetchChainId.value = null
     lastFetchAddress.value = null
     fetchPromise = null
+    consecutiveAutoRefetches = 0
   }
 
   const getBalance = (tokenAddress: Address): bigint => {

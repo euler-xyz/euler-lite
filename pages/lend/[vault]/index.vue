@@ -30,6 +30,12 @@ import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { reportClientEvent } from '~/utils/client-observability'
 import { isCowProviderOrQuote } from '~/entities/cowswap'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -99,7 +105,12 @@ useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const {
+  version: rewardsVersion,
+  getSupplyRewardApy,
+  hasSupplyRewards,
+  getSupplyRewardCampaigns,
+} = useRewardsApy()
 
 // State
 const isLoading = ref(false)
@@ -109,7 +120,8 @@ const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
 const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
-const estimateSupplyAPY = ref(0)
+const estimateSupplyAPY = ref<number | null>(0)
+const projectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
 
 // Swap & deposit state
 const selectedAsset = ref<VaultAsset | undefined>()
@@ -158,6 +170,10 @@ const {
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeCollateralVault | undefined> = ref(undefined)
+const projectionEVault = computed(() => {
+  const fallback = eVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
 
 // Check if the active debt-pricing route uses Pyth oracles (requires fresh prices)
 const hasPythOracles = (v: EVault | undefined): boolean => {
@@ -340,23 +356,54 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (needsSwap.value && !swapSelectedQuote.value && +amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
-const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
-const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
-const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
+const totalRewardsAPY = computed(() => {
+  void rewardsVersion.value
+  return getSupplyRewardApy(vaultAddress)
+})
+const hasRewards = computed(() => {
+  void rewardsVersion.value
+  return hasSupplyRewards(vaultAddress)
+})
+const intrinsicApy = computed(() => getVaultIntrinsicApy(projectionEVault.value ?? vault.value, enableIntrinsicApy.value))
 
 const baseSupplyApy = computed(() => {
   if (!features.value.hasInterestRate) return 0
-  if (!eVault.value) return 0
-  return getVaultSupplyApy(eVault.value)
+  if (!projectionEVault.value) return 0
+  return getVaultSupplyApy(projectionEVault.value)
 })
 const supplyApyWithIntrinsic = computed(() => combineApyWithIntrinsic(baseSupplyApy.value, intrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!eVault.value && !securitizeVault.value) return '0.00'
   return formatNumber(supplyApyWithIntrinsic.value + totalRewardsAPY.value)
 })
-const estimateSupplyAPYDisplay = computed(() => {
-  return formatNumber(estimateSupplyAPY.value)
-})
+const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | null => {
+  const currentVault = projectionEVault.value
+  if (!currentVault) return null
+  const supplyApyWithIntrinsic = combineApyWithIntrinsic(rawApy, intrinsicApy.value)
+  const after = getProjectedYieldState('supply-apy', {
+    supplyUsd: 1,
+    baseSupplyApy: rawApy,
+    intrinsicSupplyApy: supplyApyWithIntrinsic - rawApy,
+    supplyRewardApy: totalRewardsAPY.value,
+    borrowUsd: 0,
+    baseBorrowApy: 0,
+  })
+  if (!after) return null
+  return {
+    metric: 'supply-apy',
+    after,
+    rateLines: [{
+      id: `supply:${currentVault.address.toLowerCase()}`,
+      label: 'Lending APY',
+      symbol: currentVault.asset.symbol,
+      vaultAddress: currentVault.address,
+      before: getVaultSupplyApy(currentVault),
+      after: rawApy,
+    }],
+    rewards: mergeProjectedRewardCampaigns([], getSupplyRewardCampaigns(currentVault.address)
+      .map(campaign => ({ campaign, vaultAddress: currentVault.address }))),
+  }
+}
 
 // Vault warnings for lend context
 const lendWarnings = computed(() => {
@@ -380,9 +427,9 @@ const isVaultVerified = computed(() => {
 const load = async () => {
   isLoading.value = true
   try {
-    if (features.value.hasInterestRate && eVault.value) {
+    if (features.value.hasInterestRate && projectionEVault.value) {
       estimateSupplyAPY.value
-        = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+        = combineApyWithIntrinsic(getVaultSupplyApy(projectionEVault.value), intrinsicApy.value)
           + totalRewardsAPY.value
     }
     else {
@@ -627,41 +674,51 @@ const estimatesGuard = createRaceGuard()
 const updateEstimates = useDebounceFn(async () => {
   if (!isVaultLoaded.value) return
   const gen = estimatesGuard.next()
+  projectedYieldDetails.value = null
   try {
-    if (features.value.hasInterestRate && eVault.value) {
+    const currentVault = projectionEVault.value
+    if (features.value.hasInterestRate && currentVault) {
       // When swapping, use the swap output amount (vault-asset denominated)
       const supplyNano = needsSwap.value
         ? BigInt(swapEffectiveQuote.value?.amountOut || 0)
-        : valueToNano(amount.value, eVault.value.shares.decimals)
+        : valueToNano(amount.value, currentVault.shares.decimals)
 
       if (needsSwap.value && !supplyNano) {
-        // No swap quote yet — skip projection, keep current rate
-        estimateSupplyAPY.value
-          = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
-            + totalRewardsAPY.value
+        // The vault-asset amount is unknown until a quote resolves, so there is
+        // no honest projected utilization state to display yet.
+        estimateSupplyAPY.value = null
       }
       else {
         const projected = await getProjectedRates(
-          eVault.value.address,
-          eVault.value.totalCash,
-          eVault.value.totalBorrowed,
+          currentVault.address,
+          currentVault.totalCash,
+          currentVault.totalBorrowed,
           supplyNano,
           0n,
         )
         if (estimatesGuard.isStale(gen)) return
-        const rawAPY = projected ? nanoToValue(projected.supplyAPY, 25) : getVaultSupplyApy(eVault.value)
+        if (!projected) {
+          estimateSupplyAPY.value = null
+          projectedYieldDetails.value = null
+          return
+        }
+        const rawAPY = nanoToValue(projected.supplyAPY, 25)
         estimateSupplyAPY.value
           = combineApyWithIntrinsic(rawAPY, intrinsicApy.value)
             + totalRewardsAPY.value
+        projectedYieldDetails.value = buildProjectedSupplyDetails(rawAPY)
       }
     }
     else {
       estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
+      projectedYieldDetails.value = null
     }
   }
   catch (e) {
     if (estimatesGuard.isStale(gen)) return
     logWarn('lend-supply/estimates', e)
+    estimateSupplyAPY.value = null
+    projectedYieldDetails.value = null
   }
   finally {
     if (!estimatesGuard.isStale(gen)) {
@@ -670,12 +727,28 @@ const updateEstimates = useDebounceFn(async () => {
   }
 }, 500)
 
+const queueEstimates = () => {
+  estimatesGuard.next()
+  estimateSupplyAPY.value = null
+  projectedYieldDetails.value = null
+  if (!isVaultLoaded.value) {
+    isEstimatesLoading.value = false
+    return
+  }
+  if (needsSwap.value && !swapEffectiveQuote.value) {
+    isEstimatesLoading.value = false
+    return
+  }
+  isEstimatesLoading.value = true
+  updateEstimates()
+}
+
 const supplyApyModalData = computed(() => ({
   props: {
     mode: 'supply',
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(projectionEVault.value ?? vault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vaultAddress),
     rewardVaultAddress: vaultAddress,
   },
@@ -829,7 +902,7 @@ watch(
     }
     push(vaultAsset?.address)
     push(payWith?.address)
-    if (tokens.length) void primeSlotHintsFor(tokens)
+    if (tokens.length) void primeSlotHintsFor(tokens, { background: true })
   },
   { immediate: true },
 )
@@ -874,28 +947,28 @@ watch(swapSelectedQuote, () => {
 // Re-run estimates when swap quote resolves — supplyNano depends on amountOut
 watch(swapEffectiveQuote, () => {
   if (!needsSwap.value) return
-  if (swapEffectiveQuote.value) {
-    if (!isEstimatesLoading.value) {
-      isEstimatesLoading.value = true
-    }
-    updateEstimates()
-  }
-  else {
-    // quote was cleared (slippage change, manual refresh) — queue estimate so loading is always cleared
-    isEstimatesLoading.value = true
-    updateEstimates()
-  }
+  queueEstimates()
 })
 
 watch(amount, async () => {
   clearSimulationError()
   if (!isVaultLoaded.value) {
+    estimatesGuard.next()
+    estimateSupplyAPY.value = null
+    projectedYieldDetails.value = null
+    isEstimatesLoading.value = false
     return
   }
-  if (!isEstimatesLoading.value) {
-    isEstimatesLoading.value = true
-  }
-  updateEstimates()
+  queueEstimates()
+})
+
+watch([
+  rewardsVersion,
+  enableIntrinsicApy,
+  () => projectionEVault.value?.totalCash,
+  () => projectionEVault.value?.totalBorrowed,
+], () => {
+  queueEstimates()
 })
 </script>
 
@@ -1117,13 +1190,12 @@ watch(amount, async () => {
               :loading="isEstimatesLoading"
               variant="card"
             >
-              <SummaryRow label="Supply APY">
-                <SummaryValue
-                  :after="estimateSupplyAPYDisplay"
-                  suffix="%"
-                  estimate-only
-                />
-              </SummaryRow>
+              <ProjectedYieldSummaryRow
+                label="Supply APY"
+                :after="estimateSupplyAPY"
+                :details="projectedYieldDetails"
+                estimate-only
+              />
             </VaultFormInfoBlock>
 
             <template #buttons>

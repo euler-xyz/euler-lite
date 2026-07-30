@@ -65,10 +65,11 @@ There are two layers of configuration: env vars (resolved by `useEnvConfig`) and
 2. `useRuntimeConfig().public` — build-time values from `NUXT_PUBLIC_*` env vars (used by static / CDN deployments where the Nitro render hook never fires).
 3. Hard-coded `DEFAULTS`.
 
-Two fields drive adapter selection:
+The runtime config fields include:
 
 - **`enableV3Backend: boolean`** — set to `!!readV3ApiUrl()` on the server and emitted via `window.__APP_CONFIG__`. The client falls back to `useRuntimeConfig().public.enableV3Backend` (`isTruthy`) for static deploys. When `false` *and* `browserVaultSource === 'fallback'`, the SDK is built with `disableV3: true`.
 - **`browserVaultSource: 'fallback' | 'onchain' | 'v3'`** — pinned by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`). Selects which adapter block (`fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig`) the fast SDK uses. The plan-time SDK ignores this — it's always `onchain`.
+- **`eulerInterfacesBranch: string`** — pinned by `EULER_SDK_EULER_INTERFACES_BRANCH` (default `master`). Lite passes it to the SDK ABI service, and `/api/internal/euler-chains` uses the same branch. A configured branch takes precedence over the direct deployments URL.
 
 Chain-aware browsing calls also read `useChainConfig().onchainSdkChainIds`, injected from `ONCHAIN_SDK_CHAINS`. Listed chains use the onchain backend; all other chains use `browserVaultSource`. The list is independent of `DEPRECATED_CHAINS`, which only controls chain-selector collapsing and warm-cache skipping.
 
@@ -87,6 +88,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | SDK field | Value | Backing endpoint |
 |-----------|-------|-----------------|
 | `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/internal` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/internal/v3/[...path].ts`) |
+| `eulerInterfacesBranch` | `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | Runtime Euler Interfaces ABI source |
 | `deploymentsUrl` | `/api/internal/euler-chains` | Local proxy |
 | `eulerLabelsBaseUrl` | `/api/internal/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
 | `rewardsMerklApiUrl` | `/api/internal/proxy/merkl` | Merkl proxy |
@@ -105,7 +107,11 @@ The full object is serialized into `staticCacheKey`, so any change produces a ne
 
 ## Query Policy (single source of truth)
 
-`utils/sdk-query-policy.ts` owns the per-query policy. One row per `query*` name:
+`utils/sdk-query-policy.ts` owns the per-query policy. One row per `query*` name.
+Completeness is test-enforced: `tests/utils/sdk-query-policy.test.ts` builds the
+real SDK with a recording `buildQuery` and fails when a wrapped query name has
+no policy row (or when a row no longer matches any wrapped name), so an SDK bump
+cannot introduce a query that silently inherits `DEFAULT_STALE_TIME_MS`.
 
 ```ts
 interface SdkQueryPolicyEntry {
@@ -134,6 +140,12 @@ export const SDK_QUERY_POLICY = {
 
   // Balances
   queryBalanceOf:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
+
+  // Position migration: external position balances and authorization state
+  // are balance-like (debt accrues per block; the user can sign or revoke
+  // authorization mid-flow), so they take short windows + post-tx eviction.
+  queryGetPosition:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+  queryGetAuthorization: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
 }
 ```
 
@@ -170,7 +182,7 @@ export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => { … }
 ```
 
-`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? DEFAULT_STALE_TIME_MS })` call. Non-listed queries fall through to `DEFAULT_STALE_TIME_MS`.
+`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? DEFAULT_STALE_TIME_MS })` call. The `DEFAULT_STALE_TIME_MS` fall-through is a runtime backstop only — the completeness test keeps the policy table exhaustive, so no shipped query name actually relies on it.
 
 Key properties:
 

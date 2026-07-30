@@ -34,9 +34,9 @@ export function computeSupplyApy(
 }
 
 /**
- * Borrow-side visible APY for a vault paired with a specific collateral.
+ * Borrow-side visible APY for a vault paired with the projected collateral set.
  *
- * Includes BORROW + BORROW_COLLATERAL campaigns matched to the collateral.
+ * Includes BORROW + BORROW_COLLATERAL campaigns matched to any collateral.
  * LOOPING campaigns are not included here — they require a known multiplier
  * and are computed at the position level by the SDK (via Portfolio breakdowns).
  *
@@ -47,14 +47,14 @@ export function computeBorrowApy(
   vault: EVault,
   viewer: string | undefined,
   settings: ApyVisibilitySettings,
-  collateralAddress?: string,
+  collateralAddresses?: string | readonly string[],
 ): number {
   const baseBorrowApy = getVaultBorrowApy(vault)
   const intrinsic = settings.enableIntrinsicApy
     ? (1 + baseBorrowApy / 100) * (vault.intrinsicApy?.apy ?? 0)
     : 0
   const rewards = settings.enableRewardsApy
-    ? sumBorrowRewardApr(vault, viewer, collateralAddress)
+    ? sumBorrowRewardApr(vault, viewer, collateralAddresses)
     : 0
   return baseBorrowApy + intrinsic - rewards
 }
@@ -68,9 +68,13 @@ export function computeBorrowApy(
 export function sumBorrowRewardApr(
   vault: EVault,
   viewer: string | undefined,
-  collateralAddress: string | undefined,
+  collateralAddresses: string | readonly string[] | undefined,
 ): number {
   const campaigns: RewardCampaign[] = vault.rewards?.getActiveCampaigns({ viewer }) ?? []
+  const collateralSet = new Set(
+    (typeof collateralAddresses === 'string' ? [collateralAddresses] : collateralAddresses ?? [])
+      .map(address => address.toLowerCase()),
+  )
   let total = 0
   for (const c of campaigns) {
     if (typeof c.apr !== 'number') continue
@@ -80,8 +84,8 @@ export function sumBorrowRewardApr(
     }
     if (
       c.action === 'BORROW_COLLATERAL'
-      && collateralAddress
-      && c.collateralAddress?.toLowerCase() === collateralAddress.toLowerCase()
+      && c.collateralAddress
+      && collateralSet.has(c.collateralAddress.toLowerCase())
     ) {
       total += c.apr * 100
     }

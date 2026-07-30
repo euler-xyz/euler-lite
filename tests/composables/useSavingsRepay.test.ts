@@ -1,10 +1,11 @@
-import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, PortfolioSavingsPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, type Account, type EVault, type IHasVaultAddress, type PortfolioBorrowPosition, type PortfolioSavingsPosition, type SwapQuote, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
 
-const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted(() => {
+const { USER, SAVINGS_USER_B, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
+  const SAVINGS_USER_B = '0x0000000000000000000000000000000000000006'
   const VAULT = '0x0000000000000000000000000000000000000002'
   const ASSET = '0x0000000000000000000000000000000000000003'
   const BORROW_VAULT = '0x0000000000000000000000000000000000000004'
@@ -42,6 +43,7 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
 
   return {
     USER,
+    SAVINGS_USER_B,
     VAULT,
     sameVault,
     borrowVault,
@@ -51,9 +53,23 @@ const { USER, VAULT, sameVault, borrowVault, planAccount, mocks } = vi.hoisted((
         buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: { account?: Account<IHasVaultAddress> }) => Promise<TransactionPlan>
         getPlanAccount?: () => Account<IHasVaultAddress> | string | undefined
       }>,
+      swapQuoteInstances: [] as Array<{
+        amountField: 'amountIn' | 'amountOut'
+        selectedQuote: { value: SwapQuote | null }
+        effectiveQuote: { value: SwapQuote | null }
+        requestQuotes: ReturnType<typeof vi.fn>
+        reset: ReturnType<typeof vi.fn>
+      }>,
       getSavingsPosition: vi.fn(),
       planRepayFromSource: vi.fn(),
       runSimulation: vi.fn(),
+      getCollateralApySnapshot: vi.fn(),
+      healthOptions: [] as Array<{
+        repayAddsCash?: { value: boolean }
+        collateralValueUsd?: { value: number | null }
+        collateralAddresses?: { value: string[] }
+        collateralSnapshotComplete?: { value: boolean }
+      }>,
     },
   }
 })
@@ -84,6 +100,7 @@ vi.mock('~/components/ui/composables/useToast', () => ({
 
 vi.mock('~/utils/sdk-prices', () => ({
   getAssetUsdValue: vi.fn(async () => null),
+  getAssetUsdValueForEstimate: vi.fn(async () => null),
 }))
 
 vi.mock('~/composables/repay/useRepaySwapDetails', () => ({
@@ -99,16 +116,24 @@ vi.mock('~/composables/repay/useRepaySwapDetails', () => ({
 }))
 
 vi.mock('~/composables/repay/useRepayHealthMetrics', () => ({
-  useRepayHealthMetrics: () => ({
-    roeBefore: ref(null),
-    roeAfter: ref(null),
-    currentHealth: ref(null),
-    currentLtv: ref(null),
-    nextLtv: ref(null),
-    nextHealth: ref(null),
-    currentLiquidationPrice: ref(null),
-    nextLiquidationPrice: ref(null),
-  }),
+  useRepayHealthMetrics: (options: {
+    repayAddsCash?: { value: boolean }
+    collateralValueUsd?: { value: number | null }
+    collateralAddresses?: { value: string[] }
+    collateralSnapshotComplete?: { value: boolean }
+  }) => {
+    mocks.healthOptions.push(options)
+    return {
+      roeBefore: ref(null),
+      roeAfter: ref(null),
+      currentHealth: ref(null),
+      currentLtv: ref(null),
+      nextLtv: ref(null),
+      nextHealth: ref(null),
+      currentLiquidationPrice: ref(null),
+      nextLiquidationPrice: ref(null),
+    }
+  },
 }))
 
 vi.mock('~/composables/useEulerLabels', () => ({
@@ -117,23 +142,32 @@ vi.mock('~/composables/useEulerLabels', () => ({
 
 vi.mock('~/composables/useRepaySavingsOptions', () => ({
   useRepaySavingsOptions: () => {
-    const savingsVaults = ref([sameVault])
-    const savingsPosition = {
+    const savingsPositionA = {
       position: {},
       vault: sameVault,
       subAccount: USER,
       assets: 1_000n,
       shares: 1_000n,
     } as PortfolioSavingsPosition<VaultEntity>
+    const savingsPositionB = {
+      ...savingsPositionA,
+      subAccount: SAVINGS_USER_B,
+    } as PortfolioSavingsPosition<VaultEntity>
+    const savingsPositions = [savingsPositionA, savingsPositionB]
+    const savingsVaults = ref([sameVault, sameVault])
 
-    mocks.getSavingsPosition.mockImplementation((vaultAddress: string) =>
-      vaultAddress.toLowerCase() === VAULT.toLowerCase() ? savingsPosition : undefined,
-    )
+    mocks.getSavingsPosition.mockImplementation((vaultAddress: string, subAccount?: string) => {
+      if (vaultAddress.toLowerCase() !== VAULT.toLowerCase()) return undefined
+      return savingsPositions.find(position => !subAccount || position.subAccount === subAccount)
+    })
 
     return {
-      savingsPositions: ref([savingsPosition]),
+      savingsPositions: ref(savingsPositions),
       savingsVaults,
-      savingsOptions: ref([]),
+      savingsOptions: ref([
+        { subAccount: USER },
+        { subAccount: SAVINGS_USER_B },
+      ]),
       getSavingsPosition: mocks.getSavingsPosition,
     }
   },
@@ -141,22 +175,34 @@ vi.mock('~/composables/useRepaySavingsOptions', () => ({
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
   useSwapQuotesParallel: (options: {
+    amountField: 'amountIn' | 'amountOut'
     buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: { account?: Account<IHasVaultAddress> }) => Promise<TransactionPlan>
   }) => {
     mocks.swapQuoteOptions.push(options)
+    const selectedQuote = ref<SwapQuote | null>(null)
+    const effectiveQuote = ref<SwapQuote | null>(null)
+    const requestQuotes = vi.fn()
+    const reset = vi.fn()
+    mocks.swapQuoteInstances.push({
+      amountField: options.amountField,
+      selectedQuote,
+      effectiveQuote,
+      requestQuotes,
+      reset,
+    })
     return {
       sortedQuoteCards: ref([]),
       selectedProvider: ref(null),
-      selectedQuote: ref(null),
-      effectiveQuote: ref(null),
+      selectedQuote,
+      effectiveQuote,
       effectiveQuoteFetchedAt: ref(null),
       providersCount: ref(0),
       isLoading: ref(false),
       quoteError: ref(null),
       statusLabel: ref(null),
       getQuoteDiffPct: vi.fn(() => null),
-      reset: vi.fn(),
-      requestQuotes: vi.fn(),
+      reset,
+      requestQuotes,
       selectProvider: vi.fn(),
     }
   },
@@ -186,7 +232,15 @@ describe('useSavingsRepay', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.swapQuoteOptions.length = 0
+    mocks.swapQuoteInstances.length = 0
+    mocks.healthOptions.length = 0
     mocks.planRepayFromSource.mockResolvedValue({ type: 'repay-plan' } as unknown as TransactionPlan)
+    mocks.getCollateralApySnapshot.mockResolvedValue({
+      supplyUsd: 0,
+      weightedSupplyApy: 0,
+      collateralAddresses: [],
+      isComplete: true,
+    })
     vi.stubGlobal('ref', ref)
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
@@ -207,6 +261,9 @@ describe('useSavingsRepay', () => {
     vi.stubGlobal('useEulerAddresses', () => ({ eulerLensAddresses: ref({}) }))
     vi.stubGlobal('useVaultRegistry', () => ({ getVault: vi.fn() }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
+    vi.stubGlobal('usePositionCollateralApy', () => ({
+      getCollateralApySnapshot: mocks.getCollateralApySnapshot,
+    }))
     vi.stubGlobal('useSwapApi', () => ({
       getSwapProviders: vi.fn(async () => []),
       getSwapQuotes: vi.fn(async () => []),
@@ -251,6 +308,7 @@ describe('useSavingsRepay', () => {
       getCurrentDebt: () => position.borrowed,
       collateralSupplyApy: computed(() => 0),
       borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
     })
 
     repay.initVault()
@@ -263,6 +321,7 @@ describe('useSavingsRepay', () => {
     expect(repay.amount.value).toBe('1000')
     expect(repay.isSubmitDisabled.value).toBe(false)
     expect(repay.disabledReason.value).toBeUndefined()
+    expect(mocks.healthOptions[0]?.repayAddsCash?.value).toBe(false)
   })
 
   it('builds quote-time gas estimation plans from the candidate savings repay quote', async () => {
@@ -281,6 +340,7 @@ describe('useSavingsRepay', () => {
       getCurrentDebt: () => position.borrowed,
       collateralSupplyApy: computed(() => 0),
       borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
     })
 
     repay.initVault()
@@ -298,5 +358,202 @@ describe('useSavingsRepay', () => {
     }))
     expect(mocks.swapQuoteOptions[0]?.getPlanAccount?.()).toBe(planAccount)
     expect(plan).toEqual({ type: 'repay-plan' })
+  })
+
+  it('invalidates quotes when switching between equal-balance savings sub-accounts', async () => {
+    const repay = useSavingsRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => position.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    repay.initVault()
+    repay.amount.value = '100'
+    repay.onAmountInput()
+    await nextTick()
+
+    const exactIn = mocks.swapQuoteInstances.find(instance => instance.amountField === 'amountOut')!
+    const targetDebt = mocks.swapQuoteInstances.find(instance => instance.amountField === 'amountIn')!
+    exactIn.reset.mockClear()
+    targetDebt.reset.mockClear()
+    exactIn.requestQuotes.mockClear()
+
+    repay.onSourceVaultChange(1)
+    await nextTick()
+
+    expect(repay.selectedSavingSubAccount.value).toBe(SAVINGS_USER_B)
+    expect(repay.sourceAssets.value).toBe(1_000n)
+    expect(exactIn.reset).toHaveBeenCalledTimes(1)
+    expect(targetDebt.reset).toHaveBeenCalledTimes(1)
+    expect(exactIn.requestQuotes).toHaveBeenCalledWith(expect.objectContaining({
+      accountIn: SAVINGS_USER_B,
+      accountOut: USER,
+    }))
+  })
+
+  it('keeps collateral summary cleared when an in-flight snapshot resolves after invalidation', async () => {
+    let resolveSnapshot: ((value: {
+      supplyUsd: number
+      weightedSupplyApy: number
+      collateralAddresses: string[]
+      isComplete: boolean
+    }) => void) | undefined
+    mocks.getCollateralApySnapshot.mockReturnValueOnce(new Promise((resolve) => {
+      resolveSnapshot = resolve
+    }))
+    const positionRef = shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position)
+
+    useSavingsRepay({
+      position: positionRef,
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => position.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    expect(mocks.getCollateralApySnapshot).toHaveBeenCalledTimes(1)
+    positionRef.value = undefined
+    await nextTick()
+
+    resolveSnapshot?.({
+      supplyUsd: 123,
+      weightedSupplyApy: 4.5,
+      collateralAddresses: [VAULT],
+      isComplete: true,
+    })
+    await Promise.resolve()
+    await nextTick()
+
+    const healthOptions = mocks.healthOptions[0]
+    expect(healthOptions?.collateralValueUsd?.value).toBeNull()
+    expect(healthOptions?.collateralAddresses?.value).toEqual([])
+    expect(healthOptions?.collateralSnapshotComplete?.value).toBe(false)
+  })
+
+  it('projects a savings-vault cash withdrawal when that vault is also position collateral', async () => {
+    const sameAssetBorrowVault = {
+      ...borrowVault,
+      asset: sameVault.asset,
+    } as EVault
+    const overlapPosition = {
+      ...position,
+      borrow: sameAssetBorrowVault,
+      collateralVaults: [VAULT],
+    } as unknown as PortfolioBorrowPosition<VaultEntity>
+    const repay = useSavingsRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(overlapPosition),
+      borrowVault: computed(() => sameAssetBorrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => overlapPosition.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    repay.initVault()
+    mocks.getCollateralApySnapshot.mockClear()
+    repay.amount.value = '100'
+    repay.onAmountInput()
+
+    await vi.waitFor(() => expect(mocks.getCollateralApySnapshot).toHaveBeenCalledWith(
+      overlapPosition,
+      sameAssetBorrowVault,
+      {
+        deltas: [{
+          vaultAddress: VAULT,
+          assetsDelta: 0n,
+          cashDelta: -100n,
+          projectRates: true,
+        }],
+        liabilityRateDelta: {
+          cashDelta: 100n,
+          borrowsDelta: -100n,
+        },
+      },
+    ))
+  })
+
+  it('projects the TARGET_DEBT maximum input withdrawn from overlapping savings collateral', async () => {
+    const overlapPosition = {
+      ...position,
+      borrow: borrowVault,
+      collateralVaults: [VAULT],
+    } as unknown as PortfolioBorrowPosition<VaultEntity>
+    const repay = useSavingsRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(overlapPosition),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => overlapPosition.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    repay.initVault()
+    mocks.getCollateralApySnapshot.mockClear()
+    repay.direction.value = SwapperMode.TARGET_DEBT
+    const targetDebt = mocks.swapQuoteInstances.find(instance => instance.amountField === 'amountIn')!
+    const quote = {
+      amountIn: '100',
+      amountInMax: '110',
+      amountOut: '200',
+    } as SwapQuote
+    targetDebt.selectedQuote.value = quote
+    targetDebt.effectiveQuote.value = quote
+
+    await vi.waitFor(() => expect(mocks.getCollateralApySnapshot).toHaveBeenCalledWith(
+      overlapPosition,
+      borrowVault,
+      {
+        deltas: [{
+          vaultAddress: VAULT,
+          assetsDelta: 0n,
+          cashDelta: -110n,
+          projectRates: true,
+        }],
+        liabilityRateDelta: {
+          cashDelta: 200n,
+          borrowsDelta: -200n,
+        },
+      },
+    ))
   })
 })

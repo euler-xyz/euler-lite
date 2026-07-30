@@ -1,12 +1,13 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
 import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { getProjectedRates, getNetAPY } from '~/utils/vault/apy'
+import { areProjectedRatesComplete, getProjectedRatesBatch, getPositionMultiplier, type ProjectedRates, type ProjectedRatesRequest } from '~/utils/vault/apy'
+import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getCollateralUsdPrice, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getCollateralUsdPrice, getAssetUsdValueForEstimate, getAssetUsdValueOrZero, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { SwapTokenSelector, OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
@@ -24,6 +25,13 @@ import { getPlanHookDisabledWarning, getUtilisationWarning, getBorrowCapWarning,
 import { getVaultTags, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldCampaignInput,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 // Snapshot of all borrow inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may have been reset), so the plan
@@ -51,6 +59,7 @@ export interface UseBorrowFormOptions {
   savingPositions: ComputedRef<PortfolioSavingsPosition<VaultEntity>[]>
   balance: Ref<bigint>
 
+  pendingSubAccount: Ref<string | null>
   resolvePendingSubAccount: () => Promise<string>
 
   collateralSupplyApy: ComputedRef<number>
@@ -75,11 +84,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     formTab: _formTab,
     savingPositions,
     balance,
+    pendingSubAccount,
     resolvePendingSubAccount,
-    collateralSupplyApy,
-    borrowApy,
-    collateralSupplyRewardApy,
-    borrowRewardApy,
     collateralSupplyApyWithRewards,
     isSecuritizeCollateral,
     isGeoBlocked,
@@ -95,6 +101,17 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
   const { getBalance } = useWallets()
+  const {
+    version: rewardsVersion,
+    getSupplyRewardApy,
+    getBorrowRewardApyForCollaterals,
+    getEligibleLoopingRewardApyForCollaterals,
+    getSupplyRewardCampaigns,
+    getBorrowRewardCampaignsForCollaterals,
+    getEligibleLoopingRewardCampaignsForCollaterals,
+  } = useRewardsApy()
+  const { settings } = useUserSettings()
+  const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { finalizeTxAndRedirect } = useTxFinalization()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
   // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
@@ -116,8 +133,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Swap & borrow composable instances ---
   const { slippage: borrowSwapSlippage } = useSlippage({
-    fromSymbol: () => collateralVault.value?.asset.symbol,
-    toSymbol: () => borrowVault.value?.asset.symbol,
+    enabled: () => _formTab.value === 'borrow',
+    fromSymbol: () => borrowNeedsSwap.value
+      ? borrowSelectedAsset.value?.symbol
+      : collateralVault.value?.asset.symbol,
+    toSymbol: () => borrowNeedsSwap.value
+      ? collateralVault.value?.asset.symbol
+      : borrowVault.value?.asset.symbol,
   })
   const {
     sortedQuoteCards: borrowSwapQuoteCards,
@@ -201,7 +223,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // Estimates
   const health = ref<number | undefined>()
-  const netAPY = ref<number | undefined>()
+  const projectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
+  const netAPY = computed<number | undefined>(() => projectedYieldDetails.value?.after.total)
   const liquidationPrice = ref<number | undefined>()
 
   // Swap state
@@ -527,6 +550,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const isUnknownBorrowSwapToken = ref(false)
 
   const onSelectBorrowSwapAsset = (newAsset: VaultAsset, meta?: { isUnknownToken?: boolean }) => {
+    // Selecting a Pay-with token switches execution to the wallet-funded path.
+    // Do not retain a previously selected savings-share source behind that UI.
+    isSavingCollateral.value = false
+    selectedSavingSubAccount.value = undefined
     borrowSelectedAsset.value = newAsset
     isUnknownBorrowSwapToken.value = meta?.isUnknownToken ?? false
     collateralAmount.value = ''
@@ -582,8 +609,19 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (typeof selection === 'number') {
       const option = collateralOptions.value[selection]
       const nextIsSaving = option?.type === 'saving'
-      isSavingCollateral.value = nextIsSaving
-      selectedSavingSubAccount.value = nextIsSaving ? option?.subAccount : undefined
+      if (nextIsSaving) {
+        // Set the concrete source first. The source watcher ignores this
+        // preparatory change while wallet mode is still active, then reruns
+        // once when savings mode becomes active.
+        selectedSavingSubAccount.value = option?.subAccount
+        isSavingCollateral.value = true
+      }
+      else {
+        // Leave savings mode before clearing its disambiguator so this also
+        // produces a single estimate rerun.
+        isSavingCollateral.value = false
+        selectedSavingSubAccount.value = undefined
+      }
       return
     }
     isSavingCollateral.value = selection
@@ -614,61 +652,229 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // Async estimates (projected rates, USD prices, net APY) are debounced
   const asyncEstimatesGuard = createRaceGuard()
-  const updateAsyncEstimates = useDebounceFn(async () => {
-    if (!pair.value || !collateralVault.value || !borrowVault.value) return
-    const gen = asyncEstimatesGuard.next()
+  const projectionCollateralVault = computed(() => {
+    const fallback = collateralVault.value
+    return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+  })
+  const projectionBorrowVault = computed(() => {
+    const fallback = borrowVault.value
+    return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+  })
+  const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
+    if (asyncEstimatesGuard.isStale(gen)) return
+    const collateral = projectionCollateralVault.value
+    const borrow = projectionBorrowVault.value
+    if (!pair.value || !collateral || !borrow) {
+      projectedYieldDetails.value = null
+      isEstimatesLoading.value = false
+      return
+    }
     try {
+      const account = planAccount.value
+      const targetSubAccountAddress = pendingSubAccount.value
+        ?? (account && effectiveAddress.value ? await resolvePendingSubAccount() : undefined)
+      const targetSubAccount = account && effectiveAddress.value
+        && targetSubAccountAddress
+        ? account.getSubAccount(getAddress(targetSubAccountAddress))
+        : undefined
+      if (asyncEstimatesGuard.isStale(gen)) return
+
       // When swapping, use the quote output amount (collateral-vault-asset denominated)
       const collateralAmountNano = borrowNeedsSwap.value
         ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
-        : valueToNano(collateralAmount.value || '0', collateralVault.value.shares.decimals)
-      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
+        : valueToNano(collateralAmount.value || '0', collateral.asset.decimals)
+      const collateralCashDelta = isSavingCollateral.value && !borrowNeedsSwap.value ? 0n : collateralAmountNano
+      const savingsSourceAddress = normalizeAddress(savingCollateral.value?.subAccount)
+      const normalizedTargetSubAccountAddress = normalizeAddress(targetSubAccountAddress)
+      const isSavingsSelfTransfer = isSavingCollateral.value
+        && !borrowNeedsSwap.value
+        && !!savingsSourceAddress
+        && savingsSourceAddress === normalizedTargetSubAccountAddress
+      // The SDK omits a savings-share transfer when source and destination are
+      // the same sub-account, so those assets are already present in the
+      // layered position and must not be added a second time.
+      const selectedCollateralAssetsDelta = isSavingsSelfTransfer ? 0n : collateralAmountNano
+      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrow.asset.decimals)
+      const selectedCollateralAddress = normalizeAddress(collateral.address)
+      const borrowVaultAddress = normalizeAddress(borrow.address)
+      if (!selectedCollateralAddress || !borrowVaultAddress) {
+        projectedYieldDetails.value = null
+        return
+      }
 
-      const [collateralProjected, borrowProjected, collateralUsdValue, borrowUsdValue] = await Promise.all([
-        getProjectedRates(
-          collateralVault.value.address,
-          collateralVault.value.totalCash,
-          collateralVault.value.totalBorrowed,
-          collateralAmountNano,
-          0n,
-        ),
-        getProjectedRates(
-          borrowVault.value.address,
-          borrowVault.value.totalCash,
-          borrowVault.value.totalBorrowed,
-          -borrowAmountNano,
-          borrowAmountNano,
-        ),
-        borrowNeedsSwap.value && borrowSwapAssetUsdPrice.value
-          ? Promise.resolve((+collateralAmount.value || 0) * borrowSwapAssetUsdPrice.value)
-          : getAssetUsdValueOrZero(collateralAmountNano, collateralVault.value!, 'off-chain'),
-        getAssetUsdValueOrZero(borrowAmountNano, borrowVault.value!, 'off-chain'),
+      const positions = targetSubAccount?.positions ?? []
+      const findPosition = (address: string) => positions.find(position =>
+        normalizeAddress(position.vaultAddress) === address)
+      const collateralAddresses = new Set<string>([selectedCollateralAddress])
+      targetSubAccount?.enabledCollaterals.forEach((address) => {
+        const normalized = normalizeAddress(address)
+        if (normalized) collateralAddresses.add(normalized)
+      })
+
+      const collateralLegs: Array<{ address: string, vault: VaultEntity, assets: bigint }> = []
+      for (const address of collateralAddresses) {
+        const position = findPosition(address)
+        const existingAssets = position?.assets ?? 0n
+        const nextAssets = existingAssets + (address === selectedCollateralAddress ? selectedCollateralAssetsDelta : 0n)
+        if (nextAssets <= 0n && address !== selectedCollateralAddress) continue
+
+        const positionVault = position?.vault && 'asset' in position.vault
+          ? position.vault as VaultEntity
+          : undefined
+        const fallbackVault = address === selectedCollateralAddress ? collateral : positionVault
+        const vault = getLayeredVault(address, fallbackVault)
+        if (!vault || !('asset' in vault)) {
+          projectedYieldDetails.value = null
+          return
+        }
+        collateralLegs.push({ address, vault: vault as VaultEntity, assets: nextAssets > 0n ? nextAssets : 0n })
+      }
+
+      const existingBorrowed = findPosition(borrowVaultAddress)?.borrowed ?? 0n
+      const nextBorrowed = existingBorrowed + borrowAmountNano
+      const projectionRequests: ProjectedRatesRequest[] = [
+        {
+          vaultAddress: collateral.address,
+          currentCash: collateral.totalCash,
+          currentBorrows: collateral.totalBorrowed,
+          cashDelta: collateralCashDelta,
+          borrowsDelta: 0n,
+        },
+        {
+          vaultAddress: borrow.address,
+          currentCash: borrow.totalCash,
+          currentBorrows: borrow.totalBorrowed,
+          cashDelta: -borrowAmountNano,
+          borrowsDelta: borrowAmountNano,
+        },
+      ]
+
+      const [projectedRates, collateralUsdValues, borrowUsdValue] = await Promise.all([
+        getProjectedRatesBatch(projectionRequests),
+        Promise.all(collateralLegs.map(leg =>
+          getAssetUsdValueForEstimate(leg.assets, leg.vault, 'off-chain'))),
+        getAssetUsdValueForEstimate(nextBorrowed, borrow, 'off-chain'),
       ])
-
       if (asyncEstimatesGuard.isStale(gen)) return
+      if (
+        !areProjectedRatesComplete(projectedRates, projectionRequests.length)
+        || collateralUsdValues.some(value => value === undefined)
+        || borrowUsdValue === undefined
+      ) {
+        projectedYieldDetails.value = null
+        return
+      }
+      const projectedByAddress = new Map<string, ProjectedRates>()
+      projectionRequests.forEach((request, index) => {
+        const address = normalizeAddress(request.vaultAddress)
+        if (!projectedByAddress.has(address)) projectedByAddress.set(address, projectedRates[index]!)
+      })
+      const supplyEntries = collateralLegs.map((leg, index) => {
+        const supplyUsd = collateralUsdValues[index]!
+        const currentRaw = getVaultSupplyApy(leg.vault)
+        const projected = projectedByAddress.get(leg.address)
+        const projectedRaw = projected ? nanoToValue(projected.supplyAPY, 25) : currentRaw
+        const supplyApyWithIntrinsic = withProjectedVaultIntrinsicApy(
+          currentRaw,
+          projected ? projectedRaw : null,
+          leg.vault,
+          enableIntrinsicApy.value,
+        )
+        return {
+          ...leg,
+          supplyUsd,
+          currentRaw,
+          projectedRaw,
+          intrinsicSupplyApy: supplyApyWithIntrinsic - projectedRaw,
+          supplyRewardApy: getSupplyRewardApy(leg.address),
+        }
+      })
+      const collateralUsdValue = supplyEntries.reduce((sum, entry) => sum + entry.supplyUsd, 0)
+      const weightedSupply = (select: (entry: typeof supplyEntries[number]) => number) =>
+        collateralUsdValue > 0
+          ? supplyEntries.reduce((sum, entry) => sum + entry.supplyUsd * select(entry), 0) / collateralUsdValue
+          : 0
+      const projectedBaseSupplyApy = weightedSupply(entry => entry.projectedRaw)
+      const projectedIntrinsicSupplyApy = weightedSupply(entry => entry.intrinsicSupplyApy)
+      const projectedSupplyRewardApy = weightedSupply(entry => entry.supplyRewardApy)
+      const positiveCollateralAddresses = supplyEntries
+        .filter(entry => entry.assets > 0n)
+        .map(entry => entry.address)
 
-      // Apply projected rate deltas on top of current APYs (which include intrinsic APY)
-      const projectedSupplyApy = collateralProjected
-        ? collateralSupplyApy.value + (nanoToValue(collateralProjected.supplyAPY, 25) - getVaultSupplyApy(collateralVault.value))
-        : collateralSupplyApy.value
-
-      const projectedBorrowApy = borrowProjected
-        ? borrowApy.value + (nanoToValue(borrowProjected.borrowAPY, 25) - getVaultBorrowApy(borrowVault.value))
-        : borrowApy.value
-
-      netAPY.value = getNetAPY(
-        collateralUsdValue,
-        projectedSupplyApy,
-        borrowUsdValue,
-        projectedBorrowApy,
-        collateralSupplyRewardApy.value || null,
-        borrowRewardApy.value || null,
+      const currentBorrowRaw = getVaultBorrowApy(borrow)
+      const borrowProjected = projectedRates[1]!
+      const projectedBorrowRaw = borrowProjected ? nanoToValue(borrowProjected.borrowAPY, 25) : currentBorrowRaw
+      const projectedBorrowApy = withProjectedVaultIntrinsicApy(
+        currentBorrowRaw,
+        borrowProjected ? projectedBorrowRaw : null,
+        borrow,
+        enableIntrinsicApy.value,
       )
+      const multiplier = getPositionMultiplier(collateralUsdValue, borrowUsdValue)
+      const loopingRewardApy = getEligibleLoopingRewardApyForCollaterals(
+        borrow.address,
+        positiveCollateralAddresses,
+        multiplier,
+      )
+      const after = getProjectedYieldState('net-apy', {
+        supplyUsd: collateralUsdValue,
+        baseSupplyApy: projectedBaseSupplyApy,
+        intrinsicSupplyApy: projectedIntrinsicSupplyApy,
+        supplyRewardApy: projectedSupplyRewardApy,
+        borrowUsd: borrowUsdValue,
+        baseBorrowApy: projectedBorrowRaw,
+        intrinsicBorrowApy: projectedBorrowApy - projectedBorrowRaw,
+        borrowRewardApy: getBorrowRewardApyForCollaterals(borrow.address, positiveCollateralAddresses),
+        loopingRewardApy,
+      })
+      if (!after) {
+        projectedYieldDetails.value = null
+        return
+      }
+
+      const afterCampaigns: ProjectedYieldCampaignInput[] = [
+        ...supplyEntries
+          .filter(entry => entry.supplyUsd > 0)
+          .flatMap(entry => getSupplyRewardCampaigns(entry.address)
+            .map(campaign => ({ campaign, vaultAddress: entry.vault.address }))),
+        ...(borrowUsdValue > 0
+          ? getBorrowRewardCampaignsForCollaterals(borrow.address, positiveCollateralAddresses)
+              .map(campaign => ({ campaign, vaultAddress: borrow.address }))
+          : []),
+        ...getEligibleLoopingRewardCampaignsForCollaterals(
+          borrow.address,
+          positiveCollateralAddresses,
+          multiplier,
+        ).map(campaign => ({ campaign, vaultAddress: borrow.address })),
+      ]
+      projectedYieldDetails.value = {
+        metric: 'net-apy',
+        after,
+        rateLines: [
+          ...supplyEntries.map(entry => ({
+            id: `supply:${entry.address}`,
+            label: 'Collateral lending APY',
+            symbol: entry.vault.asset.symbol,
+            vaultAddress: entry.vault.address,
+            before: entry.currentRaw,
+            after: entry.projectedRaw,
+          })),
+          {
+            id: `borrow:${borrow.address.toLowerCase()}`,
+            label: 'Liability borrow APY',
+            symbol: borrow.asset.symbol,
+            vaultAddress: borrow.address,
+            before: currentBorrowRaw,
+            after: projectedBorrowRaw,
+          },
+        ],
+        rewards: mergeProjectedRewardCampaigns([], afterCampaigns),
+      }
     }
     catch (e) {
       if (asyncEstimatesGuard.isStale(gen)) return
       logWarn('borrow/asyncEstimates', e)
-      netAPY.value = undefined
+      projectedYieldDetails.value = null
     }
     finally {
       if (!asyncEstimatesGuard.isStale(gen)) {
@@ -676,6 +882,22 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
     }
   }, 500)
+
+  const queueAsyncEstimates = () => {
+    const gen = asyncEstimatesGuard.next()
+    projectedYieldDetails.value = null
+    const hasInput = +collateralAmount.value > 0 || +borrowAmount.value > 0
+    if (!pair.value || !collateralVault.value || !borrowVault.value || !hasInput) {
+      isEstimatesLoading.value = false
+      return
+    }
+    if (borrowNeedsSwap.value && !borrowSwapEffectiveQuote.value) {
+      isEstimatesLoading.value = false
+      return
+    }
+    isEstimatesLoading.value = true
+    updateAsyncEstimates(gen)
+  }
 
   // --- Actions: submit & send ---
   const buildSwapBorrowPlanFromQuote = async (quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> => {
@@ -1051,16 +1273,59 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   )
 
   // --- Watchers ---
+  watch(ltv, () => {
+    updateSyncEstimates()
+  })
+
   watch([collateralAmount, borrowAmount], () => {
     clearBorrowSimulationError()
     if (!pair.value) {
+      asyncEstimatesGuard.next()
+      projectedYieldDetails.value = null
+      isEstimatesLoading.value = false
       return
     }
     updateSyncEstimates()
-    if (!isEstimatesLoading.value) {
-      isEstimatesLoading.value = true
+    queueAsyncEstimates()
+  })
+
+  watch([
+    pair,
+    collateralVault,
+    borrowVault,
+    planAccount,
+    effectiveAddress,
+    pendingSubAccount,
+    () => projectionCollateralVault.value?.totalCash,
+    () => projectionCollateralVault.value?.totalBorrowed,
+    () => projectionBorrowVault.value?.totalCash,
+    () => projectionBorrowVault.value?.totalBorrowed,
+  ], () => {
+    asyncEstimatesGuard.next()
+    projectedYieldDetails.value = null
+    const hasInput = +collateralAmount.value > 0 || +borrowAmount.value > 0
+    if (!pair.value || !collateralVault.value || !borrowVault.value || !hasInput) {
+      isEstimatesLoading.value = false
+      return
     }
-    updateAsyncEstimates()
+    updateSyncEstimates()
+    queueAsyncEstimates()
+  }, { flush: 'sync' })
+
+  watch([isSavingCollateral, selectedSavingSubAccount], ([isSaving, selected], [wasSaving, previousSelected]) => {
+    const sourceChanged = isSaving !== wasSaving
+      || (isSaving && selected !== previousSelected)
+    if (!sourceChanged) return
+    // Source changes do not change either amount, but they do change whether
+    // collateral enters the vault as new cash and whether it is a self-transfer.
+    // Invalidate synchronously so an older request cannot publish between the
+    // source change and this rerun.
+    clearBorrowSimulationError()
+    queueAsyncEstimates()
+  }, { flush: 'sync' })
+
+  watch([rewardsVersion, enableIntrinsicApy], () => {
+    queueAsyncEstimates()
   })
 
   watch(borrowSelectedAsset, async () => {
@@ -1109,14 +1374,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
     // Re-run projected rate estimates when quote resolves — collateralAmountNano depends on amountOut
     if (borrowNeedsSwap.value) {
-      if (borrowSwapEffectiveQuote.value) {
-        if (!isEstimatesLoading.value) isEstimatesLoading.value = true
-        updateAsyncEstimates()
-      }
-      else {
-        isEstimatesLoading.value = true
-        updateAsyncEstimates()
-      }
+      queueAsyncEstimates()
     }
   })
 
@@ -1146,6 +1404,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     // Estimates
     health,
     netAPY,
+    projectedYieldDetails,
     liquidationPrice,
 
     // Computed: math
@@ -1218,7 +1477,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     buildBorrowPlan, // Batch
     updateEstimates: () => {
       updateSyncEstimates()
-      updateAsyncEstimates()
+      queueAsyncEstimates()
     },
     updateBorrowSwapAssetBalance,
     resetOnTabSwitch,

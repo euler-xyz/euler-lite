@@ -277,6 +277,12 @@ const supplyCapPercentageDisplay = computed(() => {
       </VaultOverviewLabelValue>
     </VaultOverviewAccordionSection>
 
+    <VaultOverviewBlockActivity
+      :vault="vault"
+      vault-type="securitize"
+      :default-open="false"
+    />
+
     <!-- Risk Parameters -->
     <VaultOverviewAccordionSection
       title="Risk parameters"

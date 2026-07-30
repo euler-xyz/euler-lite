@@ -86,6 +86,9 @@ class StubDeploymentService implements IDeploymentService {
   addDeployment() { /* noop */ }
 }
 
+// Reports a sufficient balance and a maxUint256 allowance for every spender, so
+// resolveRequiredApprovals takes the "already approved" path and plans contain
+// no ERC20 approve (the canary asserts the EVC batch calldata, not approvals).
 class HighAllowanceWalletAdapter implements IWalletAdapter {
   async fetchWallet(chainId: number, account: Address, assetsWithSpenders: { asset: Address, spenders?: Address[] }[]) {
     const assets = assetsWithSpenders.map(({ asset, spenders }) => ({
@@ -111,9 +114,7 @@ class HighAllowanceWalletAdapter implements IWalletAdapter {
 }
 
 export function buildSdkExecutionService() {
-  const deploymentService = new StubDeploymentService()
-  const walletService = new WalletService(new HighAllowanceWalletAdapter())
-  return new ExecutionService(deploymentService, walletService)
+  return new ExecutionService(new StubDeploymentService(), new WalletService(new HighAllowanceWalletAdapter()))
 }
 
 export interface SeedPosition {
@@ -221,59 +222,4 @@ export function buildSdkAccount(opts: {
     owner,
     subAccounts: subAccounts as never,
   })
-}
-
-// ---------------------------------------------------------------------------
-// Legacy side
-// ---------------------------------------------------------------------------
-
-/**
- * Builds the legacy `OperationsContext` with deterministic RPC stubs:
- *  - ERC20.allowance reads return maxUint256 (so prepareTokenApproval emits
- *    no approval steps).
- *  - All other reads throw — any plan path that needs more RPC is out of
- *    scope and indicates a missing scenario constraint.
- */
-export function buildLegacyContext(overrides?: {
-  owner?: Address
-  permit2Enabled?: boolean
-  evcEnabledCollaterals?: readonly Address[]
-  evcEnabledControllers?: readonly Address[]
-}) {
-  const owner = overrides?.owner ?? ADDR.user
-  const enabledCollaterals = overrides?.evcEnabledCollaterals ?? []
-  const enabledControllers = overrides?.evcEnabledControllers ?? []
-  const rpcProvider = {
-    readContract: async (args: { address: Address, abi: readonly unknown[], functionName: string, args: readonly unknown[] }) => {
-      if (args.functionName === 'allowance') return HIGH_ALLOWANCE
-      if (args.functionName === 'previewWithdraw') {
-        // shares == assets in golden scenarios (1:1 share/asset ratio)
-        return (args.args[0] as bigint)
-      }
-      if (args.functionName === 'getEVCAccountInfo') {
-        return { enabledControllers, enabledCollaterals }
-      }
-      throw new Error(`Unmocked readContract: ${args.functionName} on ${args.address}`)
-    },
-  }
-
-  const ctx = {
-    address: { value: owner },
-    chainId: { value: CHAIN_ID },
-    writeContractAsync: async () => { throw new Error('not used in golden tests') },
-    signTypedDataAsync: async () => { throw new Error('not used in golden tests') },
-    config: {} as never,
-    eulerCoreAddresses: { value: { evc: ADDR.evc, permit2: ADDR.permit2 } },
-    eulerPeripheryAddresses: { value: { swapVerifier: ADDR.swapVerifier, swapper: ADDR.swapper } },
-    eulerLensAddresses: { value: { accountLens: ADDR.accountLens } },
-    rpcUrl: 'http://localhost:0/rpc',
-    PYTH_HERMES_URL: '',
-    SUBGRAPH_URL: '',
-    registryGet: () => undefined,
-    registryGetVault: () => undefined,
-    permit2Enabled: { value: overrides?.permit2Enabled ?? false },
-    rpcProvider,
-  }
-
-  return ctx
 }

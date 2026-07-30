@@ -10,6 +10,7 @@ const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorag
 // 'strict-dynamic' then trusts the beacon script it inserts.
 const helpScoutBeaconScript = '!function(e,t,n){function a(){var e=t.getElementsByTagName("script")[0],n=t.createElement("script");n.type="text/javascript",n.async=!0,n.src="https://beacon-v2.helpscout.net",e.parentNode.insertBefore(n,e)}if(e.Beacon=n=function(t,n,a){e.Beacon.readyQueue.push({method:t,options:n,data:a})},n.readyQueue=[],"complete"===t.readyState)return a();e.attachEvent?e.attachEvent("onload",a):e.addEventListener("load",a,!1)}(window,document,window.Beacon||function(){});window.Beacon("init","29adfc12-af7e-46bc-8bfa-c3eb13225889")'
 const eulerSdkPackage = '@eulerxyz/euler-v2-sdk'
+const chartPackages = ['chart.js', 'chartjs-plugin-annotation']
 const isLinkedEulerSdk = (() => {
   try {
     return lstatSync(resolve(process.cwd(), 'node_modules', ...eulerSdkPackage.split('/'))).isSymbolicLink()
@@ -171,9 +172,11 @@ export default defineNuxtConfig({
       configEnableIncentra: '',
       configEnableFuul: '',
       configEnableTurtle: '',
-      // Batch announcement: set to 'true' to show a one-time modal.
-      configEnableBatchAnnouncement: '',
-      configBatchAnnouncementUrl: '',
+      // Announcement modal: populate any content field to show a one-time modal.
+      configAnnouncementTitle: '',
+      configAnnouncementBody: '',
+      configAnnouncementItems: '',
+      configAnnouncementUrl: '',
       // External token list URLs for swap token selector
       configUniswapTokenListUrl: '',
       configDefillamaTokenListUrl: '',
@@ -189,6 +192,7 @@ export default defineNuxtConfig({
       browserVaultSource: '',
       executionRecordSdkQueries: '',
       swapApiUrl: '',
+      eulerInterfacesBranch: '',
     },
   },
 
@@ -406,7 +410,7 @@ export default defineNuxtConfig({
     optimizeDeps: {
       // Linked SDK builds should be loaded directly so Vite does not keep
       // serving stale optimized bundles after rebuilding the sibling package.
-      include: isLinkedEulerSdk ? [] : [eulerSdkPackage],
+      include: isLinkedEulerSdk ? chartPackages : [eulerSdkPackage, ...chartPackages],
       exclude: isLinkedEulerSdk ? [eulerSdkPackage] : [],
       esbuildOptions: { target: 'esnext' },
     },

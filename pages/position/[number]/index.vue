@@ -16,8 +16,7 @@ import { VaultOverviewModal, OperationReviewModal, VaultApyModal, VaultNetApyMod
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getAddress, type Address, type Abi } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
@@ -43,6 +42,12 @@ const {
 } = useTransactionPlanSimulation()
 
 const positionIndex = usePositionIndex()
+const getCurrentRoutePositionIndex = () => {
+  const raw = _route.params.number
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw) && raw[0]) return raw[0]
+  return positionIndex
+}
 const buildRefinanceRoute = (collateralAddress?: string) => {
   const query: Record<string, string> = {}
   if (collateralAddress) query.collateral = collateralAddress
@@ -63,13 +68,11 @@ const isPreparing = ref(false)
 const collateralItems = ref<PositionCollateral[]>([])
 const isCollateralsLoading = ref(false)
 const disableCollateralErrorVault = ref<string | null>(null)
-const { activeLayerData, modifiedBalanceKeys, modifiedDebtKeys } = useTxBatch()
+const { activeLayerData, modifiedBalanceKeys, modifiedDebtKeys, isSimulating } = useTxBatch()
 let loadSequence = 0
 
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
-const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
-const { client: rpcClient } = useRpcClient()
 
 const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
@@ -113,7 +116,15 @@ const isBorrowSimulatedModified = computed(() =>
 const isCollateralSimulatedModified = (vault: EVault | SecuritizeCollateralVault) =>
   modifiedBalanceKeys.value.has(batchPositionKey(vault.address))
 const hasNoBorrow = computed(() => (position.value?.borrowed ?? 0n) === 0n)
-const hasQueryFailure = computed(() => !borrowVault.value || !collateralVault.value)
+const positionLTVPercent = computed(() => {
+  if (!position.value) return null
+  return getBorrowPositionUserLTVPercent(position.value) ?? null
+})
+const hasQueryFailure = computed(() =>
+  !borrowVault.value
+  || !collateralVault.value
+  || (!hasNoBorrow.value && positionLTVPercent.value === null),
+)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
 const effectiveLiquidationLTVPercent = computed(() => {
   if (!position.value) return null
@@ -123,10 +134,6 @@ const effectiveLiquidationLTVPercent = computed(() => {
 const effectiveLiquidationLTVDisplay = computed(() =>
   effectiveLiquidationLTVPercent.value === null ? '-' : `${effectiveLiquidationLTVPercent.value}%`,
 )
-const positionLTVPercent = computed(() => {
-  if (!position.value) return null
-  return getBorrowPositionUserLTVPercent(position.value) ?? null
-})
 const positionLTVDisplay = computed(() => {
   if (positionLTVPercent.value === null) return ''
   return Number.isFinite(positionLTVPercent.value) ? formatNumber(positionLTVPercent.value, 2) : '∞'
@@ -617,53 +624,24 @@ const loadCollaterals = async (sequence: number) => {
   const primaryAddress = primaryCollateralAddress.value
   const unique = Array.from(new Set(normalized))
   const orderedAddresses = [primaryAddress, ...unique.filter(address => address !== primaryAddress)]
-  const subAccount = position.value.subAccount as Address
   const primarySupplied = position.value.supplied
 
   isCollateralsLoading.value = true
 
   try {
-    if (!isEulerAddressesReady.value) {
-      await loadEulerConfig()
-    }
-
     await until(isVaultsReady).toBe(true)
-
-    const lensAddress = eulerLensAddresses.value?.accountLens
-    if (!lensAddress) {
-      throw new Error('Account lens address is not available')
-    }
-
-    const client = rpcClient.value!
 
     const items = await Promise.all(
       orderedAddresses.map(async (address) => {
         try {
-          const vault = await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
-          let assets: bigint | undefined
-
-          try {
-            const res = await client.readContract({
-              address: lensAddress as Address,
-              abi: eulerAccountLensABI as Abi,
-              functionName: 'getAccountInfo',
-              args: [subAccount, address],
-              authorizationList: undefined,
-            }) as Record<string, Record<string, unknown>>
-            assets = res.vaultAccountInfo.assets as bigint
-          }
-          catch {
-            if (address === primaryAddress) {
-              assets = primarySupplied
-            }
-            else {
-              const matchedCollateral = position.value!.collaterals?.find((collateral) => {
-                const collateralAddress = collateral.vaultAddress || collateral.vault?.address
-                return collateralAddress ? getAddress(collateralAddress) === address : false
-              })
-              assets = matchedCollateral?.assets
-            }
-          }
+          const matchedCollateral = position.value!.collaterals.find((collateral) => {
+            const collateralAddress = collateral.vaultAddress || collateral.vault?.address
+            return collateralAddress ? getAddress(collateralAddress) === address : false
+          })
+          const vault = matchedCollateral?.vault
+            ?? await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
+          const assets = matchedCollateral?.assets
+            ?? (address === primaryAddress ? primarySupplied : undefined)
 
           return vault && assets !== undefined ? { vault, assets } : null
         }
@@ -777,7 +755,7 @@ const load = async () => {
   try {
     await until(isPositionsLoaded).toBe(true)
     if (sequence !== loadSequence) return
-    position.value = getPositionBySubAccountIndex(+positionIndex)
+    position.value = getPositionBySubAccountIndex(+getCurrentRoutePositionIndex())
     if (position.value) {
       const initialCollateralVault = collateralVault.value
       collateralItems.value = initialCollateralVault
@@ -801,6 +779,37 @@ const load = async () => {
     console.warn(e)
   }
 }
+// A simulated-only position (e.g. a freshly-added multiply) stops existing the
+// moment simulation is disabled or the batch changes. Rather than stranding the
+// user on a "Position not found" screen, send them back to the portfolio once a
+// position they were viewing disappears — but only after the account and any
+// in-flight resimulation have settled, so we don't redirect on a transient gap.
+// A position that never existed (e.g. a bad URL) keeps the "not found" screen.
+//
+// Keyed to the live route param, not a plain boolean: the page component is
+// reused across /position/:number changes (no NuxtPage key), so a boolean would
+// persist and wrongly redirect an invalid index instead of showing "not found".
+const shownPositionIndex = ref<string | null>(null)
+watch(
+  [position, isPositionsLoading, isSimulating, isConnected, isSpyMode, () => _route.params.number],
+  () => {
+    const currentIndex = String(_route.params.number ?? '')
+    if (position.value) {
+      shownPositionIndex.value = currentIndex
+      return
+    }
+    if (
+      shownPositionIndex.value !== currentIndex
+      || !isPositionsLoaded.value
+      || isPositionsLoading.value
+      || isSimulating.value
+      || !(isConnected.value || isSpyMode.value)
+    ) return
+    shownPositionIndex.value = null
+    router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+  },
+  { immediate: true },
+)
 const borrowApyModalData = computed(() => {
   if (!borrowVault.value) return {}
   return {
@@ -850,7 +859,7 @@ const openRampDownModal = () => {
     props: rampCollateralEdge.value,
   })
 }
-watch([isConnected, isSpyMode, address, activeLayerData], () => {
+watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.number], () => {
   load()
 }, { immediate: true })
 </script>

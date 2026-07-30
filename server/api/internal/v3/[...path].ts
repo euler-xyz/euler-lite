@@ -9,7 +9,7 @@ import {
 } from 'h3'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
-import { safePathTemplate, urlHost } from '~/server/utils/observability'
+import { safeErrorLogFields, safePathTemplate, urlHost } from '~/server/utils/observability'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   buildV3ProxyBackoffKey,
@@ -21,10 +21,12 @@ import {
 import {
   buildV3ProxyRequestHeaders,
   buildV3ProxyTarget,
+  buildV3ProxyLogFields,
   getV3ProxyPath,
   readForwardedV3ResponseHeaders,
   validateV3ProxyUrl,
 } from '~/server/utils/v3-proxy'
+import { isAbortError } from '~/utils/errorHandling'
 
 const ALLOWED_METHODS = new Set(['GET', 'POST'])
 
@@ -44,6 +46,7 @@ export default defineEventHandler(async (event) => {
   const requestUrl = getRequestURL(event)
   const proxyPath = getV3ProxyPath(requestUrl)
   const pathTemplate = safePathTemplate(proxyPath)
+  const logFields = buildV3ProxyLogFields(requestUrl)
   const urlValidation = validateV3ProxyUrl(method, requestUrl)
   if (urlValidation.ok === false) {
     logger.warn(
@@ -76,17 +79,22 @@ export default defineEventHandler(async (event) => {
     })
   }
   catch (err) {
+    const timedOut = isAbortError(err)
     logger.warn(
       {
         ctx: 'v3-proxy',
         method,
         pathTemplate,
+        ...logFields,
         upstreamHost,
         bodyBytes: body?.length,
         durationMs: Date.now() - startedAt,
-        err,
+        reason: timedOut ? 'upstream-timeout' : 'upstream-error',
+        // Sanitized fields only — raw transport errors can embed request
+        // URLs (addresses, cursors) and abort text is client-controlled.
+        ...(!timedOut ? { err: safeErrorLogFields(err) } : {}),
       },
-      'upstream fetch failed',
+      timedOut ? 'upstream timed out' : 'upstream fetch failed',
     )
     recordV3ProxyBackoff(backoffKey)
     setResponseHeader(event, 'retry-after', Math.ceil(V3_PROXY_FAILURE_BACKOFF_MS / 1_000))
@@ -112,6 +120,7 @@ export default defineEventHandler(async (event) => {
         ctx: 'v3-proxy',
         method,
         pathTemplate,
+        ...logFields,
         upstreamHost,
         bodyBytes: body?.length,
         status: upstream.status,

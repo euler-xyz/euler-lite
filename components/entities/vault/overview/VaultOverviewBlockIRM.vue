@@ -9,10 +9,9 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import { hasCollateralExposure } from '~/utils/vault/collateral-exposure'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { eulerUtilsLensABI, eulerVaultLensABI } from '~/entities/euler/abis'
-import annotationPlugin from 'chartjs-plugin-annotation'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler, type ChartData, type ChartOptions } from 'chart.js'
-import { zeroAddress, formatUnits, type Address, type Abi } from 'viem'
+import { zeroAddress, formatUnits, type Address } from 'viem'
 import { INTEREST_RATE_MODEL_TYPE, SECONDS_IN_YEAR } from '~/entities/constants'
 import { Line } from 'vue-chartjs'
 import { logWarn } from '~/utils/errorHandling'
@@ -29,7 +28,6 @@ ChartJS.register(
   Tooltip,
   Legend,
   Filler,
-  annotationPlugin,
 )
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
@@ -254,9 +252,11 @@ const fetchAdaptiveBorrowAPY = async (wadPerSec: bigint): Promise<number | null>
   }
   try {
     const client = rpcClient.value!
+    const sdk = await getEulerSdkForChain(vault.chainId)
+    const utilsLensAbi = await sdk.abiService.fetchABI(vault.chainId, 'UtilsLens')
     const result = await client.readContract({
       address: utilsLens as Address,
-      abi: eulerUtilsLensABI as Abi,
+      abi: utilsLensAbi,
       functionName: 'computeAPYs',
       authorizationList: undefined,
       // cash/borrows don't influence borrowAPY; interestFee only affects supplyAPY.
@@ -279,13 +279,15 @@ const fetchIRMData = async (kinkFraction: number | null) => {
 
   try {
     const client = rpcClient.value!
+    const sdk = await getEulerSdkForChain(vault.chainId)
+    const vaultLensAbi = await sdk.abiService.fetchABI(vault.chainId, 'VaultLens')
 
     const { cashData, borrowsData, kinkIndex, kinkInjected } = generateChartDataPoints(kinkFraction)
 
     // Fetch general interest rate model info
     const irmData = await client.readContract({
       address: eulerLensAddresses.value.vaultLens as Address,
-      abi: eulerVaultLensABI as Abi,
+      abi: vaultLensAbi,
       functionName: 'getVaultInterestRateModelInfo',
       authorizationList: undefined,
       args: [vault.address, cashData, borrowsData],

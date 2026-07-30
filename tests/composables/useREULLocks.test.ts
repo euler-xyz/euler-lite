@@ -54,6 +54,11 @@ const importUseREULLocks = async (wallet: {
   vi.stubGlobal('useSpyMode', () => ({
     spyAddress: ref(owner),
   }))
+  // Mirrors the real helper: verified spy address wins, the connected wallet
+  // is only used outside spy mode.
+  vi.stubGlobal('useEffectiveAddress', () => ({
+    effectiveAddress: ref(owner || wallet.address),
+  }))
 
   const module = await import('~/composables/useREULLocks')
   return {

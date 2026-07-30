@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
-import { BatchAnnouncementModal } from '#components'
+import { AnnouncementModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 
 const route = useRoute()
 const router = useRouter()
-const { enableBatchAnnouncement, batchAnnouncementUrl } = useDeployConfig()
+const { announcement } = useDeployConfig()
 const isOnboardingCompleted = useLocalStorage('is-onboarding-completed', false)
-const batchAnnouncementSeen = useLocalStorage('batch-announcement-seen', false)
+const announcementSeenToken = useLocalStorage('announcement-seen-token', '')
 const modal = useModal()
-let isBatchAnnouncementOpen = false
+let isAnnouncementOpen = false
 
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
@@ -115,87 +115,33 @@ watch(route, () => {
   })
 }, { immediate: true })
 
-// Keep the HelpScout Beacon launcher off the onboarding (connect wallet)
-// screen. The Beacon container mounts asynchronously after window load, so
-// visibility is toggled via a root class (styled in assets/styles/main.scss)
-// rather than on the container element itself.
-watch(() => route.name, (name) => {
-  if (!import.meta.client) return
-  document.documentElement.classList.toggle('beacon-hidden', name === 'onboarding')
-}, { immediate: true })
-
-// Attach support diagnostics to HelpScout conversations: the connected wallet
-// address, recent console output (utils/console-capture.ts), and an app-state
-// snapshot. session-data lands in the conversation's visitor activity note
-// when the user submits a message. Keys are accumulated locally and always
-// sent together so a later call can't clobber earlier entries.
-// The form has no read-only fields, so the user is told about the attachment
-// via the responseTime sublabel in the form header — visible but not editable.
-// Safe to call before the Beacon script loads — the shim queues calls.
-const beaconSessionData: Record<string, string> = {}
-const setBeaconSessionData = (data: Record<string, string>) => {
-  if (typeof window.Beacon !== 'function') return
-  Object.assign(beaconSessionData, data)
-  window.Beacon('session-data', { ...beaconSessionData })
-}
-
-watch(address, (addr) => {
-  if (!import.meta.client) return
-  setBeaconSessionData({ 'Wallet address': addr ?? 'Not connected' })
-  window.Beacon('config', {
-    labels: {
-      responseTime: addr
-        ? `We usually respond in a few hours. Your connected wallet ${shortenAddress(addr)} and technical diagnostics will be attached to your message.`
-        : 'We usually respond in a few hours. Technical diagnostics will be attached to your message.',
-    },
-  })
-}, { immediate: true })
-
-// Diagnostics are snapshotted when the widget opens (not at submit time) —
-// Beacon has no pre-submit hook, and open-time state is what prompted the
-// user to reach out.
-onMounted(() => {
-  if (typeof window.Beacon !== 'function') return
-  window.Beacon('on', 'open', () => {
-    setBeaconSessionData({
-      'Recent console output': getRecentConsoleOutput() || 'none captured',
-      'App state': JSON.stringify({
-        url: window.location.href,
-        route: route.name,
-        chainId: chainId.value,
-        wallet: address.value ?? 'not connected',
-        theme: theme.value,
-        viewport: `${window.innerWidth}x${window.innerHeight}`,
-        userAgent: navigator.userAgent,
-        openedAt: new Date().toISOString(),
-      }),
-    })
-  })
-})
-
-const checkBatchAnnouncement = () => {
-  if (!enableBatchAnnouncement || batchAnnouncementSeen.value) return
-  if (isBatchAnnouncementOpen || route.name === 'onboarding') return
+const checkAnnouncement = () => {
+  if (!announcement.enabled || !announcement.token) return
+  if (announcementSeenToken.value === announcement.token) return
+  if (isAnnouncementOpen || route.name === 'onboarding') return
   if (!getIsOnboardingCompleted()) return
 
-  isBatchAnnouncementOpen = true
-  modal.open(BatchAnnouncementModal, {
+  isAnnouncementOpen = true
+  modal.open(AnnouncementModal, {
     isNotClosable: true,
     onClose: () => {
-      batchAnnouncementSeen.value = true
-      isBatchAnnouncementOpen = false
+      announcementSeenToken.value = announcement.token
+      isAnnouncementOpen = false
     },
     props: {
-      announcementUrl: batchAnnouncementUrl,
+      title: announcement.title,
+      body: announcement.body,
+      items: announcement.items,
+      announcementUrl: announcement.url,
     },
   })
 }
 
 checkOnboarding()
 void loadEulerConfig()
-onMounted(checkBatchAnnouncement)
+onMounted(checkAnnouncement)
 watch(() => route.name, () => {
-  nextTick(checkBatchAnnouncement)
+  nextTick(checkAnnouncement)
 })
 
 watch([chainId, showAllLabelEntries], () => {

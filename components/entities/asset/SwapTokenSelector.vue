@@ -138,9 +138,14 @@ const isUnknownAddress = computed(() => {
   return isAddress(q) && !knownAddresses.value.has(q.toLowerCase())
 })
 
-// Output ("Receive as") shows the full list with relevant tokens bubbled to the
-// top (see sortSelectableTokens); input ("Pay with") narrows to held tokens.
+// In input mode, the default list narrows to held tokens. Search still reaches
+// the full list when a user wants to pick an unheld token explicitly.
 const filteredOptions = computed(() => filterSelectableTokens(tokenOptions.value, mode, searchQuery.value))
+const emptyMessage = computed(() => {
+  if (searchQuery.value.trim()) return 'No results found'
+  if (mode === 'input') return 'No wallet balances found. Search to select another token.'
+  return 'No tokens found'
+})
 
 // Incrementally render rows — and therefore token-icon requests — instead of
 // mounting the whole list at once: start with a capped batch and grow on scroll.
@@ -471,10 +476,11 @@ const handleSelectCustomToken = () => {
 
         <!-- No results (only when NOT resolving a custom address) -->
         <div
-          v-if="!filteredOptions.length && searchQuery && !isUnknownAddress"
-          class="py-24 text-center text-content-tertiary text-p3"
+          v-if="!filteredOptions.length && !isUnknownAddress"
+          data-id="swap-token-empty"
+          class="px-24 py-32 text-center text-content-tertiary text-p3"
         >
-          No results found
+          {{ emptyMessage }}
         </div>
       </div>
     </div>

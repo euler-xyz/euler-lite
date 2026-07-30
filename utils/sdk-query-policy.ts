@@ -9,8 +9,11 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *   - `staleTimeMs` (required): the QueryClient stale time used by the
  *     browsing SDK instance (`getEulerSdk()`). Entries younger than this are
  *     served from cache; older ones trigger a re-fetch. Matches TanStack
- *     Query's `staleTime` semantics. Current SDK query names are listed here;
- *     future unlisted names fall through to `DEFAULT_STALE_TIME_MS`.
+ *     Query's `staleTime` semantics. Every query name the SDK routes through
+ *     `buildQuery` must have an explicit row — the completeness test in
+ *     `tests/utils/sdk-query-policy.test.ts` builds the SDK with a recording
+ *     `buildQuery` and fails on unclassified names, so a new SDK query cannot
+ *     silently inherit `DEFAULT_STALE_TIME_MS`.
  *
  *   - `formStaleTimeMs` (optional): override on the plan-time/form SDK
  *     instance (`getEulerSdkFresh()`). When forms construct a transaction
@@ -52,6 +55,8 @@ export interface SdkQueryPolicyEntry {
 const SECOND = 1_000
 const MINUTE = 60 * SECOND
 
+export const ACTIVITY_QUERY_STALE_TIME_MS = MINUTE
+
 export const DEFAULT_STALE_TIME_MS = 5 * MINUTE
 
 export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyEntry>> = {
@@ -73,8 +78,10 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryEVaultVerifiedArray: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryEulerEarnConvertToAssets: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryEulerEarnVerifiedArray: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryFuulClaimChecks: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryFuulClaimableRewards: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryFuulIncentives: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryFuulTotals: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryKeyringAddress: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryKeyringCheckCredential: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryKeyringPolicyId: { staleTimeMs: DEFAULT_STALE_TIME_MS },
@@ -83,6 +90,8 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   querySecuritizeVaultGovernorAdmin: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   querySecuritizeVaultSupplyCapResolved: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   querySwapProviders: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryTurtleMerkleProofs: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+  queryTurtleStreams: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryV3EVaultList: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryV3EulerEarnList: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryV3IntrinsicApysPage: { staleTimeMs: DEFAULT_STALE_TIME_MS },
@@ -99,6 +108,29 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultFactories: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
+
+  // === Activity: V3-indexed event history ===
+  queryAccountActivityEvents: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+  queryVaultActivityEvents: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+  // Historical liquidation valuations are immutable once indexed, but new
+  // liquidations append — same freshness window as the feeds they enrich.
+  queryLiquidations: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+
+  // === Position migration (SDK 1.1.3) ===
+  // Discovery lists are heavier connector reads (GraphQL + balance
+  // multicalls). External position balances and authorization state back
+  // plan sizing and signature prompts — debt accrues per block and the user
+  // can grant/revoke authorization mid-flow — so they get the balance-class
+  // short windows plus post-tx eviction (a completed migration must not
+  // serve the pre-migration position for 5 minutes). Euler-side target
+  // vault data (assets + borrow LTV) is governance config; source vault
+  // asset addresses are immutable in practice.
+  queryListPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryListTargets: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
+  queryGetPosition: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+  queryGetAuthorization: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+  queryEulerTargetVaultData: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE },
+  queryEulerSourceVaultAssets: { staleTimeMs: 5 * MINUTE },
 
   // === Pricing / APY: display-side, 1-min cache ===
   queryAssetPriceInfo: { staleTimeMs: MINUTE },
