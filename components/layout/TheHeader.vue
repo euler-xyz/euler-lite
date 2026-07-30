@@ -37,6 +37,7 @@ const {
   enableExplorePage,
   enablePoweredByEuler,
   enableAppTitle,
+  enableSupportPanel,
 } = useDeployConfig()
 const menuItems = getMenuItems(
   enableEarnPage,
@@ -95,6 +96,11 @@ const onSettingsClick = () => {
 const onLogoClick = () => {
   isSocialsTooltipVisible.value = !isSocialsTooltipVisible.value
 }
+const support = useSupportPanel()
+const onSupportClick = () => {
+  isSocialsTooltipVisible.value = false
+  support.open()
+}
 const getIsMenuItemActive = (link: MenuItem) => {
   return route.name?.toString().startsWith(link.name)
 }
@@ -152,12 +158,20 @@ onClickOutside(wrapperRef, () => {
         >
           <div class="flex flex-col gap-4 w-full">
             <div
-              v-if="links.length"
+              v-if="links.length || enableSupportPanel"
               class="mb-12"
             >
               <p class="mb-8 text-content-tertiary text-h6 text-left">
                 Resources
               </p>
+
+              <button
+                v-if="enableSupportPanel"
+                class="flex gap-4 mb-4 text-content-primary hover:text-accent-600 transition-colors"
+                @click="onSupportClick"
+              >
+                <span class="text-h6">Support</span>
+              </button>
 
               <a
                 v-for="(link, index) in links"

@@ -172,6 +172,9 @@ export default defineNuxtConfig({
       configEnableIncentra: '',
       configEnableFuul: '',
       configEnableTurtle: '',
+      // In-app support panel: set to 'true' once the HELPSCOUT_* server env vars
+      // are configured. Off by default — see docs/support-panel.md.
+      configEnableSupportPanel: '',
       // Announcement modal: populate any content field to show a one-time modal.
       configAnnouncementTitle: '',
       configAnnouncementBody: '',

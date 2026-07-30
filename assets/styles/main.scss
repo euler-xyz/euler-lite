@@ -71,8 +71,9 @@ body {
 }
 
 // HelpScout Beacon is injected asynchronously after window load (see the
-// helpscout-beacon head script in nuxt.config.ts), so per-route visibility
-// is driven by this root class (toggled in app.vue) instead of the element.
+// helpscout-beacon head script in nuxt.config.ts), so its launcher is hidden by
+// this root class — set in app.vue when the in-app support panel is enabled —
+// rather than on the element itself.
 html.beacon-hidden #beacon-container {
   display: none;
 }
