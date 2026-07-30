@@ -36,6 +36,13 @@ const buildCss = () => {
   const onAccent = token('--text-inverse', '#020508')
 
   return [
+    // The frame's own canvas. Beacon leaves html/body transparent, so on any
+    // screen where its container does not cover the whole frame — the
+    // conversation thread, for one — the browser paints the default white
+    // through, and our light text lands on it. Painting the canvas fixes every
+    // screen at once, including ones we never see.
+    `html,body{background-color:${card} !important;}`,
+
     // Panel surface
     `[class*="BeaconContainerUI"]{background:${card} !important;}`,
     '[class*="BodyUI"],[class*="BodyContentWrapper"],[class*="BodyChildWrapper"],'
