@@ -139,7 +139,21 @@ type BatchEntryBuildResult = TransactionPlan | {
   stateOverrides?: StateOverride
 }
 
-type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
+export interface BatchEntryPrefetchedSlotHints {
+  /** Chain the hints were probed against. Prevents stale hints crossing a chain switch. */
+  chainId: number
+  /** Owner-/spender-agnostic ERC20 storage-slot indices already resolved by the form. */
+  hints: SlotHints
+}
+
+type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'> & {
+  /**
+   * Form-prefetched slot hints for the add-time approval tokens. This context is
+   * consumed before the entry is stored; unlike form accounts, it is not
+   * layer-aware and cannot seed the batch's account state.
+   */
+  prefetchedSlotHints?: BatchEntryPrefetchedSlotHints
+}
 
 export type BatchEntryInput = BatchEntryInputBase & (
   {
@@ -2098,6 +2112,12 @@ export const useTxBatch = () => {
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
+        if (entry.prefetchedSlotHints?.chainId === cid) {
+          batchSlotHints = {
+            ...batchSlotHints,
+            ...entry.prefetchedSlotHints.hints,
+          }
+        }
         // Probe only what this batch has not resolved yet. Tokens any form already
         // primed cost no RPC — the SDK memoises hints by `chainId:token` — but they
         // still have to land in `batchSlotHints`, which is what the simulator reads.
@@ -2108,6 +2128,7 @@ export const useTxBatch = () => {
       const {
         buildPlan: _buildPlan,
         requiresPlanningAccount: _requiresPlanningAccount,
+        prefetchedSlotHints: _prefetchedSlotHints,
         ...fixedEntry
       } = entry
       registerReviewAssetMeta(fixedEntry.review)

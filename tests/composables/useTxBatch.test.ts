@@ -760,6 +760,58 @@ describe('useTxBatch execution errors', () => {
     expect(useTxBatch().layers.value[0]?.account).toBe(portfolioAccount)
   })
 
+  it('passes chain-matched form slot hints into the first batch simulation', async () => {
+    const sdk = createMockSdk()
+    const planningAccount = accountWithPosition(subAccount, subAccount, 11n)
+    const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
+    const approvalToken = getAddress('0x2000000000000000000000000000000000000001')
+    const approvalPlan = [{
+      type: 'requiredApproval',
+      token: approvalToken,
+      owner,
+      spender: vault,
+      amount: 1n,
+    }] as TransactionPlan
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    setBatchPrefetchedPlanningAccount(planningAccount)
+    setBatchPrefetchedBaseAccount(portfolioAccount)
+
+    await useTxBatch().addEntry({
+      label: 'Supply USDC',
+      buildPlan: async () => approvalPlan,
+      prefetchedSlotHints: {
+        chainId: 1,
+        hints: {
+          [approvalToken]: {
+            balanceSlotIndex: 9n,
+            allowanceSlotIndex: 10n,
+          },
+        },
+      },
+      subAccount,
+    })
+    await vi.waitFor(() =>
+      expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled(),
+    )
+
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
+      1,
+      owner,
+      approvalPlan,
+      expect.objectContaining({
+        stateOverrideOptions: {
+          slotHints: {
+            [approvalToken]: {
+              balanceSlotIndex: 9n,
+              allowanceSlotIndex: 10n,
+            },
+          },
+        },
+      }),
+    )
+    expect(useTxBatch().entries.value[0]).not.toHaveProperty('prefetchedSlotHints')
+  })
+
   it('ignores prefetched accounts from another chain', async () => {
     const sdk = createMockSdk()
     const staleAccount = accountWithPosition(subAccount, subAccount, 99n)
