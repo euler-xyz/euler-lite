@@ -80,8 +80,28 @@ const isMenuVisible = ref(true)
 
 const BEACON_MOBILE_BREAKPOINT = 900
 
-/** Accent that matches the active theme (see assets/styles/variables.scss). */
-const beaconAccent = computed(() => (theme.value === 'light' ? '#1c997c' : '#2ae5b9'))
+/**
+ * Read a theme token straight off the document so Beacon tracks the app's
+ * palette instead of a hardcoded copy that can drift out of sync.
+ * Beacon only accepts a hex string, so anything else falls back.
+ */
+const themeToken = (name: string, fallback: string) => {
+  if (!import.meta.client) return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value) ? value : fallback
+}
+
+/**
+ * --accent-600 is the app's primary-button green (#23c09b in both themes) and
+ * the colour Beacon paints its launcher, panel header and send button with.
+ * --accent-500 is deliberately not used here: it is the brighter text accent,
+ * and it made the launcher louder than every button in the app.
+ */
+const beaconAccent = computed(() => {
+  // Depend on theme so the token is re-read after a theme switch.
+  void theme.value
+  return themeToken('--accent-600', '#23c09b')
+})
 
 const applyBeaconDesign = () => {
   if (!import.meta.client || typeof window.Beacon !== 'function') return
@@ -127,6 +147,11 @@ const applyBeaconSessionData = () => {
     'Recent console output': getRecentConsoleOutput() || 'none captured',
   })
 }
+
+// Beacon's config API only reaches its brand colour, icon and labels. The
+// dialog's own surfaces are themed by injecting a stylesheet into its
+// same-origin iframes — see composables/useBeaconTheme.ts.
+useBeaconTheme(theme)
 
 watch([theme, address, isMenuVisible], applyBeaconDesign, { immediate: true })
 watch([address, chainId], applyBeaconSessionData, { immediate: true })
