@@ -79,24 +79,18 @@ const { planDeposit, planDepositWithSwap, prepareTransactionPlan, executePrepare
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
-const { chainId } = useEulerAddresses()
 // Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
 // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
 // skips per-call balanceOf + slot probing.
-const { primeSlotHintsFor, buildStateOverrideOptions, slotHints } = useStateOverrideOptions()
+const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
 const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
-const getBatchPrefetchedSlotHints = () => chainId.value
-  ? {
-      chainId: chainId.value,
-      hints: { ...slotHints.value },
-    }
-  : undefined
 const lendPluginPrefetch: PluginPrefetchData = { pyth: { entries: [] } }
 const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPluginPrefetch
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -621,7 +615,6 @@ const addToBatch = async () => {
       if (!swapAsset) return
       await addBatchEntry({
         label: `Deposit ${asset.value.symbol}`,
-        prefetchedSlotHints: getBatchPrefetchedSlotHints(),
         buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
@@ -632,7 +625,6 @@ const addToBatch = async () => {
       const supplyAmount = valueToNano(amount.value, asset.value.decimals)
       await addBatchEntry({
         label: `Deposit ${amount.value} ${asset.value.symbol}`,
-        prefetchedSlotHints: getBatchPrefetchedSlotHints(),
         buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'supply', asset: asset.value, amount: amount.value },

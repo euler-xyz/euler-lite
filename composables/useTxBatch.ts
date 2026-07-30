@@ -14,6 +14,8 @@ import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import {
   getBatchPrefetchedBaseAccount,
   getBatchPrefetchedPlanningAccount,
+  getBatchPrefetchedSlotHints,
+  mergeBatchPrefetchedSlotHints,
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
@@ -139,21 +141,7 @@ type BatchEntryBuildResult = TransactionPlan | {
   stateOverrides?: StateOverride
 }
 
-export interface BatchEntryPrefetchedSlotHints {
-  /** Chain the hints were probed against. Prevents stale hints crossing a chain switch. */
-  chainId: number
-  /** Owner-/spender-agnostic ERC20 storage-slot indices already resolved by the form. */
-  hints: SlotHints
-}
-
-type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'> & {
-  /**
-   * Form-prefetched slot hints for the add-time approval tokens. This context is
-   * consumed before the entry is stored; unlike form accounts, it is not
-   * layer-aware and cannot seed the batch's account state.
-   */
-  prefetchedSlotHints?: BatchEntryPrefetchedSlotHints
-}
+type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
 
 export type BatchEntryInput = BatchEntryInputBase & (
   {
@@ -466,6 +454,7 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
       }
     }))
     batchSlotHints = next
+    mergeBatchPrefetchedSlotHints(chainId, next)
   }
   catch (error) {
     logWarn('useTxBatch/primeBatchSlotHintsFor', error)
@@ -2112,15 +2101,11 @@ export const useTxBatch = () => {
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
-        if (entry.prefetchedSlotHints?.chainId === cid) {
-          batchSlotHints = {
-            ...batchSlotHints,
-            ...entry.prefetchedSlotHints.hints,
-          }
+        batchSlotHints = {
+          ...getBatchPrefetchedSlotHints(cid),
+          ...batchSlotHints,
         }
-        // Probe only what this batch has not resolved yet. Tokens any form already
-        // primed cost no RPC — the SDK memoises hints by `chainId:token` — but they
-        // still have to land in `batchSlotHints`, which is what the simulator reads.
+        // Probe only what no form or earlier batch entry has resolved yet.
         const missingSlotHintTokens = collectRequiredApprovalTokens(plan)
           .filter(token => batchSlotHints[token] === undefined)
         await primeBatchSlotHintsFor(cid, missingSlotHintTokens)
@@ -2128,7 +2113,6 @@ export const useTxBatch = () => {
       const {
         buildPlan: _buildPlan,
         requiresPlanningAccount: _requiresPlanningAccount,
-        prefetchedSlotHints: _prefetchedSlotHints,
         ...fixedEntry
       } = entry
       registerReviewAssetMeta(fixedEntry.review)

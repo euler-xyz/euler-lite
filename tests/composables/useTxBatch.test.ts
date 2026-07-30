@@ -5,6 +5,7 @@ import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
+  mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
   setBatchPrefetchedBaseAccount,
   setBatchPrefetchedPlanningAccount,
@@ -775,19 +776,16 @@ describe('useTxBatch execution errors', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     setBatchPrefetchedPlanningAccount(planningAccount)
     setBatchPrefetchedBaseAccount(portfolioAccount)
+    mergeBatchPrefetchedSlotHints(1, {
+      [approvalToken]: {
+        balanceSlotIndex: 9n,
+        allowanceSlotIndex: 10n,
+      },
+    })
 
     await useTxBatch().addEntry({
       label: 'Supply USDC',
       buildPlan: async () => approvalPlan,
-      prefetchedSlotHints: {
-        chainId: 1,
-        hints: {
-          [approvalToken]: {
-            balanceSlotIndex: 9n,
-            allowanceSlotIndex: 10n,
-          },
-        },
-      },
       subAccount,
     })
     await vi.waitFor(() =>
@@ -809,7 +807,6 @@ describe('useTxBatch execution errors', () => {
         },
       }),
     )
-    expect(useTxBatch().entries.value[0]).not.toHaveProperty('prefetchedSlotHints')
   })
 
   it('ignores prefetched accounts from another chain', async () => {

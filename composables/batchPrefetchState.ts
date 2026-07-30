@@ -1,4 +1,4 @@
-import type { Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
+import type { Account, IHasVaultAddress, SlotHints } from '@eulerxyz/euler-v2-sdk'
 
 /**
  * Form-load accounts the batch builder can safely reuse on the first add.
@@ -17,12 +17,14 @@ import type { Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
  * in `useTxBatch`) because a wallet or chain switch can land before the
  * matching loader run replaces these.
  *
- * Slot hints are deliberately *not* mirrored here: the SDK's `fetchErc20SlotHints`
- * already memoises module-scope by `chainId:token`, so once any form has primed a
- * token the batch's own probe short-circuits to a Map lookup with no RPC.
+ * Slot hints are safe to share independently: ERC20 storage-slot indices are
+ * owner- and spender-agnostic, and the registry scopes them by chain. Keeping
+ * the handoff here also avoids relying on the SDK module cache being shared
+ * across separately bundled form and batch call paths.
  */
 let planningAccount: Account<IHasVaultAddress> | undefined
 let baseAccount: Account<IHasVaultAddress> | undefined
+const slotHintsByChain = new Map<number, SlotHints>()
 
 export const setBatchPrefetchedPlanningAccount = (
   account: Account<IHasVaultAddress> | undefined,
@@ -40,12 +42,27 @@ export const setBatchPrefetchedBaseAccount = (
 
 export const getBatchPrefetchedBaseAccount = () => baseAccount
 
+export const mergeBatchPrefetchedSlotHints = (
+  chainId: number,
+  slotHints: SlotHints,
+) => {
+  slotHintsByChain.set(chainId, {
+    ...slotHintsByChain.get(chainId),
+    ...slotHints,
+  })
+}
+
+export const getBatchPrefetchedSlotHints = (chainId: number): SlotHints => ({
+  ...slotHintsByChain.get(chainId),
+})
+
 /**
- * Drops both prefetched accounts. Production resets flow through the owning
+ * Drops prefetched state. Production account resets flow through the owning
  * loaders (`useFreshAccount.reset`, `useEulerAccount.resetLoadingState`); this
  * exists so tests can isolate module state between cases.
  */
 export const resetBatchPrefetchState = () => {
   planningAccount = undefined
   baseAccount = undefined
+  slotHintsByChain.clear()
 }
