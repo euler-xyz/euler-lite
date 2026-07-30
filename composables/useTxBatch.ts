@@ -14,6 +14,8 @@ import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import {
   getBatchPrefetchedBaseAccount,
   getBatchPrefetchedPlanningAccount,
+  getBatchPrefetchedSlotHints,
+  mergeBatchPrefetchedSlotHints,
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
@@ -452,6 +454,7 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
       }
     }))
     batchSlotHints = next
+    mergeBatchPrefetchedSlotHints(chainId, next)
   }
   catch (error) {
     logWarn('useTxBatch/primeBatchSlotHintsFor', error)
@@ -2098,9 +2101,11 @@ export const useTxBatch = () => {
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
       if (cid) {
-        // Probe only what this batch has not resolved yet. Tokens any form already
-        // primed cost no RPC — the SDK memoises hints by `chainId:token` — but they
-        // still have to land in `batchSlotHints`, which is what the simulator reads.
+        batchSlotHints = {
+          ...getBatchPrefetchedSlotHints(cid),
+          ...batchSlotHints,
+        }
+        // Probe only what no form or earlier batch entry has resolved yet.
         const missingSlotHintTokens = collectRequiredApprovalTokens(plan)
           .filter(token => batchSlotHints[token] === undefined)
         await primeBatchSlotHintsFor(cid, missingSlotHintTokens)

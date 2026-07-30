@@ -3,6 +3,10 @@ import { ref } from 'vue'
 import { fetchErc20SlotHints } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { useStateOverrideOptions, useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
+import {
+  getBatchPrefetchedSlotHints,
+  resetBatchPrefetchState,
+} from '~/composables/batchPrefetchState'
 
 vi.mock('@eulerxyz/euler-v2-sdk', () => ({
   fetchErc20SlotHints: vi.fn(),
@@ -20,6 +24,7 @@ const permit2 = '0x3000000000000000000000000000000000000003' as const
 describe('useStateOverrideOptions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetBatchPrefetchState()
     chainId.value = 1
     vi.stubGlobal('useWallets', () => ({ balances: ref(new Map()) }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
@@ -63,6 +68,17 @@ describe('useStateOverrideOptions', () => {
     expect(stateOverrideOptions.buildStateOverrideOptions().slotHints).toEqual({
       [tokenB]: { balanceSlotIndex: 8453n },
     })
+  })
+
+  it('shares resolved hints with the chain-matched batch path', async () => {
+    const stateOverrideOptions = useStateOverrideOptions()
+
+    await stateOverrideOptions.primeSlotHintsFor([tokenA])
+
+    expect(getBatchPrefetchedSlotHints(1)).toEqual({
+      [tokenA]: { balanceSlotIndex: 1n },
+    })
+    expect(getBatchPrefetchedSlotHints(8453)).toEqual({})
   })
 
   it('does not restore old-chain hints when a probe resolves after switching chains', async () => {

@@ -5,6 +5,7 @@ import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
+  mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
   setBatchPrefetchedBaseAccount,
   setBatchPrefetchedPlanningAccount,
@@ -758,6 +759,54 @@ describe('useTxBatch execution errors', () => {
     expect(buildAccount).toBe(planningAccount)
     expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
     expect(useTxBatch().layers.value[0]?.account).toBe(portfolioAccount)
+  })
+
+  it('passes chain-matched form slot hints into the first batch simulation', async () => {
+    const sdk = createMockSdk()
+    const planningAccount = accountWithPosition(subAccount, subAccount, 11n)
+    const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
+    const approvalToken = getAddress('0x2000000000000000000000000000000000000001')
+    const approvalPlan = [{
+      type: 'requiredApproval',
+      token: approvalToken,
+      owner,
+      spender: vault,
+      amount: 1n,
+    }] as TransactionPlan
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    setBatchPrefetchedPlanningAccount(planningAccount)
+    setBatchPrefetchedBaseAccount(portfolioAccount)
+    mergeBatchPrefetchedSlotHints(1, {
+      [approvalToken]: {
+        balanceSlotIndex: 9n,
+        allowanceSlotIndex: 10n,
+      },
+    })
+
+    await useTxBatch().addEntry({
+      label: 'Supply USDC',
+      buildPlan: async () => approvalPlan,
+      subAccount,
+    })
+    await vi.waitFor(() =>
+      expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled(),
+    )
+
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
+      1,
+      owner,
+      approvalPlan,
+      expect.objectContaining({
+        stateOverrideOptions: {
+          slotHints: {
+            [approvalToken]: {
+              balanceSlotIndex: 9n,
+              allowanceSlotIndex: 10n,
+            },
+          },
+        },
+      }),
+    )
   })
 
   it('ignores prefetched accounts from another chain', async () => {
