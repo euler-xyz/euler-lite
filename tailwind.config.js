@@ -5,7 +5,6 @@ module.exports = {
     './components/layout/**/*.vue',
     './components/base/**/*.vue',
     './components/entities/**/*.vue',
-    './components/support/**/*.vue',
     './app.vue',
     './error.vue',
     '!./components/ui/**/*.vue',

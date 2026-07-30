@@ -69,6 +69,89 @@ useHead({
 })
 
 const isMenuVisible = ref(true)
+
+// ---------------------------------------------------------------------------
+// HelpScout Beacon
+//
+// Beacon renders its launcher and panel inside a cross-origin iframe, so our
+// CSS cannot reach inside it — appearance is driven entirely through its own
+// config API, which accepts repeated calls at runtime.
+// ---------------------------------------------------------------------------
+
+const BEACON_MOBILE_BREAKPOINT = 900
+
+/** Accent that matches the active theme (see assets/styles/variables.scss). */
+const beaconAccent = computed(() => (theme.value === 'light' ? '#1c997c' : '#2ae5b9'))
+
+const applyBeaconDesign = () => {
+  if (!import.meta.client || typeof window.Beacon !== 'function') return
+
+  // On mobile the bottom nav occupies ~98px, so lift the launcher clear of it.
+  const isMobile = window.innerWidth <= BEACON_MOBILE_BREAKPOINT
+  const verticalOffset = isMobile && isMenuVisible.value ? 106 : 24
+
+  window.Beacon('config', {
+    color: beaconAccent.value,
+    display: {
+      style: 'icon',
+      iconImage: 'question',
+      position: 'right',
+      horizontalOffset: 24,
+      verticalOffset,
+      // Above page content, below UiModal (3000) so dialogs are never covered.
+      zIndex: 2500,
+    },
+    labels: {
+      // The wallet address and diagnostics below are attached automatically, so
+      // say so where the user can see it but not edit it.
+      responseTime: address.value
+        ? `We usually reply within 4 hours. Your wallet ${shortenAddress(address.value)} and recent app diagnostics are attached.`
+        : 'We usually reply within 4 hours. Recent app diagnostics are attached.',
+    },
+  })
+}
+
+/** Wallet + chain + console buffer, attached to the conversation for agents. */
+const applyBeaconSessionData = () => {
+  if (!import.meta.client || typeof window.Beacon !== 'function') return
+  window.Beacon('session-data', {
+    'Wallet address': address.value ?? 'Not connected',
+    'Chain': String(chainId.value),
+    'App state': JSON.stringify({
+      url: window.location.href,
+      route: route.name,
+      theme: theme.value,
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      userAgent: navigator.userAgent,
+    }),
+    'Recent console output': getRecentConsoleOutput() || 'none captured',
+  })
+}
+
+watch([theme, address, isMenuVisible], applyBeaconDesign, { immediate: true })
+watch([address, chainId], applyBeaconSessionData, { immediate: true })
+
+// Keep the launcher off the onboarding (connect wallet) screen. Beacon injects
+// its container after window load, so this toggles a root class that
+// assets/styles/main.scss keys off, rather than the element itself.
+watch(() => route.name, (name) => {
+  if (!import.meta.client) return
+  document.documentElement.classList.toggle('beacon-hidden', name === 'onboarding')
+}, { immediate: true })
+
+onMounted(() => {
+  applyBeaconDesign()
+  // Re-snapshot diagnostics when the panel is opened so the console buffer and
+  // app state reflect the moment the user decided to ask for help.
+  if (typeof window.Beacon === 'function') {
+    window.Beacon('on', 'open', applyBeaconSessionData)
+  }
+  window.addEventListener('resize', applyBeaconDesign)
+})
+onUnmounted(() => {
+  if (import.meta.client) window.removeEventListener('resize', applyBeaconDesign)
+})
+
 const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
 
@@ -226,7 +309,6 @@ onUnmounted(() => {
   <UiModals />
   <UiToastContainer />
   <BatchDrawer />
-  <SupportPanelHost />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>
