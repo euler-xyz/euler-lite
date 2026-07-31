@@ -136,8 +136,11 @@ export const useEulerAccount = () => {
 
       const { getEulerSdkForChain, getEulerSdkFresh } = useEulerSdk()
       // Portfolio reads default to the fresh (onchain) instance so positions,
-      // balances and health always reflect the latest block. Callers can opt
-      // back into the cached V3-backed instance with `source: 'fast'`.
+      // balances and health come from chain rather than the V3 backend.
+      // That selects the data source, not the freshness: reads still resolve
+      // through the shared QueryClient at their `FORM_STALE_TIMES` windows, and
+      // post-tx `invalidateAfterTx` eviction is what forces a re-read. Callers
+      // can opt back into the cached V3-backed instance with `source: 'fast'`.
       // Capture the chain id once so the SDK backend selection and the fetch
       // can't diverge if the user switches chains mid-await.
       const targetChainId = chainId.value

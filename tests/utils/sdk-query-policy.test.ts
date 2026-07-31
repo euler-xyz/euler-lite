@@ -2,8 +2,8 @@
  * Invariants for the SDK_QUERY_POLICY table.
  *
  * Policy drives:
- *   - INVALIDATE_AFTER_TX — names evicted from the QueryClient at form mount
- *     and after every successful tx so display surfaces refresh.
+ *   - INVALIDATE_AFTER_TX — names evicted from the QueryClient after every
+ *     successful tx so display surfaces refresh. Nothing evicts at form mount.
  *   - STALE_TIMES — staleTime applied by the browsing SDK's wrapper.
  *   - FORM_STALE_TIMES — staleTime applied by the plan-time/form SDK's
  *     wrapper. Pre-resolved as `formStaleTimeMs ?? staleTimeMs` so runtime
