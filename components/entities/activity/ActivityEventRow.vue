@@ -451,16 +451,26 @@ const vaultDisplay = computed(() => {
               v-else
               class="activity-event-row__detail-addresses mt-2 flex min-w-0 flex-col items-start gap-2 text-p3"
             >
-              <ActivityAddress
-                v-for="address in detail.addresses"
-                :key="address.address"
-                :address="address.address"
-                :chain-id="event.chainId"
-                :label="address.label"
-                :link-kind="address.linkKind"
-                :vault-type="address.vaultType"
-                compact-vault
-              />
+              <div
+                v-for="(address, addressIndex) in detail.addresses"
+                :key="`${address.address}:${addressIndex}`"
+                class="flex w-full min-w-0 items-center gap-8"
+              >
+                <AssetAvatar
+                  v-if="'avatarAssets' in detail && detail.avatarAssets?.[addressIndex]"
+                  :asset="detail.avatarAssets[addressIndex]"
+                  size="20"
+                  class="shrink-0"
+                />
+                <ActivityAddress
+                  :address="address.address"
+                  :chain-id="event.chainId"
+                  :label="address.label"
+                  :link-kind="address.linkKind"
+                  :vault-type="address.vaultType"
+                  compact-vault
+                />
+              </div>
             </div>
           </template>
           <div
