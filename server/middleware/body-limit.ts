@@ -3,13 +3,11 @@ import { logger } from '~/server/utils/logger'
 import { safePathTemplate } from '~/server/utils/observability'
 
 // 1 MB for RPC, 2 MB for Tenderly
-const CLIENT_ERROR_LIMIT = 12 * 1024
 const RPC_LIMIT = 1 * 1024 * 1024
 const TENDERLY_LIMIT = 2 * 1024 * 1024
 const DEFAULT_LIMIT = 1 * 1024 * 1024
 
 function getLimit(pathname: string): number {
-  if (pathname === '/api/internal/client-error') return CLIENT_ERROR_LIMIT
   if (pathname.startsWith('/api/internal/tenderly/')) return TENDERLY_LIMIT
   if (pathname.startsWith('/api/internal/rpc/')) return RPC_LIMIT
   return DEFAULT_LIMIT

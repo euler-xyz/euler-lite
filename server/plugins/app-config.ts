@@ -54,7 +54,7 @@ function readAppConfig() {
     appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
     logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL'),
     socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL'),
-    pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') ? 'proxy' : '',
+    pythHermesUrl: env('PYTH_API_KEY').trim() ? 'proxy' : '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID'),
     appUrl: env('NUXT_PUBLIC_APP_URL'),
     v3ApiUrl: V3_API_PROXY_URL,
@@ -65,6 +65,11 @@ function readAppConfig() {
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
+    eulerInterfacesBranch: env(
+      'EULER_SDK_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
+    ) || 'master',
     announcement: buildAnnouncementConfig({
       title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
       body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),

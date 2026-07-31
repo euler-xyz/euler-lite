@@ -32,6 +32,16 @@ type SdkQueryRecorderWindow = Window & {
 
 const failureCache = new Map<string, { error: unknown, expiresAt: number }>()
 
+type SdkQueryInvalidationListener = (queryNames: ReadonlySet<string>) => void
+const sdkQueryInvalidationListeners = new Set<SdkQueryInvalidationListener>()
+
+export const subscribeToSdkQueryInvalidations = (
+  listener: SdkQueryInvalidationListener,
+) => {
+  sdkQueryInvalidationListeners.add(listener)
+  return () => sdkQueryInvalidationListeners.delete(listener)
+}
+
 const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): BuildQueryFn => {
   return ((queryName: string, fn, _target: object, context) => {
     const wrapped = (async (...args: Parameters<typeof fn>) => {
@@ -140,12 +150,22 @@ export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => {
     const [, queryName] = JSON.parse(key) as [string, string, string]
     if (names.has(queryName)) failureCache.delete(key)
   }
-  return sdkQueryClient.invalidateQueries({
+  const invalidation = sdkQueryClient.invalidateQueries({
     predicate: query =>
       query.queryKey[0] === 'sdk'
       && typeof query.queryKey[1] === 'string'
       && names.has(query.queryKey[1]),
   })
+  for (const listener of sdkQueryInvalidationListeners) {
+    try {
+      listener(names)
+    }
+    catch {
+      // Query invalidation is a global transaction side effect. A display
+      // subscriber must not be able to interrupt the remaining invalidation.
+    }
+  }
+  return invalidation
 }
 
 export const clearSdkQueryFailureCacheForTest = () => {

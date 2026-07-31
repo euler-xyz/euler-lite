@@ -53,7 +53,9 @@ export const SWAP_DEFAULT_DEADLINE_SECONDS = 1800
 export const SLIPPAGE_OVERRIDE_STORAGE_KEY = 'swap-slippage-override'
 export const SLIPPAGE_STORAGE_KEY = 'swap-slippage'
 export const SLIPPAGE_CONTEXT_DEFAULT_STORAGE_KEY = 'swap-slippage-context-default'
+/** Legacy key, read once to seed {@link SIGNATURES_PREFERENCE_STORAGE_KEY}. */
 export const PERMIT2_PREFERENCE_STORAGE_KEY = 'permit2-enabled'
+export const SIGNATURES_PREFERENCE_STORAGE_KEY = 'signatures-enabled'
 export const SHOW_ALL_HINT_DISMISSED_KEY = 'show-all-hint-dismissed'
 export const DEFAULT_SLIPPAGE = 0.3
 export const DEFAULT_STABLECOIN_SLIPPAGE = 0.05

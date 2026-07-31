@@ -18,7 +18,9 @@ defineProps<{
     :data-value="dataValue"
   >
     <p class="text-content-tertiary shrink-0">
-      {{ label }}
+      <slot name="label">
+        {{ label }}
+      </slot>
     </p>
     <div class="ml-auto text-right">
       <slot />

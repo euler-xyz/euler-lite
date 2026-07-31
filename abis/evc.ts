@@ -1,11 +1,11 @@
-export const BATCH_ITEM_COMPONENTS = [
+const BATCH_ITEM_COMPONENTS = [
   { name: 'targetContract', type: 'address' },
   { name: 'onBehalfOfAccount', type: 'address' },
   { name: 'value', type: 'uint256' },
   { name: 'data', type: 'bytes' },
 ] as const
 
-export const BATCH_ITEM_RESULT_COMPONENTS = [
+const BATCH_ITEM_RESULT_COMPONENTS = [
   { name: 'success', type: 'bool' },
   { name: 'result', type: 'bytes' },
 ] as const
@@ -83,71 +83,12 @@ export type BatchItemResult = {
   result: string
 }
 
-export const evcEnableControllerAbi = [
-  {
-    type: 'function',
-    name: 'enableController',
-    inputs: [
-      { name: 'account', type: 'address' },
-      { name: 'vault', type: 'address' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const
-
-export const evcDisableControllerAbi = [
-  {
-    type: 'function',
-    name: 'disableController',
-    inputs: [],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const
-
-export const evcEnableCollateralAbi = [
-  {
-    type: 'function',
-    name: 'enableCollateral',
-    inputs: [
-      { name: 'account', type: 'address' },
-      { name: 'vault', type: 'address' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const
-
-export const evcDisableCollateralAbi = [
-  {
-    type: 'function',
-    name: 'disableCollateral',
-    inputs: [
-      { name: 'account', type: 'address' },
-      { name: 'vault', type: 'address' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const
-
 export const evcGetAccountOwnerAbi = [
   {
     type: 'function',
     name: 'getAccountOwner',
     inputs: [{ name: 'account', type: 'address' }],
     outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-  },
-] as const
-
-export const evcGetControllersAbi = [
-  {
-    type: 'function',
-    name: 'getControllers',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'address[]' }],
     stateMutability: 'view',
   },
 ] as const

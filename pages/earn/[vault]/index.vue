@@ -7,6 +7,7 @@ import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
+import { isNativeCurrencyAddress } from '~/utils/native-currency'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -27,6 +28,7 @@ const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId } = useEulerAddresses()
+const { primeSlotHintsFor } = useStateOverrideOptions()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -62,6 +64,18 @@ const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRe
 const supplyApyBreakdown = computed(() => vault.value ? computeSupplyApyBreakdown(vault.value, viewer.value) : undefined)
 const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
 const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
+
+// Pre-prime ERC20 slot hints for the vault asset. One probe per token,
+// owner-/spender-agnostic; later estimate/sim calls skip access-list discovery.
+// Speculative, so it must not gate the submit button (`background: true`).
+watch(
+  () => asset.value?.address,
+  (assetAddress) => {
+    if (!assetAddress || isNativeCurrencyAddress(assetAddress)) return
+    void primeSlotHintsFor([assetAddress as Address], { background: true })
+  },
+  { immediate: true },
+)
 
 const applyLoadedVault = (loadedVault: EulerEarn) => {
   vault.value = loadedVault

@@ -50,9 +50,9 @@ cp .env.example .env
 | `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/internal/v3` proxy |
 | `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/internal/v3` as `X-API-Key` |
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
-| `PYTH_HERMES_URL` or `NUXT_PUBLIC_PYTH_HERMES_URL` | `https://hermes.pyth.network` | Pyth oracle endpoint (proxied via `/api/internal/pyth/updates`) |
+| `PYTH_API_KEY` | — | Server-side API key sent to `https://hermes.pyth.network` as Bearer authentication by `/api/internal/pyth/updates` |
 
-> **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. V3 API keys should use server-side names such as `EULER_SDK_V3_API_KEY`.
+> **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. API keys use server-side names such as `EULER_SDK_V3_API_KEY` and `PYTH_API_KEY`.
 
 #### SDK Data Source Controls
 
@@ -66,6 +66,7 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. |
 | `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of `DEPRECATED_CHAINS`; list a chain in both to deprecate it and route it onchain. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
+| `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. When set, it takes precedence over `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`. |
 
 `fallback` uses V3 first and on-chain reads second. If no V3 URL is configured, Lite passes `disableV3: true` to the SDK so fallback reads go straight on-chain.
 
@@ -98,7 +99,7 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`        | —                                          | S3/CDN base URL for labels (overrides repo/branch)    |
 | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_REPO`     | `euler-xyz/oracle-checks`                  | GitHub repo for oracle check results                  |
 | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` | —                                          | S3/CDN base URL for oracle checks (overrides repo)    |
-| `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | URL for EulerChains.json (overrides default upstream) |
+| `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | URL for EulerChains.json, used when no Euler interfaces branch is configured |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
 | `NUXT_PUBLIC_CONFIG_STARGATE_URL`           | —                                          | Stargate link                                         |
 | `NUXT_PUBLIC_CONFIG_TOS_URL`                | —                                          | Terms of Service link                                 |

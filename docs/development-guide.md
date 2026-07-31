@@ -87,7 +87,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 
 | Endpoint | Upstream source | Cache TTL | Env var override |
 |----------|----------------|-----------|------------------|
-| `GET /api/internal/euler-chains` | `EulerChains.json` from euler-interfaces | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` |
+| `GET /api/internal/euler-chains` | `EulerChains.json` from `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` when no interfaces branch is configured |
 | `GET /api/internal/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels (query-shape; used by Lite helpers) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/internal/labels/:chainId/:file` | `{chainId}/{file}` from euler-labels (path-shape; matches the SDK's default `eulerLabelsBaseUrl` template, shares cache with the query-shape route) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/internal/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
@@ -98,7 +98,7 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET\|HEAD\|POST /api/internal/proxy/incentra/:path` | Incentra API (`sdk/v1/`, `v1/` allowlist) | 30 s | `INCENTRA_API_URL`, `NUXT_PUBLIC_INCENTRA_API_URL` |
 | `POST /api/internal/proxy/subgraph/:chainId` | Per-chain Goldsky subgraph | 30 s | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
 | `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, account positions, vault reads, vault batch/resolve) | none — V3 caches upstream | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
-| `GET /api/internal/pyth/updates?ids[]=...` | Pyth Hermes (`/v2/updates/price/latest`) | No cache | `PYTH_HERMES_URL` (server-only) |
+| `GET /api/internal/pyth/updates?ids[]=...` | Pyth Hermes (`https://hermes.pyth.network/v2/updates/price/latest`) | No cache | `PYTH_API_KEY` (server-only) |
 
 All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/internal/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`.
 
@@ -124,11 +124,11 @@ Priority for deduplication: Euler SDK token list > DefiLlama > Uniswap > Merkl. 
 
 ### Pyth Proxy Endpoint Details
 
-The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update requests through the server. This avoids CORS restrictions and prevents the Hermes URL (which may contain credentials) from reaching the browser.
+The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update requests through the server. It authenticates requests to `https://hermes.pyth.network` with a server-side Bearer token, keeping the API key out of the browser.
 
-- **Rate limit**: 600 requests per 60-second window
+- **Rate limit**: 1,000 requests per 60-second window
 - **Validation**: Feed IDs must match `0x[64 hex chars]` format, max 100 per request
-- **Env var**: `PYTH_HERMES_URL` (server-only; not exposed to client)
+- **Env var**: `PYTH_API_KEY` (server-only; not exposed to client)
 
 ## Code layout (high level)
 

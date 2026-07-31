@@ -76,7 +76,7 @@ Plans may include `requiredApproval` items. During review and execution, `resolv
 - an ERC-20 approval transaction, or
 - a Permit2 signature request.
 
-`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Lite chooses whether Permit2 is enabled through `usePermit2Preference()`.
+`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Incentra chooses whether message signatures are enabled through `useSignaturePreference()`; disabling them makes approval-capable flows use transactions instead.
 
 ## Operation Guards
 
@@ -116,6 +116,7 @@ Wired into:
   - `composables/position/useCollateralForm.ts`
   - `composables/useSwapPageLogic.ts`
   - `pages/lend/[vault]/index.vue` (deposit-with-swap)
+- Page-load background priming (`primeSlotHintsFor(..., { background: true })`) on `pages/lend/[vault]/index.vue` and `pages/earn/[vault]/index.vue` — warms the form ref + batch registry without gating submit
 - Heavy single-shot `runSimulation` / `runPreparedSimulation` call-sites pass `buildStateOverrideOptions({ noBalanceOverride })` directly:
   - `composables/repay/useWalletSwapRepay.ts`
   - `composables/repay/useCollateralSwapRepay.ts`
@@ -124,9 +125,42 @@ Wired into:
 
 `noBalanceOverride: true` is only safe when the operation either doesn't consume wallet ERC20 (collateral-swap repay, debt swap) or the form already gates submit on wallet balance (multiply, borrow, lend deposit, wallet-swap repay's EXACT_IN). Withdraw mode on `useCollateralForm` keeps the override but skips the balance branch by binding `noBalanceOverride` to `mode === 'supply'`.
 
-`primeSlotHintsFor` is owner-/spender-agnostic; the SDK caches results in a module-scope `slotHintsCache` keyed on chain id + token, so a successful probe in one page warms the cache for every other page in the session.
+`primeSlotHintsFor` is owner-/spender-agnostic. The SDK also memoises results in a module-scope `slotHintsCache` keyed on chain id + token. Lite additionally mirrors resolved hints into a chain-scoped registry (`composables/batchPrefetchState.ts`) so form pages and the batch cart share probes even when they do not share one SDK module cache across separately bundled call paths.
+
+Pass `background: true` for speculative page-load priming (lend/earn vault forms). Background primes still warm the local ref + registry, but they do **not** increment `useStateOverrideResolution().isResolvingStateOverrideHints`, so submit / add-to-batch stay usable while a cold probe runs. A miss only means the simulator falls back to `eth_createAccessList` discovery.
+
+Chain switches clear the local `slotHints` ref synchronously. Late probes for an old chain must not restore into the new chain’s local ref (they may still update that chain’s registry bucket). Concurrent primes re-merge after each await so an in-flight probe cannot clobber hints that landed meanwhile.
 
 See the SDK side: `packages/euler-v2-sdk/docs/simulations-and-state-overrides.md` (performance tuning section) and `packages/euler-v2-sdk/docs/execution-service.md` (prefetching plugin data).
+
+## Batch cart prefetch
+
+The multi-tx batch cart (`composables/useTxBatch.ts`) reuses form-load accounts and slot hints so the first `addEntry` does not pay a full account refetch + access-list discovery tax.
+
+### Shared registry
+
+`composables/batchPrefetchState.ts` is a composable-free module registry (avoids import cycles between account / wallet / batch overlays):
+
+| Entry | Writer | Consumer |
+| ----- | ------ | -------- |
+| Planning account | `useFreshAccount` | First batch add that needs a planning account |
+| Base / portfolio account | `useEulerAccount` | Layer-0 snapshot seed when the cart is empty |
+| Slot hints by chain | `primeSlotHintsFor` / `primeBatchSlotHintsFor` | Every `addEntry` + `resimulate` |
+
+Both accounts are stored **pre-overlay**. Never read them back from layer-aware `usePlanAccount` / portfolio computeds — those return the active batch layer’s simulated account once a layer is active, which must never become the cart’s own layer 0. `useTxBatch` still validates chain + owner via `isAccountForContext` before reuse, because a wallet or chain switch can land before the matching loader replaces the registry.
+
+### Form → batch slot-hint handoff
+
+1. On form load, lend/earn pages call `primeSlotHintsFor(tokens, { background: true })` for the vault asset (and lend pay-with assets). That writes the form’s local ref **and** `mergeBatchPrefetchedSlotHints(chainId, …)`.
+2. Pages do **not** pass per-entry hint props into `addBatchEntry`. The registry is the handoff.
+3. Each `addEntry` merges `getBatchPrefetchedSlotHints(cid)` into module-scope `batchSlotHints` (existing cart hints win on key conflict).
+4. Only plan `requiredApproval` tokens still missing a hint are probed via `primeBatchSlotHintsFor`, which writes back into `batchSlotHints` and the registry.
+5. `resimulate` always sends `stateOverrideOptions: { slotHints: batchSlotHints }`.
+6. `batchSlotHints` lives for the cart lifetime and clears when the batch empties.
+
+### Simulation context freshness
+
+`resimulate` calls `simulateTransactionPlan(cid, ownerAddr, merged, …)` with the **current owner Address**, not a pinned `Account` object, so plugins resolve against the live owner. Layer 0 still comes from the pinned `baseAccountSnapshot` after the SDK stitch — entry plans are immutable add-time payloads, and later real-state drift must not rebuild the whole cart around a different base.
 
 ## Swap Quotes
 
@@ -151,6 +185,8 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/useEulerTx.ts` | Page-facing SDK planning, simulation preparation, and execution wrapper |
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
 | `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |
+| `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |
+| `composables/useTxBatch.ts` | Multi-tx cart: plan merge, resimulate, slot-hint reuse, execution |
 | `components/entities/operation/OperationReviewModal.vue` | Prepared-plan review, calldata copy, and Tenderly simulation |
 | `utils/stepDecoding.ts` | SDK plan item decoding for review display |
 | `utils/operationGuardRegistry.ts` | Guard transformer and blocker registry |

@@ -40,6 +40,7 @@ interface EnvConfig {
    *  rewards). Mirrors `SERVER_VAULT_CACHE_SOURCE` on the snapshot side. */
   browserVaultSource: VaultDataSource
   swapApiUrl: string
+  eulerInterfacesBranch: string
   announcement: AnnouncementConfig
 }
 
@@ -55,6 +56,7 @@ const DEFAULTS: EnvConfig = {
   enableV3Backend: false,
   browserVaultSource: DEFAULT_VAULT_DATA_SOURCE,
   swapApiUrl: '',
+  eulerInterfacesBranch: 'master',
   announcement: EMPTY_ANNOUNCEMENT_CONFIG,
 }
 
@@ -74,13 +76,18 @@ function scanEnv(): EnvConfig {
     appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
     logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL') || DEFAULTS.logoUrl,
     socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL') || DEFAULTS.socialImageUrl,
-    pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') || '',
+    pythHermesUrl: env('PYTH_API_KEY').trim() ? 'proxy' : '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
     v3ApiUrl: V3_API_PROXY_URL,
     enableV3Backend: v3UpstreamConfigured,
     browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
+    eulerInterfacesBranch: env(
+      'EULER_SDK_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
+    ) || DEFAULTS.eulerInterfacesBranch,
     announcement: buildAnnouncementConfig({
       title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
       body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),
@@ -116,6 +123,7 @@ function fromRuntimeConfig(): EnvConfig {
     enableV3Backend: isTruthy(rc.enableV3Backend),
     browserVaultSource: parseSource(rc.browserVaultSource),
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,
+    eulerInterfacesBranch: str(rc.eulerInterfacesBranch) || DEFAULTS.eulerInterfacesBranch,
     announcement: buildAnnouncementConfig({
       title: rc.configAnnouncementTitle,
       body: rc.configAnnouncementBody,

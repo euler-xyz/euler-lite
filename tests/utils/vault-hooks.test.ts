@@ -16,6 +16,7 @@ import {
   OP_LIQUIDATE,
   OP_PULL_DEBT,
   areAllUserOpsHooked,
+  decodeHookedOperationsMask,
   findBlockingDisabledOp,
   formatHookedOpsSummary,
   getHookedOperationMetas,
@@ -179,6 +180,17 @@ describe('getHookedOperationMetas', () => {
   it('includes internal ops when includeInternal=true', () => {
     const decoded = getHookedOperationMetas(hookedOperations(OP_VAULT_STATUS_CHECK), { includeInternal: true })
     expect(decoded.map(op => op.name)).toContain('Vault status check')
+  })
+})
+
+describe('decodeHookedOperationsMask', () => {
+  it('decodes protocol operation bits and preserves unknown flags', () => {
+    const decoded = decodeHookedOperationsMask((1n << 0n) | (1n << 6n) | (1n << 15n))
+
+    expect(decoded.hookedOperations.deposit).toBe(true)
+    expect(decoded.hookedOperations.borrow).toBe(true)
+    expect(decoded.hookedOperations.repay).toBe(false)
+    expect(decoded.unknownMask).toBe(1n << 15n)
   })
 })
 
