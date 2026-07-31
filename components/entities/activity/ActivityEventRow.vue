@@ -675,7 +675,7 @@ const vaultDisplay = computed(() => {
 
   /* Multi-row values such as oracle asset pairs should start beside their
      label instead of centering the label between the two assets. */
-  .activity-event-row__details--expanded .activity-event-row__detail--address-list {
+  .activity-event-row__details--expanded .activity-event-row__detail--address-list:not(.hidden) {
     align-items: start;
   }
 
