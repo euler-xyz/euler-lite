@@ -199,6 +199,12 @@ const changes = computed(() => {
       valueTitle: entry.value,
       summary: entry.summary,
       addresses: entry.addresses,
+      avatarAssets: entry.field === 'asset_pair'
+        ? entry.addresses?.map(address => ({
+            address: address.address,
+            symbol: address.label ?? '',
+          }))
+        : undefined,
     }))
 })
 // The seized collateral vault trails the numbers as its own metadata line, so
@@ -429,9 +435,17 @@ const vaultDisplay = computed(() => {
           <template v-if="detail.addresses?.length">
             <div
               v-if="!expanded && addressCollectionSummary(detail)"
-              class="break-words text-p3 text-content-primary"
+              class="mt-2 flex min-w-0 items-center gap-8"
             >
-              {{ addressCollectionSummary(detail) }}
+              <AssetAvatar
+                v-if="'avatarAssets' in detail && detail.avatarAssets?.length"
+                :asset="detail.avatarAssets"
+                size="20"
+                class="shrink-0"
+              />
+              <span class="min-w-0 break-words text-p3 text-content-primary">
+                {{ addressCollectionSummary(detail) }}
+              </span>
             </div>
             <div
               v-else
