@@ -125,11 +125,18 @@ Three distinct test layers — most day-to-day work only touches the first.
      `.output/public/_nuxt` and **auto-skips when no build exists** (this is the "1 skipped" test
      in a plain run). CI runs `npm run build` before `npm run test:run` so it executes. Build
      first if you need to exercise it locally.
-2. **Golden parity (`tests/golden/`, `vitest.golden.config.ts`).** Byte-for-byte comparison of
-   legacy transaction builders against the SDK `TransactionPlan` methods in `useEulerTx.ts`.
-   Requires a sibling git worktree at `../euler-lite-sdk-exec-legacy` — see `tests/golden/README.md`
-   and `tests/golden/COVERAGE.md`. There is **no** `test:golden` npm script; run
-   `npx vitest --config vitest.golden.config.ts run`.
+2. **Golden canary (`tests/golden/`).** A version canary (not a correctness suite) that pins the
+   byte-for-byte calldata a user would sign for one representative operation per SDK encoder family
+   (plain vault op, borrow, repay, migration, swap, leverage). Each SDK `executionService.plan*`
+   output is normalized to a canonical `[{to, data, value, evcBatch}]` tx list (`normalize.ts`) and
+   asserted against a committed fixture under `tests/golden/plans/*.json`; its purpose is to catch an
+   SDK version bump that silently changes calldata. It uses **committed fixtures — no worktree and no
+   separate vitest config** — and **runs as part of `npm run test:run`**. Scripts: `npm run test:golden`
+   (golden only), `npm run test:golden:update` (`UPDATE_GOLDEN=1`; regenerate `plans/*.json` after a
+   deliberate builder change, then review the diff), and `npm run test:golden:fetch-fixtures`
+   (re-fetch the swap-quote fixtures in `tests/golden/fixtures/*.json` via the SDK `SwapService`;
+   override the endpoint with `GOLDEN_SWAP_API_URL`). Outside update mode a missing fixture is a hard
+   failure, so the suite can't mint its own baseline. Details in `tests/golden/README.md`.
 3. **Parity / execution (Playwright, `scripts/*.mjs` + `tests/parity/`, `tests/execution/`).**
    Browser-driven diff and fork-based (Anvil) transaction recording. Driven by the `parity:*` and
    `execution:*` npm scripts using JSON scenario files. The UI exposes `data-id` / `data-field` /
