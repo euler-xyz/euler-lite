@@ -110,6 +110,10 @@ const VAULT_ACTIVITY_EVENT_TYPES = {
     'set_interest_rate_model',
     'set_liquidation_cool_off_time',
     'set_max_liquidation_discount',
+    'set_oracle_config',
+    'set_fallback_oracle',
+    'set_resolved_vault',
+    'set_oracle_governor',
   ],
   earn: [
     'deposit',
@@ -829,6 +833,7 @@ const VAULT_ADDRESS_FIELDS_BY_EVENT: Partial<Record<ActivityEvent['type'], reado
   set_cap: ['market', 'strategy', 'vault'],
   set_flow_caps: ['market', 'strategy', 'from', 'to', 'vault'],
   set_ltv: ['collateral'],
+  set_resolved_vault: ['resolved_vault'],
   set_supply_queue: ['queue', 'supply_queue', 'new_supply_queue'],
   set_withdraw_queue: ['queue', 'withdraw_queue', 'new_withdraw_queue'],
   submit_cap: ['market', 'strategy', 'vault'],
@@ -951,6 +956,7 @@ const isZeroAddressValue = (value: ActivityChangeValue): boolean => {
 
 /** Display order for change fields whose upstream order is unhelpful. */
 const CHANGE_FIELD_PRIORITY: Partial<Record<ActivityEvent['type'], readonly string[]>> = {
+  set_fallback_oracle: ['fallback_oracle', 'router'],
   set_ltv: [
     'collateral',
     'borrow_ltv',
@@ -959,6 +965,9 @@ const CHANGE_FIELD_PRIORITY: Partial<Record<ActivityEvent['type'], readonly stri
     'initial_liquidation_ltv',
     'target_timestamp',
   ],
+  set_oracle_config: ['asset0', 'asset1', 'oracle', 'router'],
+  set_oracle_governor: ['old_governor', 'new_governor', 'router'],
+  set_resolved_vault: ['asset', 'resolved_vault', 'router'],
 }
 
 const REALLOCATION_EVENT_TYPES: readonly ActivityEvent['type'][] = [

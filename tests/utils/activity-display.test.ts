@@ -73,6 +73,10 @@ describe('activity display helpers', () => {
       'repay',
       'set_caps',
       'set_ltv',
+      'set_oracle_config',
+      'set_fallback_oracle',
+      'set_resolved_vault',
+      'set_oracle_governor',
       'liquidation',
     ]))
 
@@ -195,6 +199,8 @@ describe('activity display helpers', () => {
     expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Set supply cap')
     expect(formatActivityEventLabel({ type: 'set_ltv' })).toBe('Set LTV')
     expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Set interest rate model')
+    expect(formatActivityEventLabel({ type: 'set_oracle_config' })).toBe('Set oracle config')
+    expect(formatActivityEventLabel({ type: 'set_oracle_governor' })).toBe('Set oracle governor')
   })
 
   it('labels and styles vault share transfers relative to the event position', () => {
@@ -702,6 +708,40 @@ describe('activity display helpers', () => {
       },
     }, getVaultMetadata)).toEqual([
       { field: 'new_supply_cap', label: 'New supply cap', value: '155M USDC' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'set_resolved_vault',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: {
+        fields: {
+          router: ASSET,
+          resolved_vault: OTHER_VAULT,
+          asset: SHARES,
+        },
+      },
+    }, getVaultMetadata)).toEqual([
+      {
+        field: 'asset',
+        label: 'Asset',
+        addresses: [{ address: SHARES, linkKind: 'explorer' }],
+      },
+      {
+        field: 'resolved_vault',
+        label: 'Resolved vault',
+        addresses: [{
+          address: OTHER_VAULT,
+          label: 'Collateral vault',
+          linkKind: 'vault',
+          vaultType: 'evk',
+        }],
+      },
+      {
+        field: 'router',
+        label: 'Router',
+        addresses: [{ address: ASSET, linkKind: 'explorer' }],
+      },
     ])
   })
 
