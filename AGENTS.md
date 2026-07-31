@@ -56,14 +56,21 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   (`plugins/01.query.ts`) is used for some async caching, not as global app state.
 - **Config flows env → server plugin → `window` global → composable:**
   - `RPC_URL_*`, `DEPRECATED_CHAINS`, `ONCHAIN_SDK_CHAINS`, `EVAULT_FETCH_CHUNK_CHAINS`
-    → `server/plugins/chain-config.ts` → `window.__CHAIN_CONFIG__` → `useChainConfig()`
+    → `server/plugins/chain-config.ts` → `window.__CHAIN_CONFIG__` → `useChainConfig()`.
+    Note: `__CHAIN_CONFIG__` carries only chain IDs + validation metadata (`enabledChainIds`,
+    `deprecatedChainIds`, `onchainSdkChainIds`, `eVaultFetchChunkChainIds`, `unsupportedChainIds`,
+    `chainEnvIssues`) — the `RPC_URL_*` values themselves stay server-side.
   - AppKit / V3 / Swap / Pyth URLs + branding → `server/plugins/app-config.ts` →
     `window.__APP_CONFIG__` → `useEnvConfig()`
   - `NUXT_PUBLIC_CONFIG_*` feature flags/page toggles → Nuxt `runtimeConfig.public` → `useDeployConfig()`
-- **Secrets never reach the browser.** RPC URLs, subgraph URLs (`SUBGRAPH_URL_*`), and the V3 URL
-  are server-only. The client always talks to same-origin proxies: `/api/internal/rpc/{chainId}`,
-  `/api/internal/proxy/subgraph/{chainId}`, `/api/internal/v3`. `pythHermesUrl` is exposed to the
-  client only as the string `'proxy'`.
+- **Configured upstream secrets stay server-side.** `RPC_URL_*`, subgraph URLs (`SUBGRAPH_URL_*`),
+  and the V3 URL are never shipped to the browser; the app's own reads go through same-origin
+  proxies (`/api/internal/rpc/{chainId}`, `/api/internal/proxy/subgraph/{chainId}`,
+  `/api/internal/v3`), and `pythHermesUrl` is exposed to the client only as the string `'proxy'`.
+  This is **not** a claim that the browser makes zero third-party requests: per-chain viem
+  transports use the network's public RPC (`network.rpcUrls.default.http`) as a fallback behind the
+  proxy (`plugins/00.wagmi.ts`), and Reown AppKit + the connected wallet provider make their own
+  outbound calls (AppKit Blockchain API, WalletConnect relay, etc.).
 
 ## Repository layout
 
@@ -87,11 +94,16 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
 
 ## Server / proxy layer (`server/`)
 
-- **Internal proxies** (`server/api/internal/`) keep upstreams/secrets server-side and are the
-  only outbound path the browser uses: `v3/[...path]` (allowlisted V3 proxy), `rpc/[chainId]`
-  (JSON-RPC, allowlisted methods), `token-list`, `vaults` (pre-computed snapshot),
-  `proxy/subgraph/[chainId]`, `proxy/merkl|fuul|incentra|turtle/*`, `pyth/updates`,
-  `screen-address`, `tenderly/*`, `oracle-*`, `labels/*`, `tos`, `client-error`.
+- **Internal proxies** (`server/api/internal/`) keep configured upstreams/secrets server-side and
+  are the app's main outbound data path. Representative routes: `v3/[...path]` (allowlisted V3
+  proxy), `rpc/[chainId]` (JSON-RPC, allowlisted methods), `token-list`, `vaults` (pre-computed
+  snapshot), `euler-chains` (deployment metadata used as the SDK `deploymentsUrl`),
+  `proxy/subgraph/[chainId]`, `proxy/merkl|fuul|incentra|turtle/*`, `proxy/aave` + `proxy/morpho`
+  (external-migration discovery), `proxy/intrinsic-apy-overrides`, `pyth/updates`, `screen-address`,
+  `tenderly/*`, `oracle-*`, `labels/*`, `tos`. This list is **not** exhaustive and drifts between
+  branches (e.g. the client-error log endpoint has been removed on `development` to keep browser
+  diagnostics local) — treat the `server/api/internal/` directory + `docs/architecture.md` as the
+  authoritative inventory, especially when auditing CSP / `connect-src`.
 - **Public routes** (`server/api/public/`): `is-known`, `metadata` (documented in `docs/public-api.md`).
 - **Server middleware:** `geo-gate.ts` (451 for sanctioned countries via Cloudflare `CF-IPCountry`;
   set `DEV_GEO_COUNTRY` locally since there's no CF header), `cors.ts`, `security-headers.ts`,
@@ -133,6 +145,24 @@ Start with `docs/README.md` (index) and `docs/architecture.md`. Notable topics:
 `pricing-system.md`, `pyth-oracle-handling.md`, `portfolio-logic.md`,
 `vault-labels-and-verification.md`, `token-list.md`, `geo-blocking.md`, `tos-signing.md`,
 `keyring-hooks.md`, `public-api.md`, `intrinsic-apy.md`.
+
+## Euler protocol safety invariants
+
+When touching transaction-building or position flows, verify against the Euler v2 protocol
+invariants — do **not** reinvent them inline. The authoritative sources are `docs/transaction-building.md`
+(EVC batching, sub-accounts, Permit2), `docs/pricing-system.md` / `docs/pyth-oracle-handling.md`
+(oracle pricing), and the `.claude/skills/review-business/SKILL.md` skill, which links the
+upstream `euler-xyz/agent-skills` (`euler-vaults`, `euler-earn`, `euler-advanced`, `euler-irm-oracles`)
+plus https://docs.euler.finance. Key invariants those cover (checklist, not a substitute for the docs):
+
+- Vault state-changing calls go through the **EVC** (`abis/evc.ts`), not directly to the vault.
+- At most **one controller (borrow) vault enabled per account**; `enableController()` must precede
+  the borrow, and `enableCollateral()` must be set before collateral is counted.
+- Prices resolve through the **EulerRouter / cross-adapter** oracle config — never a raw price feed.
+- Vaults/adapters are **factory-deployed**; treat non-factory addresses as untrusted.
+- Flash loans must be **repaid within the same batch**; `pullDebt` moves debt *to* the caller.
+- **EulerEarn** respects target allocations, cap timelocks, and ascending PublicAllocator withdrawal
+  order (`docs`/`euler-earn` skill).
 
 ## Conventions & gotchas
 
