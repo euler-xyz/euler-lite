@@ -104,6 +104,9 @@ Allowed `GET` paths:
 | `/v3/apys/rewards` | Reward APYs. |
 | `/v3/rewards/breakdown` | Rewards breakdown. |
 | `/v3/accounts/{address}/positions` | Account positions. |
+| `/v3/activity/accounts/0x…/events` | Portfolio / account activity events. Pattern requires a `0x` + 40-hex owner. |
+| `/v3/activity/vaults/{chainId}/0x…/events` | Vault activity events. Pattern requires a positive integer chain id and a `0x` + 40-hex vault. |
+| `/v3/liquidations` | Liquidation rows used to enrich activity feed liquidations. |
 | `/v3/earn/vaults` | Earn vault catalogue. |
 | `/v3/earn/vaults/{chainId}/{vault}` | Earn vault read. |
 | `/v3/earn/vaults/{chainId}/{vault}/totals` | Earn vault totals history. |
@@ -112,6 +115,8 @@ Allowed `GET` paths:
 | `/v3/evk/vaults/bad-debt` | Bad debt rows. |
 | `/v3/evk/vaults/open-interest` | Open interest by vault/collateral query. |
 | `/v3/evk/vaults/open-interest/by-collateral` | Open interest grouped by collateral. |
+
+Activity surfaces are documented end-to-end in [Activity Feed](./activity-feed.md).
 
 Allowed `POST` paths:
 
@@ -144,11 +149,13 @@ Backoff keys normalize high-cardinality account and vault paths:
 | Request shape | Backoff key behavior |
 |---|---|
 | `/v3/accounts/{address}/positions` | Address is collapsed to `/v3/accounts/:address/positions`. |
+| `/v3/activity/accounts/{owner}/events` | Owner is collapsed to `/v3/activity/accounts/:owner/events`, plus safe activity query context (`chainId`, `vaultType`, `from`, `to`, `category`, `eventType`) when present. |
+| `/v3/activity/vaults/{chainId}/{vault}/events` | Vault address is collapsed to `/v3/activity/vaults/{chainId}/:vault/events` (chain id stays in the template), plus the same safe activity query context when present. |
 | `/v3/earn/vaults/{chainId}/{vault}` | Chain and vault are collapsed to `/v3/earn/vaults/:chainId/:vault`. |
 | `/v3/{evk,earn}/vaults/{chainId}/{vault}/totals` | Full path is retained, plus `resolution`, `from`, and `to` query params when present. |
-| Other paths | Full normalized path is used. |
+| Other paths (including `/v3/liquidations`) | Full normalized path is used. |
 
-Non-OK upstream responses and fetch exceptions are logged with `ctx: "v3-proxy"`, `method`, `pathTemplate`, `upstreamHost`, `durationMs`, optional `bodyBytes`, and safe V3 context from `buildV3ProxyLogFields()`: `v3ChainId`, `v3VaultKind`, `v3VaultAddress`, and sanitized pagination/range fields such as `v3From`, `v3To`, `v3Limit`, `v3Offset`, `v3Resolution`, and `v3MinBadDebtUsd`.
+Non-OK upstream responses and fetch exceptions are logged with `ctx: "v3-proxy"`, `method`, `pathTemplate`, `upstreamHost`, `durationMs`, optional `bodyBytes`, and safe V3 context from `buildV3ProxyLogFields()`: `v3ChainId`, `v3ChainIds`, `v3VaultKind`, `v3VaultAddress`, `v3ActivityScope`, `v3ActivityCategories`, `v3ActivityEventTypes`, and sanitized pagination/range fields such as `v3From`, `v3To`, `v3Limit`, `v3Offset`, `v3Resolution`, and `v3MinBadDebtUsd`. Account, violator, and liquidator wallet addresses are intentionally omitted from logs.
 
 Troubleshooting quick checks:
 
