@@ -71,15 +71,17 @@ CI=true npm run test:run
 
 Configuration is split into two mechanisms:
 
-1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, wallet screening. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`. Browser V3 data services use the same-origin `/api/internal/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
+1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, branding, and deployment announcements. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`, with `NUXT_PUBLIC_*` values as build-time fallbacks. Browser V3 data services use the same-origin `/api/internal/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
 
-2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — branding, social links, feature flags. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
+2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — social links, feature flags, labels/oracle source URLs, and static deployment fallbacks. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
 
 3. **Chain config** (`useChainConfig()`) — derived dynamically from `RPC_URL_<chainId>` env vars at server startup, injected via `window.__CHAIN_CONFIG__`.
 
 See the [README](../README.md) for the full env var reference.
 
 Dev HTTPS: `HTTPS_KEY`, `HTTPS_CERT` (optional).
+
+Announcement modal content can be supplied as runtime `CONFIG_ANNOUNCEMENT_TITLE`, `CONFIG_ANNOUNCEMENT_BODY`, `CONFIG_ANNOUNCEMENT_ITEMS`, and `CONFIG_ANNOUNCEMENT_URL` values, or as `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` build-time fallbacks. See [Announcement Modal](./announcement-modal.md) for examples, dismissal behavior, and URL constraints.
 
 ## Server-Side Data Proxies
 
@@ -88,8 +90,8 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | Endpoint | Upstream source | Cache TTL | Env var override |
 |----------|----------------|-----------|------------------|
 | `GET /api/internal/euler-chains` | `EulerChains.json` from `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` when no interfaces branch is configured |
-| `GET /api/internal/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels (query-shape; used by Lite helpers) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
-| `GET /api/internal/labels/:chainId/:file` | `{chainId}/{file}` from euler-labels (path-shape; matches the SDK's default `eulerLabelsBaseUrl` template, shares cache with the query-shape route) | 5 min | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
+| `GET /api/internal/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels (query-shape; used by Lite helpers). Reads through the shared TTL cache — a fresh entry short-circuits without upstream. | 5 min read-through | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
+| `GET /api/internal/labels/:chainId/:file` | `{chainId}/{file}` from euler-labels (path-shape; SDK `eulerLabelsBaseUrl` template). Calls `refreshLabelFile()` directly — bypasses the fresh-cache check and joins any in-flight refresh for the same `scope:file`. Shared cache is write + stale-fallback only on this route. | 5 min shared cache (stale fallback; not read-through) | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/internal/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
 | `GET /api/internal/token-list?chainId=X` | Euler V3 + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/internal/vaults?chainId=X` | Pre-computed chain vault snapshot built by the server-side SDK | 2 min (V3 configured) / 5 min (no V3) | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL` (presence selects cadence) |
@@ -97,17 +99,17 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET\|HEAD\|POST /api/internal/proxy/fuul/:path` | `api.fuul.xyz/api/v1` (`incentives`, `totals`, `claim-checks`, `rewards` allowlist) | 30 s | `FUUL_API_URL`, `NUXT_PUBLIC_FUUL_API_URL` |
 | `GET\|HEAD\|POST /api/internal/proxy/incentra/:path` | Incentra API (`sdk/v1/`, `v1/` allowlist) | 30 s | `INCENTRA_API_URL`, `NUXT_PUBLIC_INCENTRA_API_URL` |
 | `POST /api/internal/proxy/subgraph/:chainId` | Per-chain Goldsky subgraph | 30 s | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
-| `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, account positions, vault reads, vault batch/resolve) | none — V3 caches upstream | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
+| `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, account positions, activity/liquidations, vault reads, vault batch/resolve) | none — forwards upstream; `503` during failure backoff | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
 | `GET /api/internal/pyth/updates?ids[]=...` | Pyth Hermes (`https://hermes.pyth.network/v2/updates/price/latest`) | No cache | `PYTH_API_KEY` (server-only) |
 
-All endpoints use rate limiting and return stale cached data when upstream is unavailable (except `/api/internal/pyth/updates` which requires real-time data and returns no-store cache headers). The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`.
+All listed endpoints use rate limiting. Local-TTL endpoints (everything in the table except `/api/internal/v3/...` and `/api/internal/pyth/updates`) return stale cached data when upstream is unavailable. The V3 proxy has no local TTL cache: it forwards the upstream response, or returns `503` during failure backoff / upstream outage with `retry-after`. `/api/internal/pyth/updates` requires real-time data and returns no-store cache headers. The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`. See [Server-Side Caching](./server-side-caching.md) for V3 allowlist, backoff, and labels handler divergence detail.
 
 **Startup cache warming**: `server/plugins/warm-cache.ts` runs at Nitro startup. Two timers:
 
 - **Global cycle (5 min)**: `/api/internal/euler-chains` once, cross-chain `labels/all/assets.json` once, then per-chain `/api/internal/labels/*` and `/api/internal/token-list` for every enabled non-deprecated chain, serialized so cross-chain upstreams dedupe via the in-flight cache.
 - **Vaults cycle (1 min when V3 is configured, otherwise 5 min)**: `/api/internal/vaults` per chain, also serialized.
 
-Each warm task is a **direct function call** (`refreshX()`) that bypasses the handler's fresh-cache short-circuit and forces an upstream fetch, so the entry is always overwritten before it can expire — user requests during the refresh window keep reading the still-fresh previous entry from cache. Warming runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses.
+Each warm task is a **direct function call** (`refreshX()`) that bypasses any handler fresh-cache short-circuit and forces an upstream fetch, so the entry is always overwritten before it can expire. Handlers that read through the cache (query-shape labels, vault snapshot, and similar) keep serving the still-fresh previous entry during that refresh. The path-shape labels handler does not: it calls `refreshLabelFile()` and joins the in-flight refresh instead. Warming runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses from read-through handlers.
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
