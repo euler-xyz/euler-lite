@@ -383,6 +383,7 @@ const vaultDisplay = computed(() => {
         :class="[
           index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-detail hidden' : '',
           detailAddressCount(detail) ? 'activity-event-row__detail--address-list' : '',
+          detail.key === 'change:asset_pair' ? 'activity-event-row__detail--asset-pair' : '',
         ]"
       >
         <div
@@ -728,5 +729,17 @@ const vaultDisplay = computed(() => {
     margin-left: 162px;
     margin-top: 2px;
   }
+}
+
+.activity-event-row__details--expanded .activity-event-row__detail--asset-pair:not(.hidden) {
+  display: block;
+}
+
+.activity-event-row__details--expanded .activity-event-row__detail--asset-pair .activity-event-row__detail-label {
+  padding-top: 0;
+}
+
+.activity-event-row__details--expanded .activity-event-row__detail--asset-pair .activity-event-row__detail-addresses {
+  margin-top: 2px;
 }
 </style>
