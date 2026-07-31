@@ -127,13 +127,10 @@ const applyBeaconDesign = () => {
       zIndex: 2500,
     },
     labels: {
+      whatMethodWorks: 'Euler Finance',
       messageButtonLabel: 'Create new support ticket',
       noTimeToWaitAround: '',
-      // The wallet address and diagnostics below are attached automatically,
-      // so say so where the user can see it but not edit it.
-      responseTime: address.value
-        ? `We usually reply within 4 hours. Your wallet ${shortenAddress(address.value)} and recent app diagnostics are attached.`
-        : 'We usually reply within 4 hours. Recent app diagnostics are attached.',
+      responseTime: 'Your wallet address will be attached to the ticket. We’ll investigate the issue as soon as possible.',
     },
   })
 }
