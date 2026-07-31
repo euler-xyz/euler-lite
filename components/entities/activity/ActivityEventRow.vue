@@ -380,7 +380,10 @@ const vaultDisplay = computed(() => {
         v-for="(detail, index) in details"
         :key="detail.key"
         class="activity-event-row__detail min-w-0"
-        :class="index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
+        :class="[
+          index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-detail hidden' : '',
+          detailAddressCount(detail) ? 'activity-event-row__detail--address-list' : '',
+        ]"
       >
         <div
           v-if="detail.label"
@@ -668,6 +671,20 @@ const vaultDisplay = computed(() => {
     grid-template-columns: 130px minmax(0, 1fr);
     align-items: center;
     column-gap: 12px;
+  }
+
+  /* Multi-row values such as oracle asset pairs should start beside their
+     label instead of centering the label between the two assets. */
+  .activity-event-row__details--expanded .activity-event-row__detail--address-list {
+    align-items: start;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__detail--address-list .activity-event-row__detail-label {
+    padding-top: 2px;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__detail--address-list .activity-event-row__detail-addresses {
+    margin-top: 0;
   }
 
   .activity-event-row__details--expanded .activity-event-row__detail > :not(.activity-event-row__detail-label) {
