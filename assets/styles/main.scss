@@ -76,3 +76,14 @@ body {
 html.beacon-hidden #beacon-container {
   display: none;
 }
+
+// Beacon's UI is rendered in a cross-origin iframe, so its white card
+// surfaces cannot be styled from the host app. This transforms the complete
+// rendered frame in dark mode: white menus become dark and the widget's dark
+// type becomes light, preserving contrast in every Help Scout screen.
+//
+// The Beacon source accent is pre-compensated in app.vue so it still renders
+// as the app's green after the filter is applied.
+html[data-theme="dark"] #beacon-container iframe {
+  filter: invert(1) hue-rotate(180deg);
+}

@@ -79,6 +79,9 @@ const isMenuVisible = ref(true)
 // ---------------------------------------------------------------------------
 
 const BEACON_MOBILE_BREAKPOINT = 900
+// The dark-mode iframe filter in main.scss converts this source colour to the
+// app's #23c09b Beacon accent. Help Scout has no API for an iframe dark theme.
+const BEACON_DARK_FILTER_ACCENT = '#008762'
 
 /**
  * Read a theme token straight off the document so Beacon tracks the app's
@@ -111,7 +114,10 @@ const applyBeaconDesign = () => {
   const verticalOffset = isMobile && isMenuVisible.value ? 106 : 24
 
   window.Beacon('config', {
-    color: beaconAccent.value,
+    // In dark mode Beacon's complete cross-origin frame is filtered to a dark
+    // palette. Use its pre-filter source colour so the rendered accent still
+    // matches the rest of the app.
+    color: theme.value === 'dark' ? BEACON_DARK_FILTER_ACCENT : beaconAccent.value,
     display: {
       style: 'icon',
       iconImage: 'question',
@@ -147,11 +153,6 @@ const applyBeaconSessionData = () => {
     'Recent console output': getRecentConsoleOutput() || 'none captured',
   })
 }
-
-// Beacon's config API only reaches its brand colour, icon and labels. The
-// dialog's own surfaces are themed by injecting a stylesheet into its
-// same-origin iframes — see composables/useBeaconTheme.ts.
-useBeaconTheme(theme)
 
 watch([theme, address, isMenuVisible], applyBeaconDesign, { immediate: true })
 watch([address, chainId], applyBeaconSessionData, { immediate: true })
