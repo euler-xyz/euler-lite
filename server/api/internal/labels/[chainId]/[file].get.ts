@@ -10,9 +10,12 @@
  * cross-chain `all/assets.json` file the SDK's
  * `getEulerLabelsGlobalAssetsUrl` calls). Anything else 400s.
  *
- * Reuses `refreshLabelFile` from the sibling query-shape endpoint, so
- * both paths share one in-memory TTL cache and one upstream-fetch
- * pipeline.
+ * Calls `refreshLabelFile` from the sibling query-shape endpoint, so both
+ * paths share one in-memory TTL cache and one upstream-fetch pipeline.
+ * Unlike the query-shape handler, this route does not short-circuit on a
+ * fresh cache entry: every request force-refreshes (joining any in-flight
+ * fetch for the same `scope:file`), and the shared cache is used for writes
+ * and stale fallback only.
  */
 import { createError, getRouterParam, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
