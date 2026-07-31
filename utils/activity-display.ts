@@ -449,6 +449,13 @@ export const formatActivityEventLabel = (
 ): string => {
   const sourceLabel = event.label?.trim()
   if (sourceLabel) return sourceLabel
+  const oracleRouterLabel = {
+    set_oracle_config: 'Oracle route updated',
+    set_fallback_oracle: 'Fallback oracle updated',
+    set_resolved_vault: 'Resolved vault updated',
+    set_oracle_governor: 'Oracle governor updated',
+  }[event.type]
+  if (oracleRouterLabel) return oracleRouterLabel
   if (event.type === 'transfer') {
     const direction = getActivityTransferDirection(event)
     if (direction === 'sent') return 'Vault shares sent'
@@ -817,6 +824,7 @@ export interface ActivityChangeEntry {
   field: string
   label: string
   value?: string
+  summary?: string
   addresses?: ActivityChangeAddress[]
 }
 
@@ -1032,85 +1040,123 @@ const resolveChangeAddresses = (
   })
 }
 
+const resolveOracleAssetPair = (
+  event: ActivityChangeEventSource,
+  getTokenSymbol: ActivityAddressLabelLookup | undefined,
+): ActivityChangeEntry | null => {
+  if (event.type !== 'set_oracle_config') return null
+  const asset0 = event.change?.fields.asset0
+  const asset1 = event.change?.fields.asset1
+  if (
+    typeof asset0 !== 'string'
+    || typeof asset1 !== 'string'
+    || !isAddress(asset0)
+    || !isAddress(asset1)
+  ) return null
+
+  const addresses = [asset0, asset1].map((value) => {
+    const address = value as Address
+    return {
+      address,
+      label: getTokenSymbol?.(address) ?? getSpecialAddressLabel(address) ?? shortenAddress(address),
+      linkKind: 'explorer' as const,
+    }
+  })
+  return {
+    field: 'asset_pair',
+    label: 'Asset pair',
+    summary: addresses.map(address => address.label).join(' / '),
+    addresses,
+  }
+}
+
 export const getActivityChangeEntries = (
   event: ActivityChangeEventSource,
   getVaultMetadata?: ActivityVaultMetadataLookup,
-): ActivityChangeEntry[] => orderedActivityChangeFields(event).map(([field, value]) => {
+  getTokenSymbol?: ActivityAddressLabelLookup,
+): ActivityChangeEntry[] => {
+  const assetPair = resolveOracleAssetPair(event, getTokenSymbol)
+  const fields = orderedActivityChangeFields(event)
+    .filter(([field]) => !assetPair || (field !== 'asset0' && field !== 'asset1'))
+
+  const entries = fields.map(([field, value]): ActivityChangeEntry => {
   // The zero address reads better as an explicit "None" than as a linked,
   // copyable 0x0000…0000 (e.g. a renounced governor or cleared receiver).
-  if (isZeroAddressValue(value)) {
-    return { field, label: formatActivityChangeLabel(field), value: 'None' }
-  }
-  const addresses = resolveChangeAddresses(event, field, value, getVaultMetadata)
-  if (addresses) return { field, label: formatActivityChangeLabel(field), addresses }
+    if (isZeroAddressValue(value)) {
+      return { field, label: formatActivityChangeLabel(field), value: 'None' }
+    }
+    const addresses = resolveChangeAddresses(event, field, value, getVaultMetadata)
+    if (addresses) return { field, label: formatActivityChangeLabel(field), addresses }
 
-  let formatted: string | null = null
-  const vaultMetadata = event.vault ? getVaultMetadata?.(event.vault) : undefined
-  if (event.type === 'set_caps' && (field === 'supply_cap' || field === 'borrow_cap')) {
-    formatted = formatActivityCap(value, event.vault, getVaultMetadata)
-  }
-  else if (
-    (event.type === 'set_cap' || event.type === 'submit_cap')
-    && field === 'cap'
-  ) {
-    const cap = parseActivityInteger(value)
-    formatted = event.vaultType === 'earn' && cap !== null && cap >= UINT136_MAX
-      ? 'Unlimited'
-      : formatActivityTokenAmount(value, vaultMetadata?.asset, true)
-  }
-  else if (
-    event.type === 'set_supply_cap'
-    && (field === 'cap' || field === 'supply_cap' || field === 'new_supply_cap')
-  ) {
-    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset, true)
-  }
-  else if (
-    (event.type === 'reallocate_supply' || event.type === 'reallocate_withdraw')
-    && (field === 'supplied_assets' || field === 'withdrawn_assets')
-  ) {
-    formatted = formatActivityTokenAmount(value, vaultMetadata?.asset, true)
-  }
-  else if (event.type === 'set_ltv' && field.endsWith('_ltv')) {
-    formatted = formatActivityBps(value)
-  }
-  else if (
-    event.type === 'set_config_flags'
-    && (field === 'config_flags' || field === 'new_config_flags')
-  ) {
-    formatted = formatActivityConfigFlags(value)
-  }
-  // EVK ConfigAmounts are scaled over 1e4 — 500 reads as 5%, 350 as 3.5%.
-  else if (
-    event.type === 'set_interest_fee'
-    && ['fee', 'new_fee', 'interest_fee', 'new_interest_fee'].includes(field)
-  ) {
-    formatted = formatActivityBps(value)
-  }
-  else if (
-    event.type === 'set_max_liquidation_discount'
-    && ['discount', 'new_discount', 'max_liquidation_discount', 'new_max_liquidation_discount'].includes(field)
-  ) {
-    formatted = formatActivityBps(value)
-  }
-  else if (
-    event.type === 'set_hook_config'
-    && (field === 'hooked_ops' || field === 'new_hooked_ops')
-  ) {
-    formatted = formatActivityHookedOperations(value)
-  }
-  else if (field === 'target_timestamp') {
-    formatted = formatActivityUnixTimestamp(value)
-  }
-  else if (field === 'ramp_duration' || field.endsWith('_timelock') || field.endsWith('_cool_off_time')) {
-    formatted = formatActivityDuration(value)
-  }
+    let formatted: string | null = null
+    const vaultMetadata = event.vault ? getVaultMetadata?.(event.vault) : undefined
+    if (event.type === 'set_caps' && (field === 'supply_cap' || field === 'borrow_cap')) {
+      formatted = formatActivityCap(value, event.vault, getVaultMetadata)
+    }
+    else if (
+      (event.type === 'set_cap' || event.type === 'submit_cap')
+      && field === 'cap'
+    ) {
+      const cap = parseActivityInteger(value)
+      formatted = event.vaultType === 'earn' && cap !== null && cap >= UINT136_MAX
+        ? 'Unlimited'
+        : formatActivityTokenAmount(value, vaultMetadata?.asset, true)
+    }
+    else if (
+      event.type === 'set_supply_cap'
+      && (field === 'cap' || field === 'supply_cap' || field === 'new_supply_cap')
+    ) {
+      formatted = formatActivityTokenAmount(value, vaultMetadata?.asset, true)
+    }
+    else if (
+      (event.type === 'reallocate_supply' || event.type === 'reallocate_withdraw')
+      && (field === 'supplied_assets' || field === 'withdrawn_assets')
+    ) {
+      formatted = formatActivityTokenAmount(value, vaultMetadata?.asset, true)
+    }
+    else if (event.type === 'set_ltv' && field.endsWith('_ltv')) {
+      formatted = formatActivityBps(value)
+    }
+    else if (
+      event.type === 'set_config_flags'
+      && (field === 'config_flags' || field === 'new_config_flags')
+    ) {
+      formatted = formatActivityConfigFlags(value)
+    }
+    // EVK ConfigAmounts are scaled over 1e4 — 500 reads as 5%, 350 as 3.5%.
+    else if (
+      event.type === 'set_interest_fee'
+      && ['fee', 'new_fee', 'interest_fee', 'new_interest_fee'].includes(field)
+    ) {
+      formatted = formatActivityBps(value)
+    }
+    else if (
+      event.type === 'set_max_liquidation_discount'
+      && ['discount', 'new_discount', 'max_liquidation_discount', 'new_max_liquidation_discount'].includes(field)
+    ) {
+      formatted = formatActivityBps(value)
+    }
+    else if (
+      event.type === 'set_hook_config'
+      && (field === 'hooked_ops' || field === 'new_hooked_ops')
+    ) {
+      formatted = formatActivityHookedOperations(value)
+    }
+    else if (field === 'target_timestamp') {
+      formatted = formatActivityUnixTimestamp(value)
+    }
+    else if (field === 'ramp_duration' || field.endsWith('_timelock') || field.endsWith('_cool_off_time')) {
+      formatted = formatActivityDuration(value)
+    }
 
-  return {
-    field,
-    label: formatActivityChangeLabel(field),
-    value: formatted ?? formatActivityChangeValue(value),
-  }
-})
+    return {
+      field,
+      label: formatActivityChangeLabel(field),
+      value: formatted ?? formatActivityChangeValue(value),
+    }
+  })
+  return assetPair ? [assetPair, ...entries] : entries
+}
 
 interface ActivityParticipantSource {
   account?: Address

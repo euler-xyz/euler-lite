@@ -56,6 +56,7 @@ const {
   registryVersion,
 } = useVaultRegistry()
 const { getTokenByAddress } = useTokenList()
+const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol } = useTokenSymbolResolver()
 const vaultAddress = computed(() => event.vault ?? '')
 const vaultProduct = useEulerProductOfVault(vaultAddress)
 const collateralVaultAddress = computed(() =>
@@ -92,6 +93,15 @@ const activityVaultMetadata = (address: `0x${string}`) => {
     vaultType: getRegistryVaultType(address),
   }
 }
+
+const knownTokenSymbols = computed(() => {
+  void registryVersion.value
+  return buildKnownSymbols()
+})
+
+const activityTokenSymbol = (address: `0x${string}`) =>
+  tokenMetadata(address)?.symbol
+  ?? resolveTokenSymbol(address, knownTokenSymbols.value)
 
 const resolveAvatarAsset = (asset: ActivityEvent['assets'][number]) => {
   const representsVaultShares = asset.kind === 'shares'
@@ -179,7 +189,7 @@ const assets = computed(() => {
 const changes = computed(() => {
   // Re-resolve human-readable vault names when registry metadata arrives.
   void registryVersion.value
-  return getActivityChangeEntries(event, activityVaultMetadata)
+  return getActivityChangeEntries(event, activityVaultMetadata, activityTokenSymbol)
     .filter(entry => event.category !== 'liquidations' || entry.field !== 'collateral')
     .map(entry => ({
       kind: 'change' as const,
@@ -187,6 +197,7 @@ const changes = computed(() => {
       label: entry.label,
       value: entry.value,
       valueTitle: entry.value,
+      summary: entry.summary,
       addresses: entry.addresses,
     }))
 })
@@ -237,15 +248,17 @@ const portfolioPosition = computed(() => showVault
 const COLLAPSED_ENTRY_COUNT = 1
 const hiddenEntryCount = computed(() =>
   Math.max(0, details.value.length - COLLAPSED_ENTRY_COUNT))
-const addressCollectionSummary = (count: number) =>
-  getActivityAddressCollectionSummary(event.type, count)
+const addressCollectionSummary = (detail: (typeof details.value)[number]) =>
+  'summary' in detail && detail.summary
+    ? detail.summary
+    : getActivityAddressCollectionSummary(event.type, detailAddressCount(detail))
 const detailAddressCount = (detail: (typeof details.value)[number]) =>
   'addresses' in detail && Array.isArray(detail.addresses) ? detail.addresses.length : 0
 const hasExpandableDetails = computed(() =>
   hiddenEntryCount.value > 0
   || details.value
     .slice(0, COLLAPSED_ENTRY_COUNT)
-    .some(detail => addressCollectionSummary(detailAddressCount(detail)) !== null))
+    .some(detail => addressCollectionSummary(detail) !== null))
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => portfolioPosition.value
   ? `${portfolioPosition.value.label} liquidated`
@@ -415,10 +428,10 @@ const vaultDisplay = computed(() => {
         <template v-else>
           <template v-if="detail.addresses?.length">
             <div
-              v-if="!expanded && addressCollectionSummary(detail.addresses.length)"
+              v-if="!expanded && addressCollectionSummary(detail)"
               class="break-words text-p3 text-content-primary"
             >
-              {{ addressCollectionSummary(detail.addresses.length) }}
+              {{ addressCollectionSummary(detail) }}
             </div>
             <div
               v-else

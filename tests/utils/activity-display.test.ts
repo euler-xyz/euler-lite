@@ -199,8 +199,10 @@ describe('activity display helpers', () => {
     expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Set supply cap')
     expect(formatActivityEventLabel({ type: 'set_ltv' })).toBe('Set LTV')
     expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Set interest rate model')
-    expect(formatActivityEventLabel({ type: 'set_oracle_config' })).toBe('Set oracle config')
-    expect(formatActivityEventLabel({ type: 'set_oracle_governor' })).toBe('Set oracle governor')
+    expect(formatActivityEventLabel({ type: 'set_oracle_config' })).toBe('Oracle route updated')
+    expect(formatActivityEventLabel({ type: 'set_fallback_oracle' })).toBe('Fallback oracle updated')
+    expect(formatActivityEventLabel({ type: 'set_resolved_vault' })).toBe('Resolved vault updated')
+    expect(formatActivityEventLabel({ type: 'set_oracle_governor' })).toBe('Oracle governor updated')
   })
 
   it('labels and styles vault share transfers relative to the event position', () => {
@@ -708,6 +710,44 @@ describe('activity display helpers', () => {
       },
     }, getVaultMetadata)).toEqual([
       { field: 'new_supply_cap', label: 'New supply cap', value: '155M USDC' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'set_oracle_config',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: {
+        fields: {
+          router: OTHER_VAULT,
+          oracle: VAULT,
+          asset1: SHARES,
+          asset0: ASSET,
+        },
+      },
+    }, getVaultMetadata, address => address === ASSET
+      ? 'AUSD'
+      : address === SHARES
+        ? 'PT-AUSD'
+        : undefined)).toEqual([
+      {
+        field: 'asset_pair',
+        label: 'Asset pair',
+        summary: 'AUSD / PT-AUSD',
+        addresses: [
+          { address: ASSET, label: 'AUSD', linkKind: 'explorer' },
+          { address: SHARES, label: 'PT-AUSD', linkKind: 'explorer' },
+        ],
+      },
+      {
+        field: 'oracle',
+        label: 'Oracle',
+        addresses: [{ address: VAULT, linkKind: 'explorer' }],
+      },
+      {
+        field: 'router',
+        label: 'Router',
+        addresses: [{ address: OTHER_VAULT, linkKind: 'explorer' }],
+      },
     ])
 
     expect(getActivityChangeEntries({
