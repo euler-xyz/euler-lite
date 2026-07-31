@@ -79,9 +79,9 @@ const isMenuVisible = ref(true)
 // ---------------------------------------------------------------------------
 
 const BEACON_MOBILE_BREAKPOINT = 900
-// The dark-mode iframe filter in main.scss converts this source colour to the
-// app's #23c09b Beacon accent. Help Scout has no API for an iframe dark theme.
-const BEACON_DARK_FILTER_ACCENT = '#008762'
+// The dark-mode SVG filter maps Help Scout's white canvas to --bg-body and
+// dark text to white. This source colour becomes the app's #23c09b accent.
+const BEACON_DARK_FILTER_ACCENT = '#e34472'
 
 /**
  * Read a theme token straight off the document so Beacon tracks the app's
@@ -114,9 +114,8 @@ const applyBeaconDesign = () => {
   const verticalOffset = isMobile && isMenuVisible.value ? 106 : 24
 
   window.Beacon('config', {
-    // In dark mode Beacon's complete cross-origin frame is filtered to a dark
-    // palette. Use its pre-filter source colour so the rendered accent still
-    // matches the rest of the app.
+    // Use the pre-filter source colour in dark mode so Beacon's rendered
+    // accent still matches the rest of the app.
     color: theme.value === 'dark' ? BEACON_DARK_FILTER_ACCENT : beaconAccent.value,
     display: {
       style: 'icon',
@@ -128,8 +127,10 @@ const applyBeaconDesign = () => {
       zIndex: 2500,
     },
     labels: {
-      // The wallet address and diagnostics below are attached automatically, so
-      // say so where the user can see it but not edit it.
+      messageButtonLabel: 'Create new support ticket',
+      noTimeToWaitAround: '',
+      // The wallet address and diagnostics below are attached automatically,
+      // so say so where the user can see it but not edit it.
       responseTime: address.value
         ? `We usually reply within 4 hours. Your wallet ${shortenAddress(address.value)} and recent app diagnostics are attached.`
         : 'We usually reply within 4 hours. Recent app diagnostics are attached.',
@@ -312,6 +313,36 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- Help Scout is cross-origin. This filter maps its white interface to the
+       same #08131f value used by --bg-body in the app's dark theme. -->
+  <svg
+    aria-hidden="true"
+    class="absolute w-0 h-0 overflow-hidden"
+    focusable="false"
+  >
+    <filter
+      id="euler-beacon-dark-theme"
+      color-interpolation-filters="sRGB"
+    >
+      <feComponentTransfer>
+        <feFuncR
+          type="linear"
+          slope="-0.968627"
+          intercept="1"
+        />
+        <feFuncG
+          type="linear"
+          slope="-0.92549"
+          intercept="1"
+        />
+        <feFuncB
+          type="linear"
+          slope="-0.878431"
+          intercept="1"
+        />
+      </feComponentTransfer>
+    </filter>
+  </svg>
   <div
     class="sticky top-0 z-[101]"
   >
