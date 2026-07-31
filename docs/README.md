@@ -46,6 +46,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - SDK TransactionPlan architecture and composite operations
 - EVC batching and Permit2 integration
 - Sub-accounts and position isolation
+- Simulation performance tuning and batch-cart slot-hint / account prefetch
+
+### 📜 [Activity Feed](./activity-feed.md)
+
+- V3-backed vault and portfolio activity surfaces
+- Availability gating, category defaults, and display event-type allowlists
+- Liquidation enrichment, transaction grouping, and proxy allowlist constraints
 
 ### 🧩 [SDK Integration](./sdk-integration.md)
 
