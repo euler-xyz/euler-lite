@@ -146,6 +146,11 @@ export const SDK_QUERY_POLICY = {
   // authorization mid-flow), so they take short windows + post-tx eviction.
   queryGetPosition:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
   queryGetAuthorization: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
+
+  // Activity history (V3 via /api/internal/v3). See docs/activity-feed.md.
+  queryAccountActivityEvents: { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+  queryVaultActivityEvents:   { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
+  queryLiquidations:          { staleTimeMs: ACTIVITY_QUERY_STALE_TIME_MS, invalidateAfterTx: true },
 }
 ```
 

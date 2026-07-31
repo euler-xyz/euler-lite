@@ -2,6 +2,7 @@ import { ref, watch } from 'vue'
 import { type Address, getAddress } from 'viem'
 import { fetchErc20SlotHints, type SlotHints, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
+import { mergeBatchPrefetchedSlotHints } from '~/composables/batchPrefetchState'
 import { logWarn } from '~/utils/errorHandling'
 
 const pendingStateOverrideHintResolutions = ref(0)
@@ -92,6 +93,7 @@ export const useStateOverrideOptions = () => {
             logWarn('useStateOverrideOptions/primeSlotHintsFor', e)
           }
         }))
+        mergeBatchPrefetchedSlotHints(cid, resolvedHints)
         // Re-read after the await: a concurrent prime may have landed its own
         // hints while these probes were in flight, and snapshotting before the
         // await would drop them.

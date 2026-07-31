@@ -527,6 +527,10 @@ const vaultDisplay = computed(() => {
   grid-column: 1 / -1;
 }
 
+.activity-event-row__details--expanded .activity-event-row__detail:not(.hidden) {
+  width: 100%;
+}
+
 @container activity-feed (min-width: 520px) {
   /* One rule for every row: the icon, details column, and transaction link
      center against the full card height beside the title line. */
@@ -624,7 +628,6 @@ const vaultDisplay = computed(() => {
 
   .activity-event-row__details--expanded .activity-event-row__detail:not(.hidden) {
     display: grid;
-    width: 100%;
     grid-template-columns: 130px minmax(0, 1fr);
     align-items: center;
     column-gap: 12px;
