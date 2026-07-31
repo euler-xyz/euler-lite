@@ -152,10 +152,13 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryPythUpdateData: { staleTimeMs: 30 * SECOND },
   queryPythUpdateFee: { staleTimeMs: 30 * SECOND },
 
-  // === Balances / allowances: short cache, always-fresh in form context ===
-  // Balance reads are marked `invalidateAfterTx` so that post-tx wallet refreshes
-  // (useWallets.updateBalances, fetchSingleBalance, fetchVaultShareBalance) read
-  // the new on-chain state instead of the 60-second browsing-SDK cache.
+  // === Balances / allowances: short cache, 15 s in form context ===
+  // The 15-second form window keeps external wallet changes from going unnoticed
+  // for long; it is a stale time, so a read inside that window still comes from
+  // cache. Balance reads are additionally marked `invalidateAfterTx` so post-tx
+  // wallet refreshes (useWallets.updateBalances, fetchSingleBalance,
+  // fetchVaultShareBalance) read the new on-chain state instead of the
+  // 60-second browsing-SDK cache.
   queryNativeBalance: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
   queryTokenBalances: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
   queryBalanceOf: { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
@@ -166,7 +169,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
 const policyEntries = (): [EulerSDKQueryName, SdkQueryPolicyEntry][] =>
   Object.entries(SDK_QUERY_POLICY) as [EulerSDKQueryName, SdkQueryPolicyEntry][]
 
-/** Names where `invalidateAfterTx === true` — used by post-tx and form-mount eviction. */
+/** Names where `invalidateAfterTx === true` — used by post-tx eviction. */
 export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]
   = policyEntries()
     .filter(([, p]) => p.invalidateAfterTx === true)

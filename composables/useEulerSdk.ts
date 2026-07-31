@@ -351,10 +351,11 @@ export const getEulerSdkForChain = async (chainId: number): Promise<EulerSDK> =>
 }
 
 /** "Slow"/plan-time instance: account and vault adapters stay onchain/subgraph
- *  regardless of browser source, with zero stale-time on plan-critical queries.
- *  Rewards use fallback so claim planning can combine V3 rows with direct
- *  provider proof data. Used by useEulerTx for plan construction, simulate,
- *  and execute. */
+ *  regardless of browser source, with the shorter `FORM_STALE_TIMES` windows
+ *  (1 min / 15 s) on plan-critical queries rather than a forced refetch — see
+ *  the entry-point notes at the top of this file. Rewards use fallback so claim
+ *  planning can combine V3 rows with direct provider proof data. Used by
+ *  useEulerTx for plan construction, simulate, and execute. */
 export const getEulerSdkFresh = async (): Promise<EulerSDK> => {
   const { sdk } = await lookupInstance('fresh', 'onchain', sdkFreshBuildQuery)
   return sdk
