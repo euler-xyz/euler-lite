@@ -196,9 +196,11 @@ describe('activity display helpers', () => {
 
   it('uses normalized labels and titleizes fallback event types', () => {
     expect(formatActivityEventLabel({ label: 'Borrowed USDC', type: 'borrow' })).toBe('Borrowed USDC')
-    expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Set supply cap')
-    expect(formatActivityEventLabel({ type: 'set_ltv' })).toBe('Set LTV')
-    expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Set interest rate model')
+    expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Supply cap updated')
+    expect(formatActivityEventLabel({ type: 'set_ltv' })).toBe('LTV updated')
+    expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Interest rate model updated')
+    expect(formatActivityEventLabel({ type: 'set_liquidation_cool_off_time' })).toBe('Liquidation cool-off time updated')
+    expect(formatActivityEventLabel({ type: 'set_is_allocator' })).toBe('Allocator status updated')
     expect(formatActivityEventLabel({ type: 'set_oracle_config' })).toBe('Oracle route updated')
     expect(formatActivityEventLabel({ type: 'set_fallback_oracle' })).toBe('Fallback oracle updated')
     expect(formatActivityEventLabel({ type: 'set_resolved_vault' })).toBe('Resolved vault updated')

@@ -449,13 +449,19 @@ export const formatActivityEventLabel = (
 ): string => {
   const sourceLabel = event.label?.trim()
   if (sourceLabel) return sourceLabel
-  const oracleRouterLabel = {
+  const normalizedLabel = {
     set_oracle_config: 'Oracle route updated',
     set_fallback_oracle: 'Fallback oracle updated',
     set_resolved_vault: 'Resolved vault updated',
     set_oracle_governor: 'Oracle governor updated',
+    set_liquidation_cool_off_time: 'Liquidation cool-off time updated',
+    set_is_allocator: 'Allocator status updated',
   }[event.type]
-  if (oracleRouterLabel) return oracleRouterLabel
+  if (normalizedLabel) return normalizedLabel
+  if (event.type.startsWith('set_')) {
+    const setting = titleizeActivityType(event.type.slice('set_'.length))
+    return `${applyActivityAcronyms(setting)} updated`
+  }
   if (event.type === 'transfer') {
     const direction = getActivityTransferDirection(event)
     if (direction === 'sent') return 'Vault shares sent'
