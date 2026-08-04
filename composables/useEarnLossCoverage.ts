@@ -11,8 +11,10 @@ type EarnCoverageTarget = Pick<EulerEarn, 'address' | 'lostAssets'>
  * Reads the EulerEarn share balance parked at `address(1)`, the canonical sink
  * used to cover a vault's realised losses.
  *
- * Resolves to `undefined` while loading and on failure, so callers fall back to
- * treating the recorded shortfall as fully uncovered rather than understating it.
+ * `coverageShares` is `undefined` both while a read is in flight and after one
+ * fails, so callers must consult `isCoverageLoading` to tell those apart:
+ * withhold the figure while loading, and treat a settled `undefined` as no
+ * coverage — which overstates rather than understates what is unbacked.
  *
  * Only reads when the vault actually recorded a shortfall — a vault with
  * `lostAssets == 0` has nothing to net off, so the common case costs no RPC.
@@ -35,6 +37,11 @@ export const useEarnLossCoverage = (vault: Ref<EarnCoverageTarget | undefined>) 
       return
     }
 
+    // Drop the previous vault's coverage before awaiting. The race guard stops a
+    // stale response from landing later, but it cannot retract a value already
+    // committed — leaving it in place would net this vault's shortfall against
+    // another vault's shares and understate what is actually uncovered.
+    coverageShares.value = undefined
     isLoading.value = true
 
     try {

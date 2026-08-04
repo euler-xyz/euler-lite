@@ -52,4 +52,16 @@ describe('computeUncoveredLosses', () => {
   it('pins the canonical coverage sink to address(1)', () => {
     expect(EARN_LOSS_COVERAGE_ADDRESS).toBe('0x0000000000000000000000000000000000000001')
   })
+
+  // Live mainnet state for TelosC Surge USDC (0x49C5733d71511A78a3E12925ea832f49031c97e9),
+  // a real fully covered loss: the shares parked at address(1) are worth more
+  // than the recorded shortfall, so nothing is left unbacked.
+  it('reports zero for a real fully covered vault', () => {
+    const vault = {
+      lostAssets: 238869503n,
+      convertToAssets: (shares: bigint) => (shares === 238870000n ? 244068111n : 0n),
+    }
+
+    expect(computeUncoveredLosses(vault, 238870000n)).toBe(0n)
+  })
 })
