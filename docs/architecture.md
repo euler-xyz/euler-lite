@@ -246,7 +246,7 @@ The Explore page (`pages/explore/index.vue`) provides a market discovery interfa
 
 The `useMarketGroups` composable (`composables/useMarketGroups.ts`) implements a hybrid grouping algorithm:
 
-1. **Product-label groups** — Vaults are first assigned to groups using `products` metadata from euler-labels. Each product defines a curator entity, name, and list of vault addresses.
+1. **Product-label groups** — Vaults are first assigned to groups using versioned Public Labels product metadata from V3. Each product defines its managing entity, optional display-only co-brands, name, and assigned vaults. Manager ownership and governance verification use only the managing entity.
 2. **Collateral graph augmentation** — For each group, external collateral vaults (referenced by member vaults but not in the group) are resolved and attached.
 3. **Orphan clustering** — Vaults not assigned to any product are clustered using a BFS connected-component algorithm over their collateral relationships. This produces "Ungrouped" markets.
 4. **Async TVL resolution** — Group metrics (TVL, available liquidity, borrowed) are resolved asynchronously using USD pricing.

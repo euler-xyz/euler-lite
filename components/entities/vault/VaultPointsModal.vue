@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getEulerLabelEntityLogo, getEulerLabelPointLogo } from '~/entities/euler/labels'
 
 defineEmits(['close'])
-const { pointName, pointLogo } = defineProps<{
+const { pointName, pointLogo, campaignType = 'deposit' } = defineProps<{
   pointName: string
   pointLogo: string
+  campaignType?: 'deposit' | 'borrow'
 }>()
 
 const onLogoError = (event: Event) => {
@@ -67,9 +68,9 @@ const formattedPointName = computed(() => convertMarkdownLinks(pointName))
     @close="$emit('close')"
   >
     <div class="flex items-center gap-12">
-      <span class="text-p2">Supply earns</span>
+      <span class="text-p2">{{ campaignType === 'borrow' ? 'Borrowing earns' : 'Supply earns' }}</span>
       <img
-        :src="`/entities/${pointLogo}`"
+        :src="getEulerLabelPointLogo(pointLogo)"
         alt="Point logo"
         referrerpolicy="no-referrer"
         class="w-20 h-20 rounded-full"

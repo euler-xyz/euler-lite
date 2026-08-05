@@ -30,6 +30,7 @@ const deferred = <T>(): Deferred<T> => {
 const mocks = vi.hoisted(() => ({
   evcBatchCall: vi.fn(),
   fetchEulerLabelsData: vi.fn(),
+  fetchPublicLabelsData: vi.fn(),
   getProvider: vi.fn(),
   invalidateSdkQueries: vi.fn(),
   vaults: [] as Array<{ asset: { address: string } }>,
@@ -44,6 +45,10 @@ vi.mock('~/composables/useEulerSdk', () => ({
       getProvider: mocks.getProvider,
     },
   })),
+}))
+
+vi.mock('~/utils/public-labels', () => ({
+  fetchPublicLabelsData: mocks.fetchPublicLabelsData,
 }))
 
 vi.mock('~/composables/useEulerOracleAdapters', () => ({
@@ -99,6 +104,9 @@ describe('useEulerLabels chain-scoped loading', () => {
     currentChainId.value = 1
     mocks.evcBatchCall.mockReset().mockResolvedValue([])
     mocks.fetchEulerLabelsData.mockReset()
+    mocks.fetchPublicLabelsData.mockReset().mockImplementation(
+      (_request: unknown, _chainId: number, _version: unknown, legacy: Promise<EulerLabelsData>) => legacy,
+    )
     mocks.getProvider.mockReset().mockReturnValue({})
     mocks.invalidateSdkQueries.mockReset().mockResolvedValue(undefined)
     mocks.vaults.length = 0
@@ -216,6 +224,19 @@ describe('useEulerLabels chain-scoped loading', () => {
 
     expect(currentProductKeys()).toEqual(['refreshed'])
     expect(labels.isLoading.value).toBe(false)
+    expect(labels.isReady.value).toBe(true)
+  })
+
+  it('falls back to the compatibility snapshot when Public Labels V3 fails', async () => {
+    const fallback = labelsFor('compatibility-fallback')
+    mocks.fetchEulerLabelsData.mockResolvedValue(fallback)
+    mocks.fetchPublicLabelsData.mockRejectedValue(new Error('V3 unavailable'))
+
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+
+    expect(currentProductKeys()).toEqual(['compatibility-fallback'])
+    expect(labels.geoPolicies.value).toEqual([])
     expect(labels.isReady.value).toBe(true)
   })
 

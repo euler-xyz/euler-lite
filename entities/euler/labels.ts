@@ -1,8 +1,15 @@
 export type EulerLabelEntity = {
+  id?: string
   name: string
   logo: string
   description: string
   url: string
+  legalEntityName?: string
+  riskMethodology?: string
+  security?: string
+  termsOfService?: string
+  licenses?: string
+  disclaimers?: string
   addresses: Record<string, string>
   social: {
     twitter: string
@@ -10,6 +17,7 @@ export type EulerLabelEntity = {
     discord: string
     telegram: string
     github: string
+    [key: string]: string | undefined
   }
 }
 export type EulerLabelVaultOverride = {
@@ -25,16 +33,24 @@ export type EulerLabelVaultOverride = {
 }
 
 export type EulerLabelProduct = {
+  id?: string
+  chainId?: number
   name: string
   description: string
   portfolioNotice?: string
   entity: string[] | string
+  /** Display-only brand partners. These do not participate in manager verification. */
+  coBrandEntityIds?: string[]
+  isDeprecated?: boolean
+  /** Local compatibility wrapper for a labeled vault that has no product. */
+  isStandalone?: boolean
   url: string
   vaults: string[]
   deprecatedVaults?: string[]
   deprecationReason?: string
   notExplorable?: boolean
   block?: string[]
+  restricted?: string[]
   vaultOverrides?: Record<string, EulerLabelVaultOverride>
   // Freeform classification tags, e.g. 'keyring', 'access control', or
   // 'governance limited'. Replaces the former bespoke classification booleans.
@@ -84,6 +100,7 @@ export type EulerLabelPoint = {
 export type EulerLabelPointReward = {
   name: string
   logo: string
+  type?: 'deposit' | 'borrow'
 }
 
 export const eulerLabelEntityEmpty = {
@@ -112,8 +129,12 @@ export const eulerLabelProductEmpty = {
 } as EulerLabelProduct
 
 export const getEulerLabelEntityLogo = (fileName: string) => {
+  if (/^https?:\/\//i.test(fileName)) return fileName
   const { EULER_LABELS_ENTITY_LOGO_URL } = useEulerConfig()
   return `${EULER_LABELS_ENTITY_LOGO_URL}/${fileName}`
 }
+
+export const getEulerLabelPointLogo = (fileName: string) =>
+  /^https?:\/\//i.test(fileName) ? fileName : `/entities/${fileName}`
 
 export const getEntityLogoLocalPath = (fileName: string) => `/entities/${fileName}`

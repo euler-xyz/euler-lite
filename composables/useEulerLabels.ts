@@ -20,6 +20,12 @@ import { useEulerOracleAdapters } from '~/composables/useEulerOracleAdapters'
 import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import {
+  fetchPublicLabelsData,
+  type MigratedEulerLabelsData,
+  type PublicLabelsQuery,
+  type PublicLabelsResponse,
+} from '~/utils/public-labels'
 
 const LABEL_QUERY_NAMES = [
   'queryEulerLabelsEntities',
@@ -29,7 +35,7 @@ const LABEL_QUERY_NAMES = [
   'queryEulerLabelsAssets',
 ] as const
 
-const createEmptyEulerLabelsData = (): EulerLabelsData => ({
+const createEmptyEulerLabelsData = (): MigratedEulerLabelsData => ({
   products: {},
   entities: {},
   points: {},
@@ -45,25 +51,28 @@ const createEmptyEulerLabelsData = (): EulerLabelsData => ({
   assetBlocks: {},
   assetRestrictions: {},
   assetPatternRules: [],
-} as unknown as EulerLabelsData)
+  rawGeoPolicies: [],
+} as unknown as MigratedEulerLabelsData)
 
-const labelsData = shallowRef<EulerLabelsData>(createEmptyEulerLabelsData())
+const labelsData = shallowRef<MigratedEulerLabelsData>(createEmptyEulerLabelsData())
 const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
-const pendingLabelsFetches = new Map<number, Promise<EulerLabelsData>>()
+const pendingLabelsFetches = new Map<number, Promise<MigratedEulerLabelsData>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
 
-const setLabelsData = (data: EulerLabelsData, chainId: number | null) => {
+const setLabelsData = (data: MigratedEulerLabelsData, chainId: number | null) => {
   labelsData.value = data
   labelsChainId.value = chainId
   labelsVersion.value += 1
 }
 
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
+
+export const getCurrentMigratedEulerLabelsData = (): MigratedEulerLabelsData => labelsData.value
 
 export const getEulerLabelsVersion = (): number => labelsVersion.value
 
@@ -79,7 +88,8 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
     ...data,
     notExplorableEarnVaults: data.notExplorableEarnVaults ?? new Set(),
     assetPatternRules: data.assetPatternRules ?? [],
-  } as unknown as EulerLabelsData, null)
+    rawGeoPolicies: (data as Partial<MigratedEulerLabelsData>).rawGeoPolicies ?? [],
+  } as unknown as MigratedEulerLabelsData, null)
   isReady.value = true
   isLoading.value = false
 }
@@ -100,6 +110,7 @@ const entities = toReactive(computed(() => labelsData.value.entities as Record<s
 const points = toReactive(computed(() => labelsData.value.points as Record<string, EulerLabelPointReward[]>))
 const verifiedVaultAddresses = computed(() => labelsData.value.verifiedVaultAddresses)
 const earnVaults = computed(() => labelsData.value.earnVaults)
+const geoPolicies = computed(() => labelsData.value.rawGeoPolicies)
 
 const isCurrentLabelsLoad = (chainId: number, generation: number) => {
   const { getCurrentChainConfig } = useEulerAddresses()
@@ -110,13 +121,23 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
   const pendingFetch = pendingLabelsFetches.get(chainId)
   if (pendingFetch && !forceRefresh) return pendingFetch
 
-  const fetchPromise = (async () => {
-    if (forceRefresh) {
-      await invalidateSdkQueries([...LABEL_QUERY_NAMES])
-    }
+  const request = async <T>(path: string, query: PublicLabelsQuery): Promise<PublicLabelsResponse<T>> =>
+    $fetch<PublicLabelsResponse<T>>(`/api/internal/v3${path}`, { query })
 
+  const fetchPromise = (async () => {
+    if (forceRefresh) await invalidateSdkQueries([...LABEL_QUERY_NAMES])
     const sdk = await getEulerSdk()
-    return sdk.eulerLabelsService.fetchEulerLabelsData(chainId)
+    const legacy = sdk.eulerLabelsService.fetchEulerLabelsData(chainId)
+    try {
+      return await fetchPublicLabelsData(request, chainId, undefined, legacy)
+    }
+    catch (error) {
+      logWarn('labels/public-v3', error)
+      return {
+        ...await legacy,
+        rawGeoPolicies: [],
+      } as MigratedEulerLabelsData
+    }
   })()
 
   pendingLabelsFetches.set(chainId, fetchPromise)
@@ -256,6 +277,7 @@ export const useEulerLabels = () => {
     points,
     oracleAdapters: oracleAdapters.oracleAdapters,
     earnVaults,
+    geoPolicies,
     loadLabels,
     loadOracleAdapter: oracleAdapters.loadOracleAdapter,
     loadOracleAdapters: oracleAdapters.loadOracleAdapters,

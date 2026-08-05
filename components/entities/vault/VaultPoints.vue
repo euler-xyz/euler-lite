@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getEulerLabelEntityLogo, getEulerLabelPointLogo } from '~/entities/euler/labels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultPointsModal } from '#components'
 
-const { vault } = defineProps<{ vault: EVault | EulerEarn | SecuritizeCollateralVault }>()
+const { vault, campaignType = 'deposit' } = defineProps<{
+  vault: EVault | EulerEarn | SecuritizeCollateralVault
+  campaignType?: 'deposit' | 'borrow'
+}>()
 
-const points = useEulerPointsOfVault(vault.address)
+const allPoints = useEulerPointsOfVault(vault.address)
+const points = computed(() => allPoints.filter(point =>
+  point.type ? point.type === campaignType : campaignType === 'deposit',
+))
 const modal = useModal()
 
 const onLogoError = (event: Event, logoFileName: string) => {
@@ -27,6 +33,7 @@ const onPointClick = (
     props: {
       pointName: point.name,
       pointLogo: point.logo,
+      campaignType,
     },
   })
 }
@@ -42,7 +49,7 @@ const onPointClick = (
       :key="point.name"
       class="w-16 h-16 rounded-full cursor-pointer select-none"
       :class="{ '-ml-6': index > 0 }"
-      :src="`/entities/${point.logo}`"
+      :src="getEulerLabelPointLogo(point.logo)"
       alt="Points entity logo"
       referrerpolicy="no-referrer"
       draggable="false"

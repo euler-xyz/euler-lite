@@ -465,6 +465,25 @@ describe('getMarketEntities', () => {
     expect(getMarketEntities(market)).toEqual({
       name: 'KPK & Securitize',
       logos: ['/entities/kpk.svg', '/entities/securitize.png'],
+      labels: ['KPK', 'Securitize'],
+    })
+  })
+
+  it('shows co-brand logos while keeping the product owner as the manager label', () => {
+    const market = {
+      ...makeMarket([makeVault('0xBorrow', [])]),
+      source: 'product',
+      curator: { name: 'KPK', logo: 'kpk.svg' },
+      brandEntities: [
+        { name: 'KPK', logo: 'kpk.svg' },
+        { name: 'Securitize', logo: 'securitize.png' },
+      ],
+    } as MarketGroup
+
+    expect(getMarketEntities(market)).toEqual({
+      name: 'KPK',
+      logos: ['/entities/kpk.svg', '/entities/securitize.png'],
+      labels: ['KPK', 'Securitize'],
     })
   })
 })
