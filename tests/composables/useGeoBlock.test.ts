@@ -345,12 +345,26 @@ describe('isVaultBlockedByCountry — asset-level OR', () => {
     expect(isVaultBlockedByCountry(vault)).toBe(true)
   })
 
-  it('does not block a vault whose registry lookup returns no asset', () => {
+  it('fails closed when a vault registry lookup returns no asset', () => {
     setCountry('DE')
     assetBlocks['0xdeadbeef'] = ['DE']
     const vault = '0x3333333333333333333333333333333333333333'
     getVaultMock.mockReturnValue(undefined)
-    expect(isVaultBlockedByCountry(vault)).toBe(false)
+    expect(isVaultBlockedByCountry(vault)).toBe(true)
+  })
+
+  it('uses a caller-supplied asset without depending on registry state', () => {
+    setCountry('DE')
+    assetBlocks[USDC.toLowerCase()] = ['DE']
+    const vault = '0x3333333333333333333333333333333333333333'
+    getVaultMock.mockReturnValue(undefined)
+
+    expect(isVaultBlockedByCountry(vault, {
+      asset: { address: USDC, symbol: 'USDC', name: 'USD Coin' },
+    })).toBe(true)
+    expect(isVaultBlockedByCountry(vault, {
+      asset: { address: WETH, symbol: 'WETH', name: 'Wrapped Ether' },
+    })).toBe(false)
   })
 
   it('propagates sanctioned-country blocks even without any vault rule', () => {
@@ -384,5 +398,16 @@ describe('isVaultRestrictedByCountry — asset-level OR', () => {
       asset: { address: '0xdeadbeef', symbol: 'OMPL', name: 'Ampleforth' },
     })
     expect(isVaultRestrictedByCountry(vault)).toBe(true)
+  })
+
+  it('fails closed without asset metadata and accepts a supplied chain-scoped asset', () => {
+    setCountry('DE')
+    const vault = '0x7777777777777777777777777777777777777777'
+    getVaultMock.mockReturnValue(undefined)
+
+    expect(isVaultRestrictedByCountry(vault)).toBe(true)
+    expect(isVaultRestrictedByCountry(vault, {
+      asset: { address: WETH, symbol: 'WETH', name: 'Wrapped Ether' },
+    })).toBe(false)
   })
 })

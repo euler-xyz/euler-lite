@@ -79,6 +79,10 @@ const { COLLATERAL_VAULT, NEW_COLLATERAL_VAULT, wethAsset, usdcAsset, collateral
       getEligibleLoopingRewardApyForCollaterals: vi.fn(() => 0),
       getEligibleLoopingRewardCampaignsForCollaterals: vi.fn((): RewardCampaign[] => []),
       getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
+      isVaultBlockedByCountry: vi.fn((_address: string, _opts?: unknown) => false),
+      isVaultRestrictedByCountry: vi.fn((_address: string, _opts?: unknown) => false),
+      isAssetBlockedByCountry: vi.fn((_asset?: unknown) => false),
+      isAssetRestrictedByCountry: vi.fn((_asset?: unknown, _opts?: unknown) => false),
     },
   }
 })
@@ -116,10 +120,10 @@ vi.mock('~/utils/sdk-prices', () => ({
 }))
 
 vi.mock('~/composables/useGeoBlock', () => ({
-  isAnyVaultBlockedByCountry: vi.fn(() => false),
-  isVaultRestrictedByCountry: vi.fn(() => false),
-  isAssetBlockedByCountry: vi.fn(() => false),
-  isAssetRestrictedByCountry: vi.fn(() => false),
+  isVaultBlockedByCountry: mocks.isVaultBlockedByCountry,
+  isVaultRestrictedByCountry: mocks.isVaultRestrictedByCountry,
+  isAssetBlockedByCountry: mocks.isAssetBlockedByCountry,
+  isAssetRestrictedByCountry: mocks.isAssetRestrictedByCountry,
 }))
 
 vi.mock('~/utils/operationGuardRegistry', async () => {
@@ -309,6 +313,10 @@ describe('useCollateralForm', () => {
     mocks.getEligibleLoopingRewardApyForCollaterals.mockReturnValue(0)
     mocks.getEligibleLoopingRewardCampaignsForCollaterals.mockReturnValue([])
     mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
+    mocks.isVaultBlockedByCountry.mockReturnValue(false)
+    mocks.isVaultRestrictedByCountry.mockReturnValue(false)
+    mocks.isAssetBlockedByCountry.mockReturnValue(false)
+    mocks.isAssetRestrictedByCountry.mockReturnValue(false)
     rewardsVersion.value = 0
     const swapApi = await getSwapApi()
     swapApi.effectiveQuote.value = null
@@ -556,6 +564,26 @@ describe('useCollateralForm', () => {
     form.amount.value = '2'
     await flush()
     expect(form.amountFixed.value.value).toBe(2n * 10n ** 18n)
+  })
+
+  it('direct supply checks the resolved input asset and passes vault assets to policy', async () => {
+    mocks.isAssetBlockedByCountry.mockImplementation(asset => asset === wethAsset)
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+    })
+    await flush()
+
+    expect(form.isInputAssetBlocked.value).toBe(true)
+    expect(form.submitDisabled.value).toBe(true)
+    expect(mocks.isVaultBlockedByCountry).toHaveBeenCalledWith(
+      collateralVault.address,
+      { asset: collateralVault.asset },
+    )
+    expect(mocks.isVaultBlockedByCountry).toHaveBeenCalledWith(
+      borrowVault.address,
+      { asset: borrowVault.asset },
+    )
   })
 
   it('withdraw with swap-out: amount stays collateral-denominated, quote is ignored', async () => {
