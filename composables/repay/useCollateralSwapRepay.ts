@@ -1,4 +1,4 @@
-import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan, TransactionPlanPrepared, SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
@@ -33,6 +33,7 @@ import { COWSWAP_ORDER_DEADLINE_SECONDS, getCowSwapChainConfig, getCowSwapQuoteO
 import { type CowSwapClosePositionExecuteParams, useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -77,7 +78,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
-  const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
+  const { planRepayFromSource, executePreparedPlan, prefetchPluginData } = useEulerTx()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
@@ -725,8 +726,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -737,13 +738,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
   }
 
-  const send = async () => {
-    if (!position.value || !borrowVault.value) return
-    if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
+  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
     try {
       isSubmitting.value = true
-      const txPlan = await buildRepayPlan()
-      await executePlan(txPlan)
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       await finalizeTxAndRedirect()
     }
     catch (e) {

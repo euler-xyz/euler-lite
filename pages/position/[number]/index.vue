@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { getRoe, getNetAPY } from '~/utils/vault/apy'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getBorrowCapWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdPrice, getCollateralUsdPrice, getCollateralUsdValue, toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquidation, getBorrowPositionUserLTVPercent } from '~/utils/ltv'
@@ -19,6 +19,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const _route = useRoute()
 const router = useRouter()
@@ -33,7 +34,7 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
-const { planTransfer, executePlan } = useEulerTx()
+const { planTransfer, executePreparedPlan } = useEulerTx()
 const { account: planAccount } = usePlanAccount()
 const {
   runSimulation: runDisableCollateralSimulation,
@@ -706,8 +707,8 @@ const disableCollateral = async (vault: EVault) => {
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send(vault.address)
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await send(reviewed)
         },
       },
     })
@@ -716,20 +717,10 @@ const disableCollateral = async (vault: EVault) => {
     isPreparing.value = false
   }
 }
-const send = async (collateralAddress: string) => {
+const send = async (reviewed: TransactionPlanPrepared | undefined) => {
   try {
     isSubmitting.value = true
-    const subAccount = position.value!.subAccount as Address
-    const owner = address.value as Address
-    const txPlan = await planTransfer({
-      vaultAddress: collateralAddress as Address,
-      from: subAccount,
-      to: owner,
-      amount: maxUint256,
-      disableCollateralFrom: true,
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
 
     modal.close()
     setTimeout(() => {

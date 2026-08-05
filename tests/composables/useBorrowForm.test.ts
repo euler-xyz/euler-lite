@@ -1,6 +1,6 @@
 import { computed, nextTick, ref, shallowRef, watch, watchEffect, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EVault, IHasVaultAddress, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, PortfolioSavingsPosition, TransactionPlan, TransactionPlanPrepared, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
@@ -43,6 +43,7 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
     mocks: {
       planBorrow: vi.fn(),
       executePlan: vi.fn(),
+      executePreparedPlan: vi.fn(),
       prefetchPluginData: vi.fn(),
       preloadSubAccountSnapshot: vi.fn(),
       fetchSingleBalance: vi.fn(async () => 0n),
@@ -253,6 +254,7 @@ describe('useBorrowForm savings collateral', () => {
       planBorrow: mocks.planBorrow,
       planSwapAndBorrow: vi.fn(),
       executePlan: mocks.executePlan,
+      executePreparedPlan: mocks.executePreparedPlan,
       prefetchPluginData: mocks.prefetchPluginData,
       preloadSubAccountSnapshot: mocks.preloadSubAccountSnapshot,
     }))
@@ -411,6 +413,32 @@ describe('useBorrowForm savings collateral', () => {
 
     expect(mocks.runSimulation).toHaveBeenCalled()
     expect(mocks.modalOpen).toHaveBeenCalled()
+  })
+
+  it('executes the exact prepared artifact handed back by review without rebuilding', async () => {
+    const positions = shallowRef<PortfolioSavingsPosition<VaultEntity>[]>([])
+    const form = makeForm(positions)
+    const reviewedPlan = [{ type: 'evcBatch' }] as unknown as TransactionPlan
+    mocks.planBorrow.mockResolvedValue(reviewedPlan)
+    mocks.runSimulation.mockResolvedValue(true)
+
+    form.collateralAmount.value = '1'
+    form.borrowAmount.value = '1'
+    await form.submit()
+
+    const callsBeforeConfirm = mocks.planBorrow.mock.calls.length
+    const onConfirm = mocks.modalOpen.mock.calls.at(-1)?.[1]?.props?.onConfirm as
+      | ((reviewed: TransactionPlanPrepared | undefined) => Promise<void>)
+      | undefined
+    const reviewed = { plan: reviewedPlan, chainId: 1, account: USER } as unknown as TransactionPlanPrepared
+
+    form.borrowAmount.value = '2'
+    await onConfirm?.(reviewed)
+
+    expect(mocks.executePreparedPlan).toHaveBeenCalledOnce()
+    expect(mocks.executePreparedPlan).toHaveBeenCalledWith(reviewed)
+    expect(mocks.planBorrow).toHaveBeenCalledTimes(callsBeforeConfirm)
+    expect(mocks.executePlan).not.toHaveBeenCalled()
   })
 
   it('does not project a savings share transfer as new vault cash', async () => {

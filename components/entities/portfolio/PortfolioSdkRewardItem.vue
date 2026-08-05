@@ -9,6 +9,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { executeReviewedFuulClaim } from '~/utils/fuulRewardClaim'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -34,7 +35,7 @@ const rewardClaimKey = computed(() => [
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
 const { refreshLocks } = useREULLocks()
 const { addEntry: addBatchEntry, entries: batchEntries, entryCount, clearBatch } = useTxBatch()
-const { executePlan, executePreparedPlan, prepareTransactionPlan } = useEulerTx()
+const { executePreparedPlan, prepareTransactionPlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const { settings } = useUserSettings()
@@ -85,7 +86,7 @@ const ensureWalletOnClaimChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const claim = async (reviewedFuulPlan?: TransactionPlanPrepared) => {
+const claim = async (reviewed: TransactionPlanPrepared | undefined) => {
   if (isREULBatchBlocked.value) {
     error('Clear the current batch before claiming rEUL')
     return
@@ -99,18 +100,15 @@ const claim = async (reviewedFuulPlan?: TransactionPlanPrepared) => {
   try {
     isClaiming.value = true
 
-    if (reward.provider !== 'fuul' && !plan.value) {
-      plan.value = await buildClaimRewardPlan(reward)
-    }
     if (isREULBatchBlocked.value) {
       error('Clear the current batch before claiming rEUL')
       return
     }
     if (reward.provider === 'fuul') {
-      await executeReviewedFuulClaim(reviewedFuulPlan, executePreparedPlan)
+      await executeReviewedFuulClaim(reviewed, executePreparedPlan)
     }
     else {
-      await executePlan(plan.value!)
+      await executePreparedPlan(requireReviewedExecution(reviewed))
     }
     if (isREULReward.value) {
       await refreshLocks(true)
@@ -219,8 +217,8 @@ const onClaimClick = async () => {
         plan: reviewedFuulPlan ? undefined : (plan.value || undefined),
         prepared: reviewedFuulPlan,
         submittingLabel: 'Claiming...',
-        onConfirm: async () => {
-          await claim(reviewedFuulPlan)
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await claim(reviewed)
         },
       },
     })

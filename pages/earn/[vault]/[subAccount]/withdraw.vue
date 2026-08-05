@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, type TransactionPlan, type TransactionPlanPrepared, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
@@ -15,12 +15,13 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { createRaceGuard } from '~/utils/race-guard'
 import { reportClientEvent } from '~/utils/client-observability'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { planWithdrawOrRedeem, executePlan } = useEulerTx()
+const { planWithdrawOrRedeem, executePreparedPlan } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -178,8 +179,8 @@ const submit = async () => {
         amount: amount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await send(reviewed)
         },
       },
     })
@@ -218,23 +219,10 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio/saving', { subAccount: ownerAddr, vault: vaultAddress })
 }
 
-const send = async () => {
+const send = async (reviewed: TransactionPlanPrepared | undefined) => {
   try {
     isSubmitting.value = true
-    if (!asset.value?.address) {
-      console.error('No asset address')
-      void reportClientEvent({
-        event: 'client_invariant_missing',
-        flow: 'earn_withdraw',
-        phase: 'execute_precheck',
-        invariant: 'no_asset_address',
-        vaultAddress,
-      }, new Error('No asset address'))
-      return
-    }
-
-    if (!plan.value) return
-    await executePlan(plan.value)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
 
     modal.close()
     setTimeout(() => {

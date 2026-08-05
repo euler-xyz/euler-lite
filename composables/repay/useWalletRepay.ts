@@ -1,5 +1,5 @@
 import { getPositionMultiplier } from '~/utils/vault/apy'
-import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
 import { maxUint256, type Address } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -28,6 +28,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 interface UseWalletRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -67,7 +68,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planRepayFromWallet, executePlan } = useEulerTx()
+  const { planRepayFromWallet, executePreparedPlan } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { primeSlotHintsFor } = useStateOverrideOptions()
   const { isConnected } = useWagmi()
@@ -201,8 +202,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -213,22 +214,10 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
     try {
       isSubmitting.value = true
-      if (!position.value || !borrowVault.value || !collateralVault.value) return
-
-      const amountNano = valueToNano(amount.value, borrowVault.value.asset.decimals)
-      const currentDebt = position.value.borrowed || 0n
-      const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
-      const txPlan = await planRepayFromWallet({
-        liabilityVault: borrowVault.value.address as Address,
-        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
-        receiver: position.value.subAccount as Address,
-        cleanupOnMax: isFullRepay,
-        account: planAccount.value,
-      })
-      await executePlan(txPlan)
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       await finalizeTxAndRedirect()
     }
     catch (e) {

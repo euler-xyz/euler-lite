@@ -4,7 +4,7 @@ import { OperationReviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { REULLock } from '~/entities/reul'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -13,6 +13,7 @@ import {
   runWithFreshREULLockReview,
   type REULLockReviewValidation,
 } from '~/components/entities/reward/reulUnlockReview'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const modal = useModal()
 const { error } = useToast()
@@ -20,7 +21,7 @@ const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
 const { entryCount, clearBatch } = useTxBatch()
-const { executePlan } = useEulerTx()
+const { executePreparedPlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
@@ -87,7 +88,10 @@ const showReviewRefreshError = (status: Exclude<REULLockReviewValidation['status
   }
 }
 
-const unlock = async (reviewedLock: REULLock) => {
+const unlock = async (
+  reviewedLock: REULLock,
+  reviewed: TransactionPlanPrepared | undefined,
+) => {
   if (isBatchActive.value) {
     error('Clear the current batch before unlocking rEUL')
     return
@@ -99,21 +103,14 @@ const unlock = async (reviewedLock: REULLock) => {
     const result = await runWithFreshREULLockReview(
       reviewedLock,
       () => refreshLocks(true),
-      async (currentLock) => {
+      async () => {
         if (isBatchActive.value) {
           modal.close()
           error('Clear the current batch before unlocking rEUL')
           return false
         }
 
-        const unlockPlan = await buildUnlockREULPlan([currentLock.timestamp])
-        if (isBatchActive.value) {
-          modal.close()
-          error('Clear the current batch before unlocking rEUL')
-          return false
-        }
-
-        await executePlan(unlockPlan)
+        await executePreparedPlan(requireReviewedExecution(reviewed))
         modal.close()
         await refreshLocks(true)
         return true
@@ -197,8 +194,8 @@ const onUnlockClick = async () => {
       props: {
         ...getReviewProps(reviewedLock),
         plan: plan.value || undefined,
-        onConfirm: async () => {
-          await unlock(reviewedLock)
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await unlock(reviewedLock, reviewed)
         },
       },
     })

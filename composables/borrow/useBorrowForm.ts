@@ -1,6 +1,6 @@
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
-import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, type TransactionPlanPrepared, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { areProjectedRatesComplete, getProjectedRatesBatch, getPositionMultiplier, type ProjectedRates, type ProjectedRatesRequest } from '~/utils/vault/apy'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
@@ -32,6 +32,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 // Snapshot of all borrow inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may have been reset), so the plan
@@ -96,7 +97,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planBorrow, planSwapAndBorrow, executePlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+  const { planBorrow, planSwapAndBorrow, executePreparedPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
@@ -929,64 +930,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     })
   }
 
-  // Standard (non-swap) borrow plan, shared by submit/send and the batch path.
-  // `account` is the snapshot the plan builds against (live for submit, the prior
-  // layer for batch); `subAccountSnapshotApplied` tells planBorrow whether the
-  // sub-account snapshot is already on `account` (true for batch — see below).
-  const buildStandardBorrowPlan = async (
-    account: Account<IHasVaultAddress> | undefined,
-    subAccountAddr: Address,
-    subAccountSnapshotApplied: boolean,
-  ): Promise<TransactionPlan> => {
-    if (!collateralVault.value || !borrowVault.value) {
-      throw new Error('Missing vault data')
-    }
-    let collateralAmountForPlan = collateralAmountFixed.value.toFormat({ decimals: Number(collateralVault.value.shares.decimals) }).value
-    let selectedSavingsCollateral: PortfolioSavingsPosition<VaultEntity> | undefined
-    if (isSavingCollateral.value) {
-      selectedSavingsCollateral = savingCollateral.value
-      if (!selectedSavingsCollateral) {
-        throw new Error('Savings position not found')
-      }
-      if (selectedSavingsCollateral.assets === collateralAmountForPlan) {
-        collateralAmountForPlan = selectedSavingsCollateral.shares
-      }
-      else {
-        collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountForPlan)
-      }
-    }
-    const borrowAmountNano = borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value
-    return isSavingCollateral.value
-      ? planBorrow({
-          vaultAddress: borrowVault.value.address as Address,
-          amount: borrowAmountNano,
-          borrowAccount: subAccountAddr,
-          account,
-          subAccountSnapshotApplied,
-          collateral: {
-            vault: collateralVault.value.address as Address,
-            amount: collateralAmountForPlan,
-            source: 'savings',
-            from: selectedSavingsCollateral!.subAccount as Address,
-          },
-        })
-      : planBorrow({
-          vaultAddress: borrowVault.value.address as Address,
-          amount: borrowAmountNano,
-          borrowAccount: subAccountAddr,
-          account,
-          subAccountSnapshotApplied,
-          collateral: {
-            vault: collateralVault.value.address as Address,
-            asset: collateralVault.value.asset.address as Address,
-            amount: collateralAmountForPlan,
-            wrappedNativeInfo: isBorrowNativeWrap.value
-              ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-              : undefined,
-          },
-        })
-  }
-
   // Build this form's plan for the batch ("shopping cart"), against the prior
   // layer's simulated `account`. CoW swaps can't merge into an EVC batch and are
   // gated out at the call site. `subAccountSnapshotApplied: true` keeps the layer
@@ -1113,8 +1056,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
             swapMode: SwapperMode.EXACT_IN,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+              await send(reviewed)
             },
             submittingLabel: 'Submitting...',
           },
@@ -1196,8 +1139,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           plan: plan.value || undefined,
           supplyingAssetForBorrow: collateralVault.value?.asset,
           supplyingAmount: collateralAmount.value,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -1208,32 +1151,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
     try {
       isSubmitting.value = true
-      if (!collateralVault.value || !borrowVault.value) {
-        return
-      }
-
-      let txPlan: TransactionPlan
-
-      // Swap & borrow path
-      if (borrowNeedsSwap.value) {
-        const quote = borrowSwapSelectedQuote.value || borrowSwapEffectiveQuote.value
-        if (!quote) {
-          error('No swap quote available')
-          return
-        }
-        txPlan = await buildSwapBorrowPlanFromQuote(quote)
-      }
-      else {
-        // Standard borrow path
-        const subAccountAddr = (await resolvePendingSubAccount()) as Address
-        const account = planAccount.value
-        const subAccountSnapshotApplied = await ensureBorrowSubAccountSnapshot(account, subAccountAddr)
-        txPlan = await buildStandardBorrowPlan(account, subAccountAddr, subAccountSnapshotApplied)
-      }
-      await executePlan(txPlan)
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       await finalizeTxAndRedirect()
     }
     catch (e) {

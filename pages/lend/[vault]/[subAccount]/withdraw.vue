@@ -33,6 +33,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const router = useRouter()
 const route = useRoute()
@@ -506,8 +507,8 @@ const submit = async () => {
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
           swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
         },
       })
@@ -517,15 +518,10 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
-const send = async () => {
+const send = async (reviewed: TransactionPlanPrepared | undefined) => {
   try {
     isSubmitting.value = true
-    if (!asset.value?.address) {
-      return
-    }
-
-    if (!preparedPlan.value) return
-    await executePreparedPlan(preparedPlan.value)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
 
     // share/asset balances are reactive over the account entity, which refreshes
     // after the tx; evict cached wallet token queries for the swap-output display.
