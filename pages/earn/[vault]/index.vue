@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { computeSupplyApyBreakdown, type TransactionPlan, type TransactionPlanPrepared, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -14,12 +14,13 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal } from '#components'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { planDeposit, executePlan } = useEulerTx()
+const { planDeposit, executePreparedPlan } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -184,8 +185,8 @@ const submit = async () => {
         amount: amount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await send(reviewed)
         },
       },
     })
@@ -209,19 +210,10 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
 }
 
-const send = async () => {
+const send = async (reviewed: TransactionPlanPrepared | undefined) => {
   try {
     isSubmitting.value = true
-    if (!asset.value?.address) {
-      return
-    }
-    const txPlan = plan.value ?? await planDeposit({
-      vaultAddress: vaultAddress as Address,
-      assetAddress: asset.value.address as Address,
-      amount: valueToNano(amount.value || '0', asset.value.decimals),
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
 
     modal.close()
     await updateEstimates()

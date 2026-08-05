@@ -12,6 +12,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
+import { REVIEWED_EXECUTION_UNAVAILABLE_ERROR } from '~/utils/reviewed-execution'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -57,7 +58,7 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm?: () => void | Promise<void>
+  onConfirm?: (reviewed?: TransactionPlanPrepared) => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
@@ -97,13 +98,14 @@ const hasCopiedCalldata = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
-// `preparedPlan` is either the caller-provided prepared envelope's plan or the
-// result of preparing a raw plan inside this modal.
-const preparedPlan = shallowRef<TransactionPlan | undefined>()
+// The exact caller-provided or in-modal prepared envelope displayed by Review.
+// Confirmation receives this same object, so callers cannot rebuild from live
+// form state and execute different calldata.
+const reviewedExecution = shallowRef<TransactionPlanPrepared | undefined>()
 const prepareError = ref('')
 const tenderlyLocalError = ref('')
 const isPreparingPlan = ref(false)
-const reviewPlan = computed(() => preparedPlan.value)
+const reviewPlan = computed(() => reviewedExecution.value?.plan)
 const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
 const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
 // calldataPrepared is the dedicated copy-calldata plan (e.g. carrying
@@ -136,12 +138,12 @@ watch(
     const requestId = ++prepareRequestId
     hasCopiedCalldata.value = false
     prepareError.value = ''
-    preparedPlan.value = undefined
+    reviewedExecution.value = undefined
 
     // Preferred path: caller pre-prepared the envelope. No async work — modal
     // renders the prepared plan synchronously.
     if (prepared?.plan?.length) {
-      preparedPlan.value = prepared.plan
+      reviewedExecution.value = prepared
       isPreparingPlan.value = false
       return
     }
@@ -158,14 +160,14 @@ watch(
     try {
       const envelope = await prepareTransactionPlan(plan)
       if (requestId === prepareRequestId) {
-        preparedPlan.value = envelope.plan
+        reviewedExecution.value = envelope
         prepareError.value = ''
       }
     }
     catch (err) {
       logWarn('OperationReviewModal/prepareTransactionPlan', err)
       if (requestId === prepareRequestId) {
-        preparedPlan.value = undefined
+        reviewedExecution.value = undefined
         prepareError.value = 'Transaction preparation failed. Close this review and try again.'
       }
     }
@@ -216,7 +218,11 @@ const internalSubmitting = ref(false)
 
 const handleConfirm = async () => {
   if (isConfirmDisabled.value || !onConfirm) return
-  const result = onConfirm()
+  if (!reviewedExecution.value && !allowConfirmWithoutPlan) {
+    prepareError.value = REVIEWED_EXECUTION_UNAVAILABLE_ERROR
+    return
+  }
+  const result = onConfirm(reviewedExecution.value)
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
     try {

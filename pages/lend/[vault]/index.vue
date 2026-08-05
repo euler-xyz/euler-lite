@@ -36,6 +36,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -577,8 +578,8 @@ const submit = async () => {
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
           swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
         },
       })
@@ -635,14 +636,10 @@ const addToBatch = async () => {
   })
 }
 
-const send = async () => {
+const send = async (reviewed: TransactionPlanPrepared | undefined) => {
   try {
     isSubmitting.value = true
-    if (!preparedPlan.value) {
-      throw new Error('Prepared supply plan is unavailable')
-    }
-
-    await executePreparedPlan(preparedPlan.value)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
 
     modal.close()
     await updateEstimates()

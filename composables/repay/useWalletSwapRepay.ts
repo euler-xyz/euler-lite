@@ -1,5 +1,5 @@
 import { getPositionMultiplier } from '~/utils/vault/apy'
-import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type TransactionPlanPrepared, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueForEstimate, getTokenUsdValue } from '~/utils/sdk-prices'
@@ -34,6 +34,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 interface UseWalletSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -79,7 +80,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planSwapAndRepay, executePlan, prefetchPluginData } = useEulerTx()
+  const { planSwapAndRepay, executePreparedPlan, prefetchPluginData } = useEulerTx()
   // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
   // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
   // than forging it. Skip balance overrides + keep slot hints + wallet
@@ -961,8 +962,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -973,13 +974,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
     try {
       isSubmitting.value = true
-      if (!position.value || !borrowVault.value || !collateralVault.value || !quotes.selectedQuote.value || !selectedAsset.value) return
-
-      const txPlan = await buildRepayPlan()
-      await executePlan(txPlan)
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       await finalizeTxAndRedirect()
     }
     catch (e) {

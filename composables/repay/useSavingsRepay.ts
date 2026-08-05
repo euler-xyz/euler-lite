@@ -1,4 +1,4 @@
-import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, SecuritizeCollateralVault, PortfolioBorrowPosition, SwapQuote, VaultEntity, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import type { Ref, ComputedRef } from 'vue'
@@ -23,6 +23,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 interface UseSavingsRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -73,7 +74,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
-  const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
+  const { planRepayFromSource, executePreparedPlan, prefetchPluginData } = useEulerTx()
   const { account: planAccount } = usePlanAccount()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeTxAndRedirect } = useTxFinalization()
@@ -494,8 +495,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           transferAmounts,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -506,13 +507,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     }
   }
 
-  const send = async () => {
-    if (!position.value || !borrowVault.value || !sourceVault.value) return
-    if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
+  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
     try {
       isSubmitting.value = true
-      const txPlan = await buildRepayPlan()
-      await executePlan(txPlan)
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       await finalizeTxAndRedirect()
     }
     catch (e) {

@@ -38,6 +38,7 @@ import {
   type ProjectedYieldDetails,
   type ProjectedYieldState,
 } from '~/utils/projected-yield'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 export interface UseCollateralFormOptions {
   mode: 'supply' | 'withdraw'
@@ -124,7 +125,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const submitLabel = options.reviewLabel
-  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
   const usePreparedPipeline = options.usePreparedPipeline ?? true
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
@@ -1066,8 +1067,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
             swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
             swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+              await send(reviewed)
             },
             submittingLabel: 'Submitting...',
           },
@@ -1080,39 +1081,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   }
 
   // --- Send ---
-  const send = async () => {
+  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
     try {
       isSubmitting.value = true
-      if (!asset.value?.address || !collateralVault.value?.address) return
-
-      if (usePreparedPipeline) {
-        if (!preparedPlan.value) return
-        await executePreparedPlan(preparedPlan.value)
-      }
-      else {
-        // Explicit legacy opt-out rebuilds the plan at send time.
-        let txPlan: TransactionPlan
-        if (options.needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
-          const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
-          txPlan = await options.buildSwapPlan(quote, {
-            vaultAddress: collateralVault.value.address,
-            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-            slippage: swapSlippage.value,
-            subAccount: position.value?.subAccount,
-            account: planAccount.value,
-          })
-        }
-        else {
-          txPlan = await options.buildDirectPlan({
-            vaultAddress: collateralVault.value.address,
-            assetAddress: asset.value.address,
-            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-            subAccount: position.value?.subAccount,
-            account: planAccount.value,
-          })
-        }
-        await executePlan(txPlan)
-      }
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend })
     }
     catch (e) {

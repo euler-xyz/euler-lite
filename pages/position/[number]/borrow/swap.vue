@@ -92,6 +92,7 @@ import {
   type ProjectedYieldState,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const route = useRoute()
 const router = useRouter()
@@ -112,7 +113,6 @@ const {
   planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
   executePreparedPlan,
-  executePlan,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
@@ -3665,8 +3665,8 @@ const submit = async () => {
           quoteFetchedAt: effectiveQuoteFetchedAt.value,
           vaultAmounts: refinanceVaultAmounts.value,
           ...refinanceSwapReviewInfo.value,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await send(reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -3678,16 +3678,10 @@ const submit = async () => {
   }
 }
 
-const send = async () => {
+const send = async (reviewed: TransactionPlanPrepared | undefined) => {
   isSubmitting.value = true
   try {
-    if (preparedPlan.value) {
-      await executePreparedPlan(preparedPlan.value)
-    }
-    else {
-      const txPlan = await buildRefinancePlan()
-      await executePlan(txPlan)
-    }
+    await executePreparedPlan(requireReviewedExecution(reviewed))
     modal.close()
     setTimeout(() => {
       router.replace({ path: '/portfolio', query: { network: route.query.network } })

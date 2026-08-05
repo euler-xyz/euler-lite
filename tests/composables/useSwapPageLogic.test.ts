@@ -271,7 +271,7 @@ describe('useSwapPageLogic', () => {
     }))
 
     const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm()
+    await modalArgs.props.onConfirm(prepared)
 
     expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
     expect(captured.executePlan).not.toHaveBeenCalled()
@@ -315,7 +315,7 @@ describe('useSwapPageLogic', () => {
 
     await swap.submit()
     const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm()
+    await modalArgs.props.onConfirm(prepared)
 
     expect(buildPlan).toHaveBeenCalledTimes(1)
     expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(1)

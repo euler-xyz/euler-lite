@@ -34,6 +34,7 @@ import {
   type ProjectedYieldDetails,
   type ProjectedYieldMetric,
 } from '~/utils/projected-yield'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const route = useRoute()
 const router = useRouter()
@@ -997,8 +998,8 @@ const submitMultiply = async () => {
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await sendMultiply()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await sendMultiply(reviewed)
           },
         },
       })
@@ -1009,13 +1010,10 @@ const submitMultiply = async () => {
   }
 }
 
-const sendMultiply = async () => {
-  if (!preparedPlan.value) {
-    return
-  }
+const sendMultiply = async (reviewed: TransactionPlanPrepared | undefined) => {
   isSubmitting.value = true
   try {
-    await executePreparedPlan(preparedPlan.value)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
     modal.close()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
     setTimeout(() => {

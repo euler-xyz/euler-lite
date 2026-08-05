@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef, watch, watchEffect, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, SwapQuote, TransactionPlan, TransactionPlanPrepared, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 
 const { USER, borrowVault, collateralVault, walletAsset, planAccount, mocks } = vi.hoisted(() => {
@@ -64,7 +64,9 @@ const { USER, borrowVault, collateralVault, walletAsset, planAccount, mocks } = 
         effectiveQuote: Ref<SwapQuote | null>
       }>,
       planSwapAndRepay: vi.fn(),
+      executePreparedPlan: vi.fn(),
       runSimulation: vi.fn(),
+      modalOpen: vi.fn(),
       getCollateralApySnapshot: vi.fn(),
       getNetAPYFromWeightedSupplySnapshot: vi.fn(() => 10),
       getAssetUsdValueForEstimate: vi.fn(async () => 0 as number | undefined),
@@ -79,7 +81,7 @@ vi.mock('#components', () => ({
 
 vi.mock('~/components/ui/composables/useModal', () => ({
   useModal: () => ({
-    open: vi.fn(),
+    open: mocks.modalOpen,
     close: vi.fn(),
   }),
 }))
@@ -214,6 +216,7 @@ describe('useWalletSwapRepay', () => {
     vi.stubGlobal('useEulerTx', () => ({
       planSwapAndRepay: mocks.planSwapAndRepay,
       executePlan: vi.fn(),
+      executePreparedPlan: mocks.executePreparedPlan,
       prefetchPluginData: vi.fn(),
     }))
     vi.stubGlobal('useStateOverrideOptions', () => ({
@@ -306,6 +309,57 @@ describe('useWalletSwapRepay', () => {
     }))
     expect(mocks.swapQuoteOptions[0]?.getPlanAccount?.()).toBe(planAccount)
     expect(plan).toEqual({ type: 'wallet-swap-repay-plan' })
+  })
+
+  it('executes the exact reviewed swap-repay artifact without rebuilding from a changed quote', async () => {
+    const repay = useWalletSwapRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      netAPY: ref(0),
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+    const quote = {
+      amountIn: '100',
+      amountOut: '200',
+      amountOutMin: '190',
+      receiver: borrowVault.address,
+      accountOut: USER,
+    } as SwapQuote
+    const reviewedPlan = [{ type: 'evcBatch' }] as unknown as TransactionPlan
+    mocks.planSwapAndRepay.mockResolvedValue(reviewedPlan)
+    mocks.runSimulation.mockResolvedValue(true)
+    repay.selectedAsset.value = walletAsset
+    repay.amount.value = '100'
+    mocks.quoteStates[0]!.selectedQuote.value = quote
+    mocks.quoteStates[0]!.effectiveQuote.value = quote
+
+    await repay.submit()
+
+    const callsBeforeConfirm = mocks.planSwapAndRepay.mock.calls.length
+    const onConfirm = mocks.modalOpen.mock.calls.at(-1)?.[1]?.props?.onConfirm as
+      | ((reviewed: TransactionPlanPrepared | undefined) => Promise<void>)
+      | undefined
+    const reviewed = { plan: reviewedPlan, chainId: 1, account: USER } as unknown as TransactionPlanPrepared
+    repay.amount.value = '200'
+    mocks.quoteStates[0]!.selectedQuote.value = { ...quote, amountIn: '200' }
+
+    await onConfirm?.(reviewed)
+
+    expect(mocks.executePreparedPlan).toHaveBeenCalledOnce()
+    expect(mocks.executePreparedPlan).toHaveBeenCalledWith(reviewed)
+    expect(mocks.planSwapAndRepay).toHaveBeenCalledTimes(callsBeforeConfirm)
   })
 
   it('clears an earlier Net APY estimate when the next projection rejects', async () => {

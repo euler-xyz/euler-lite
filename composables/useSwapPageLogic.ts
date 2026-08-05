@@ -15,6 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -98,7 +99,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const route = useRoute()
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
-  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -565,8 +566,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             plan: preparedPlan.value ? undefined : (plan.value || undefined),
             prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+              await send(reviewed)
             },
             submittingLabel: 'Submitting...',
           },
@@ -578,19 +579,10 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     }
   }
 
-  const send = async () => {
-    if (!fromVault.value || !toVault.value) return
-    if (!isSameAsset.value && !selectedQuote.value) return
-
+  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
     isSubmitting.value = true
     try {
-      if (preparedPlan.value) {
-        await executePreparedPlan(preparedPlan.value)
-      }
-      else {
-        const txPlan = await buildPlan(undefined, currentPlanContext())
-        await executePlan(txPlan)
-      }
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       modal.close()
       setTimeout(() => {
         router.replace({ path: redirectPath, query: { network: route.query.network } })

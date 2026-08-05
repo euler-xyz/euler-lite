@@ -43,6 +43,7 @@ import {
   type ProjectedYieldRateLine,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -90,7 +91,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePlan, preloadSubAccountSnapshot } = useEulerTx()
+  const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePreparedPlan, preloadSubAccountSnapshot } = useEulerTx()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   // State-override knobs: skip balance probing (form validates "Not enough
   // balance"), pass current wallet snapshot, and pre-prime slot hints when the
@@ -1325,8 +1326,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await sendMultiply()
+          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+            await sendMultiply(reviewed)
           },
         },
       })
@@ -1336,14 +1337,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
   }
 
-  const sendMultiply = async () => {
-    // Use the unprepared plan and let executeTransactionPlan re-run plugins
-    // at submit time — keeps the on-chain Pyth update payload fresh so the
-    // staleness check can't bite us between Review-click and broadcast.
-    if (!multiplyPlan.value) return
+  const sendMultiply = async (reviewed: TransactionPlanPrepared | undefined) => {
     isMultiplySubmitting.value = true
     try {
-      await executePlan(multiplyPlan.value)
+      await executePreparedPlan(requireReviewedExecution(reviewed))
       await finalizeTxAndRedirect()
     }
     catch (e) {

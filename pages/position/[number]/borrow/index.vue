@@ -8,7 +8,7 @@ import { getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePr
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import type { PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { PortfolioBorrowPosition, VaultEntity, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
@@ -42,12 +42,13 @@ import {
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const router = useRouter()
 const _route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { planBorrow, executePlan } = useEulerTx()
+const { planBorrow, executePreparedPlan } = useEulerTx()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -227,10 +228,6 @@ const priceFixed = computed(() => {
   return FixedPoint.fromValue(conservativePriceRatio(collateralPrice, borrowPrice), 18)
 })
 priceInvert.autoInvert(() => priceFixed.value.toUnsafeFloat())
-const borrowAmountFixed = computed(() => FixedPoint.fromValue(
-  valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals),
-  Number(borrowVault.value?.asset.decimals),
-))
 const ltvFixed = computed(() => {
   const fn = FixedPoint.fromValue(valueToNano(ltv.value, 4), 4)
   const maxLtv = FixedPoint.fromValue(valueToNano(ltvToPercent(pair.value?.ltv.borrowLTV ?? 0), 4), 4)
@@ -458,8 +455,8 @@ const submit = async () => {
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await send(reviewed)
         },
       },
     })
@@ -494,19 +491,10 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio', { subAccount: borrowAccount })
 }
 
-const send = async () => {
+const send = async (reviewed: TransactionPlanPrepared | undefined) => {
   try {
     isSubmitting.value = true
-    if (!collateralVault.value || !borrowVault.value || !position.value) {
-      return
-    }
-    const txPlan = await planBorrow({
-      vaultAddress: borrowVault.value.address as Address,
-      amount: borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value,
-      borrowAccount: position.value.subAccount as Address,
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
 
     modal.close()
     updateBalance()

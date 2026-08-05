@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { OperationReviewModal } from '#components'
 import { formatUnits } from 'viem'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { UserReward } from '~/entities/reward-campaign'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -39,7 +40,7 @@ const rewardClaimKey = computed(() => [
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
 const { addEntry: addBatchEntry, entries: batchEntries } = useTxBatch()
-const { executePlan } = useEulerTx()
+const { executePreparedPlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const { settings } = useUserSettings()
@@ -79,7 +80,7 @@ const ensureWalletOnClaimChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const claim = async () => {
+const claim = async (reviewed: TransactionPlanPrepared | undefined) => {
   if (isSpyMode.value) {
     error('Exit spy mode to claim rewards')
     return
@@ -88,10 +89,7 @@ const claim = async () => {
   try {
     isClaiming.value = true
 
-    if (!plan.value) {
-      plan.value = await buildClaimRewardPlan(reward)
-    }
-    await executePlan(plan.value)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
     modal.close()
     await refreshRewards({ delayedRetry: true })
   }
@@ -181,8 +179,8 @@ const onClaimClick = async () => {
         amount: rewardAmount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Claiming...',
-        onConfirm: async () => {
-          await claim()
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await claim(reviewed)
         },
       },
     })

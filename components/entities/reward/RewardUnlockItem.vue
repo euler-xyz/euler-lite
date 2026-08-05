@@ -4,10 +4,11 @@ import { OperationReviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { REULLock } from '~/entities/reul'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 const modal = useModal()
 const { error } = useToast()
@@ -15,7 +16,7 @@ const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
 const { addEntry: addBatchEntry } = useTxBatch()
-const { executePlan } = useEulerTx()
+const { executePreparedPlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
@@ -76,12 +77,11 @@ const ensureWalletOnSiteChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const unlock = async () => {
+const unlock = async (reviewed: TransactionPlanPrepared | undefined) => {
   try {
     isUnlocking.value = true
 
-    const unlockPlan = await buildUnlockREULPlan([item.timestamp])
-    await executePlan(unlockPlan)
+    await executePreparedPlan(requireReviewedExecution(reviewed))
     modal.close()
     await refreshLocks(false)
   }
@@ -160,8 +160,8 @@ const onUnlockClick = async () => {
         ...getReviewProps(),
         amount: unlockableAmount.value,
         plan: plan.value || undefined,
-        onConfirm: async () => {
-          await unlock()
+        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
+          await unlock(reviewed)
         },
       },
     })
