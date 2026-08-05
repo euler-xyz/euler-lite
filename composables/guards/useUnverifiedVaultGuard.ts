@@ -1,4 +1,4 @@
-import { computed, provide, reactive, ref, watch, onUnmounted, type ComputedRef } from 'vue'
+import { computed, provide, reactive, ref, watch, onUnmounted, type ComputedRef, type Ref } from 'vue'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 
@@ -7,11 +7,25 @@ export interface UnverifiedVaultGuardState {
   acknowledgeRisk: () => void
 }
 
-export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) => {
+interface UnverifiedVaultGuardContext {
+  account: Ref<string | undefined>
+  chainId: Ref<number | undefined>
+}
+
+export const useUnverifiedVaultGuard = (
+  vaultAddresses: ComputedRef<string[]>,
+  context?: UnverifiedVaultGuardContext,
+) => {
   const { isKnownEscrowAddress } = useVaultRegistry()
   const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
 
-  const sessionAccepted = ref(false)
+  const acknowledgedContextKey = ref('')
+
+  const contextKey = computed(() => {
+    const addresses = [...new Set(vaultAddresses.value.map(normalizeAddress))].sort()
+    const account = context?.account.value ? normalizeAddress(context.account.value) : ''
+    return JSON.stringify([context?.chainId.value ?? null, account, addresses])
+  })
 
   const hasUnverifiedVault = computed(() =>
     vaultAddresses.value.some((addr) => {
@@ -23,11 +37,11 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
   )
 
   const isAcknowledgmentRequired = computed(() =>
-    hasUnverifiedVault.value && !sessionAccepted.value,
+    hasUnverifiedVault.value && acknowledgedContextKey.value !== contextKey.value,
   )
 
   const acknowledgeRisk = () => {
-    sessionAccepted.value = true
+    acknowledgedContextKey.value = contextKey.value
   }
 
   watch(isAcknowledgmentRequired, (required) => {
