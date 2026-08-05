@@ -1,4 +1,5 @@
 import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { getEulerLabelProductBrandEntities } from '@eulerxyz/euler-v2-sdk/public-labels'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
@@ -9,7 +10,6 @@ import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProdu
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
-import { getEulerLabelProductBrandEntities } from '~/utils/public-labels'
 
 // -- Helpers --
 

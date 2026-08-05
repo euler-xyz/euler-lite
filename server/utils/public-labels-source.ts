@@ -3,8 +3,8 @@ import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
 import { getEffectiveLabelsSource } from './labels-source'
 import { logger } from './logger'
+import { PublicLabelsV3Adapter } from '@eulerxyz/euler-v2-sdk/public-labels'
 import {
-  fetchPublicLabelsSource,
   normalizePublicLabelsData,
   PUBLIC_LABELS_RUNTIME_VERSION,
   type PublicEulerLabelsData,
@@ -22,13 +22,6 @@ const cache = createTtlCache<PublicLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntri
 const inFlight = createInFlightDedup<string, PublicLabelsBundle>()
 
 const cacheKey = (chainId: number, version: string): string => `${chainId}:${version}`
-
-interface PublishedLabelVersion {
-  versionKey?: string
-  status?: string
-  aliases?: string[]
-  isLatest?: boolean
-}
 
 const buildRequest = (): PublicLabelsRequest => async <T>(
   path: string,
@@ -52,23 +45,6 @@ const buildRequest = (): PublicLabelsRequest => async <T>(
   return await response.json() as PublicLabelsResponse<T>
 }
 
-const resolveVersion = async (
-  request: PublicLabelsRequest,
-  requestedVersion: string,
-): Promise<string> => {
-  if (requestedVersion !== PUBLIC_LABELS_RUNTIME_VERSION) return requestedVersion
-  const response = await request<PublishedLabelVersion[]>('/label-sets/public/versions', {})
-  if (!Array.isArray(response.data)) throw new Error('Invalid Public Labels versions response')
-  const published = response.data.find(version =>
-    version.status === 'published'
-    && (version.isLatest === true || version.aliases?.includes(PUBLIC_LABELS_RUNTIME_VERSION)),
-  )
-  if (!published?.versionKey || !/^v[0-9]{17}$/.test(published.versionKey)) {
-    throw new Error('Public Labels latest alias is unavailable')
-  }
-  return published.versionKey
-}
-
 export function refreshPublicLabelsBundle(
   chainId: number,
   version = PUBLIC_LABELS_RUNTIME_VERSION,
@@ -79,16 +55,23 @@ export function refreshPublicLabelsBundle(
       const bundle = await withWallClock(
         async () => {
           const request = buildRequest()
-          const resolvedVersion = await resolveVersion(request, version)
-          const [publicLabels, effectivePolicy] = await Promise.all([
-            fetchPublicLabelsSource(request, chainId, resolvedVersion),
+          const adapter = new PublicLabelsV3Adapter({
+            endpoint: readResolvedV3ApiUrl(),
+            request,
+          })
+          const [snapshot, effectivePolicy] = await Promise.all([
+            adapter.fetchPublicLabelsSnapshot(chainId, version),
             getEffectiveLabelsSource(chainId),
           ])
           // Validate the complete cross-source relationship before replacing
           // a known-good raw bundle. Server consumers normalize it again into
           // SDK-compatible Sets/RegExps; the browser receives JSON-safe data.
-          normalizePublicLabelsData(chainId, publicLabels, effectivePolicy)
-          return { version: resolvedVersion, publicLabels, effectivePolicy }
+          normalizePublicLabelsData(chainId, snapshot.publicLabels, effectivePolicy)
+          return {
+            version: snapshot.version,
+            publicLabels: snapshot.publicLabels,
+            effectivePolicy,
+          }
         },
         REFRESH_BUDGET_MS,
         `public-labels chain=${chainId}`,

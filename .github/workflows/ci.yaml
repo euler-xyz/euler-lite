@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  EULER_SDK_BRANCH: feat/public-labels-v3-sdk
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -47,6 +50,8 @@ jobs:
 
       - run: npm ci
 
+      - run: sh scripts/install-preview-sdk.sh
+
       - run: npm run typecheck
 
   test:
@@ -65,6 +70,8 @@ jobs:
       - run: npm install -g npm@11.10.0
 
       - run: npm ci
+
+      - run: sh scripts/install-preview-sdk.sh
 
       # tests/utils/logger-bundle.test.ts inspects the production client bundle
       # at .output/public/_nuxt and hard-fails under CI when it is absent, so

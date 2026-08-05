@@ -1,125 +1,33 @@
-import type { EulerLabelAssetPatternRule, EulerLabelsData } from '@eulerxyz/euler-v2-sdk'
+import {
+  hasPublishedVaultLabelContent,
+  normalizePublicLabelsData as normalizeSdkPublicLabelsData,
+  type EulerLabelAssetPatternRule,
+  type PublicEulerLabelsData,
+  type PublicLabelsSource,
+} from '@eulerxyz/euler-v2-sdk/public-labels'
 import { getAddress } from 'viem'
-import type {
-  EulerLabelEarnVaultEntry,
-  EulerLabelAssetEntry,
-  EulerLabelEntity,
-  EulerLabelPointReward,
-  EulerLabelProduct,
-  EulerLabelVaultOverride,
-} from '~/entities/euler/labels'
+import type { EulerLabelAssetEntry, EulerLabelProduct } from '~/entities/euler/labels'
 
-export const PUBLIC_LABELS_RUNTIME_VERSION = 'latest'
+export {
+  PUBLIC_LABELS_RUNTIME_VERSION,
+} from '@eulerxyz/euler-v2-sdk/public-labels'
+
+export type {
+  PublicEntityAddress,
+  PublicEntityLabel,
+  PublicEulerLabelsData,
+  PublicGeoPolicy,
+  PublicLabelsMeta,
+  PublicLabelsQuery,
+  PublicLabelsRequest,
+  PublicLabelsResponse,
+  PublicLabelsSource,
+  PublicProductLabel,
+  PublicVaultCampaign,
+  PublicVaultLabel,
+} from '@eulerxyz/euler-v2-sdk/public-labels'
+
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
-export const PUBLIC_LABELS_PAGE_SIZE = 100
-
-const MAX_PUBLIC_LABEL_RECORDS = 10_000
-const ENTITY_ADDRESS_CONCURRENCY = 8
-
-export interface PublicLabelsMeta {
-  total?: number
-  limit?: number
-  offset?: number
-  timestamp: string
-}
-
-export interface PublicLabelsResponse<T> {
-  data: T
-  meta: PublicLabelsMeta
-}
-
-export interface PublicVaultCampaign {
-  name: string
-  logo: string | null
-  type: 'deposit' | 'borrow'
-}
-
-export interface PublicVaultLabel {
-  chainId: number
-  address: string
-  vaultType: 'evk' | 'earn' | 'securitize' | 'escrow'
-  productId: string | null
-  entityId: string | null
-  name: string | null
-  description: string | null
-  portfolioNotice: string | null
-  isDeprecated: boolean
-  deprecationReason: string | null
-  tags: string[]
-  campaigns: PublicVaultCampaign[] | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PublicProductLabel {
-  id: string
-  chainId: number
-  entityId: string
-  coBrandEntityIds?: string[] | null
-  name: string
-  logo?: string | null
-  description: string | null
-  url: string | null
-  portfolioNotice: string | null
-  isDeprecated: boolean
-  deprecationReason: string | null
-  governanceMode: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PublicEntityLabel {
-  id: string
-  name: string
-  logo: string | null
-  description: string | null
-  url: string | null
-  socialTwitter: string | null
-  socialYoutube: string | null
-  socialDiscord: string | null
-  socialTelegram: string | null
-  socialGithub: string | null
-  socialDefillama: string | null
-  legalEntityName: string | null
-  riskMethodology: string | null
-  security: string | null
-  termsOfService: string | null
-  licenses: string | null
-  disclaimers: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PublicEntityAddress {
-  entityId: string
-  chainId: number
-  address: string
-  label: string | null
-}
-
-export interface PublicGeoPolicy {
-  id: string
-  chainId: number | null
-  productId: string | null
-  vaultAddress: string | null
-  assetAddress: string | null
-  assetSymbols?: string[] | null
-  assetSymbolRegex?: string | null
-  assetNames?: string[] | null
-  assetNameRegex?: string | null
-  countries: string[]
-  policyType: 'block' | 'restrict'
-  reason: string | null
-  createdAt: string
-}
-
-export interface PublicLabelsSource {
-  vaults: PublicVaultLabel[]
-  products: PublicProductLabel[]
-  entities: PublicEntityLabel[]
-  entityAddresses: PublicEntityAddress[]
-  geoPolicies: PublicGeoPolicy[]
-}
 
 export interface EffectiveProductPolicy {
   block?: string[]
@@ -160,144 +68,11 @@ export interface PublicLabelsBundle {
   effectivePolicy: EffectiveLabelsSource
 }
 
-export type PublicLabelsQuery = Record<string, string | number | undefined>
-export type PublicLabelsRequest = <T>(
-  path: string,
-  query: PublicLabelsQuery,
-) => Promise<PublicLabelsResponse<T>>
-
-export type PublicEulerLabelsData = Omit<EulerLabelsData, 'products' | 'entities'> & {
-  products: Record<string, EulerLabelProduct>
-  entities: Record<string, EulerLabelEntity>
-  /** Versioned policy records are informational until effective precedence is specified. */
-  rawGeoPolicies: PublicGeoPolicy[]
-}
-
-export const getEulerLabelProductBrandEntityKeys = (product: EulerLabelProduct): string[] => {
-  const ownerKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
-  return [...new Set([...ownerKeys.filter(Boolean), ...(product.coBrandEntityIds ?? [])])]
-}
-
-export const getEulerLabelProductBrandEntities = (
-  product: EulerLabelProduct,
-  entities: Record<string, EulerLabelEntity>,
-): EulerLabelEntity[] => getEulerLabelProductBrandEntityKeys(product)
-  .map(key => entities[key])
-  .filter((entity): entity is EulerLabelEntity => Boolean(entity))
-
-const isNonNegativeInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 0
-
-const assertListResponse = <T>(
-  response: PublicLabelsResponse<T[]>,
-  path: string,
-): { items: T[], total: number } => {
-  if (!response || !Array.isArray(response.data)) {
-    throw new Error(`Invalid Public Labels response for ${path}`)
-  }
-  const total = response.meta?.total
-  if (!isNonNegativeInteger(total) || total > MAX_PUBLIC_LABEL_RECORDS) {
-    throw new Error(`Invalid Public Labels total for ${path}`)
-  }
-  return { items: response.data, total }
-}
-
-export const fetchAllPublicLabelPages = async <T>(
-  request: PublicLabelsRequest,
-  path: string,
-  query: PublicLabelsQuery,
-): Promise<T[]> => {
-  const result: T[] = []
-  let offset = 0
-
-  while (true) {
-    const response = await request<T[]>(path, {
-      ...query,
-      limit: PUBLIC_LABELS_PAGE_SIZE,
-      offset,
-    })
-    const { items, total } = assertListResponse(response, path)
-    result.push(...items)
-
-    if (result.length >= total) return result.slice(0, total)
-    if (items.length === 0) {
-      throw new Error(`Public Labels pagination stalled for ${path}`)
-    }
-    offset += items.length
-  }
-}
-
-const mapWithConcurrency = async <T, R>(
-  values: T[],
-  concurrency: number,
-  mapper: (value: T) => Promise<R>,
-): Promise<R[]> => {
-  const result = new Array<R>(values.length)
-  let nextIndex = 0
-
-  const worker = async () => {
-    while (nextIndex < values.length) {
-      const index = nextIndex++
-      result[index] = await mapper(values[index])
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, values.length) }, () => worker()),
-  )
-  return result
-}
-
-const isSafeEntityId = (value: string): boolean => /^[A-Za-z0-9_-]{1,100}$/.test(value)
-
-export const fetchPublicLabelsData = async (
-  request: PublicLabelsRequest,
-  chainId: number,
-  version = PUBLIC_LABELS_RUNTIME_VERSION,
-  effectivePolicy?: EffectiveLabelsSource | Promise<EffectiveLabelsSource>,
-): Promise<PublicEulerLabelsData> => {
-  const [source, resolvedEffectivePolicy] = await Promise.all([
-    fetchPublicLabelsSource(request, chainId, version),
-    Promise.resolve(effectivePolicy),
-  ])
-  return normalizePublicLabelsData(chainId, source, resolvedEffectivePolicy)
-}
-
-export const fetchPublicLabelsSource = async (
-  request: PublicLabelsRequest,
-  chainId: number,
-  version = PUBLIC_LABELS_RUNTIME_VERSION,
-): Promise<PublicLabelsSource> => {
-  const [vaults, products, entities, geoPolicies] = await Promise.all([
-    fetchAllPublicLabelPages<PublicVaultLabel>(request, '/curation/vaults', { version, chainId }),
-    fetchAllPublicLabelPages<PublicProductLabel>(request, '/products', { version, chainId }),
-    fetchAllPublicLabelPages<PublicEntityLabel>(request, '/entities', { version }),
-    fetchAllPublicLabelPages<PublicGeoPolicy>(request, '/geo-policies', { version }),
-  ])
-
-  const entityIds = [...new Set([
-    ...products.flatMap(product => [product.entityId, ...(product.coBrandEntityIds ?? [])]),
-    ...vaults.flatMap(vault => vault.entityId ? [vault.entityId] : []),
-  ])].filter(isSafeEntityId)
-
-  const entityAddressPages = await mapWithConcurrency(
-    entityIds,
-    ENTITY_ADDRESS_CONCURRENCY,
-    entityId => fetchAllPublicLabelPages<PublicEntityAddress>(
-      request,
-      `/entities/${entityId}/addresses`,
-      { chainId, version },
-    ),
-  )
-
-  return {
-    vaults,
-    products,
-    entities,
-    entityAddresses: entityAddressPages.flat(),
-    geoPolicies,
-  }
-}
+const emptyEffectiveLabelsSource = (): EffectiveLabelsSource => ({
+  products: {},
+  earnVaults: [],
+  assets: [],
+})
 
 const uniqueStrings = (values: Iterable<string>): string[] => [...new Set(values)]
 
@@ -309,143 +84,6 @@ const tryAddress = (value: string): string | undefined => {
     return undefined
   }
 }
-
-const present = <T>(value: T | null | undefined): T | undefined =>
-  value === null || value === undefined ? undefined : value
-
-const safeHttpUrl = (value: string | null | undefined): string => {
-  if (!value) return ''
-  try {
-    const protocol = new URL(value).protocol
-    return protocol === 'http:' || protocol === 'https:' ? value : ''
-  }
-  catch {
-    return ''
-  }
-}
-
-const makeVaultOverride = (vault: PublicVaultLabel): EulerLabelVaultOverride => ({
-  ...present(vault.name) !== undefined && { name: vault.name! },
-  ...present(vault.description) !== undefined && { description: vault.description! },
-  ...present(vault.portfolioNotice) !== undefined && { portfolioNotice: vault.portfolioNotice! },
-  ...present(vault.deprecationReason) !== undefined && { deprecationReason: vault.deprecationReason! },
-  ...(vault.tags.length > 0 && { tags: [...vault.tags] }),
-})
-
-const buildEntity = (
-  entity: PublicEntityLabel,
-  addresses: PublicEntityAddress[],
-): EulerLabelEntity => ({
-  id: entity.id,
-  name: entity.name,
-  logo: safeHttpUrl(entity.logo),
-  description: entity.description ?? '',
-  url: safeHttpUrl(entity.url),
-  ...present(entity.legalEntityName) !== undefined && { legalEntityName: entity.legalEntityName! },
-  ...present(entity.riskMethodology) !== undefined && { riskMethodology: entity.riskMethodology! },
-  ...present(entity.security) !== undefined && { security: entity.security! },
-  ...present(entity.termsOfService) !== undefined && { termsOfService: entity.termsOfService! },
-  ...present(entity.licenses) !== undefined && { licenses: entity.licenses! },
-  ...present(entity.disclaimers) !== undefined && { disclaimers: entity.disclaimers! },
-  addresses: Object.fromEntries(addresses.map(entry => [getAddress(entry.address), entry.label ?? ''])),
-  social: {
-    twitter: safeHttpUrl(entity.socialTwitter),
-    youtube: safeHttpUrl(entity.socialYoutube),
-    discord: safeHttpUrl(entity.socialDiscord),
-    telegram: safeHttpUrl(entity.socialTelegram),
-    github: safeHttpUrl(entity.socialGithub),
-    defillama: safeHttpUrl(entity.socialDefillama),
-  },
-})
-
-const productTags = (vaults: PublicVaultLabel[]): string[] | undefined => {
-  if (vaults.length === 0) return undefined
-  const tags = uniqueStrings(vaults[0].tags).filter(tag =>
-    vaults.every(vault => vault.tags.includes(tag)),
-  )
-  return tags.length > 0 ? tags : undefined
-}
-
-const buildProduct = (
-  product: PublicProductLabel,
-  vaults: PublicVaultLabel[],
-): EulerLabelProduct => {
-  const active: string[] = []
-  const deprecated: string[] = []
-  const vaultOverrides: Record<string, EulerLabelVaultOverride> = {}
-
-  for (const vault of vaults) {
-    const address = getAddress(vault.address)
-    if (vault.isDeprecated) deprecated.push(address)
-    else active.push(address)
-    vaultOverrides[address] = makeVaultOverride(vault)
-  }
-
-  const tags = productTags(vaults)
-  const logo = safeHttpUrl(product.logo)
-  return {
-    id: product.id,
-    chainId: product.chainId,
-    name: product.name,
-    description: product.description ?? '',
-    ...(product.portfolioNotice && { portfolioNotice: product.portfolioNotice }),
-    entity: product.entityId,
-    coBrandEntityIds: [...(product.coBrandEntityIds ?? [])],
-    url: safeHttpUrl(product.url),
-    ...(logo && { logo }),
-    vaults: active,
-    deprecatedVaults: deprecated,
-    ...(product.deprecationReason && { deprecationReason: product.deprecationReason }),
-    ...(product.isDeprecated && { isDeprecated: true }),
-    ...(tags && { tags }),
-    vaultOverrides,
-  }
-}
-
-const standaloneProductKey = (address: string): string => `__vault_${address.toLowerCase()}`
-
-/**
- * The inventory is a union of label and assessment records. A row with only
- * identity/type/timestamps is assessment-only and must not affect listing or
- * verification state.
- */
-export const hasPublishedVaultLabelContent = (vault: PublicVaultLabel): boolean => Boolean(
-  vault.productId
-  || vault.entityId
-  || vault.name
-  || vault.description
-  || vault.portfolioNotice
-  || vault.isDeprecated
-  || vault.deprecationReason
-  || vault.tags.length
-  || vault.campaigns?.length,
-)
-
-const buildStandaloneProduct = (vault: PublicVaultLabel): EulerLabelProduct => {
-  const address = getAddress(vault.address)
-  return {
-    id: standaloneProductKey(address),
-    chainId: vault.chainId,
-    isStandalone: true,
-    name: vault.name ?? '',
-    description: vault.description ?? '',
-    ...(vault.portfolioNotice && { portfolioNotice: vault.portfolioNotice }),
-    entity: vault.entityId ?? '',
-    coBrandEntityIds: [],
-    url: '',
-    vaults: vault.isDeprecated ? [] : [address],
-    deprecatedVaults: vault.isDeprecated ? [address] : [],
-    ...(vault.deprecationReason && { deprecationReason: vault.deprecationReason }),
-    ...(vault.tags.length > 0 && { tags: [...vault.tags] }),
-    vaultOverrides: { [address]: makeVaultOverride(vault) },
-  }
-}
-
-const emptyEffectiveLabelsSource = (): EffectiveLabelsSource => ({
-  products: {},
-  earnVaults: [],
-  assets: [],
-})
 
 const getEffectiveVaultSets = (effective: EffectiveLabelsSource) => {
   const verified = new Set<string>()
@@ -508,14 +146,19 @@ const normalizeEffectiveAssets = (entries: EulerLabelAssetEntry[]) => {
   return { blocks, restrictions, patternRules }
 }
 
+/**
+ * Adds Lite's temporary effective-policy compatibility layer to the canonical
+ * Public Labels content normalized by the SDK.
+ */
 export const normalizePublicLabelsData = (
   chainId: number,
   source: PublicLabelsSource,
   effectivePolicy: EffectiveLabelsSource = emptyEffectiveLabelsSource(),
 ): PublicEulerLabelsData => {
+  const data = normalizeSdkPublicLabelsData(chainId, source)
   const inventoryRows = source.vaults.filter(vault => vault.chainId === chainId)
-  const chainVaults = inventoryRows.filter(hasPublishedVaultLabelContent)
   const { verified: compatibilityVerified, earn: compatibilityEarn } = getEffectiveVaultSets(effectivePolicy)
+
   // Plain-address labels and assessment-only rows have the same empty content
   // shape in the inventory. Retain an empty row only when the compatibility
   // snapshot already classifies that exact published inventory address.
@@ -530,85 +173,22 @@ export const normalizePublicLabelsData = (
     && vault.vaultType !== 'escrow'
     && compatibilityVerified.has(vault.address.toLowerCase()),
   )
-  const productRows = source.products.filter(product => product.chainId === chainId)
-  const vaultsByProduct = new Map<string, PublicVaultLabel[]>()
-  for (const vault of chainVaults) {
-    if (!vault.productId) continue
-    const rows = vaultsByProduct.get(vault.productId) ?? []
-    rows.push(vault)
-    vaultsByProduct.set(vault.productId, rows)
+
+  const verifiedVaultAddresses = [
+    ...data.verifiedVaultAddresses,
+    ...compatibilityVerifiedRows.map(vault => getAddress(vault.address)),
+  ]
+  const earnVaults = [...data.earnVaults]
+  const earnVaultEntries = { ...data.earnVaultEntries }
+  for (const vault of compatibilityEarnRows) {
+    const address = getAddress(vault.address)
+    earnVaults.push(address)
+    earnVaultEntries[address.toLowerCase()] ??= { address }
   }
 
-  const products: Record<string, EulerLabelProduct> = {}
-  for (const product of productRows) {
-    products[product.id] = buildProduct(product, vaultsByProduct.get(product.id) ?? [])
-  }
-
-  for (const vault of chainVaults) {
-    if (vault.productId) {
-      if (!products[vault.productId]) {
-        throw new Error(`Public Labels vault references missing product ${vault.productId}`)
-      }
-      continue
-    }
-    if (vault.vaultType !== 'earn' && vault.vaultType !== 'escrow') {
-      products[standaloneProductKey(vault.address)] = buildStandaloneProduct(vault)
-    }
-  }
-
-  const addressesByEntity = new Map<string, PublicEntityAddress[]>()
-  for (const address of source.entityAddresses) {
-    if (address.chainId !== chainId) continue
-    const rows = addressesByEntity.get(address.entityId) ?? []
-    rows.push(address)
-    addressesByEntity.set(address.entityId, rows)
-  }
-  const entities = Object.fromEntries(source.entities.map(entity => [
-    entity.id,
-    buildEntity(entity, addressesByEntity.get(entity.id) ?? []),
-  ])) as Record<string, EulerLabelEntity>
-
-  const verifiedVaultAddresses: string[] = compatibilityVerifiedRows.map(vault => getAddress(vault.address))
-  const earnVaults: string[] = []
-  const earnVaultEntries: Record<string, EulerLabelEarnVaultEntry> = {}
+  const products = data.products as Record<string, EulerLabelProduct>
   const effectiveEarn = normalizeEffectiveEarnPolicy(effectivePolicy)
   const effectiveAssets = normalizeEffectiveAssets(effectivePolicy.assets)
-  const earnVaultBlocks: Record<string, string[]> = effectiveEarn.blocks
-  const earnVaultRestrictions: Record<string, string[]> = effectiveEarn.restrictions
-  const deprecatedEarnVaults: Record<string, string> = {}
-  const earnVaultDescriptions: Record<string, string> = {}
-  const earnVaultNotices: Record<string, string> = {}
-  const notExplorableEarnVaults = effectiveEarn.notExplorable
-  const points: Record<string, EulerLabelPointReward[]> = {}
-  for (const vault of [...chainVaults, ...compatibilityEarnRows]) {
-    const address = getAddress(vault.address)
-    const lower = address.toLowerCase()
-    if (vault.vaultType === 'earn') {
-      earnVaults.push(address)
-      earnVaultEntries[lower] = {
-        address,
-        ...(vault.tags.length > 0 && { tags: [...vault.tags] }),
-        ...(vault.isDeprecated && { deprecated: true }),
-        ...(vault.deprecationReason && { deprecationReason: vault.deprecationReason }),
-        ...(vault.description && { description: vault.description }),
-        ...(vault.portfolioNotice && { portfolioNotice: vault.portfolioNotice }),
-      }
-      if (vault.isDeprecated) deprecatedEarnVaults[lower] = vault.deprecationReason ?? ''
-      if (vault.description) earnVaultDescriptions[lower] = vault.description
-      if (vault.portfolioNotice) earnVaultNotices[lower] = vault.portfolioNotice
-    }
-    else if (vault.vaultType !== 'escrow') {
-      verifiedVaultAddresses.push(address)
-    }
-
-    if (vault.campaigns?.length) {
-      points[address] = vault.campaigns.map(campaign => ({
-        name: campaign.name,
-        logo: safeHttpUrl(campaign.logo),
-        type: campaign.type,
-      }))
-    }
-  }
 
   // Apply the currently effective geo/visibility policy. Raw V3 geo policies
   // are intentionally not composed here: global/product/vault/asset precedence
@@ -635,6 +215,7 @@ export const normalizePublicLabelsData = (
       target.notExplorableBorrow = previous.notExplorableBorrow
     }
   }
+
   for (const [address, entry] of Object.entries(earnVaultEntries)) {
     entry.block = effectiveEarn.blocks[address]
     entry.restricted = effectiveEarn.restrictions[address]
@@ -642,23 +223,16 @@ export const normalizePublicLabelsData = (
   }
 
   return {
+    ...data,
     products,
-    entities,
-    points,
     verifiedVaultAddresses: uniqueStrings(verifiedVaultAddresses),
     earnVaults: uniqueStrings(earnVaults),
     earnVaultEntries,
-    earnVaultBlocks,
-    earnVaultRestrictions,
-    deprecatedEarnVaults,
-    earnVaultDescriptions,
-    earnVaultNotices,
-    notExplorableEarnVaults,
+    earnVaultBlocks: effectiveEarn.blocks,
+    earnVaultRestrictions: effectiveEarn.restrictions,
+    notExplorableEarnVaults: effectiveEarn.notExplorable,
     assetBlocks: effectiveAssets.blocks,
     assetRestrictions: effectiveAssets.restrictions,
     assetPatternRules: effectiveAssets.patternRules,
-    rawGeoPolicies: source.geoPolicies.filter(policy =>
-      policy.chainId === null || policy.chainId === chainId,
-    ),
-  } as PublicEulerLabelsData
+  }
 }

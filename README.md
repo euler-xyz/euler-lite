@@ -298,7 +298,7 @@ docker build \
 
 When `EULER_SDK_BRANCH` is set, the builder clones `euler-xyz/euler-sdks`, builds `packages/euler-v2-sdk`, packs it, and installs that tarball with `--no-save` before running the Lite build. The committed Lite package files still point at the installed npm version.
 
-Railway PR builds use the same Dockerfile. Set `EULER_SDK_BRANCH` for previews that should consume a branch from `https://github.com/euler-xyz/euler-sdks.git`; leave it unset for previews that should use the npm version in `package-lock.json`.
+Railway PR builds use the same Dockerfile. Set `EULER_SDK_BRANCH` for previews that should consume a branch from `https://github.com/euler-xyz/euler-sdks.git`; leave it unset for previews that should use the npm version in `package-lock.json`. Paired Lite PRs can run `sh scripts/install-preview-sdk.sh` after `npm ci` in CI to validate the same SDK branch without changing the committed dependency.
 
 The SDK preview build installs `pnpm@10` by default. Set `EULER_SDK_PNPM_VERSION` if the SDK branch requires another pnpm version.
 

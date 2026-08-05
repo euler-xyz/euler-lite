@@ -1,14 +1,11 @@
 import { getAddress } from 'viem'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  fetchAllPublicLabelPages,
-  fetchPublicLabelsData,
   getEulerLabelProductBrandEntities,
   getEulerLabelProductBrandEntityKeys,
+} from '@eulerxyz/euler-v2-sdk/public-labels'
+import {
   normalizePublicLabelsData,
-  PUBLIC_LABELS_PAGE_SIZE,
-  type PublicLabelsRequest,
-  type PublicProductLabel,
   type EffectiveLabelsSource,
 } from '~/utils/public-labels'
 import {
@@ -23,74 +20,6 @@ import {
   VERIFICATION_ONLY_EVK,
   publicLabelsFixture,
 } from '~/tests/fixtures/public-labels-v20260804151305236'
-
-describe('Public Labels pagination', () => {
-  it('follows meta.total with limit/offset using the pinned fixture version', async () => {
-    const rows = Array.from({ length: 167 }, (_, index) => ({ id: `product-${index}` }))
-    const request = vi.fn(async (_path: string, query: Record<string, string | number | undefined>) => {
-      const offset = Number(query.offset)
-      return {
-        data: rows.slice(offset, offset + PUBLIC_LABELS_PAGE_SIZE),
-        meta: {
-          total: rows.length,
-          offset,
-          limit: PUBLIC_LABELS_PAGE_SIZE,
-          timestamp: '2026-08-04T15:13:05.236Z',
-        },
-      }
-    })
-
-    const result = await fetchAllPublicLabelPages<Pick<PublicProductLabel, 'id'>>(
-      request as PublicLabelsRequest,
-      '/products',
-      { version: PUBLIC_LABELS_FIXTURE_VERSION },
-    )
-
-    expect(result).toHaveLength(167)
-    expect(request.mock.calls.map(([, query]) => query)).toEqual([
-      { version: PUBLIC_LABELS_FIXTURE_VERSION, limit: 100, offset: 0 },
-      { version: PUBLIC_LABELS_FIXTURE_VERSION, limit: 100, offset: 100 },
-    ])
-  })
-
-  it('fails closed when pagination stops before meta.total', async () => {
-    const request = vi.fn(async () => ({
-      data: [],
-      meta: { total: 1, timestamp: '2026-08-04T15:13:05.236Z' },
-    })) as PublicLabelsRequest
-
-    await expect(fetchAllPublicLabelPages(request, '/products', {
-      version: PUBLIC_LABELS_FIXTURE_VERSION,
-    })).rejects.toThrow('pagination stalled')
-  })
-
-  it('pins entity governance-address reads to the selected dataset version', async () => {
-    const rowsByPath: Record<string, unknown[]> = {
-      '/curation/vaults': publicLabelsFixture.vaults,
-      '/products': publicLabelsFixture.products,
-      '/entities': publicLabelsFixture.entities,
-      '/geo-policies': publicLabelsFixture.geoPolicies,
-      '/entities/kpk/addresses': publicLabelsFixture.entityAddresses,
-      '/entities/securitize/addresses': [],
-    }
-    const request = vi.fn(async (path: string) => ({
-      data: rowsByPath[path] ?? [],
-      meta: {
-        total: (rowsByPath[path] ?? []).length,
-        timestamp: '2026-08-04T15:13:05.236Z',
-      },
-    })) as PublicLabelsRequest
-
-    await fetchPublicLabelsData(request, 1, PUBLIC_LABELS_FIXTURE_VERSION)
-
-    const addressCalls = vi.mocked(request).mock.calls.filter(([path]) => path.endsWith('/addresses'))
-    expect(addressCalls).toHaveLength(2)
-    expect(addressCalls.map(([, query]) => query)).toEqual([
-      { chainId: 1, version: PUBLIC_LABELS_FIXTURE_VERSION, limit: 100, offset: 0 },
-      { chainId: 1, version: PUBLIC_LABELS_FIXTURE_VERSION, limit: 100, offset: 0 },
-    ])
-  })
-})
 
 describe(`Public Labels ${PUBLIC_LABELS_FIXTURE_VERSION} normalization`, () => {
   it('keeps KPK as owner, exposes Securitize as a co-brand, and maps hosted profiles', () => {

@@ -1,106 +1,23 @@
-export type EulerLabelEntity = {
-  id?: string
-  name: string
-  logo: string
-  description: string
-  url: string
-  legalEntityName?: string
-  riskMethodology?: string
-  security?: string
-  termsOfService?: string
-  licenses?: string
-  disclaimers?: string
-  addresses: Record<string, string>
-  social: {
-    twitter: string
-    youtube: string
-    discord: string
-    telegram: string
-    github: string
-    [key: string]: string | undefined
-  }
-}
-export type EulerLabelVaultOverride = {
-  name?: string
-  description?: string
-  portfolioNotice?: string
-  deprecationReason?: string
-  block?: string[]
-  restricted?: string[]
-  notExplorableLend?: boolean
-  notExplorableBorrow?: boolean
-  tags?: string[]
-}
+import type {
+  EulerLabelAssetEntry as SdkEulerLabelAssetEntry,
+  EulerLabelEarnVaultEntry as SdkEulerLabelEarnVaultEntry,
+  EulerLabelEntity as SdkEulerLabelEntity,
+  EulerLabelPoint as SdkEulerLabelPoint,
+  EulerLabelProduct as SdkEulerLabelProduct,
+  EulerLabelVaultOverride as SdkEulerLabelVaultOverride,
+} from '@eulerxyz/euler-v2-sdk/public-labels'
 
-export type EulerLabelProduct = {
-  id?: string
-  chainId?: number
-  name: string
-  description: string
-  portfolioNotice?: string
+export type EulerLabelEntity = SdkEulerLabelEntity
+export type EulerLabelVaultOverride = SdkEulerLabelVaultOverride
+export type EulerLabelEarnVaultEntry = SdkEulerLabelEarnVaultEntry
+export type EulerLabelAssetEntry = SdkEulerLabelAssetEntry
+export type EulerLabelPoint = SdkEulerLabelPoint
+export type EulerLabelPointReward = SdkEulerLabelPoint
+
+// Lite's existing UI assumes every rendered product has a managing entity.
+// Public Labels normalization guarantees that shape for product records.
+export type EulerLabelProduct = Omit<SdkEulerLabelProduct, 'entity'> & {
   entity: string[] | string
-  /** Display-only brand partners. These do not participate in manager verification. */
-  coBrandEntityIds?: string[]
-  isDeprecated?: boolean
-  /** Local compatibility wrapper for a labeled vault that has no product. */
-  isStandalone?: boolean
-  url: string
-  vaults: string[]
-  deprecatedVaults?: string[]
-  deprecationReason?: string
-  notExplorable?: boolean
-  block?: string[]
-  restricted?: string[]
-  vaultOverrides?: Record<string, EulerLabelVaultOverride>
-  // Freeform classification tags, e.g. 'keyring', 'access control', or
-  // 'governance limited'. Replaces the former bespoke classification booleans.
-  tags?: string[]
-}
-
-export type EulerLabelEarnVaultEntry = {
-  address: string
-  block?: string[]
-  restricted?: string[]
-  tags?: string[]
-  deprecated?: boolean
-  deprecationReason?: string
-  description?: string
-  portfolioNotice?: string
-  notExplorable?: boolean
-}
-
-/**
- * Asset-level geo-blocking entry. At least one match field
- * (`address` | `symbols` | `symbolRegex` | `names` | `nameRegex`) must be
- * set. When multiple match fields are set they are OR-composed: the entry
- * matches an asset if ANY populated match field matches.
- *
- * All string comparisons (`symbols`, `names`) are case-insensitive. Regex
- * fields are compiled with the `i` flag at load time. Invalid regexes are
- * dropped with a warning.
- *
- * `block` (hard) and `restricted` (soft) follow the same semantics as
- * vault-level rules; countries accept the `EU` / `EEA` / `EFTA` aliases.
- */
-export type EulerLabelAssetEntry = {
-  address?: string
-  symbols?: string[]
-  symbolRegex?: string
-  names?: string[]
-  nameRegex?: string
-  block?: string[]
-  restricted?: string[]
-}
-export type EulerLabelPoint = {
-  name: string
-  logo: string
-  collateralVaults?: string[]
-}
-
-export type EulerLabelPointReward = {
-  name: string
-  logo: string
-  type?: 'deposit' | 'borrow'
 }
 
 export const eulerLabelEntityEmpty = {
@@ -117,6 +34,7 @@ export const eulerLabelEntityEmpty = {
     github: '',
   },
 } as EulerLabelEntity
+
 export const eulerLabelProductEmpty = {
   name: '',
   description: '',
@@ -128,9 +46,8 @@ export const eulerLabelProductEmpty = {
   vaultOverrides: {},
 } as EulerLabelProduct
 
-export const getEulerLabelEntityLogo = (fileName: string) => {
-  return /^https?:\/\//i.test(fileName) ? fileName : ''
-}
+export const getEulerLabelEntityLogo = (fileName: string) =>
+  /^https?:\/\//i.test(fileName) ? fileName : ''
 
 export const getEulerLabelPointLogo = (fileName: string) =>
   /^https?:\/\//i.test(fileName) ? fileName : ''

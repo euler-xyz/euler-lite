@@ -1,4 +1,4 @@
-import type { PublicLabelsSource } from '~/utils/public-labels'
+import type { PublicLabelsSource } from '@eulerxyz/euler-v2-sdk/public-labels'
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
