@@ -146,6 +146,9 @@ export const useREULLocks = () => {
       chainId,
       account: wagmiAddress.value as Address,
       lockTimestamp: lockTimestamps[0] as bigint,
+      // Early unlocks can burn the unvested remainder; the review UI displays
+      // that loss before building this explicitly opted-in plan.
+      allowRemainderLoss: true,
       rEulAddress: reulTokenContractAddress.value
         ? (reulTokenContractAddress.value as Address)
         : undefined,
