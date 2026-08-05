@@ -815,6 +815,8 @@ const buildPlanAssetMap = (
 ): KnownAssetMap => {
   const assets: KnownAssetMap = {}
   addKnownAsset(assets, ctx.asset)
+  addKnownAsset(assets, ctx.supplyingAssetForBorrow)
+  addKnownAsset(assets, ctx.swapFromAsset)
   addKnownAsset(assets, ctx.swapToAsset)
   for (const asset of ctx.knownAssets ?? []) addKnownAsset(assets, asset)
 
@@ -1151,13 +1153,22 @@ export function buildTransactionPlanDisplaySteps(
       const resolved = item.resolved ?? []
       for (const r of resolved) {
         index++
+        const token = r.token ?? item.token
+        const approvalAsset = getKnownAsset(token, ctx, getVault, knownAssets)
+        const assetInfo: StepAssetInfo = approvalAsset
+          ? buildAssetInfo(approvalAsset, r.amount)
+          : {
+              symbol: token,
+              address: token,
+              amount: `${r.amount.toString()} base units`,
+            }
         if (r.type === 'approve') {
           steps.push({
             index,
             label: 'Approve',
-            labelSuffix: 'for vault',
+            labelSuffix: `for spender ${r.spender}`,
             isSeparateTx: true,
-            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
+            assetInfo,
           })
         }
         else {
@@ -1165,8 +1176,9 @@ export function buildTransactionPlanDisplaySteps(
           steps.push({
             index,
             label: 'Sign permit2 message',
+            labelSuffix: `for spender ${r.spender}`,
             isSeparateTx: false,
-            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
+            assetInfo,
           })
         }
       }
