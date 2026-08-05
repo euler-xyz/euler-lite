@@ -158,15 +158,20 @@ const authorizationSummaryGroups = computed(() =>
   }).filter(({ rows }) => rows.length),
 )
 
-// Unverified vaults the batch touches — surfaced as a warning. A vault is the
-// target of an op's core action; we read targets off each op's contextual plan
-// and check the registry's verification flag (same source the forms use).
-const unverifiedVaultNames = computed<string[]>(() => {
-  const names = new Set<string>()
-  for (const entry of entries.value) {
-    const plan = entryPlans.value[entry.id]
-    if (!plan) continue
-    for (const item of plan) {
+// Prepared plan (with plugins and approvals resolved) shared by review,
+// calldata export, and the unverified-vault consent gate.
+const preparedPlanRef = ref<TransactionPlan | undefined>()
+
+// Unverified vaults the batch touches. Once preparation completes this is
+// derived from the exact prepared envelope that backs calldata and execution,
+// so a transformed plan cannot silently change the consent set.
+const unverifiedVaults = computed<Array<{ address: string, name: string }>>(() => {
+  const vaults = new Map<string, string>()
+  const plans = preparedPlanRef.value?.length
+    ? [preparedPlanRef.value]
+    : entries.value.map(entry => entryPlans.value[entry.id]).filter(Boolean)
+  for (const plan of plans) {
+    for (const item of plan ?? []) {
       if (item.type !== 'evcBatch') continue
       for (const bi of flattenBatchEntries(item.items)) {
         try {
@@ -174,16 +179,29 @@ const unverifiedVaultNames = computed<string[]>(() => {
           const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
           if (vault && !isVerifiedVault(addr)) {
             const name = vault.shares?.name || vault.asset?.symbol || ''
-            if (name) names.add(name)
+            vaults.set(addr.toLowerCase(), name || addr)
           }
         }
         catch { /* skip malformed address */ }
       }
     }
   }
-  return [...names]
+  return [...vaults].map(([address, name]) => ({ address, name }))
 })
+const unverifiedVaultNames = computed(() => unverifiedVaults.value.map(vault => vault.name))
 const hasUnverified = computed(() => unverifiedVaultNames.value.length > 0)
+const unverifiedContextKey = computed(() => JSON.stringify([
+  chainId.value ?? null,
+  ownerSubAccountKey.value ?? '',
+  unverifiedVaults.value.map(vault => vault.address).sort(),
+]))
+const acknowledgedUnverifiedContextKey = ref('')
+const hasAcknowledgedUnverifiedBatch = computed({
+  get: () => !hasUnverified.value || acknowledgedUnverifiedContextKey.value === unverifiedContextKey.value,
+  set: (accepted: boolean) => {
+    acknowledgedUnverifiedContextKey.value = accepted ? unverifiedContextKey.value : ''
+  },
+})
 
 interface REULUnlockInfo {
   unlockableAmount: number
@@ -295,8 +313,6 @@ interface ResolvedApproval { type: string, token: string }
 const approvals = ref<Array<{ kind: 'approve' | 'permit', symbol: string }>>([])
 const isPreparing = ref(false)
 const prepareError = ref('')
-// The prepared plan (with approvals resolved) backs "Copy calldata".
-const preparedPlanRef = ref<TransactionPlan | undefined>()
 const hasPermit2Approval = computed(() =>
   hasPermit2TokenApproval(preparedPlanRef.value, eulerCoreAddresses.value?.permit2),
 )
@@ -383,11 +399,18 @@ const copyCalldata = async () => {
 const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
 
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
+  isSpyMode.value
+  || isExecuting.value
+  || isPreparing.value
+  || isSimulating.value
+  || !canExecuteBatch.value
+  || !!prepareError.value
+  || !hasAcknowledgedUnverifiedBatch.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
   if (hasGeoBlockedEntries.value) return 'This operation is not available in your region'
+  if (!hasAcknowledgedUnverifiedBatch.value) return 'Acknowledge the current unverified vault set to execute'
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
   if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
   if (simError.value) return 'This batch would revert — resolve the flagged error'
@@ -643,6 +666,13 @@ const handleClose = () => {
         title="Interacting with an unverified vault"
         :description="`This batch interacts with an unverified vault (${unverifiedVaultNames.join(', ')}). Proceeding with an unknown and unverified vault may pose security risks — such vaults could potentially be used for phishing attempts.`"
       />
+      <label
+        v-if="hasUnverified"
+        class="flex items-start gap-8 text-p3 text-content-secondary cursor-pointer"
+      >
+        <UiCheckbox v-model="hasAcknowledgedUnverifiedBatch" />
+        <span>I understand and want to execute this batch against the unverified vaults listed above.</span>
+      </label>
 
       <!-- Top-level batch error (revert / status-check / wallet shortfall) -->
       <BatchAlert

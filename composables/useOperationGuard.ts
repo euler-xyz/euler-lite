@@ -21,7 +21,10 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
   useTosGuard()
 
   // --- Unverified vault guard ---
-  useUnverifiedVaultGuard(addresses)
+  useUnverifiedVaultGuard(addresses, {
+    account: userAddress,
+    chainId,
+  })
 
   // --- Keyring guard ---
   const keyringVaultAddress = computed(() =>
