@@ -263,6 +263,75 @@ const disableController = () => encodeFunctionData({
   args: [],
 })
 
+describe('buildTransactionPlanDisplaySteps approval rows', () => {
+  it('uses the approval token, amount, and spender instead of the operation asset', () => {
+    const collateralAmount = 2n * 10n ** 18n
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: wethAsset,
+      owner: account,
+      spender: wethVault,
+      amount: collateralAmount,
+      resolved: [{
+        type: 'approve',
+        token: wethAsset,
+        owner: account,
+        spender: wethVault,
+        amount: collateralAmount,
+        data: '0x',
+      }],
+    }]
+
+    const steps = buildTransactionPlanDisplaySteps(plan, {
+      type: 'borrow',
+      asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+      amount: '1',
+      supplyingAssetForBorrow: { symbol: 'WETH', address: wethAsset, decimals: 18 },
+      supplyingAmount: '2',
+    }, getVault, () => '')
+
+    expect(steps).toEqual([{
+      index: 1,
+      label: 'Approve',
+      labelSuffix: `for spender ${wethVault}`,
+      isSeparateTx: true,
+      assetInfo: {
+        symbol: 'WETH',
+        address: wethAsset,
+        amount: '2',
+      },
+    }])
+  })
+
+  it('does not fall back to the primary asset when approval token metadata is unknown', () => {
+    const unknownToken = '0x0000000000000000000000000000000000000041' as Address
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: unknownToken,
+      owner: account,
+      spender: verifier,
+      amount: 123n,
+      resolved: [{
+        type: 'permit2',
+        token: unknownToken,
+        owner: account,
+        spender: verifier,
+        amount: 123n,
+      }],
+    }]
+
+    const [step] = buildTransactionPlanDisplaySteps(plan, ctx, getVault, () => '')
+
+    expect(step?.assetInfo).toEqual({
+      symbol: unknownToken,
+      address: unknownToken,
+      amount: '123 base units',
+    })
+    expect(step?.assetInfo?.address).not.toBe(usdcAsset)
+    expect(step?.labelSuffix).toBe(`for spender ${verifier}`)
+  })
+})
+
 const swapperMulticall = (calls: Hex[]) => encodeFunctionData({
   abi: swapperAbi,
   functionName: 'multicall',
