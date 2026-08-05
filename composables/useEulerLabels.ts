@@ -21,11 +21,11 @@ import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
   normalizePublicLabelsData,
-  type MigratedEulerLabelsData,
+  type PublicEulerLabelsData,
   type PublicLabelsBundle,
 } from '~/utils/public-labels'
 
-const createEmptyEulerLabelsData = (): MigratedEulerLabelsData => ({
+const createEmptyEulerLabelsData = (): PublicEulerLabelsData => ({
   products: {},
   entities: {},
   points: {},
@@ -42,27 +42,25 @@ const createEmptyEulerLabelsData = (): MigratedEulerLabelsData => ({
   assetRestrictions: {},
   assetPatternRules: [],
   rawGeoPolicies: [],
-} as unknown as MigratedEulerLabelsData)
+} as unknown as PublicEulerLabelsData)
 
-const labelsData = shallowRef<MigratedEulerLabelsData>(createEmptyEulerLabelsData())
+const labelsData = shallowRef<PublicEulerLabelsData>(createEmptyEulerLabelsData())
 const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
-const pendingLabelsFetches = new Map<number, Promise<MigratedEulerLabelsData>>()
+const pendingLabelsFetches = new Map<number, Promise<PublicEulerLabelsData>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
 
-const setLabelsData = (data: MigratedEulerLabelsData, chainId: number | null) => {
+const setLabelsData = (data: PublicEulerLabelsData, chainId: number | null) => {
   labelsData.value = data
   labelsChainId.value = chainId
   labelsVersion.value += 1
 }
 
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
-
-export const getCurrentMigratedEulerLabelsData = (): MigratedEulerLabelsData => labelsData.value
 
 export const getEulerLabelsVersion = (): number => labelsVersion.value
 
@@ -78,8 +76,8 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
     ...data,
     notExplorableEarnVaults: data.notExplorableEarnVaults ?? new Set(),
     assetPatternRules: data.assetPatternRules ?? [],
-    rawGeoPolicies: (data as Partial<MigratedEulerLabelsData>).rawGeoPolicies ?? [],
-  } as unknown as MigratedEulerLabelsData, null)
+    rawGeoPolicies: (data as Partial<PublicEulerLabelsData>).rawGeoPolicies ?? [],
+  } as unknown as PublicEulerLabelsData, null)
   isReady.value = true
   isLoading.value = false
 }

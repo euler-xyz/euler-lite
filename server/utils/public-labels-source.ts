@@ -7,7 +7,7 @@ import {
   fetchPublicLabelsSource,
   normalizePublicLabelsData,
   PUBLIC_LABELS_RUNTIME_VERSION,
-  type MigratedEulerLabelsData,
+  type PublicEulerLabelsData,
   type PublicLabelsBundle,
   type PublicLabelsQuery,
   type PublicLabelsRequest,
@@ -116,7 +116,7 @@ export function getPublicLabelsBundle(
 export async function getPublicEulerLabelsData(
   chainId: number,
   version = PUBLIC_LABELS_RUNTIME_VERSION,
-): Promise<MigratedEulerLabelsData> {
+): Promise<PublicEulerLabelsData> {
   const bundle = await getPublicLabelsBundle(chainId, version)
   return normalizePublicLabelsData(chainId, bundle.publicLabels, bundle.effectivePolicy)
 }

@@ -166,7 +166,7 @@ export type PublicLabelsRequest = <T>(
   query: PublicLabelsQuery,
 ) => Promise<PublicLabelsResponse<T>>
 
-export type MigratedEulerLabelsData = Omit<EulerLabelsData, 'products' | 'entities'> & {
+export type PublicEulerLabelsData = Omit<EulerLabelsData, 'products' | 'entities'> & {
   products: Record<string, EulerLabelProduct>
   entities: Record<string, EulerLabelEntity>
   /** Versioned policy records are informational until effective precedence is specified. */
@@ -255,7 +255,7 @@ export const fetchPublicLabelsData = async (
   chainId: number,
   version = PUBLIC_LABELS_RUNTIME_VERSION,
   effectivePolicy?: EffectiveLabelsSource | Promise<EffectiveLabelsSource>,
-): Promise<MigratedEulerLabelsData> => {
+): Promise<PublicEulerLabelsData> => {
   const [source, resolvedEffectivePolicy] = await Promise.all([
     fetchPublicLabelsSource(request, chainId, version),
     Promise.resolve(effectivePolicy),
@@ -512,7 +512,7 @@ export const normalizePublicLabelsData = (
   chainId: number,
   source: PublicLabelsSource,
   effectivePolicy: EffectiveLabelsSource = emptyEffectiveLabelsSource(),
-): MigratedEulerLabelsData => {
+): PublicEulerLabelsData => {
   const inventoryRows = source.vaults.filter(vault => vault.chainId === chainId)
   const chainVaults = inventoryRows.filter(hasPublishedVaultLabelContent)
   const { verified: compatibilityVerified, earn: compatibilityEarn } = getEffectiveVaultSets(effectivePolicy)
@@ -660,5 +660,5 @@ export const normalizePublicLabelsData = (
     rawGeoPolicies: source.geoPolicies.filter(policy =>
       policy.chainId === null || policy.chainId === chainId,
     ),
-  } as MigratedEulerLabelsData
+  } as PublicEulerLabelsData
 }
