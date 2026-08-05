@@ -154,6 +154,19 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
   })
 
+  it.each([
+    ['account', () => { currentAccount = OTHER_OWNER }],
+    ['chain', () => { currentChainId = 8453 }],
+  ] as const)('does not start raw reviewed execution after %s drift', async (kind, driftWallet) => {
+    const { executePlan } = useEulerTx()
+    driftWallet()
+
+    await expect(executePlan([], { account: OWNER, chainId: 1 }))
+      .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind })
+    expect(getEulerSdkFresh).not.toHaveBeenCalled()
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
   it('does not broadcast a reviewed migration after account drift', async () => {
     const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction }: {
       sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
