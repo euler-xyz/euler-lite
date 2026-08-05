@@ -36,6 +36,10 @@ export interface DisplayStep {
   isSeparateTx: boolean
   assetInfo?: StepAssetInfo
   toAssetInfo?: StepAssetInfo
+  /** Fuul claim fee taken directly from the reviewed payable call. */
+  nativeValue?: bigint
+  /** Payable call destination associated with `nativeValue`. */
+  nativeValueTarget?: string
   iconOnly?: boolean
   /**
    * Identity of the underlying encoded transaction, present when the step
@@ -1347,6 +1351,9 @@ export function buildTransactionPlanDisplaySteps(
             index--
             continue
           }
+          const isPayableFuulClaim = ctx.type === 'fuul-reward'
+            && action.data.slice(0, 10).toLowerCase() === FUUL_CLAIM_SELECTOR
+            && action.value > 0n
           const step: DisplayStep = {
             index,
             label: displayLabel,
@@ -1354,6 +1361,8 @@ export function buildTransactionPlanDisplaySteps(
             isSeparateTx: false,
             assetInfo,
             toAssetInfo,
+            nativeValue: isPayableFuulClaim ? action.value : undefined,
+            nativeValueTarget: isPayableFuulClaim ? action.targetContract : undefined,
             iconOnly: label === 'Update price feeds',
           }
           steps.push(step)
@@ -1441,6 +1450,12 @@ export function buildTransactionPlanDisplaySteps(
               amount: ctx.amount,
               iconUrl: rewardIconUrl,
             }
+          : undefined,
+        nativeValue: ctx.type === 'fuul-reward' && item.functionName === 'claim' && item.value > 0n
+          ? item.value
+          : undefined,
+        nativeValueTarget: ctx.type === 'fuul-reward' && item.functionName === 'claim' && item.value > 0n
+          ? item.to
           : undefined,
       })
       continue
