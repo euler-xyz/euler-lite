@@ -4,7 +4,6 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { computeUncoveredLosses } from '~/utils/vault/earn-losses'
 import { createRaceGuard, runGuarded } from '~/utils/race-guard'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
@@ -33,27 +32,15 @@ watchEffect(async () => {
   availableLiquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
-// `lostAssets` is never written back down once a shortfall is covered, so net it
-// off against the shares parked at address(1) before showing it as still unbacked.
-const { coverageShares, isCoverageLoading } = useEarnLossCoverage(computed(() => vault))
-const uncoveredLosses = computed(() => computeUncoveredLosses(vault, coverageShares.value))
-
 const uncoveredLossesDisplay = ref('-')
 const uncoveredLossesGuard = createRaceGuard()
 
+// EulerEarn service adapters expose `lostAssets` as the uncovered shortfall
+// after subtracting the value of shares held by the coverage address.
 watchEffect(async () => {
-  // Withhold the figure until the coverage read settles. Mid-flight the shares
-  // read as `undefined`, which would render the gross shortfall and overstate
-  // what is unbacked on a vault whose loss has already been covered.
-  if (isCoverageLoading.value) {
-    uncoveredLossesDisplay.value = '-'
-    return
-  }
-
-  const amount = uncoveredLosses.value
   await runGuarded(
     uncoveredLossesGuard,
-    () => formatAssetValue(amount, vault, 'off-chain'),
+    () => formatAssetValue(vault.lostAssets, vault, 'off-chain'),
     (price) => {
       uncoveredLossesDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
     },
@@ -93,6 +80,7 @@ const supplyApyModalData = computed(() => ({
       :value="uncoveredLossesDisplay"
       orientation="horizontal"
       data-field="Uncovered losses"
+      :data-value="vault.lostAssets.toString()"
     >
       <template #label>
         <span class="flex items-center gap-4">
