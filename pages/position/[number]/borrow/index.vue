@@ -42,6 +42,7 @@ import {
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const router = useRouter()
 const _route = useRoute()
@@ -458,8 +459,8 @@ const submit = async () => {
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+          await send(reviewedWalletContext)
         },
       },
     })
@@ -494,7 +495,7 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio', { subAccount: borrowAccount })
 }
 
-const send = async () => {
+const send = async (reviewedWalletContext?: WalletExecutionContext) => {
   try {
     isSubmitting.value = true
     if (!collateralVault.value || !borrowVault.value || !position.value) {
@@ -506,7 +507,7 @@ const send = async () => {
       borrowAccount: position.value.subAccount as Address,
       account: planAccount.value,
     })
-    await executePlan(txPlan)
+    await executePlan(txPlan, reviewedWalletContext)
 
     modal.close()
     updateBalance()

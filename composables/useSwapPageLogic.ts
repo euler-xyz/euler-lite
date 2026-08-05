@@ -15,6 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -565,8 +566,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             plan: preparedPlan.value ? undefined : (plan.value || undefined),
             prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+              await send(reviewedWalletContext)
             },
             submittingLabel: 'Submitting...',
           },
@@ -578,7 +579,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (reviewedWalletContext?: WalletExecutionContext) => {
     if (!fromVault.value || !toVault.value) return
     if (!isSameAsset.value && !selectedQuote.value) return
 
@@ -589,7 +590,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       }
       else {
         const txPlan = await buildPlan(undefined, currentPlanContext())
-        await executePlan(txPlan)
+        await executePlan(txPlan, reviewedWalletContext)
       }
       modal.close()
       setTimeout(() => {

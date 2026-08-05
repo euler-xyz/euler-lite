@@ -1385,12 +1385,24 @@ export const useEulerTx = () => {
     }
   }
 
-  const executePlan = async (plan: TransactionPlan) => {
+  const executePlan = async (
+    plan: TransactionPlan,
+    reviewedWalletContext?: WalletExecutionContext,
+  ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
-    const owner = requireOwner()
-    const cid = requireChainId()
+    const owner = reviewedWalletContext?.account ?? requireOwner()
+    const cid = reviewedWalletContext?.chainId ?? requireChainId()
+    if (reviewedWalletContext) {
+      const currentAccount = getAccount(config)
+      assertWalletExecutionContext({
+        expectedAccount: owner,
+        expectedChainId: cid,
+        currentAccount: currentAccount.address,
+        currentChainId: currentAccount.chainId,
+      })
+    }
     // Execute via the fresh SDK so the in-flight allowance / Permit2 reads
     // and post-tx wait-for-receipts use the on-chain path.
     // executeTransactionPlan runs processPlanPlugins internally for TOS/Keyring.

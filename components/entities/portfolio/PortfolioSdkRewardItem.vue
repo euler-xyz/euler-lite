@@ -8,6 +8,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -79,7 +80,7 @@ const ensureWalletOnClaimChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const claim = async () => {
+const claim = async (reviewedWalletContext?: WalletExecutionContext) => {
   if (isSpyMode.value) {
     error('Exit spy mode to claim rewards')
     return
@@ -91,7 +92,7 @@ const claim = async () => {
     if (!plan.value) {
       plan.value = await buildClaimRewardPlan(reward)
     }
-    await executePlan(plan.value)
+    await executePlan(plan.value, reviewedWalletContext)
     modal.close()
     await refreshRewards({ delayedRetry: true })
   }
@@ -181,8 +182,8 @@ const onClaimClick = async () => {
         amount: rewardAmount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Claiming...',
-        onConfirm: async () => {
-          await claim()
+        onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+          await claim(reviewedWalletContext)
         },
       },
     })

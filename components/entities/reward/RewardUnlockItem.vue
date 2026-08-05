@@ -8,6 +8,7 @@ import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const modal = useModal()
 const { error } = useToast()
@@ -76,12 +77,12 @@ const ensureWalletOnSiteChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const unlock = async () => {
+const unlock = async (reviewedWalletContext?: WalletExecutionContext) => {
   try {
     isUnlocking.value = true
 
     const unlockPlan = await buildUnlockREULPlan([item.timestamp])
-    await executePlan(unlockPlan)
+    await executePlan(unlockPlan, reviewedWalletContext)
     modal.close()
     await refreshLocks(false)
   }
@@ -160,8 +161,8 @@ const onUnlockClick = async () => {
         ...getReviewProps(),
         amount: unlockableAmount.value,
         plan: plan.value || undefined,
-        onConfirm: async () => {
-          await unlock()
+        onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+          await unlock(reviewedWalletContext)
         },
       },
     })

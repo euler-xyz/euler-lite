@@ -15,6 +15,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { createRaceGuard } from '~/utils/race-guard'
 import { reportClientEvent } from '~/utils/client-observability'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const router = useRouter()
 const route = useRoute()
@@ -178,8 +179,8 @@ const submit = async () => {
         amount: amount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+          await send(reviewedWalletContext)
         },
       },
     })
@@ -218,7 +219,7 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio/saving', { subAccount: ownerAddr, vault: vaultAddress })
 }
 
-const send = async () => {
+const send = async (reviewedWalletContext?: WalletExecutionContext) => {
   try {
     isSubmitting.value = true
     if (!asset.value?.address) {
@@ -234,7 +235,7 @@ const send = async () => {
     }
 
     if (!plan.value) return
-    await executePlan(plan.value)
+    await executePlan(plan.value, reviewedWalletContext)
 
     modal.close()
     setTimeout(() => {

@@ -14,6 +14,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal } from '#components'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const router = useRouter()
 const route = useRoute()
@@ -184,8 +185,8 @@ const submit = async () => {
         amount: amount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+          await send(reviewedWalletContext)
         },
       },
     })
@@ -209,7 +210,7 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
 }
 
-const send = async () => {
+const send = async (reviewedWalletContext?: WalletExecutionContext) => {
   try {
     isSubmitting.value = true
     if (!asset.value?.address) {
@@ -221,7 +222,7 @@ const send = async () => {
       amount: valueToNano(amount.value || '0', asset.value.decimals),
       account: planAccount.value,
     })
-    await executePlan(txPlan)
+    await executePlan(txPlan, reviewedWalletContext)
 
     modal.close()
     await updateEstimates()

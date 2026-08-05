@@ -32,6 +32,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 // Snapshot of all borrow inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may have been reset), so the plan
@@ -1113,8 +1114,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
             swapMode: SwapperMode.EXACT_IN,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+              await send(reviewedWalletContext)
             },
             submittingLabel: 'Submitting...',
           },
@@ -1196,8 +1197,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           plan: plan.value || undefined,
           supplyingAssetForBorrow: collateralVault.value?.asset,
           supplyingAmount: collateralAmount.value,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+            await send(reviewedWalletContext)
           },
           submittingLabel: 'Submitting...',
         },
@@ -1208,7 +1209,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (reviewedWalletContext?: WalletExecutionContext) => {
     try {
       isSubmitting.value = true
       if (!collateralVault.value || !borrowVault.value) {
@@ -1233,7 +1234,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         const subAccountSnapshotApplied = await ensureBorrowSubAccountSnapshot(account, subAccountAddr)
         txPlan = await buildStandardBorrowPlan(account, subAccountAddr, subAccountSnapshotApplied)
       }
-      await executePlan(txPlan)
+      await executePlan(txPlan, reviewedWalletContext)
       await finalizeTxAndRedirect()
     }
     catch (e) {

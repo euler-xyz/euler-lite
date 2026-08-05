@@ -31,6 +31,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -1066,8 +1067,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
             swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
             swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+              await send(reviewedWalletContext)
             },
             submittingLabel: 'Submitting...',
           },
@@ -1080,7 +1081,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   }
 
   // --- Send ---
-  const send = async () => {
+  const send = async (reviewedWalletContext?: WalletExecutionContext) => {
     try {
       isSubmitting.value = true
       if (!asset.value?.address || !collateralVault.value?.address) return
@@ -1111,7 +1112,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             account: planAccount.value,
           })
         }
-        await executePlan(txPlan)
+        await executePlan(txPlan, reviewedWalletContext)
       }
       await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend })
     }

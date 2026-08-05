@@ -12,6 +12,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -57,7 +58,7 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm?: () => void | Promise<void>
+  onConfirm?: (reviewedWalletContext?: WalletExecutionContext) => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
@@ -100,6 +101,7 @@ let nowTimer: ReturnType<typeof setInterval> | undefined
 // `preparedPlan` is either the caller-provided prepared envelope's plan or the
 // result of preparing a raw plan inside this modal.
 const preparedPlan = shallowRef<TransactionPlan | undefined>()
+const reviewedPrepared = shallowRef<TransactionPlanPrepared | undefined>()
 const prepareError = ref('')
 const tenderlyLocalError = ref('')
 const isPreparingPlan = ref(false)
@@ -131,17 +133,19 @@ onUnmounted(() => {
 })
 
 watch(
-  () => [prepared, plan, walletAddress.value, currentChainId.value, allowConfirmWithoutPlan] as const,
+  () => [prepared, plan, allowConfirmWithoutPlan] as const,
   async () => {
     const requestId = ++prepareRequestId
     hasCopiedCalldata.value = false
     prepareError.value = ''
     preparedPlan.value = undefined
+    reviewedPrepared.value = undefined
 
     // Preferred path: caller pre-prepared the envelope. No async work — modal
     // renders the prepared plan synchronously.
     if (prepared?.plan?.length) {
       preparedPlan.value = prepared.plan
+      reviewedPrepared.value = prepared
       isPreparingPlan.value = false
       return
     }
@@ -159,6 +163,7 @@ watch(
       const envelope = await prepareTransactionPlan(plan)
       if (requestId === prepareRequestId) {
         preparedPlan.value = envelope.plan
+        reviewedPrepared.value = envelope
         prepareError.value = ''
       }
     }
@@ -166,6 +171,7 @@ watch(
       logWarn('OperationReviewModal/prepareTransactionPlan', err)
       if (requestId === prepareRequestId) {
         preparedPlan.value = undefined
+        reviewedPrepared.value = undefined
         prepareError.value = 'Transaction preparation failed. Close this review and try again.'
       }
     }
@@ -214,9 +220,20 @@ const handleTenderlySimulate = async () => {
 
 const internalSubmitting = ref(false)
 
+const reviewedWalletContext = computed<WalletExecutionContext | undefined>(() => {
+  const envelope = reviewedPrepared.value
+  if (!envelope) return undefined
+  return {
+    account: typeof envelope.account === 'string'
+      ? getAddress(envelope.account)
+      : getAddress(envelope.account.owner),
+    chainId: envelope.chainId,
+  }
+})
+
 const handleConfirm = async () => {
   if (isConfirmDisabled.value || !onConfirm) return
-  const result = onConfirm()
+  const result = onConfirm(reviewedWalletContext.value)
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
     try {

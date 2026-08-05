@@ -19,6 +19,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 
 const _route = useRoute()
 const router = useRouter()
@@ -706,8 +707,8 @@ const disableCollateral = async (vault: EVault) => {
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send(vault.address)
+        onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+          await send(vault.address, reviewedWalletContext)
         },
       },
     })
@@ -716,7 +717,10 @@ const disableCollateral = async (vault: EVault) => {
     isPreparing.value = false
   }
 }
-const send = async (collateralAddress: string) => {
+const send = async (
+  collateralAddress: string,
+  reviewedWalletContext?: WalletExecutionContext,
+) => {
   try {
     isSubmitting.value = true
     const subAccount = position.value!.subAccount as Address
@@ -729,7 +733,7 @@ const send = async (collateralAddress: string) => {
       disableCollateralFrom: true,
       account: planAccount.value,
     })
-    await executePlan(txPlan)
+    await executePlan(txPlan, reviewedWalletContext)
 
     modal.close()
     setTimeout(() => {

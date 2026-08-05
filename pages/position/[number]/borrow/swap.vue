@@ -53,6 +53,7 @@ import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/uti
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
+import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
@@ -3665,8 +3666,8 @@ const submit = async () => {
           quoteFetchedAt: effectiveQuoteFetchedAt.value,
           vaultAmounts: refinanceVaultAmounts.value,
           ...refinanceSwapReviewInfo.value,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (reviewedWalletContext?: WalletExecutionContext) => {
+            await send(reviewedWalletContext)
           },
           submittingLabel: 'Submitting...',
         },
@@ -3678,7 +3679,7 @@ const submit = async () => {
   }
 }
 
-const send = async () => {
+const send = async (reviewedWalletContext?: WalletExecutionContext) => {
   isSubmitting.value = true
   try {
     if (preparedPlan.value) {
@@ -3686,7 +3687,7 @@ const send = async () => {
     }
     else {
       const txPlan = await buildRefinancePlan()
-      await executePlan(txPlan)
+      await executePlan(txPlan, reviewedWalletContext)
     }
     modal.close()
     setTimeout(() => {
