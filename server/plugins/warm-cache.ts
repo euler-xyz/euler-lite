@@ -1,6 +1,7 @@
 /**
  * Pre-populates the in-memory TTL caches for every proxy that serves
- * static/low-churn data (labels, token-list, euler-chains) and for the
+ * static/low-churn data (Public Labels, effective policy, token-list,
+ * Euler Chains) and for the
  * per-chain vault snapshot served at /api/internal/vaults.
  *
  * Nitro's node-server preset calls `server.listen()` synchronously right
@@ -14,9 +15,9 @@
  *
  * Two timers, each with its own cadence:
  *
- *   • Global cycle (5 min): /api/internal/euler-chains once, cross-chain
- *     `all/assets.json` once, then per-chain labels + token-list,
- *     serialized across chains.
+ *   • Global cycle (5 min): Euler Chains once, cross-chain effective asset
+ *     policy once, then each chain's Public Labels bundle, effective policy,
+ *     and token list, serialized across chains.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
  *     /api/internal/vaults per chain, serialized.
  *
@@ -35,10 +36,11 @@
  * Merkl's /tokens/reward payload is fetched transitively by /api/internal/token-list
  * (one of its sources).
  */
-import { LABEL_FILES, refreshLabelFile } from '../api/internal/labels/[file].get'
+import { EFFECTIVE_POLICY_LABEL_FILES, refreshLabelFile } from '../utils/labels-source'
 import { refreshEulerChains } from '../api/internal/euler-chains.get'
 import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
+import { refreshPublicLabelsBundle } from '../utils/public-labels-source'
 import {
   readDisableServerVaultCache,
   readV3ApiUrl,
@@ -98,19 +100,21 @@ const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined
 const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
 
-// Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
-// upstream. The /api/internal/labels/assets.json handler unions this with the
-// per-chain file; warm it once so the first chain-scoped request doesn't
-// pay the cold-upstream cost.
+// Cross-chain pattern rules for effective asset policy live at
+// `all/assets.json`. Warm them once; the shared policy source combines them
+// with each chain's rules while assembling the Public Labels bundle.
 const warmGlobalAssets = () =>
   reportWarm('labels/assets.json scope=all', refreshLabelFile('all', 'assets.json'))
 
 // --- Per-chain warms (parallel across chains and within a chain) ---
 
-const warmLabels = (chainId: number): Promise<unknown>[] =>
-  LABEL_FILES.map(file =>
-    reportWarm(`labels/${file} chain=${chainId}`, refreshLabelFile(chainId, file)),
+const warmEffectivePolicy = (chainId: number): Promise<unknown>[] =>
+  EFFECTIVE_POLICY_LABEL_FILES.map(file =>
+    reportWarm(`labels-policy/${file} chain=${chainId}`, refreshLabelFile(chainId, file)),
   )
+
+const warmPublicLabels = (chainId: number) =>
+  reportWarm(`public-labels chain=${chainId}`, refreshPublicLabelsBundle(chainId))
 
 const warmTokenList = (chainId: number) =>
   reportWarm(`token-list chain=${chainId}`, refreshTokenList(chainId))
@@ -121,10 +125,11 @@ const warmTokenList = (chainId: number) =>
 const warmVaults = (chainId: number) =>
   reportWarm(`vaults chain=${chainId}`, refreshChainVaults(chainId))
 
-// Labels + token-list — refresh at the global 5-min interval. Vaults run
-// on their own faster timer (see `warmVaultsForChains` below).
+// Public Labels, effective policy, and token-list refresh at the global
+// 5-min interval. Vaults run on their own faster timer.
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
-  ...warmLabels(chainId),
+  ...warmEffectivePolicy(chainId),
+  warmPublicLabels(chainId),
   warmTokenList(chainId),
 ]
 

@@ -11,18 +11,13 @@ const FORWARDED_RESPONSE_HEADERS = [
 const GET_ONLY_PATHS = new Set([
   '/v3/apys/intrinsic',
   '/v3/apys/rewards',
-  '/v3/curation/vaults',
   '/v3/earn/vaults',
-  '/v3/entities',
   '/v3/evk/vaults',
   '/v3/evk/vaults/bad-debt',
   '/v3/evk/vaults/open-interest',
   '/v3/evk/vaults/open-interest/by-collateral',
-  '/v3/geo-policies',
-  '/v3/label-sets/public/versions',
   '/v3/liquidations',
   '/v3/prices',
-  '/v3/products',
   '/v3/rewards/breakdown',
   '/v3/tokens',
 ])
@@ -31,14 +26,9 @@ const GET_ONLY_PATH_PATTERNS = [
   /^\/v3\/accounts\/[^/]+\/positions$/,
   /^\/v3\/activity\/accounts\/0x[a-fA-F0-9]{40}\/events$/,
   /^\/v3\/activity\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/events$/,
-  /^\/v3\/curation\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/labels$/,
-  /^\/v3\/entities\/[A-Za-z0-9_-]{1,100}$/,
-  /^\/v3\/entities\/[A-Za-z0-9_-]{1,100}\/addresses$/,
-  /^\/v3\/(?:earn|evk)\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/assessment$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+\/totals$/,
   /^\/v3\/evk\/vaults\/[^/]+\/[^/]+\/totals$/,
-  /^\/v3\/products\/[1-9][0-9]{0,15}\/[A-Za-z0-9_-]{1,100}$/,
 ]
 
 const POST_ONLY_PATHS = new Set([

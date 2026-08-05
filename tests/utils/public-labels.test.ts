@@ -1,4 +1,3 @@
-import type { EulerLabelsData } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -10,6 +9,7 @@ import {
   PUBLIC_LABELS_PAGE_SIZE,
   type PublicLabelsRequest,
   type PublicProductLabel,
+  type EffectiveLabelsSource,
 } from '~/utils/public-labels'
 import {
   ASSESSMENT_ONLY_EARN,
@@ -94,13 +94,9 @@ describe('Public Labels pagination', () => {
 
 describe(`Public Labels ${PUBLIC_LABELS_FIXTURE_VERSION} normalization`, () => {
   it('keeps KPK as owner, exposes Securitize as a co-brand, and maps hosted profiles', () => {
-    const legacy = {
+    const effectivePolicy: EffectiveLabelsSource = {
       products: {
         'kpk-securitize': {
-          name: 'Legacy KPK market',
-          description: '',
-          entity: KPK,
-          url: '',
           vaults: [getAddress(KPK_VAULT)],
           block: ['US'],
           vaultOverrides: {
@@ -108,16 +104,11 @@ describe(`Public Labels ${PUBLIC_LABELS_FIXTURE_VERSION} normalization`, () => {
           },
         },
       },
-      assetBlocks: { '0xasset': ['GB'] },
-      assetRestrictions: {},
-      assetPatternRules: [],
-      earnVaultBlocks: {},
-      earnVaultRestrictions: {},
-      earnVaultEntries: {},
-      notExplorableEarnVaults: new Set<string>(),
-    } as unknown as EulerLabelsData
+      earnVaults: [],
+      assets: [],
+    }
 
-    const result = normalizePublicLabelsData(1, publicLabelsFixture, legacy)
+    const result = normalizePublicLabelsData(1, publicLabelsFixture, effectivePolicy)
     const product = result.products['kpk-securitize']
 
     expect(product.entity).toBe(KPK)
@@ -140,13 +131,9 @@ describe(`Public Labels ${PUBLIC_LABELS_FIXTURE_VERSION} normalization`, () => {
   })
 
   it('keeps neutral escrows unattributed and raw geo policies non-effective', () => {
-    const legacy = {
+    const effectivePolicy: EffectiveLabelsSource = {
       products: {
         'kpk-securitize': {
-          name: 'Legacy KPK market',
-          description: '',
-          entity: KPK,
-          url: '',
           vaults: [getAddress(KPK_VAULT)],
           block: ['US'],
           vaultOverrides: {
@@ -154,16 +141,11 @@ describe(`Public Labels ${PUBLIC_LABELS_FIXTURE_VERSION} normalization`, () => {
           },
         },
       },
-      assetBlocks: {},
-      assetRestrictions: {},
-      assetPatternRules: [],
-      earnVaultBlocks: {},
-      earnVaultRestrictions: {},
-      earnVaultEntries: {},
-      notExplorableEarnVaults: new Set<string>(),
-    } as unknown as EulerLabelsData
+      earnVaults: [],
+      assets: [],
+    }
 
-    const result = normalizePublicLabelsData(1, publicLabelsFixture, legacy)
+    const result = normalizePublicLabelsData(1, publicLabelsFixture, effectivePolicy)
     const product = result.products['kpk-securitize']
 
     expect(result.verifiedVaultAddresses).not.toContain(getAddress(NEUTRAL_ESCROW))
@@ -178,24 +160,53 @@ describe(`Public Labels ${PUBLIC_LABELS_FIXTURE_VERSION} normalization`, () => {
   })
 
   it('retains compatibility-confirmed plain labels without trusting assessment-only rows', () => {
-    const legacy = {
-      products: {},
-      verifiedVaultAddresses: [getAddress(VERIFICATION_ONLY_EVK)],
+    const effectivePolicy: EffectiveLabelsSource = {
+      products: {
+        compatibility: { vaults: [getAddress(VERIFICATION_ONLY_EVK)] },
+      },
       earnVaults: [getAddress(VERIFICATION_ONLY_EARN)],
-      assetBlocks: {},
-      assetRestrictions: {},
-      assetPatternRules: [],
-      earnVaultBlocks: {},
-      earnVaultRestrictions: {},
-      earnVaultEntries: {},
-      notExplorableEarnVaults: new Set<string>(),
-    } as unknown as EulerLabelsData
+      assets: [],
+    }
 
-    const result = normalizePublicLabelsData(1, publicLabelsFixture, legacy)
+    const result = normalizePublicLabelsData(1, publicLabelsFixture, effectivePolicy)
 
     expect(result.verifiedVaultAddresses).toContain(getAddress(VERIFICATION_ONLY_EVK))
     expect(result.verifiedVaultAddresses).not.toContain(getAddress(ASSESSMENT_ONLY_EVK))
     expect(result.earnVaults).toContain(getAddress(VERIFICATION_ONLY_EARN))
     expect(result.earnVaults).not.toContain(getAddress(ASSESSMENT_ONLY_EARN))
+  })
+
+  it('keeps mixed vault tags scoped to their vault override', () => {
+    const sibling = {
+      ...publicLabelsFixture.vaults[0],
+      address: '0x00000000000000000000000000000000000000C1',
+      tags: [],
+    }
+    const result = normalizePublicLabelsData(1, {
+      ...publicLabelsFixture,
+      vaults: [publicLabelsFixture.vaults[0], sibling],
+    })
+    const product = result.products['kpk-securitize']
+
+    expect(product.tags).toBeUndefined()
+    expect(product.vaultOverrides?.[getAddress(KPK_VAULT)]?.tags).toContain('recently added')
+    expect(product.vaultOverrides?.[getAddress(sibling.address)]?.tags).toBeUndefined()
+  })
+
+  it('drops non-http profile and campaign URLs at the normalization boundary', () => {
+    const result = normalizePublicLabelsData(1, {
+      ...publicLabelsFixture,
+      entities: publicLabelsFixture.entities.map((entity, index) => index === 0
+        ? { ...entity, logo: 'data:image/svg+xml,bad', url: 'javascript:alert(1)', socialTwitter: 'file:///tmp/bad' }
+        : entity),
+      vaults: publicLabelsFixture.vaults.map((vault, index) => index === 0
+        ? { ...vault, campaigns: [{ name: 'Unsafe', logo: 'javascript:alert(1)', type: 'deposit' }] }
+        : vault),
+    })
+
+    expect(result.entities.kpk.logo).toBe('')
+    expect(result.entities.kpk.url).toBe('')
+    expect(result.entities.kpk.social.twitter).toBe('')
+    expect(result.points[getAddress(KPK_VAULT)]?.[0]?.logo).toBe('')
   })
 })

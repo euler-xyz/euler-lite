@@ -129,12 +129,10 @@ export const eulerLabelProductEmpty = {
 } as EulerLabelProduct
 
 export const getEulerLabelEntityLogo = (fileName: string) => {
-  if (/^https?:\/\//i.test(fileName)) return fileName
-  const { EULER_LABELS_ENTITY_LOGO_URL } = useEulerConfig()
-  return `${EULER_LABELS_ENTITY_LOGO_URL}/${fileName}`
+  return /^https?:\/\//i.test(fileName) ? fileName : ''
 }
 
 export const getEulerLabelPointLogo = (fileName: string) =>
-  /^https?:\/\//i.test(fileName) ? fileName : `/entities/${fileName}`
+  /^https?:\/\//i.test(fileName) ? fileName : ''
 
 export const getEntityLogoLocalPath = (fileName: string) => `/entities/${fileName}`

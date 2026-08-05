@@ -12,7 +12,6 @@ import { toReactive, until } from '@vueuse/core'
 import { decodeFunctionResult, encodeFunctionData, type Hex, type PublicClient } from 'viem'
 import { computed, ref, shallowReactive, shallowRef, unref, type Ref } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
-import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import type { EulerLabelEntity, EulerLabelProduct, EulerLabelPointReward } from '~/entities/euler/labels'
 import { eulerLabelProductEmpty } from '~/entities/euler/labels'
 import { getEulerSdk } from '~/composables/useEulerSdk'
@@ -21,19 +20,10 @@ import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
-  fetchPublicLabelsData,
+  normalizePublicLabelsData,
   type MigratedEulerLabelsData,
-  type PublicLabelsQuery,
-  type PublicLabelsResponse,
+  type PublicLabelsBundle,
 } from '~/utils/public-labels'
-
-const LABEL_QUERY_NAMES = [
-  'queryEulerLabelsEntities',
-  'queryEulerLabelsProducts',
-  'queryEulerLabelsPoints',
-  'queryEulerLabelsEarnVaults',
-  'queryEulerLabelsAssets',
-] as const
 
 const createEmptyEulerLabelsData = (): MigratedEulerLabelsData => ({
   products: {},
@@ -121,22 +111,17 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
   const pendingFetch = pendingLabelsFetches.get(chainId)
   if (pendingFetch && !forceRefresh) return pendingFetch
 
-  const request = async <T>(path: string, query: PublicLabelsQuery): Promise<PublicLabelsResponse<T>> =>
-    $fetch<PublicLabelsResponse<T>>(`/api/internal/v3${path}`, { query })
-
   const fetchPromise = (async () => {
-    if (forceRefresh) await invalidateSdkQueries([...LABEL_QUERY_NAMES])
-    const sdk = await getEulerSdk()
-    const legacy = sdk.eulerLabelsService.fetchEulerLabelsData(chainId)
     try {
-      return await fetchPublicLabelsData(request, chainId, undefined, legacy)
+      const bundle = await $fetch<PublicLabelsBundle>('/api/internal/public-labels', {
+        query: { chainId },
+        ...(forceRefresh && { headers: { 'cache-control': 'no-cache' } }),
+      })
+      return normalizePublicLabelsData(chainId, bundle.publicLabels, bundle.effectivePolicy)
     }
     catch (error) {
       logWarn('labels/public-v3', error)
-      return {
-        ...await legacy,
-        rawGeoPolicies: [],
-      } as MigratedEulerLabelsData
+      throw error
     }
   })()
 

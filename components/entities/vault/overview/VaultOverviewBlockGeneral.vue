@@ -169,7 +169,7 @@ watchEffect(() => {
         </p>
       </div>
     </div>
-    <!-- eslint-disable vue/no-v-html -- trusted label content -->
+    <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p
       v-if="description"
       class="text-p2 text-content-secondary auto-link"

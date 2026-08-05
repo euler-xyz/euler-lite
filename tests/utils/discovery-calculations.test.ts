@@ -21,13 +21,13 @@ import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 
 vi.mock('~/entities/euler/labels', () => ({
-  getEulerLabelEntityLogo: (logo: string) => `/entities/${logo}`,
+  getEulerLabelEntityLogo: (logo: string) => logo,
 }))
 
 vi.mock('~/utils/eulerLabelsUtils', () => ({
   getEntitiesByVault: (vault: { address?: string }) => {
-    if (vault.address === '0xBorrow') return [{ name: 'KPK', logo: 'kpk.svg' }]
-    if (vault.address === '0xSecuritize') return [{ name: 'Securitize', logo: 'securitize.png' }]
+    if (vault.address === '0xBorrow') return [{ name: 'KPK', logo: 'https://token-images.euler.finance/labels/kpk' }]
+    if (vault.address === '0xSecuritize') return [{ name: 'Securitize', logo: 'https://token-images.euler.finance/labels/securitize' }]
     return []
   },
   isVaultCyclicalNote: () => false,
@@ -464,7 +464,10 @@ describe('getMarketEntities', () => {
 
     expect(getMarketEntities(market)).toEqual({
       name: 'KPK & Securitize',
-      logos: ['/entities/kpk.svg', '/entities/securitize.png'],
+      logos: [
+        'https://token-images.euler.finance/labels/kpk',
+        'https://token-images.euler.finance/labels/securitize',
+      ],
       labels: ['KPK', 'Securitize'],
     })
   })
@@ -473,16 +476,19 @@ describe('getMarketEntities', () => {
     const market = {
       ...makeMarket([makeVault('0xBorrow', [])]),
       source: 'product',
-      curator: { name: 'KPK', logo: 'kpk.svg' },
+      curator: { name: 'KPK', logo: 'https://token-images.euler.finance/labels/kpk' },
       brandEntities: [
-        { name: 'KPK', logo: 'kpk.svg' },
-        { name: 'Securitize', logo: 'securitize.png' },
+        { name: 'KPK', logo: 'https://token-images.euler.finance/labels/kpk' },
+        { name: 'Securitize', logo: 'https://token-images.euler.finance/labels/securitize' },
       ],
     } as MarketGroup
 
     expect(getMarketEntities(market)).toEqual({
       name: 'KPK',
-      logos: ['/entities/kpk.svg', '/entities/securitize.png'],
+      logos: [
+        'https://token-images.euler.finance/labels/kpk',
+        'https://token-images.euler.finance/labels/securitize',
+      ],
       labels: ['KPK', 'Securitize'],
     })
   })

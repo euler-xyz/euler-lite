@@ -1,8 +1,16 @@
 export function resolveLabelsBaseUrl(): string {
-  const explicit = (process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL || '').trim().replace(/\/+$/, '')
+  const explicit = (
+    process.env.EFFECTIVE_POLICY_BASE_URL
+    || process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL
+    || ''
+  ).trim().replace(/\/+$/, '')
   if (explicit) return explicit
-  const repo = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO || 'euler-xyz/euler-labels'
-  const branch = process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH || 'master'
+  const repo = process.env.EFFECTIVE_POLICY_REPO
+    || process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO
+    || 'euler-xyz/euler-labels'
+  const branch = process.env.EFFECTIVE_POLICY_REPO_BRANCH
+    || process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH
+    || 'master'
   return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
 }
 

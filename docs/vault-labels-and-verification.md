@@ -8,7 +8,7 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 
 ## Label Data Sources
 
-`useEulerLabels` reads the immutable Public Labels dataset from V3 through the same-origin `/api/internal/v3` proxy. Normal application traffic uses `version=latest`; deterministic tests use the published version pinned in `utils/public-labels.ts`. List reads follow `meta.total` with `limit=100` and increasing `offset`, because V3 caps each page at 100 records.
+`useEulerLabels` reads one chain-scoped bundle from `/api/internal/public-labels`. The server resolves `version=latest` once through the published-versions endpoint, then pins every page and entity-address read in that aggregate to the resulting immutable version. Deterministic tests request the published version pinned in `utils/public-labels.ts` directly. List reads follow `meta.total` with `limit=100` and increasing `offset`, because V3 caps each page at 100 records.
 
 | Public data | V3 path |
 |---|---|
@@ -18,15 +18,15 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 | Entity governance addresses | `GET /entities/{entityId}/addresses?chainId=...` |
 | Geo policy records | `GET /geo-policies?version=...` |
 
-The vault inventory is a union of label and assessment records. Lite includes a row in label-derived listing or verification state when it has a product/entity assignment or published label content such as display metadata, deprecation, tags, or campaigns. Plain-address labels and assessment-only rows share the same empty content shape, so an empty row is retained only when the SDK compatibility snapshot classifies the same inventory address as a verified or Earn vault. Other assessment-only rows are ignored.
+The vault inventory is a union of label and assessment records. Lite includes a row in label-derived listing or verification state when it has a product/entity assignment or published label content such as display metadata, deprecation, tags, or campaigns. Plain-address labels and assessment-only rows share the same empty content shape, so an empty row is retained only when the effective-policy snapshot classifies the same inventory address as a verified or Earn vault. Other assessment-only rows are ignored.
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in manager ownership, governor verification, or manager-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
 
-The current V3 assessment and geo-policy records are not final eligibility decisions. Lite does not use raw `/evk/vaults/{chainId}/{address}/assessment` or `/earn/vaults/{chainId}/{address}/assessment` responses to hide or verify vaults, and it does not resolve global/product/vault/asset geo precedence from raw policy rows. Until V3 publishes an effective derived contract, Lite preserves the effective `block`, `restricted`, and discovery-visibility values supplied by the SDK labels service. Raw geo policies are retained as informational data only.
+The current V3 assessment and geo-policy records are not final eligibility decisions. Lite does not use raw `/evk/vaults/{chainId}/{address}/assessment` or `/earn/vaults/{chainId}/{address}/assessment` responses to hide or verify vaults, and it does not resolve global/product/vault/asset geo precedence from raw policy rows. Until V3 publishes an effective derived contract, the server reads only effective `block`, `restricted`, and discovery-visibility values from the compatibility policy source. That source contributes no display content. Raw V3 geo policies are retained as informational data only.
 
 Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/internal/oracle-adapter?chainId=X&address=0x...`.
 
-**Caching and fallback**: Public Labels requests share the client label load's chain-scoped in-flight deduplication and refresh lifecycle. The V3 proxy is request-scoped; V3 owns upstream caching. If a Public Labels read fails, the current load falls back to the SDK compatibility-label snapshot and logs the V3 failure.
+**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. The browser also deduplicates chain-scoped loads. There is no second display-label source: if V3 fails without a stale bundle, the load fails closed and the client publishes an empty label snapshot.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -41,6 +41,8 @@ Entity rows provide profile text, hosted logos, website/social links, and option
 Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations.
 
 Classification markers use vault `tags`. Current UI-recognized tags include `keyring`, `access control`, `governance limited`, `recently added`, `suppress high utilisation warning`, and `cyclical note`.
+
+Vault tags stay scoped to their vault override. A product-level tag is emitted only when every assigned vault carries that tag, so one vault's classification cannot leak to sibling vaults.
 
 ---
 
@@ -82,7 +84,7 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | Vault Source | Verification Method |
 |-------------|---------------------|
 | **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
-| **Earn vaults** | Default repo: loaded from `eulerEarnGovernedPerspective` on-chain. Alternative repos: verified if in `earnVaults` from labels |
+| **Earn vaults** | Published Public Labels inventory, plus `eulerEarnGovernedPerspective` on-chain for governed Earn discovery |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
@@ -205,12 +207,14 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | `entities/euler/labels.ts` | TypeScript type definitions for all label types |
 | `utils/public-labels.ts` | Public V3 pagination, normalization, and effective-visibility composition |
 | `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the normalized label snapshot |
-| `composables/useEulerLabels.ts` | Chain-scoped Public Labels and compatibility-visibility loading |
+| `server/utils/public-labels-source.ts` | Shared V3 aggregate cache used by browser, public APIs, and vault snapshots |
+| `server/utils/labels-source.ts` | Server-only temporary effective-policy overlay |
+| `composables/useEulerLabels.ts` | Chain-scoped aggregate loading and normalized label publication |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
 | `composables/useGeoBlock.ts` | Geo-blocking logic using label block/restricted fields |
 
 ## Programmatic verification lookup
 
-External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. This server endpoint uses the compatibility-label snapshot plus the on-chain `escrowedCollateralPerspective`, applies governor / router-governor / owner verification, and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults. Escrow vaults from the on-chain perspective and earn entries with no product entry are trusted unconditionally.
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. This server endpoint uses the same normalized Public Labels bundle as the UI plus the on-chain `escrowedCollateralPerspective`, applies governor / router-governor / owner verification, and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults. Escrow vaults from the on-chain perspective and standalone Earn entries are trusted unconditionally.
 
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.

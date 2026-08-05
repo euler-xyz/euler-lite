@@ -9,6 +9,7 @@ import {
   getEulerLabelWrapPairs,
   useEulerLabels,
 } from '~/composables/useEulerLabels'
+import type { PublicLabelsBundle } from '~/utils/public-labels'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -29,18 +30,14 @@ const deferred = <T>(): Deferred<T> => {
 
 const mocks = vi.hoisted(() => ({
   evcBatchCall: vi.fn(),
-  fetchEulerLabelsData: vi.fn(),
-  fetchPublicLabelsData: vi.fn(),
+  fetchPublicLabelsBundle: vi.fn(),
+  normalizePublicLabelsData: vi.fn(),
   getProvider: vi.fn(),
-  invalidateSdkQueries: vi.fn(),
   vaults: [] as Array<{ asset: { address: string } }>,
 }))
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdk: vi.fn(async () => ({
-    eulerLabelsService: {
-      fetchEulerLabelsData: mocks.fetchEulerLabelsData,
-    },
     providerService: {
       getProvider: mocks.getProvider,
     },
@@ -48,7 +45,7 @@ vi.mock('~/composables/useEulerSdk', () => ({
 }))
 
 vi.mock('~/utils/public-labels', () => ({
-  fetchPublicLabelsData: mocks.fetchPublicLabelsData,
+  normalizePublicLabelsData: mocks.normalizePublicLabelsData,
 }))
 
 vi.mock('~/composables/useEulerOracleAdapters', () => ({
@@ -77,10 +74,6 @@ vi.mock('~/utils/multicall', () => ({
   evcBatchCall: mocks.evcBatchCall,
 }))
 
-vi.mock('~/utils/sdk-query-cache', () => ({
-  invalidateSdkQueries: mocks.invalidateSdkQueries,
-}))
-
 const currentChainId = ref(1)
 const getCurrentChainConfig = computed(() => ({
   chainId: currentChainId.value,
@@ -97,19 +90,25 @@ const labelsFor = (marker: string) => ({
   },
 }) as unknown as EulerLabelsData
 
+const bundleFor = (labels: EulerLabelsData): PublicLabelsBundle => ({
+  version: 'v20260804151305236',
+  publicLabels: labels,
+  effectivePolicy: { products: {}, earnVaults: [], assets: [] },
+}) as unknown as PublicLabelsBundle
+
 const currentProductKeys = () => Object.keys(getCurrentEulerLabelsData().products)
 
 describe('useEulerLabels chain-scoped loading', () => {
   beforeEach(() => {
     currentChainId.value = 1
     mocks.evcBatchCall.mockReset().mockResolvedValue([])
-    mocks.fetchEulerLabelsData.mockReset()
-    mocks.fetchPublicLabelsData.mockReset().mockImplementation(
-      (_request: unknown, _chainId: number, _version: unknown, legacy: Promise<EulerLabelsData>) => legacy,
+    mocks.fetchPublicLabelsBundle.mockReset()
+    mocks.normalizePublicLabelsData.mockReset().mockImplementation(
+      (_chainId: number, labels: EulerLabelsData) => labels,
     )
     mocks.getProvider.mockReset().mockReturnValue({})
-    mocks.invalidateSdkQueries.mockReset().mockResolvedValue(undefined)
     mocks.vaults.length = 0
+    vi.stubGlobal('$fetch', mocks.fetchPublicLabelsBundle)
     vi.stubGlobal('useEulerAddresses', () => ({
       getCurrentChainConfig,
       loadEulerConfig: vi.fn(),
@@ -122,9 +121,10 @@ describe('useEulerLabels chain-scoped loading', () => {
   })
 
   it('starts a separate fetch for a new chain and ignores the stale response', async () => {
-    const chainOne = deferred<EulerLabelsData>()
-    const chainTwo = deferred<EulerLabelsData>()
-    mocks.fetchEulerLabelsData.mockImplementation((chainId: number) => {
+    const chainOne = deferred<PublicLabelsBundle>()
+    const chainTwo = deferred<PublicLabelsBundle>()
+    mocks.fetchPublicLabelsBundle.mockImplementation((_url: string, options: { query: { chainId: number } }) => {
+      const chainId = options.query.chainId
       if (chainId === 1) return chainOne.promise
       if (chainId === 2) return chainTwo.promise
       throw new Error(`unexpected chain ${chainId}`)
@@ -132,35 +132,36 @@ describe('useEulerLabels chain-scoped loading', () => {
 
     const labels = useEulerLabels()
     const firstLoad = labels.loadLabels()
-    await vi.waitFor(() => expect(mocks.fetchEulerLabelsData).toHaveBeenCalledWith(1))
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(1))
 
     currentChainId.value = 2
     const secondLoad = labels.loadLabels()
-    await vi.waitFor(() => expect(mocks.fetchEulerLabelsData).toHaveBeenCalledWith(2))
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2))
 
     expect(labels.isLoading.value).toBe(true)
     expect(labels.isReady.value).toBe(false)
 
-    chainTwo.resolve(labelsFor('chain-two'))
+    chainTwo.resolve(bundleFor(labelsFor('chain-two')))
     await secondLoad
 
     expect(currentProductKeys()).toEqual(['chain-two'])
     expect(labels.isLoading.value).toBe(false)
     expect(labels.isReady.value).toBe(true)
 
-    chainOne.resolve(labelsFor('stale-chain-one'))
+    chainOne.resolve(bundleFor(labelsFor('stale-chain-one')))
     await firstLoad
 
-    expect(mocks.fetchEulerLabelsData).toHaveBeenCalledTimes(2)
+    expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
     expect(currentProductKeys()).toEqual(['chain-two'])
     expect(labels.isLoading.value).toBe(false)
     expect(labels.isReady.value).toBe(true)
   })
 
   it('reuses only the chain fetch while the latest wrapper controls publication', async () => {
-    const chainOne = deferred<EulerLabelsData>()
-    const chainTwo = deferred<EulerLabelsData>()
-    mocks.fetchEulerLabelsData.mockImplementation((chainId: number) => {
+    const chainOne = deferred<PublicLabelsBundle>()
+    const chainTwo = deferred<PublicLabelsBundle>()
+    mocks.fetchPublicLabelsBundle.mockImplementation((_url: string, options: { query: { chainId: number } }) => {
+      const chainId = options.query.chainId
       if (chainId === 1) return chainOne.promise
       if (chainId === 2) return chainTwo.promise
       throw new Error(`unexpected chain ${chainId}`)
@@ -169,26 +170,26 @@ describe('useEulerLabels chain-scoped loading', () => {
 
     const labels = useEulerLabels()
     const firstChainOneLoad = labels.loadLabels()
-    await vi.waitFor(() => expect(mocks.fetchEulerLabelsData).toHaveBeenCalledWith(1))
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(1))
 
     currentChainId.value = 2
     const chainTwoLoad = labels.loadLabels()
-    await vi.waitFor(() => expect(mocks.fetchEulerLabelsData).toHaveBeenCalledWith(2))
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2))
 
     currentChainId.value = 1
     const latestChainOneLoad = labels.loadLabels()
-    await vi.waitFor(() => expect(mocks.fetchEulerLabelsData).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2))
 
-    chainOne.resolve(labelsFor('latest-chain-one'))
+    chainOne.resolve(bundleFor(labelsFor('latest-chain-one')))
     await Promise.all([firstChainOneLoad, latestChainOneLoad])
 
-    expect(mocks.fetchEulerLabelsData.mock.calls.filter(([chainId]) => chainId === 1)).toHaveLength(1)
+    expect(mocks.fetchPublicLabelsBundle.mock.calls.filter(([, options]) => options.query.chainId === 1)).toHaveLength(1)
     expect(currentProductKeys()).toEqual(['latest-chain-one'])
     expect(getEulerLabelsVersion()).toBe(initialVersion + 4)
     expect(labels.isLoading.value).toBe(false)
     expect(labels.isReady.value).toBe(true)
 
-    chainTwo.resolve(labelsFor('stale-chain-two'))
+    chainTwo.resolve(bundleFor(labelsFor('stale-chain-two')))
     await chainTwoLoad
 
     expect(currentProductKeys()).toEqual(['latest-chain-one'])
@@ -196,30 +197,29 @@ describe('useEulerLabels chain-scoped loading', () => {
   })
 
   it('keeps a force-refresh replacement available when the older fetch settles first', async () => {
-    const original = deferred<EulerLabelsData>()
-    const refreshed = deferred<EulerLabelsData>()
-    mocks.fetchEulerLabelsData
+    const original = deferred<PublicLabelsBundle>()
+    const refreshed = deferred<PublicLabelsBundle>()
+    mocks.fetchPublicLabelsBundle
       .mockReturnValueOnce(original.promise)
       .mockReturnValueOnce(refreshed.promise)
 
     const labels = useEulerLabels()
     const originalLoad = labels.loadLabels()
-    await vi.waitFor(() => expect(mocks.fetchEulerLabelsData).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(1))
 
     const refreshLoad = labels.loadLabels(true)
     await vi.waitFor(() => {
-      expect(mocks.invalidateSdkQueries).toHaveBeenCalledTimes(1)
-      expect(mocks.fetchEulerLabelsData).toHaveBeenCalledTimes(2)
+      expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
     })
 
-    original.resolve(labelsFor('original'))
+    original.resolve(bundleFor(labelsFor('original')))
     await originalLoad
 
     const joinedRefreshLoad = labels.loadLabels()
     await Promise.resolve()
-    expect(mocks.fetchEulerLabelsData).toHaveBeenCalledTimes(2)
+    expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
 
-    refreshed.resolve(labelsFor('refreshed'))
+    refreshed.resolve(bundleFor(labelsFor('refreshed')))
     await Promise.all([refreshLoad, joinedRefreshLoad])
 
     expect(currentProductKeys()).toEqual(['refreshed'])
@@ -227,15 +227,13 @@ describe('useEulerLabels chain-scoped loading', () => {
     expect(labels.isReady.value).toBe(true)
   })
 
-  it('falls back to the compatibility snapshot when Public Labels V3 fails', async () => {
-    const fallback = labelsFor('compatibility-fallback')
-    mocks.fetchEulerLabelsData.mockResolvedValue(fallback)
-    mocks.fetchPublicLabelsData.mockRejectedValue(new Error('V3 unavailable'))
+  it('does not publish a second labels source when the aggregate endpoint fails', async () => {
+    mocks.fetchPublicLabelsBundle.mockRejectedValue(new Error('V3 unavailable'))
 
     const labels = useEulerLabels()
     await labels.loadLabels()
 
-    expect(currentProductKeys()).toEqual(['compatibility-fallback'])
+    expect(currentProductKeys()).toEqual([])
     expect(labels.geoPolicies.value).toEqual([])
     expect(labels.isReady.value).toBe(true)
   })
@@ -244,11 +242,12 @@ describe('useEulerLabels chain-scoped loading', () => {
     const wrapper = '0x0000000000000000000000000000000000000011'
     const underlying = '0x0000000000000000000000000000000000000022'
     const staleProbe = deferred<Array<{ success: boolean, result: string }>>()
-    const chainTwo = deferred<EulerLabelsData>()
+    const chainTwo = deferred<PublicLabelsBundle>()
     mocks.vaults.push({ asset: { address: wrapper } })
     mocks.evcBatchCall.mockReturnValueOnce(staleProbe.promise)
-    mocks.fetchEulerLabelsData.mockImplementation((chainId: number) => {
-      if (chainId === 1) return Promise.resolve(labelsFor('chain-one'))
+    mocks.fetchPublicLabelsBundle.mockImplementation((_url: string, options: { query: { chainId: number } }) => {
+      const chainId = options.query.chainId
+      if (chainId === 1) return Promise.resolve(bundleFor(labelsFor('chain-one')))
       if (chainId === 2) return chainTwo.promise
       throw new Error(`unexpected chain ${chainId}`)
     })
@@ -260,7 +259,7 @@ describe('useEulerLabels chain-scoped loading', () => {
     currentChainId.value = 2
     mocks.vaults.length = 0
     const chainTwoLoad = labels.loadLabels()
-    await vi.waitFor(() => expect(mocks.fetchEulerLabelsData).toHaveBeenCalledWith(2))
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2))
 
     staleProbe.resolve([{
       success: true,
@@ -271,7 +270,7 @@ describe('useEulerLabels chain-scoped loading', () => {
 
     expect(getEulerLabelWrapPairs()).toEqual({})
 
-    chainTwo.resolve(labelsFor('chain-two'))
+    chainTwo.resolve(bundleFor(labelsFor('chain-two')))
     await chainTwoLoad
     expect(currentProductKeys()).toEqual(['chain-two'])
     expect(getEulerLabelWrapPairs()).toEqual({})

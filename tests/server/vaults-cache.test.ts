@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   fetchVaults: vi.fn(),
   fetchVerifiedVaultAddresses: vi.fn(),
   fetchVaultTypes: vi.fn(),
-  refreshLabelFile: vi.fn(),
+  getPublicEulerLabelsData: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
 }))
@@ -30,9 +30,8 @@ vi.mock('@eulerxyz/euler-v2-sdk', () => ({
   },
 }))
 
-vi.mock('~/server/api/internal/labels/[file].get', () => ({
-  LABEL_FILES: [],
-  refreshLabelFile: mocks.refreshLabelFile,
+vi.mock('~/server/utils/public-labels-source', () => ({
+  getPublicEulerLabelsData: mocks.getPublicEulerLabelsData,
 }))
 
 vi.mock('~/server/utils/sdk-server', () => ({
@@ -66,22 +65,16 @@ describe('vaults cache', () => {
     mocks.fetchVaults.mockReset()
     mocks.fetchVerifiedVaultAddresses.mockReset()
     mocks.fetchVaultTypes.mockReset()
-    mocks.refreshLabelFile.mockReset()
+    mocks.getPublicEulerLabelsData.mockReset()
     mocks.warn.mockReset()
     mocks.error.mockReset()
     process.env.EVAULT_FETCH_CHUNK_CHAINS = '146'
 
     mocks.fetchVerifiedVaultAddresses.mockResolvedValue([])
     mocks.fetchVaultTypes.mockResolvedValue({})
-    mocks.refreshLabelFile.mockImplementation(async (_scope, file) => {
-      if (file === 'products.json') {
-        return {
-          test: {
-            vaults: [...VAULTS],
-          },
-        }
-      }
-      return []
+    mocks.getPublicEulerLabelsData.mockResolvedValue({
+      verifiedVaultAddresses: [...VAULTS],
+      earnVaults: [],
     })
   })
 

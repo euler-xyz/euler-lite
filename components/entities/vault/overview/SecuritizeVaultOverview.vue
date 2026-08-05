@@ -161,7 +161,7 @@ const supplyCapPercentageDisplay = computed(() => {
         v-if="description"
         class="w-full rounded-12 p-16 bg-surface-tertiary"
       >
-        <!-- eslint-disable vue/no-v-html -- trusted label content -->
+        <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
         <p
           class="text-p3 text-content-secondary auto-link"
           v-html="autoLink(description)"

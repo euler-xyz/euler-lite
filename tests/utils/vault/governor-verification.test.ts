@@ -208,7 +208,7 @@ describe('isEarnVaultOwnerVerified', () => {
     expect(isEarnVaultOwnerVerified(earn, labels)).toBe(false)
   })
 
-  it('trusts earn vaults without a product entry (earn-vaults.json sole anchor)', () => {
+  it('trusts a published earn vault without a product assignment', () => {
     const earn = makeEarn({ owner: GOV_A })
     const labels = buildLabels({ declaredKeys: {} })
     expect(isEarnVaultOwnerVerified(earn, labels)).toBe(true)

@@ -1,7 +1,6 @@
 import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
-import { resolveLabelsBaseUrl } from './labels-base-url'
 import {
   buildLabelsView,
   type EntityEntryFull,
@@ -48,11 +47,11 @@ export interface VaultMetadata {
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
-  /** True if the vault is listed under any product's `deprecatedVaults` (or earn-vaults `deprecated: true`). */
+  /** True when Public Labels marks the vault deprecated. */
   deprecated: boolean
   /** True when the owning product has the `governance limited` tag. False for vaults without a product. */
   governanceLimited: boolean
-  /** The owning product slug from products.json (e.g. "euler-prime"), or null for vaults outside any product (escrow, earn-only entries, governor mismatch with no product). */
+  /** The Public Labels product ID, or null for vaults outside a product. */
   productId: string | null
   asset: AssetInfo | null
   /** All declared product entities whose `addresses` contain the vault's on-chain governor (or owner, for Earn). Empty when no entity matches, the vault is escrow, or the vault is unverified. Multiple entries can occur when a product declares multiple entities and more than one matches. */
@@ -78,7 +77,7 @@ function strOrEmpty(value: unknown): string {
 }
 
 function entityLogoUrl(fileName: string): string {
-  return `${resolveLabelsBaseUrl()}/logo/${fileName}`
+  return /^https?:\/\//i.test(fileName) ? fileName : ''
 }
 
 function buildAsset(asset: VaultAsset | undefined, tokenLogos: Map<string, string>): AssetInfo | null {

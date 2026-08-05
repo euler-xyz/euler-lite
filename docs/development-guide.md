@@ -73,7 +73,7 @@ Configuration is split into two mechanisms:
 
 1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, branding, and deployment announcements. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`, with `NUXT_PUBLIC_*` values as build-time fallbacks. Browser V3 data services use the same-origin `/api/internal/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
 
-2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — social links, feature flags, labels/oracle source URLs, and static deployment fallbacks. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
+2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — social links, feature flags, oracle source URLs, and static deployment fallbacks. Set via `NUXT_PUBLIC_CONFIG_*` env vars. The temporary visibility/geo compatibility policy is server-only and configured through `EFFECTIVE_POLICY_*`; display content comes from Public Labels V3. `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` configure their respective upstream data sources.
 
 3. **Chain config** (`useChainConfig()`) — derived dynamically from `RPC_URL_<chainId>` env vars at server startup, injected via `window.__CHAIN_CONFIG__`.
 
@@ -85,13 +85,12 @@ Announcement modal content can be supplied as runtime `CONFIG_ANNOUNCEMENT_TITLE
 
 ## Server-Side Data Proxies
 
-External metadata (contract addresses, labels, oracle checks) is fetched through Nuxt server proxy endpoints rather than directly from GitHub/CDN. This deduplicates upstream requests across users, adds stale-fallback resilience, and avoids GitHub rate limits.
+External metadata (contract addresses, Public Labels, oracle checks) is fetched through Nuxt server endpoints rather than directly from the browser. This deduplicates upstream requests across users, adds stale-fallback resilience, and avoids upstream rate limits.
 
 | Endpoint | Upstream source | Cache TTL | Env var override |
 |----------|----------------|-----------|------------------|
 | `GET /api/internal/euler-chains` | `EulerChains.json` from `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | 5 min | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` when no interfaces branch is configured |
-| `GET /api/internal/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels (query-shape; used by Lite helpers). Reads through the shared TTL cache — a fresh entry short-circuits without upstream. | 5 min read-through | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
-| `GET /api/internal/labels/:chainId/:file` | `{chainId}/{file}` from euler-labels (path-shape; SDK `eulerLabelsBaseUrl` template). Calls `refreshLabelFile()` directly — bypasses the fresh-cache check and joins any in-flight refresh for the same `scope:file`. Shared cache is write + stale-fallback only on this route. | 5 min shared cache (stale fallback; not read-through) | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
+| `GET /api/internal/public-labels?chainId=X&version=latest` | Versioned Public Labels V3 content plus the temporary effective-policy overlay | 5 min server cache; 30 s browser/CDN | `V3_API_URL`, optional `EULER_SDK_V3_API_KEY`; `EFFECTIVE_POLICY_BASE_URL` for policy only |
 | `GET /api/internal/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
 | `GET /api/internal/token-list?chainId=X` | Euler V3 + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/internal/vaults?chainId=X` | Pre-computed chain vault snapshot built by the server-side SDK | 2 min (V3 configured) / 5 min (no V3) | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL` (presence selects cadence) |
@@ -102,14 +101,14 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, account positions, activity/liquidations, vault reads, vault batch/resolve) | none — forwards upstream; `503` during failure backoff | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
 | `GET /api/internal/pyth/updates?ids[]=...` | Pyth Hermes (`https://hermes.pyth.network/v2/updates/price/latest`) | No cache | `PYTH_API_KEY` (server-only) |
 
-All listed endpoints use rate limiting. Local-TTL endpoints (everything in the table except `/api/internal/v3/...` and `/api/internal/pyth/updates`) return stale cached data when upstream is unavailable. The V3 proxy has no local TTL cache: it forwards the upstream response, or returns `503` during failure backoff / upstream outage with `retry-after`. `/api/internal/pyth/updates` requires real-time data and returns no-store cache headers. The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`. See [Server-Side Caching](./server-side-caching.md) for V3 allowlist, backoff, and labels handler divergence detail.
+All listed endpoints use rate limiting. Local-TTL endpoints (everything in the table except `/api/internal/v3/...` and `/api/internal/pyth/updates`) return bounded stale cached data when upstream is unavailable. The V3 proxy has no local TTL cache: it forwards the upstream response, or returns `503` during failure backoff / upstream outage with `retry-after`. `/api/internal/pyth/updates` requires real-time data and returns no-store cache headers. The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`. See [Server-Side Caching](./server-side-caching.md) for details.
 
 **Startup cache warming**: `server/plugins/warm-cache.ts` runs at Nitro startup. Two timers:
 
-- **Global cycle (5 min)**: `/api/internal/euler-chains` once, cross-chain `labels/all/assets.json` once, then per-chain `/api/internal/labels/*` and `/api/internal/token-list` for every enabled non-deprecated chain, serialized so cross-chain upstreams dedupe via the in-flight cache.
+- **Global cycle (5 min)**: Euler Chains once, the cross-chain effective asset policy once, then each enabled non-deprecated chain's Public Labels bundle, effective product/Earn/asset policy, and token list.
 - **Vaults cycle (1 min when V3 is configured, otherwise 5 min)**: `/api/internal/vaults` per chain, also serialized.
 
-Each warm task is a **direct function call** (`refreshX()`) that bypasses any handler fresh-cache short-circuit and forces an upstream fetch, so the entry is always overwritten before it can expire. Handlers that read through the cache (query-shape labels, vault snapshot, and similar) keep serving the still-fresh previous entry during that refresh. The path-shape labels handler does not: it calls `refreshLabelFile()` and joins the in-flight refresh instead. Warming runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses from read-through handlers.
+Each warm task is a **direct function call** (`refreshX()`) that forces an upstream fetch and replaces the cached value before expiry. Concurrent refreshes join the same in-flight operation; request paths continue to use the previous fresh value or the bounded stale fallback. Warming runs in the background — Nitro's node-server preset does not await plugins before starting the HTTP listener, so users arriving in the first few seconds of a freshly booted instance may pay the cold-upstream latency.
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 

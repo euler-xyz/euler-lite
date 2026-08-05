@@ -13,7 +13,6 @@ type BuildEulerSDKOptions = {
     v3ApiUrl?: string
     tokenlistApiBaseUrl?: string
     deploymentsUrl?: string
-    eulerLabelsBaseUrl?: string
     oracleAdaptersBaseUrl?: string
     rewardsMerklApiUrl?: string
     rewardsBrevisApiUrl?: string
@@ -149,7 +148,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: 'https://example.test/EulerChains.json',
-        configLabelsBaseUrl: 'https://labels.example.test/',
         configOracleChecksBaseUrl: 'https://oracles.example.test/data/',
       },
     }))
@@ -166,7 +164,6 @@ describe('useEulerSdk', () => {
       v3ApiUrl: '/api/internal',
       tokenlistApiBaseUrl: '/api/internal',
       deploymentsUrl: '/api/internal/euler-chains',
-      eulerLabelsBaseUrl: '/api/internal/labels',
       oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
     })
     expect(options.rpcUrls).toBeUndefined()
@@ -182,7 +179,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
         configOracleChecksBaseUrl: '',
       },
     }))
@@ -200,7 +196,6 @@ describe('useEulerSdk', () => {
       intrinsicApyV3ApiUrl: '/api/internal',
       eulerInterfacesBranch: 'account-lens-update',
       deploymentsUrl: '/api/internal/euler-chains',
-      eulerLabelsBaseUrl: '/api/internal/labels',
       rewardsMerklApiUrl: '/api/internal/proxy/merkl',
       rewardsBrevisApiUrl: '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns',
       rewardsBrevisProofsApiUrl: '/api/internal/proxy/incentra/v1/getMerkleProofsBatch',
@@ -230,7 +225,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
         configOracleChecksBaseUrl: '',
       },
     }))
@@ -264,7 +258,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
         configOracleChecksBaseUrl: '',
       },
     }))
@@ -291,7 +284,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
         configOracleChecksBaseUrl: '',
       },
     }))
