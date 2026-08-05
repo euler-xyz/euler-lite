@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import type { DisplayStep } from '~/utils/stepDecoding'
-import { formatNumber } from '~/utils/string-utils'
+import { formatUnits } from 'viem'
+import { formatNumber, shortenAddress } from '~/utils/string-utils'
+import { getChainById } from '~/entities/chainRegistry'
 
 defineProps<{
   steps: DisplayStep[]
 }>()
+
+const { chainId } = useEulerAddresses()
+const nativeCurrency = computed(() => getChainById(chainId.value)?.nativeCurrency)
+const nativeSymbol = computed(() => nativeCurrency.value?.symbol ?? 'ETH')
+const nativeDecimals = computed(() => nativeCurrency.value?.decimals ?? 18)
+const formatNativeValue = (value: bigint) => formatUnits(value, nativeDecimals.value)
+const formatNativeValueWithSymbol = (value: bigint) => `${formatNativeValue(value)} ${nativeSymbol.value}`
 
 const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
   const amount = assetInfo?.amount
@@ -84,6 +93,25 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
           </template>
         </p>
       </template>
+      <p
+        v-if="step.nativeValue !== undefined && step.nativeValueTarget"
+        class="basis-full text-p4 text-content-tertiary"
+      >
+        Fuul claim fee:
+        <UiExactAmount
+          :exact="formatNativeValueWithSymbol(step.nativeValue)"
+          :placement="step.index === 1 ? 'bottom' : 'top'"
+        >
+          {{ formatNativeValue(step.nativeValue) }}&nbsp;{{ nativeSymbol }}
+        </UiExactAmount>
+        to
+        <UiExactAmount
+          :exact="step.nativeValueTarget"
+          :placement="step.index === 1 ? 'bottom' : 'top'"
+        >
+          {{ shortenAddress(step.nativeValueTarget) }}
+        </UiExactAmount>
+      </p>
     </div>
     <span
       v-if="step.isSeparateTx"

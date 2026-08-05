@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { OperationReviewModal } from '#components'
 import { formatUnits } from 'viem'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { UserReward } from '~/entities/reward-campaign'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
+import { executeReviewedFuulClaim } from '~/utils/fuulRewardClaim'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 
@@ -39,14 +40,14 @@ const rewardClaimKey = computed(() => [
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
 const { addEntry: addBatchEntry, entries: batchEntries } = useTxBatch()
-const { executePlan } = useEulerTx()
+const { executePlan, executePreparedPlan, prepareTransactionPlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const { settings } = useUserSettings()
 const modal = useModal()
 const { error } = useToast()
 const { chainId: walletChainId, switchChain } = useWagmi()
-const { runSimulation, simulationError } = useTransactionPlanSimulation()
+const { runSimulation, runPreparedSimulation, simulationError } = useTransactionPlanSimulation()
 
 const isClaiming = ref(false)
 const isPreparing = ref(false)
@@ -79,7 +80,7 @@ const ensureWalletOnClaimChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const claim = async () => {
+const claim = async (reviewedFuulPlan?: TransactionPlanPrepared) => {
   if (isSpyMode.value) {
     error('Exit spy mode to claim rewards')
     return
@@ -88,10 +89,15 @@ const claim = async () => {
   try {
     isClaiming.value = true
 
-    if (!plan.value) {
-      plan.value = await buildClaimRewardPlan(reward)
+    if (reward.provider === 'fuul') {
+      await executeReviewedFuulClaim(reviewedFuulPlan, executePreparedPlan)
     }
-    await executePlan(plan.value)
+    else {
+      if (!plan.value) {
+        plan.value = await buildClaimRewardPlan(reward)
+      }
+      await executePlan(plan.value)
+    }
     modal.close()
     await refreshRewards({ delayedRetry: true })
   }
@@ -155,17 +161,23 @@ const onClaimClick = async () => {
   isPreparing.value = true
   try {
     await ensureWalletOnClaimChain()
+    let reviewedFuulPlan: TransactionPlanPrepared | undefined
 
     try {
       plan.value = await buildClaimRewardPlan(reward)
+      if (reward.provider === 'fuul') {
+        reviewedFuulPlan = await prepareTransactionPlan(plan.value)
+      }
     }
     catch (e) {
       logWarn('PortfolioSdkRewardItem/buildPlan', e)
       plan.value = null
     }
 
-    if (plan.value) {
-      const ok = await runSimulation(plan.value)
+    if (reviewedFuulPlan || plan.value) {
+      const ok = reviewedFuulPlan
+        ? await runPreparedSimulation(reviewedFuulPlan)
+        : await runSimulation(plan.value!)
       if (!ok) return
     }
 
@@ -179,10 +191,11 @@ const onClaimClick = async () => {
         },
         assetIconUrl: externalIconUrl.value,
         amount: rewardAmount.value,
-        plan: plan.value || undefined,
+        plan: reviewedFuulPlan ? undefined : (plan.value || undefined),
+        prepared: reviewedFuulPlan,
         submittingLabel: 'Claiming...',
         onConfirm: async () => {
-          await claim()
+          await claim(reviewedFuulPlan)
         },
       },
     })
