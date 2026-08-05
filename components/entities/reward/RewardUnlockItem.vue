@@ -8,13 +8,14 @@ import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { hasEarlierREULClaim } from './reulUnlockBatchSafety'
 
 const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
-const { addEntry: addBatchEntry } = useTxBatch()
+const { addEntry: addBatchEntry, entries: batchEntries } = useTxBatch()
 const { executePlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
@@ -119,12 +120,22 @@ const onAddToBatchClick = async () => {
     await addBatchEntry({
       label: 'Unlock rEUL',
       requiresPlanningAccount: false,
-      buildPlan: async () => buildUnlockREULPlan([item.timestamp]),
+      // This builder runs inside useTxBatch's serialized add queue. Checking
+      // here also covers a claim whose own add was still in flight when the
+      // user clicked Unlock.
+      buildPlan: async () => {
+        if (hasEarlierREULClaim(batchEntries.value, reulTokenContractAddress.value)) {
+          throw new Error('Claim rEUL in a separate transaction, then refresh the lock before unlocking it.')
+        }
+        return buildUnlockREULPlan([item.timestamp])
+      },
       review: getReviewProps(),
     })
   }
   catch (e) {
-    error('Failed to add to batch')
+    error('Failed to add to batch', {
+      description: e instanceof Error ? e.message : 'Unable to prepare this rEUL unlock.',
+    })
     logWarn('RewardUnlockItem/onAddToBatchClick', e)
   }
   finally {
