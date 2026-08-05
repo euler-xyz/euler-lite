@@ -3,7 +3,7 @@ import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, Tran
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -670,16 +670,19 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   // --- Validation computeds ---
   const isGeoBlocked = computed(() => {
-    const addresses: string[] = []
-    if (borrowVault.value) addresses.push(borrowVault.value.address)
-    if (collateralVault.value) addresses.push(collateralVault.value.address)
-    return isAnyVaultBlockedByCountry(...addresses)
+    return (!!borrowVault.value && isVaultBlockedByCountry(
+      borrowVault.value.address,
+      { asset: borrowVault.value.asset },
+    )) || (!!collateralVault.value && isVaultBlockedByCountry(
+      collateralVault.value.address,
+      { asset: collateralVault.value.asset },
+    ))
   })
 
   const isSwapRestricted = computed(() =>
     options.needsSwap.value && isVaultRestrictedByCountry(
       collateralVault.value?.address || '',
-      { counterpart: options.effectiveAsset.value },
+      { asset: collateralVault.value?.asset, counterpart: options.effectiveAsset.value },
     ),
   )
 
@@ -696,7 +699,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // doesn't consult this flag).
   const isInputAssetBlocked = computed(() =>
     options.mode === 'supply'
-    && options.needsSwap.value
     && isAssetBlockedByCountry(options.effectiveAsset.value),
   )
   const isOutputAssetBlocked = computed(() =>
@@ -732,6 +734,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     || isOutputAssetRestricted.value
     || isLoading.value
     || isSubmitDisabled.value,
+  )
+
+  const isPolicyBlocked = computed(() =>
+    isGeoBlocked.value
+    || isSwapRestricted.value
+    || isInputAssetBlocked.value
+    || isOutputAssetBlocked.value
+    || isOutputAssetRestricted.value,
   )
 
   // --- Estimates ---
@@ -1001,15 +1011,11 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // --- Submit ---
   const submit = async () => {
     if (isOperationBlocked.value) return
-    if (isPreparing.value
-      || isGeoBlocked.value
-      || isSwapRestricted.value
-      || isInputAssetBlocked.value
-      || isOutputAssetBlocked.value
-      || isOutputAssetRestricted.value) return
+    if (isPreparing.value || isPolicyBlocked.value) return
     isPreparing.value = true
     try {
       await guardWithPriceImpact(async () => {
+        if (isPolicyBlocked.value) return
         if (!collateralVault.value?.address || !asset.value?.address) return
 
         plan.value = null
@@ -1051,6 +1057,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
           if (!ok) return
         }
 
+        if (isPolicyBlocked.value) {
+          plan.value = null
+          preparedPlan.value = null
+          return
+        }
+
         const reviewAsset = options.getReviewAsset(options.needsSwap.value)
         const reviewType = options.needsSwap.value ? options.swapReviewType : options.reviewType
         modal.open(OperationReviewModal, {
@@ -1083,6 +1095,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const send = async () => {
     try {
       isSubmitting.value = true
+      if (isPolicyBlocked.value) {
+        plan.value = null
+        preparedPlan.value = null
+        error('This operation is not available in your region')
+        return
+      }
       if (!asset.value?.address || !collateralVault.value?.address) return
 
       if (usePreparedPipeline) {

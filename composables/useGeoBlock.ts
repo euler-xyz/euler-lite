@@ -55,6 +55,13 @@ const expandBlockList = (codes: readonly string[]): string[] => {
  */
 export type AssetLike = string | { address?: string, symbol?: string, name?: string } | undefined
 
+export interface VaultGeoPolicyOptions {
+  /** Prefer the caller's already-resolved, chain-scoped vault asset. */
+  asset?: AssetLike
+  /** Asset on the other side of a wrap/acquisition check. */
+  counterpart?: AssetLike
+}
+
 // Normalize an AssetLike into the three fields we consult. Returns undefined
 // when nothing is available (keeps callers' guards simple).
 const toAssetFields = (asset: AssetLike): { address?: string, symbol?: string, name?: string } | undefined => {
@@ -203,7 +210,10 @@ const computeAssetRestricted = (
   return cacheSet(assetRestrictedCache, cacheKey, false)
 }
 
-export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
+export const isVaultBlockedByCountry = (
+  vaultAddress: string,
+  opts?: Pick<VaultGeoPolicyOptions, 'asset'>,
+): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
@@ -216,9 +226,12 @@ export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
   const earnBlock = getEarnVaultBlock(vaultAddress)
   if (earnBlock?.length && isCountryInList(expandBlockList(earnBlock))) return true
 
-  // Asset-level block: a vault is blocked whenever its underlying asset is blocked.
-  // Pass the full asset so pattern rules (symbol/name) also apply.
-  if (isAssetBlockedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
+  // Asset policy is part of every vault decision. Prefer the caller's resolved
+  // chain-scoped object; a missing asset after country detection is complete is
+  // an incomplete policy decision and therefore fails closed.
+  const asset = opts?.asset ?? getVaultUnderlyingAsset(vaultAddress)
+  if (!toAssetFields(asset)) return true
+  if (isAssetBlockedByCountry(asset)) return true
 
   return false
 }
@@ -229,7 +242,7 @@ export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
 
 export const isVaultRestrictedByCountry = (
   vaultAddress: string,
-  opts?: { counterpart?: AssetLike },
+  opts?: VaultGeoPolicyOptions,
 ): boolean => {
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
@@ -240,8 +253,11 @@ export const isVaultRestrictedByCountry = (
   const earnRestricted = getEarnVaultRestricted(vaultAddress)
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
 
-  // Asset-level restriction: a vault is restricted whenever its underlying asset is restricted.
-  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress), opts)) return true
+  // As with hard blocks, unresolved asset metadata cannot be interpreted as an
+  // unrestricted vault once country detection is complete.
+  const asset = opts?.asset ?? getVaultUnderlyingAsset(vaultAddress)
+  if (!toAssetFields(asset)) return true
+  if (isAssetRestrictedByCountry(asset, { counterpart: opts?.counterpart })) return true
 
   return false
 }
