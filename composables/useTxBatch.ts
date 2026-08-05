@@ -33,6 +33,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import { getVaultTags, isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 
 export interface BatchWalletChange {
   token: string
@@ -371,6 +372,15 @@ const getReviewAddressArray = (review: Record<string, unknown>, key: string): st
   return Array.isArray(value) && value.every(item => typeof item === 'string')
     ? value
     : []
+}
+
+export const isBatchEntryGeoBlocked = (entry: Pick<BatchEntry, 'review'>): boolean => {
+  const review = entry.review
+  if (!review) return false
+  const vaultAddresses = getReviewAddressArray(review, 'geoVaultAddresses')
+  const targetVaultAddresses = getReviewAddressArray(review, 'geoTargetVaultAddresses')
+  return isAnyVaultBlockedByCountry(...vaultAddresses)
+    || targetVaultAddresses.some(address => getVaultTags(address, 'swap-target').disabled)
 }
 
 export const buildRefinanceReplacementBorrowPositionKeys = (
@@ -2334,7 +2344,7 @@ export const useTxBatch = () => {
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
     // real `batch` tx would revert, so refuse to send.
-    if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
+    if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value || hasGeoBlockedEntries.value) return
     execError.value = undefined
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
@@ -2372,6 +2382,7 @@ export const useTxBatch = () => {
   // funding). Surfaced as "Not enough balance" and blocks execution — the
   // simulation forges balances, so without this the cart would look executable.
   const hasInsufficientBalance = computed(() => walletShortfalls.value.length > 0)
+  const hasGeoBlockedEntries = computed(() => entries.value.some(isBatchEntryGeoBlocked))
   // Human-readable shortfall, e.g. "Not enough wallet balance. Missing 0.01 wstETH".
   // The batch still simulates (balances are forged) — this just explains why it
   // can't execute, mirroring how a failed health check blocks an otherwise-valid
@@ -2393,7 +2404,8 @@ export const useTxBatch = () => {
     && !isExecuting.value
     && !hasFailedOps.value
     && !simError.value
-    && !hasInsufficientBalance.value,
+    && !hasInsufficientBalance.value
+    && !hasGeoBlockedEntries.value,
   )
 
   // Net wallet balance changes from real (layer 0) to the *final* layer — the
@@ -2466,6 +2478,7 @@ export const useTxBatch = () => {
     hasFailedOps,
     canExecuteBatch,
     hasInsufficientBalance,
+    hasGeoBlockedEntries,
     insufficientBalanceMessage,
     walletShortfalls,
     modifiedKeys,

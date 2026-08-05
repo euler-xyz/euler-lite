@@ -32,6 +32,7 @@ const {
   canExecuteBatch,
   hasFailedOps,
   hasInsufficientBalance,
+  hasGeoBlockedEntries,
   insufficientBalanceMessage,
   executeBatch,
   prepareBatchPlan,
@@ -386,6 +387,7 @@ const isConfirmDisabled = computed(() =>
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
+  if (hasGeoBlockedEntries.value) return 'This operation is not available in your region'
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
   if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
   if (simError.value) return 'This batch would revert — resolve the flagged error'
