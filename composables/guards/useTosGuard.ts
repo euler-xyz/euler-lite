@@ -61,6 +61,7 @@ export const useTosGuard = () => {
   const sessionAccepted = useState<boolean>('tosGuardSessionAccepted', () => false)
   const tosLoadFailed = useState<boolean>('tosGuardLoadFailed', () => false)
   const tosData = ref<TosData | null>(null)
+  let checkGeneration = 0
 
   const tosRequirementState = computed<TosRequirementState>(() => ({
     hasWalletAddress: !!address.value,
@@ -77,19 +78,29 @@ export const useTosGuard = () => {
   )
 
   const checkHasSigned = async () => {
+    const generation = ++checkGeneration
+    const checkedAddress = address.value
+    const checkedChainId = chainId.value
+    const isCurrentCheck = () =>
+      generation === checkGeneration
+      && address.value === checkedAddress
+      && chainId.value === checkedChainId
+
     if (!enableTosSignature) {
       hasSigned.value = true
       return
     }
     if (hasSigned.value === true) return
-    if (!address.value) {
+    if (!checkedAddress) {
       hasSigned.value = false
       return
     }
     if (!isReady.value) {
       await loadEulerConfig()
+      if (!isCurrentCheck()) return
     }
-    if (!tosSignerAddress.value) {
+    const signerAddress = tosSignerAddress.value
+    if (!signerAddress) {
       hasSigned.value = false
       return
     }
@@ -97,10 +108,12 @@ export const useTosGuard = () => {
     let data: TosData
     try {
       data = await getTosData()
+      if (!isCurrentCheck()) return
       tosData.value = data
       tosLoadFailed.value = false
     }
     catch (e) {
+      if (!isCurrentCheck()) return
       logWarn('tosGuard/loadTos', e)
       tosLoadFailed.value = true
       hasSigned.value = false
@@ -110,15 +123,17 @@ export const useTosGuard = () => {
     try {
       const client = rpcClient.value!
       const lastSignTimestamp = await client.readContract({
-        address: tosSignerAddress.value,
+        address: signerAddress,
         abi: tosSignerReadAbi,
         functionName: 'lastTermsOfUseSignatureTimestamp',
         authorizationList: undefined,
-        args: [address.value as Address, data.tosMessageHash],
+        args: [checkedAddress as Address, data.tosMessageHash],
       })
+      if (!isCurrentCheck()) return
       hasSigned.value = (lastSignTimestamp as bigint) > 0
     }
     catch (e) {
+      if (!isCurrentCheck()) return
       logWarn('tosGuard/checkSignature', e)
       hasSigned.value = false
     }

@@ -22,6 +22,9 @@ import {
   clearAssetGeoCache,
   isAssetBlockedByCountry,
   isAssetRestrictedByCountry,
+  GEO_POLICY_BLOCKED_REASON,
+  GEO_POLICY_PENDING_REASON,
+  getVaultOperationGeoBlockReason,
   isVaultBlockedByCountry,
   isVaultRestrictedByCountry,
 } from '~/composables/useGeoBlock'
@@ -105,6 +108,29 @@ describe('isAssetBlockedByCountry — loading & sentinel states', () => {
     expect(isAssetBlockedByCountry(undefined)).toBe(false)
     expect(isAssetBlockedByCountry('')).toBe(false)
     expect(isAssetBlockedByCountry({})).toBe(false)
+  })
+})
+
+describe('operation geo policy', () => {
+  beforeEach(resetState)
+
+  it('blocks state-changing operations while country detection is pending', () => {
+    setCountry(undefined)
+    expect(getVaultOperationGeoBlockReason([USDC])).toBe(GEO_POLICY_PENDING_REASON)
+  })
+
+  it('reacts when the active country blocks a reviewed vault', () => {
+    const vault = '0x1111111111111111111111111111111111111111'
+    getVaultMock.mockReturnValue({
+      asset: { address: USDC, symbol: 'USDC', name: 'USD Coin' },
+    })
+    assetBlocks[USDC.toLowerCase()] = ['DE']
+
+    setCountry('CA')
+    expect(getVaultOperationGeoBlockReason([vault])).toBeUndefined()
+
+    setCountry('DE')
+    expect(getVaultOperationGeoBlockReason([vault])).toBe(GEO_POLICY_BLOCKED_REASON)
   })
 })
 

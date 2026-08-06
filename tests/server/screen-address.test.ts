@@ -87,7 +87,7 @@ describe('POST /api/internal/screen-address', () => {
     expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(USER)
   })
 
-  it('derives vpnIsUsed from trusted request headers', async () => {
+  it('preserves positive VPN signals from the client and trusted request headers', async () => {
     process.env.WALLET_SCREENING_URI = SCREENING_URI
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
       new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 }),
@@ -119,6 +119,6 @@ describe('POST /api/internal/screen-address', () => {
       const init = call[1]
       return JSON.parse(String(init?.body)) as { vpnIsUsed: string }
     })
-    expect(bodies.map(body => body.vpnIsUsed)).toEqual(['true', 'true', 'true', 'true', 'false'])
+    expect(bodies.map(body => body.vpnIsUsed)).toEqual(['true', 'true', 'true', 'true', 'true'])
   })
 })

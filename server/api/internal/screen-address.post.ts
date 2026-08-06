@@ -34,7 +34,8 @@ export default defineEventHandler(async (event) => {
 
   const address = body.address
   const vpnIsUsed = String(
-    isTruthyHeader(event.node.req.headers['x-is-vpn'])
+    body.vpnIsUsed === true
+    || isTruthyHeader(event.node.req.headers['x-is-vpn'])
     || isTruthyHeader(event.node.req.headers['x-is-proxy-or-vpn']),
   )
 

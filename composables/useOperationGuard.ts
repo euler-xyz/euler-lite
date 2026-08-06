@@ -7,6 +7,7 @@ import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVault
 import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
+import { getVaultOperationGeoBlockReason } from '~/composables/useGeoBlock'
 
 export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[]) => {
   const { address: userAddress } = useWagmi()
@@ -22,6 +23,13 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
 
   // --- Unverified vault guard ---
   useUnverifiedVaultGuard(addresses)
+
+  // --- Geo guard ---
+  const geoBlockReason = computed(() => getVaultOperationGeoBlockReason(addresses.value))
+  watch(geoBlockReason, (reason) => {
+    if (reason) registerOperationBlocker('geo', reason)
+    else unregisterOperationBlocker('geo')
+  }, { immediate: true })
 
   // --- Keyring guard ---
   const keyringVaultAddress = computed(() =>
@@ -114,5 +122,6 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
   onUnmounted(() => {
     clearOperationMeta('keyring')
     unregisterOperationBlocker('keyring')
+    unregisterOperationBlocker('geo')
   })
 }

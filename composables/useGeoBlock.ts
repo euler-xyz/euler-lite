@@ -227,6 +227,15 @@ export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
   return addresses.some(addr => isVaultBlockedByCountry(addr))
 }
 
+export const GEO_POLICY_PENDING_REASON = 'Checking regional availability'
+export const GEO_POLICY_BLOCKED_REASON = 'This operation is not available in your region'
+
+export const getVaultOperationGeoBlockReason = (addresses: string[]): string | undefined => {
+  if (country.value === undefined) return GEO_POLICY_PENDING_REASON
+  if (addresses.some(address => isVaultBlockedByCountry(address))) return GEO_POLICY_BLOCKED_REASON
+  return undefined
+}
+
 export const isVaultRestrictedByCountry = (
   vaultAddress: string,
   opts?: { counterpart?: AssetLike },

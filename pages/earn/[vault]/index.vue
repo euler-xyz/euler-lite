@@ -8,7 +8,7 @@ import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBl
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
 import { isNativeCurrencyAddress } from '~/utils/native-currency'
-import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -212,6 +212,10 @@ const addToBatch = async () => {
 const send = async () => {
   try {
     isSubmitting.value = true
+    if (isOperationBlocked.value || isGeoBlocked.value) {
+      error(operationBlockReason.value ?? 'This operation is not available in your region')
+      return
+    }
     if (!asset.value?.address) {
       return
     }

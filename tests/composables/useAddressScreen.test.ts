@@ -92,6 +92,19 @@ describe('useAddressScreen', () => {
     expect(screening.isAddressScreened(USER)).toBe(false)
   })
 
+  it('disconnects when local VPN detection is positive even if address screening is clean', async () => {
+    mocks.detectVpn.mockResolvedValue(true)
+    mocks.screenAddress.mockResolvedValue(false)
+
+    const screening = useAddressScreen()
+    await screening.screenConnectedAddress(USER)
+
+    expect(mocks.screenAddress).toHaveBeenCalledWith(USER, true)
+    expect(mocks.disconnect).toHaveBeenCalledTimes(1)
+    expect(mocks.modalOpen).toHaveBeenCalledTimes(1)
+    expect(screening.isAddressScreened(USER)).toBe(false)
+  })
+
   it('invalidates a pending verdict when screening state is reset', async () => {
     let resolveScreening: (value: boolean) => void = () => {}
     mocks.detectVpn.mockResolvedValue(false)
