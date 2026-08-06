@@ -8,6 +8,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { executeReviewedFuulClaim } from '~/utils/fuulRewardClaim'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -20,12 +21,23 @@ const { reward } = defineProps<{ reward: UserReward }>()
 const rewardKey = computed(() =>
   `${reward.chainId}:${reward.provider}:${reward.token.address.toLowerCase()}:${reward.unclaimed}`,
 )
+const rewardClaimKey = computed(() => [
+  reward.chainId,
+  reward.provider,
+  reward.claimAddress?.toLowerCase() ?? '',
+  reward.campaignId ?? '',
+  reward.streamId ?? '',
+  reward.token.address.toLowerCase(),
+  reward.unclaimed,
+].join(':'))
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
-const { entryCount, clearBatch } = useTxBatch()
+const { addEntry: addBatchEntry, entries: batchEntries, entryCount, clearBatch } = useTxBatch()
 const { executePlan, executePreparedPlan, prepareTransactionPlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
+const { settings } = useUserSettings()
+const { eulerTokenAddresses } = useEulerAddresses()
 const modal = useModal()
 const { error } = useToast()
 const { chainId: walletChainId, switchChain } = useWagmi()
@@ -33,13 +45,25 @@ const { runSimulation, runPreparedSimulation, simulationError } = useTransaction
 
 const isClaiming = ref(false)
 const isPreparing = ref(false)
+const isAddingToBatch = ref(false)
 const plan = ref<TransactionPlan | null>(null)
 
 const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed), reward.token.decimals)))
 const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
 const planKind = computed(() => REWARD_PROVIDER_REVIEW_TYPES[reward.provider] ?? 'reward')
-const isBatchActive = computed(() => entryCount.value > 0)
+const isREULReward = computed(() => {
+  const reulAddress = eulerTokenAddresses.value?.rEUL
+  return reward.token.symbol.toLowerCase() === 'reul'
+    || (!!reulAddress && reward.token.address.toLowerCase() === reulAddress.toLowerCase())
+})
+const canAddToBatch = computed(() =>
+  settings.value.enableAdvancedMode && reward.provider !== 'turtle' && !isREULReward.value,
+)
+const isInBatch = computed(() =>
+  batchEntries.value.some(entry => entry.rewardClaimKey === rewardClaimKey.value),
+)
+const isREULBatchBlocked = computed(() => isREULReward.value && entryCount.value > 0)
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -59,8 +83,8 @@ const ensureWalletOnClaimChain = async () => {
 }
 
 const claim = async (reviewedFuulPlan?: TransactionPlanPrepared) => {
-  if (isBatchActive.value) {
-    error('Clear the current batch before claiming rewards')
+  if (isREULBatchBlocked.value) {
+    error('Clear the current batch before claiming rEUL')
     return
   }
 
@@ -93,18 +117,58 @@ const claim = async (reviewedFuulPlan?: TransactionPlanPrepared) => {
   }
 }
 
+const onAddToBatchClick = async () => {
+  if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value || isInBatch.value) return
+  isAddingToBatch.value = true
+  try {
+    await ensureWalletOnClaimChain()
+    await addBatchEntry({
+      label: `Claim ${reward.token.symbol}`,
+      rewardClaimKey: rewardClaimKey.value,
+      requiresPlanningAccount: false,
+      buildPlan: async () => buildClaimRewardPlan(reward),
+      review: {
+        type: planKind.value,
+        asset: {
+          symbol: reward.token.symbol,
+          address: reward.token.address,
+          decimals: reward.token.decimals,
+        },
+        assetIconUrl: externalIconUrl.value,
+        amount: rewardAmount.value,
+        submittingLabel: 'Claiming...',
+      },
+    })
+  }
+  catch (e) {
+    let description = 'Unable to prepare this reward claim.'
+    try {
+      description = await getTxErrorMessage(e)
+    }
+    catch (messageError) {
+      logWarn('PortfolioSdkRewardItem/onAddToBatchClick/getTxErrorMessage', messageError)
+    }
+    error('Failed to add to batch', { description })
+    logWarn('PortfolioSdkRewardItem/onAddToBatchClick', e)
+  }
+  finally {
+    isAddingToBatch.value = false
+  }
+}
+
 const onClaimClick = async () => {
-  if (isBatchActive.value) {
-    error('Clear the current batch before claiming rewards')
+  if (isREULBatchBlocked.value) {
+    error('Clear the current batch before claiming rEUL')
     return
   }
+  if (isInBatch.value) return
 
   if (isSpyMode.value) {
     error('Exit spy mode to claim rewards')
     return
   }
 
-  if (isPreparing.value) return
+  if (isPreparing.value || isAddingToBatch.value) return
   isPreparing.value = true
   try {
     await ensureWalletOnClaimChain()
@@ -159,12 +223,23 @@ const onClaimClick = async () => {
 <template>
   <div
     class="relative overflow-hidden bg-surface rounded-xl border border-line-subtle shadow-card p-16 transition-all duration-default ease-default"
+    :class="{ '!border !border-dashed !border-line-emphasis': isInBatch }"
     data-id="portfolio-list-item"
     data-list="sdk-rewards"
     :data-key="rewardKey"
     :data-token-address="reward.token.address.toLowerCase()"
+    :data-batch-queued="isInBatch ? 'true' : undefined"
   >
-    <div class="relative z-0 flex flex-col gap-12">
+    <div
+      v-if="isInBatch"
+      class="pointer-events-none absolute inset-0 z-10"
+      style="background: repeating-linear-gradient(45deg, transparent 0 9px, rgba(114, 131, 149, .06) 9px 18px);"
+      aria-hidden="true"
+    />
+    <div
+      class="relative z-0 flex flex-col gap-12"
+      :class="{ 'opacity-50 pointer-events-none': isInBatch }"
+    >
       <div class="flex justify-between items-center mb-12">
         <AssetAvatar
           v-if="hasIcon"
@@ -219,22 +294,32 @@ const onClaimClick = async () => {
           </p>
         </div>
       </div>
-      <div class="grid grid-cols-1">
+      <div :class="canAddToBatch ? 'grid grid-cols-2 gap-8' : 'grid grid-cols-1'">
         <UiButton
           rounded
           :loading="isClaiming || isPreparing"
-          :disabled="isSpyMode || isBatchActive"
+          :disabled="isSpyMode || isAddingToBatch || isInBatch || isREULBatchBlocked"
           @click="onClaimClick"
         >
           Claim
         </UiButton>
+        <UiButton
+          v-if="canAddToBatch"
+          rounded
+          variant="primary-stroke"
+          :loading="isAddingToBatch"
+          :disabled="isSpyMode || isClaiming || isPreparing || isInBatch"
+          @click="onAddToBatchClick"
+        >
+          {{ isInBatch ? 'In batch' : 'Add to batch' }}
+        </UiButton>
       </div>
       <p
-        v-if="isBatchActive"
+        v-if="isREULBatchBlocked"
         class="text-center text-p3 text-content-tertiary"
         data-testid="reward-batch-blocked"
       >
-        Clear the current batch before claiming rewards ·
+        Clear the current batch before claiming rEUL ·
         <button
           type="button"
           class="text-accent-500 hover:text-accent-600"
