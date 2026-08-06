@@ -16,6 +16,7 @@ interface StoredTosSignature {
 }
 
 const signatures = new Map<SignatureKey, StoredTosSignature>()
+let tosContextVersion = 0
 
 const keyFor = (chainId: number, account: Address): SignatureKey =>
   `${chainId}:${getAddress(account).toLowerCase()}`
@@ -26,15 +27,26 @@ export const setLiteTosSignature = (args: {
   tosMessage: string
   tosMessageHash: Hex
 }) => {
-  signatures.set(keyFor(args.chainId, args.account), {
+  const key = keyFor(args.chainId, args.account)
+  const current = signatures.get(key)
+  if (
+    current?.tosMessage === args.tosMessage
+    && current.tosMessageHash === args.tosMessageHash
+  ) return
+  signatures.set(key, {
     tosMessage: args.tosMessage,
     tosMessageHash: args.tosMessageHash,
   })
+  tosContextVersion += 1
 }
 
 export const clearLiteTosSignature = (args: { chainId: number, account: Address }) => {
-  signatures.delete(keyFor(args.chainId, args.account))
+  if (signatures.delete(keyFor(args.chainId, args.account))) {
+    tosContextVersion += 1
+  }
 }
+
+export const getLiteTosContextVersion = (): number => tosContextVersion
 
 const ownerOf = (account: AddressOrAccount): Address =>
   typeof account === 'string' ? getAddress(account) : getAddress(account.owner)

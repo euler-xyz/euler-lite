@@ -27,6 +27,7 @@ const {
   walletChanges,
   simError,
   execError,
+  pendingSafeSubmission,
   isExecuting,
   isSimulating,
   canExecuteBatch,
@@ -34,6 +35,7 @@ const {
   hasInsufficientBalance,
   insufficientBalanceMessage,
   executeBatch,
+  reconcilePendingSafeSubmission,
   prepareBatchPlan,
   entryPlans,
   marketByEntryId,
@@ -382,10 +384,16 @@ const copyCalldata = async () => {
 const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
 
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
+  isSpyMode.value
+  || isExecuting.value
+  || isPreparing.value
+  || isSimulating.value
+  || (!pendingSafeSubmission.value && !canExecuteBatch.value)
+  || !!prepareError.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
+  if (pendingSafeSubmission.value) return `Safe submission ${pendingSafeSubmission.value.submittedHash} must be reconciled before this batch can be retried`
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
   if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
   if (simError.value) return 'This batch would revert — resolve the flagged error'
@@ -394,7 +402,8 @@ const blockedReason = computed(() => {
 
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
-  await executeBatch()
+  if (pendingSafeSubmission.value) await reconcilePendingSafeSubmission()
+  else await executeBatch()
   // executeBatch clears the cart on success; close once nothing's left to do.
   if (!execError.value && entries.value.length === 0) emit('close')
 }
@@ -717,7 +726,7 @@ const handleClose = () => {
           data-testid="batch-review-execute"
           @click="handleExecute"
         >
-          {{ isExecuting ? 'Executing…' : 'Execute batch' }}
+          {{ isExecuting ? (pendingSafeSubmission ? 'Reconciling…' : 'Executing…') : (pendingSafeSubmission ? 'Check Safe status' : 'Execute batch') }}
         </UiButton>
         <p
           v-if="blockedReason"

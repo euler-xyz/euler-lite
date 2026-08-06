@@ -29,6 +29,7 @@ import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { profAsync, profMark } from '~/utils/profiler'
+import { getLiteTosContextVersion } from '~/utils/sdk-tos'
 
 export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
 export type SwapQuotePlanContext = {
@@ -313,11 +314,13 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     let gas: bigint
     let plan: TransactionPlan
     let prepared: TransactionPlanPrepared
+    let tosContextVersion: number
     try {
       const fallbackAccount = (params.origin || effectiveOwner.value || quote.accountIn) as Address
       const account = getPlanAccount(fallbackAccount)
       plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider, getPlanContext(account)))
       const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
+      tosContextVersion = getLiteTosContextVersion()
       prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))
       const gasPlan = await profAsync(`quote:${provider}`, 'buildGasEstimatePlan', () => buildGasEstimatePlan(plan))
       const gasPrepared = gasPlan === plan
@@ -342,7 +345,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
     const gasPrice = await gasPricePromise
     if (!gasPrice) {
-      return { provider, quote, amountUsd: await amountUsdPromise, plan, preparedPlan: prepared }
+      return { provider, quote, amountUsd: await amountUsdPromise, plan, preparedPlan: prepared, tosContextVersion }
     }
 
     const gasCostNative = gas * gasPrice
@@ -358,6 +361,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       gasCostUsd,
       plan,
       preparedPlan: prepared,
+      tosContextVersion,
     }
   }
 

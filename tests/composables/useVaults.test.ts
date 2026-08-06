@@ -15,12 +15,14 @@ const HIDDEN_WETH_LENDING_EVAULT = '0x2ff5F1Ca35f5100226ac58E1BFE5aac56919443B'
 const HIDDEN_TELOSC_WORMHOLE_EVAULT = '0x2e6Dff8907aFdA5D62A278e21B2e65c8595D746E'
 const BASE_EARN_VAULT = '0x8bF41Ad2b816F7c220b22F4BCD63fC2A35Ab4247'
 
-const makeVault = (address: string): EVault => ({
+const makeVault = (address: string, targetChainId = 1): EVault => ({
+  chainId: targetChainId,
   address: getAddress(address),
   collaterals: [],
 }) as unknown as EVault
 
-const makeEarnVault = (address: string): EulerEarn => ({
+const makeEarnVault = (address: string, targetChainId = 1): EulerEarn => ({
+  chainId: targetChainId,
   address: getAddress(address),
 }) as unknown as EulerEarn
 
@@ -39,14 +41,14 @@ describe('useVaults EVault verification metadata', () => {
     fetchVerifiedVaultAddresses.mockReset()
     fetchVaultTypes.mockReset()
 
-    fetchVaults.mockImplementation(async (_chainId: number, addresses: Address[]) => ({
+    fetchVaults.mockImplementation(async (targetChainId: number, addresses: Address[]) => ({
       errors: [],
-      result: addresses.map(address => makeVault(address)),
+      result: addresses.map(address => makeVault(address, targetChainId)),
     }))
     fetchEarnVaults.mockResolvedValue({ errors: [], result: [] })
-    fetchEarnVault.mockImplementation(async (_chainId: number, address: Address) => ({
+    fetchEarnVault.mockImplementation(async (targetChainId: number, address: Address) => ({
       errors: [],
-      result: makeEarnVault(address),
+      result: makeEarnVault(address, targetChainId),
     }))
     fetchVerifiedVaultAddresses.mockResolvedValue([])
     fetchVaultTypes.mockResolvedValue({})

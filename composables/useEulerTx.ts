@@ -55,6 +55,7 @@ import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
 import {
   getSafeWalletProvider,
+  SafeTransactionStatusUnknownError,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
 } from '~/utils/safeWalletTransactions'
@@ -477,6 +478,9 @@ export const useEulerTx = () => {
   const freshPlanContext = async (preloaded?: Account<IHasVaultAddress>) => {
     const owner = requireOwner()
     const cid = requireChainId()
+    if (preloaded && preloaded.chainId !== cid) {
+      throw new Error(`Plan account chain ${preloaded.chainId} does not match the active chain ${cid}`)
+    }
     const sdk = await profAsync('sdk', 'getEulerSdkFresh', () => getEulerSdkFresh())
     if (preloaded) return { sdk, account: preloaded }
     const fetched = await profAsync('sdk', 'fetchAccount', () => sdk.accountService.fetchAccount(cid, owner))
@@ -520,10 +524,27 @@ export const useEulerTx = () => {
   const planDeposit = async (input: PlanDepositInput): Promise<TransactionPlan> => {
     const owner = requireOwner()
     const { sdk, account } = await freshPlanContext(input.account)
+    const vaultAddress = getAddress(input.vaultAddress)
+    const assetAddress = getAddress(input.assetAddress)
+    const fetchedVault = await profAsync('sdk', 'fetchDepositVault', () => sdk.vaultMetaService.fetchVault(
+      account.chainId,
+      vaultAddress,
+    ))
+    const currentVault = fetchedVault.result
+    if (!currentVault) {
+      throw new Error(`Unable to verify deposit vault ${vaultAddress} on chain ${account.chainId}`)
+    }
+    if (
+      currentVault.chainId !== account.chainId
+      || getAddress(currentVault.address) !== vaultAddress
+      || getAddress(currentVault.asset.address) !== assetAddress
+    ) {
+      throw new Error(`Deposit vault metadata changed on chain ${account.chainId}; reload and review the transaction again`)
+    }
     const args: PlanDepositArgs = {
       account,
-      vault: input.vaultAddress,
-      asset: input.assetAddress,
+      vault: vaultAddress,
+      asset: assetAddress,
       amount: input.amount,
       receiver: input.receiver ?? owner,
       enableCollateral: input.enableCollateral,
@@ -1469,7 +1490,17 @@ export const useEulerTx = () => {
       prepared,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        const currentAccount = getAccount(config)
+        assertWalletExecutionContext({
+          expectedAccount: preparedOwner,
+          expectedChainId: prepared.chainId,
+          currentAccount: currentAccount.address,
+          currentChainId: currentAccount.chainId,
+        })
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          account: preparedOwner,
+        })
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
@@ -1477,6 +1508,63 @@ export const useEulerTx = () => {
 
     finalizeExecution(result)
     return result
+  }
+
+  const reconcileSafeTransaction = async ({
+    submittedHash,
+    account,
+    chainId: expectedChainId,
+    timeoutMs = 15_000,
+  }: {
+    submittedHash: Hash
+    account: Address
+    chainId: number
+    timeoutMs?: number
+  }): Promise<
+    | { status: 'executed', receipt: TransactionReceipt }
+    | { status: 'not-executed' }
+    | { status: 'unknown' }
+  > => {
+    const currentAccount = getAccount(config)
+    assertWalletExecutionContext({
+      expectedAccount: account,
+      expectedChainId,
+      currentAccount: currentAccount.address,
+      currentChainId: currentAccount.chainId,
+    })
+
+    const safeWalletProvider = await getSafeWalletProvider(currentAccount.connector)
+    if (!safeWalletProvider) {
+      throw new Error('Reconnect the Safe wallet to reconcile the submitted transaction')
+    }
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(expectedChainId)
+    if (!provider) {
+      throw new Error('No provider available to reconcile the Safe transaction')
+    }
+
+    try {
+      const execution = await waitForSafeTransactionExecution({
+        submittedHash,
+        walletProvider: safeWalletProvider,
+        publicClient: provider as ReceiptClientLike,
+        timeoutMs,
+      })
+      finalizeExecution({ receipts: [execution.receipt] })
+      return { status: 'executed', receipt: execution.receipt }
+    }
+    catch (error) {
+      if (error instanceof SafeTransactionStatusUnknownError) {
+        return { status: 'unknown' }
+      }
+      if (error instanceof Error && (
+        error.message === 'Safe transaction was cancelled'
+        || error.message === 'Safe transaction failed'
+      )) {
+        return { status: 'not-executed' }
+      }
+      throw error
+    }
   }
 
   /**
@@ -1541,5 +1629,6 @@ export const useEulerTx = () => {
     simulatePreparedPlan,
     executePlan,
     executePreparedPlan,
+    reconcileSafeTransaction,
   }
 }

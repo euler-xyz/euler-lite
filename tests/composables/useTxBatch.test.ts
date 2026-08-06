@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getAddress, type Address, type Hex } from 'viem'
+import { getAddress, type Address, type Hash, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
@@ -13,6 +13,7 @@ import {
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import { SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -31,6 +32,7 @@ const routerReplace = vi.fn()
 const eulerTxMocks = {
   prepareTransactionPlan: vi.fn(),
   executePreparedPlan: vi.fn(),
+  reconcileSafeTransaction: vi.fn(),
   estimateGasForPlan: vi.fn(),
   sendPlainTransactions: vi.fn(),
 }
@@ -310,6 +312,8 @@ beforeEach(() => {
   vi.restoreAllMocks()
   eulerTxMocks.prepareTransactionPlan.mockReset()
   eulerTxMocks.executePreparedPlan.mockReset()
+  eulerTxMocks.reconcileSafeTransaction.mockReset()
+  eulerTxMocks.reconcileSafeTransaction.mockResolvedValue({ status: 'unknown' })
   eulerTxMocks.estimateGasForPlan.mockReset()
   eulerTxMocks.sendPlainTransactions.mockReset()
   eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
@@ -1313,6 +1317,39 @@ describe('useTxBatch execution prerequisites', () => {
 
     expect(batch.entryCount.value).toBe(0)
     expect(batch.execError.value).toBeUndefined()
+  })
+
+  it('locks an unresolved Safe submission until reconciliation confirms its outcome', async () => {
+    const batch = useTxBatch()
+    const safeHash = `0x${'12'.repeat(32)}` as Hash
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.executePreparedPlan.mockRejectedValue(
+      new SafeTransactionStatusUnknownError(safeHash, 'timeout'),
+    )
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    expect(batch.pendingSafeSubmission.value?.submittedHash).toBe(safeHash)
+    expect(batch.canExecuteBatch.value).toBe(false)
+    expect(migrationFlowMocks.revokeAfterAbort).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain(safeHash)
+
+    batch.clearBatch()
+    await batch.executeBatch()
+    expect(batch.entryCount.value).toBe(1)
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+
+    await batch.reconcilePendingSafeSubmission()
+    expect(batch.pendingSafeSubmission.value?.submittedHash).toBe(safeHash)
+
+    eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'not-executed' })
+    await batch.reconcilePendingSafeSubmission()
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+    expect(batch.entryCount.value).toBe(1)
   })
 })
 

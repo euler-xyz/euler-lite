@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -33,6 +33,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import { SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
 
 export interface BatchWalletChange {
   token: string
@@ -210,6 +211,14 @@ const isSimulating = ref(false)
 const simError = ref<string | undefined>(undefined)
 const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
+interface PendingSafeBatchSubmission {
+  submittedHash: Hash
+  account: Address
+  chainId: number
+  refreshExternalMigrationPositions: boolean
+  grantedRevokes: MigrationAuthorizationRevoke[]
+}
+const pendingSafeSubmission = shallowRef<PendingSafeBatchSubmission | null>(null)
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
@@ -1622,7 +1631,13 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
-  const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
+  const {
+    prepareTransactionPlan,
+    executePreparedPlan,
+    reconcileSafeTransaction,
+    estimateGasForPlan,
+    sendPlainTransactions,
+  } = useEulerTx()
   const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
@@ -2066,6 +2081,7 @@ export const useTxBatch = () => {
   }
 
   const addEntry = async (entry: BatchEntryInput) => {
+    if (pendingSafeSubmission.value) return
     // Ignore a rapid duplicate click while an identical add is still in flight
     // (same target sub-account + label). Sequential re-adds are unaffected — the
     // signature is released once the add settles.
@@ -2146,6 +2162,7 @@ export const useTxBatch = () => {
   }
 
   const removeEntry = (id: string) => {
+    if (pendingSafeSubmission.value) return
     const nextEntries = entries.value.filter(entry => entry.id !== id)
     execError.value = undefined
     entries.value = nextEntries
@@ -2165,7 +2182,9 @@ export const useTxBatch = () => {
     }
   }
 
-  const clearBatch = () => {
+  const clearBatchInternal = (safeTerminal: boolean) => {
+    if (pendingSafeSubmission.value && !safeTerminal) return
+    if (safeTerminal) pendingSafeSubmission.value = null
     resimToken++
     entries.value = []
     layers.value = []
@@ -2182,12 +2201,15 @@ export const useTxBatch = () => {
     syncOverlay()
   }
 
+  const clearBatch = () => clearBatchInternal(false)
+
   const setActiveLayer = (layer: number) => {
     activeLayer.value = Math.max(0, Math.min(layer, layers.value.length - 1))
     syncOverlay()
   }
 
   const dismissExecutionError = () => {
+    if (pendingSafeSubmission.value) return
     execError.value = undefined
   }
 
@@ -2330,7 +2352,7 @@ export const useTxBatch = () => {
    * signed execution plan before the merged batch is prepared and sent.
    */
   const executeBatch = async () => {
-    if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
+    if (isExecuting.value || pendingSafeSubmission.value || entries.value.length === 0 || !lastMerged) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
     // real `batch` tx would revert, so refuse to send.
@@ -2338,27 +2360,77 @@ export const useTxBatch = () => {
     execError.value = undefined
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
+    let shouldRefreshExternalMigrationPositions = false
     try {
       if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
       // would revert (against the current chain state, which may have moved since
       // the last simulation), surface the decoded reason and don't send.
-      const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
+      shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
       await sendExecutionPrerequisites(grantedRevokes)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
       const prepared = await prepareTransactionPlan(executionPlan)
       await executePreparedPlan(prepared)
-      clearBatch()
+      clearBatchInternal(true)
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
       await revokeAfterSuccess(grantedRevokes)
       await redirectAfterBatchExecution()
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      // The batch never landed, so no granted authorization should be left
-      // standing. Entries stay in the cart for a retry, which re-grants.
-      await revokeAfterAbort(grantedRevokes)
+      if (error instanceof SafeTransactionStatusUnknownError && owner.value && chainId.value) {
+        pendingSafeSubmission.value = {
+          submittedHash: error.submittedHash,
+          account: getAddress(owner.value),
+          chainId: chainId.value,
+          refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+          grantedRevokes: [...grantedRevokes],
+        }
+        execError.value = `${error.message} Submitted Safe hash: ${error.submittedHash}`
+      }
+      else {
+        // The batch never landed, so no granted authorization should be left
+        // standing. Entries stay in the cart for a retry, which re-grants.
+        await revokeAfterAbort(grantedRevokes)
+        execError.value = await describeExecError(error)
+      }
+    }
+    finally {
+      isExecuting.value = false
+    }
+  }
+
+  const reconcilePendingSafeSubmission = async () => {
+    const pending = pendingSafeSubmission.value
+    if (!pending || isExecuting.value) return
+    isExecuting.value = true
+    try {
+      const result = await reconcileSafeTransaction({
+        submittedHash: pending.submittedHash,
+        account: pending.account,
+        chainId: pending.chainId,
+      })
+      if (result.status === 'executed') {
+        pendingSafeSubmission.value = null
+        clearBatchInternal(true)
+        if (pending.refreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+        await revokeAfterSuccess(pending.grantedRevokes)
+        await redirectAfterBatchExecution()
+        return
+      }
+      if (result.status === 'not-executed') {
+        pendingSafeSubmission.value = null
+        await revokeAfterAbort(pending.grantedRevokes)
+        execError.value = 'Safe confirmed that the submitted transaction was not executed. The batch has been rebuilt and can be reviewed again.'
+        lastMerged = null
+        await runResimulate()
+        return
+      }
+      execError.value = `Safe transaction status is still unknown. Submitted Safe hash: ${pending.submittedHash}`
+    }
+    catch (error) {
+      logWarn('useTxBatch/reconcileSafe', error)
       execError.value = await describeExecError(error)
     }
     finally {
@@ -2391,6 +2463,7 @@ export const useTxBatch = () => {
     entries.value.length > 0
     && !isSimulating.value
     && !isExecuting.value
+    && !pendingSafeSubmission.value
     && !hasFailedOps.value
     && !simError.value
     && !hasInsufficientBalance.value,
@@ -2463,6 +2536,7 @@ export const useTxBatch = () => {
     simError,
     isExecuting,
     execError,
+    pendingSafeSubmission,
     hasFailedOps,
     canExecuteBatch,
     hasInsufficientBalance,
@@ -2484,6 +2558,7 @@ export const useTxBatch = () => {
     dismissExecutionError,
     setActiveLayer,
     executeBatch,
+    reconcilePendingSafeSubmission,
     // Tenderly "Simulate on Tenderly" for the whole batch.
     tenderlyEnabled,
     isTenderlySimulating: tenderly.isSimulating,

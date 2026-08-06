@@ -20,6 +20,8 @@ export type SwapQuoteCard = {
    *  Review-click can skip `prepareTransactionPlan` (plugin pipeline) and go
    *  straight to simulate/execute against this envelope. */
   preparedPlan?: TransactionPlanPrepared
+  /** TOS plugin-store version captured before this envelope was prepared. */
+  tosContextVersion?: number
 }
 
 /** Whether the gas cost on a card is trustworthy (known-zero for gasless

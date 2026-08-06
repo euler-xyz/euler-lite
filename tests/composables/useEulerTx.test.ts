@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { encodeFunctionData, erc20Abi, getAddress, type Address, type Hash, type Hex, type TransactionReceipt } from 'viem'
-import type { MigrationAuthorizationRequest, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { Account, type MigrationAuthorizationRequest, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -34,6 +34,8 @@ const OWNER = getAddress('0x1000000000000000000000000000000000000000')
 const OTHER_OWNER = getAddress('0x2000000000000000000000000000000000000000')
 const TOKEN = getAddress('0x3000000000000000000000000000000000000000')
 const SWAP_VERIFIER = getAddress('0x4000000000000000000000000000000000000000')
+const VAULT = getAddress('0x5000000000000000000000000000000000000000')
+const OTHER_TOKEN = getAddress('0x6000000000000000000000000000000000000000')
 const GRANT_HASH = `0x${'11'.repeat(32)}` as Hash
 
 const authorizationRequest = {
@@ -154,6 +156,59 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
   })
 
+  it('rejects a preloaded plan account from another chain', async () => {
+    const account = new Account({ chainId: 8453, owner: OWNER, subAccounts: {} })
+    const { planDeposit } = useEulerTx()
+
+    await expect(planDeposit({
+      vaultAddress: VAULT,
+      assetAddress: TOKEN,
+      amount: 1n,
+      account,
+    })).rejects.toThrow('does not match the active chain')
+  })
+
+  it('verifies the current-chain vault asset before planning a deposit', async () => {
+    const account = new Account({ chainId: 1, owner: OWNER, subAccounts: {} })
+    const fetchVault = vi.fn().mockResolvedValue({
+      result: { chainId: 1, address: VAULT, asset: { address: OTHER_TOKEN } },
+      errors: [],
+    })
+    const sdkPlanDeposit = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      vaultMetaService: { fetchVault },
+      executionService: { planDeposit: sdkPlanDeposit },
+    } as never)
+    const { planDeposit } = useEulerTx()
+
+    await expect(planDeposit({
+      vaultAddress: VAULT,
+      assetAddress: TOKEN,
+      amount: 1n,
+      account,
+    })).rejects.toThrow('Deposit vault metadata changed')
+    expect(sdkPlanDeposit).not.toHaveBeenCalled()
+
+    fetchVault.mockResolvedValueOnce({
+      result: { chainId: 1, address: VAULT, asset: { address: TOKEN } },
+      errors: [],
+    })
+    sdkPlanDeposit.mockReturnValueOnce([])
+
+    await expect(planDeposit({
+      vaultAddress: VAULT,
+      assetAddress: TOKEN,
+      amount: 1n,
+      account,
+    })).resolves.toEqual([])
+    expect(sdkPlanDeposit).toHaveBeenCalledWith(expect.objectContaining({
+      account,
+      vault: VAULT,
+      asset: TOKEN,
+      amount: 1n,
+    }))
+  })
+
   it('does not broadcast a reviewed migration after account drift', async () => {
     const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction }: {
       sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
@@ -181,6 +236,74 @@ describe('useEulerTx migration authorization cleanup', () => {
     await expect(executePreparedPlan(prepared))
       .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind: 'account' })
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['account', () => { currentAccount = OTHER_OWNER }],
+    ['chain', () => { currentChainId = 8453 }],
+  ] as const)('does not request a prepared Permit2 signature after %s drift', async (kind, driftWallet) => {
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (typedData: Record<string, unknown>) => Promise<Hex>
+    }) => {
+      await signTypedData({
+        domain: {},
+        types: {},
+        primaryType: 'PermitWitnessTransferFrom',
+        message: {},
+      })
+      return { receipts: [] }
+    })
+    const provider = { waitForTransactionReceipt: vi.fn() }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+    driftWallet()
+
+    await expect(executePreparedPlan(prepared))
+      .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind })
+    expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
+  })
+
+  it('pins a prepared Permit2 signature request to the reviewed owner', async () => {
+    wagmiMocks.signTypedDataAsync.mockResolvedValue('0x1234')
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (typedData: Record<string, unknown>) => Promise<Hex>
+    }) => {
+      await signTypedData({
+        domain: {},
+        types: {},
+        primaryType: 'PermitWitnessTransferFrom',
+        message: {},
+      })
+      return { receipts: [] }
+    })
+    const provider = { waitForTransactionReceipt: vi.fn() }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan({
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared)
+
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith(expect.objectContaining({ account: OWNER }))
   })
 
   it.each([

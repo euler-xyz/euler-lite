@@ -744,7 +744,7 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
     }
 
     const escrowAddrs: string[] = escrow.map(h => h.vault.address)
-    setEscrowAddresses(escrowAddrs)
+    setEscrowAddresses(escrowAddrs, targetChainId)
 
     registrySetMany([
       ...evk.map(h => ({ address: h.vault.address, vault: h.vault, type: 'evk' as const, verified: true })),
@@ -827,7 +827,7 @@ const loadVaults = async () => {
     // Seed the registry's escrow set from SDK-backed categorization. The SDK
     // service reads the escrow verified array, so no duplicate local RPC check
     // is needed here.
-    setEscrowAddresses(categories.escrow)
+    setEscrowAddresses(categories.escrow, startChainId)
 
     // Phase 2: fetch EVault, Earn, Securitize in parallel; follow with escrow
     // vault info once EVault collaterals + Earn strategies are known (the

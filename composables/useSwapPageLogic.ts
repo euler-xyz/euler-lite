@@ -11,6 +11,7 @@ import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
+import { getLiteTosContextVersion } from '~/utils/sdk-tos'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
@@ -115,6 +116,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const isPreparing = ref(false)
   const plan = ref<TransactionPlan | null>(null)
   const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
+  const preparedPlanTosContextVersion = ref<number | null>(null)
   const fromAmount = ref('')
   const toAmount = ref('')
   const { slippage } = useSlippage({
@@ -500,9 +502,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     if (isSameAsset.value || !selectedQuote.value) return null
     const card = selectedQuoteCard.value
     if (!card?.preparedPlan || card.quote !== selectedQuote.value) return null
+    if (card.tosContextVersion !== getLiteTosContextVersion()) return null
     return {
       plan: card.plan ?? card.preparedPlan.plan,
       prepared: card.preparedPlan as TransactionPlanPrepared,
+      tosContextVersion: card.tosContextVersion,
     }
   }
 
@@ -523,16 +527,23 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         if (!isSameAsset.value && !selectedQuote.value) return
 
         preparedPlan.value = null
+        preparedPlanTosContextVersion.value = null
         plan.value = null
         try {
           const preparedQuotePlan = getSelectedPreparedQuotePlan()
           if (preparedQuotePlan) {
             plan.value = preparedQuotePlan.plan
             preparedPlan.value = preparedQuotePlan.prepared
+            preparedPlanTosContextVersion.value = preparedQuotePlan.tosContextVersion
           }
           else {
             plan.value = await buildPlan(undefined, currentPlanContext())
+            const tosContextVersion = getLiteTosContextVersion()
             preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount() })
+            if (tosContextVersion !== getLiteTosContextVersion()) {
+              throw new Error('Terms of Use acceptance changed during transaction preparation')
+            }
+            preparedPlanTosContextVersion.value = tosContextVersion
           }
         }
         catch (e) {
@@ -540,6 +551,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
           showError('Failed to build transaction')
           plan.value = null
           preparedPlan.value = null
+          preparedPlanTosContextVersion.value = null
           return
         }
 
@@ -585,6 +597,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     isSubmitting.value = true
     try {
       if (preparedPlan.value) {
+        if (preparedPlanTosContextVersion.value !== getLiteTosContextVersion()) {
+          preparedPlan.value = null
+          preparedPlanTosContextVersion.value = null
+          modal.close()
+          showError('Terms acceptance changed. Review the transaction again.')
+          return
+        }
         await executePreparedPlan(preparedPlan.value)
       }
       else {

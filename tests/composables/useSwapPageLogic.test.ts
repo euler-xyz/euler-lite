@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 
-const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
+const { captured, tosContext, useSwapQuotesParallelMock } = vi.hoisted(() => ({
   captured: {
     planAccount: { chainId: 1 },
     swapOptions: null as null | {
@@ -14,12 +14,14 @@ const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
     selectedQuoteCard: null as unknown as Ref<unknown>,
     modalOpen: vi.fn(),
     modalClose: vi.fn(),
+    showError: vi.fn(),
     executePlan: vi.fn(),
     executePreparedPlan: vi.fn(),
     prepareTransactionPlan: vi.fn(),
     runSimulation: vi.fn(),
     runPreparedSimulation: vi.fn(),
   },
+  tosContext: { version: 0 },
   useSwapQuotesParallelMock: vi.fn(),
 }))
 
@@ -37,8 +39,12 @@ vi.mock('~/components/ui/composables/useModal', () => ({
 
 vi.mock('~/components/ui/composables/useToast', () => ({
   useToast: () => ({
-    error: vi.fn(),
+    error: captured.showError,
   }),
+}))
+
+vi.mock('~/utils/sdk-tos', () => ({
+  getLiteTosContextVersion: () => tosContext.version,
 }))
 
 vi.mock('~/composables/usePriceImpactGate', () => ({
@@ -99,6 +105,7 @@ const makeVault = (address: string, assetAddress: string, symbol: string) => ({
 describe('useSwapPageLogic', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    tosContext.version = 0
     captured.swapOptions = null
     captured.selectedQuote = ref<SwapQuote | null>(null)
     captured.selectedQuoteCard = ref<unknown>(null)
@@ -239,6 +246,7 @@ describe('useSwapPageLogic', () => {
       quote,
       plan: { type: 'quote-plan' },
       preparedPlan: prepared,
+      tosContextVersion: 0,
     }
 
     const swap = useSwapPageLogic({
@@ -275,6 +283,58 @@ describe('useSwapPageLogic', () => {
 
     expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
     expect(captured.executePlan).not.toHaveBeenCalled()
+  })
+
+  it('re-prepares a cached quote after TOS acceptance changes', async () => {
+    const toVault = makeVault(
+      '0x0000000000000000000000000000000000000002',
+      '0x0000000000000000000000000000000000000003',
+      'WETH',
+    )
+    const fromVault = shallowRef<EVault | SecuritizeCollateralVault | undefined>(makeVault(
+      '0x0000000000000000000000000000000000000004',
+      '0x0000000000000000000000000000000000000005',
+      'USDC',
+    ))
+    const toVaultRef = shallowRef<EVault | undefined>(toVault)
+    const rawPlan = [{ type: 'evcBatch', items: [] }] as TransactionPlan
+    const oldPrepared = { __prepared: true, plan: rawPlan, chainId: 1, account: '0x0000000000000000000000000000000000000007' }
+    const freshPrepared = { ...oldPrepared, fresh: true }
+    const buildPlan = vi.fn(async () => rawPlan)
+    const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
+    captured.prepareTransactionPlan.mockResolvedValueOnce(freshPrepared)
+    captured.selectedQuote.value = quote
+    captured.selectedQuoteCard.value = {
+      provider: 'provider',
+      quote,
+      plan: rawPlan,
+      preparedPlan: oldPrepared,
+      tosContextVersion: 0,
+    }
+    tosContext.version = 1
+
+    const swap = useSwapPageLogic({
+      amountField: 'amountOut',
+      compare: 'max',
+      fromVault,
+      toVault: toVaultRef,
+      balance: computed(() => 1000n),
+      vaultOptions: computed(() => [toVault]),
+      displayAmountField: 'amountOut',
+      quoteDiffPrefix: '-',
+      buildQuoteRequest: () => null,
+      buildPlan,
+      getBalanceError: () => null,
+      getGeoBlockedAddresses: () => [],
+      redirectPath: '/portfolio/saving',
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+
+    await swap.submit()
+
+    expect(buildPlan).toHaveBeenCalledTimes(1)
+    expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(rawPlan, { account: captured.planAccount })
+    expect(captured.runPreparedSimulation).toHaveBeenCalledWith(freshPrepared, {})
   })
 
   it('prepares a rebuilt plan once and reuses it for confirm when no quote prepared plan is available', async () => {
