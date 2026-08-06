@@ -8,26 +8,22 @@ import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { BatchEntryAddRejectedError } from '~/composables/useTxBatch'
-import { hasEarlierREULClaim } from './reulUnlockBatchSafety'
 
 const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
-const { addEntry: addBatchEntry, entries: batchEntries } = useTxBatch()
+const { entryCount, clearBatch } = useTxBatch()
 const { executePlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
-const { settings } = useUserSettings()
 const { item } = defineProps<{ item: REULLock }>()
 const itemKey = computed(() => item.timestamp.toString())
 
 const isUnlocking = ref(false)
 const isPreparing = ref(false)
-const isAddingToBatch = ref(false)
 const plan = ref<TransactionPlan | null>(null)
 
 // rEUL address is read from chain contract config (reulTokenContractAddress) —
@@ -42,7 +38,7 @@ const walletChangeTokenSymbol = computed(() =>
   walletChangeToken.value?.symbol ?? (eulTokenContractAddress.value ? 'EUL' : 'rEUL'),
 )
 const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
-const canAddToBatch = computed(() => settings.value.enableAdvancedMode)
+const isBatchActive = computed(() => entryCount.value > 0)
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)
@@ -79,6 +75,11 @@ const ensureWalletOnSiteChain = async () => {
 }
 
 const unlock = async () => {
+  if (isBatchActive.value) {
+    error('Clear the current batch before unlocking rEUL')
+    return
+  }
+
   try {
     isUnlocking.value = true
 
@@ -113,48 +114,13 @@ const getReviewProps = () => ({
   submittingLabel: 'Unlocking...',
 })
 
-const rejectEarlierREULClaim = () => {
-  if (hasEarlierREULClaim(batchEntries.value, reulTokenContractAddress.value)) {
-    throw new BatchEntryAddRejectedError(
-      'Claim rEUL in a separate transaction, then refresh the lock before unlocking it.',
-    )
-  }
-}
-
-const onAddToBatchClick = async () => {
-  if (!canAddToBatch.value || isPreparing.value || isUnlocking.value || isAddingToBatch.value) return
-  isAddingToBatch.value = true
-  try {
-    // Refuse a stable claim-only cart locally so its successful simulation is
-    // untouched and remains executable.
-    rejectEarlierREULClaim()
-    await ensureWalletOnSiteChain()
-    await addBatchEntry({
-      label: 'Unlock rEUL',
-      requiresPlanningAccount: false,
-      // This builder runs inside useTxBatch's serialized add queue. Checking
-      // here also covers a claim whose own add was still in flight when the
-      // user clicked Unlock.
-      buildPlan: async () => {
-        rejectEarlierREULClaim()
-        return buildUnlockREULPlan([item.timestamp])
-      },
-      review: getReviewProps(),
-    })
-  }
-  catch (e) {
-    error('Failed to add to batch', {
-      description: e instanceof Error ? e.message : 'Unable to prepare this rEUL unlock.',
-    })
-    logWarn('RewardUnlockItem/onAddToBatchClick', e)
-  }
-  finally {
-    isAddingToBatch.value = false
-  }
-}
-
 const onUnlockClick = async () => {
-  if (isPreparing.value || isAddingToBatch.value) return
+  if (isBatchActive.value) {
+    error('Clear the current batch before unlocking rEUL')
+    return
+  }
+
+  if (isPreparing.value) return
   isPreparing.value = true
   try {
     await ensureWalletOnSiteChain()
@@ -260,26 +226,31 @@ const onUnlockClick = async () => {
           </div>
         </div>
       </div>
-      <div :class="canAddToBatch ? 'grid grid-cols-2 gap-8' : 'grid grid-cols-1'">
+      <div class="grid grid-cols-1">
         <UiButton
           rounded
           :loading="isUnlocking || isPreparing"
-          :disabled="isSpyMode || isAddingToBatch"
+          :disabled="isSpyMode || isBatchActive"
           @click="onUnlockClick"
         >
           Unlock
         </UiButton>
-        <UiButton
-          v-if="canAddToBatch"
-          rounded
-          variant="primary-stroke"
-          :loading="isAddingToBatch"
-          :disabled="isSpyMode || isUnlocking || isPreparing"
-          @click="onAddToBatchClick"
-        >
-          Add to batch
-        </UiButton>
       </div>
+      <p
+        v-if="isBatchActive"
+        class="mt-8 text-center text-p3 text-content-tertiary"
+        data-testid="reul-unlock-batch-blocked"
+      >
+        Clear the current batch before unlocking rEUL ·
+        <button
+          type="button"
+          class="text-accent-500 hover:text-accent-600"
+          data-testid="reul-unlock-clear-batch"
+          @click="clearBatch"
+        >
+          Clear batch
+        </button>
+      </p>
       <UiAlert
         v-if="simulationError"
         class="mt-12"

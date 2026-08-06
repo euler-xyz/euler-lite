@@ -46,11 +46,6 @@ export interface BatchClosedPosition {
   vault: Address
 }
 
-/** Reject an entry add without invalidating the existing cart simulation. */
-export class BatchEntryAddRejectedError extends Error {
-  override name = 'BatchEntryAddRejectedError'
-}
-
 /**
  * Transaction batch builder ("shopping cart") with layered simulated state.
  *
@@ -137,8 +132,6 @@ export interface BatchEntry {
   nameOverride?: string
   /** Refresh external protocol positions after this entry executes in a batch. */
   refreshExternalMigrationPositions?: boolean
-  /** Stable claim identifier for reward rows already queued in the batch. */
-  rewardClaimKey?: string
 }
 
 type BatchEntryBuildResult = TransactionPlan | {
@@ -2137,15 +2130,12 @@ export const useTxBatch = () => {
       await nextAdd
     }
     catch (error) {
-      const preservesBatchState = error instanceof BatchEntryAddRejectedError
-      logBatchDiag(preservesBatchState ? 'addEntry:rejected' : 'addEntry:threw', {
+      logBatchDiag('addEntry:threw', {
         label: entry.label,
         error: error instanceof Error ? error.message : String(error),
-      }, preservesBatchState ? 'warn' : 'error')
-      if (!preservesBatchState) {
-        logWarn('useTxBatch/addEntry', error)
-        simError.value = error instanceof Error ? error.message : String(error)
-      }
+      }, 'error')
+      logWarn('useTxBatch/addEntry', error)
+      simError.value = error instanceof Error ? error.message : String(error)
       throw error
     }
     finally {
