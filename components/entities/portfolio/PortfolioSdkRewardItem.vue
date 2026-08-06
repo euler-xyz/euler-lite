@@ -2,7 +2,7 @@
 import { OperationReviewModal } from '#components'
 import { formatUnits } from 'viem'
 import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { REWARD_PROVIDER_REVIEW_TYPES, type UserReward } from '~/entities/reward-campaign'
+import type { UserReward } from '~/entities/reward-campaign'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
@@ -16,6 +16,13 @@ const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   brevis: 'Incentra',
   fuul: 'Fuul',
   turtle: 'Turtle',
+}
+
+const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward'> = {
+  merkl: 'reward',
+  brevis: 'brevis-reward',
+  fuul: 'fuul-reward',
+  turtle: 'turtle-reward',
 }
 
 const { reward } = defineProps<{ reward: UserReward }>()
@@ -53,7 +60,7 @@ const plan = ref<TransactionPlan | null>(null)
 const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed), reward.token.decimals)))
 const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
-const planKind = computed(() => REWARD_PROVIDER_REVIEW_TYPES[reward.provider] ?? 'reward')
+const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
 const isREULReward = computed(() => {
   const reulAddress = eulerTokenAddresses.value?.rEUL
   if (reulAddress) {
