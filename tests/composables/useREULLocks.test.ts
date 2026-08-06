@@ -12,6 +12,8 @@ const importUseREULLocks = async (wallet: {
 } = {}) => {
   vi.resetModules()
 
+  const unmountCallbacks: Array<() => void> = []
+
   const lock = {
     timestamp: 1n,
     amount: 5_920_093_000_000_000_000n,
@@ -36,7 +38,9 @@ const importUseREULLocks = async (wallet: {
   vi.stubGlobal('until', () => ({
     toBeTruthy: vi.fn(async () => true),
   }))
-  vi.stubGlobal('onUnmounted', vi.fn())
+  vi.stubGlobal('onUnmounted', (callback: () => void) => {
+    unmountCallbacks.push(callback)
+  })
   vi.stubGlobal('useWagmi', () => ({
     isConnected: ref(wallet.connected ?? false),
     address: ref(wallet.address),
@@ -67,6 +71,7 @@ const importUseREULLocks = async (wallet: {
     buildUnlockPlan,
     unlockPlan,
     lock,
+    unmountCallbacks,
   }
 }
 
@@ -75,6 +80,7 @@ describe('useREULLocks', () => {
 
   afterEach(() => {
     scope?.stop()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.resetModules()
   })
@@ -155,5 +161,30 @@ describe('useREULLocks', () => {
     await expect(refreshPromise).resolves.toEqual([refreshedLock])
     expect(locks.isLocksLoading.value).toBe(false)
     expect(locks.locks.value).toEqual([refreshedLock])
+  })
+
+  it('keeps the shared poller alive until the last sibling consumer unmounts', async () => {
+    vi.useFakeTimers()
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
+    const { useREULLocks, fetchLocks, unmountCallbacks } = await importUseREULLocks()
+
+    scope = effectScope()
+    scope.run(() => {
+      useREULLocks()
+      useREULLocks()
+    })
+
+    expect(unmountCallbacks).toHaveLength(2)
+    unmountCallbacks[0]?.()
+    expect(clearIntervalSpy).not.toHaveBeenCalled()
+    const callsBeforePoll = fetchLocks.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchLocks.mock.calls.length).toBeGreaterThan(callsBeforePoll)
+
+    unmountCallbacks[1]?.()
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1)
+    const callsAfterUnmount = fetchLocks.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchLocks).toHaveBeenCalledTimes(callsAfterUnmount)
   })
 })

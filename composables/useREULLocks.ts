@@ -11,9 +11,12 @@ const isLocksLoading = ref(true)
 const locks: Ref<REULLock[]> = ref([])
 
 let interval: NodeJS.Timeout | null = null
+const pollConsumers = new Map<symbol, () => void>()
 const lockGuard = createRaceGuard()
 
 export const useREULLocks = () => {
+  const consumerId = Symbol('reul-locks-consumer')
+  let released = false
   // The connected wallet stays the transaction signer; only display/query
   // address selection is spy-aware.
   const { address: wagmiAddress, chainId: walletChainId } = useWagmi()
@@ -89,6 +92,12 @@ export const useREULLocks = () => {
     return await loadREULLocksInfo(effectiveAddress.value, isInitialLoading)
   }
 
+  pollConsumers.set(consumerId, () => {
+    if (effectiveAddress.value) {
+      void loadREULLocksInfo(effectiveAddress.value, false)
+    }
+  })
+
   watch([isActive, selectedChainId], ([active, currentChainId], [_oldActive, oldChainId]) => {
     if (oldChainId && currentChainId !== oldChainId) {
       lockGuard.next()
@@ -103,9 +112,7 @@ export const useREULLocks = () => {
 
     if (active && !interval) {
       interval = setInterval(() => {
-        if (effectiveAddress.value) {
-          loadREULLocksInfo(effectiveAddress.value, false)
-        }
+        pollConsumers.values().next().value?.()
       }, POLL_INTERVAL_60S_MS)
     }
     else if (!active) {
@@ -135,7 +142,10 @@ export const useREULLocks = () => {
   })
 
   onUnmounted(() => {
-    if (interval) {
+    if (released) return
+    released = true
+    pollConsumers.delete(consumerId)
+    if (pollConsumers.size === 0 && interval) {
       clearInterval(interval)
       interval = null
     }
