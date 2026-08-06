@@ -30,24 +30,24 @@ export const useREULLocks = () => {
   const eulTokenContractAddress = computed(() => eulerTokenAddresses.value?.EUL ?? '')
   const addressesReady = computed(() => !!reulTokenContractAddress.value && !!eulTokenContractAddress.value)
 
-  const loadREULLocksInfo = async (userAddress: string, isInitialLoading = true) => {
+  const loadREULLocksInfo = async (userAddress: string, isInitialLoading = true): Promise<REULLock[] | null> => {
     const gen = lockGuard.next()
+    if (isInitialLoading) {
+      isLocksLoading.value = true
+    }
     await until(addressesReady).toBeTruthy({ timeout: 10_000, throwOnTimeout: false })
-    if (lockGuard.isStale(gen)) return
+    if (lockGuard.isStale(gen)) return null
     const chainId = selectedChainId.value
     if (!addressesReady.value || !chainId) {
       if (!lockGuard.isStale(gen)) isLocksLoading.value = false
-      return
+      return null
     }
 
     try {
       if (!userAddress) {
-        if (lockGuard.isStale(gen)) return
+        if (lockGuard.isStale(gen)) return null
         locks.value = []
-        return
-      }
-      if (isInitialLoading) {
-        isLocksLoading.value = true
+        return []
       }
 
       const sdk = await getEulerSdkForChain(chainId)
@@ -56,12 +56,14 @@ export const useREULLocks = () => {
         account: userAddress as Address,
         rEulAddress: reulTokenContractAddress.value as Address,
       })
-      if (lockGuard.isStale(gen)) return
+      if (lockGuard.isStale(gen)) return null
       locks.value = nextLocks
+      return nextLocks
     }
     catch (e) {
-      if (lockGuard.isStale(gen)) return
+      if (lockGuard.isStale(gen)) return null
       logWarn('reulLocks/fetch', e)
+      return null
     }
     finally {
       if (!lockGuard.isStale(gen)) {
@@ -70,14 +72,21 @@ export const useREULLocks = () => {
     }
   }
 
-  const refreshLocks = async (isInitialLoading = false) => {
+  const refreshLocks = async (isInitialLoading = false): Promise<REULLock[] | null> => {
+    // A required refresh is a transaction-review freshness boundary. Remove
+    // the previously rendered rows immediately so stale burn quotes cannot be
+    // opened while the replacement RPC is in flight or after it fails.
+    if (isInitialLoading) {
+      isLocksLoading.value = true
+      locks.value = []
+    }
     if (!effectiveAddress.value) {
       lockGuard.next()
       locks.value = []
       isLocksLoading.value = false
-      return
+      return []
     }
-    await loadREULLocksInfo(effectiveAddress.value, isInitialLoading)
+    return await loadREULLocksInfo(effectiveAddress.value, isInitialLoading)
   }
 
   watch([isActive, selectedChainId], ([active, currentChainId], [_oldActive, oldChainId]) => {

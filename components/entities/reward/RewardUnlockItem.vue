@@ -8,6 +8,11 @@ import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import {
+  refreshREULLockReview,
+  runWithFreshREULLockReview,
+  type REULLockReviewValidation,
+} from '~/components/entities/reward/reulUnlockReview'
 
 const modal = useModal()
 const { error } = useToast()
@@ -48,17 +53,13 @@ const amount = computed(() => {
   return nanoToValue(item.amount, reulToken.value?.decimals)
 })
 
-const amountToBeBurned = computed(() => {
-  return nanoToValue(item.amountToBeBurned, reulToken.value?.decimals)
-})
+const getFormattedDate = (lock: REULLock) =>
+  DateTime.fromSeconds(Number(lock.timestamp)).plus({ days: 180 }).toFormat('MMMM dd, yyyy')
+const formattedDate = computed(() => getFormattedDate(item))
 
-const formattedDate = computed(() => {
-  return DateTime.fromSeconds(Number(item.timestamp)).plus({ days: 180 }).toFormat('MMMM dd, yyyy')
-})
-
-const daysUntilMaturity = computed(() => {
-  return Math.max(0, Math.floor(DateTime.fromSeconds(Number(item.timestamp)).plus({ days: 180 }).diffNow('days').days))
-})
+const getDaysUntilMaturity = (lock: REULLock) =>
+  Math.max(0, Math.floor(DateTime.fromSeconds(Number(lock.timestamp)).plus({ days: 180 }).diffNow('days').days))
+const daysUntilMaturity = computed(() => getDaysUntilMaturity(item))
 
 const ensureWalletOnSiteChain = async () => {
   const targetChainId = siteChainId.value
@@ -74,7 +75,19 @@ const ensureWalletOnSiteChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const unlock = async () => {
+const showReviewRefreshError = (status: Exclude<REULLockReviewValidation['status'], 'fresh'>) => {
+  if (status === 'changed') {
+    error('The rEUL unlock amount changed. Review the updated values and try again.')
+  }
+  else if (status === 'missing') {
+    error('This rEUL lock is no longer available.')
+  }
+  else {
+    error('Unable to refresh the rEUL lock. Try again.')
+  }
+}
+
+const unlock = async (reviewedLock: REULLock) => {
   if (isBatchActive.value) {
     error('Clear the current batch before unlocking rEUL')
     return
@@ -83,10 +96,33 @@ const unlock = async () => {
   try {
     isUnlocking.value = true
 
-    const unlockPlan = await buildUnlockREULPlan([item.timestamp])
-    await executePlan(unlockPlan)
-    modal.close()
-    await refreshLocks(false)
+    const result = await runWithFreshREULLockReview(
+      reviewedLock,
+      () => refreshLocks(true),
+      async (currentLock) => {
+        if (isBatchActive.value) {
+          modal.close()
+          error('Clear the current batch before unlocking rEUL')
+          return false
+        }
+
+        const unlockPlan = await buildUnlockREULPlan([currentLock.timestamp])
+        if (isBatchActive.value) {
+          modal.close()
+          error('Clear the current batch before unlocking rEUL')
+          return false
+        }
+
+        await executePlan(unlockPlan)
+        modal.close()
+        await refreshLocks(true)
+        return true
+      },
+    )
+    if (result.status === 'changed' || result.status === 'missing' || result.status === 'unavailable') {
+      modal.close()
+      showReviewRefreshError(result.status)
+    }
   }
   catch (e) {
     error('Transaction failed')
@@ -97,19 +133,19 @@ const unlock = async () => {
   }
 }
 
-const getReviewProps = () => ({
+const getReviewProps = (reviewedLock: REULLock) => ({
   type: 'reul-unlock',
   asset: {
     symbol: walletChangeTokenSymbol.value,
     address: walletChangeTokenAddress.value,
     decimals: walletChangeTokenDecimals.value,
   },
-  amount: unlockableAmount.value,
+  amount: nanoToValue(reviewedLock.unlockableAmount, reulToken.value?.decimals),
   reulUnlockInfo: {
-    unlockableAmount: unlockableAmount.value,
-    amountToBeBurned: amountToBeBurned.value,
-    maturityDate: formattedDate.value,
-    daysUntilMaturity: daysUntilMaturity.value,
+    unlockableAmount: nanoToValue(reviewedLock.unlockableAmount, reulToken.value?.decimals),
+    amountToBeBurned: nanoToValue(reviewedLock.amountToBeBurned, reulToken.value?.decimals),
+    maturityDate: getFormattedDate(reviewedLock),
+    daysUntilMaturity: getDaysUntilMaturity(reviewedLock),
   },
   submittingLabel: 'Unlocking...',
 })
@@ -125,9 +161,20 @@ const onUnlockClick = async () => {
   try {
     await ensureWalletOnSiteChain()
 
+    const validation = await refreshREULLockReview(item, () => refreshLocks(true))
+    if (validation.status !== 'fresh') {
+      showReviewRefreshError(validation.status)
+      return
+    }
+    if (isBatchActive.value) {
+      error('Clear the current batch before unlocking rEUL')
+      return
+    }
+    const reviewedLock = validation.lock
+
     // Build the transaction plan
     try {
-      plan.value = await buildUnlockREULPlan([item.timestamp])
+      plan.value = await buildUnlockREULPlan([reviewedLock.timestamp])
     }
     catch (e) {
       logWarn('RewardUnlockItem/buildPlan', e)
@@ -140,15 +187,18 @@ const onUnlockClick = async () => {
         return
       }
     }
+    if (isBatchActive.value) {
+      error('Clear the current batch before unlocking rEUL')
+      return
+    }
 
     // Open the operation review modal (same pattern as reward claims)
     modal.open(OperationReviewModal, {
       props: {
-        ...getReviewProps(),
-        amount: unlockableAmount.value,
+        ...getReviewProps(reviewedLock),
         plan: plan.value || undefined,
         onConfirm: async () => {
-          await unlock()
+          await unlock(reviewedLock)
         },
       },
     })
