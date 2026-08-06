@@ -122,4 +122,38 @@ describe('useREULLocks', () => {
       rEulAddress: reulAddress,
     })
   })
+
+  it('removes stale rows while a required post-transaction refresh is pending', async () => {
+    const { useREULLocks, fetchLocks, lock } = await importUseREULLocks()
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await vi.waitFor(() => expect(locks?.locks.value).toEqual([lock]))
+
+    const refreshedLock = {
+      ...lock,
+      unlockableAmount: lock.unlockableAmount + 1n,
+      amountToBeBurned: 1n,
+    }
+    let resolveRefresh!: (value: typeof lock[]) => void
+    const pendingRefresh = new Promise<typeof lock[]>((resolve) => {
+      resolveRefresh = resolve
+    })
+    fetchLocks.mockImplementationOnce(() => pendingRefresh)
+
+    const refreshPromise = locks.refreshLocks(true)
+
+    expect(locks.isLocksLoading.value).toBe(true)
+    expect(locks.locks.value).toEqual([])
+
+    resolveRefresh([refreshedLock])
+    await expect(refreshPromise).resolves.toEqual([refreshedLock])
+    expect(locks.isLocksLoading.value).toBe(false)
+    expect(locks.locks.value).toEqual([refreshedLock])
+  })
 })

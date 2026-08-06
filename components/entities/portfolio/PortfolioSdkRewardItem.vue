@@ -38,6 +38,7 @@ const rewardClaimKey = computed(() => [
 ].join(':'))
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
+const { refreshLocks } = useREULLocks()
 const { addEntry: addBatchEntry, entries: batchEntries, entryCount, clearBatch } = useTxBatch()
 const { executePlan } = useEulerTx()
 const { getTokenByAddress } = useTokenList()
@@ -60,8 +61,10 @@ const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? 
 const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
 const isREULReward = computed(() => {
   const reulAddress = eulerTokenAddresses.value?.rEUL
+  if (reulAddress) {
+    return reward.token.address.toLowerCase() === reulAddress.toLowerCase()
+  }
   return reward.token.symbol.toLowerCase() === 'reul'
-    || (!!reulAddress && reward.token.address.toLowerCase() === reulAddress.toLowerCase())
 })
 const canAddToBatch = computed(() =>
   settings.value.enableAdvancedMode && reward.provider !== 'turtle' && !isREULReward.value,
@@ -105,7 +108,14 @@ const claim = async () => {
     if (!plan.value) {
       plan.value = await buildClaimRewardPlan(reward)
     }
+    if (isREULBatchBlocked.value) {
+      error('Clear the current batch before claiming rEUL')
+      return
+    }
     await executePlan(plan.value)
+    if (isREULReward.value) {
+      await refreshLocks(true)
+    }
     modal.close()
     await refreshRewards({ delayedRetry: true })
   }
@@ -185,6 +195,10 @@ const onClaimClick = async () => {
     if (plan.value) {
       const ok = await runSimulation(plan.value)
       if (!ok) return
+    }
+    if (isREULBatchBlocked.value) {
+      error('Clear the current batch before claiming rEUL')
+      return
     }
 
     modal.open(OperationReviewModal, {
