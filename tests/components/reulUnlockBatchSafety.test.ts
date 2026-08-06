@@ -16,7 +16,7 @@ describe('hasEarlierREULClaim', () => {
   })
 
   it('detects every batchable reward provider by the claimed token address', () => {
-    for (const type of ['brevis-reward', 'fuul-reward']) {
+    for (const type of ['brevis-reward', 'fuul-reward', 'turtle-reward']) {
       expect(hasEarlierREULClaim([
         entryWithReview({ type, asset: { address: REUL } }),
       ], REUL)).toBe(true)
