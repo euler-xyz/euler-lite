@@ -1,11 +1,7 @@
 import type { BatchEntry } from '~/composables/useTxBatch'
+import { REWARD_PROVIDER_REVIEW_TYPES } from '~/entities/reward-campaign'
 
-const REWARD_REVIEW_TYPES = new Set([
-  'reward',
-  'brevis-reward',
-  'fuul-reward',
-  'turtle-reward',
-])
+const REWARD_REVIEW_TYPES = new Set<string>(Object.values(REWARD_PROVIDER_REVIEW_TYPES))
 
 export const hasEarlierREULClaim = (
   entries: readonly Pick<BatchEntry, 'review'>[],

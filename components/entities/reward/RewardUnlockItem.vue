@@ -8,6 +8,7 @@ import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { BatchEntryAddRejectedError } from '~/composables/useTxBatch'
 import { hasEarlierREULClaim } from './reulUnlockBatchSafety'
 
 const modal = useModal()
@@ -112,10 +113,21 @@ const getReviewProps = () => ({
   submittingLabel: 'Unlocking...',
 })
 
+const rejectEarlierREULClaim = () => {
+  if (hasEarlierREULClaim(batchEntries.value, reulTokenContractAddress.value)) {
+    throw new BatchEntryAddRejectedError(
+      'Claim rEUL in a separate transaction, then refresh the lock before unlocking it.',
+    )
+  }
+}
+
 const onAddToBatchClick = async () => {
   if (!canAddToBatch.value || isPreparing.value || isUnlocking.value || isAddingToBatch.value) return
   isAddingToBatch.value = true
   try {
+    // Refuse a stable claim-only cart locally so its successful simulation is
+    // untouched and remains executable.
+    rejectEarlierREULClaim()
     await ensureWalletOnSiteChain()
     await addBatchEntry({
       label: 'Unlock rEUL',
@@ -124,9 +136,7 @@ const onAddToBatchClick = async () => {
       // here also covers a claim whose own add was still in flight when the
       // user clicked Unlock.
       buildPlan: async () => {
-        if (hasEarlierREULClaim(batchEntries.value, reulTokenContractAddress.value)) {
-          throw new Error('Claim rEUL in a separate transaction, then refresh the lock before unlocking it.')
-        }
+        rejectEarlierREULClaim()
         return buildUnlockREULPlan([item.timestamp])
       },
       review: getReviewProps(),

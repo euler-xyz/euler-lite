@@ -24,6 +24,15 @@ export type UserReward = Omit<SdkUserReward, 'provider'> & {
   timestamp?: string | number
 }
 
+export type RewardReviewType = 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward'
+
+export const REWARD_PROVIDER_REVIEW_TYPES: Record<UserReward['provider'], RewardReviewType> = {
+  merkl: 'reward',
+  brevis: 'brevis-reward',
+  fuul: 'fuul-reward',
+  turtle: 'turtle-reward',
+}
+
 export interface RewardCampaignDisplay {
   id: string
   parityKey: string

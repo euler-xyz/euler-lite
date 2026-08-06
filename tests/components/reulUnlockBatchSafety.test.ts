@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { hasEarlierREULClaim } from '~/components/entities/reward/reulUnlockBatchSafety'
+import { REWARD_PROVIDER_REVIEW_TYPES } from '~/entities/reward-campaign'
 
 const REUL = '0xf3e621395fc714B90dA337AA9108771597b4E696'
 
@@ -15,8 +16,8 @@ describe('hasEarlierREULClaim', () => {
     ], REUL)).toBe(true)
   })
 
-  it('detects every batchable reward provider by the claimed token address', () => {
-    for (const type of ['brevis-reward', 'fuul-reward', 'turtle-reward']) {
+  it('detects every reward claim review type by the claimed token address', () => {
+    for (const type of Object.values(REWARD_PROVIDER_REVIEW_TYPES)) {
       expect(hasEarlierREULClaim([
         entryWithReview({ type, asset: { address: REUL } }),
       ], REUL)).toBe(true)

@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { awaitFinalPlanningLayer, BatchEntryAddRejectedError, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
   mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
@@ -706,6 +706,57 @@ describe('normalizeSimulatedVaultLayers', () => {
 })
 
 describe('useTxBatch execution errors', () => {
+  it('keeps a settled claim cart executable when a policy rejects an unlock add', async () => {
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Claim rEUL',
+      requiresPlanningAccount: false,
+      buildPlan: async () => [] as TransactionPlan,
+      review: {
+        type: 'reward',
+        asset: { address: aToken },
+      },
+    })
+    await vi.waitFor(() => expect(batch.canExecuteBatch.value).toBe(true))
+    const claimEntry = batch.entries.value[0]
+
+    await expect(batch.addEntry({
+      label: 'Unlock rEUL',
+      requiresPlanningAccount: false,
+      buildPlan: async () => {
+        throw new BatchEntryAddRejectedError('Claim rEUL separately')
+      },
+    })).rejects.toThrow('Claim rEUL separately')
+
+    expect(batch.entries.value).toEqual([claimEntry])
+    expect(batch.simError.value).toBeUndefined()
+    expect(batch.canExecuteBatch.value).toBe(true)
+  })
+
+  it('still records ordinary plan-build failures as cart simulation errors', async () => {
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Claim reward',
+      requiresPlanningAccount: false,
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    await vi.waitFor(() => expect(batch.canExecuteBatch.value).toBe(true))
+
+    await expect(batch.addEntry({
+      label: 'Build invalid operation',
+      requiresPlanningAccount: false,
+      buildPlan: async () => {
+        throw new Error('plan build failed')
+      },
+    })).rejects.toThrow('plan build failed')
+
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.simError.value).toBe('plan build failed')
+    expect(batch.canExecuteBatch.value).toBe(false)
+  })
+
   it('reuses the prefetched portfolio account as layer 0 for account-free entries', async () => {
     const sdk = createMockSdk()
     const portfolioAccount = accountWithPosition(subAccount, subAccount, 22n)
