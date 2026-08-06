@@ -4,11 +4,12 @@ import { OperationReviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { REULLock } from '~/entities/reul'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import {
+  prepareREULUnlockPlan,
   refreshREULLockReview,
   runWithFreshREULLockReview,
   type REULLockReviewValidation,
@@ -29,7 +30,6 @@ const itemKey = computed(() => item.timestamp.toString())
 
 const isUnlocking = ref(false)
 const isPreparing = ref(false)
-const plan = ref<TransactionPlan | null>(null)
 
 // rEUL address is read from chain contract config (reulTokenContractAddress) —
 // the authoritative source. Its metadata (symbol, decimals, logo) is looked
@@ -85,6 +85,17 @@ const showReviewRefreshError = (status: Exclude<REULLockReviewValidation['status
   else {
     error('Unable to refresh the rEUL lock. Try again.')
   }
+}
+
+const showPreparationError = async (cause: unknown) => {
+  let description = 'Unable to prepare this rEUL unlock.'
+  try {
+    description = await getTxErrorMessage(cause)
+  }
+  catch (messageError) {
+    logWarn('RewardUnlockItem/getTxErrorMessage', messageError)
+  }
+  error('Unable to prepare rEUL unlock', { description })
 }
 
 const unlock = async (reviewedLock: REULLock) => {
@@ -172,20 +183,21 @@ const onUnlockClick = async () => {
     }
     const reviewedLock = validation.lock
 
-    // Build the transaction plan
-    try {
-      plan.value = await buildUnlockREULPlan([reviewedLock.timestamp])
+    const preparation = await prepareREULUnlockPlan(
+      reviewedLock,
+      lock => buildUnlockREULPlan([lock.timestamp]),
+      runSimulation,
+    )
+    if (preparation.status === 'build-failed') {
+      logWarn('RewardUnlockItem/buildPlan', preparation.error)
+      await showPreparationError(preparation.error)
+      return
     }
-    catch (e) {
-      logWarn('RewardUnlockItem/buildPlan', e)
-      plan.value = null
-    }
-
-    if (plan.value) {
-      const ok = await runSimulation(plan.value)
-      if (!ok) {
-        return
-      }
+    if (preparation.status === 'simulation-failed') {
+      error('Simulation failed', {
+        description: simulationError.value || 'Unable to simulate this rEUL unlock. Try again.',
+      })
+      return
     }
     if (isBatchActive.value) {
       error('Clear the current batch before unlocking rEUL')
@@ -196,7 +208,7 @@ const onUnlockClick = async () => {
     modal.open(OperationReviewModal, {
       props: {
         ...getReviewProps(reviewedLock),
-        plan: plan.value || undefined,
+        plan: preparation.plan,
         onConfirm: async () => {
           await unlock(reviewedLock)
         },
@@ -204,6 +216,7 @@ const onUnlockClick = async () => {
     })
   }
   catch (e) {
+    await showPreparationError(e)
     logWarn('RewardUnlockItem/onUnlockClick', e)
   }
   finally {
@@ -301,14 +314,6 @@ const onUnlockClick = async () => {
           Clear batch
         </button>
       </p>
-      <UiAlert
-        v-if="simulationError"
-        class="mt-12"
-        title="Error"
-        variant="error"
-        :description="simulationError"
-        size="compact"
-      />
     </div>
   </div>
 </template>
