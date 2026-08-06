@@ -115,6 +115,7 @@ const AAVE_PERMIT_SELECTOR = toFunctionSelector('function permit(address,address
 const MERKL_CLAIM_SELECTOR = toFunctionSelector('function claim(address[],address[],uint256[],bytes32[][])')
 const BREVIS_CLAIM_SELECTOR = toFunctionSelector('function claim(address,uint256[],uint64,bytes32[])')
 const FUUL_CLAIM_SELECTOR = toFunctionSelector('function claim((address,address,address,uint8,uint256,uint8,uint256,uint256,bytes32,bytes[])[])')
+const REUL_UNLOCK_SELECTOR = toFunctionSelector('function withdrawToByLockTimestamp(address,uint256,bool)')
 const MORPHO_AUTHORIZATION_SELECTOR = toFunctionSelector('function setAuthorizationWithSig((address,address,bool,uint256,uint256),(uint8,bytes32,bytes32))')
 const MORPHO_BORROW_FOR_SENDER_SELECTOR = toFunctionSelector('function morphoBorrowForSender(address,(address,address,address,address,uint256),uint256,address)')
 const MORPHO_WITHDRAW_COLLATERAL_FOR_SENDER_SELECTOR = toFunctionSelector('function morphoWithdrawCollateralForSender(address,(address,address,address,address,uint256),uint256,address)')
@@ -208,6 +209,7 @@ const SELECTOR_LABELS: Record<string, string> = {
   [MERKL_CLAIM_SELECTOR]: 'Claim',
   [BREVIS_CLAIM_SELECTOR]: 'Claim',
   [FUUL_CLAIM_SELECTOR]: 'Claim',
+  [REUL_UNLOCK_SELECTOR]: 'Unlock',
 }
 
 const MAX_UINT256 = 2n ** 256n - 1n
@@ -1091,7 +1093,7 @@ const resolveBatchItemAssetInfo = (
     return { symbol: ctx.asset.symbol, address: ctx.asset.address }
   }
 
-  if (label === 'Claim') {
+  if (label === 'Claim' || label === 'Unlock') {
     return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
   }
 
