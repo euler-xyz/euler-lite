@@ -145,9 +145,15 @@ export const useREULLocks = () => {
     if (released) return
     released = true
     pollConsumers.delete(consumerId)
-    if (pollConsumers.size === 0 && interval) {
-      clearInterval(interval)
-      interval = null
+    if (pollConsumers.size === 0) {
+      lockGuard.next()
+      isLoaded.value = false
+      locks.value = []
+      isLocksLoading.value = false
+      if (interval) {
+        clearInterval(interval)
+        interval = null
+      }
     }
   })
 
