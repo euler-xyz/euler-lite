@@ -34,6 +34,8 @@ import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFi
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import {
+  getVaultTags,
+  isAnyVaultBlockedByCountry,
   isVaultBlockedByCountry,
   isVaultRestrictedByCountry,
   type AssetLike,
@@ -144,7 +146,7 @@ export interface BatchEntry {
   geoPolicy?: Array<{ vaultAddress: string, asset?: AssetLike, acquisition?: boolean }>
 }
 
-export const isBatchEntryGeoBlocked = (entry: Pick<BatchEntry, 'geoPolicy'>): boolean =>
+const isBatchEntryPolicyBlocked = (entry: Pick<BatchEntry, 'geoPolicy'>): boolean =>
   (entry.geoPolicy ?? []).some(policy =>
     isVaultBlockedByCountry(policy.vaultAddress, { asset: policy.asset })
     || (policy.acquisition && isVaultRestrictedByCountry(policy.vaultAddress, { asset: policy.asset })),
@@ -385,6 +387,16 @@ const getReviewAddressArray = (review: Record<string, unknown>, key: string): st
   return Array.isArray(value) && value.every(item => typeof item === 'string')
     ? value
     : []
+}
+
+export const isBatchEntryGeoBlocked = (entry: Pick<BatchEntry, 'geoPolicy' | 'review'>): boolean => {
+  if (isBatchEntryPolicyBlocked(entry)) return true
+  const review = entry.review
+  if (!review) return false
+  const vaultAddresses = getReviewAddressArray(review, 'geoVaultAddresses')
+  const targetVaultAddresses = getReviewAddressArray(review, 'geoTargetVaultAddresses')
+  return isAnyVaultBlockedByCountry(...vaultAddresses)
+    || targetVaultAddresses.some(address => getVaultTags(address, 'swap-target').disabled)
 }
 
 export const buildRefinanceReplacementBorrowPositionKeys = (

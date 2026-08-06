@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, isBatchEntryGeoBlocked, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
   mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
@@ -17,6 +17,13 @@ import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
 }))
+
+const geoPolicyMocks = vi.hoisted(() => ({
+  isAnyVaultBlockedByCountry: vi.fn((..._addresses: string[]) => false),
+  getVaultTags: vi.fn((_address: string, _context?: string) => ({ tags: [], disabled: false })),
+}))
+
+vi.mock('~/composables/useGeoBlock', () => geoPolicyMocks)
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -307,6 +314,10 @@ const createMockSdk = () => ({
 })
 
 beforeEach(() => {
+  geoPolicyMocks.isAnyVaultBlockedByCountry.mockReset()
+  geoPolicyMocks.isAnyVaultBlockedByCountry.mockReturnValue(false)
+  geoPolicyMocks.getVaultTags.mockReset()
+  geoPolicyMocks.getVaultTags.mockReturnValue({ tags: [], disabled: false })
   vi.restoreAllMocks()
   eulerTxMocks.prepareTransactionPlan.mockReset()
   eulerTxMocks.executePreparedPlan.mockReset()
@@ -324,6 +335,26 @@ beforeEach(() => {
   vi.mocked(getEulerSdkFresh).mockResolvedValue(createMockSdk() as never)
   resetBatchPrefetchState()
   useTxBatch().clearBatch()
+})
+
+describe('isBatchEntryGeoBlocked', () => {
+  it('checks every vault for hard blocks and target vaults for acquisition restrictions', () => {
+    const source = '0x1000000000000000000000000000000000000001'
+    const target = '0x2000000000000000000000000000000000000002'
+    geoPolicyMocks.getVaultTags.mockImplementation(address => ({
+      tags: [],
+      disabled: address === target,
+    }))
+
+    expect(isBatchEntryGeoBlocked({
+      review: {
+        geoVaultAddresses: [source, target],
+        geoTargetVaultAddresses: [target],
+      },
+    })).toBe(true)
+    expect(geoPolicyMocks.isAnyVaultBlockedByCountry).toHaveBeenCalledWith(source, target)
+    expect(geoPolicyMocks.getVaultTags).toHaveBeenCalledWith(target, 'swap-target')
+  })
 })
 
 describe('stitchAccount', () => {

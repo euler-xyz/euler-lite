@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, type Ref } from 'vue'
+import { computed, nextTick, ref, shallowRef, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
@@ -19,6 +19,11 @@ const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
     prepareTransactionPlan: vi.fn(),
     runSimulation: vi.fn(),
     runPreparedSimulation: vi.fn(),
+    country: null as unknown as Ref<string | null | undefined>,
+    geoBlocked: null as unknown as Ref<boolean>,
+    targetDisabled: null as unknown as Ref<boolean>,
+    resetQuotes: vi.fn(),
+    toastError: vi.fn(),
   },
   useSwapQuotesParallelMock: vi.fn(),
 }))
@@ -37,7 +42,7 @@ vi.mock('~/components/ui/composables/useModal', () => ({
 
 vi.mock('~/components/ui/composables/useToast', () => ({
   useToast: () => ({
-    error: vi.fn(),
+    error: captured.toastError,
   }),
 }))
 
@@ -52,8 +57,9 @@ vi.mock('~/composables/useEulerLabels', () => ({
 }))
 
 vi.mock('~/composables/useGeoBlock', () => ({
-  getVaultTags: vi.fn(() => ({ disabled: false })),
-  isAnyVaultBlockedByCountry: vi.fn(() => false),
+  useGeoBlock: () => ({ country: captured.country }),
+  getVaultTags: vi.fn(() => ({ disabled: captured.targetDisabled.value })),
+  isAnyVaultBlockedByCountry: vi.fn(() => captured.geoBlocked.value),
 }))
 
 vi.mock('~/composables/useStateOverrideOptions', () => ({
@@ -108,6 +114,11 @@ describe('useSwapPageLogic', () => {
     captured.runSimulation.mockResolvedValue(true)
     captured.runPreparedSimulation.mockReset()
     captured.runPreparedSimulation.mockResolvedValue(true)
+    captured.country = ref<string | null | undefined>('PL')
+    captured.geoBlocked = ref(false)
+    captured.targetDisabled = ref(false)
+    captured.resetQuotes.mockReset()
+    captured.toastError.mockReset()
     useSwapQuotesParallelMock.mockImplementation((options) => {
       captured.swapOptions = options
       return {
@@ -122,7 +133,7 @@ describe('useSwapPageLogic', () => {
         quoteError: ref(null),
         statusLabel: ref(null),
         getQuoteDiffPct: vi.fn(() => null),
-        reset: vi.fn(),
+        reset: captured.resetQuotes,
         requestQuotes: vi.fn(),
         selectProvider: vi.fn(),
       }
@@ -324,5 +335,90 @@ describe('useSwapPageLogic', () => {
     expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {})
     expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
     expect(captured.executePlan).not.toHaveBeenCalled()
+  })
+
+  it('blocks a soft-restricted target even when the caller geo list is otherwise allowed', async () => {
+    const toVault = makeVault(
+      '0x0000000000000000000000000000000000000002',
+      '0x0000000000000000000000000000000000000003',
+      'WETH',
+    )
+    const fromVault = shallowRef<EVault | SecuritizeCollateralVault | undefined>(makeVault(
+      '0x0000000000000000000000000000000000000004',
+      '0x0000000000000000000000000000000000000005',
+      'USDC',
+    ))
+    const toVaultRef = shallowRef<EVault | undefined>(toVault)
+    captured.targetDisabled.value = true
+
+    const swap = useSwapPageLogic({
+      amountField: 'amountOut',
+      compare: 'max',
+      fromVault,
+      toVault: toVaultRef,
+      balance: computed(() => 1000n),
+      vaultOptions: computed(() => [toVault]),
+      displayAmountField: 'amountOut',
+      quoteDiffPrefix: '-',
+      buildQuoteRequest: () => null,
+      buildPlan: vi.fn(async () => []),
+      getBalanceError: () => null,
+      getGeoBlockedAddresses: () => [fromVault.value!.address, toVaultRef.value!.address],
+      redirectPath: '/portfolio/saving',
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+
+    expect(swap.isGeoBlocked.value).toBe(true)
+    expect(swap.reviewSwapDisabled.value).toBe(true)
+    await swap.submit()
+    expect(captured.prepareTransactionPlan).not.toHaveBeenCalled()
+    expect(captured.modalOpen).not.toHaveBeenCalled()
+  })
+
+  it('re-checks target policy at confirmation and invalidates quotes when country changes', async () => {
+    const toVault = makeVault(
+      '0x0000000000000000000000000000000000000002',
+      '0x0000000000000000000000000000000000000003',
+      'WETH',
+    )
+    const fromVault = shallowRef<EVault | SecuritizeCollateralVault | undefined>(makeVault(
+      '0x0000000000000000000000000000000000000004',
+      '0x0000000000000000000000000000000000000005',
+      'USDC',
+    ))
+    const toVaultRef = shallowRef<EVault | undefined>(toVault)
+    captured.selectedQuote.value = { amountIn: '100', amountOut: '200' } as SwapQuote
+
+    const swap = useSwapPageLogic({
+      amountField: 'amountOut',
+      compare: 'max',
+      fromVault,
+      toVault: toVaultRef,
+      balance: computed(() => 1000n),
+      vaultOptions: computed(() => [toVault]),
+      displayAmountField: 'amountOut',
+      quoteDiffPrefix: '-',
+      buildQuoteRequest: () => null,
+      buildPlan: vi.fn(async () => []),
+      getBalanceError: () => null,
+      getGeoBlockedAddresses: () => [fromVault.value!.address, toVaultRef.value!.address],
+      redirectPath: '/portfolio/saving',
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+
+    await swap.submit()
+    const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
+    expect(modalArgs).toBeDefined()
+
+    captured.targetDisabled.value = true
+    await modalArgs.props.onConfirm()
+
+    expect(captured.executePreparedPlan).not.toHaveBeenCalled()
+    expect(captured.executePlan).not.toHaveBeenCalled()
+    expect(captured.toastError).toHaveBeenCalledWith('This operation is not available in your region')
+
+    captured.country.value = 'US'
+    await nextTick()
+    expect(captured.resetQuotes).toHaveBeenCalled()
   })
 })

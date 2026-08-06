@@ -5,7 +5,7 @@ import { OperationReviewModal, SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry, getVaultTags, useGeoBlock } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
@@ -103,6 +103,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const { error: showError } = useToast()
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { account: defaultPlanAccount } = usePlanAccount()
+  const { country } = useGeoBlock()
   // Debt-swap / collateral-swap pages don't consume the user's wallet ERC20
   // balance — the source is an existing position. Safe to skip balance
   // overrides (no balanceOf RPC + no balance-slot probing per estimate).
@@ -193,6 +194,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const resetQuoteState = () => {
     resetQuoteStateInternal()
     toAmount.value = ''
+  }
+
+  const invalidatePreparedSwap = () => {
+    plan.value = null
+    preparedPlan.value = null
   }
 
   const onRefreshQuotes = () => {
@@ -327,6 +333,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   // ── Watchers ───────────────────────────────────────────────────────────
   watch(toVault, () => {
     clearSimulationError()
+    invalidatePreparedSwap()
     if (!toVault.value || isSameVault.value) {
       toAmount.value = ''
       resetQuoteState()
@@ -351,9 +358,16 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   watch([fromVault, slippage], () => {
     clearSimulationError()
+    invalidatePreparedSwap()
     if (fromAmount.value) {
       requestQuote()
     }
+  })
+
+  watch(country, () => {
+    clearSimulationError()
+    invalidatePreparedSwap()
+    resetQuoteState()
   })
 
   watch(selectedQuote, () => {
@@ -399,7 +413,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return additionalErrors.some(err => !!err.value)
   })
 
-  const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...getGeoBlockedAddresses()))
+  const isGeoBlocked = computed(() => {
+    const addresses = getGeoBlockedAddresses().filter(Boolean)
+    return isAnyVaultBlockedByCountry(...addresses)
+      || (!!toVault.value && getVaultTags(toVault.value.address, 'swap-target').disabled)
+  })
 
   const reviewSwapLabel = computed(() => {
     if (isSameAsset.value) return 'Review Transfer'
@@ -519,7 +537,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     isPreparing.value = true
     try {
       await guardWithPriceImpact(async () => {
-        if (isSubmitting.value || !fromVault.value) return
+        if (isSubmitting.value || isGeoBlocked.value || !fromVault.value) return
         if (!isSameAsset.value && !selectedQuote.value) return
 
         preparedPlan.value = null
@@ -552,6 +570,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
           if (!ok) return
         }
 
+        // Country policy may change while the plan is being prepared or
+        // simulated. Never open review with a plan that is no longer allowed.
+        if (isGeoBlocked.value) {
+          invalidatePreparedSwap()
+          return
+        }
+
         const showSwapAmounts = sameAssetModalType === 'transfer' || !isSameAsset.value
         modal.open(OperationReviewModal, {
           props: {
@@ -581,6 +606,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const send = async () => {
     if (!fromVault.value || !toVault.value) return
     if (!isSameAsset.value && !selectedQuote.value) return
+    if (isOperationBlocked.value || isGeoBlocked.value) {
+      invalidatePreparedSwap()
+      showError('This operation is not available in your region')
+      return
+    }
 
     isSubmitting.value = true
     try {

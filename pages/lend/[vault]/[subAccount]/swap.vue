@@ -24,6 +24,7 @@ import {
 } from '~/utils/projected-yield'
 import { buildLendSwapProjectionPlan, resolveLendSwapProjectedRates } from '~/utils/lend-swap-apy'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { getVaultTags } from '~/composables/useGeoBlock'
 
 const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
@@ -211,7 +212,7 @@ const swap = useSwapPageLogic({
     if (balance.value < amountNano) return 'Not enough liquidity in vault'
     return null
   },
-  getGeoBlockedAddresses: () => [getVaultAddress()],
+  getGeoBlockedAddresses: () => [fromVault.value?.address, toVault.value?.address].filter((address): address is Address => !!address),
 })
 
 const {
@@ -329,6 +330,9 @@ const { guardWithPriceImpact: guardWithAddToBatchPriceImpact } = usePriceImpactG
 const addToBatch = async () => {
   if (!canAddToBatch.value) return
   await guardWithAddToBatchPriceImpact(async () => {
+    // Re-check after the async price-impact acknowledgement. Country policy or
+    // the selected target may have changed while the dialog was open.
+    if (isGeoBlocked.value) return
     const from = fromVault.value
     const to = toVault.value
     if (!from || !to) return
@@ -360,7 +364,16 @@ const addToBatch = async () => {
         account,
       }),
       subAccount: positionAccount,
-      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
+      review: {
+        type: 'swap',
+        asset: from.asset,
+        amount: fromAmount.value,
+        swapToAsset: to.asset,
+        swapMode: SwapperMode.EXACT_IN,
+        quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value,
+        geoVaultAddresses: [fromAddr, toAddr],
+        geoTargetVaultAddresses: [toAddr],
+      },
     })
     fromAmount.value = ''
     redirectAfterAdd('/portfolio/saving', { subAccount: positionAccount, vault: toAddr })
@@ -394,7 +407,10 @@ const loadVaults = async () => {
     }
 
     if (targetAddress && isAddress(targetAddress) && getAddress(targetAddress) !== getAddress(baseAddress)) {
-      toVault.value = await getVault(targetAddress)
+      const targetVault = await getVault(targetAddress)
+      if (!getVaultTags(targetVault.address, 'swap-target').disabled) {
+        toVault.value = targetVault
+      }
     }
     else if (!isFromSecuritize) {
       toVault.value = fromVault.value as EVault
