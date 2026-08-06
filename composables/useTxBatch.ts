@@ -132,6 +132,8 @@ export interface BatchEntry {
   nameOverride?: string
   /** Refresh external protocol positions after this entry executes in a batch. */
   refreshExternalMigrationPositions?: boolean
+  /** Stable claim identifier for reward rows already queued in the batch. */
+  rewardClaimKey?: string
 }
 
 type BatchEntryBuildResult = TransactionPlan | {
