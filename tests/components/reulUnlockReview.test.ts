@@ -44,4 +44,20 @@ describe('runWithFreshREULLockReview', () => {
     )).resolves.toEqual({ status: 'executed' })
     expect(execute).toHaveBeenCalledWith(currentLock)
   })
+
+  it('accepts the naturally improved unlock quote at confirmation', async () => {
+    const improvedLock = {
+      ...reviewedLock,
+      unlockableAmount: 81n,
+      amountToBeBurned: 19n,
+    }
+    const execute = vi.fn(async () => true)
+
+    await expect(runWithFreshREULLockReview(
+      reviewedLock,
+      async () => [improvedLock],
+      execute,
+    )).resolves.toEqual({ status: 'executed' })
+    expect(execute).toHaveBeenCalledWith(improvedLock)
+  })
 })

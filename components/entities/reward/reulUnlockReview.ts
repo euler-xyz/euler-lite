@@ -17,8 +17,9 @@ export const refreshREULLockReview = async (
   if (!currentLock) return { status: 'missing' }
 
   if (
-    currentLock.unlockableAmount !== reviewedLock.unlockableAmount
-    || currentLock.amountToBeBurned !== reviewedLock.amountToBeBurned
+    currentLock.amount !== reviewedLock.amount
+    || currentLock.unlockableAmount < reviewedLock.unlockableAmount
+    || currentLock.amountToBeBurned > reviewedLock.amountToBeBurned
   ) {
     return { status: 'changed' }
   }
