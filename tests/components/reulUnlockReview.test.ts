@@ -26,7 +26,6 @@ describe('runWithFreshREULLockReview', () => {
     expect(execute).not.toHaveBeenCalled()
     resolveRefresh([{
       ...reviewedLock,
-      unlockableAmount: 70n,
       amountToBeBurned: 30n,
     }])
 
