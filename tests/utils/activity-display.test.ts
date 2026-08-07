@@ -752,6 +752,8 @@ describe('activity display helpers', () => {
       },
     ])
 
+    // The resolved vault leads (the collapsed row shows only the first
+    // entry), and the asset address decodes into its token symbol.
     expect(getActivityChangeEntries({
       type: 'set_resolved_vault',
       vault: VAULT,
@@ -763,12 +765,7 @@ describe('activity display helpers', () => {
           asset: SHARES,
         },
       },
-    }, getVaultMetadata)).toEqual([
-      {
-        field: 'asset',
-        label: 'Asset',
-        addresses: [{ address: SHARES, linkKind: 'explorer' }],
-      },
+    }, getVaultMetadata, address => address === SHARES ? 'PT-AUSD' : undefined)).toEqual([
       {
         field: 'resolved_vault',
         label: 'Resolved vault',
@@ -780,9 +777,28 @@ describe('activity display helpers', () => {
         }],
       },
       {
+        field: 'asset',
+        label: 'Asset',
+        addresses: [{ address: SHARES, label: 'PT-AUSD', linkKind: 'explorer' }],
+      },
+      {
         field: 'router',
         label: 'Router',
         addresses: [{ address: ASSET, linkKind: 'explorer' }],
+      },
+    ])
+
+    // Without a symbol source the asset falls back to its plain address link.
+    expect(getActivityChangeEntries({
+      type: 'set_resolved_vault',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: { fields: { asset: SHARES } },
+    }, getVaultMetadata)).toEqual([
+      {
+        field: 'asset',
+        label: 'Asset',
+        addresses: [{ address: SHARES, linkKind: 'explorer' }],
       },
     ])
   })

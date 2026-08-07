@@ -200,6 +200,7 @@ const changes = computed(() => {
       summary: entry.summary,
       addresses: entry.addresses,
       avatarAssets: entry.field === 'asset_pair'
+        || (event.type === 'set_resolved_vault' && entry.field === 'asset')
         ? entry.addresses?.map(address => ({
             address: address.address,
             symbol: address.label ?? '',

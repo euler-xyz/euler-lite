@@ -854,6 +854,11 @@ const VAULT_ADDRESS_FIELDS_BY_EVENT: Partial<Record<ActivityEvent['type'], reado
   submit_market_removal: ['market', 'strategy', 'vault'],
 }
 
+/** Change fields holding plain token addresses, labelled with their symbol. */
+const TOKEN_ADDRESS_FIELDS_BY_EVENT: Partial<Record<ActivityEvent['type'], readonly string[]>> = {
+  set_resolved_vault: ['asset'],
+}
+
 const parseActivityInteger = (value: ActivityChangeValue): bigint | null => {
   if (typeof value !== 'string' && typeof value !== 'number') return null
   try {
@@ -981,7 +986,7 @@ const CHANGE_FIELD_PRIORITY: Partial<Record<ActivityEvent['type'], readonly stri
   ],
   set_oracle_config: ['asset0', 'asset1', 'oracle', 'router'],
   set_oracle_governor: ['old_governor', 'new_governor', 'router'],
-  set_resolved_vault: ['asset', 'resolved_vault', 'router'],
+  set_resolved_vault: ['resolved_vault', 'asset', 'router'],
 }
 
 const REALLOCATION_EVENT_TYPES: readonly ActivityEvent['type'][] = [
@@ -1026,14 +1031,21 @@ const resolveChangeAddresses = (
   field: string,
   value: ActivityChangeValue,
   getVaultMetadata: ActivityVaultMetadataLookup | undefined,
+  getTokenSymbol: ActivityAddressLabelLookup | undefined,
 ): ActivityChangeAddress[] | null => {
   const values = Array.isArray(value) ? value : [value]
   if (!values.length || !values.every(item => typeof item === 'string' && isAddress(item))) return null
 
   const isVaultAddress = VAULT_ADDRESS_FIELDS_BY_EVENT[event.type]?.includes(field) ?? false
+  const isTokenAddress = TOKEN_ADDRESS_FIELDS_BY_EVENT[event.type]?.includes(field) ?? false
   return values.map((item) => {
     const address = item as Address
-    if (!isVaultAddress) return { address, linkKind: 'explorer' as const }
+    if (!isVaultAddress) {
+      const label = isTokenAddress
+        ? getTokenSymbol?.(address) ?? getSpecialAddressLabel(address)
+        : undefined
+      return { address, linkKind: 'explorer' as const, ...(label ? { label } : {}) }
+    }
     const display = getVaultMetadata
       ? resolveActivityVaultDisplay(address, getVaultMetadata)
       : null
@@ -1091,7 +1103,7 @@ export const getActivityChangeEntries = (
     if (isZeroAddressValue(value)) {
       return { field, label: formatActivityChangeLabel(field), value: 'None' }
     }
-    const addresses = resolveChangeAddresses(event, field, value, getVaultMetadata)
+    const addresses = resolveChangeAddresses(event, field, value, getVaultMetadata, getTokenSymbol)
     if (addresses) return { field, label: formatActivityChangeLabel(field), addresses }
 
     let formatted: string | null = null
