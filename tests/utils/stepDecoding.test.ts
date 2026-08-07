@@ -73,6 +73,9 @@ const aaveAuthAbi = parseAbi([
   'function delegationWithSig(address delegator,address delegatee,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
   'function permit(address owner,address spender,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
 ])
+const reulAbi = parseAbi([
+  'function withdrawToByLockTimestamp(address account,uint256 lockTimestamp,bool allowRemainderLoss)',
+])
 
 const ctx: StepDecodingContext = {
   type: 'swap',
@@ -531,6 +534,41 @@ describe('buildTransactionPlanDisplaySteps generic-handler redeem outside migrat
     })))
 
     expect(steps[0]?.label).toBe('Withdraw')
+  })
+})
+
+describe('buildTransactionPlanDisplaySteps rEUL unlock rows', () => {
+  it('labels the SDK unlock batch item and shows the reviewed EUL amount', () => {
+    const steps = buildTransactionPlanDisplaySteps(
+      [{
+        type: 'evcBatch',
+        items: [{
+          type: 'operation',
+          name: 'Unlock rEUL',
+          items: [batchItem(encodeFunctionData({
+            abi: reulAbi,
+            functionName: 'withdrawToByLockTimestamp',
+            args: [account, 123n, true],
+          }))],
+        }],
+      }] satisfies TransactionPlan,
+      {
+        type: 'reul-unlock',
+        asset: { symbol: 'EUL', address: usdcAsset, decimals: 18 },
+        amount: '1.2345',
+      },
+      getVault,
+      getLogoUrl,
+    )
+
+    expect(steps).toMatchObject([{
+      label: 'Unlock',
+      assetInfo: {
+        symbol: 'EUL',
+        address: usdcAsset,
+        amount: '1.2345',
+      },
+    }])
   })
 })
 

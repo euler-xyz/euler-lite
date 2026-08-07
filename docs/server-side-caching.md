@@ -74,11 +74,99 @@ Two endpoints, same `refreshLabelFile` engine:
 - **`/api/internal/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
 - **`/api/internal/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/internal/labels`, default templates land here.
 
-Both endpoints share the same in-memory TTL cache. Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
+Both endpoints write to and fall back on the same in-memory TTL cache, but only the query-shape handler reads through it. It checks `cache.get()` first (and uses the `getOrRefresh` helper for the `assets.json` union), so a fresh entry short-circuits without touching upstream. The path-shape handler calls `refreshLabelFile` directly, and that function is the force-refresh primitive — it skips the fresh-entry check and only deduplicates while a fetch is in flight. Every path-shape request therefore reaches upstream unless it coincides with an in-flight fetch for the same key, so the warm-cache entry acts as a stale fallback on that route rather than as a read-through cache. Since the SDK's default template targets the path shape, that is the route most label traffic takes. Warm callers (`warm-cache.ts`, `vaults-cache.ts`) use `refreshLabelFile` intentionally — see [Warm-Cache Plugin](#warm-cache-plugin) for why. The path handler's file header documents the shared TTL cache / upstream-fetch pipeline and that this route force-refreshes rather than reading through.
+
+Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
 
 ### V3 proxy
 
-`/api/internal/v3/{...path}` forwards only the SDK browser endpoints Lite needs. It accepts `GET` for token, price, APY, reward, account-position, and vault-read endpoints, and `POST` for the SDK vault batch and vault resolve endpoints. The route consumes a local rate-limit budget before forwarding (`GET` costs 1, `POST` costs 5), injects the server-side V3 API key when configured, and forwards only fixed JSON headers to upstream. Query strings and JSON bodies are left for V3 to validate.
+`/api/internal/v3/{...path}` is a deliberately narrow same-origin proxy for browser-side SDK V3 calls and a few Lite-owned chart endpoints. It normalizes browser paths to `/v3/...`, validates the exact path/method allowlist, consumes a local rate-limit budget, injects the server-side V3 API key when configured, and forwards only JSON-safe headers to the upstream V3 API. Query strings and POST bodies are forwarded unchanged after the route/method check; V3 remains responsible for domain-level validation.
+
+Request flow:
+
+```text
+browser / SDK
+  -> /api/internal/v3/{...path}
+  -> server/utils/v3-proxy.ts validates path + method
+  -> server/utils/v3-proxy-backoff.ts checks per-route cooldown
+  -> V3_API_URL / EULER_SDK_V3_API_URL / NUXT_PUBLIC_V3_API_URL
+```
+
+If no V3 URL env var is set, the proxy target falls back to `https://v3.euler.finance`; `enableV3Backend` still remains `false`, so normal `fallback` SDK reads skip V3 unless the deployment explicitly configures it.
+
+#### Allowlist
+
+Allowed `GET` paths:
+
+| Path | Notes |
+|---|---|
+| `/v3/tokens` | Token list / token metadata. |
+| `/v3/prices` | V3 prices. |
+| `/v3/apys/intrinsic` | Intrinsic APY data. |
+| `/v3/apys/rewards` | Reward APYs. |
+| `/v3/rewards/breakdown` | Rewards breakdown. |
+| `/v3/accounts/{address}/positions` | Account positions. |
+| `/v3/activity/accounts/0x…/events` | Portfolio / account activity events. Pattern requires a `0x` + 40-hex owner. |
+| `/v3/activity/vaults/{chainId}/0x…/events` | Vault activity events. Pattern requires a positive integer chain id and a `0x` + 40-hex vault. |
+| `/v3/liquidations` | Liquidation rows used to enrich activity feed liquidations. |
+| `/v3/earn/vaults` | Earn vault catalogue. |
+| `/v3/earn/vaults/{chainId}/{vault}` | Earn vault read. |
+| `/v3/earn/vaults/{chainId}/{vault}/totals` | Earn vault totals history. |
+| `/v3/evk/vaults` | EVK vault catalogue. |
+| `/v3/evk/vaults/{chainId}/{vault}/totals` | EVK vault totals history. |
+| `/v3/evk/vaults/bad-debt` | Bad debt rows. |
+| `/v3/evk/vaults/open-interest` | Open interest by vault/collateral query. |
+| `/v3/evk/vaults/open-interest/by-collateral` | Open interest grouped by collateral. |
+
+Activity surfaces are documented end-to-end in [Activity Feed](./activity-feed.md).
+
+Allowed `POST` paths:
+
+| Path | Notes |
+|---|---|
+| `/v3/evk/vaults/batch` | SDK batched EVK vault reads. |
+| `/v3/resolve/vaults` | SDK vault resolution. |
+
+Everything outside the allowlist returns `404 V3 path not allowed`; method mismatches return `405 Method not allowed`. Additions should be made in `server/utils/v3-proxy.ts` alongside tests so the browser cannot accidentally become an open proxy.
+
+#### Headers, rate limits, and responses
+
+- Rate limiter label: `v3-proxy`, `10_000` budget units per 60 seconds.
+- Cost: `GET` = 1 unit, `POST` = 5 units.
+- Request headers sent upstream: `accept: application/json`, `content-type: application/json` for POST, and `X-API-Key` when `V3_API_KEY`, `EULER_SDK_V3_API_KEY`, or `EULER_V3_API_KEY` is configured.
+- Response headers forwarded back: `cache-control`, `cf-ray`, `content-type`, `etag`, and `last-modified`.
+- The proxy itself does not TTL-cache V3 responses; V3 and any CDN in front of it own freshness. Retry protection is handled by the backoff described below.
+
+#### Failure backoff and logs
+
+`server/utils/v3-proxy-backoff.ts` applies a 10-second cooldown (`V3_PROXY_FAILURE_BACKOFF_MS`) per normalized route key after:
+
+- upstream fetch errors, or
+- retryable upstream statuses: `429`, `500`, `502`, `503`, `504`.
+
+During cooldown the proxy returns `503 V3 upstream cooling down` with a `retry-after` header. Fetch exceptions return `503 V3 upstream unavailable` and also set `retry-after`.
+
+Backoff keys normalize high-cardinality account and vault paths:
+
+| Request shape | Backoff key behavior |
+|---|---|
+| `/v3/accounts/{address}/positions` | Address is collapsed to `/v3/accounts/:address/positions`. |
+| `/v3/activity/accounts/{owner}/events` | Owner is collapsed to `/v3/activity/accounts/:owner/events`, plus safe activity query context (`chainId`, `vaultType`, `from`, `to`, `category`, `eventType`) when present. |
+| `/v3/activity/vaults/{chainId}/{vault}/events` | Vault address is collapsed to `/v3/activity/vaults/{chainId}/:vault/events` (chain id stays in the template), plus the same safe activity query context when present. |
+| `/v3/earn/vaults/{chainId}/{vault}` | Chain and vault are collapsed to `/v3/earn/vaults/:chainId/:vault`. |
+| `/v3/{evk,earn}/vaults/{chainId}/{vault}/totals` | Full path is retained, plus `resolution`, `from`, and `to` query params when present. |
+| Other paths (including `/v3/liquidations`) | Full normalized path is used. |
+
+Non-OK upstream responses and fetch exceptions are logged with `ctx: "v3-proxy"`, `method`, `pathTemplate`, `upstreamHost`, `durationMs`, optional `bodyBytes`, and safe V3 context from `buildV3ProxyLogFields()`: `v3ChainId`, `v3ChainIds`, `v3VaultKind`, `v3VaultAddress`, `v3ActivityScope`, `v3ActivityCategories`, `v3ActivityEventTypes`, and sanitized pagination/range fields such as `v3From`, `v3To`, `v3Limit`, `v3Offset`, `v3Resolution`, and `v3MinBadDebtUsd`. Account, violator, and liquidator wallet addresses are intentionally omitted from logs.
+
+Troubleshooting quick checks:
+
+| Symptom | Check |
+|---|---|
+| `404 V3 path not allowed` | The browser is calling a path not declared in `GET_ONLY_PATHS`, `GET_ONLY_PATH_PATTERNS`, or `POST_ONLY_PATHS`. Add a narrow allowlist entry instead of forwarding a broad prefix. |
+| `405 Method not allowed` | The path exists but is being called with the wrong method, or an unsupported method was sent. |
+| Repeated `503 V3 upstream cooling down` | Search logs for the same `pathTemplate` and V3 context in the previous 10 seconds; the first retryable failure records the cooldown. |
+| V3-only charts or bad-debt sections are hidden | `useV3ChainGate()` requires `enableV3Backend` and excludes chains listed in `ONCHAIN_SDK_CHAINS`. Exposure displays can fall back to RPC-derived qualitative data, but bad debt and history have no on-chain equivalent. |
 
 ## Vault Snapshot Pipeline
 
@@ -240,7 +328,7 @@ When the two intervals are equal (V3 off), the timers naturally double-warm at e
 
 Every warm task is a **direct function call** (`refreshChainVaults(chainId)`, `refreshLabelFile(...)`, etc.) that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. If we warm via HTTP, the handler short-circuits on the still-fresh previous entry (age ≈ TTL − 2 s) and the entry then expires without refresh until the next cycle — leaving a stale window per cycle. Direct calls ensure the entry is always rewritten *before* it expires.
 
-User requests arriving during a refresh continue to read the still-fresh previous entry via the handler's own `cache.get()` short-circuit, so there's no blocking on the in-flight refresh.
+User requests arriving during a refresh continue to read the still-fresh previous entry via the handler's own `cache.get()` short-circuit, so there's no blocking on the in-flight refresh. This holds for handlers that actually short-circuit — the vault snapshot endpoint and the query-shape labels endpoint. The path-shape labels endpoint calls `refreshLabelFile` instead of reading through, so a concurrent request there joins the in-flight refresh rather than being served the previous entry (see [Labels](#labels)).
 
 ### Boot behaviour
 

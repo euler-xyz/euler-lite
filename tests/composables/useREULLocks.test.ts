@@ -12,6 +12,8 @@ const importUseREULLocks = async (wallet: {
 } = {}) => {
   vi.resetModules()
 
+  const unmountCallbacks: Array<() => void> = []
+
   const lock = {
     timestamp: 1n,
     amount: 5_920_093_000_000_000_000n,
@@ -36,7 +38,9 @@ const importUseREULLocks = async (wallet: {
   vi.stubGlobal('until', () => ({
     toBeTruthy: vi.fn(async () => true),
   }))
-  vi.stubGlobal('onUnmounted', vi.fn())
+  vi.stubGlobal('onUnmounted', (callback: () => void) => {
+    unmountCallbacks.push(callback)
+  })
   vi.stubGlobal('useWagmi', () => ({
     isConnected: ref(wallet.connected ?? false),
     address: ref(wallet.address),
@@ -67,6 +71,7 @@ const importUseREULLocks = async (wallet: {
     buildUnlockPlan,
     unlockPlan,
     lock,
+    unmountCallbacks,
   }
 }
 
@@ -75,6 +80,7 @@ describe('useREULLocks', () => {
 
   afterEach(() => {
     scope?.stop()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.resetModules()
   })
@@ -118,7 +124,111 @@ describe('useREULLocks', () => {
       chainId: 1,
       account: owner,
       lockTimestamp: 123n,
+      allowRemainderLoss: true,
       rEulAddress: reulAddress,
     })
+  })
+
+  it('removes stale rows while a required post-transaction refresh is pending', async () => {
+    const { useREULLocks, fetchLocks, lock } = await importUseREULLocks()
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await vi.waitFor(() => expect(locks?.locks.value).toEqual([lock]))
+
+    const refreshedLock = {
+      ...lock,
+      unlockableAmount: lock.unlockableAmount + 1n,
+      amountToBeBurned: 1n,
+    }
+    let resolveRefresh!: (value: typeof lock[]) => void
+    const pendingRefresh = new Promise<typeof lock[]>((resolve) => {
+      resolveRefresh = resolve
+    })
+    fetchLocks.mockImplementationOnce(() => pendingRefresh)
+
+    const refreshPromise = locks.refreshLocks(true)
+
+    expect(locks.isLocksLoading.value).toBe(true)
+    expect(locks.locks.value).toEqual([])
+
+    resolveRefresh([refreshedLock])
+    await expect(refreshPromise).resolves.toEqual([refreshedLock])
+    expect(locks.isLocksLoading.value).toBe(false)
+    expect(locks.locks.value).toEqual([refreshedLock])
+  })
+
+  it('clears shared state and invalidates in-flight loads after the final consumer unmounts', async () => {
+    const { useREULLocks, fetchLocks, lock, unmountCallbacks } = await importUseREULLocks()
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await vi.waitFor(() => expect(locks?.locks.value).toEqual([lock]))
+
+    const staleLock = {
+      ...lock,
+      unlockableAmount: lock.unlockableAmount + 1n,
+    }
+    let resolveRefresh!: (value: typeof lock[]) => void
+    const pendingRefresh = new Promise<typeof lock[]>((resolve) => {
+      resolveRefresh = resolve
+    })
+    fetchLocks.mockImplementationOnce(() => pendingRefresh)
+
+    const refreshPromise = locks.refreshLocks()
+    await vi.waitFor(() => expect(fetchLocks).toHaveBeenCalledTimes(2))
+
+    scope.stop()
+    scope = undefined
+    unmountCallbacks[0]?.()
+    expect(locks.locks.value).toEqual([])
+    expect(locks.isLocksLoading.value).toBe(false)
+
+    resolveRefresh([staleLock])
+    await expect(refreshPromise).resolves.toBeNull()
+    expect(locks.locks.value).toEqual([])
+
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+    await vi.waitFor(() => expect(fetchLocks).toHaveBeenCalledTimes(3))
+    expect(locks.locks.value).toEqual([lock])
+  })
+
+  it('keeps the shared poller alive until the last sibling consumer unmounts', async () => {
+    vi.useFakeTimers()
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
+    const { useREULLocks, fetchLocks, unmountCallbacks } = await importUseREULLocks()
+
+    scope = effectScope()
+    scope.run(() => {
+      useREULLocks()
+      useREULLocks()
+    })
+
+    await vi.waitFor(() => expect(fetchLocks).toHaveBeenCalledTimes(1))
+    expect(unmountCallbacks).toHaveLength(2)
+    unmountCallbacks[0]?.()
+    expect(clearIntervalSpy).not.toHaveBeenCalled()
+    const callsBeforePoll = fetchLocks.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchLocks).toHaveBeenCalledTimes(callsBeforePoll + 1)
+
+    unmountCallbacks[1]?.()
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1)
+    const callsAfterUnmount = fetchLocks.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchLocks).toHaveBeenCalledTimes(callsAfterUnmount)
   })
 })
