@@ -2,6 +2,7 @@
 import type { ActivityCategory, ActivityEvent, LiquidationRecord } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getExplorerLink } from '~/utils/block-explorer'
+import { fetchVaultCategory } from '~/utils/vault/categories'
 import {
   getActivityAddressCollectionSummary,
   getActivityLiquidationBonusEntry,
@@ -56,6 +57,7 @@ const {
   registryVersion,
 } = useVaultRegistry()
 const { getTokenByAddress } = useTokenList()
+const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol } = useTokenSymbolResolver()
 const vaultAddress = computed(() => event.vault ?? '')
 const vaultProduct = useEulerProductOfVault(vaultAddress)
 const collateralVaultAddress = computed(() =>
@@ -68,8 +70,16 @@ const collateralProduct = useEulerProductOfVault(collateralVaultAddress)
 // so none of them fall back to a raw shortened address.
 const metadataVaultAddresses = computed(() => getActivityResolvableVaultAddresses(event))
 
+// Factory membership gates the registry fetch: addresses the vault resolver
+// doesn't recognize as Euler vaults (e.g. an external ERC-4626 configured as
+// a router resolved vault) skip the registry's on-chain fetch fallback and
+// deterministically render as their raw token symbol instead.
 watch(metadataVaultAddresses, (addresses) => {
-  for (const address of addresses) void getOrFetchRegistryVault(address)
+  for (const address of addresses) {
+    void fetchVaultCategory(address).then((category) => {
+      if (category) void getOrFetchRegistryVault(address)
+    })
+  }
 }, { immediate: true })
 
 const tokenMetadata = (address: `0x${string}`) => {
@@ -92,6 +102,15 @@ const activityVaultMetadata = (address: `0x${string}`) => {
     vaultType: getRegistryVaultType(address),
   }
 }
+
+const knownTokenSymbols = computed(() => {
+  void registryVersion.value
+  return buildKnownSymbols()
+})
+
+const activityTokenSymbol = (address: `0x${string}`) =>
+  tokenMetadata(address)?.symbol
+  ?? resolveTokenSymbol(address, knownTokenSymbols.value)
 
 const resolveAvatarAsset = (asset: ActivityEvent['assets'][number]) => {
   const representsVaultShares = asset.kind === 'shares'
@@ -179,7 +198,7 @@ const assets = computed(() => {
 const changes = computed(() => {
   // Re-resolve human-readable vault names when registry metadata arrives.
   void registryVersion.value
-  return getActivityChangeEntries(event, activityVaultMetadata)
+  return getActivityChangeEntries(event, activityVaultMetadata, activityTokenSymbol)
     .filter(entry => event.category !== 'liquidations' || entry.field !== 'collateral')
     .map(entry => ({
       kind: 'change' as const,
@@ -187,7 +206,15 @@ const changes = computed(() => {
       label: entry.label,
       value: entry.value,
       valueTitle: entry.value,
+      summary: entry.summary,
       addresses: entry.addresses,
+      avatarAssets: entry.field === 'asset_pair'
+        || (event.type === 'set_resolved_vault' && entry.field === 'asset')
+        ? entry.addresses?.map(address => ({
+            address: address.address,
+            symbol: address.label ?? '',
+          }))
+        : undefined,
     }))
 })
 // The seized collateral vault trails the numbers as its own metadata line, so
@@ -237,15 +264,17 @@ const portfolioPosition = computed(() => showVault
 const COLLAPSED_ENTRY_COUNT = 1
 const hiddenEntryCount = computed(() =>
   Math.max(0, details.value.length - COLLAPSED_ENTRY_COUNT))
-const addressCollectionSummary = (count: number) =>
-  getActivityAddressCollectionSummary(event.type, count)
+const addressCollectionSummary = (detail: (typeof details.value)[number]) =>
+  'summary' in detail && detail.summary
+    ? detail.summary
+    : getActivityAddressCollectionSummary(event.type, detailAddressCount(detail))
 const detailAddressCount = (detail: (typeof details.value)[number]) =>
   'addresses' in detail && Array.isArray(detail.addresses) ? detail.addresses.length : 0
 const hasExpandableDetails = computed(() =>
   hiddenEntryCount.value > 0
   || details.value
     .slice(0, COLLAPSED_ENTRY_COUNT)
-    .some(detail => addressCollectionSummary(detailAddressCount(detail)) !== null))
+    .some(detail => addressCollectionSummary(detail) !== null))
 const eventIcon = computed(() => getActivityEventIcon(event))
 const eventLabel = computed(() => portfolioPosition.value
   ? `${portfolioPosition.value.label} liquidated`
@@ -361,7 +390,11 @@ const vaultDisplay = computed(() => {
         v-for="(detail, index) in details"
         :key="detail.key"
         class="activity-event-row__detail min-w-0"
-        :class="index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-detail hidden' : ''"
+        :class="[
+          index >= COLLAPSED_ENTRY_COUNT && !expanded ? 'activity-event-row__secondary-detail hidden' : '',
+          detailAddressCount(detail) ? 'activity-event-row__detail--address-list' : '',
+          detail.key === 'change:asset_pair' ? 'activity-event-row__detail--asset-pair' : '',
+        ]"
       >
         <div
           v-if="detail.label"
@@ -415,25 +448,43 @@ const vaultDisplay = computed(() => {
         <template v-else>
           <template v-if="detail.addresses?.length">
             <div
-              v-if="!expanded && addressCollectionSummary(detail.addresses.length)"
-              class="break-words text-p3 text-content-primary"
+              v-if="!expanded && addressCollectionSummary(detail)"
+              class="mt-2 flex min-w-0 items-center gap-8"
             >
-              {{ addressCollectionSummary(detail.addresses.length) }}
+              <AssetAvatar
+                v-if="'avatarAssets' in detail && detail.avatarAssets?.length"
+                :asset="detail.avatarAssets"
+                size="20"
+                class="shrink-0"
+              />
+              <span class="min-w-0 break-words text-p3 text-content-primary">
+                {{ addressCollectionSummary(detail) }}
+              </span>
             </div>
             <div
               v-else
               class="activity-event-row__detail-addresses mt-2 flex min-w-0 flex-col items-start gap-2 text-p3"
             >
-              <ActivityAddress
-                v-for="address in detail.addresses"
-                :key="address.address"
-                :address="address.address"
-                :chain-id="event.chainId"
-                :label="address.label"
-                :link-kind="address.linkKind"
-                :vault-type="address.vaultType"
-                compact-vault
-              />
+              <div
+                v-for="(address, addressIndex) in detail.addresses"
+                :key="`${address.address}:${addressIndex}`"
+                class="flex w-full min-w-0 items-center gap-8"
+              >
+                <AssetAvatar
+                  v-if="'avatarAssets' in detail && detail.avatarAssets?.[addressIndex]"
+                  :asset="detail.avatarAssets[addressIndex]"
+                  size="20"
+                  class="shrink-0"
+                />
+                <ActivityAddress
+                  :address="address.address"
+                  :chain-id="event.chainId"
+                  :label="address.label"
+                  :link-kind="address.linkKind"
+                  :vault-type="address.vaultType"
+                  compact-vault
+                />
+              </div>
             </div>
           </template>
           <div
@@ -633,6 +684,20 @@ const vaultDisplay = computed(() => {
     column-gap: 12px;
   }
 
+  /* Multi-row values such as oracle asset pairs should start beside their
+     label instead of centering the label between the two assets. */
+  .activity-event-row__details--expanded .activity-event-row__detail--address-list:not(.hidden) {
+    align-items: start;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__detail--address-list .activity-event-row__detail-label {
+    padding-top: 2px;
+  }
+
+  .activity-event-row__details--expanded .activity-event-row__detail--address-list .activity-event-row__detail-addresses {
+    margin-top: 0;
+  }
+
   .activity-event-row__details--expanded .activity-event-row__detail > :not(.activity-event-row__detail-label) {
     grid-column: 2;
   }
@@ -674,5 +739,17 @@ const vaultDisplay = computed(() => {
     margin-left: 162px;
     margin-top: 2px;
   }
+}
+
+.activity-event-row__details--expanded .activity-event-row__detail--asset-pair:not(.hidden) {
+  display: block;
+}
+
+.activity-event-row__details--expanded .activity-event-row__detail--asset-pair .activity-event-row__detail-label {
+  padding-top: 0;
+}
+
+.activity-event-row__details--expanded .activity-event-row__detail--asset-pair .activity-event-row__detail-addresses {
+  margin-top: 2px;
 }
 </style>

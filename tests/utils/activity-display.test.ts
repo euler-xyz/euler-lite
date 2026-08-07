@@ -73,6 +73,10 @@ describe('activity display helpers', () => {
       'repay',
       'set_caps',
       'set_ltv',
+      'set_oracle_config',
+      'set_fallback_oracle',
+      'set_resolved_vault',
+      'set_oracle_governor',
       'liquidation',
     ]))
 
@@ -192,9 +196,15 @@ describe('activity display helpers', () => {
 
   it('uses normalized labels and titleizes fallback event types', () => {
     expect(formatActivityEventLabel({ label: 'Borrowed USDC', type: 'borrow' })).toBe('Borrowed USDC')
-    expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Set supply cap')
-    expect(formatActivityEventLabel({ type: 'set_ltv' })).toBe('Set LTV')
-    expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Set interest rate model')
+    expect(formatActivityEventLabel({ type: 'set_supply_cap' })).toBe('Supply cap updated')
+    expect(formatActivityEventLabel({ type: 'set_ltv' })).toBe('LTV updated')
+    expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Interest rate model updated')
+    expect(formatActivityEventLabel({ type: 'set_liquidation_cool_off_time' })).toBe('Liquidation cool-off time updated')
+    expect(formatActivityEventLabel({ type: 'set_is_allocator' })).toBe('Allocator status updated')
+    expect(formatActivityEventLabel({ type: 'set_oracle_config' })).toBe('Oracle route updated')
+    expect(formatActivityEventLabel({ type: 'set_fallback_oracle' })).toBe('Fallback oracle updated')
+    expect(formatActivityEventLabel({ type: 'set_resolved_vault' })).toBe('Resolved vault updated')
+    expect(formatActivityEventLabel({ type: 'set_oracle_governor' })).toBe('Oracle governor updated')
   })
 
   it('labels and styles vault share transfers relative to the event position', () => {
@@ -702,6 +712,119 @@ describe('activity display helpers', () => {
       },
     }, getVaultMetadata)).toEqual([
       { field: 'new_supply_cap', label: 'New supply cap', value: '155M USDC' },
+    ])
+
+    expect(getActivityChangeEntries({
+      type: 'set_oracle_config',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: {
+        fields: {
+          router: OTHER_VAULT,
+          oracle: VAULT,
+          asset1: SHARES,
+          asset0: ASSET,
+        },
+      },
+    }, getVaultMetadata, address => address === ASSET
+      ? 'AUSD'
+      : address === SHARES
+        ? 'PT-AUSD'
+        : undefined)).toEqual([
+      {
+        field: 'asset_pair',
+        label: 'Asset pair',
+        summary: 'AUSD / PT-AUSD',
+        addresses: [
+          { address: ASSET, label: 'AUSD', linkKind: 'explorer' },
+          { address: SHARES, label: 'PT-AUSD', linkKind: 'explorer' },
+        ],
+      },
+      {
+        field: 'oracle',
+        label: 'Oracle',
+        addresses: [{ address: VAULT, linkKind: 'explorer' }],
+      },
+      {
+        field: 'router',
+        label: 'Router',
+        addresses: [{ address: OTHER_VAULT, linkKind: 'explorer' }],
+      },
+    ])
+
+    // The resolved vault leads (the collapsed row shows only the first
+    // entry), and the asset address decodes into its token symbol.
+    expect(getActivityChangeEntries({
+      type: 'set_resolved_vault',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: {
+        fields: {
+          router: ASSET,
+          resolved_vault: OTHER_VAULT,
+          asset: SHARES,
+        },
+      },
+    }, getVaultMetadata, address => address === SHARES ? 'PT-AUSD' : undefined)).toEqual([
+      {
+        field: 'resolved_vault',
+        label: 'Resolved vault',
+        addresses: [{
+          address: OTHER_VAULT,
+          label: 'Collateral vault',
+          linkKind: 'vault',
+          vaultType: 'evk',
+        }],
+      },
+      {
+        field: 'asset',
+        label: 'Asset',
+        addresses: [{ address: SHARES, label: 'PT-AUSD', linkKind: 'explorer' }],
+      },
+      {
+        field: 'router',
+        label: 'Router',
+        addresses: [{ address: ASSET, linkKind: 'explorer' }],
+      },
+    ])
+
+    // A resolved vault the registry cannot resolve (e.g. a non-Euler
+    // ERC-4626) falls back to its token symbol and an explorer link instead
+    // of a dead internal vault page.
+    expect(getActivityChangeEntries({
+      type: 'set_resolved_vault',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: { fields: { resolved_vault: SHARES, asset: ASSET } },
+    }, getVaultMetadata, address => address === SHARES
+      ? 'sUSDS'
+      : address === ASSET
+        ? 'USDC'
+        : undefined)).toEqual([
+      {
+        field: 'resolved_vault',
+        label: 'Resolved vault',
+        addresses: [{ address: SHARES, label: 'sUSDS', linkKind: 'explorer' }],
+      },
+      {
+        field: 'asset',
+        label: 'Asset',
+        addresses: [{ address: ASSET, label: 'USDC', linkKind: 'explorer' }],
+      },
+    ])
+
+    // Without a symbol source the asset falls back to its plain address link.
+    expect(getActivityChangeEntries({
+      type: 'set_resolved_vault',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: { fields: { asset: SHARES } },
+    }, getVaultMetadata)).toEqual([
+      {
+        field: 'asset',
+        label: 'Asset',
+        addresses: [{ address: SHARES, linkKind: 'explorer' }],
+      },
     ])
   })
 
