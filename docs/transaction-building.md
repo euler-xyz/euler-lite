@@ -55,7 +55,7 @@ Combined helpers keep page code simpler where a workflow can use either a same-a
 - `planDebtChange`
 - `planWithdrawOrRedeem`
 
-The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain id, Permit2 preference, and wallet callbacks. The quote and vault inputs stay explicit at the page/composable boundary.
+The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain id, gasless-signature preference (`usePermit2`), and wallet callbacks. The quote and vault inputs stay explicit at the page/composable boundary.
 
 ## Execution Flow
 
@@ -69,14 +69,38 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain 
 
 The review modal is fail-closed: if preparation does not produce a plan, it shows an error and disables confirmation.
 
-## Approvals and Permit2
+## Approvals and Gasless Signatures
 
 Plans may include `requiredApproval` items. During review and execution, `resolveRequiredApprovals` resolves each approval to either:
 
 - an ERC-20 approval transaction, or
 - a Permit2 signature request.
 
-`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Incentra chooses whether message signatures are enabled through `useSignaturePreference()`; disabling them makes approval-capable flows use transactions instead.
+`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required.
+
+### User preference (`useSignaturePreference`)
+
+Users choose whether message signatures are enabled via **Settings → Gasless signatures** (`components/entities/wallet/SignatureSettings.vue`). The preference defaults to **on** and is read everywhere through `composables/useSignaturePreference.ts`.
+
+| Concern | Detail |
+| ------- | ------ |
+| Storage key | `signatures-enabled` (`SIGNATURES_PREFERENCE_STORAGE_KEY`) |
+| Legacy key | `permit2-enabled` — copied once into the new key by `seedSignaturePreference`, then removed |
+| Default | `true` (gasless / typed-data path) |
+| `useEulerTx` wiring | `usePermit2: options?.usePermit2 ?? signaturesEnabled.value` on plan/prepare/execute helpers |
+
+When the toggle is **off**, approval-capable flows fall back to on-chain approval transactions instead of Permit2 (and other) message signatures. That path exists for wallets that cannot sign typed data reliably (for example some Safe / smart-account setups) while still allowing migrations and deposits to proceed.
+
+Do not treat this as an Incentra- or rewards-specific switch — it is a global Lite setting for every message signature the app collects.
+
+### Cross-protocol migrations
+
+Outgoing migrate (`pages/position/[number]/migrate.vue`) threads the same preference as `useSignatures`:
+
+- **On** → `authorizationKind: 'typedData'`; Morpho can append a signed post-migration disable (`removeAuthorizationAfterMigration`) inside the batch.
+- **Off** → `authorizationKind: 'transaction'`; connectors return `msg.sender` grant txs, and Lite shows separate post-settle revoke steps instead of a signed disable.
+
+`composables/useMigrationAuthorizationFlow.ts` owns restore/revoke queuing after success or abort when the transaction (non-signature) path left a temporary authorization standing. Failed restorations stay queued and must complete before another migration retry.
 
 ## Operation Guards
 
