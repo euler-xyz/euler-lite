@@ -788,6 +788,31 @@ describe('activity display helpers', () => {
       },
     ])
 
+    // A resolved vault the registry cannot resolve (e.g. a non-Euler
+    // ERC-4626) falls back to its token symbol and an explorer link instead
+    // of a dead internal vault page.
+    expect(getActivityChangeEntries({
+      type: 'set_resolved_vault',
+      vault: VAULT,
+      vaultType: 'evk',
+      change: { fields: { resolved_vault: SHARES, asset: ASSET } },
+    }, getVaultMetadata, address => address === SHARES
+      ? 'sUSDS'
+      : address === ASSET
+        ? 'USDC'
+        : undefined)).toEqual([
+      {
+        field: 'resolved_vault',
+        label: 'Resolved vault',
+        addresses: [{ address: SHARES, label: 'sUSDS', linkKind: 'explorer' }],
+      },
+      {
+        field: 'asset',
+        label: 'Asset',
+        addresses: [{ address: ASSET, label: 'USDC', linkKind: 'explorer' }],
+      },
+    ])
+
     // Without a symbol source the asset falls back to its plain address link.
     expect(getActivityChangeEntries({
       type: 'set_resolved_vault',

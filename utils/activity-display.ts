@@ -1038,22 +1038,28 @@ const resolveChangeAddresses = (
 
   const isVaultAddress = VAULT_ADDRESS_FIELDS_BY_EVENT[event.type]?.includes(field) ?? false
   const isTokenAddress = TOKEN_ADDRESS_FIELDS_BY_EVENT[event.type]?.includes(field) ?? false
+  const tokenLabel = (address: Address) =>
+    getTokenSymbol?.(address) ?? getSpecialAddressLabel(address)
   return values.map((item) => {
     const address = item as Address
     if (!isVaultAddress) {
-      const label = isTokenAddress
-        ? getTokenSymbol?.(address) ?? getSpecialAddressLabel(address)
-        : undefined
+      const label = isTokenAddress ? tokenLabel(address) : undefined
       return { address, linkKind: 'explorer' as const, ...(label ? { label } : {}) }
     }
-    const display = getVaultMetadata
-      ? resolveActivityVaultDisplay(address, getVaultMetadata)
-      : null
+    const metadata = getVaultMetadata?.(address)
+    // A vault the registry cannot resolve (e.g. a non-Euler ERC-4626 resolved
+    // vault) still has a token symbol — show that and link to the explorer
+    // instead of a dead internal vault page.
+    if (!metadata) {
+      const label = tokenLabel(address)
+      return { address, linkKind: 'explorer' as const, ...(label ? { label } : {}) }
+    }
+    const display = resolveActivityVaultDisplay(address, getVaultMetadata!)
     return {
       address,
       linkKind: 'vault' as const,
       label: display?.name ?? display?.addressLabel,
-      vaultType: getVaultMetadata?.(address)?.vaultType ?? event.vaultType,
+      vaultType: metadata.vaultType ?? event.vaultType,
     }
   })
 }
