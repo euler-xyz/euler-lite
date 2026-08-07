@@ -114,3 +114,5 @@ Intrinsic APY values rotate when the V3 backend's source providers update — ty
 V3 owns the provider list. Add the asset upstream in the V3 backend's intrinsic-APY adapter and it appears in `vault.intrinsicApy` here automatically the next time the snapshot warms.
 
 If a provider needs Lite-specific handling before it is available in V3, keep the data on an explicit current data path such as a labels payload field and wire it into the vault display code with tests. The preferred durable path is upstream into V3.
+
+For form previews, the intrinsic component is recomputed against projected market rates and included in the before/after contribution breakdown. See [Projected Yield](./projected-yield.md).

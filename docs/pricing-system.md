@@ -77,3 +77,5 @@ Those calculations stay independent from market display prices.
 USD helpers return `undefined` when the SDK field is missing. UI wrappers use `toUsdAmount()` or `get*OrZero()` depending on whether the component needs to distinguish missing prices from true zero values.
 
 Use `toUsdAmount(undefined)` when the UI should show the token amount instead of a USD value. Use `getAssetUsdValueOrZero()` only in aggregate/list contexts where missing prices should not block rendering.
+
+Form-time Net APY and ROE previews use the same liability-context USD values to weight every collateral in a position. See [Projected Yield](./projected-yield.md) for the utilization simulation, completeness rules, and metric formulas.
