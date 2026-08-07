@@ -52,7 +52,7 @@
     "chartjs-plugin-annotation": "3.1.0",
     "luxon": "3.7.2",
     "modern-normalize": "3.0.1",
-    "nuxt": "4.4.8",
+    "nuxt": "4.5.1",
     "pino": "10.3.1",
     "viem": "2.55.10",
     "vue": "3.5.40",
@@ -77,8 +77,7 @@
   "overrides": {
     "@base-org/account": "2.5.1",
     "@wagmi/connectors": "8.0.26",
-    "serialize-javascript": "7.0.4",
-    "unhead": "2.1.15"
+    "serialize-javascript": "7.0.4"
   },
   "license": "MIT"
 }
