@@ -2,6 +2,7 @@
 import type { ActivityCategory, ActivityEvent, LiquidationRecord } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { getExplorerLink } from '~/utils/block-explorer'
+import { fetchVaultCategory } from '~/utils/vault/categories'
 import {
   getActivityAddressCollectionSummary,
   getActivityLiquidationBonusEntry,
@@ -69,8 +70,16 @@ const collateralProduct = useEulerProductOfVault(collateralVaultAddress)
 // so none of them fall back to a raw shortened address.
 const metadataVaultAddresses = computed(() => getActivityResolvableVaultAddresses(event))
 
+// Factory membership gates the registry fetch: addresses the vault resolver
+// doesn't recognize as Euler vaults (e.g. an external ERC-4626 configured as
+// a router resolved vault) skip the registry's on-chain fetch fallback and
+// deterministically render as their raw token symbol instead.
 watch(metadataVaultAddresses, (addresses) => {
-  for (const address of addresses) void getOrFetchRegistryVault(address)
+  for (const address of addresses) {
+    void fetchVaultCategory(address).then((category) => {
+      if (category) void getOrFetchRegistryVault(address)
+    })
+  }
 }, { immediate: true })
 
 const tokenMetadata = (address: `0x${string}`) => {
