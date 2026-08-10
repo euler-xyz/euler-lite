@@ -3,10 +3,18 @@ const { address } = defineProps<{ address: string }>()
 
 const { safeInfo } = useSafeAddressInfo(() => address)
 
+// Describes the configured owner threshold only — enabled Safe modules can
+// execute without owner confirmations, and the probe does not inspect them.
 const tooltipText = computed(() => {
   if (!safeInfo.value) return ''
   const { threshold, owners, version } = safeInfo.value
-  return `This address is a Safe smart account (v${version}). Executing a transaction from it requires ${threshold} of its ${owners.length} owner signatures.`
+  return `This address is a Safe smart account (v${version}) configured with a ${threshold}-of-${owners.length} owner threshold.`
+})
+
+const ariaLabel = computed(() => {
+  if (!safeInfo.value) return 'Safe multisig'
+  const { threshold, owners } = safeInfo.value
+  return `Safe multisig: ${threshold} of ${owners.length} owner threshold`
 })
 </script>
 
@@ -15,6 +23,7 @@ const tooltipText = computed(() => {
     v-if="safeInfo"
     title="Safe multisig"
     :text="tooltipText"
+    :aria-label="ariaLabel"
   >
     <span class="flex items-center gap-4 text-content-secondary">
       <SvgIcon
