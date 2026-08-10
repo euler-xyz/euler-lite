@@ -103,6 +103,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { entryCount: batchEntryCount } = useTxBatch()
+  const { cowSwapForcedOff } = useCowSwapEligibility()
   const {
     version: rewardsVersion,
     getSupplyRewardApy,
@@ -167,7 +168,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
     compare: 'max',
-    includeCowSwap: () => batchEntryCount.value === 0 && !isMultiplySavingCollateral.value,
+    includeCowSwap: () => !cowSwapForcedOff.value && batchEntryCount.value === 0 && !isMultiplySavingCollateral.value,
     buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
     getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
     // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
