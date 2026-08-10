@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { isEulerEarn, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
 import { stringToColor } from '~/utils/string-utils'
-import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral } from '~/utils/discoveryCalculations'
+import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
 
 const props = defineProps<{
   market: MarketGroup
@@ -35,6 +36,23 @@ const isGraphEdgeHighlighted = (fromAddr: string, toAddr: string): boolean => {
 
 const isNodeCyclicalNote = (address: string): boolean => {
   return isVaultCyclicalNote(address)
+}
+
+const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+
+// Same signal as the per-pair "Unknown" risk-manager pill: the vault resolved,
+// but its governor/owner isn't part of any declared product entity. Applies to
+// group members too — the curator's label attests membership, not that the
+// declared entity actually holds the governor keys.
+const isNodeRiskManagerUnknown = (address: string): boolean => {
+  const vault = findVault(props.market, address)
+  if (!vault) return false
+  if (isEulerEarn(vault)) return !isEarnVaultOwnerVerified(vault)
+  if (isSecuritizeCollateralVault(vault)) return !isSecuritizeGovernorVerified(vault)
+  // Governance info can be absent on lazily-hydrated collateral vaults — don't
+  // flag what simply hasn't been fetched yet (mirrors useMarketGroups).
+  if (!('governorAdmin' in vault)) return false
+  return !isVaultGovernorVerified(vault)
 }
 </script>
 
@@ -238,8 +256,10 @@ const isNodeCyclicalNote = (address: string): boolean => {
           >
             {{ node.assetSymbol.slice(0, 2) }}
           </text>
-          <!-- Unknown collateral badge: governor not in any declared product entity, or vault truly missing -->
-          <g v-if="node.isUnknown">
+          <!-- Unknown risk-manager badge: governor/owner not in any declared
+               product entity (members and externals alike — same signal as the
+               per-pair "Unknown" pill), or vault truly missing -->
+          <g v-if="node.isUnknown || isNodeRiskManagerUnknown(node.address)">
             <circle
               :cx="node.x + 9"
               :cy="node.y - 9"
