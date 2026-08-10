@@ -102,6 +102,24 @@ describe('useSafeWallet', () => {
     expect(isSafeWallet.value).toBe(false)
   })
 
+  it('fails closed when an identifiably Safe connector cannot provide its provider', async () => {
+    const brokenSafeConnector = {
+      id: 'safe',
+      name: 'Safe',
+      getProvider: async () => {
+        throw new Error('provider unavailable')
+      },
+    }
+    wagmiMocks.getAccount.mockReturnValue({ connector: brokenSafeConnector })
+    const useSafeWallet = await importComposable()
+
+    const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
+    await vi.waitFor(() => expect(isSafeWalletResolved.value).toBe(true))
+    // The connector says Safe by identity — provider failure must not
+    // reclassify it as a regular wallet and re-enable signatures.
+    expect(isSafeWallet.value).toBe(true)
+  })
+
   it('clears a previous Safe answer the moment the connector changes', async () => {
     wagmiMocks.getAccount.mockReturnValue({ connector: safeConnector })
     let releaseProvider!: (value: { request: () => void }) => void

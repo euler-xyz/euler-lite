@@ -278,12 +278,12 @@ describe('useEulerTx Safe wallet bundling', () => {
     },
   ] as unknown as TransactionPlan
 
-  const buildPrepared = (plan: TransactionPlan) => ({
+  const buildPrepared = (plan: TransactionPlan, usePermit2 = false) => ({
     __prepared: true,
     plan,
     chainId: 1,
     account: OWNER,
-    usePermit2: false,
+    usePermit2,
     unlimitedApproval: false,
   }) as TransactionPlanPrepared
 
@@ -354,10 +354,13 @@ describe('useEulerTx Safe wallet bundling', () => {
     const { executePreparedPlan } = useEulerTx()
     const batchOnly = [approvedPlan[1]] as TransactionPlan
 
-    await executePreparedPlan(buildPrepared(batchOnly))
+    // usePermit2: true with no permit2 items — the envelope must still be
+    // normalized before the sequential fallback runs it for a Safe.
+    await executePreparedPlan(buildPrepared(batchOnly, true))
 
     expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
     expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
+    expect(executePreparedTransactionPlan.mock.calls[0][0].prepared.usePermit2).toBe(false)
   })
 
   it('executes the repaired envelope sequentially when the repair leaves one call', async () => {

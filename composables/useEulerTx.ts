@@ -1568,6 +1568,11 @@ export const useEulerTx = () => {
         })
         effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
       }
+      else if (prepared.usePermit2) {
+        // Invariant: an envelope executed for a Safe never carries
+        // usePermit2, even when no permit2 items happened to resolve.
+        effectivePrepared = { ...prepared, usePermit2: false }
+      }
 
       // Prepared plans already ran plugins and approval resolution.
       const bundled = await executePlanAsSafeBundle({

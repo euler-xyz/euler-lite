@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { useConfig } from '@wagmi/vue'
 import { getAccount, watchAccount } from '@wagmi/vue/actions'
-import { getSafeWalletProvider, type WalletConnectorLike } from '~/utils/safeWalletTransactions'
+import { getSafeWalletProvider, isSafeConnectorIdentity, type WalletConnectorLike } from '~/utils/safeWalletTransactions'
 import { createRaceGuard } from '~/utils/race-guard'
 
 const isSafeWalletRef = ref(false)
@@ -29,7 +29,11 @@ const updateFromConnector = async (connector: WalletConnectorLike | undefined) =
   // results that arrive after the connector changed again.
   const provider = await getSafeWalletProvider(connector).catch(() => undefined)
   if (!detectionGuard.isStale(generation)) {
-    isSafeWalletRef.value = Boolean(provider)
+    // Fail closed on provider-acquisition failure: a connector that is
+    // identifiably Safe by id/name stays classified as a Safe even when its
+    // provider could not be obtained — signatures must not silently
+    // re-enable for a known Safe.
+    isSafeWalletRef.value = Boolean(provider) || isSafeConnectorIdentity(connector)
     isResolvedRef.value = true
   }
 }
