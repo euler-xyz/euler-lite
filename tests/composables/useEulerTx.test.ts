@@ -478,6 +478,74 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(result.hashes).toEqual([SAFE_TX_HASH])
   })
 
+  it('normalizes the envelope in degraded mode when the Safe provider is unavailable', async () => {
+    // Connector identifies as Safe, but getProvider() rejects — no bundle
+    // and no status polling are possible, yet permit2 must stay off.
+    const brokenSafeConnector = {
+      id: 'safe',
+      name: 'Safe',
+      getProvider: async () => {
+        throw new Error('provider unavailable')
+      },
+    }
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: brokenSafeConnector,
+    }) as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan(buildPrepared([approvedPlan[1]] as TransactionPlan, true))
+
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
+    expect(executePreparedTransactionPlan.mock.calls[0][0].prepared.usePermit2).toBe(false)
+  })
+
+  it('repairs permit2 envelopes in degraded mode before sequential execution', async () => {
+    const brokenSafeConnector = {
+      id: 'safe',
+      name: 'Safe',
+      getProvider: async () => {
+        throw new Error('provider unavailable')
+      },
+    }
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: brokenSafeConnector,
+    }) as never)
+    const resolveRequiredApprovals = vi.fn(async () => approvedPlan)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ getTransactionReceipt: vi.fn() })) },
+      deploymentService: { getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: EVC } } })) },
+      executionService: {
+        encodeBatch: vi.fn(() => BATCH_DATA),
+        resolveRequiredApprovals,
+        executePreparedTransactionPlan,
+      },
+    } as never)
+    const permitPrepared = buildPrepared([
+      {
+        ...approvedPlan[0],
+        resolved: [{ type: 'permit2', token: TOKEN, amount: 100n, owner: OWNER, spender: SWAP_VERIFIER }],
+      },
+      approvedPlan[1],
+    ] as unknown as TransactionPlan, true)
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan(permitPrepared)
+
+    // The permit2 resolution is repaired even though no bundle is possible,
+    // and the sequential path runs the repaired envelope.
+    expect(resolveRequiredApprovals).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
+    const executedPrepared = executePreparedTransactionPlan.mock.calls[0][0].prepared
+    expect(executedPrepared.plan).toBe(approvedPlan)
+    expect(executedPrepared.usePermit2).toBe(false)
+  })
+
   it('bundles raw plans after resolving approvals through the SDK', async () => {
     const processPlanPlugins = vi.fn(async (plan: TransactionPlan) => plan)
     const resolveRequiredApprovals = vi.fn(async () => approvedPlan)

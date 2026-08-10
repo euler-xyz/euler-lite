@@ -55,6 +55,7 @@ import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
 import {
   getSafeWalletProvider,
+  isSafeConnectorIdentity,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
   type WalletProviderLike,
@@ -1476,6 +1477,9 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
+    // Known Safe even when provider acquisition failed — degraded execution
+    // must still never take the permit2 path.
+    const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
 
     if (safeWalletProvider && connector) {
       // Mirror what executeTransactionPlan would do to the plan (plugins,
@@ -1521,8 +1525,9 @@ export const useEulerTx = () => {
       plan,
       chainId: cid,
       account: owner,
-      // A detected Safe never uses permit2, even on the sequential fallback.
-      usePermit2: safeWalletProvider ? false : signaturesEnabled.value,
+      // A known Safe never uses permit2, even on the sequential fallback
+      // and even when its provider could not be acquired.
+      usePermit2: isKnownSafe ? false : signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
@@ -1553,8 +1558,12 @@ export const useEulerTx = () => {
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
 
+    // Known Safe even when provider acquisition failed — the degraded
+    // sequential path must still never sign permit2 messages.
+    const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
+
     let effectivePrepared = prepared
-    if (safeWalletProvider && connector) {
+    if (isKnownSafe) {
       // A Safe never signs permit2 messages. If the envelope was prepared
       // before Safe detection resolved, re-resolve its approvals with
       // permit2 off — resolution overwrites `resolved` on each item, so the
@@ -1573,7 +1582,9 @@ export const useEulerTx = () => {
         // usePermit2, even when no permit2 items happened to resolve.
         effectivePrepared = { ...prepared, usePermit2: false }
       }
+    }
 
+    if (safeWalletProvider && connector) {
       // Prepared plans already ran plugins and approval resolution.
       const bundled = await executePlanAsSafeBundle({
         plan: effectivePrepared.plan,
