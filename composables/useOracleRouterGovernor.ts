@@ -2,6 +2,7 @@ import { computed, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { getAddress, isAddress, type Address, type PublicClient } from 'viem'
 import { governableGovernorAbi } from '~/abis/oracle'
 import { createOnchainLookupCache } from '~/utils/onchain-lookup-cache'
+import { isTransportError } from '~/utils/viem-errors'
 
 // Router governance changes rarely; 5 min matches the app's other caches.
 const CACHE_TTL_MS = 5 * 60_000
@@ -21,7 +22,9 @@ const probeGovernor = async (
     })
     return getAddress(governor)
   }
-  catch {
+  catch (err) {
+    // A flaky RPC response must not get cached as "no governor" for the TTL.
+    if (isTransportError(err)) throw err
     // Not a Governable contract (or empty call data) — no governor to show.
     return null
   }

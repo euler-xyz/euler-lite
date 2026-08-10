@@ -3,6 +3,7 @@ import { getAddress, isAddress, type Address, type PublicClient } from 'viem'
 import { safeAccountAbi } from '~/abis/safe'
 import { createOnchainLookupCache } from '~/utils/onchain-lookup-cache'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
+import { isTransportError } from '~/utils/viem-errors'
 import { resolveSafeAccountInfo, type SafeAccountInfo } from '~/utils/safe-account'
 
 // Threshold/owners can change over time; 5 min matches the app's other caches.
@@ -15,15 +16,15 @@ const safeInfoCache = createOnchainLookupCache<SafeAccountInfo | null>(CACHE_TTL
  *
  * All three reads fire concurrently — the transport batches them into a
  * single RPC request. EOAs return empty call data and non-Safe contracts
- * revert on the unknown selectors, so failed reads mean "not a Safe" rather
- * than an error. Only a rejected `masterCopy()` matching a known singleton
- * would be ambiguous, and that combination cannot occur.
+ * revert on the unknown selectors, so those failures mean "not a Safe".
+ * Transport-level failures are rethrown instead — a flaky RPC response must
+ * not get cached as a definitive negative for the TTL.
  */
 const probeSafeAccount = async (
   client: PublicClient,
   address: Address,
 ): Promise<SafeAccountInfo | null> => {
-  const [masterCopy, threshold, owners] = await Promise.allSettled([
+  const results = await Promise.allSettled([
     client.readContract({
       address,
       abi: safeAccountAbi,
@@ -44,6 +45,13 @@ const probeSafeAccount = async (
     }),
   ])
 
+  for (const result of results) {
+    if (result.status === 'rejected' && isTransportError(result.reason)) {
+      throw result.reason
+    }
+  }
+
+  const [masterCopy, threshold, owners] = results
   return resolveSafeAccountInfo(
     masterCopy.status === 'fulfilled' ? masterCopy.value : null,
     threshold.status === 'fulfilled' ? threshold.value : null,

@@ -1,4 +1,7 @@
-import type { Address } from 'viem'
+import { zeroAddress, type Address } from 'viem'
+
+/** Safe's OwnerManager linked-list sentinel — never a legitimate owner. */
+const SENTINEL_OWNER = '0x0000000000000000000000000000000000000001'
 
 export type SafeAccountInfo = {
   /** Safe contract version of the singleton the proxy points at, e.g. '1.4.1'. */
@@ -43,7 +46,11 @@ export const getSafeSingletonVersion = (
 /**
  * Validate raw probe results into a SafeAccountInfo, or null when the address
  * is not a recognizable Safe. Threshold/owner invariants mirror what the Safe
- * contracts themselves enforce; anything violating them is a lookalike.
+ * contracts themselves enforce (OwnerManager forbids zero/sentinel/duplicate
+ * owners); anything violating them is a lookalike.
+ *
+ * This is a display heuristic: a purpose-built contract can still mimic all
+ * probed functions. Never use the result for authorization decisions.
  */
 export const resolveSafeAccountInfo = (
   singleton: string | null | undefined,
@@ -57,6 +64,10 @@ export const resolveSafeAccountInfo = (
   const thresholdCount = Number(threshold)
   if (!Number.isSafeInteger(thresholdCount) || thresholdCount < 1) return null
   if (owners.length < thresholdCount) return null
+
+  const normalizedOwners = owners.map(owner => owner.toLowerCase())
+  if (normalizedOwners.some(owner => owner === zeroAddress || owner === SENTINEL_OWNER)) return null
+  if (new Set(normalizedOwners).size !== normalizedOwners.length) return null
 
   return {
     version,

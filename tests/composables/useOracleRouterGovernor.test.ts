@@ -66,6 +66,25 @@ describe('useOracleRouterGovernor', () => {
     expect(client.readContract).not.toHaveBeenCalled()
   })
 
+  it('does not cache transport failures as "no governor"', async () => {
+    const readContract = vi.fn()
+      .mockRejectedValueOnce(new Error('HTTP request failed'))
+      .mockResolvedValue(GOVERNOR_ADDRESS)
+    stubEnvironment({ readContract })
+    const useOracleRouterGovernor = await importComposable()
+
+    const first = useOracleRouterGovernor(() => ROUTER_ADDRESS)
+    await vi.waitFor(() => expect(readContract).toHaveBeenCalled())
+    // Macrotask flush so the failed probe fully settles and releases its
+    // in-flight slot before the retry instance is created.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(first.governor.value).toBeUndefined()
+
+    // A fresh instance retries because the transport failure was not cached.
+    const second = useOracleRouterGovernor(() => ROUTER_ADDRESS)
+    await vi.waitFor(() => expect(second.governor.value).toBeTruthy())
+  })
+
   it('caches lookups across instances', async () => {
     const client = { readContract: vi.fn(async () => GOVERNOR_ADDRESS) }
     stubEnvironment(client)

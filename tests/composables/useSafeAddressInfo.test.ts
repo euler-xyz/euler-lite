@@ -123,6 +123,31 @@ describe('useSafeAddressInfo', () => {
     expect(client.readContract).toHaveBeenCalledTimes(3)
   })
 
+  it('does not cache transport failures as negatives', async () => {
+    const readContract = vi.fn()
+      .mockRejectedValueOnce(new Error('HTTP request failed'))
+      .mockRejectedValueOnce(new Error('HTTP request failed'))
+      .mockRejectedValueOnce(new Error('HTTP request failed'))
+      .mockImplementation(async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'masterCopy') return SAFE_141_SINGLETON
+        if (functionName === 'getThreshold') return 3n
+        return OWNERS
+      })
+    stubEnvironment({ readContract })
+    const useSafeAddressInfo = await importComposable()
+
+    const first = useSafeAddressInfo(() => SAFE_ADDRESS)
+    await vi.waitFor(() => expect(readContract).toHaveBeenCalledTimes(3))
+    // Macrotask flush so the failed probe fully settles and releases its
+    // in-flight slot before the retry instance is created.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(first.safeInfo.value).toBeNull()
+
+    // A fresh instance retries because the transport failure was not cached.
+    const second = useSafeAddressInfo(() => SAFE_ADDRESS)
+    await vi.waitFor(() => expect(second.safeInfo.value).not.toBeNull())
+  })
+
   it('probes distinct addresses independently', async () => {
     const client = safeClient()
     stubEnvironment(client)

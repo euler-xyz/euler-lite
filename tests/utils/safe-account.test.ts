@@ -49,4 +49,12 @@ describe('resolveSafeAccountInfo', () => {
     expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 4n, OWNERS)).toBeNull()
     expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, BigInt(Number.MAX_SAFE_INTEGER) + 1n, OWNERS)).toBeNull()
   })
+
+  it('rejects owner lists a Safe cannot have', () => {
+    const zeroOwner = '0x0000000000000000000000000000000000000000'
+    const sentinelOwner = '0x0000000000000000000000000000000000000001'
+    expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 1n, [...OWNERS, zeroOwner])).toBeNull()
+    expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 1n, [...OWNERS, sentinelOwner])).toBeNull()
+    expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 1n, [OWNERS[0], OWNERS[0].toUpperCase().replace('0X', '0x')])).toBeNull()
+  })
 })
