@@ -19,6 +19,10 @@ const updateFromConnector = async (connector: WalletConnectorLike | undefined) =
     isResolvedRef.value = true
     return
   }
+  // Fail closed on transition: a previous connector's Safe answer must not
+  // survive into the new connector's pending window, or display consumers
+  // would transiently treat an EOA as a Safe.
+  isSafeWalletRef.value = false
   isResolvedRef.value = false
   // Detection needs the connector provider (WalletConnect identifies Safe
   // via peer metadata), so it resolves asynchronously; the guard discards

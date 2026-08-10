@@ -102,6 +102,33 @@ describe('useSafeWallet', () => {
     expect(isSafeWallet.value).toBe(false)
   })
 
+  it('clears a previous Safe answer the moment the connector changes', async () => {
+    wagmiMocks.getAccount.mockReturnValue({ connector: safeConnector })
+    let releaseProvider!: (value: { request: () => void }) => void
+    const slowEoaConnector = {
+      id: 'walletconnect',
+      name: 'WalletConnect',
+      getProvider: () => new Promise<{ request: () => void }>((resolve) => {
+        releaseProvider = resolve
+      }),
+    }
+    const useSafeWallet = await importComposable()
+
+    const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
+    await vi.waitFor(() => expect(isSafeWallet.value).toBe(true))
+
+    // Safe → slow EOA connector: the stale Safe answer must drop
+    // synchronously, not linger through the new connector's detection.
+    const { onChange } = wagmiMocks.watchAccount.mock.calls[0][1]
+    onChange({ connector: slowEoaConnector })
+    expect(isSafeWallet.value).toBe(false)
+    expect(isSafeWalletResolved.value).toBe(false)
+
+    releaseProvider({ request: () => {} })
+    await vi.waitFor(() => expect(isSafeWalletResolved.value).toBe(true))
+    expect(isSafeWallet.value).toBe(false)
+  })
+
   it('reports unresolved while detection for the current connector is pending', async () => {
     wagmiMocks.getAccount.mockReturnValue({ connector: undefined })
     let releaseProvider!: (value: { request: () => void }) => void
