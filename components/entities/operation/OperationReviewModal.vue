@@ -80,6 +80,7 @@ const { address: walletAddress, isSpyMode, effectiveAddress } = useEffectiveAddr
 const { chainId: currentChainId } = useWagmi()
 const { getVault } = useVaultRegistry()
 const { prepareTransactionPlan } = useEulerTx()
+const { isSafeWallet } = useSafeWallet()
 const { eulerCoreAddresses } = useEulerAddresses()
 const { isResolvingStateOverrideHints } = useStateOverrideResolution()
 const {
@@ -241,6 +242,7 @@ const rawDisplaySteps = computed((): DisplayStep[] => {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
     swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs,
+    bundledApprovals: isSafeWallet.value,
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })

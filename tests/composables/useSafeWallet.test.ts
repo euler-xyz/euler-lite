@@ -1,0 +1,111 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const wagmiMocks = vi.hoisted(() => ({
+  config: {},
+  getAccount: vi.fn(),
+  watchAccount: vi.fn(),
+}))
+
+vi.mock('@wagmi/vue', () => ({
+  useConfig: () => wagmiMocks.config,
+}))
+
+vi.mock('@wagmi/vue/actions', () => ({
+  getAccount: wagmiMocks.getAccount,
+  watchAccount: wagmiMocks.watchAccount,
+}))
+
+const safeConnector = {
+  id: 'safe',
+  name: 'Safe',
+  getProvider: async () => ({ request: vi.fn() }),
+}
+
+const injectedConnector = {
+  id: 'io.metamask',
+  name: 'MetaMask',
+  getProvider: async () => ({ request: vi.fn() }),
+}
+
+const importComposable = async () => {
+  const { useSafeWallet } = await import('~/composables/useSafeWallet')
+  return useSafeWallet
+}
+
+describe('useSafeWallet', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    wagmiMocks.getAccount.mockReset()
+    wagmiMocks.watchAccount.mockReset()
+  })
+
+  it('reports true for the Safe iframe connector', async () => {
+    wagmiMocks.getAccount.mockReturnValue({ connector: safeConnector })
+    const useSafeWallet = await importComposable()
+
+    const { isSafeWallet } = useSafeWallet()
+    await vi.waitFor(() => expect(isSafeWallet.value).toBe(true))
+  })
+
+  it('reports false for regular connectors and no connector', async () => {
+    wagmiMocks.getAccount.mockReturnValue({ connector: injectedConnector })
+    const useSafeWallet = await importComposable()
+
+    const { isSafeWallet } = useSafeWallet()
+    // Detection resolves asynchronously; give it a macrotask.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(isSafeWallet.value).toBe(false)
+  })
+
+  it('follows connector changes through the wagmi account watcher', async () => {
+    wagmiMocks.getAccount.mockReturnValue({ connector: undefined })
+    const useSafeWallet = await importComposable()
+
+    const { isSafeWallet } = useSafeWallet()
+    expect(wagmiMocks.watchAccount).toHaveBeenCalledTimes(1)
+    const { onChange } = wagmiMocks.watchAccount.mock.calls[0][1]
+
+    onChange({ connector: safeConnector })
+    await vi.waitFor(() => expect(isSafeWallet.value).toBe(true))
+
+    onChange({ connector: injectedConnector })
+    await vi.waitFor(() => expect(isSafeWallet.value).toBe(false))
+
+    onChange({ connector: undefined })
+    expect(isSafeWallet.value).toBe(false)
+  })
+
+  it('discards stale detections after a rapid connector switch', async () => {
+    wagmiMocks.getAccount.mockReturnValue({ connector: undefined })
+    let releaseSafeProvider!: (value: { request: () => void }) => void
+    const slowSafeConnector = {
+      id: 'safe',
+      name: 'Safe',
+      getProvider: () => new Promise<{ request: () => void }>((resolve) => {
+        releaseSafeProvider = resolve
+      }),
+    }
+    const useSafeWallet = await importComposable()
+
+    const { isSafeWallet } = useSafeWallet()
+    const { onChange } = wagmiMocks.watchAccount.mock.calls[0][1]
+
+    onChange({ connector: slowSafeConnector })
+    // The user switches away before Safe detection resolves.
+    onChange({ connector: injectedConnector })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    releaseSafeProvider({ request: () => {} })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(isSafeWallet.value).toBe(false)
+  })
+
+  it('initializes the account watcher only once across calls', async () => {
+    wagmiMocks.getAccount.mockReturnValue({ connector: undefined })
+    const useSafeWallet = await importComposable()
+
+    useSafeWallet()
+    useSafeWallet()
+    expect(wagmiMocks.watchAccount).toHaveBeenCalledTimes(1)
+  })
+})

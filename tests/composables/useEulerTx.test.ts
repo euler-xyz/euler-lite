@@ -11,6 +11,7 @@ import { WalletExecutionContextChangedError } from '~/utils/walletExecutionConte
 const wagmiMocks = vi.hoisted(() => ({
   sendTransactionAsync: vi.fn(),
   signTypedDataAsync: vi.fn(),
+  sendCalls: vi.fn(),
   config: {},
 }))
 
@@ -22,6 +23,7 @@ vi.mock('@wagmi/vue', () => ({
 
 vi.mock('@wagmi/vue/actions', () => ({
   getAccount: vi.fn(),
+  sendCalls: wagmiMocks.sendCalls,
 }))
 
 vi.mock('~/composables/useEulerSdk', () => ({
@@ -235,5 +237,187 @@ describe('useEulerTx migration authorization cleanup', () => {
       failed: [blocked],
     })
     expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useEulerTx Safe wallet bundling', () => {
+  const EVC = getAddress('0x5000000000000000000000000000000000000000')
+  const SAFE_TX_HASH = `0x${'22'.repeat(32)}` as Hash
+  const APPROVE_DATA = '0x095ea7b3' as Hex
+  const BATCH_DATA = '0xabcdef' as Hex
+
+  let currentAccount = OWNER
+  let currentChainId = 1
+  let executePreparedTransactionPlan: ReturnType<typeof vi.fn>
+
+  const safeConnector = {
+    id: 'safe',
+    name: 'Safe',
+    getProvider: async () => ({ request: vi.fn() }),
+  }
+
+  const approvedPlan = [
+    {
+      type: 'requiredApproval',
+      token: TOKEN,
+      owner: OWNER,
+      spender: SWAP_VERIFIER,
+      amount: 100n,
+      resolved: [{
+        type: 'approve',
+        token: TOKEN,
+        owner: OWNER,
+        spender: SWAP_VERIFIER,
+        amount: 100n,
+        data: APPROVE_DATA,
+      }],
+    },
+    {
+      type: 'evcBatch',
+      items: [{ targetContract: SWAP_VERIFIER, onBehalfOfAccount: OWNER, value: 0n, data: '0x01' }],
+    },
+  ] as unknown as TransactionPlan
+
+  const buildPrepared = (plan: TransactionPlan) => ({
+    __prepared: true,
+    plan,
+    chainId: 1,
+    account: OWNER,
+    usePermit2: false,
+    unlimitedApproval: false,
+  }) as TransactionPlanPrepared
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    currentAccount = OWNER
+    currentChainId = 1
+
+    vi.stubGlobal('useWagmi', () => ({ address: ref(OWNER), chainId: ref(1) }))
+    vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
+    vi.stubGlobal('useSignaturePreference', () => ({ signaturesEnabled: ref(false) }))
+    vi.stubGlobal('usePortfolioRefresh', () => ({ triggerPortfolioRefresh: vi.fn() }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
+
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: safeConnector,
+    }) as never)
+
+    wagmiMocks.sendCalls.mockResolvedValue({ id: SAFE_TX_HASH })
+    executePreparedTransactionPlan = vi.fn(async () => ({ receipts: [] }))
+
+    const provider = {
+      getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hash }) => ({
+        transactionHash: hash,
+        status: 'success',
+        blockNumber: 123n,
+      }) as TransactionReceipt),
+      waitForTransactionReceipt: vi.fn(),
+    }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      deploymentService: { getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: EVC } } })) },
+      executionService: {
+        encodeBatch: vi.fn(() => BATCH_DATA),
+        executePreparedTransactionPlan,
+      },
+    } as never)
+  })
+
+  it('submits approve + EVC batch as one Safe call bundle', async () => {
+    const { executePreparedPlan } = useEulerTx()
+
+    const result = await executePreparedPlan(buildPrepared(approvedPlan))
+
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledWith(wagmiMocks.config, {
+      account: OWNER,
+      chainId: 1,
+      forceAtomic: true,
+      calls: [
+        { to: TOKEN, data: APPROVE_DATA, value: 0n },
+        { to: EVC, data: BATCH_DATA, value: 0n },
+      ],
+    })
+    expect(result.hashes).toEqual([SAFE_TX_HASH])
+    expect(result.receipts[0].transactionHash).toBe(SAFE_TX_HASH)
+    // The sequential path never runs: no per-transaction sends.
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('falls back to sequential execution for single-call plans', async () => {
+    const { executePreparedPlan } = useEulerTx()
+    const batchOnly = [approvedPlan[1]] as TransactionPlan
+
+    await executePreparedPlan(buildPrepared(batchOnly))
+
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to sequential execution for plans with permit2 signatures', async () => {
+    const { executePreparedPlan } = useEulerTx()
+    const permitPlan = [
+      {
+        ...approvedPlan[0],
+        resolved: [{ type: 'permit2', token: TOKEN, amount: 100n, owner: OWNER, spender: SWAP_VERIFIER }],
+      },
+      approvedPlan[1],
+    ] as unknown as TransactionPlan
+
+    await executePreparedPlan(buildPrepared(permitPlan))
+
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not submit a bundle after account drift', async () => {
+    const { executePreparedPlan } = useEulerTx()
+    currentAccount = OTHER_OWNER
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind: 'account' })
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+  })
+
+  it('rejects bundle ids that are not hash-shaped', async () => {
+    wagmiMocks.sendCalls.mockResolvedValue({ id: 'bundle-1' })
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toThrow('unexpected call bundle id')
+  })
+
+  it('bundles raw plans after resolving approvals through the SDK', async () => {
+    const processPlanPlugins = vi.fn(async (plan: TransactionPlan) => plan)
+    const resolveRequiredApprovals = vi.fn(async () => approvedPlan)
+    const executeTransactionPlan = vi.fn()
+    const provider = {
+      getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hash }) => ({
+        transactionHash: hash,
+        status: 'success',
+        blockNumber: 123n,
+      }) as TransactionReceipt),
+    }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      deploymentService: { getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: EVC } } })) },
+      executionService: {
+        encodeBatch: vi.fn(() => BATCH_DATA),
+        processPlanPlugins,
+        resolveRequiredApprovals,
+        executeTransactionPlan,
+      },
+    } as never)
+    const { executePlan } = useEulerTx()
+
+    const result = await executePlan([approvedPlan[0]] as TransactionPlan)
+
+    expect(resolveRequiredApprovals).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
+    expect(executeTransactionPlan).not.toHaveBeenCalled()
+    expect(result.hashes).toEqual([SAFE_TX_HASH])
   })
 })

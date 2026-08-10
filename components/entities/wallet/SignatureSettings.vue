@@ -1,7 +1,12 @@
 <script setup lang="ts">
-const { signaturesEnabled, setSignaturesEnabled } = useSignaturePreference()
+const { signaturesEnabled, signaturesForcedOff, setSignaturesEnabled } = useSignaturePreference()
+
+const description = computed(() => signaturesForcedOff.value
+  ? 'Safe wallets bundle approvals into the transaction batch, so message signatures are unavailable'
+  : 'Use gasless message signatures instead of approval transactions')
 
 const onToggle = (value: boolean | undefined) => {
+  if (signaturesForcedOff.value) return
   setSignaturesEnabled(value ?? false)
 }
 </script>
@@ -14,11 +19,12 @@ const onToggle = (value: boolean | undefined) => {
           Gasless signatures
         </div>
         <div class="text-p3 text-content-muted">
-          Use gasless message signatures instead of approval transactions
+          {{ description }}
         </div>
       </div>
       <UiSwitch
         :model-value="signaturesEnabled"
+        :disabled="signaturesForcedOff"
         @update:model-value="onToggle"
       />
     </div>

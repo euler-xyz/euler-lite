@@ -48,6 +48,7 @@ const {
 
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId: wagmiChainId } = useWagmi()
+const { isSafeWallet } = useSafeWallet()
 const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
@@ -113,7 +114,7 @@ const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
     const ctx = entry.review as unknown as StepDecodingContext | undefined
     if (!plan?.length || !ctx) continue
     try {
-      out[entry.id] = buildTransactionPlanDisplaySteps(plan, ctx, getVault, getAssetLogoUrl)
+      out[entry.id] = buildTransactionPlanDisplaySteps(plan, { ...ctx, bundledApprovals: isSafeWallet.value }, getVault, getAssetLogoUrl)
     }
     catch (error) {
       logWarn('BatchReviewModal/steps', error)
@@ -460,7 +461,7 @@ const handleClose = () => {
               />
               {{ a.kind === 'permit' ? `Sign permit2 — ${a.symbol}` : `Approve ${a.symbol}` }}
             </span>
-            <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : 'bundled in batch' }}</span>
+            <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : isSafeWallet ? 'bundled in batch' : '1 transaction' }}</span>
           </div>
         </div>
       </div>

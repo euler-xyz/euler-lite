@@ -61,6 +61,12 @@ export interface StepDecodingContext {
   knownAssets?: StepKnownAsset[]
   swapQuoteOutputs?: StepKnownSwapOutput[]
   vaultAmounts?: Record<string, string>
+  /**
+   * Approvals are submitted in the same wallet submission as the batch
+   * (Safe wallets bundle them via EIP-5792), so approve steps are not
+   * separate transactions.
+   */
+  bundledApprovals?: boolean
 }
 
 type KnownAsset = StepKnownAsset
@@ -1158,7 +1164,7 @@ export function buildTransactionPlanDisplaySteps(
             index,
             label: 'Approve',
             labelSuffix: 'for vault',
-            isSeparateTx: true,
+            isSeparateTx: !ctx.bundledApprovals,
             assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
           })
         }

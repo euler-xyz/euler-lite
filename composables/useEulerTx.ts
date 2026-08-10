@@ -41,7 +41,7 @@ import type {
   WrappedNativeInfo, SwapQuote,
 } from '@eulerxyz/euler-v2-sdk'
 import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
-import { getAccount } from '@wagmi/vue/actions'
+import { getAccount, sendCalls } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import {
   encodeMigrationAuthorizationTxs,
@@ -57,7 +57,13 @@ import {
   getSafeWalletProvider,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
+  type WalletProviderLike,
 } from '~/utils/safeWalletTransactions'
+import {
+  PlanNotBundleableError,
+  transactionPlanToCalls,
+  type PlanEncodingSdk,
+} from '~/utils/transaction-plan-calls'
 import {
   assertWalletExecutionContext,
   type WalletExecutionContext,
@@ -1385,6 +1391,60 @@ export const useEulerTx = () => {
     }
   }
 
+  /**
+   * Submit every plan transaction as one EIP-5792 call bundle. Safe turns
+   * the bundle into a single MultiSend proposal, so signers approve once
+   * instead of once per transaction (approve + EVC batch collapse into one
+   * proposal). Returns undefined when the plan cannot be bundled (permit2 /
+   * CoW swap items) or when bundling brings no benefit (fewer than two
+   * calls) — callers fall back to sequential execution.
+   */
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, safeWalletProvider, sdk }: {
+    plan: TransactionPlan
+    chainId: number
+    owner: Address
+    provider: unknown
+    safeWalletProvider: WalletProviderLike
+    sdk: PlanEncodingSdk
+  }) => {
+    let calls
+    try {
+      calls = transactionPlanToCalls(plan, sdk, chainId)
+    }
+    catch (err) {
+      if (err instanceof PlanNotBundleableError) return undefined
+      throw err
+    }
+    if (calls.length < 2) return undefined
+
+    const currentAccount = getAccount(config)
+    assertWalletExecutionContext({
+      expectedAccount: owner,
+      expectedChainId: chainId,
+      currentAccount: currentAccount.address,
+      currentChainId: currentAccount.chainId,
+    })
+
+    const { id } = await sendCalls(config, {
+      account: owner,
+      chainId,
+      forceAtomic: true,
+      calls,
+    })
+    // Safe returns the safeTxHash as the bundle id; the status poller needs
+    // a hash-shaped id to resolve it to the executed transaction.
+    if (!/^0x[0-9a-f]{64}$/i.test(id)) {
+      throw new Error('Safe wallet returned an unexpected call bundle id')
+    }
+
+    const execution = await waitForSafeTransactionExecution({
+      submittedHash: id as Hash,
+      walletProvider: safeWalletProvider,
+      publicClient: provider as ReceiptClientLike,
+    })
+    return { plan, hashes: [execution.hash], receipts: [execution.receipt] }
+  }
+
   const executePlan = async (plan: TransactionPlan) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1405,6 +1465,31 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
+
+    if (safeWalletProvider) {
+      // Mirror what executeTransactionPlan would do to the plan (plugins,
+      // approval resolution), then try to submit it as one Safe proposal.
+      const processedPlan = await sdk.executionService.processPlanPlugins(plan, owner, cid)
+      const resolvedPlan = await sdk.executionService.resolveRequiredApprovals({
+        plan: processedPlan,
+        chainId: cid,
+        account: owner,
+        usePermit2: signaturesEnabled.value,
+      })
+      const bundled = await executePlanAsSafeBundle({
+        plan: resolvedPlan,
+        chainId: cid,
+        owner,
+        provider,
+        safeWalletProvider,
+        sdk,
+      })
+      if (bundled) {
+        finalizeExecution(bundled)
+        return bundled
+      }
+    }
+
     const sendTransaction = buildSendTransaction({
       isOkx,
       expectedAccount: owner,
@@ -1452,6 +1537,23 @@ export const useEulerTx = () => {
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
+
+    if (safeWalletProvider) {
+      // Prepared plans already ran plugins and approval resolution.
+      const bundled = await executePlanAsSafeBundle({
+        plan: prepared.plan,
+        chainId: prepared.chainId,
+        owner: preparedOwner,
+        provider,
+        safeWalletProvider,
+        sdk,
+      })
+      if (bundled) {
+        finalizeExecution(bundled)
+        return bundled
+      }
+    }
+
     const sendTransaction = buildSendTransaction({
       isOkx,
       expectedAccount: preparedOwner,

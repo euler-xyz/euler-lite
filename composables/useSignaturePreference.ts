@@ -31,12 +31,12 @@ export const useSignaturePreference = () => {
     }
   }
 
-  const signaturesEnabled = useState<boolean>(SIGNATURES_PREFERENCE_STORAGE_KEY, () => true)
+  const userPreference = useState<boolean>(SIGNATURES_PREFERENCE_STORAGE_KEY, () => true)
   const persisted = useLocalStorage<boolean>(SIGNATURES_PREFERENCE_STORAGE_KEY, true)
 
   const syncValue = (value: boolean) => {
-    if (signaturesEnabled.value !== value) {
-      signaturesEnabled.value = value
+    if (userPreference.value !== value) {
+      userPreference.value = value
     }
     if (persisted.value !== value) {
       persisted.value = value
@@ -44,14 +44,25 @@ export const useSignaturePreference = () => {
   }
 
   watch(persisted, value => syncValue(value), { immediate: true })
-  watch(signaturesEnabled, value => syncValue(value))
+  watch(userPreference, value => syncValue(value))
 
   const setSignaturesEnabled = (value: boolean) => {
     syncValue(value)
   }
 
+  // Safe multisigs execute approvals inside the batched Safe transaction and
+  // off-chain signatures are a poor fit (EIP-1271 collection per signer, plus
+  // a one-time on-chain approval to Permit2 anyway) — force the approval
+  // flow while a Safe is connected. The stored preference is untouched, so
+  // it comes back when the user reconnects a regular wallet.
+  const { isSafeWallet } = useSafeWallet()
+  const signaturesForcedOff = isSafeWallet
+
+  const signaturesEnabled = computed(() => userPreference.value && !signaturesForcedOff.value)
+
   return {
     signaturesEnabled,
+    signaturesForcedOff,
     setSignaturesEnabled,
   }
 }
