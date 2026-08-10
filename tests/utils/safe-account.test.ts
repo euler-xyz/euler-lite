@@ -51,10 +51,11 @@ describe('resolveSafeAccountInfo', () => {
   })
 
   it('rejects owner lists a Safe cannot have', () => {
-    const zeroOwner = '0x0000000000000000000000000000000000000000'
-    const sentinelOwner = '0x0000000000000000000000000000000000000001'
+    const zeroOwner = '0x0000000000000000000000000000000000000000' as const
+    const sentinelOwner = '0x0000000000000000000000000000000000000001' as const
+    const duplicateOwner = '0x00000000000000000000000000000000000000A1' as const
     expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 1n, [...OWNERS, zeroOwner])).toBeNull()
     expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 1n, [...OWNERS, sentinelOwner])).toBeNull()
-    expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 1n, [OWNERS[0], OWNERS[0].toUpperCase().replace('0X', '0x')])).toBeNull()
+    expect(resolveSafeAccountInfo(SAFE_141_SINGLETON, 1n, [OWNERS[0], duplicateOwner])).toBeNull()
   })
 })
