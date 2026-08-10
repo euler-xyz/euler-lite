@@ -47,12 +47,13 @@ export const getSafeSingletonVersion = (
  * Validate raw probe results into a SafeAccountInfo, or null when the address
  * is not a recognizable Safe. Threshold/owner invariants mirror what the Safe
  * contracts themselves enforce (OwnerManager forbids zero/sentinel/duplicate
- * owners); anything violating them is a lookalike.
+ * owners and self-ownership, GS203); anything violating them is a lookalike.
  *
  * This is a display heuristic: a purpose-built contract can still mimic all
  * probed functions. Never use the result for authorization decisions.
  */
 export const resolveSafeAccountInfo = (
+  account: string,
   singleton: string | null | undefined,
   threshold: bigint | null | undefined,
   owners: readonly Address[] | null | undefined,
@@ -65,8 +66,11 @@ export const resolveSafeAccountInfo = (
   if (!Number.isSafeInteger(thresholdCount) || thresholdCount < 1) return null
   if (owners.length < thresholdCount) return null
 
+  const normalizedAccount = account.toLowerCase()
   const normalizedOwners = owners.map(owner => owner.toLowerCase())
-  if (normalizedOwners.some(owner => owner === zeroAddress || owner === SENTINEL_OWNER)) return null
+  if (normalizedOwners.some(owner =>
+    owner === zeroAddress || owner === SENTINEL_OWNER || owner === normalizedAccount,
+  )) return null
   if (new Set(normalizedOwners).size !== normalizedOwners.length) return null
 
   return {

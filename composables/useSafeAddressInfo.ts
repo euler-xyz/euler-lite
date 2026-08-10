@@ -53,6 +53,7 @@ const probeSafeAccount = async (
 
   const [masterCopy, threshold, owners] = results
   return resolveSafeAccountInfo(
+    address,
     masterCopy.status === 'fulfilled' ? masterCopy.value : null,
     threshold.status === 'fulfilled' ? threshold.value : null,
     owners.status === 'fulfilled' ? owners.value : null,
