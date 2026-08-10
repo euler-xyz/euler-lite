@@ -5,6 +5,10 @@ import { getSafeWalletProvider, type WalletConnectorLike } from '~/utils/safeWal
 import { createRaceGuard } from '~/utils/race-guard'
 
 const isSafeWalletRef = ref(false)
+// False from the moment a connector change is observed until its detection
+// probe lands. Consumers that must not act on a stale/unknown answer (e.g.
+// permit2 gating) treat "unresolved" as fail-closed.
+const isResolvedRef = ref(false)
 const detectionGuard = createRaceGuard()
 let watcherInitialized = false
 
@@ -12,14 +16,17 @@ const updateFromConnector = async (connector: WalletConnectorLike | undefined) =
   const generation = detectionGuard.next()
   if (!connector) {
     isSafeWalletRef.value = false
+    isResolvedRef.value = true
     return
   }
+  isResolvedRef.value = false
   // Detection needs the connector provider (WalletConnect identifies Safe
   // via peer metadata), so it resolves asynchronously; the guard discards
   // results that arrive after the connector changed again.
   const provider = await getSafeWalletProvider(connector).catch(() => undefined)
   if (!detectionGuard.isStale(generation)) {
     isSafeWalletRef.value = Boolean(provider)
+    isResolvedRef.value = true
   }
 }
 
@@ -28,6 +35,9 @@ const updateFromConnector = async (connector: WalletConnectorLike | undefined) =
  * app-wide. Detection matches `getSafeWalletProvider`: the wagmi `safe`
  * iframe connector, a Safe-named connector, or a WalletConnect session with
  * Safe's official peer metadata.
+ *
+ * `isSafeWalletResolved` is false while detection for the current connector
+ * is still pending — `isSafeWallet` is not an answer until it turns true.
  *
  * The wagmi subscription is created once, on the first client-side call
  * (which must happen in a setup context so `useConfig()` can inject), and
@@ -47,5 +57,6 @@ export const useSafeWallet = () => {
 
   return {
     isSafeWallet: computed(() => isSafeWalletRef.value),
+    isSafeWalletResolved: computed(() => isResolvedRef.value),
   }
 }

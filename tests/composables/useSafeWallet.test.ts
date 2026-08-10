@@ -43,8 +43,10 @@ describe('useSafeWallet', () => {
     wagmiMocks.getAccount.mockReturnValue({ connector: safeConnector })
     const useSafeWallet = await importComposable()
 
-    const { isSafeWallet } = useSafeWallet()
+    const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
+    expect(isSafeWalletResolved.value).toBe(false)
     await vi.waitFor(() => expect(isSafeWallet.value).toBe(true))
+    expect(isSafeWalletResolved.value).toBe(true)
   })
 
   it('reports false for regular connectors and no connector', async () => {
@@ -98,6 +100,30 @@ describe('useSafeWallet', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(isSafeWallet.value).toBe(false)
+  })
+
+  it('reports unresolved while detection for the current connector is pending', async () => {
+    wagmiMocks.getAccount.mockReturnValue({ connector: undefined })
+    let releaseProvider!: (value: { request: () => void }) => void
+    const slowConnector = {
+      id: 'walletconnect',
+      name: 'WalletConnect',
+      getProvider: () => new Promise<{ request: () => void }>((resolve) => {
+        releaseProvider = resolve
+      }),
+    }
+    const useSafeWallet = await importComposable()
+
+    const { isSafeWalletResolved } = useSafeWallet()
+    // No connector resolves immediately.
+    await vi.waitFor(() => expect(isSafeWalletResolved.value).toBe(true))
+
+    const { onChange } = wagmiMocks.watchAccount.mock.calls[0][1]
+    onChange({ connector: slowConnector })
+    expect(isSafeWalletResolved.value).toBe(false)
+
+    releaseProvider({ request: () => {} })
+    await vi.waitFor(() => expect(isSafeWalletResolved.value).toBe(true))
   })
 
   it('initializes the account watcher only once across calls', async () => {

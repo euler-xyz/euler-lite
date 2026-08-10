@@ -64,6 +64,7 @@ import {
   transactionPlanToCalls,
   type PlanEncodingSdk,
 } from '~/utils/transaction-plan-calls'
+import { hasPermit2Signature } from '~/utils/transactionPlanApprovals'
 import {
   assertWalletExecutionContext,
   type WalletExecutionContext,
@@ -1399,11 +1400,13 @@ export const useEulerTx = () => {
    * CoW swap items) or when bundling brings no benefit (fewer than two
    * calls) — callers fall back to sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, safeWalletProvider, sdk }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
     provider: unknown
+    /** The connector whose provider was identified as Safe. */
+    connector: NonNullable<ReturnType<typeof getAccount>['connector']>
     safeWalletProvider: WalletProviderLike
     sdk: PlanEncodingSdk
   }) => {
@@ -1425,9 +1428,14 @@ export const useEulerTx = () => {
       currentChainId: currentAccount.chainId,
     })
 
+    // Pin submission to the connector whose provider was identified as Safe.
+    // Without it, wagmi resolves the currently-active connector, and a
+    // same-account connector switch would submit through one provider while
+    // status polling watches another.
     const { id } = await sendCalls(config, {
       account: owner,
       chainId,
+      connector,
       forceAtomic: true,
       calls,
     })
@@ -1442,6 +1450,9 @@ export const useEulerTx = () => {
       walletProvider: safeWalletProvider,
       publicClient: provider as ReceiptClientLike,
     })
+    if (execution.receipt.status !== 'success') {
+      throw new Error('Safe transaction reverted')
+    }
     return { plan, hashes: [execution.hash], receipts: [execution.receipt] }
   }
 
@@ -1466,21 +1477,24 @@ export const useEulerTx = () => {
       getSafeWalletProvider(connector),
     ])
 
-    if (safeWalletProvider) {
+    if (safeWalletProvider && connector) {
       // Mirror what executeTransactionPlan would do to the plan (plugins,
       // approval resolution), then try to submit it as one Safe proposal.
+      // The provider positively identified a Safe, so permit2 is forced off
+      // here regardless of the (possibly lagging) reactive preference.
       const processedPlan = await sdk.executionService.processPlanPlugins(plan, owner, cid)
       const resolvedPlan = await sdk.executionService.resolveRequiredApprovals({
         plan: processedPlan,
         chainId: cid,
         account: owner,
-        usePermit2: signaturesEnabled.value,
+        usePermit2: false,
       })
       const bundled = await executePlanAsSafeBundle({
         plan: resolvedPlan,
         chainId: cid,
         owner,
         provider,
+        connector,
         safeWalletProvider,
         sdk,
       })
@@ -1507,7 +1521,8 @@ export const useEulerTx = () => {
       plan,
       chainId: cid,
       account: owner,
-      usePermit2: signaturesEnabled.value,
+      // A detected Safe never uses permit2, even on the sequential fallback.
+      usePermit2: safeWalletProvider ? false : signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
@@ -1538,13 +1553,29 @@ export const useEulerTx = () => {
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
 
-    if (safeWalletProvider) {
+    let effectivePrepared = prepared
+    if (safeWalletProvider && connector) {
+      // A Safe never signs permit2 messages. If the envelope was prepared
+      // before Safe detection resolved, re-resolve its approvals with
+      // permit2 off — resolution overwrites `resolved` on each item, so the
+      // repaired plan is used for both the bundle and the fallback.
+      if (hasPermit2Signature(prepared.plan)) {
+        const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
+          plan: prepared.plan,
+          chainId: prepared.chainId,
+          account: preparedOwner,
+          usePermit2: false,
+        })
+        effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+      }
+
       // Prepared plans already ran plugins and approval resolution.
       const bundled = await executePlanAsSafeBundle({
-        plan: prepared.plan,
+        plan: effectivePrepared.plan,
         chainId: prepared.chainId,
         owner: preparedOwner,
         provider,
+        connector,
         safeWalletProvider,
         sdk,
       })
@@ -1568,7 +1599,7 @@ export const useEulerTx = () => {
     })
 
     const result = await sdk.executionService.executePreparedTransactionPlan({
-      prepared,
+      prepared: effectivePrepared,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])

@@ -89,3 +89,31 @@ export const transactionPlanToCalls = (
 
   return calls
 }
+
+/**
+ * Whether a resolved plan would actually submit as one EIP-5792 bundle:
+ * every item is expressible as a static call AND there are at least two
+ * calls (a single call gains nothing from bundling). Mirrors the execution
+ * gate in useEulerTx without encoding anything — use for display decisions.
+ */
+export const isPlanBundleable = (plan: TransactionPlan): boolean => {
+  let callCount = 0
+
+  for (const item of plan) {
+    if (item.type === 'requiredApproval') {
+      if (!item.resolved) return false
+      for (const resolved of item.resolved) {
+        if (resolved.type !== 'approve') return false
+        callCount++
+      }
+      continue
+    }
+    if (item.type === 'evcBatch' || item.type === 'contractCall') {
+      callCount++
+      continue
+    }
+    return false
+  }
+
+  return callCount >= 2
+}

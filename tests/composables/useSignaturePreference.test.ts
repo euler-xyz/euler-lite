@@ -69,6 +69,7 @@ describe('seedSignaturePreference', () => {
 
 describe('useSignaturePreference', () => {
   let isSafeWallet: Ref<boolean>
+  let isSafeWalletResolved: Ref<boolean>
 
   const setupComposable = async () => {
     const { useSignaturePreference } = await import('~/composables/useSignaturePreference')
@@ -78,6 +79,7 @@ describe('useSignaturePreference', () => {
   beforeEach(() => {
     vi.resetModules()
     isSafeWallet = ref(false)
+    isSafeWalletResolved = ref(true)
     const state = new Map<string, Ref<unknown>>()
     vi.stubGlobal('useState', (key: string, init: () => unknown) => {
       let entry = state.get(key)
@@ -88,7 +90,7 @@ describe('useSignaturePreference', () => {
       return entry
     })
     vi.stubGlobal('useLocalStorage', (_key: string, defaultValue: boolean) => ref(defaultValue))
-    vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet }))
+    vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet, isSafeWalletResolved }))
   })
 
   it('follows the user preference for regular wallets', async () => {
@@ -119,6 +121,20 @@ describe('useSignaturePreference', () => {
     // Disconnecting the Safe restores the untouched user preference.
     isSafeWallet.value = false
     expect(signaturesEnabled.value).toBe(true)
+  })
+
+  it('fails closed while Safe detection is still pending', async () => {
+    isSafeWalletResolved.value = false
+    const { signaturesEnabled, signaturesForcedOff } = await setupComposable()
+
+    // Unresolved detection must not allow a permit2-backed plan to prepare.
+    expect(signaturesEnabled.value).toBe(false)
+    expect(signaturesForcedOff.value).toBe(true)
+
+    // Detection resolves to a regular wallet — preference applies again.
+    isSafeWalletResolved.value = true
+    expect(signaturesEnabled.value).toBe(true)
+    expect(signaturesForcedOff.value).toBe(false)
   })
 
   it('ignores toggle writes while forced off without corrupting the preference', async () => {

@@ -11,6 +11,7 @@ import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 
 const emits = defineEmits(['close', 'confirm'])
@@ -242,7 +243,9 @@ const rawDisplaySteps = computed((): DisplayStep[] => {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
     swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs,
-    bundledApprovals: isSafeWallet.value,
+    // Bundle eligibility mirrors execution: Safe wallet AND a plan that can
+    // actually submit as one bundle — otherwise approves stay "Separate tx".
+    bundledApprovals: isSafeWallet.value && isPlanBundleable(currentPlan),
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })

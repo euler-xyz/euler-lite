@@ -53,10 +53,13 @@ export const useSignaturePreference = () => {
   // Safe multisigs execute approvals inside the batched Safe transaction and
   // off-chain signatures are a poor fit (EIP-1271 collection per signer, plus
   // a one-time on-chain approval to Permit2 anyway) — force the approval
-  // flow while a Safe is connected. The stored preference is untouched, so
-  // it comes back when the user reconnects a regular wallet.
-  const { isSafeWallet } = useSafeWallet()
-  const signaturesForcedOff = isSafeWallet
+  // flow while a Safe is connected. Fail closed: while detection for the
+  // current connector is still pending, signatures stay off so a plan cannot
+  // be prepared with permit2 before a slow (WalletConnect) Safe detection
+  // lands. The stored preference is untouched, so it comes back when the
+  // user reconnects a regular wallet.
+  const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
+  const signaturesForcedOff = computed(() => isSafeWallet.value || !isSafeWalletResolved.value)
 
   const signaturesEnabled = computed(() => userPreference.value && !signaturesForcedOff.value)
 

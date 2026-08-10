@@ -12,6 +12,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 import { getAuthorizationStepDisplay } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import { formatNumber } from '~/utils/string-utils'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
@@ -114,7 +115,7 @@ const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
     const ctx = entry.review as unknown as StepDecodingContext | undefined
     if (!plan?.length || !ctx) continue
     try {
-      out[entry.id] = buildTransactionPlanDisplaySteps(plan, { ...ctx, bundledApprovals: isSafeWallet.value }, getVault, getAssetLogoUrl)
+      out[entry.id] = buildTransactionPlanDisplaySteps(plan, { ...ctx, bundledApprovals: bundlesApprovals.value }, getVault, getAssetLogoUrl)
     }
     catch (error) {
       logWarn('BatchReviewModal/steps', error)
@@ -300,6 +301,11 @@ const preparedPlanRef = ref<TransactionPlan | undefined>()
 const hasPermit2Approval = computed(() =>
   hasPermit2TokenApproval(preparedPlanRef.value, eulerCoreAddresses.value?.permit2),
 )
+// Mirrors execution eligibility: only claim bundling when the merged plan
+// would actually submit as one Safe bundle.
+const bundlesApprovals = computed(() =>
+  isSafeWallet.value && !!preparedPlanRef.value && isPlanBundleable(preparedPlanRef.value),
+)
 
 onMounted(async () => {
   nowTimer = setInterval(() => {
@@ -461,7 +467,7 @@ const handleClose = () => {
               />
               {{ a.kind === 'permit' ? `Sign permit2 — ${a.symbol}` : `Approve ${a.symbol}` }}
             </span>
-            <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : isSafeWallet ? 'bundled in batch' : '1 transaction' }}</span>
+            <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : bundlesApprovals ? 'bundled in batch' : '1 transaction' }}</span>
           </div>
         </div>
       </div>

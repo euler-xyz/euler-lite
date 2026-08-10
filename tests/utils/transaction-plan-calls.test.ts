@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import {
+  isPlanBundleable,
   PlanNotBundleableError,
   transactionPlanToCalls,
   type PlanEncodingSdk,
@@ -89,6 +90,20 @@ describe('transactionPlanToCalls', () => {
 
     expect(() => transactionPlanToCalls([evcBatchItem([0n])] as TransactionPlan, sdkWithoutEvc, 1))
       .toThrow(PlanNotBundleableError)
+  })
+
+  it('mirrors execution eligibility through isPlanBundleable', () => {
+    expect(isPlanBundleable([approvalItem([approveResolved]), evcBatchItem([0n])] as TransactionPlan)).toBe(true)
+    // Single call gains nothing from bundling.
+    expect(isPlanBundleable([evcBatchItem([0n])] as TransactionPlan)).toBe(false)
+    // Permit2 signatures and unresolved approvals cannot bundle.
+    expect(isPlanBundleable([
+      approvalItem([{ type: 'permit2', token: TOKEN, amount: 100n, owner: OWNER, spender: SPENDER }]),
+      evcBatchItem([0n]),
+    ] as TransactionPlan)).toBe(false)
+    expect(isPlanBundleable([approvalItem(), evcBatchItem([0n])] as TransactionPlan)).toBe(false)
+    // Approval already satisfied (resolved: []) leaves one call.
+    expect(isPlanBundleable([approvalItem([]), evcBatchItem([0n])] as TransactionPlan)).toBe(false)
   })
 
   it('encodes contractCall items', () => {

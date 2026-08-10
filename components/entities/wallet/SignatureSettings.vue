@@ -1,7 +1,10 @@
 <script setup lang="ts">
 const { signaturesEnabled, signaturesForcedOff, setSignaturesEnabled } = useSignaturePreference()
+const { isSafeWallet } = useSafeWallet()
 
-const description = computed(() => signaturesForcedOff.value
+// The forced-off flag also covers the brief detection-pending window; only
+// show the Safe explanation once a Safe is positively identified.
+const description = computed(() => isSafeWallet.value
   ? 'Safe wallets bundle approvals into the transaction batch, so message signatures are unavailable'
   : 'Use gasless message signatures instead of approval transactions')
 
