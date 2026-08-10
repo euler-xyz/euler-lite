@@ -26,6 +26,10 @@ const onCopyClick = () => {
 
 <template>
   <div class="flex gap-4 items-center">
+    <SafeAccountBadge
+      v-if="checkSafe"
+      :address="address"
+    />
     <NuxtLink
       :to="explorerLink"
       class="text-accent-600 underline cursor-pointer hover:text-accent-500"
@@ -33,10 +37,6 @@ const onCopyClick = () => {
     >
       {{ displayLabel }}
     </NuxtLink>
-    <SafeAccountBadge
-      v-if="checkSafe"
-      :address="address"
-    />
     <button
       class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
       @click="onCopyClick"

@@ -1,23 +1,12 @@
 <script setup lang="ts">
-import { shortenAddress } from '~/utils/string-utils'
-
 const { address } = defineProps<{ address: string }>()
 
 const { safeInfo } = useSafeAddressInfo(() => address)
 
-const tooltipSections = computed(() => {
-  if (!safeInfo.value) return []
+const tooltipText = computed(() => {
+  if (!safeInfo.value) return ''
   const { threshold, owners, version } = safeInfo.value
-  return [
-    {
-      title: `Safe smart account (v${version})`,
-      text: `Executing a transaction from this address requires ${threshold} of its ${owners.length} owner signatures.`,
-    },
-    {
-      title: `Owners (${owners.length})`,
-      text: owners.map(owner => shortenAddress(owner)).join(', '),
-    },
-  ]
+  return `This address is a Safe smart account (v${version}). Executing a transaction from it requires ${threshold} of its ${owners.length} owner signatures.`
 })
 </script>
 
@@ -25,7 +14,7 @@ const tooltipSections = computed(() => {
   <UiHoverPreviewTooltip
     v-if="safeInfo"
     title="Safe multisig"
-    :sections="tooltipSections"
+    :text="tooltipText"
   >
     <span class="flex items-center gap-4 text-content-secondary">
       <SvgIcon
