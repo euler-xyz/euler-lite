@@ -208,6 +208,7 @@ const changes = computed(() => {
       valueTitle: entry.value,
       summary: entry.summary,
       addresses: entry.addresses,
+      addressDetails: entry.addressDetails,
       avatarAssets: entry.field === 'asset_pair'
         || (event.type === 'set_resolved_vault' && entry.field === 'asset')
         ? entry.addresses?.map(address => ({
@@ -468,7 +469,7 @@ const vaultDisplay = computed(() => {
               <div
                 v-for="(address, addressIndex) in detail.addresses"
                 :key="`${address.address}:${addressIndex}`"
-                class="flex w-full min-w-0 items-center gap-8"
+                class="flex w-full min-w-0 flex-wrap items-center gap-x-8 gap-y-2"
               >
                 <AssetAvatar
                   v-if="'avatarAssets' in detail && detail.avatarAssets?.[addressIndex]"
@@ -484,6 +485,10 @@ const vaultDisplay = computed(() => {
                   :vault-type="address.vaultType"
                   compact-vault
                 />
+                <span
+                  v-if="'addressDetails' in detail && detail.addressDetails?.[addressIndex]"
+                  class="text-p4 text-content-secondary"
+                >{{ detail.addressDetails[addressIndex] }}</span>
               </div>
             </div>
           </template>
