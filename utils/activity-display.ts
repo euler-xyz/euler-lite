@@ -448,6 +448,7 @@ export const getActivityTransferDirection = (
 export const formatActivityEventLabel = (
   event: ActivityEventLabelSource,
 ): string => {
+  if (event.type === 'set_flow_caps') return 'Public allocator limits updated'
   const sourceLabel = event.label?.trim()
   if (sourceLabel) return sourceLabel
   const normalizedLabel = {
