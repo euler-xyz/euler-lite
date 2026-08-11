@@ -607,6 +607,19 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
   })
 
+  it('rejects wrapper calls around a plan that encodes no calls', async () => {
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+
+    // A no-op migration must never submit [grant, revoke] alone and
+    // finalize as success.
+    await expect(executePreparedPlanWithPlainCalls(buildPrepared([] as TransactionPlan), {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    })).rejects.toThrow('produced no calls to bundle')
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
   it('returns undefined from the plain-calls bundle for non-Safe connectors', async () => {
     vi.mocked(getAccount).mockImplementation(() => ({
       address: currentAccount,

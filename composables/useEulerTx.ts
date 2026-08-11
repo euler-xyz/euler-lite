@@ -1433,6 +1433,16 @@ export const useEulerTx = () => {
       if (err instanceof PlanNotBundleableError) return undefined
       throw err
     }
+    if (planCalls.length === 0) {
+      // Wrapper calls must never satisfy the bundle on their own: submitting
+      // [grant, revoke] around an empty plan would finalize a no-op
+      // migration as success. Without wrappers an empty plan simply has
+      // nothing to bundle and falls back to sequential execution.
+      if (extraCalls?.before?.length || extraCalls?.after?.length) {
+        throw new Error('Transaction plan produced no calls to bundle')
+      }
+      return undefined
+    }
     const toPlanCall = (tx: PlainTxRequest) => ({ to: tx.to, data: tx.data, value: tx.value ?? 0n })
     const calls = [
       ...(extraCalls?.before ?? []).map(toPlanCall),
