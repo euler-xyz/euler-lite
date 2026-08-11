@@ -15,6 +15,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { createRaceGuard } from '~/utils/race-guard'
 import { reportClientEvent } from '~/utils/client-observability'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 
 const router = useRouter()
 const route = useRoute()
@@ -236,10 +237,15 @@ const send = async () => {
     if (!plan.value) return
     await executePlan(plan.value)
 
-    modal.close()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-    }, 400)
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    markTrackedExecutionSucceeded()
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     error('Transaction failed')

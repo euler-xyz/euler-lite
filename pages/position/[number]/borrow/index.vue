@@ -42,6 +42,7 @@ import {
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 
 const router = useRouter()
 const _route = useRoute()
@@ -508,11 +509,16 @@ const send = async () => {
     })
     await executePlan(txPlan)
 
-    modal.close()
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    markTrackedExecutionSucceeded()
     updateBalance()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
-    }, 400)
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     console.warn(e)

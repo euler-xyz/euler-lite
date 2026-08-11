@@ -36,6 +36,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -644,11 +645,16 @@ const send = async () => {
 
     await executePreparedPlan(preparedPlan.value)
 
-    modal.close()
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    markTrackedExecutionSucceeded()
     await updateEstimates()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-    }, 400)
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     error('Transaction failed')
