@@ -19,6 +19,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 
 const _route = useRoute()
 const router = useRouter()
@@ -731,10 +732,15 @@ const send = async (collateralAddress: string) => {
     })
     await executePlan(txPlan)
 
-    modal.close()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
-    }, 400)
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    markTrackedExecutionSucceeded()
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     error('Transaction failed')

@@ -3693,10 +3693,15 @@ const send = async () => {
       const txPlan = await buildRefinancePlan()
       await executePlan(txPlan)
     }
-    modal.close()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio', query: { network: route.query.network } })
-    }, 400)
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    markTrackedExecutionSucceeded()
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio', query: { network: route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     showError('Transaction failed')
