@@ -8,6 +8,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import { markTrackedExecutionSucceeded } from '~/composables/useSafeExecutionDetachment'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -113,6 +114,9 @@ const claim = async () => {
       return
     }
     await executePlan(plan.value)
+    // Success signal for a detached Safe completion toast — this flow closes
+    // without navigating, so only the mark is needed.
+    markTrackedExecutionSucceeded()
     if (isREULReward.value) {
       await refreshLocks(true)
     }

@@ -8,6 +8,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import { markTrackedExecutionSucceeded } from '~/composables/useSafeExecutionDetachment'
 import {
   prepareREULUnlockPlan,
   refreshREULLockReview,
@@ -125,6 +126,9 @@ const unlock = async (reviewedLock: REULLock) => {
         }
 
         await executePlan(unlockPlan)
+        // Success signal for a detached Safe completion toast — this flow
+        // closes without navigating, so only the mark is needed.
+        markTrackedExecutionSucceeded()
         modal.close()
         await refreshLocks(true)
         return true
