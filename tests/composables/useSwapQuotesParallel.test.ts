@@ -226,4 +226,42 @@ describe('useSwapQuotesParallel', () => {
     expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
     expect(quotes.selectedProvider.value).toBeNull()
   })
+
+  it('drops an in-flight CoW response that resolves after the gate flips to false', async () => {
+    const includeCowSwap = ref(true)
+    const otherQuote = makeQuote('100', '200')
+    let releaseCowQuote!: (quotes: SwapQuote[]) => void
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      provider === 'cow'
+        ? new Promise<SwapQuote[]>((resolve) => {
+            releaseCowQuote = resolve
+          })
+        : Promise.resolve([otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+
+    // The gate flips (e.g. Safe detection lands) while the CoW request is
+    // still in flight — same sweep generation, so the staleness guard does
+    // not cover it.
+    includeCowSwap.value = false
+    await nextTick()
+
+    releaseCowQuote([makeQuote('100', '300')])
+    await flushPromises()
+    await nextTick()
+
+    // The resolved CoW card must not reinsert past the eviction.
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+  })
 })

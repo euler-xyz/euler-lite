@@ -378,6 +378,13 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   }
 
   const upsertQuote = (card: SwapQuoteCard) => {
+    // An in-flight CoW response can resolve after the gate flipped mid-sweep
+    // (e.g. Safe detection landing): the sweep generation is still current,
+    // and the eviction watcher only removes cards already displayed. Re-check
+    // eligibility at acceptance time so the resolved card cannot reinsert.
+    if (isCowProviderOrQuote(card.provider, card.quote) && !shouldIncludeCowSwap()) {
+      return
+    }
     const { provider } = card
     const next = quoteCards.value.filter(existing => existing.provider !== provider)
     next.push({ ...card, fetchedAt: card.fetchedAt ?? Date.now() })
