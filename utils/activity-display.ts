@@ -448,7 +448,6 @@ export const getActivityTransferDirection = (
 export const formatActivityEventLabel = (
   event: ActivityEventLabelSource,
 ): string => {
-  if (event.type === 'set_flow_caps') return 'Strategy caps updated'
   const sourceLabel = event.label?.trim()
   if (sourceLabel) return sourceLabel
   const normalizedLabel = {
