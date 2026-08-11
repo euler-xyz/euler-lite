@@ -2626,6 +2626,12 @@ type PreparedMigrationTenderlySimulation = {
 type InboundExternalMigrationPreview = {
   key: string
   useSignatures: boolean
+  /**
+   * The review showed the authorization riding in ONE atomic Safe proposal.
+   * Latched at review time and revalidated at confirmation — execution must
+   * never silently run a ceremony the user did not review.
+   */
+  bundledReview: boolean
   input: InboundExternalMigrationInput
   account: Account<IHasVaultAddress>
   tenderlySimulation: PreparedMigrationTenderlySimulation
@@ -2937,6 +2943,7 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
     const preview: InboundExternalMigrationPreview = {
       key,
       useSignatures,
+      bundledReview: !useSignatures && isSafeWallet.value && !!authorizationRequest,
       input,
       account,
       tenderlySimulation: {
@@ -3410,20 +3417,25 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
     inboundExternalPreparedPlan.value = null
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
-      if (!useSignatures && isSafeWallet.value) {
+      if (preview.bundledReview) {
+        // The review promised ONE atomic Safe proposal. Revalidate that mode
+        // at confirmation: a wallet that no longer classifies as a Safe must
+        // re-review, never silently receive the sequential multi-proposal
+        // ceremony; a degraded Safe (provider unavailable) throws inside the
+        // bundle helper.
+        if (!isSafeWallet.value) {
+          throw new Error('Wallet changed since review — please review the migration again.')
+        }
         const bundleAuthorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
         inboundExternalAuthorizationConnector.value = bundleAuthorizationRequest ? input.source.connectorId : null
         if (bundleAuthorizationRequest) {
-          // Safe wallets: grants + migration batch + revocations as one
-          // atomic proposal. 'aborted' means the pre-bundle simulation
-          // rejected with nothing on-chain; a degraded Safe (provider
-          // unavailable) throws instead of silently running the sequential
-          // ceremony the review never showed.
           const outcome = await sendInboundExternalMigrationAsSafeBundle(input, bundleAuthorizationRequest, account, useSignatures)
           if (outcome === 'aborted') return
           finishInboundExternalMigrationSuccess(input)
           return
         }
+        // The grant went live since review (fresh request is empty): nothing
+        // to wrap; the plain plan below still submits as one Safe proposal.
       }
 
       const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)

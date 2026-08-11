@@ -73,6 +73,12 @@ type OutgoingMigrationInput = ReturnType<typeof buildMigrationInput>
 type OutgoingMigrationPreview = {
   key: string
   useSignatures: boolean
+  /**
+   * The review showed the authorization riding in ONE atomic Safe proposal.
+   * Latched at review time and revalidated at confirmation — execution must
+   * never silently run a ceremony the user did not review.
+   */
+  bundledReview: boolean
   input: OutgoingMigrationInput
   account: Account<IHasVaultAddress>
   position: MigrationPosition
@@ -788,6 +794,7 @@ async function prepareOutgoingMigrationPreview(
     const preview: OutgoingMigrationPreview = {
       key,
       useSignatures,
+      bundledReview: !useSignatures && isSafeWallet.value && !!authorizationRequest,
       input,
       account,
       position: migrationPosition,
@@ -899,18 +906,23 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
     let authorization: SignedMigrationAuthorization | undefined
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
-      if (authorizationRequest && !useSignatures) {
-        // Safe wallets: grants + batch + revocations as one atomic proposal.
-        // 'aborted' means the pre-bundle simulation rejected with nothing
-        // on-chain; a degraded Safe (provider unavailable) throws instead of
-        // silently running the sequential multi-proposal ceremony the review
-        // never showed. Only non-Safe wallets fall through.
-        const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
-        if (outcome === 'aborted') return
-        if (outcome === 'executed') {
+      if (preview.bundledReview) {
+        // The review promised ONE atomic Safe proposal. Revalidate that mode
+        // at confirmation: a wallet that no longer classifies as a Safe must
+        // re-review, never silently receive the sequential multi-proposal
+        // ceremony; a degraded Safe (provider unavailable) throws inside the
+        // bundle helper.
+        if (!isSafeWallet.value) {
+          throw new Error('Wallet changed since review — please review the migration again.')
+        }
+        if (authorizationRequest) {
+          const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
+          if (outcome === 'aborted') return
           finishMigrationSuccess()
           return
         }
+        // The grant went live since review (fresh request is empty): nothing
+        // to wrap; the plain plan below still submits as one Safe proposal.
       }
 
       if (authorizationRequest) {
@@ -999,13 +1011,7 @@ async function sendMigrationAsSafeBundle(
   migrationPosition: MigrationPosition,
   authorizationRequest: MigrationAuthorizationRequest,
   account?: Account<IHasVaultAddress>,
-): Promise<'executed' | 'aborted' | 'not-safe'> {
-  // Revalidate the reviewed execution mode at confirmation: the review
-  // showed ONE atomic proposal for a Safe, so a Safe whose provider cannot
-  // be acquired must abort loudly rather than silently degrade into the
-  // sequential grant → migration → revoke ceremony the user never reviewed.
-  if (!isSafeWallet.value) return 'not-safe'
-
+): Promise<'executed' | 'aborted'> {
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
   const simulation = await buildMigrationSimulation(input, migrationPosition, authorizationRequest, account)
   const prepared = await prepareTransactionPlan(simulation.plan, {
