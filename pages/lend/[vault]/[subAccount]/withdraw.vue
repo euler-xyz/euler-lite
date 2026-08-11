@@ -33,6 +33,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 
 const router = useRouter()
 const route = useRoute()
@@ -535,10 +536,15 @@ const send = async () => {
     preparedPlan.value = null
     resetSwapQuoteState()
 
-    modal.close()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-    }, 400)
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    markTrackedExecutionSucceeded()
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     error('Transaction failed')
