@@ -12,6 +12,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
+import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 
 const emits = defineEmits(['close', 'confirm'])
@@ -215,29 +216,36 @@ const handleTenderlySimulate = async () => {
 }
 
 const internalSubmitting = ref(false)
-const { trackAttached, detach } = useSafeExecutionDetachment()
+const { beginTrackedExecution, hasPendingDetachedExecution } = useSafeExecutionDetachment()
 
 let pendingExecution: Promise<void> | null = null
-let releaseAttached: (() => void) | null = null
+let executionHandle: TrackedExecutionHandle | null = null
 
 const handleConfirm = async () => {
   if (isConfirmDisabled.value || !onConfirm) return
+  // Latch the wallet classification at submission time — detachability must
+  // not follow a mid-flight connector switch.
+  const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
+  // Single-slot gate: while a detached proposal is pending, no new
+  // submission may start (isConfirmDisabled also reflects this).
+  if (!handle) return
   const result = onConfirm()
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
     pendingExecution = result as Promise<void>
-    releaseAttached = trackAttached()
+    executionHandle = handle
     try {
       await result
     }
     finally {
       internalSubmitting.value = false
       pendingExecution = null
-      releaseAttached?.()
-      releaseAttached = null
+      executionHandle?.release()
+      executionHandle = null
     }
   }
   else {
+    handle.release()
     emits('close')
   }
 }
@@ -245,14 +253,17 @@ const handleConfirm = async () => {
 // Safe proposals can wait on co-signers for minutes to days — the modal must
 // not hold the app hostage. Closing hands the execution to background
 // completion toasts and suppresses the flow's post-transaction navigation.
-const canDetachExecution = computed(() => isSafeWallet.value && internalSubmitting.value)
+// Uses the classification latched at submit, not live detection.
+const canDetachExecution = computed(() =>
+  internalSubmitting.value && executionHandle?.safeAtSubmit === true)
 
 const onCloseRequested = () => {
   if (internalSubmitting.value) {
     if (!canDetachExecution.value) return
-    if (pendingExecution) detach(pendingExecution)
-    releaseAttached?.()
-    releaseAttached = null
+    if (pendingExecution && executionHandle) {
+      executionHandle.detach(pendingExecution)
+      executionHandle = null
+    }
   }
   emits('close')
 }
@@ -435,10 +446,11 @@ const isSwapQuoteStale = computed(() => {
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
-const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
+const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
+  if (hasPendingDetachedExecution.value && !internalSubmitting.value) return 'Awaiting Safe signatures…'
   if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
   return internalSubmitting.value && submittingLabel ? submittingLabel : (providedConfirmLabel || btnLabel.value)
 })
