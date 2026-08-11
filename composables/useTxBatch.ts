@@ -18,6 +18,7 @@ import {
   mergeBatchPrefetchedSlotHints,
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import {
   activeLayerVaultsRef,
@@ -463,6 +464,10 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
 
 const redirectAfterBatchExecution = async () => {
   try {
+    // Success signal for a detached Safe completion toast, and the gate that
+    // keeps a background-confirmed batch from yanking the user mid-flow.
+    markTrackedExecutionSucceeded()
+    if (shouldSuppressPostTxNavigation()) return
     const router = useRouter()
     const route = useRoute()
     const query: Record<string, string> = {}

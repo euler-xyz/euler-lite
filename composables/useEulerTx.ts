@@ -1206,11 +1206,19 @@ export const useEulerTx = () => {
     isOkx,
     expectedAccount,
     expectedChainId,
+    connector,
     resolveHash,
   }: {
     isOkx: boolean
     expectedAccount: Address
     expectedChainId: number
+    /**
+     * Pin submissions to the connector captured when this sender was built.
+     * Without it wagmi resolves the currently-active connector, and a
+     * same-account/same-chain connector switch mid-sequence would submit
+     * through one provider while hash resolution polls another.
+     */
+    connector?: ReturnType<typeof getAccount>['connector']
     resolveHash?: (hash: Hash) => Promise<Hash>
   }) => {
     let okxDelayPending = false
@@ -1229,6 +1237,7 @@ export const useEulerTx = () => {
       const hash = await sendTransactionAsync({
         account: expectedAccount,
         chainId: expectedChainId,
+        ...(connector ? { connector } : {}),
         to,
         data: data as Hex,
         value: value ?? 0n,
@@ -1283,6 +1292,7 @@ export const useEulerTx = () => {
       isOkx,
       expectedAccount: owner,
       expectedChainId: cid,
+      connector,
     })
 
     const receipts: TransactionReceipt[] = []
@@ -1542,6 +1552,7 @@ export const useEulerTx = () => {
       isOkx,
       expectedAccount: owner,
       expectedChainId: cid,
+      connector,
       resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
@@ -1635,6 +1646,7 @@ export const useEulerTx = () => {
       isOkx,
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
+      connector,
       resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
