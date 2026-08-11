@@ -8,7 +8,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { markTrackedExecutionSucceeded } from '~/composables/useSafeExecutionDetachment'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 import {
   prepareREULUnlockPlan,
   refreshREULLockReview,
@@ -126,10 +126,14 @@ const unlock = async (reviewedLock: REULLock) => {
         }
 
         await executePlan(unlockPlan)
-        // Success signal for a detached Safe completion toast — this flow
-        // closes without navigating, so only the mark is needed.
+        // Success signal for a detached Safe completion toast — always mark.
         markTrackedExecutionSucceeded()
-        modal.close()
+        // Unscoped modal.close() pops the top of the modal stack; after
+        // detachment the user may have opened a different modal, so global
+        // UI teardown is suppressed like navigation.
+        if (!shouldSuppressPostTxNavigation()) {
+          modal.close()
+        }
         await refreshLocks(true)
         return true
       },
