@@ -61,11 +61,14 @@ export const useSafeExecutionDetachment = () => {
   const toast = useToast()
 
   /**
-   * Track a submission. Returns null while a detached execution is pending
-   * (callers must gate their confirm on `hasPendingDetachedExecution`).
+   * Track a submission. Returns null while ANY tracked execution is live —
+   * detached or attended. Overwriting an attended slot would orphan its
+   * handle (its detach/release would no-op) and let its finalize point mark
+   * success on the wrong execution, so exclusivity is required for
+   * attribution, not just during detached windows.
    */
   const beginTrackedExecution = (options: { safeAtSubmit: boolean }): TrackedExecutionHandle | null => {
-    if (currentExecution.value?.detached) return null
+    if (currentExecution.value) return null
     const id = nextExecutionId++
     currentExecution.value = {
       id,

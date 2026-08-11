@@ -33,6 +33,7 @@ import { getNewSubAccount } from '~/composables/useSubAccounts'
 import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS, useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -3432,7 +3433,11 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
     }
 
     await revokeAfterSuccess(revokeTxs)
+    // Success signal for a detached Safe completion toast; suppress the
+    // redirect when the proposal confirmed after its modal was closed.
+    markTrackedExecutionSucceeded()
     schedulePostMigrationRefreshes(input.owner)
+    if (shouldSuppressPostTxNavigation()) return
     modal.close()
     // Land on the Positions (or Deposits) list rather than returning to the
     // external migration route, which no longer has a source position after tx.
