@@ -853,6 +853,7 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures),
         calldataPrepared: preview.calldataPrepared,
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
+        calldataWrapCalls: buildCalldataWrapCalls(preview.authorizationRequest, preview.useSignatures),
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
@@ -949,6 +950,21 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
   finally {
     submittingTargetId.value = ''
   }
+}
+
+/**
+ * The grant/revocation calls the Safe bundle wraps around the migration plan
+ * — surfaced so Copy calldata matches the actual proposal. Empty for
+ * signature-mode migrations and non-Safe wallets (which broadcast them as
+ * standalone transactions instead).
+ */
+function buildCalldataWrapCalls(
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+) {
+  if (!authorizationRequest || useSignatures || !isSafeWallet.value) return undefined
+  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
+  return { before: grants, after: revokes }
 }
 
 function finishMigrationSuccess() {

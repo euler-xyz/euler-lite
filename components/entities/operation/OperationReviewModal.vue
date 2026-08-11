@@ -11,6 +11,7 @@ import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 
@@ -23,7 +24,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -39,6 +40,13 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   calldataPrepared?: TransactionPlanPrepared
   /** The copy-calldata-only plan contains placeholder wallet signatures. */
   calldataUsesPlaceholderSignatures?: boolean
+  /**
+   * Plain calls that execution wraps around the plan in the same Safe
+   * submission (migration authorization grants before it, revocations
+   * after). Included in Copy calldata so the copied JSON matches the actual
+   * proposal.
+   */
+  calldataWrapCalls?: { before: PlainTxRequest[], after: PlainTxRequest[] }
   /** Tenderly-only raw plan fallback. */
   tenderlyPlan?: TransactionPlan
   /** Additional simulation overrides required by the Tenderly-only plan. */
@@ -327,6 +335,16 @@ const copyCalldata = async () => {
     const sdk = await getEulerSdkForChain(cid)
     const entries: { to: string, data: string, value: string }[] = []
 
+    const pushWrapCalls = (calls: PlainTxRequest[] | undefined) => {
+      for (const call of calls ?? []) {
+        entries.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
+      }
+    }
+
+    // Execution wraps the plan with these in the same Safe submission —
+    // the copied JSON must match the actual proposal.
+    pushWrapCalls(calldataWrapCalls?.before)
+
     for (const item of currentPlan) {
       if (item.type === 'requiredApproval') {
         for (const r of item.resolved ?? []) {
@@ -357,6 +375,8 @@ const copyCalldata = async () => {
         })
       }
     }
+
+    pushWrapCalls(calldataWrapCalls?.after)
 
     await copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
     hasCopiedCalldata.value = true

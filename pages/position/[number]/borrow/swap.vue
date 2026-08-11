@@ -3370,6 +3370,7 @@ const reviewInboundExternalMigration = async () => {
         postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, preview.useSignatures),
         calldataPrepared: preview.calldataPrepared,
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
+        calldataWrapCalls: buildInboundExternalCalldataWrapCalls(preview.authorizationRequest, preview.useSignatures),
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
@@ -3457,6 +3458,21 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
   finally {
     isSubmitting.value = false
   }
+}
+
+/**
+ * The grant/revocation calls the Safe bundle wraps around the migration plan
+ * — surfaced so Copy calldata matches the actual proposal. Empty for
+ * signature-mode migrations and non-Safe wallets (which broadcast them as
+ * standalone transactions instead).
+ */
+function buildInboundExternalCalldataWrapCalls(
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+) {
+  if (!authorizationRequest || useSignatures || !isSafeWallet.value) return undefined
+  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
+  return { before: grants, after: revokes }
 }
 
 function finishInboundExternalMigrationSuccess(input: InboundExternalMigrationInput) {
