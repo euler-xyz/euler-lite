@@ -113,14 +113,22 @@ const unlock = async (reviewedLock: REULLock) => {
       () => refreshLocks(true),
       async (currentLock) => {
         if (isBatchActive.value) {
-          modal.close()
+          // Unscoped close pops the top of the modal stack; if the review
+          // submission was detached the user may be in a different modal.
+          if (!shouldSuppressPostTxNavigation()) {
+            modal.close()
+          }
           error('Clear the current batch before unlocking rEUL')
           return false
         }
 
         const unlockPlan = await buildUnlockREULPlan([currentLock.timestamp])
         if (isBatchActive.value) {
-          modal.close()
+          // Unscoped close pops the top of the modal stack; if the review
+          // submission was detached the user may be in a different modal.
+          if (!shouldSuppressPostTxNavigation()) {
+            modal.close()
+          }
           error('Clear the current batch before unlocking rEUL')
           return false
         }
@@ -139,7 +147,9 @@ const unlock = async (reviewedLock: REULLock) => {
       },
     )
     if (result.status === 'changed' || result.status === 'missing' || result.status === 'unavailable') {
-      modal.close()
+      if (!shouldSuppressPostTxNavigation()) {
+        modal.close()
+      }
       showReviewRefreshError(result.status)
     }
   }
