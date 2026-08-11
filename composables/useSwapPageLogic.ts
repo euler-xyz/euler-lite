@@ -15,6 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -591,10 +592,15 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         const txPlan = await buildPlan(undefined, currentPlanContext())
         await executePlan(txPlan)
       }
-      modal.close()
-      setTimeout(() => {
-        router.replace({ path: redirectPath, query: { network: route.query.network } })
-      }, 400)
+      // Success signal for a detached Safe completion toast; a proposal that
+      // confirmed after its modal was closed must not redirect mid-flow.
+      markTrackedExecutionSucceeded()
+      if (!shouldSuppressPostTxNavigation()) {
+        modal.close()
+        setTimeout(() => {
+          router.replace({ path: redirectPath, query: { network: route.query.network } })
+        }, 400)
+      }
     }
     catch (e) {
       showError('Transaction failed')
