@@ -202,6 +202,7 @@ describe('activity display helpers', () => {
     expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Interest rate model updated')
     expect(formatActivityEventLabel({ type: 'set_liquidation_cool_off_time' })).toBe('Liquidation cool-off time updated')
     expect(formatActivityEventLabel({ type: 'set_is_allocator' })).toBe('Allocator status updated')
+    expect(formatActivityEventLabel({ label: 'Flow caps updated', type: 'set_flow_caps' })).toBe('Strategy caps updated')
     expect(formatActivityEventLabel({ type: 'set_oracle_config' })).toBe('Oracle route updated')
     expect(formatActivityEventLabel({ type: 'set_fallback_oracle' })).toBe('Fallback oracle updated')
     expect(formatActivityEventLabel({ type: 'set_resolved_vault' })).toBe('Resolved vault updated')
