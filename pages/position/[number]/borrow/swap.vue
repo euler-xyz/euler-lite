@@ -3374,11 +3374,11 @@ const reviewInboundExternalMigration = async () => {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, preview.useSignatures),
-        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, preview.useSignatures),
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
+        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         calldataPrepared: preview.calldataPrepared,
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
-        calldataWrapCalls: buildInboundExternalCalldataWrapCalls(preview.authorizationRequest, preview.useSignatures),
+        calldataWrapCalls: buildInboundExternalCalldataWrapCalls(preview.authorizationRequest, preview.bundledReview),
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
@@ -3480,9 +3480,11 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
  */
 function buildInboundExternalCalldataWrapCalls(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
-  useSignatures: boolean,
+  bundledReview: boolean,
 ) {
-  if (!authorizationRequest || useSignatures || !isSafeWallet.value) return undefined
+  // Driven by the latched review mode, not live detection — displayed and
+  // copied calldata must match the ceremony the confirmation will run.
+  if (!authorizationRequest || !bundledReview) return undefined
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
   return { before: grants, after: revokes }
 }
@@ -3611,8 +3613,10 @@ const addInboundExternalMigrationToBatch = async () => {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures),
-        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures),
+        // Batch prerequisites broadcast as standalone transactions
+        // (sendPlainTransactions), never inside the cart's Safe bundle.
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures, false),
+        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures, false),
         displayPlan: preview.calldataPrepared.plan,
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
@@ -3971,11 +3975,12 @@ function getTypedDataAuthorizationValue(request: MigrationAuthorizationRequest |
 function buildInboundExternalMigrationSignatureSteps(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
+  bundled: boolean,
 ): DisplayStep[] {
   const sourceCollateral = externalCollateralAsset.value
   if (!sourceCollateral) return []
   if (!useSignatures) {
-    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled: isSafeWallet.value })
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled })
   }
   if (inboundExternalAuthorizationConnector.value === AAVE_CONNECTOR_ID) {
     const permitValue = getTypedDataAuthorizationValue(authorizationRequest)
@@ -4012,9 +4017,10 @@ function buildInboundExternalMigrationSignatureSteps(
 function buildInboundExternalMigrationRevokeSteps(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
+  bundled: boolean,
 ): DisplayStep[] {
   if (!authorizationRequest || useSignatures) return []
-  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled: isSafeWallet.value })
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled })
 }
 
 function getRoutedVia(provider: string | null, quote: SwapQuote | null): string | null {

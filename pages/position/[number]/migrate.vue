@@ -857,11 +857,11 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         type: 'migration',
         asset: sourceDebtVault.value.asset,
         amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
-        signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest, preview.useSignatures),
-        postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures),
+        signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
+        postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         calldataPrepared: preview.calldataPrepared,
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
-        calldataWrapCalls: buildCalldataWrapCalls(preview.authorizationRequest, preview.useSignatures),
+        calldataWrapCalls: buildCalldataWrapCalls(preview.authorizationRequest, preview.bundledReview),
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
@@ -974,9 +974,11 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
  */
 function buildCalldataWrapCalls(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
-  useSignatures: boolean,
+  bundledReview: boolean,
 ) {
-  if (!authorizationRequest || useSignatures || !isSafeWallet.value) return undefined
+  // Driven by the latched review mode, not live detection — displayed and
+  // copied calldata must match the ceremony the confirmation will run.
+  if (!authorizationRequest || !bundledReview) return undefined
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
   return { before: grants, after: revokes }
 }
@@ -1100,8 +1102,10 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       type: 'migration',
       asset: sourceDebtAsset,
       amount: debtAmount,
-      signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures),
-      postSteps: buildRevokeSteps(authorizationRequest, useSignatures),
+      // Batch prerequisites broadcast as standalone transactions
+      // (sendPlainTransactions), never inside the cart's Safe bundle.
+      signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures, false),
+      postSteps: buildRevokeSteps(authorizationRequest, useSignatures, false),
       displayPlan: preview.calldataPrepared.plan,
     },
   }
@@ -1159,10 +1163,11 @@ function buildSignatureSteps(
   target: OutgoingMigrationTarget | undefined,
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
+  bundled: boolean,
 ): DisplayStep[] {
   if (!authorizationRequest || !target) return []
   if (!useSignatures) {
-    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled: isSafeWallet.value })
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled })
   }
   if (target.connectorId === AAVE_CONNECTOR_ID) {
     return [{
@@ -1184,9 +1189,10 @@ function buildSignatureSteps(
 function buildRevokeSteps(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
+  bundled: boolean,
 ): DisplayStep[] {
   if (!authorizationRequest || useSignatures) return []
-  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled: isSafeWallet.value })
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled })
 }
 
 function targetLiquidityDisplay(target: OutgoingMigrationTarget): string {
