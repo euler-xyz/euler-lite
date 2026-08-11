@@ -1,4 +1,4 @@
-import { getAddress, type Address, type Hash, type Hex, type TransactionReceipt } from 'viem'
+import { getAddress, type Address, type Hash, type Hex, type StateOverride, type TransactionReceipt } from 'viem'
 import type {
   Account,
   CollateralShareSource,
@@ -1184,12 +1184,20 @@ export const useEulerTx = () => {
     })
   }
 
-  const simulatePreparedPlan = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
+  const simulatePreparedPlan = async (
+    prepared: TransactionPlanPrepared,
+    stateOverrideOptions?: SimulationStateOverrideOptions,
+    extraStateOverrides?: StateOverride,
+  ) => {
     return profAsync('sdk', 'simulatePreparedTransactionPlan', async () => {
       const sdk = await getEulerSdkForChain(prepared.chainId)
       return sdk.executionService.simulatePreparedTransactionPlan(prepared, {
         stateOverrides: true,
         stateOverrideOptions,
+        // Caller-supplied overrides for state the plan assumes but which is
+        // not on-chain yet (e.g. migration authorizations that will be
+        // granted inside the same Safe bundle).
+        ...(extraStateOverrides?.length ? { extraStateOverrides } : {}),
       })
     })
   }
@@ -1397,11 +1405,13 @@ export const useEulerTx = () => {
    * Submit every plan transaction as one EIP-5792 call bundle. Safe turns
    * the bundle into a single MultiSend proposal, so signers approve once
    * instead of once per transaction (approve + EVC batch collapse into one
-   * proposal). Returns undefined when the plan cannot be bundled (permit2 /
-   * CoW swap items) or when bundling brings no benefit (fewer than two
-   * calls) — callers fall back to sequential execution.
+   * proposal). `extraCalls` wrap the plan inside the same bundle (migration
+   * authorization grants before it, revocations after it). Returns undefined
+   * when the plan cannot be bundled (permit2 / CoW swap items) or when
+   * bundling brings no benefit (fewer than two calls) — callers fall back to
+   * sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
@@ -1410,15 +1420,25 @@ export const useEulerTx = () => {
     connector: NonNullable<ReturnType<typeof getAccount>['connector']>
     safeWalletProvider: WalletProviderLike
     sdk: PlanEncodingSdk
+    extraCalls?: {
+      before?: readonly PlainTxRequest[]
+      after?: readonly PlainTxRequest[]
+    }
   }) => {
-    let calls
+    let planCalls
     try {
-      calls = transactionPlanToCalls(plan, sdk, chainId)
+      planCalls = transactionPlanToCalls(plan, sdk, chainId)
     }
     catch (err) {
       if (err instanceof PlanNotBundleableError) return undefined
       throw err
     }
+    const toPlanCall = (tx: PlainTxRequest) => ({ to: tx.to, data: tx.data, value: tx.value ?? 0n })
+    const calls = [
+      ...(extraCalls?.before ?? []).map(toPlanCall),
+      ...planCalls,
+      ...(extraCalls?.after ?? []).map(toPlanCall),
+    ]
     if (calls.length < 2) return undefined
 
     const currentAccount = getAccount(config)
@@ -1629,6 +1649,72 @@ export const useEulerTx = () => {
   }
 
   /**
+   * Execute a prepared plan as one Safe call bundle wrapped by extra plain
+   * calls: migration authorization grants before the plan, revocations after
+   * it. Atomicity is the point — a failed migration reverts its grants with
+   * it, and the revocations land in the same proposal, so no standing
+   * authorization ever needs unwind bookkeeping.
+   *
+   * Returns undefined when no Safe bundle context is available (regular
+   * wallet, or a Safe whose provider could not be acquired) — the caller
+   * owns the sequential fallback, which must broadcast the grants and wait
+   * for them to mine before the migration plan is rebuilt.
+   */
+  const executePreparedPlanWithPlainCalls = async (
+    prepared: TransactionPlanPrepared,
+    extraCalls: {
+      before?: readonly PlainTxRequest[]
+      after?: readonly PlainTxRequest[]
+    },
+  ) => {
+    if (isSpyMode.value) {
+      throw new Error('Transactions are disabled in spy mode')
+    }
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(prepared.chainId)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
+    const connector = getAccount(config).connector
+    const safeWalletProvider = await getSafeWalletProvider(connector)
+    if (!safeWalletProvider || !connector) return undefined
+
+    const preparedOwner = typeof prepared.account === 'string'
+      ? getAddress(prepared.account)
+      : getAddress(prepared.account.owner)
+
+    // Same invariant as executePreparedPlan: an envelope executed for a Safe
+    // never carries permit2.
+    let effectivePrepared = prepared
+    if (hasPermit2Signature(prepared.plan)) {
+      const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
+        plan: prepared.plan,
+        chainId: prepared.chainId,
+        account: preparedOwner,
+        usePermit2: false,
+      })
+      effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+    }
+    else if (prepared.usePermit2) {
+      effectivePrepared = { ...prepared, usePermit2: false }
+    }
+
+    const bundled = await executePlanAsSafeBundle({
+      plan: effectivePrepared.plan,
+      chainId: prepared.chainId,
+      owner: preparedOwner,
+      provider,
+      connector,
+      safeWalletProvider,
+      sdk,
+      extraCalls,
+    })
+    if (!bundled) return undefined
+    finalizeExecution(bundled)
+    return bundled
+  }
+
+  /**
    * Attach a fresh snapshot of a sub-account onto a pre-loaded Account. Call
    * once per form interaction (after the receiver/borrow sub-account is known
    * and before fanning out per-quote plan builds) to amortise what would
@@ -1688,6 +1774,7 @@ export const useEulerTx = () => {
     estimateGasForPlan,
     prefetchPluginData,
     simulatePreparedPlan,
+    executePreparedPlanWithPlainCalls,
     executePlan,
     executePreparedPlan,
   }

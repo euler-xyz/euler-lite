@@ -172,4 +172,13 @@ describe('buildMigrationAuthorizationTxSteps', () => {
     expect(buildMigrationAuthorizationTxSteps(typedDataRequest(), 'grant')).toEqual([])
     expect(buildMigrationAuthorizationTxSteps(undefined, 'grant')).toEqual([])
   })
+
+  it('marks rows as same-submission when bundled into a Safe proposal', () => {
+    const request = aaveApprovalRequest() as unknown as MigrationAuthorizationRequest
+
+    expect(buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true })[0]!.isSeparateTx).toBe(false)
+    expect(buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true })[0]!.isSeparateTx).toBe(false)
+    // Default stays standalone.
+    expect(buildMigrationAuthorizationTxSteps(request, 'grant')[0]!.isSeparateTx).toBe(true)
+  })
 })

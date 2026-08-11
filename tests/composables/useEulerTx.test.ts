@@ -576,4 +576,117 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(executeTransactionPlan).not.toHaveBeenCalled()
     expect(result.hashes).toEqual([SAFE_TX_HASH])
   })
+
+  const GRANT_CALL = { to: TOKEN, data: '0x11ff' as Hex, value: 0n }
+  const REVOKE_CALL = { to: TOKEN, data: '0x22ff' as Hex }
+
+  it('wraps the plan with plain calls inside one Safe bundle in order', async () => {
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+    const batchOnly = [approvedPlan[1]] as TransactionPlan
+
+    const result = await executePreparedPlanWithPlainCalls(buildPrepared(batchOnly), {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    })
+
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledWith(wagmiMocks.config, {
+      account: OWNER,
+      chainId: 1,
+      connector: safeConnector,
+      forceAtomic: true,
+      calls: [
+        // Grants before the batch, revocations after — one atomic proposal.
+        { to: TOKEN, data: '0x11ff', value: 0n },
+        { to: EVC, data: BATCH_DATA, value: 0n },
+        { to: TOKEN, data: '0x22ff', value: 0n },
+      ],
+    })
+    expect(result?.hashes).toEqual([SAFE_TX_HASH])
+    expect(result?.receipts[0].transactionHash).toBe(SAFE_TX_HASH)
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
+  it('returns undefined from the plain-calls bundle for non-Safe connectors', async () => {
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: { id: 'io.metamask', name: 'MetaMask', getProvider: async () => ({ request: vi.fn() }) },
+    }) as never)
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+
+    const result = await executePreparedPlanWithPlainCalls(buildPrepared([approvedPlan[1]] as TransactionPlan), {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    })
+
+    // The caller owns the sequential fallback (grants must mine first).
+    expect(result).toBeUndefined()
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
+  it('returns undefined from the plain-calls bundle for a Safe without a provider', async () => {
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: {
+        id: 'safe',
+        name: 'Safe',
+        getProvider: async () => {
+          throw new Error('provider unavailable')
+        },
+      },
+    }) as never)
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+
+    const result = await executePreparedPlanWithPlainCalls(buildPrepared([approvedPlan[1]] as TransactionPlan), {
+      before: [GRANT_CALL],
+    })
+
+    expect(result).toBeUndefined()
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+  })
+
+  it('throws on a reverted plain-calls bundle instead of finalizing it', async () => {
+    const provider = {
+      getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hash }) => ({
+        transactionHash: hash,
+        status: 'reverted',
+        blockNumber: 123n,
+      }) as TransactionReceipt),
+    }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      deploymentService: { getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: EVC } } })) },
+      executionService: { encodeBatch: vi.fn(() => BATCH_DATA), executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+
+    await expect(executePreparedPlanWithPlainCalls(buildPrepared([approvedPlan[1]] as TransactionPlan), {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    })).rejects.toThrow('Safe transaction reverted')
+  })
+
+  it('passes extra state overrides through prepared simulation', async () => {
+    const simulatePreparedTransactionPlan = vi.fn(async () => ({ kind: 'simulated' }))
+    const { getEulerSdkForChain } = await import('~/composables/useEulerSdk')
+    vi.mocked(getEulerSdkForChain).mockResolvedValue({
+      executionService: { simulatePreparedTransactionPlan },
+    } as never)
+    const { simulatePreparedPlan } = useEulerTx()
+    const prepared = buildPrepared([approvedPlan[1]] as TransactionPlan)
+    const overrides = [{ address: TOKEN, stateDiff: [] }]
+
+    await simulatePreparedPlan(prepared, undefined, overrides as never)
+    expect(simulatePreparedTransactionPlan).toHaveBeenCalledWith(prepared, expect.objectContaining({
+      extraStateOverrides: overrides,
+    }))
+
+    await simulatePreparedPlan(prepared)
+    expect(simulatePreparedTransactionPlan).toHaveBeenLastCalledWith(prepared, expect.not.objectContaining({
+      extraStateOverrides: expect.anything(),
+    }))
+  })
 })

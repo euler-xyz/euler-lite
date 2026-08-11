@@ -94,11 +94,16 @@ const RESTORE_LABELS: Record<string, string> = {
   metamorphoApproval: 'Restore previous Morpho vault share approval',
 }
 
-/** Review-modal rows for the standalone grant or restoration transactions. */
+/**
+ * Review-modal rows for the grant or restoration transactions. `bundled`
+ * marks them as riding in the same Safe submission as the migration batch
+ * instead of standalone transactions.
+ */
 export const buildMigrationAuthorizationTxSteps = (
   request: MigrationAuthorizationRequest | undefined,
   phase: 'grant' | 'revoke',
   startIndex = 1,
+  options?: { bundled?: boolean },
 ): DisplayStep[] => {
   const labels = phase === 'grant' ? GRANT_LABELS : RESTORE_LABELS
   const fallback = phase === 'grant' ? 'Approve migration' : 'Restore previous migration authorization'
@@ -113,7 +118,7 @@ export const buildMigrationAuthorizationTxSteps = (
     steps.push({
       index: startIndex + steps.length,
       label: (authorizationType && labels[authorizationType]) || fallback,
-      isSeparateTx: true,
+      isSeparateTx: !options?.bundled,
     })
   }
 

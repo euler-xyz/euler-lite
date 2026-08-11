@@ -112,11 +112,13 @@ const {
   planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
   executePreparedPlan,
+  executePreparedPlanWithPlainCalls,
   executePlan,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
 const { signaturesEnabled } = useSignaturePreference()
+const { isSafeWallet } = useSafeWallet()
 const {
   restorePendingBeforeRetry,
   revokeAfterSuccess,
@@ -3406,6 +3408,23 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
     inboundExternalPreparedPlan.value = null
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
+      if (!useSignatures && isSafeWallet.value) {
+        const bundleAuthorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+        inboundExternalAuthorizationConnector.value = bundleAuthorizationRequest ? input.source.connectorId : null
+        if (bundleAuthorizationRequest) {
+          // Safe wallets: grants + migration batch + revocations as one
+          // atomic proposal. 'aborted' means the pre-bundle simulation
+          // rejected with nothing on-chain; 'unavailable' falls through to
+          // the sequential grant flow below.
+          const outcome = await sendInboundExternalMigrationAsSafeBundle(input, bundleAuthorizationRequest, account, useSignatures)
+          if (outcome === 'aborted') return
+          if (outcome === 'executed') {
+            finishInboundExternalMigrationSuccess(input)
+            return
+          }
+        }
+      }
+
       const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)
       inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
       inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, {
@@ -3429,18 +3448,7 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
     }
 
     await revokeAfterSuccess(revokeTxs)
-    schedulePostMigrationRefreshes(input.owner)
-    modal.close()
-    // Land on the Positions (or Deposits) list rather than returning to the
-    // external migration route, which no longer has a source position after tx.
-    const redirectPath = input.eulerTarget.borrowVault
-      ? '/portfolio'
-      : input.eulerTarget.collateralVault
-        ? '/portfolio/saving'
-        : '/portfolio'
-    setTimeout(() => {
-      void router.replace({ path: redirectPath, query: { network: route.query.network } })
-    }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+    finishInboundExternalMigrationSuccess(input)
   }
   catch (err) {
     showError(err instanceof Error ? err.message : 'Migration failed')
@@ -3449,6 +3457,60 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
   finally {
     isSubmitting.value = false
   }
+}
+
+function finishInboundExternalMigrationSuccess(input: InboundExternalMigrationInput) {
+  schedulePostMigrationRefreshes(input.owner)
+  modal.close()
+  // Land on the Positions (or Deposits) list rather than returning to the
+  // external migration route, which no longer has a source position after tx.
+  const redirectPath = input.eulerTarget.borrowVault
+    ? '/portfolio'
+    : input.eulerTarget.collateralVault
+      ? '/portfolio/saving'
+      : '/portfolio'
+  setTimeout(() => {
+    void router.replace({ path: redirectPath, query: { network: route.query.network } })
+  }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+}
+
+/**
+ * Execute the inbound migration as one atomic Safe proposal: authorization
+ * grants, the migration batch, and the revocations in a single
+ * wallet_sendCalls bundle. The plan comes from the simulation variant, which
+ * is byte-identical to the execution plan for transaction-kind authorizations
+ * but validates the grant instead of reading the live allowance — so nothing
+ * needs to be mined before the bundle is built. The pre-bundle simulation
+ * runs with the SDK's authorization state overrides for the same reason.
+ *
+ * Returns 'executed' when the bundle confirmed, 'aborted' when the simulation
+ * rejected (nothing on-chain, nothing to unwind), or 'unavailable' when there
+ * is no Safe bundle context — the caller falls back to sequential grants.
+ */
+const sendInboundExternalMigrationAsSafeBundle = async (
+  input: InboundExternalMigrationInput,
+  authorizationRequest: MigrationAuthorizationRequest,
+  account: Account<IHasVaultAddress> | undefined,
+  useSignatures: boolean,
+): Promise<'executed' | 'aborted' | 'unavailable'> => {
+  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
+  const simulation = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures)
+  const prepared = await prepareTransactionPlan(simulation.plan, {
+    account,
+    chainId: input.position.chainId,
+    usePermit2: false,
+  })
+  inboundExternalPlan.value = simulation.plan
+  inboundExternalPreparedPlan.value = prepared
+  const ok = await runPreparedSimulation(
+    prepared,
+    buildRefinanceStateOverrideOptions(),
+    simulation.stateOverrides,
+  )
+  if (!ok) return 'aborted'
+
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes })
+  return result ? 'executed' : 'unavailable'
 }
 
 const addInboundExternalMigrationToBatch = async () => {
@@ -3870,7 +3932,7 @@ function buildInboundExternalMigrationSignatureSteps(
   const sourceCollateral = externalCollateralAsset.value
   if (!sourceCollateral) return []
   if (!useSignatures) {
-    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant')
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled: isSafeWallet.value })
   }
   if (inboundExternalAuthorizationConnector.value === AAVE_CONNECTOR_ID) {
     const permitValue = getTypedDataAuthorizationValue(authorizationRequest)
@@ -3909,7 +3971,7 @@ function buildInboundExternalMigrationRevokeSteps(
   useSignatures: boolean,
 ): DisplayStep[] {
   if (!authorizationRequest || useSignatures) return []
-  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke')
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled: isSafeWallet.value })
 }
 
 function getRoutedVia(provider: string | null, quote: SwapQuote | null): string | null {

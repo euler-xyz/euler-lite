@@ -112,10 +112,12 @@ const {
   planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
   executePreparedPlan,
+  executePreparedPlanWithPlainCalls,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
 const { signaturesEnabled } = useSignaturePreference()
+const { isSafeWallet } = useSafeWallet()
 const {
   restorePendingBeforeRetry,
   revokeAfterSuccess,
@@ -895,6 +897,19 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
     let authorization: SignedMigrationAuthorization | undefined
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
+      if (authorizationRequest && !useSignatures) {
+        // Safe wallets: try grants + batch + revocations as one atomic
+        // proposal. 'aborted' means the pre-bundle simulation rejected with
+        // nothing on-chain; 'unavailable' falls through to the sequential
+        // grant flow below.
+        const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
+        if (outcome === 'aborted') return
+        if (outcome === 'executed') {
+          finishMigrationSuccess()
+          return
+        }
+      }
+
       if (authorizationRequest) {
         if (useSignatures) {
           authorization = await signMigrationAuthorization(authorizationRequest)
@@ -925,11 +940,7 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
     }
 
     await revokeAfterSuccess(revokeTxs)
-    schedulePostMigrationRefreshes()
-    modal.close()
-    setTimeout(() => {
-      void router.replace({ path: '/portfolio', query: { network: route.query.network } })
-    }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+    finishMigrationSuccess()
   }
   catch (err) {
     showError(err instanceof Error ? err.message : 'Migration failed')
@@ -938,6 +949,55 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
   finally {
     submittingTargetId.value = ''
   }
+}
+
+function finishMigrationSuccess() {
+  schedulePostMigrationRefreshes()
+  modal.close()
+  setTimeout(() => {
+    void router.replace({ path: '/portfolio', query: { network: route.query.network } })
+  }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+}
+
+/**
+ * Execute the migration as one atomic Safe proposal: authorization grants,
+ * the migration batch, and the revocations in a single wallet_sendCalls
+ * bundle. The plan comes from the simulation variant, which is byte-identical
+ * to the execution plan for transaction-kind authorizations but validates the
+ * grant instead of reading the live allowance — so nothing needs to be mined
+ * before the bundle is built. The pre-bundle simulation runs with the SDK's
+ * authorization state overrides for the same reason.
+ *
+ * Returns 'executed' when the bundle confirmed, 'aborted' when the simulation
+ * rejected (nothing on-chain, nothing to unwind), or 'unavailable' when there
+ * is no Safe bundle context — the caller falls back to sequential grants.
+ */
+async function sendMigrationAsSafeBundle(
+  input: OutgoingMigrationInput,
+  migrationPosition: MigrationPosition,
+  authorizationRequest: MigrationAuthorizationRequest,
+  account?: Account<IHasVaultAddress>,
+): Promise<'executed' | 'aborted' | 'unavailable'> {
+  // Cheap reactive pre-check; the authoritative provider probe happens inside
+  // executePreparedPlanWithPlainCalls.
+  if (!isSafeWallet.value) return 'unavailable'
+
+  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
+  const simulation = await buildMigrationSimulation(input, migrationPosition, authorizationRequest, account)
+  const prepared = await prepareTransactionPlan(simulation.plan, {
+    account,
+    chainId: input.target.chainId,
+    usePermit2: false,
+  })
+  const ok = await runPreparedSimulation(
+    prepared,
+    buildStateOverrideOptions({ noBalanceOverride: true }),
+    simulation.stateOverrides,
+  )
+  if (!ok) return 'aborted'
+
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes })
+  return result ? 'executed' : 'unavailable'
 }
 
 async function addMigrationToBatch(target: OutgoingMigrationTarget) {
@@ -1069,7 +1129,7 @@ function buildSignatureSteps(
 ): DisplayStep[] {
   if (!authorizationRequest || !target) return []
   if (!useSignatures) {
-    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant')
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled: isSafeWallet.value })
   }
   if (target.connectorId === AAVE_CONNECTOR_ID) {
     return [{
@@ -1093,7 +1153,7 @@ function buildRevokeSteps(
   useSignatures: boolean,
 ): DisplayStep[] {
   if (!authorizationRequest || useSignatures) return []
-  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke')
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled: isSafeWallet.value })
 }
 
 function targetLiquidityDisplay(target: OutgoingMigrationTarget): string {
