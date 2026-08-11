@@ -399,9 +399,24 @@ const blockedReason = computed(() => {
   return ''
 })
 
+const { trackAttached, detach } = useSafeExecutionDetachment()
+
+let pendingBatchExecution: Promise<void> | null = null
+let releaseAttached: (() => void) | null = null
+
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
-  await executeBatch()
+  const run = executeBatch()
+  pendingBatchExecution = run
+  releaseAttached = trackAttached()
+  try {
+    await run
+  }
+  finally {
+    pendingBatchExecution = null
+    releaseAttached?.()
+    releaseAttached = null
+  }
   // executeBatch clears the cart on success; close once nothing's left to do.
   if (!execError.value && entries.value.length === 0) emit('close')
 }
@@ -410,12 +425,32 @@ const handleClose = () => {
   dismissExecutionError()
   emit('close')
 }
+
+// Safe proposals can wait on co-signers for minutes to days — allow closing
+// the modal mid-execution and surface completion as a toast instead.
+const canDetachExecution = computed(() => isSafeWallet.value && isExecuting.value)
+
+const onCloseRequested = () => {
+  if (isExecuting.value) {
+    if (!canDetachExecution.value) return
+    if (pendingBatchExecution) {
+      // executeBatch resolves on failure too (it reports via execError), so
+      // surface that state as the detached completion outcome.
+      detach(pendingBatchExecution.then(() => {
+        if (execError.value) throw new Error(execError.value)
+      }), { successMessage: 'Batch confirmed' })
+    }
+    releaseAttached?.()
+    releaseAttached = null
+  }
+  handleClose()
+}
 </script>
 
 <template>
   <BaseModalWrapper
     title="Review batch"
-    @close="!isExecuting && handleClose()"
+    @close="onCloseRequested"
   >
     <!-- Separator under the modal title -->
     <div class="-mx-16 mb-16 border-t border-line-default" />
