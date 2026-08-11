@@ -534,6 +534,28 @@ export const normalizeSimulatedVaultLayers = <T>(
   return null
 }
 
+/**
+ * Strip layers produced by plugin-prepended loose batch items (e.g. the lite
+ * ToS registration for an account whose acceptance hasn't landed on-chain).
+ * The layered simulation emits one layer per top-level batch unit, so those
+ * items surface as extra layers between the pre-batch snapshot and the first
+ * entry's layer, breaking the layer[i] ↔ entry[i-1] contract that
+ * getCurrentFinalLayer enforces (`layers.length === entries.length + 1`).
+ *
+ * `hasBaseLayer` arrays keep index 0 (the pre-batch snapshot) and drop the
+ * following `extra` plugin layers; base-less arrays drop the first `extra`.
+ */
+export const stripLeadingPluginLayers = <T>(
+  layerArray: T[],
+  extra: number,
+  hasBaseLayer: boolean,
+): T[] => {
+  if (extra <= 0) return layerArray
+  return hasBaseLayer
+    ? [...layerArray.slice(0, 1), ...layerArray.slice(1 + extra)]
+    : layerArray.slice(extra)
+}
+
 type BatchSimulationWalletBalances = {
   simulatedWalletBalances?: Record<string, bigint>[]
 }
@@ -1733,11 +1755,34 @@ export const useTxBatch = () => {
       // layer's touched positions onto the previous full account. This preserves
       // the user's existing positions in vaults the batch never touched.
       const rawSimAccounts = (sim.simulatedAccounts ?? []) as Account<IHasVaultAddress>[]
-      const simAccounts = rawSimAccounts.length === plans.length
+      const paddedSimAccounts = rawSimAccounts.length === plans.length
         ? [baseAccount, ...rawSimAccounts]
         : rawSimAccounts
+      // Plan plugins may prepend loose batch items ahead of the entry
+      // operations (the lite ToS registration is the known case). Each loose
+      // item produces its own simulation layer, so fold those away — keeping
+      // the real pre-batch snapshot as layer 0 — and strip the vault/wallet
+      // layer arrays in lockstep so all layer indices keep mapping to cart
+      // entries. Failure attribution (operationIndex) is left untouched: its
+      // indexing for loose items is SDK-internal, and the ToS registration
+      // cannot realistically fail.
+      const extraLeadingLayers = Math.max(0, paddedSimAccounts.length - (plans.length + 1))
+      if (extraLeadingLayers > 0) {
+        logBatchDiag('resimulate:plugin-layers-stripped', {
+          token,
+          extraLeadingLayers,
+          rawSimAccounts: paddedSimAccounts.length,
+          plans: plans.length,
+        }, 'warn')
+      }
+      const simAccounts = stripLeadingPluginLayers(paddedSimAccounts, extraLeadingLayers, true)
       const rawSimVaultLayers = sim.simulatedVaultsLayers ?? []
-      const normalizedSimVaultLayers = normalizeSimulatedVaultLayers(rawSimVaultLayers, plans.length)
+      const strippedSimVaultLayers = stripLeadingPluginLayers(
+        rawSimVaultLayers,
+        extraLeadingLayers,
+        rawSimVaultLayers.length === plans.length + 1 + extraLeadingLayers,
+      )
+      const normalizedSimVaultLayers = normalizeSimulatedVaultLayers(strippedSimVaultLayers, plans.length)
       const simVaultLayers = normalizedSimVaultLayers ?? []
       if (normalizedSimVaultLayers === null) {
         logBatchDiag('resimulate:vault-layer-cardinality-invalid', {
@@ -1823,7 +1868,12 @@ export const useTxBatch = () => {
         }
         return out
       }
-      const simWb = ((sim as BatchSimulationWalletBalances).simulatedWalletBalances ?? []).map(normalizeWalletBalances)
+      const rawSimWb = (sim as BatchSimulationWalletBalances).simulatedWalletBalances ?? []
+      const simWb = stripLeadingPluginLayers(
+        rawSimWb,
+        extraLeadingLayers,
+        rawSimWb.length === plans.length + 1 + extraLeadingLayers,
+      ).map(normalizeWalletBalances)
       const touchedTokens = collectWalletBalanceTokens(simWb)
       const realWallet: Record<string, bigint> = {}
       if (touchedTokens.length) {
