@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const toastMocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
+  warning: vi.fn(),
 }))
 
 vi.mock('~/components/ui/composables/useToast', () => ({
@@ -14,8 +15,8 @@ vi.mock('~/utils/tx-errors', () => ({
 }))
 
 const importComposable = async () => {
-  const { useSafeExecutionDetachment } = await import('~/composables/useSafeExecutionDetachment')
-  return useSafeExecutionDetachment()
+  const mod = await import('~/composables/useSafeExecutionDetachment')
+  return { detachment: mod.useSafeExecutionDetachment(), mod }
 }
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -25,53 +26,110 @@ describe('useSafeExecutionDetachment', () => {
     vi.resetModules()
     toastMocks.success.mockReset()
     toastMocks.error.mockReset()
+    toastMocks.warning.mockReset()
   })
 
-  it('toasts success and clears the pending state when a detached execution confirms', async () => {
-    const detachment = await importComposable()
+  it('latches the wallet classification at submission time', async () => {
+    const { detachment } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+
+    expect(handle.safeAtSubmit).toBe(true)
+    handle.release()
+  })
+
+  it('toasts success only when the flow reached its finalize point', async () => {
+    const { detachment, mod } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
     let release!: () => void
     const execution = new Promise<void>((resolve) => {
       release = resolve
     })
 
-    detachment.detach(execution)
-    expect(detachment.hasDetachedPending.value).toBe(true)
-    expect(detachment.shouldSuppressPostTxNavigation()).toBe(true)
+    handle.detach(execution)
+    expect(detachment.hasPendingDetachedExecution.value).toBe(true)
+    expect(mod.shouldSuppressPostTxNavigation()).toBe(true)
 
+    // The flow's success tail runs finalize before the promise resolves.
+    mod.markTrackedExecutionSucceeded()
     release()
     await flush()
+
     expect(toastMocks.success).toHaveBeenCalledWith('Safe transaction confirmed')
-    expect(detachment.hasDetachedPending.value).toBe(false)
-    expect(detachment.shouldSuppressPostTxNavigation()).toBe(false)
+    expect(toastMocks.warning).not.toHaveBeenCalled()
+    expect(detachment.hasPendingDetachedExecution.value).toBe(false)
+    expect(mod.shouldSuppressPostTxNavigation()).toBe(false)
+  })
+
+  it('warns instead of confirming when the execution resolves without finalize', async () => {
+    const { detachment } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+    let release!: () => void
+    const execution = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    // Flow swallowed its error and resolved — never report as confirmed.
+    handle.detach(execution)
+    release()
+    await flush()
+
+    expect(toastMocks.success).not.toHaveBeenCalled()
+    expect(toastMocks.warning).toHaveBeenCalledWith('Safe transaction did not complete — check your Safe for details')
   })
 
   it('toasts the decoded failure when a detached execution rejects', async () => {
-    const detachment = await importComposable()
+    const { detachment } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
     let reject!: (err: Error) => void
     const execution = new Promise<void>((_resolve, rejectPromise) => {
       reject = rejectPromise
     })
 
-    detachment.detach(execution)
+    handle.detach(execution)
     reject(new Error('Safe transaction reverted'))
     await flush()
 
     expect(toastMocks.error).toHaveBeenCalledWith('Safe transaction reverted')
-    expect(detachment.hasDetachedPending.value).toBe(false)
+    expect(detachment.hasPendingDetachedExecution.value).toBe(false)
   })
 
-  it('does not suppress navigation while an attached submission is in flight', async () => {
-    const detachment = await importComposable()
-    detachment.detach(new Promise<void>(() => {}))
+  it('gates new submissions while a detached execution is pending', async () => {
+    const { detachment } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+    handle.detach(new Promise<void>(() => {}))
 
-    // Another modal is open and submitting — its success must navigate.
-    const release = detachment.trackAttached()
-    expect(detachment.shouldSuppressPostTxNavigation()).toBe(false)
+    // Single-slot: a second confirm cannot begin.
+    expect(detachment.beginTrackedExecution({ safeAtSubmit: false })).toBeNull()
+    expect(detachment.hasPendingDetachedExecution.value).toBe(true)
+  })
 
-    release()
-    expect(detachment.shouldSuppressPostTxNavigation()).toBe(true)
-    // Release is idempotent.
-    release()
-    expect(detachment.shouldSuppressPostTxNavigation()).toBe(true)
+  it('frees the slot when an attended execution settles without detaching', async () => {
+    const { detachment, mod } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: false })!
+
+    handle.release()
+    expect(mod.shouldSuppressPostTxNavigation()).toBe(false)
+    // The next submission can begin immediately.
+    expect(detachment.beginTrackedExecution({ safeAtSubmit: true })).not.toBeNull()
+  })
+
+  it('scopes success marking to the live execution', async () => {
+    const { detachment, mod } = await importComposable()
+    const first = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+    let releaseFirst!: () => void
+    first.detach(new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    }))
+
+    // Marks recorded during the detached window belong to that execution —
+    // no attended submission can start (gate), so no ambiguity exists.
+    mod.markTrackedExecutionSucceeded()
+    releaseFirst()
+    await flush()
+    expect(toastMocks.success).toHaveBeenCalledTimes(1)
+
+    // Slot cleared: a later mark with no live execution is a no-op.
+    mod.markTrackedExecutionSucceeded()
+    expect(detachment.hasPendingDetachedExecution.value).toBe(false)
   })
 })

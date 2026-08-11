@@ -15,14 +15,18 @@ describe('useTxFinalization', () => {
     return useTxFinalization()
   }
 
+  const markSucceeded = vi.fn()
+
   beforeEach(() => {
     vi.resetModules()
     vi.useFakeTimers()
     suppress = false
     modalMocks.close.mockReset()
     routerMocks.replace.mockReset()
+    markSucceeded.mockReset()
     vi.stubGlobal('useRouter', () => routerMocks)
     vi.stubGlobal('useSafeExecutionDetachment', () => ({
+      markTrackedExecutionSucceeded: markSucceeded,
       shouldSuppressPostTxNavigation: () => suppress,
     }))
   })
@@ -51,6 +55,8 @@ describe('useTxFinalization', () => {
     expect(onAfterClose).toHaveBeenCalledTimes(1)
     expect(modalMocks.close).not.toHaveBeenCalled()
     expect(routerMocks.replace).not.toHaveBeenCalled()
+    // The finalize point still marks success so the detached toast confirms.
+    expect(markSucceeded).toHaveBeenCalledTimes(1)
     vi.useRealTimers()
   })
 })

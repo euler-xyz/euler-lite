@@ -13,6 +13,7 @@ import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 import { getAuthorizationStepDisplay } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
+import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { formatNumber } from '~/utils/string-utils'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
@@ -389,7 +390,7 @@ const copyCalldata = async () => {
 const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
 
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
+  isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
@@ -399,23 +400,27 @@ const blockedReason = computed(() => {
   return ''
 })
 
-const { trackAttached, detach } = useSafeExecutionDetachment()
+const { beginTrackedExecution, hasPendingDetachedExecution } = useSafeExecutionDetachment()
 
 let pendingBatchExecution: Promise<void> | null = null
-let releaseAttached: (() => void) | null = null
+let executionHandle: TrackedExecutionHandle | null = null
 
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
+  // Latch the wallet classification at submission time; the single-slot gate
+  // rejects new submissions while a detached proposal is pending.
+  const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
+  if (!handle) return
   const run = executeBatch()
   pendingBatchExecution = run
-  releaseAttached = trackAttached()
+  executionHandle = handle
   try {
     await run
   }
   finally {
     pendingBatchExecution = null
-    releaseAttached?.()
-    releaseAttached = null
+    executionHandle?.release()
+    executionHandle = null
   }
   // executeBatch clears the cart on success; close once nothing's left to do.
   if (!execError.value && entries.value.length === 0) emit('close')
@@ -427,21 +432,22 @@ const handleClose = () => {
 }
 
 // Safe proposals can wait on co-signers for minutes to days — allow closing
-// the modal mid-execution and surface completion as a toast instead.
-const canDetachExecution = computed(() => isSafeWallet.value && isExecuting.value)
+// the modal mid-execution and surface completion as a toast instead. Uses the
+// classification latched at submit, not live detection.
+const canDetachExecution = computed(() =>
+  isExecuting.value && executionHandle?.safeAtSubmit === true)
 
 const onCloseRequested = () => {
   if (isExecuting.value) {
     if (!canDetachExecution.value) return
-    if (pendingBatchExecution) {
+    if (pendingBatchExecution && executionHandle) {
       // executeBatch resolves on failure too (it reports via execError), so
       // surface that state as the detached completion outcome.
-      detach(pendingBatchExecution.then(() => {
+      executionHandle.detach(pendingBatchExecution.then(() => {
         if (execError.value) throw new Error(execError.value)
       }), { successMessage: 'Batch confirmed' })
+      executionHandle = null
     }
-    releaseAttached?.()
-    releaseAttached = null
   }
   handleClose()
 }

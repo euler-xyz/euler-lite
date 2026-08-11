@@ -8,9 +8,13 @@ interface FinalizeOptions {
 export const useTxFinalization = () => {
   const router = useRouter()
   const modal = useModal()
-  const { shouldSuppressPostTxNavigation } = useSafeExecutionDetachment()
+  const { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } = useSafeExecutionDetachment()
 
   const finalizeTxAndRedirect = async (options: FinalizeOptions = {}) => {
+    // Reaching the finalize point is the success signal a detached
+    // completion toast keys on — flows swallow their own errors, so a bare
+    // promise resolution is not evidence of confirmation.
+    markTrackedExecutionSucceeded()
     if (shouldSuppressPostTxNavigation()) {
       // A detached Safe proposal confirmed after its modal was closed — the
       // user may be mid-flow elsewhere, so completion surfaces as a toast
