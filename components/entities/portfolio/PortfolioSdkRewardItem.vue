@@ -8,7 +8,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
-import { markTrackedExecutionSucceeded } from '~/composables/useSafeExecutionDetachment'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -114,13 +114,17 @@ const claim = async () => {
       return
     }
     await executePlan(plan.value)
-    // Success signal for a detached Safe completion toast — this flow closes
-    // without navigating, so only the mark is needed.
+    // Success signal for a detached Safe completion toast — always mark.
     markTrackedExecutionSucceeded()
     if (isREULReward.value) {
       await refreshLocks(true)
     }
-    modal.close()
+    // Unscoped modal.close() pops the top of the modal stack; after
+    // detachment the user may have opened a different modal, so global UI
+    // teardown is suppressed like navigation.
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+    }
     await refreshRewards({ delayedRetry: true })
   }
   catch (e) {
