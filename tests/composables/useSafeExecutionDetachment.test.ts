@@ -103,6 +103,27 @@ describe('useSafeExecutionDetachment', () => {
     expect(detachment.hasPendingDetachedExecution.value).toBe(true)
   })
 
+  it('refuses to overwrite a live attended execution', async () => {
+    const { detachment, mod } = await importComposable()
+    const first = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+
+    // A second attended submission must not steal the slot: the first
+    // handle would be orphaned (its detach would no-op) and finalize-point
+    // success marks would land on the wrong execution.
+    expect(detachment.beginTrackedExecution({ safeAtSubmit: false })).toBeNull()
+
+    // The first execution retains full control of its slot.
+    let release!: () => void
+    first.detach(new Promise<void>((resolve) => {
+      release = resolve
+    }))
+    expect(detachment.hasPendingDetachedExecution.value).toBe(true)
+    mod.markTrackedExecutionSucceeded()
+    release()
+    await flush()
+    expect(toastMocks.success).toHaveBeenCalledTimes(1)
+  })
+
   it('frees the slot when an attended execution settles without detaching', async () => {
     const { detachment, mod } = await importComposable()
     const handle = detachment.beginTrackedExecution({ safeAtSubmit: false })!

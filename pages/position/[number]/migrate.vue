@@ -42,6 +42,7 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
 import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 
@@ -925,11 +926,16 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
     }
 
     await revokeAfterSuccess(revokeTxs)
+    // Success signal for a detached Safe completion toast; suppress the
+    // redirect when the proposal confirmed after its modal was closed.
+    markTrackedExecutionSucceeded()
     schedulePostMigrationRefreshes()
-    modal.close()
-    setTimeout(() => {
-      void router.replace({ path: '/portfolio', query: { network: route.query.network } })
-    }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+    if (!shouldSuppressPostTxNavigation()) {
+      modal.close()
+      setTimeout(() => {
+        void router.replace({ path: '/portfolio', query: { network: route.query.network } })
+      }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+    }
   }
   catch (err) {
     showError(err instanceof Error ? err.message : 'Migration failed')
