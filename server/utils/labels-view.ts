@@ -229,7 +229,7 @@ async function buildSnapshot(
   labels: EulerLabelsData,
 ): Promise<{ snapshot: ChainVaultsSnapshot, escrowAddresses: Set<Address> }> {
   const escrowAddresses = new Set<Address>(
-    uniqueAddresses(await sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW])),
+    uniqueAddresses(await sdk.eVaultService.fetchPerspectiveVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW])),
   )
   const candidates = uniqueAddresses([
     ...labels.verifiedVaultAddresses,

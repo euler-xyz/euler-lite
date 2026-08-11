@@ -13,7 +13,7 @@ const VAULTS = [
 
 const mocks = vi.hoisted(() => ({
   fetchVaults: vi.fn(),
-  fetchVerifiedVaultAddresses: vi.fn(),
+  fetchPerspectiveVaultAddresses: vi.fn(),
   fetchVaultTypes: vi.fn(),
   refreshLabelFile: vi.fn(),
   warn: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock('~/server/utils/sdk-server', () => ({
   getServerSdk: vi.fn(async () => ({
     eVaultService: {
       fetchVaults: mocks.fetchVaults,
-      fetchVerifiedVaultAddresses: mocks.fetchVerifiedVaultAddresses,
+      fetchPerspectiveVaultAddresses: mocks.fetchPerspectiveVaultAddresses,
     },
     eulerEarnService: {
       fetchVaults: vi.fn(async () => ({ result: [], errors: [] })),
@@ -64,14 +64,14 @@ describe('vaults cache', () => {
   beforeEach(() => {
     vi.resetModules()
     mocks.fetchVaults.mockReset()
-    mocks.fetchVerifiedVaultAddresses.mockReset()
+    mocks.fetchPerspectiveVaultAddresses.mockReset()
     mocks.fetchVaultTypes.mockReset()
     mocks.refreshLabelFile.mockReset()
     mocks.warn.mockReset()
     mocks.error.mockReset()
     process.env.EVAULT_FETCH_CHUNK_CHAINS = '146'
 
-    mocks.fetchVerifiedVaultAddresses.mockResolvedValue([])
+    mocks.fetchPerspectiveVaultAddresses.mockResolvedValue([])
     mocks.fetchVaultTypes.mockResolvedValue({})
     mocks.refreshLabelFile.mockImplementation(async (_scope, file) => {
       if (file === 'products.json') {

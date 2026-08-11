@@ -27,7 +27,7 @@ const makeEarnVault = (address: string): EulerEarn => ({
 const fetchVaults = vi.fn()
 const fetchEarnVaults = vi.fn()
 const fetchEarnVault = vi.fn()
-const fetchVerifiedVaultAddresses = vi.fn()
+const fetchPerspectiveVaultAddresses = vi.fn()
 const fetchVaultTypes = vi.fn()
 const chainId = ref(1)
 
@@ -36,7 +36,7 @@ describe('useVaults EVault verification metadata', () => {
     fetchVaults.mockReset()
     fetchEarnVaults.mockReset()
     fetchEarnVault.mockReset()
-    fetchVerifiedVaultAddresses.mockReset()
+    fetchPerspectiveVaultAddresses.mockReset()
     fetchVaultTypes.mockReset()
 
     fetchVaults.mockImplementation(async (_chainId: number, addresses: Address[]) => ({
@@ -48,7 +48,7 @@ describe('useVaults EVault verification metadata', () => {
       errors: [],
       result: makeEarnVault(address),
     }))
-    fetchVerifiedVaultAddresses.mockResolvedValue([])
+    fetchPerspectiveVaultAddresses.mockResolvedValue([])
     fetchVaultTypes.mockResolvedValue({})
     chainId.value = 1
 
@@ -61,7 +61,7 @@ describe('useVaults EVault verification metadata', () => {
     }))
     vi.stubGlobal('useEulerLabels', useEulerLabels)
     const sdk = {
-      eVaultService: { fetchVaults, fetchVerifiedVaultAddresses },
+      eVaultService: { fetchVaults, fetchPerspectiveVaultAddresses },
       eulerEarnService: { fetchVaults: fetchEarnVaults, fetchVault: fetchEarnVault },
       vaultMetaService: { fetchVaultTypes },
     }

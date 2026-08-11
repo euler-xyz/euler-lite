@@ -82,7 +82,7 @@ const fetchEscrowAddressSet = async (chainId: number): Promise<Set<string>> => {
   if (existing) return existing
 
   const promise = getSdk(chainId)
-    .then(sdk => sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW]))
+    .then(sdk => sdk.eVaultService.fetchPerspectiveVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW]))
     .then(addresses => new Set(uniqueAddresses(addresses).map(address => address.toLowerCase())))
     .then((set) => {
       escrowAddressCache.set(chainId, set)

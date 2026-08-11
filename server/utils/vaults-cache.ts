@@ -151,7 +151,7 @@ const partitionVerified = async (
 
 const fetchEscrowAddrs = async (sdk: EulerSDK, chainId: number): Promise<Address[]> => {
   try {
-    const list = await sdk.eVaultService.fetchVerifiedVaultAddresses(
+    const list = await sdk.eVaultService.fetchPerspectiveVaultAddresses(
       chainId,
       [StandardEVaultPerspectives.ESCROW],
     )

@@ -59,11 +59,11 @@ export const buildRegistryMetaService = (registry: Registry): IVaultMetaService<
   ): Promise<ServiceResult<(VaultEntity | undefined)[]>> {
     throw new Error('registry meta-stub: fetchVaults() not supported')
   },
-  async fetchVerifiedVaultAddresses(): Promise<Address[]> {
-    throw new Error('registry meta-stub: fetchVerifiedVaultAddresses() not supported')
+  async fetchPerspectiveVaultAddresses(): Promise<Address[]> {
+    throw new Error('registry meta-stub: fetchPerspectiveVaultAddresses() not supported')
   },
-  async fetchVerifiedVaults(): Promise<ServiceResult<(VaultEntity | undefined)[]>> {
-    throw new Error('registry meta-stub: fetchVerifiedVaults() not supported')
+  async fetchPerspectiveVaults(): Promise<ServiceResult<(VaultEntity | undefined)[]>> {
+    throw new Error('registry meta-stub: fetchPerspectiveVaults() not supported')
   },
   async fetchAllVaults(
     _chainId: number,
