@@ -106,6 +106,28 @@ describe('transactionPlanToCalls', () => {
     expect(isPlanBundleable([approvalItem([]), evcBatchItem([0n])] as TransactionPlan)).toBe(false)
   })
 
+  it('hard-throws for contractCall items planned for another chain', () => {
+    const plan = [{
+      type: 'contractCall',
+      chainId: 8453,
+      to: SPENDER,
+      abi: [{ type: 'function', name: 'ping', inputs: [], outputs: [], stateMutability: 'payable' }],
+      functionName: 'ping',
+      args: [],
+      value: 0n,
+    }] as unknown as TransactionPlan
+
+    // Not a PlanNotBundleableError: falling back to sequential execution
+    // would misroute the call identically, so this must fail loudly.
+    expect(() => transactionPlanToCalls(plan, sdk, 1)).toThrow('targets chain 8453')
+    try {
+      transactionPlanToCalls(plan, sdk, 1)
+    }
+    catch (err) {
+      expect(err).not.toBeInstanceOf(PlanNotBundleableError)
+    }
+  })
+
   it('encodes contractCall items', () => {
     const plan = [{
       type: 'contractCall',
