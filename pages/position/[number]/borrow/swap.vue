@@ -33,6 +33,7 @@ import { getNewSubAccount } from '~/composables/useSubAccounts'
 import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS, useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -3415,14 +3416,13 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
         if (bundleAuthorizationRequest) {
           // Safe wallets: grants + migration batch + revocations as one
           // atomic proposal. 'aborted' means the pre-bundle simulation
-          // rejected with nothing on-chain; 'unavailable' falls through to
-          // the sequential grant flow below.
+          // rejected with nothing on-chain; a degraded Safe (provider
+          // unavailable) throws instead of silently running the sequential
+          // ceremony the review never showed.
           const outcome = await sendInboundExternalMigrationAsSafeBundle(input, bundleAuthorizationRequest, account, useSignatures)
           if (outcome === 'aborted') return
-          if (outcome === 'executed') {
-            finishInboundExternalMigrationSuccess(input)
-            return
-          }
+          finishInboundExternalMigrationSuccess(input)
+          return
         }
       }
 
@@ -3476,7 +3476,11 @@ function buildInboundExternalCalldataWrapCalls(
 }
 
 function finishInboundExternalMigrationSuccess(input: InboundExternalMigrationInput) {
+  // Success signal for a detached Safe completion toast; a proposal that
+  // confirmed after its modal was closed must not yank the user mid-flow.
+  markTrackedExecutionSucceeded()
   schedulePostMigrationRefreshes(input.owner)
+  if (shouldSuppressPostTxNavigation()) return
   modal.close()
   // Land on the Positions (or Deposits) list rather than returning to the
   // external migration route, which no longer has a source position after tx.
@@ -3508,7 +3512,7 @@ const sendInboundExternalMigrationAsSafeBundle = async (
   authorizationRequest: MigrationAuthorizationRequest,
   account: Account<IHasVaultAddress> | undefined,
   useSignatures: boolean,
-): Promise<'executed' | 'aborted' | 'unavailable'> => {
+): Promise<'executed' | 'aborted'> => {
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
   const simulation = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures)
   const prepared = await prepareTransactionPlan(simulation.plan, {
@@ -3526,7 +3530,13 @@ const sendInboundExternalMigrationAsSafeBundle = async (
   if (!ok) return 'aborted'
 
   const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes })
-  return result ? 'executed' : 'unavailable'
+  if (!result) {
+    // The review showed ONE atomic proposal. A Safe whose provider cannot be
+    // acquired at confirm time must abort loudly, never silently degrade
+    // into the sequential multi-proposal ceremony the user never reviewed.
+    throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
+  }
+  return 'executed'
 }
 
 const addInboundExternalMigrationToBatch = async () => {

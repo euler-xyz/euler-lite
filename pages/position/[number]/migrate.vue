@@ -42,6 +42,7 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
 import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 
@@ -899,10 +900,11 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
       if (authorizationRequest && !useSignatures) {
-        // Safe wallets: try grants + batch + revocations as one atomic
-        // proposal. 'aborted' means the pre-bundle simulation rejected with
-        // nothing on-chain; 'unavailable' falls through to the sequential
-        // grant flow below.
+        // Safe wallets: grants + batch + revocations as one atomic proposal.
+        // 'aborted' means the pre-bundle simulation rejected with nothing
+        // on-chain; a degraded Safe (provider unavailable) throws instead of
+        // silently running the sequential multi-proposal ceremony the review
+        // never showed. Only non-Safe wallets fall through.
         const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
         if (outcome === 'aborted') return
         if (outcome === 'executed') {
@@ -968,7 +970,11 @@ function buildCalldataWrapCalls(
 }
 
 function finishMigrationSuccess() {
+  // Success signal for a detached Safe completion toast; a proposal that
+  // confirmed after its modal was closed must not yank the user mid-flow.
+  markTrackedExecutionSucceeded()
   schedulePostMigrationRefreshes()
+  if (shouldSuppressPostTxNavigation()) return
   modal.close()
   setTimeout(() => {
     void router.replace({ path: '/portfolio', query: { network: route.query.network } })
@@ -993,10 +999,12 @@ async function sendMigrationAsSafeBundle(
   migrationPosition: MigrationPosition,
   authorizationRequest: MigrationAuthorizationRequest,
   account?: Account<IHasVaultAddress>,
-): Promise<'executed' | 'aborted' | 'unavailable'> {
-  // Cheap reactive pre-check; the authoritative provider probe happens inside
-  // executePreparedPlanWithPlainCalls.
-  if (!isSafeWallet.value) return 'unavailable'
+): Promise<'executed' | 'aborted' | 'not-safe'> {
+  // Revalidate the reviewed execution mode at confirmation: the review
+  // showed ONE atomic proposal for a Safe, so a Safe whose provider cannot
+  // be acquired must abort loudly rather than silently degrade into the
+  // sequential grant → migration → revoke ceremony the user never reviewed.
+  if (!isSafeWallet.value) return 'not-safe'
 
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
   const simulation = await buildMigrationSimulation(input, migrationPosition, authorizationRequest, account)
@@ -1013,7 +1021,10 @@ async function sendMigrationAsSafeBundle(
   if (!ok) return 'aborted'
 
   const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes })
-  return result ? 'executed' : 'unavailable'
+  if (!result) {
+    throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
+  }
+  return 'executed'
 }
 
 async function addMigrationToBatch(target: OutgoingMigrationTarget) {
