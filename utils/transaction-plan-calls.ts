@@ -72,6 +72,16 @@ export const transactionPlanToCalls = (
     }
 
     if (item.type === 'contractCall') {
+      // A call planned for another chain must never be flattened into this
+      // bundle: the {to, data, value} shape the wallet receives carries no
+      // chain information, so nothing downstream (wagmi, Safe, MultiSend)
+      // can catch the mismatch. Hard error rather than a bundling fallback —
+      // the sequential path would misroute the call identically.
+      if (item.chainId !== chainId) {
+        throw new Error(
+          `Transaction plan item targets chain ${item.chainId} but the submission is for chain ${chainId}`,
+        )
+      }
       calls.push({
         to: item.to,
         data: encodeFunctionData({

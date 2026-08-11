@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, stripLeadingPluginLayers, useTxBatch } from '~/composables/useTxBatch'
 import {
   mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
@@ -705,6 +705,22 @@ describe('normalizeSimulatedVaultLayers', () => {
   })
 })
 
+describe('stripLeadingPluginLayers', () => {
+  it('keeps the base layer and drops the plugin layers after it', () => {
+    expect(stripLeadingPluginLayers(['base', 'tos', 'op1', 'op2'], 1, true)).toEqual(['base', 'op1', 'op2'])
+    expect(stripLeadingPluginLayers(['base', 'a', 'b', 'op1'], 2, true)).toEqual(['base', 'op1'])
+  })
+
+  it('drops leading plugin layers from base-less arrays', () => {
+    expect(stripLeadingPluginLayers(['tos', 'op1', 'op2'], 1, false)).toEqual(['op1', 'op2'])
+  })
+
+  it('is a no-op without extra layers', () => {
+    expect(stripLeadingPluginLayers(['base', 'op1'], 0, true)).toEqual(['base', 'op1'])
+    expect(stripLeadingPluginLayers(['op1'], 0, false)).toEqual(['op1'])
+  })
+})
+
 describe('useTxBatch execution errors', () => {
   it('reuses the prefetched portfolio account as layer 0 for account-free entries', async () => {
     const sdk = createMockSdk()
@@ -885,6 +901,40 @@ describe('useTxBatch execution errors', () => {
     })
 
     expect(activeLayerVaultsRef.value[vault.toLowerCase()]).toBe(simulatedVault)
+  })
+
+  it('folds plugin-prepended simulation layers into the base layer (ToS registration)', async () => {
+    const sdk = createMockSdk()
+    // Base + the loose ToS-registration item's layer + the entry's layer: the
+    // layered simulation emits one layer per top-level batch unit, so an
+    // account whose ToS acceptance has not landed on-chain gets entries + 2
+    // layers. Without folding, getCurrentFinalLayer never finds its
+    // entries + 1 final layer and the cart dies with "Batch simulation not
+    // loaded" after the retry budget.
+    sdk.executionService.simulateTransactionPlan.mockResolvedValue({
+      simulatedAccounts: [
+        accountWithPosition(subAccount, subAccount, 1n),
+        accountWithPosition(subAccount, subAccount, 1n),
+        accountWithPosition(subAccount, subAccount, 5n),
+      ],
+      simulatedVaultsLayers: [],
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    } as never)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Supply USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+    })
+
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    expect(batch.simError.value).toBeUndefined()
+    expect(batch.activeLayer.value).toBe(1)
   })
 
   it('does not apply a final-only vault snapshot to earlier layers of a multi-operation batch', async () => {

@@ -215,22 +215,46 @@ const handleTenderlySimulate = async () => {
 }
 
 const internalSubmitting = ref(false)
+const { trackAttached, detach } = useSafeExecutionDetachment()
+
+let pendingExecution: Promise<void> | null = null
+let releaseAttached: (() => void) | null = null
 
 const handleConfirm = async () => {
   if (isConfirmDisabled.value || !onConfirm) return
   const result = onConfirm()
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
+    pendingExecution = result as Promise<void>
+    releaseAttached = trackAttached()
     try {
       await result
     }
     finally {
       internalSubmitting.value = false
+      pendingExecution = null
+      releaseAttached?.()
+      releaseAttached = null
     }
   }
   else {
     emits('close')
   }
+}
+
+// Safe proposals can wait on co-signers for minutes to days — the modal must
+// not hold the app hostage. Closing hands the execution to background
+// completion toasts and suppresses the flow's post-transaction navigation.
+const canDetachExecution = computed(() => isSafeWallet.value && internalSubmitting.value)
+
+const onCloseRequested = () => {
+  if (internalSubmitting.value) {
+    if (!canDetachExecution.value) return
+    if (pendingExecution) detach(pendingExecution)
+    releaseAttached?.()
+    releaseAttached = null
+  }
+  emits('close')
 }
 
 const isWalletSignatureStep = (step: DisplayStep) =>
@@ -423,7 +447,7 @@ const confirmLabel = computed(() => {
 <template>
   <BaseModalWrapper
     :title="hideExecute ? 'Operations' : 'Transaction review'"
-    @close="!internalSubmitting && $emit('close')"
+    @close="onCloseRequested"
   >
     <div class="flex flex-col gap-24">
       <!-- Operation context (market + position) grouped tightly above its steps,
