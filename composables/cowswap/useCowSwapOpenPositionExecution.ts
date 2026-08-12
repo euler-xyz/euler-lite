@@ -2,6 +2,7 @@ import type { PlanOpenPositionWithCoWArgs } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { getCowSwapChainConfig } from '~/entities/cowswap'
 import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
+import type { OperationPolicyCheck } from '~/utils/operationGuardRegistry'
 
 export type CowSwapOpenPositionExecuteParams = PlanOpenPositionWithCoWArgs & {
   chainId: number
@@ -10,7 +11,7 @@ export type CowSwapOpenPositionExecuteParams = PlanOpenPositionWithCoWArgs & {
 export const useCowSwapOpenPositionExecution = () => {
   const core = useCowSwapExecutionCore()
 
-  const executeAsync = async (params: CowSwapOpenPositionExecuteParams) => {
+  const executeAsync = async (params: CowSwapOpenPositionExecuteParams, policyChecks: OperationPolicyCheck[] = []) => {
     const sdk = await getEulerSdkFresh()
     const plan = sdk.executionService.planOpenPositionWithCoW(params)
     const chainConfig = getCowSwapChainConfig(params.chainId)
@@ -22,7 +23,7 @@ export const useCowSwapOpenPositionExecution = () => {
       cancellationMode: 'cow-api',
       orderbookUrl: chainConfig.orderbookUrl,
       settlementContract: chainConfig.settlementContract,
-    })
+    }, policyChecks)
   }
 
   return {

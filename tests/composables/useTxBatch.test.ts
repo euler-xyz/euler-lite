@@ -13,6 +13,7 @@ import {
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import { registerOperationPolicyCheck, unregisterOperationPolicyCheck } from '~/utils/operationGuardRegistry'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -1027,6 +1028,32 @@ describe('useTxBatch execution errors', () => {
       path: '/portfolio',
       query: { network: '8453' },
     })
+  })
+
+  it('retains a source-page policy check and blocks after that page unmounts', async () => {
+    const batch = useTxBatch()
+    const policyBlocked = ref(false)
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+
+    registerOperationPolicyCheck(
+      'test-navigation-policy',
+      () => policyBlocked.value ? 'Operation policy changed' : undefined,
+    )
+    await batch.addEntry({
+      label: 'Supply collateral',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+
+    // The form page is gone, but its callback remains attached to the entry.
+    unregisterOperationPolicyCheck('test-navigation-policy')
+    policyBlocked.value = true
+
+    expect(batch.policyBlockReason.value).toBe('Operation policy changed')
+    expect(batch.canExecuteBatch.value).toBe(false)
+    await batch.executeBatch()
+    expect(eulerTxMocks.prepareTransactionPlan).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
   })
 
   it('passes the pre-entry simulated account to execution plan builders', async () => {

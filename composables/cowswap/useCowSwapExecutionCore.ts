@@ -18,6 +18,7 @@ import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { usePortfolioRefresh } from '~/composables/usePortfolioRefresh'
 import { logWarn } from '~/utils/errorHandling'
+import { assertOperationPolicyChecks, type OperationPolicyCheck } from '~/utils/operationGuardRegistry'
 
 /** SDK progress status → lite UI status used by the review modal. */
 const SDK_STATUS_TO_LITE: Record<CowSwapTransactionPlanExecutionStatus, CowSwapExecutionStatus> = {
@@ -101,7 +102,11 @@ export const useCowSwapExecutionCore = () => {
    * Captures any `permitCancellation` from the plan items so a later EVC-permit hard cancel
    * is available.
    */
-  const executePlan = async (flow: CowSwapPlanFlow): Promise<CowSwapOrderUid> => {
+  const executePlan = async (
+    flow: CowSwapPlanFlow,
+    policyChecks: OperationPolicyCheck[] = [],
+  ): Promise<CowSwapOrderUid> => {
+    assertOperationPolicyChecks(policyChecks)
     const userAddress = requireWallet()
     error.value = null
     locallyCancelled.value = false
@@ -115,13 +120,25 @@ export const useCowSwapExecutionCore = () => {
 
     try {
       const sdk = await getEulerSdkFresh()
+      assertOperationPolicyChecks(policyChecks)
       const result = await sdk.executionService.executeCowSwapTransactionPlan({
         plan: flow.plan,
         chainId: flow.chainId,
         account: userAddress,
-        sendTransaction,
-        signTypedData,
-        onProgress,
+        sendTransaction: (transaction) => {
+          assertOperationPolicyChecks(policyChecks)
+          return sendTransaction(transaction)
+        },
+        signTypedData: (typedData) => {
+          assertOperationPolicyChecks(policyChecks)
+          return signTypedData(typedData)
+        },
+        onProgress: (progress) => {
+          // The SDK emits before each CoW phase, including submitOrder. This
+          // closes the interval after signing but before the order is posted.
+          assertOperationPolicyChecks(policyChecks)
+          onProgress(progress)
+        },
       })
 
       for (const r of result.results) {

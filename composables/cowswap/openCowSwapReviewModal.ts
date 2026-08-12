@@ -12,6 +12,11 @@ import type {
   CowSwapOrderUid,
 } from '~/entities/cowswap'
 import { CowSwapReviewModal } from '#components'
+import {
+  assertOperationPolicyChecks,
+  captureOperationPolicyChecks,
+  type OperationPolicyCheck,
+} from '~/utils/operationGuardRegistry'
 
 type CowSwapExecutionRef<TExecuteParams> = {
   status: Ref<CowSwapExecutionStatus>
@@ -20,7 +25,7 @@ type CowSwapExecutionRef<TExecuteParams> = {
   locallyCancelled: Ref<boolean>
   cancellationMode: Ref<CowSwapCancellationMode | undefined>
   cancellationStatus: Ref<CowSwapCancellationStatus>
-  executeAsync: (params: TExecuteParams) => Promise<CowSwapOrderUid>
+  executeAsync: (params: TExecuteParams, policyChecks?: OperationPolicyCheck[]) => Promise<CowSwapOrderUid>
   cancelOrder: () => Promise<void>
 }
 
@@ -83,6 +88,7 @@ export const openCowSwapReviewModal = <TExecuteParams>(
     logPrefix: string
   },
 ) => {
+  const policyChecks = captureOperationPolicyChecks()
   modal.open(CowSwapReviewModal, {
     isNotClosable: true,
     closeOnBackdropWhenAllowed: true,
@@ -100,7 +106,8 @@ export const openCowSwapReviewModal = <TExecuteParams>(
       quoteFetchedAt: options.quoteFetchedAt,
       onConfirm: async () => {
         try {
-          await options.execution.executeAsync(options.executeParams)
+          assertOperationPolicyChecks(policyChecks)
+          await options.execution.executeAsync(options.executeParams, policyChecks)
         }
         catch (e) {
           logWarn(`${options.logPrefix}/execute`, e)

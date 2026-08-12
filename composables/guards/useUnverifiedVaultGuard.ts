@@ -47,17 +47,18 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
     }
   }
 
-  const hasUnverifiedVault = computed(() => {
+  const getCurrentBlockReason = (): string | undefined => {
     // Track both live registry replacement and label refreshes before applying
     // the canonical authority rule for the resolved vault type.
     void registryVersion.value
     getEulerLabelsVersion()
     return vaultAddresses.value.some(address => !hasCanonicalVerification(address))
-  })
+      && !sessionAccepted.value
+      ? 'Unverified vault risk acknowledgment required'
+      : undefined
+  }
 
-  const isAcknowledgmentRequired = computed(() =>
-    hasUnverifiedVault.value && !sessionAccepted.value,
-  )
+  const isAcknowledgmentRequired = computed(() => Boolean(getCurrentBlockReason()))
 
   const acknowledgeRisk = () => {
     sessionAccepted.value = true
@@ -80,4 +81,6 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
     isAcknowledgmentRequired,
     acknowledgeRisk,
   }))
+
+  return { getBlockReason: getCurrentBlockReason }
 }

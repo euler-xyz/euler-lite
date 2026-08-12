@@ -4,7 +4,14 @@ import type { Address } from 'viem'
 import { useKeyring } from '~/composables/useKeyring'
 import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
-import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import {
+  clearOperationMeta,
+  registerOperationBlocker,
+  registerOperationPolicyCheck,
+  setOperationMeta,
+  unregisterOperationBlocker,
+  unregisterOperationPolicyCheck,
+} from '~/utils/operationGuardRegistry'
 import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getVaultOperationGeoBlockReason } from '~/composables/useGeoBlock'
@@ -28,6 +35,7 @@ export const useOperationGuard = (
   const chainId = useChainId()
   const { registryVersion } = useVaultRegistry()
   const geoBlockerKey = `geo:${++operationGuardInstanceSequence}`
+  const policyCheckKey = `policy:${operationGuardInstanceSequence}`
 
   const addresses = computed((): string[] => {
     const raw = isRef(vaultAddresses) ? vaultAddresses.value : vaultAddresses
@@ -35,10 +43,12 @@ export const useOperationGuard = (
   })
 
   // --- TOS guard (global, not vault-specific) ---
-  useTosGuard()
+  const tosGuard = useTosGuard()
 
   // --- Unverified vault guard ---
-  if (options.enforceUnverified !== false) useUnverifiedVaultGuard(addresses)
+  const unverifiedGuard = options.enforceUnverified !== false
+    ? useUnverifiedVaultGuard(addresses)
+    : undefined
 
   // --- Geo guard ---
   const geoBlockReason = computed(() => {
@@ -63,6 +73,26 @@ export const useOperationGuard = (
   const keyring = useKeyring(keyringVaultAddress)
 
   const needsVerification = computed(() => keyring.isVerificationRequired.value)
+
+  // This callback deliberately reads the source refs directly. Captured batch
+  // and CoW operations retain it after this component's reactive scope stops.
+  const getCurrentPolicyBlockReason = (): string | undefined => {
+    const tosReason = tosGuard?.getBlockReason?.()
+    if (tosReason) return tosReason
+
+    if (options.enforceGeo !== false) {
+      getEulerLabelsVersion()
+      void registryVersion.value
+      const geoReason = getVaultOperationGeoBlockReason(addresses.value)
+      if (geoReason) return geoReason
+    }
+
+    const unverifiedReason = unverifiedGuard?.getBlockReason?.()
+    if (unverifiedReason) return unverifiedReason
+    return keyring.isVerificationRequired.value ? 'Identity verification required' : undefined
+  }
+
+  registerOperationPolicyCheck(policyCheckKey, getCurrentPolicyBlockReason)
 
   // Provide keyring state to descendant components (VaultFormSubmit)
   provide('keyring-guard', reactive({
@@ -147,5 +177,6 @@ export const useOperationGuard = (
     clearOperationMeta('keyring')
     unregisterOperationBlocker('keyring')
     unregisterOperationBlocker(geoBlockerKey)
+    unregisterOperationPolicyCheck(policyCheckKey)
   })
 }

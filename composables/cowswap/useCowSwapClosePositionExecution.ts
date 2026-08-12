@@ -1,6 +1,7 @@
 import type { PlanClosePositionWithCowArgs } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
+import type { OperationPolicyCheck } from '~/utils/operationGuardRegistry'
 
 export type CowSwapClosePositionExecuteParams = PlanClosePositionWithCowArgs & {
   chainId: number
@@ -9,7 +10,7 @@ export type CowSwapClosePositionExecuteParams = PlanClosePositionWithCowArgs & {
 export const useCowSwapClosePositionExecution = () => {
   const core = useCowSwapExecutionCore()
 
-  const executeAsync = async (params: CowSwapClosePositionExecuteParams) => {
+  const executeAsync = async (params: CowSwapClosePositionExecuteParams, policyChecks: OperationPolicyCheck[] = []) => {
     const sdk = await getEulerSdkFresh()
     const plan = sdk.executionService.planClosePositionWithCow(params)
 
@@ -17,7 +18,7 @@ export const useCowSwapClosePositionExecution = () => {
       plan,
       chainId: params.chainId,
       cancellationMode: 'evc-permit',
-    })
+    }, policyChecks)
   }
 
   return {

@@ -8,6 +8,11 @@ import { shallowRef, computed } from 'vue'
 const blockers = shallowRef<Map<string, string>>(new Map())
 const metadata = shallowRef<Map<string, Record<string, unknown>>>(new Map())
 
+/** A live policy check captured by an operation before its page can unmount. */
+export type OperationPolicyCheck = () => string | undefined
+
+const policyChecks = shallowRef<Map<string, OperationPolicyCheck>>(new Map())
+
 export const registerOperationBlocker = (key: string, reason: string) => {
   const next = new Map(blockers.value)
   next.set(key, reason)
@@ -18,6 +23,40 @@ export const unregisterOperationBlocker = (key: string) => {
   const next = new Map(blockers.value)
   next.delete(key)
   blockers.value = next
+}
+
+export const registerOperationPolicyCheck = (key: string, check: OperationPolicyCheck) => {
+  const next = new Map(policyChecks.value)
+  next.set(key, check)
+  policyChecks.value = next
+}
+
+export const unregisterOperationPolicyCheck = (key: string) => {
+  const next = new Map(policyChecks.value)
+  next.delete(key)
+  policyChecks.value = next
+}
+
+/**
+ * Capture callbacks rather than their current result. A batch entry or CoW
+ * review can therefore re-evaluate the policy after its source form unmounts.
+ */
+export const captureOperationPolicyChecks = (): OperationPolicyCheck[] =>
+  Array.from(policyChecks.value.values())
+
+export const getOperationPolicyBlockReason = (
+  checks: readonly OperationPolicyCheck[],
+): string | undefined => {
+  for (const check of checks) {
+    const reason = check()
+    if (reason) return reason
+  }
+  return undefined
+}
+
+export const assertOperationPolicyChecks = (checks: readonly OperationPolicyCheck[]) => {
+  const reason = getOperationPolicyBlockReason(checks)
+  if (reason) throw new Error(reason)
 }
 
 export const setOperationMeta = (key: string, meta: Record<string, unknown>) => {

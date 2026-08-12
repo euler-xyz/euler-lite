@@ -66,15 +66,17 @@ export const useTosGuard = () => {
   const tosData = ref<TosData | null>(null)
   const blockerKey = `tos:${++tosGuardInstanceSequence}`
 
-  const tosRequirementState = computed<TosRequirementState>(() => ({
+  const getCurrentTosRequirementState = (): TosRequirementState => ({
     hasWalletAddress: !!address.value,
     enableTosSignature,
     hasSigned: hasSigned.value,
     sessionAccepted: sessionAccepted.value,
     tosLoadFailed: tosLoadFailed.value,
-  }))
+  })
+  const tosRequirementState = computed<TosRequirementState>(getCurrentTosRequirementState)
   const isTermsRequired = computed(() => isTosAcceptanceRequired(tosRequirementState.value))
-  const tosBlockReason = computed(() => getTosBlockReason(tosRequirementState.value))
+  const getCurrentTosBlockReason = () => getTosBlockReason(getCurrentTosRequirementState())
+  const tosBlockReason = computed(getCurrentTosBlockReason)
 
   const tosSignerAddress = computed(() =>
     eulerPeripheryAddresses.value?.termsOfUseSigner as Address | undefined,
@@ -230,4 +232,6 @@ export const useTosGuard = () => {
     tosLoadFailed,
     acceptTerms,
   }))
+
+  return { getBlockReason: getCurrentTosBlockReason }
 }

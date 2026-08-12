@@ -2,6 +2,7 @@ import type { PlanSwapCollateralWithCoWArgs } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { getCowSwapChainConfig } from '~/entities/cowswap'
 import { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
+import type { OperationPolicyCheck } from '~/utils/operationGuardRegistry'
 
 export type CowSwapCollateralSwapExecuteParams = PlanSwapCollateralWithCoWArgs & {
   chainId: number
@@ -10,7 +11,7 @@ export type CowSwapCollateralSwapExecuteParams = PlanSwapCollateralWithCoWArgs &
 export const useCowSwapCollateralSwapExecution = () => {
   const core = useCowSwapExecutionCore()
 
-  const executeAsync = async (params: CowSwapCollateralSwapExecuteParams) => {
+  const executeAsync = async (params: CowSwapCollateralSwapExecuteParams, policyChecks: OperationPolicyCheck[] = []) => {
     const sdk = await getEulerSdkFresh()
     const plan = sdk.executionService.planSwapCollateralWithCoW(params)
     const chainConfig = getCowSwapChainConfig(params.chainId)
@@ -22,7 +23,7 @@ export const useCowSwapCollateralSwapExecution = () => {
       cancellationMode: 'cow-api',
       orderbookUrl: chainConfig.orderbookUrl,
       settlementContract: chainConfig.settlementContract,
-    })
+    }, policyChecks)
   }
 
   return {

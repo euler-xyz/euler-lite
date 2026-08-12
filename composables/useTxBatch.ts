@@ -33,6 +33,12 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import {
+  assertOperationPolicyChecks,
+  captureOperationPolicyChecks,
+  getOperationPolicyBlockReason,
+  type OperationPolicyCheck,
+} from '~/utils/operationGuardRegistry'
 
 export interface BatchWalletChange {
   token: string
@@ -134,6 +140,8 @@ export interface BatchEntry {
   refreshExternalMigrationPositions?: boolean
   /** Stable claim identifier for reward rows already queued in the batch. */
   rewardClaimKey?: string
+  /** Live checks captured while the source operation guard is still mounted. */
+  policyChecks: OperationPolicyCheck[]
 }
 
 type BatchEntryBuildResult = TransactionPlan | {
@@ -141,7 +149,7 @@ type BatchEntryBuildResult = TransactionPlan | {
   stateOverrides?: StateOverride
 }
 
-type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
+type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan' | 'policyChecks'>
 
 export type BatchEntryInput = BatchEntryInputBase & (
   {
@@ -2066,6 +2074,7 @@ export const useTxBatch = () => {
   }
 
   const addEntry = async (entry: BatchEntryInput) => {
+    const policyChecks = captureOperationPolicyChecks()
     // Ignore a rapid duplicate click while an identical add is still in flight
     // (same target sub-account + label). Sequential re-adds are unaffected — the
     // signature is released once the add settles.
@@ -2120,6 +2129,7 @@ export const useTxBatch = () => {
         ...fixedEntry,
         ...(builtStateOverrides ? { stateOverrides: builtStateOverrides } : {}),
         plan,
+        policyChecks,
         id: `entry-${++idSeq}`,
       }]
       logBatchDiag('addEntry:added', { label: entry.label, newEntryCount: entries.value.length })
@@ -2334,7 +2344,7 @@ export const useTxBatch = () => {
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
     // real `batch` tx would revert, so refuse to send.
-    if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
+    if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value || policyBlockReason.value) return
     execError.value = undefined
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
@@ -2348,6 +2358,9 @@ export const useTxBatch = () => {
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
       const prepared = await prepareTransactionPlan(executionPlan)
+      // The final gate runs after every asynchronous prerequisite and planning
+      // step, immediately before the wallet-facing execution call.
+      assertOperationPolicyChecks(entries.value.flatMap(entry => entry.policyChecks))
       await executePreparedPlan(prepared)
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
@@ -2372,6 +2385,13 @@ export const useTxBatch = () => {
   // funding). Surfaced as "Not enough balance" and blocks execution — the
   // simulation forges balances, so without this the cart would look executable.
   const hasInsufficientBalance = computed(() => walletShortfalls.value.length > 0)
+  const policyBlockReason = computed(() => {
+    for (const entry of entries.value) {
+      const reason = getOperationPolicyBlockReason(entry.policyChecks)
+      if (reason) return reason
+    }
+    return undefined
+  })
   // Human-readable shortfall, e.g. "Not enough wallet balance. Missing 0.01 wstETH".
   // The batch still simulates (balances are forged) — this just explains why it
   // can't execute, mirroring how a failed health check blocks an otherwise-valid
@@ -2393,7 +2413,8 @@ export const useTxBatch = () => {
     && !isExecuting.value
     && !hasFailedOps.value
     && !simError.value
-    && !hasInsufficientBalance.value,
+    && !hasInsufficientBalance.value
+    && !policyBlockReason.value,
   )
 
   // Net wallet balance changes from real (layer 0) to the *final* layer — the
@@ -2465,6 +2486,7 @@ export const useTxBatch = () => {
     execError,
     hasFailedOps,
     canExecuteBatch,
+    policyBlockReason,
     hasInsufficientBalance,
     insufficientBalanceMessage,
     walletShortfalls,

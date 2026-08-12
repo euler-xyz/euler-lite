@@ -30,6 +30,7 @@ const {
   isExecuting,
   isSimulating,
   canExecuteBatch,
+  policyBlockReason,
   hasFailedOps,
   hasInsufficientBalance,
   insufficientBalanceMessage,
@@ -389,6 +390,7 @@ const blockedReason = computed(() => {
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
   if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
   if (simError.value) return 'This batch would revert — resolve the flagged error'
+  if (policyBlockReason.value) return policyBlockReason.value
   return ''
 })
 
