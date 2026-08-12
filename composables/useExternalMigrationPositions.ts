@@ -403,9 +403,9 @@ const readContractsAllowFailure = async (
   }
 }
 
-// Failed root and candidate reads reject the whole Aave fetch rather than
-// decode as "no balance". Unconfigured reserve-data and supply-balance probes
-// may be skipped so an unrelated failure cannot discard confirmed positions.
+// Failed root and configured-position reads reject the whole Aave fetch rather
+// than decode as "no balance". Unconfigured reserve probes and per-asset
+// metadata failures are isolated so they cannot discard confirmed positions.
 const requireReadResult = (result: ContractReadResult | undefined, label: string): unknown => {
   if (result?.status === 'success') return result.result
   const cause = result?.status === 'failure' ? result.error : undefined
@@ -793,14 +793,26 @@ export const useExternalMigrationPositions = (options: {
     )
     const assetsByAddress = new Map<Address, ExternalMigrationAsset>()
     activeAssets.forEach((asset, index) => {
+      const symbolResult = metadataResults[index * 2]
+      const decimalsResult = metadataResults[index * 2 + 1]
+      if (symbolResult?.status !== 'success' || decimalsResult?.status !== 'success') {
+        const field = symbolResult?.status !== 'success' ? 'symbol' : 'decimals'
+        const result = field === 'symbol' ? symbolResult : decimalsResult
+        const cause = result?.status === 'failure' ? result.error : new Error(`Aave ${field} result missing`)
+        logWarn('externalMigration/aaveMetadataSkipped', cause, {
+          data: { asset, field },
+        })
+        return
+      }
+
       assetsByAddress.set(asset, parseAaveAsset(
         asset,
-        requireReadResult(metadataResults[index * 2], `symbol(${asset})`),
-        requireReadResult(metadataResults[index * 2 + 1], `decimals(${asset})`),
+        symbolResult.result,
+        decimalsResult.result,
       ))
     })
 
-    const usdPricesByAsset = await fetchAaveAssetUsdPrices(targetChainId, activeAssets)
+    const usdPricesByAsset = await fetchAaveAssetUsdPrices(targetChainId, [...assetsByAddress.keys()])
 
     const candidates: AaveMigrationCandidate[] = []
     for (const collateralAsset of suppliedAssets) {
