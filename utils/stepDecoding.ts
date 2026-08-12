@@ -37,6 +37,14 @@ export interface DisplayStep {
   assetInfo?: StepAssetInfo
   toAssetInfo?: StepAssetInfo
   iconOnly?: boolean
+  /**
+   * Identity of the underlying encoded transaction, present when the step
+   * maps 1:1 to a concrete transaction. Rows sharing a txKey ARE the same
+   * transaction and may be consolidated in summaries; rows without one must
+   * never be — labels are generic per authorization type, so two different
+   * tokens can share a label while being distinct transactions.
+   */
+  txKey?: string
 }
 
 /** Structurally matches useVaultRegistry().getVault */

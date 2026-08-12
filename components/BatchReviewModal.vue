@@ -162,18 +162,21 @@ const authorizationSummaryGroups = computed(() =>
 // inside the expanded row undercounts the ceremony in the collapsed summary.
 //
 // Rows render in EXECUTION order: restorations unwind in reverse entry order
-// (each entry's own steps are already reversed by the encoder). Rows that
-// resolve to the identical restoration are consolidated — a grant an earlier
-// entry already made resolves to no prerequisite at execution, so its
-// duplicate displayed revoke would never run.
+// (each entry's own steps are already reversed by the encoder). Rows carrying
+// the identical encoded restoration TRANSACTION are consolidated — a grant an
+// earlier entry already made resolves to no prerequisite at execution, so its
+// duplicate displayed revoke would never run. Labels are NOT identity: two
+// different aTokens share "Restore previous aToken approval", so rows without
+// a txKey are never collapsed.
 const postExecutionSummaryRows = computed(() => {
   const rows = [...entries.value].reverse().flatMap(entry =>
     (postStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
   )
   const seen = new Set<string>()
   return rows.filter(({ step }) => {
-    if (seen.has(step.label)) return false
-    seen.add(step.label)
+    if (!step.txKey) return true
+    if (seen.has(step.txKey)) return false
+    seen.add(step.txKey)
     return true
   })
 })

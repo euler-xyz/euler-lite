@@ -139,14 +139,49 @@ describe('encodeMigrationAuthorizationTxs', () => {
   })
 })
 
+const txKeyOf = (to: Address, data: string): string => `${to.toLowerCase()}:0:${data}`
+
 describe('buildMigrationAuthorizationTxSteps', () => {
   it('labels grant and restoration rows per connector', () => {
     expect(buildMigrationAuthorizationTxSteps(aaveApprovalRequest(), 'grant')).toEqual([
-      { index: 1, label: 'Approve aToken transfer', isSeparateTx: true },
+      {
+        index: 1,
+        label: 'Approve aToken transfer',
+        isSeparateTx: true,
+        txKey: txKeyOf(aToken, encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 1000n] })),
+      },
     ])
     expect(buildMigrationAuthorizationTxSteps(morphoAuthorizationRequest(), 'revoke', 4)).toEqual([
-      { index: 4, label: 'Restore previous Morpho authorization', isSeparateTx: true },
+      {
+        index: 4,
+        label: 'Restore previous Morpho authorization',
+        isSeparateTx: true,
+        txKey: txKeyOf(morphoBlue, encodeFunctionData({ abi: setAuthorizationAbi, functionName: 'setAuthorization', args: [swapVerifier, false] })),
+      },
     ])
+  })
+
+  it('keys row identity on the encoded transaction, not the label', () => {
+    const otherAToken = '0x0000000000000000000000000000000000000009' as Address
+    const otherRequest = {
+      ...aaveApprovalRequest(),
+      token: otherAToken,
+      call: { to: otherAToken, abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 1000n] },
+      revocation: { to: otherAToken, abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 250n] },
+    } as unknown as MigrationAuthorizationRequest
+
+    const [first] = buildMigrationAuthorizationTxSteps(aaveApprovalRequest(), 'revoke')
+    const [second] = buildMigrationAuthorizationTxSteps(otherRequest, 'revoke')
+
+    // Two different aTokens share a generic label but are distinct
+    // restoration transactions — consolidating them by label would hide a
+    // real transaction from the batch summary.
+    expect(first!.label).toBe(second!.label)
+    expect(first!.txKey).not.toBe(second!.txKey)
+
+    // Identical requests resolve to the identical transaction identity.
+    const [repeat] = buildMigrationAuthorizationTxSteps(aaveApprovalRequest(), 'revoke')
+    expect(repeat!.txKey).toBe(first!.txKey)
   })
 
   it('orders restoration rows to match the transactions actually sent', () => {
