@@ -668,18 +668,16 @@ export const useExternalMigrationPositions = (options: {
           }
         })
       : []
-    if (userConfiguration === 0n || reserves.length === 0) return []
+    if (reserves.length === 0) return []
 
     const collateralAssets = reserves.filter((_, index) => hasAaveCollateralBit(userConfiguration, index))
     const debtAssets = reserves.filter((_, index) => hasAaveBorrowBit(userConfiguration, index))
-    if (!collateralAssets.length) return []
 
-    const activeAssets = [...new Set([...collateralAssets, ...debtAssets].map(asset => asset.toLowerCase()))]
-      .map(asset => getAddress(asset))
-
+    // Aave's configuration bitmap omits supplies that are not enabled as
+    // collateral, so aToken balances must be checked across every reserve.
     const reserveDataResults = await readContractsAllowFailure(
       client,
-      activeAssets.map(asset => ({
+      reserves.map(asset => ({
         address: pool,
         abi: AAVE_POOL_DISCOVERY_ABI,
         functionName: 'getReserveData',
@@ -688,11 +686,64 @@ export const useExternalMigrationPositions = (options: {
       'externalMigration/aaveReserveMulticall',
     )
     const reserveTokensByAsset = new Map<Address, AaveReserveTokens>()
-    activeAssets.forEach((asset, index) => {
+    reserves.forEach((asset, index) => {
       const tokens = parseAaveReserveTokens(requireReadResult(reserveDataResults[index], `getReserveData(${asset})`))
       if (tokens) reserveTokensByAsset.set(asset, tokens)
     })
 
+    const balanceReadEntries: { kind: 'supply' | 'variableDebt' | 'stableDebt', asset: Address }[] = [
+      ...reserves.map(asset => ({ kind: 'supply' as const, asset })),
+      ...debtAssets.flatMap(asset => [
+        { kind: 'variableDebt' as const, asset },
+        { kind: 'stableDebt' as const, asset },
+      ]),
+    ]
+    const balanceResults = await readContractsAllowFailure(
+      client,
+      balanceReadEntries.flatMap((entry) => {
+        const tokens = reserveTokensByAsset.get(entry.asset)
+        if (!tokens) return []
+        const address = entry.kind === 'supply'
+          ? tokens.aTokenAddress
+          : entry.kind === 'variableDebt'
+            ? tokens.variableDebtTokenAddress
+            : tokens.stableDebtTokenAddress
+        return [{
+          address,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [targetOwner],
+        }]
+      }),
+      'externalMigration/aaveBalancesMulticall',
+    )
+
+    let resultIndex = 0
+    const supplyAmounts = new Map<Address, bigint>()
+    const debtAmounts = new Map<Address, { variableDebt: bigint, stableDebt: bigint }>()
+    for (const entry of balanceReadEntries) {
+      if (!reserveTokensByAsset.has(entry.asset)) continue
+      const amount = parseBigIntAmount(requireReadResult(balanceResults[resultIndex], `balanceOf(${entry.kind}:${entry.asset})`))
+      resultIndex += 1
+      if (entry.kind === 'supply') {
+        supplyAmounts.set(entry.asset, amount)
+        continue
+      }
+      const debt = debtAmounts.get(entry.asset) ?? { variableDebt: 0n, stableDebt: 0n }
+      if (entry.kind === 'variableDebt') debt.variableDebt = amount
+      else debt.stableDebt = amount
+      debtAmounts.set(entry.asset, debt)
+    }
+
+    const suppliedAssets = reserves.filter(asset => (supplyAmounts.get(asset) ?? 0n) > 0n)
+    const borrowedAssets = debtAssets.filter((asset) => {
+      const debt = debtAmounts.get(asset)
+      return !!debt && debt.variableDebt + debt.stableDebt > 0n
+    })
+    if (!suppliedAssets.length) return []
+
+    const activeAssets = [...new Set([...suppliedAssets, ...borrowedAssets].map(asset => asset.toLowerCase()))]
+      .map(asset => getAddress(asset))
     const metadataResults = await readContractsAllowFailure(
       client,
       activeAssets.flatMap(asset => [
@@ -718,59 +769,16 @@ export const useExternalMigrationPositions = (options: {
       ))
     })
 
-    const balanceReadEntries: { kind: 'collateral' | 'variableDebt' | 'stableDebt', asset: Address }[] = [
-      ...collateralAssets.map(asset => ({ kind: 'collateral' as const, asset })),
-      ...debtAssets.flatMap(asset => [
-        { kind: 'variableDebt' as const, asset },
-        { kind: 'stableDebt' as const, asset },
-      ]),
-    ]
-    const balanceResults = await readContractsAllowFailure(
-      client,
-      balanceReadEntries.flatMap((entry) => {
-        const tokens = reserveTokensByAsset.get(entry.asset)
-        if (!tokens) return []
-        const address = entry.kind === 'collateral'
-          ? tokens.aTokenAddress
-          : entry.kind === 'variableDebt'
-            ? tokens.variableDebtTokenAddress
-            : tokens.stableDebtTokenAddress
-        return [{
-          address,
-          abi: erc20Abi,
-          functionName: 'balanceOf',
-          args: [targetOwner],
-        }]
-      }),
-      'externalMigration/aaveBalancesMulticall',
-    )
-
-    let resultIndex = 0
-    const collateralAmounts = new Map<Address, bigint>()
-    const debtAmounts = new Map<Address, { variableDebt: bigint, stableDebt: bigint }>()
-    for (const entry of balanceReadEntries) {
-      if (!reserveTokensByAsset.has(entry.asset)) continue
-      const amount = parseBigIntAmount(requireReadResult(balanceResults[resultIndex], `balanceOf(${entry.kind}:${entry.asset})`))
-      resultIndex += 1
-      if (entry.kind === 'collateral') {
-        collateralAmounts.set(entry.asset, amount)
-        continue
-      }
-      const debt = debtAmounts.get(entry.asset) ?? { variableDebt: 0n, stableDebt: 0n }
-      if (entry.kind === 'variableDebt') debt.variableDebt = amount
-      else debt.stableDebt = amount
-      debtAmounts.set(entry.asset, debt)
-    }
-
     const usdPricesByAsset = await fetchAaveAssetUsdPrices(targetChainId, activeAssets)
 
     const candidates: AaveMigrationCandidate[] = []
-    for (const collateralAsset of collateralAssets) {
-      const collateralAmount = collateralAmounts.get(collateralAsset) ?? 0n
+    for (const collateralAsset of suppliedAssets) {
+      const collateralAmount = supplyAmounts.get(collateralAsset) ?? 0n
       const collateral = assetsByAddress.get(collateralAsset)
       if (collateralAmount <= 0n || !collateral) continue
 
-      if (!debtAssets.length) {
+      const isCollateralEnabled = collateralAssets.includes(collateralAsset)
+      if (!isCollateralEnabled || !borrowedAssets.length) {
         const ref: AavePositionRef = {
           collateralAsset,
           pool,
@@ -798,7 +806,7 @@ export const useExternalMigrationPositions = (options: {
         continue
       }
 
-      for (const debtAsset of debtAssets) {
+      for (const debtAsset of borrowedAssets) {
         const debt = debtAmounts.get(debtAsset) ?? { variableDebt: 0n, stableDebt: 0n }
         const debtAmount = debt.variableDebt + debt.stableDebt
         const debtMeta = assetsByAddress.get(debtAsset)

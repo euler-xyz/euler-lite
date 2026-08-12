@@ -19,6 +19,7 @@ const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const WETH = getAddress('0x4200000000000000000000000000000000000006')
 const AAVE_POOL = getAddress('0xA238Dd80C259a72e81d7e4664a9801593F98d1c5')
 const AAVE_WETH = getAddress('0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7')
+const AAVE_USDC = getAddress('0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB')
 const AAVE_STABLE_DEBT_USDC = getAddress('0x0000000000000000000000000000000000000001')
 const AAVE_VARIABLE_DEBT_USDC = getAddress('0x59dca05b6c26dbd64b5381374aAaC5CD05644C28')
 const MORPHO_ORACLE = getAddress('0xFEa2D58cEfCb9fcb597723c6bAE66fFE4193aFE4')
@@ -408,6 +409,11 @@ describe('useExternalMigrationPositions', () => {
       stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
       variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
     })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
     balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { query?: string }
@@ -449,6 +455,70 @@ describe('useExternalMigrationPositions', () => {
     })
   })
 
+  it('discovers Aave V3 supply-only positions that are not enabled as collateral', async () => {
+    aaveUserConfiguration = 0n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_USDC, 4_000_001n)
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value).toHaveLength(1)
+    expect(result.positions.value[0]).toMatchObject({
+      connectorId: 'aave',
+      protocol: 'Aave V3',
+      id: `aave:${AAVE_POOL}:${USDC}:supply`,
+      owner: OWNER,
+      debt: null,
+      collateral: expect.objectContaining({
+        address: USDC,
+        amount: 4_000_001n,
+        amountUsd: 4.000001,
+        symbol: 'USDC',
+      }),
+    })
+  })
+
+  it('keeps non-collateral supplies separate from debt-backed Aave positions', async () => {
+    aaveUserConfiguration = 6n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
+    balancesByToken.set(AAVE_USDC, 4_000_001n)
+    balancesByToken.set(AAVE_VARIABLE_DEBT_USDC, 1_000_000n)
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => ({ id: position.id, debt: position.debt?.amount ?? null }))).toEqual([
+      { id: `aave:${AAVE_POOL}:${USDC}:supply`, debt: null },
+      { id: `aave:${AAVE_POOL}:${WETH}:${USDC}:variable`, debt: 1_000_000n },
+    ])
+  })
+
   it('sorts discovered positions by net asset or deposit value descending', async () => {
     aaveUserConfiguration = 2n
     aaveReserves = [WETH, USDC]
@@ -456,6 +526,11 @@ describe('useExternalMigrationPositions', () => {
       aTokenAddress: AAVE_WETH,
       stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
       variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
     })
     balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
