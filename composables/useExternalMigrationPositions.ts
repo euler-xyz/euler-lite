@@ -403,9 +403,9 @@ const readContractsAllowFailure = async (
   }
 }
 
-// Failed reads must reject the whole Aave fetch (mirroring the Morpho fetch)
-// rather than decode as "no balance" — otherwise an RPC blip silently makes a
-// real position disappear from discovery with zero observability.
+// Failed root and candidate reads reject the whole Aave fetch rather than
+// decode as "no balance". Individual unconfigured reserve probes may be skipped
+// so an unrelated reserve failure cannot discard already-confirmed positions.
 const requireReadResult = (result: ContractReadResult | undefined, label: string): unknown => {
   if (result?.status === 'success') return result.result
   const cause = result?.status === 'failure' ? result.error : undefined
@@ -686,9 +686,27 @@ export const useExternalMigrationPositions = (options: {
       'externalMigration/aaveReserveMulticall',
     )
     const reserveTokensByAsset = new Map<Address, AaveReserveTokens>()
+    const configuredAssets = new Set(
+      [...collateralAssets, ...debtAssets].map(asset => asset.toLowerCase()),
+    )
     reserves.forEach((asset, index) => {
-      const tokens = parseAaveReserveTokens(requireReadResult(reserveDataResults[index], `getReserveData(${asset})`))
-      if (tokens) reserveTokensByAsset.set(asset, tokens)
+      const result = reserveDataResults[index]
+      const isConfiguredAsset = configuredAssets.has(asset.toLowerCase())
+      if (result?.status !== 'success') {
+        if (isConfiguredAsset) requireReadResult(result, `getReserveData(${asset})`)
+        const cause = result?.status === 'failure' ? result.error : new Error('Aave reserve data result missing')
+        logWarn('externalMigration/aaveReserveDataSkipped', cause, { data: { asset } })
+        return
+      }
+
+      const tokens = parseAaveReserveTokens(result.result)
+      if (!tokens) {
+        const invalidResult = new Error(`Aave discovery read returned invalid reserve data: ${asset}`)
+        if (isConfiguredAsset) throw invalidResult
+        logWarn('externalMigration/aaveReserveDataSkipped', invalidResult, { data: { asset } })
+        return
+      }
+      reserveTokensByAsset.set(asset, tokens)
     })
 
     const balanceReadEntries: { kind: 'supply' | 'variableDebt' | 'stableDebt', asset: Address }[] = [

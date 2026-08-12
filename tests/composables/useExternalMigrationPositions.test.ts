@@ -401,6 +401,62 @@ describe('useExternalMigrationPositions', () => {
     expect(result.error.value).toContain('Aave discovery read failed')
   })
 
+  it('keeps valid Aave and Morpho rows when an unrelated Aave reserve read fails', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([
+      MARKET_ID,
+      `aave:${AAVE_POOL}:${WETH}:supply`,
+    ])
+    expect(result.error.value).toBe('')
+  })
+
+  it('fails Aave discovery when reserve data fails for a configured collateral', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value).toEqual([])
+    expect(result.error.value).toContain(`Aave discovery read failed: getReserveData(${WETH})`)
+  })
+
   it('discovers Aave V3 supply-only positions when the wallet has collateral and no debt', async () => {
     aaveUserConfiguration = 2n
     aaveReserves = [WETH, USDC]
