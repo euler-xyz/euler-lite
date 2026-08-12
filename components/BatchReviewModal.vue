@@ -420,7 +420,7 @@ const handleExecute = async () => {
   // rejects new submissions while a detached proposal is pending.
   const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
   if (!handle) return
-  const run = executeBatch()
+  const run = executeBatch(handle.scope)
   pendingBatchExecution = run
   executionHandle = handle
   try {

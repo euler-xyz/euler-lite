@@ -42,7 +42,7 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
 import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 
@@ -855,8 +855,8 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
-        onConfirm: async () => {
-          await sendMigration(preview)
+        onConfirm: async (execution) => {
+          await sendMigration(execution, preview)
         },
         submittingLabel: 'Migrating...',
       },
@@ -871,7 +871,7 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   }
 }
 
-async function sendMigration(preview: OutgoingMigrationPreview) {
+async function sendMigration(execution: TrackedExecutionScope, preview: OutgoingMigrationPreview) {
   const { input: reviewedInput, account: reviewedAccount, position: migrationPosition, useSignatures } = preview
   const { target } = reviewedInput
   submittingTargetId.value = target.id
@@ -928,9 +928,9 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
     await revokeAfterSuccess(revokeTxs)
     // Success signal for a detached Safe completion toast; suppress the
     // redirect when the proposal confirmed after its modal was closed.
-    markTrackedExecutionSucceeded()
+    execution.markSucceeded()
     schedulePostMigrationRefreshes()
-    if (!shouldSuppressPostTxNavigation()) {
+    if (!execution.suppressPostTxUi()) {
       modal.close()
       setTimeout(() => {
         void router.replace({ path: '/portfolio', query: { network: route.query.network } })

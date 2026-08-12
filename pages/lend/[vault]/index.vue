@@ -36,7 +36,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -578,8 +578,8 @@ const submit = async () => {
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
           swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (execution) => {
+            await send(execution)
           },
         },
       })
@@ -636,7 +636,7 @@ const addToBatch = async () => {
   })
 }
 
-const send = async () => {
+const send = async (execution: TrackedExecutionScope) => {
   try {
     isSubmitting.value = true
     if (!preparedPlan.value) {
@@ -647,9 +647,9 @@ const send = async () => {
 
     // Success signal for a detached Safe completion toast; a proposal that
     // confirmed after its modal was closed must not redirect mid-flow.
-    markTrackedExecutionSucceeded()
+    execution.markSucceeded()
     await updateEstimates()
-    if (!shouldSuppressPostTxNavigation()) {
+    if (!execution.suppressPostTxUi()) {
       modal.close()
       setTimeout(() => {
         router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })

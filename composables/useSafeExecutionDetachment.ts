@@ -24,23 +24,27 @@ const currentExecution = ref<TrackedExecution | null>(null)
 let accountWatcherInitialized = false
 
 /**
- * The flow's success tail reached its finalize point. Recorded on the
- * tracked execution so a detached completion can distinguish "confirmed"
- * from "resolved because the flow swallowed its error".
+ * Execution-bound view handed to the flow a modal confirms. Both members
+ * resolve against the record captured at submission — never the global
+ * slot — so a flow's late asynchronous tail can neither mark a successor
+ * execution as succeeded nor read the successor's suppression state
+ * (the attribution race behind abandonment overlap).
  */
-export const markTrackedExecutionSucceeded = () => {
-  if (currentExecution.value) {
-    currentExecution.value.succeeded = true
-  }
+export interface TrackedExecutionScope {
+  /** This execution's flow reached its finalize point. */
+  markSucceeded: () => void
+  /**
+   * True when this execution was detached or abandoned — its flow tail
+   * must skip navigation and global UI teardown (unscoped modal closes).
+   */
+  suppressPostTxUi: () => boolean
 }
 
-/**
- * True while a detached Safe execution is pending — post-transaction
- * navigation must be suppressed (the user may be mid-flow elsewhere) and new
- * submissions are gated until it resolves.
- */
-export const shouldSuppressPostTxNavigation = () =>
-  currentExecution.value?.detached === true
+/** Inert scope for flows running outside a tracked submission. */
+export const untrackedExecutionScope: TrackedExecutionScope = {
+  markSucceeded: () => {},
+  suppressPostTxUi: () => false,
+}
 
 /**
  * Stop tracking the current execution because its wallet context is gone.
@@ -58,6 +62,8 @@ export const abandonTrackedExecution = () => {
 export interface TrackedExecutionHandle {
   /** Wallet classification latched at submission time. */
   safeAtSubmit: boolean
+  /** Execution-bound success/suppression view to hand to the flow. */
+  scope: TrackedExecutionScope
   /** Hand the execution over to background completion toasts. */
   detach: (execution: Promise<unknown>, options?: { successMessage?: string }) => void
   /** End attached tracking (promise settled while the modal stayed open). */
@@ -122,6 +128,12 @@ export const useSafeExecutionDetachment = () => {
 
     return {
       safeAtSubmit: options.safeAtSubmit,
+      scope: {
+        markSucceeded: () => {
+          record.succeeded = true
+        },
+        suppressPostTxUi: () => record.detached || record.abandoned,
+      },
       detach: (execution, detachOptions) => {
         if (currentExecution.value?.id !== id) return
         record.detached = true
@@ -155,8 +167,6 @@ export const useSafeExecutionDetachment = () => {
 
   return {
     beginTrackedExecution,
-    markTrackedExecutionSucceeded,
-    shouldSuppressPostTxNavigation,
     hasPendingDetachedExecution: computed(() => currentExecution.value?.detached === true),
   }
 }

@@ -55,7 +55,7 @@ describe('useSafeExecutionDetachment', () => {
   })
 
   it('toasts success only when the flow reached its finalize point', async () => {
-    const { detachment, mod } = await importComposable()
+    const { detachment } = await importComposable()
     const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
     let release!: () => void
     const execution = new Promise<void>((resolve) => {
@@ -64,17 +64,16 @@ describe('useSafeExecutionDetachment', () => {
 
     handle.detach(execution)
     expect(detachment.hasPendingDetachedExecution.value).toBe(true)
-    expect(mod.shouldSuppressPostTxNavigation()).toBe(true)
+    expect(handle.scope.suppressPostTxUi()).toBe(true)
 
     // The flow's success tail runs finalize before the promise resolves.
-    mod.markTrackedExecutionSucceeded()
+    handle.scope.markSucceeded()
     release()
     await flush()
 
     expect(toastMocks.success).toHaveBeenCalledWith('Safe transaction confirmed')
     expect(toastMocks.warning).not.toHaveBeenCalled()
     expect(detachment.hasPendingDetachedExecution.value).toBe(false)
-    expect(mod.shouldSuppressPostTxNavigation()).toBe(false)
   })
 
   it('warns instead of confirming when the execution resolves without finalize', async () => {
@@ -121,7 +120,7 @@ describe('useSafeExecutionDetachment', () => {
   })
 
   it('refuses to overwrite a live attended execution', async () => {
-    const { detachment, mod } = await importComposable()
+    const { detachment } = await importComposable()
     const first = detachment.beginTrackedExecution({ safeAtSubmit: true })!
 
     // A second attended submission must not steal the slot: the first
@@ -135,18 +134,18 @@ describe('useSafeExecutionDetachment', () => {
       release = resolve
     }))
     expect(detachment.hasPendingDetachedExecution.value).toBe(true)
-    mod.markTrackedExecutionSucceeded()
+    first.scope.markSucceeded()
     release()
     await flush()
     expect(toastMocks.success).toHaveBeenCalledTimes(1)
   })
 
   it('frees the slot when an attended execution settles without detaching', async () => {
-    const { detachment, mod } = await importComposable()
+    const { detachment } = await importComposable()
     const handle = detachment.beginTrackedExecution({ safeAtSubmit: false })!
 
     handle.release()
-    expect(mod.shouldSuppressPostTxNavigation()).toBe(false)
+    expect(handle.scope.suppressPostTxUi()).toBe(false)
     // The next submission can begin immediately.
     expect(detachment.beginTrackedExecution({ safeAtSubmit: true })).not.toBeNull()
   })
@@ -170,7 +169,9 @@ describe('useSafeExecutionDetachment', () => {
     next!.release()
 
     // The abandoned execution's continuation stays silent — no toast for a
-    // wallet that is no longer connected.
+    // wallet that is no longer connected — and its own scope still
+    // suppresses its late tail's navigation/teardown.
+    expect(handle.scope.suppressPostTxUi()).toBe(true)
     release()
     await flush()
     expect(toastMocks.success).not.toHaveBeenCalled()
@@ -187,23 +188,30 @@ describe('useSafeExecutionDetachment', () => {
     expect(detachment.hasPendingDetachedExecution.value).toBe(true)
   })
 
-  it('scopes success marking to the live execution', async () => {
-    const { detachment, mod } = await importComposable()
+  it('scopes success marking to the owning execution across abandonment overlap', async () => {
+    const { detachment } = await importComposable()
     const first = detachment.beginTrackedExecution({ safeAtSubmit: true })!
     let releaseFirst!: () => void
     first.detach(new Promise<void>((resolve) => {
       releaseFirst = resolve
     }))
 
-    // Marks recorded during the detached window belong to that execution —
-    // no attended submission can start (gate), so no ambiguity exists.
-    mod.markTrackedExecutionSucceeded()
-    releaseFirst()
-    await flush()
-    expect(toastMocks.success).toHaveBeenCalledTimes(1)
+    // Wallet switch abandons A and frees the slot for B.
+    wagmiMocks.onChange?.({ address: '0x2000000000000000000000000000000000000000', connector: { id: 'io.metamask' } })
+    const second = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+    let releaseSecond!: () => void
+    second.detach(new Promise<void>((resolve) => {
+      releaseSecond = resolve
+    }))
 
-    // Slot cleared: a later mark with no live execution is a no-op.
-    mod.markTrackedExecutionSucceeded()
-    expect(detachment.hasPendingDetachedExecution.value).toBe(false)
+    // A's late tail marks A's OWN record — never B's. A is abandoned, so no
+    // toast; B resolving unmarked must warn, not falsely confirm.
+    first.scope.markSucceeded()
+    expect(first.scope.suppressPostTxUi()).toBe(true)
+    releaseFirst()
+    releaseSecond()
+    await flush()
+    expect(toastMocks.success).not.toHaveBeenCalled()
+    expect(toastMocks.warning).toHaveBeenCalledTimes(1)
   })
 })
