@@ -113,6 +113,16 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   // gating). First quote to need it computes; subsequent ones await. Reset on
   // each new sweep so a fresh asset selection re-resolves.
   let sweepPrefetchPromise: Promise<PluginPrefetchData | undefined> | null = null
+  // The last sweep's request, replayed when CoW eligibility resolves to true
+  // while the on-screen quote set lacks CoW because of the gate — a sweep made
+  // during the fail-closed Safe-detection window, or one whose CoW cards were
+  // evicted when the gate flipped off. Eviction alone can't be undone locally:
+  // the CoW quote was never fetched (or is stale), so the sweep re-runs.
+  let lastQuoteRequest: {
+    params: SwapQuoteInput
+    requestOptions: SwapQuotesRequestOptions
+    cowGatedOff: boolean
+  } | null = null
   const guard = createRaceGuard()
 
   const sortedQuoteCards = computed(() =>
@@ -373,6 +383,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       quoteAbort = null
     }
     sweepPrefetchPromise = null
+    lastQuoteRequest = null
     guard.next()
     isLoading.value = false
   }
@@ -442,6 +453,13 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     const gen = guard.next()
     sweepPrefetchPromise = null
 
+    const includeCowSwap = shouldIncludeCowSwap()
+    lastQuoteRequest = {
+      params,
+      requestOptions,
+      cowGatedOff: includeCowSwap === false,
+    }
+
     isLoading.value = true
     quoteCards.value = []
     // Preserve user's manual selection — it will be validated against
@@ -453,7 +471,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     providersCount.value = 0
 
     try {
-      const providers = requestOptions.providers ?? await getSwapProviders({ includeCowSwap: shouldIncludeCowSwap() })
+      const providers = requestOptions.providers ?? await getSwapProviders({ includeCowSwap })
       if (guard.isStale(gen)) {
         return
       }
@@ -588,6 +606,19 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   watch(() => shouldIncludeCowSwap(), (includeCowSwap) => {
     if (includeCowSwap === false) {
       hideCowQuoteCards()
+      // The displayed sweep now lacks CoW because of the gate — remember
+      // that so a later return to eligibility replays it.
+      if (lastQuoteRequest) {
+        lastQuoteRequest = { ...lastQuoteRequest, cowGatedOff: true }
+      }
+      return
+    }
+    // Eligibility resolving to true (Safe detection finishing on a regular
+    // wallet, or a switch back to one) must widen a sweep that ran or was
+    // evicted during the gated window — eviction is one-way, so without a
+    // replay the reduced quote set persists until the next input change.
+    if (includeCowSwap === true && lastQuoteRequest?.cowGatedOff) {
+      void requestQuotes(lastQuoteRequest.params, lastQuoteRequest.requestOptions)
     }
   })
 
