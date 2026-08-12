@@ -57,6 +57,7 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
+  migrationAuthorizationPayloadKey,
   type MigrationAuthorizationRevoke,
 } from '~/utils/migrationAuthorizationTxs'
 import {
@@ -113,11 +114,13 @@ const {
   planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
   executePreparedPlan,
+  executePreparedPlanWithPlainCalls,
   executePlan,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
 const { signaturesEnabled } = useSignaturePreference()
+const { isSafeWallet } = useSafeWallet()
 const {
   restorePendingBeforeRetry,
   revokeAfterSuccess,
@@ -1064,8 +1067,11 @@ const buildRefinancePlan = async (
   return planRefinancePosition(input)
 }
 
+const { cowSwapForcedOff } = useCowSwapEligibility()
+
 const canRequestCollateralCowSwap = computed(() =>
-  collateralNeedsSwap.value
+  !cowSwapForcedOff.value
+  && collateralNeedsSwap.value
   && !hasDebtChange.value
   && currentCollateralShares.value > 0n
   && !!getCowSwapChainConfig(currentChainId.value ?? 0),
@@ -2624,6 +2630,12 @@ type PreparedMigrationTenderlySimulation = {
 type InboundExternalMigrationPreview = {
   key: string
   useSignatures: boolean
+  /**
+   * The review showed the authorization riding in ONE atomic Safe proposal.
+   * Latched at review time and revalidated at confirmation — execution must
+   * never silently run a ceremony the user did not review.
+   */
+  bundledReview: boolean
   input: InboundExternalMigrationInput
   account: Account<IHasVaultAddress>
   tenderlySimulation: PreparedMigrationTenderlySimulation
@@ -2831,15 +2843,16 @@ const buildInboundExternalMigrationCalldataPreview = async (
 
 /**
  * Resolve the migration authorization: sign it, or grant it on-chain and return
- * the revokes to send once the batch has settled.
+ * the revokes to send once the batch has settled. Takes the request the
+ * confirmation gate already fetched and validated against the review — never
+ * re-fetches, so what executes is exactly what passed the payload-equality
+ * check.
  */
 const resolveInboundExternalMigrationAuthorization = async (
-  input: InboundExternalMigrationInput,
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
   revokeTxs: MigrationAuthorizationRevoke[],
   useSignatures: boolean,
 ): Promise<SignedMigrationAuthorization | undefined> => {
-  const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-  inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
   // No request means the grant is already live on-chain: nothing to sign, and
   // nothing of ours to revoke afterwards.
   if (!authorizationRequest) return undefined
@@ -2935,6 +2948,7 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
     const preview: InboundExternalMigrationPreview = {
       key,
       useSignatures,
+      bundledReview: !useSignatures && isSafeWallet.value && !!authorizationRequest,
       input,
       account,
       tenderlySimulation: {
@@ -3365,10 +3379,11 @@ const reviewInboundExternalMigration = async () => {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, preview.useSignatures),
-        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, preview.useSignatures),
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
+        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         calldataPrepared: preview.calldataPrepared,
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
+        calldataWrapCalls: buildInboundExternalCalldataWrapCalls(preview.authorizationRequest, preview.bundledReview),
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
@@ -3405,9 +3420,45 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
     })
     if (!await restorePendingBeforeRetry()) return
     inboundExternalPreparedPlan.value = null
+    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+    inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
+
+    // The reviewed ceremony is defined by the authorization payload the modal
+    // displayed and copied. Authorization state can drift between review and
+    // confirmation (an allowance granted or revoked elsewhere, a restore
+    // value that moved) — executing the fresh payload would add or remove
+    // grant/revoke calls the user never reviewed. Drop the cached preview so
+    // the re-review builds against the current state.
+    if (migrationAuthorizationPayloadKey(authorizationRequest) !== migrationAuthorizationPayloadKey(preview.authorizationRequest)) {
+      inboundExternalMigrationPreview.value = null
+      throw new Error('Authorization requirements changed since review — please review the migration again.')
+    }
+
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
-      const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)
+      if (preview.bundledReview) {
+        // The review promised ONE atomic Safe proposal. Revalidate that mode
+        // at confirmation: a wallet that no longer classifies as a Safe must
+        // re-review, never silently receive the sequential multi-proposal
+        // ceremony; a degraded Safe (provider unavailable) throws inside the
+        // bundle helper.
+        if (!isSafeWallet.value) {
+          throw new Error('Wallet changed since review — please review the migration again.')
+        }
+        // bundledReview implies the review carried a request, and payload
+        // equality above pins the fresh one to it — reaching here without
+        // one is drift the gate somehow missed, so fail closed.
+        if (!authorizationRequest) {
+          inboundExternalMigrationPreview.value = null
+          throw new Error('Authorization requirements changed since review — please review the migration again.')
+        }
+        const outcome = await sendInboundExternalMigrationAsSafeBundle(input, authorizationRequest, account, useSignatures)
+        if (outcome === 'aborted') return
+        finishInboundExternalMigrationSuccess(execution, input)
+        return
+      }
+
+      const authorization = await resolveInboundExternalMigrationAuthorization(authorizationRequest, revokeTxs, useSignatures)
       inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
       inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, {
         account,
@@ -3430,22 +3481,7 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
     }
 
     await revokeAfterSuccess(revokeTxs)
-    // Success signal for a detached Safe completion toast; suppress the
-    // redirect when the proposal confirmed after its modal was closed.
-    execution.markSucceeded()
-    schedulePostMigrationRefreshes(input.owner)
-    if (execution.suppressPostTxUi()) return
-    modal.close()
-    // Land on the Positions (or Deposits) list rather than returning to the
-    // external migration route, which no longer has a source position after tx.
-    const redirectPath = input.eulerTarget.borrowVault
-      ? '/portfolio'
-      : input.eulerTarget.collateralVault
-        ? '/portfolio/saving'
-        : '/portfolio'
-    setTimeout(() => {
-      void router.replace({ path: redirectPath, query: { network: route.query.network } })
-    }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+    finishInboundExternalMigrationSuccess(execution, input)
   }
   catch (err) {
     showError(err instanceof Error ? err.message : 'Migration failed')
@@ -3454,6 +3490,88 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
   finally {
     isSubmitting.value = false
   }
+}
+
+/**
+ * The grant/revocation calls the Safe bundle wraps around the migration plan
+ * — surfaced so Copy calldata matches the actual proposal. Empty for
+ * signature-mode migrations and non-Safe wallets (which broadcast them as
+ * standalone transactions instead).
+ */
+function buildInboundExternalCalldataWrapCalls(
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  bundledReview: boolean,
+) {
+  // Driven by the latched review mode, not live detection — displayed and
+  // copied calldata must match the ceremony the confirmation will run.
+  if (!authorizationRequest || !bundledReview) return undefined
+  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
+  return { before: grants, after: revokes }
+}
+
+function finishInboundExternalMigrationSuccess(execution: TrackedExecutionScope, input: InboundExternalMigrationInput) {
+  // Success signal for a detached Safe completion toast; a proposal that
+  // confirmed after its modal was closed must not yank the user mid-flow.
+  // Bound to THIS execution's record.
+  execution.markSucceeded()
+  schedulePostMigrationRefreshes(input.owner)
+  if (execution.suppressPostTxUi()) return
+  modal.close()
+  // Land on the Positions (or Deposits) list rather than returning to the
+  // external migration route, which no longer has a source position after tx.
+  const redirectPath = input.eulerTarget.borrowVault
+    ? '/portfolio'
+    : input.eulerTarget.collateralVault
+      ? '/portfolio/saving'
+      : '/portfolio'
+  setTimeout(() => {
+    void router.replace({ path: redirectPath, query: { network: route.query.network } })
+  }, MODAL_CLOSE_REDIRECT_DELAY_MS)
+}
+
+/**
+ * Execute the inbound migration as one atomic Safe proposal: authorization
+ * grants, the migration batch, and the revocations in a single
+ * wallet_sendCalls bundle. The plan comes from the simulation variant, which
+ * is byte-identical to the execution plan for transaction-kind authorizations
+ * but validates the grant instead of reading the live allowance — so nothing
+ * needs to be mined before the bundle is built. The pre-bundle simulation
+ * runs with the SDK's authorization state overrides for the same reason.
+ *
+ * Returns 'executed' when the bundle confirmed, 'aborted' when the simulation
+ * rejected (nothing on-chain, nothing to unwind), or 'unavailable' when there
+ * is no Safe bundle context — the caller falls back to sequential grants.
+ */
+const sendInboundExternalMigrationAsSafeBundle = async (
+  input: InboundExternalMigrationInput,
+  authorizationRequest: MigrationAuthorizationRequest,
+  account: Account<IHasVaultAddress> | undefined,
+  useSignatures: boolean,
+): Promise<'executed' | 'aborted'> => {
+  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
+  const simulation = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures)
+  const prepared = await prepareTransactionPlan(simulation.plan, {
+    account,
+    chainId: input.position.chainId,
+    usePermit2: false,
+  })
+  inboundExternalPlan.value = simulation.plan
+  inboundExternalPreparedPlan.value = prepared
+  const ok = await runPreparedSimulation(
+    prepared,
+    buildRefinanceStateOverrideOptions(),
+    simulation.stateOverrides,
+  )
+  if (!ok) return 'aborted'
+
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true })
+  if (!result) {
+    // The review showed ONE atomic proposal. A Safe whose provider cannot be
+    // acquired at confirm time must abort loudly, never silently degrade
+    // into the sequential multi-proposal ceremony the user never reviewed.
+    throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
+  }
+  return 'executed'
 }
 
 const addInboundExternalMigrationToBatch = async () => {
@@ -3508,6 +3626,26 @@ const addInboundExternalMigrationToBatch = async () => {
                 postTxsByPreTx: revokesByGrant,
               }
             },
+            // Bundled counterpart for Safe execution: the simulation-variant
+            // plan validates the grant instead of reading the live
+            // allowance, so nothing needs to mine before the proposal is
+            // assembled. The review rows come from the SAME resolution so
+            // the modal cannot display a ceremony other than the one that
+            // executes.
+            buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
+              const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+              const { grants, revokes } = request
+                ? encodeMigrationAuthorizationTxs(request)
+                : { grants: [], revokes: [] }
+              const simulation = await buildInboundExternalMigrationSimulationResult(input, request, account, useSignatures)
+              return {
+                plan: simulation.plan,
+                grants,
+                revokes,
+                grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
+                revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
+              }
+            },
           }),
       stateOverrides: preview.tenderlySimulation.stateOverrides,
       subAccount: input.eulerTarget.eulerAccount,
@@ -3516,8 +3654,10 @@ const addInboundExternalMigrationToBatch = async () => {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures),
-        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures),
+        // Batch prerequisites broadcast as standalone transactions
+        // (sendPlainTransactions), never inside the cart's Safe bundle.
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures, false),
+        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures, false),
         displayPlan: preview.calldataPrepared.plan,
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
@@ -3876,11 +4016,12 @@ function getTypedDataAuthorizationValue(request: MigrationAuthorizationRequest |
 function buildInboundExternalMigrationSignatureSteps(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
+  bundled: boolean,
 ): DisplayStep[] {
   const sourceCollateral = externalCollateralAsset.value
   if (!sourceCollateral) return []
   if (!useSignatures) {
-    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant')
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled })
   }
   if (inboundExternalAuthorizationConnector.value === AAVE_CONNECTOR_ID) {
     const permitValue = getTypedDataAuthorizationValue(authorizationRequest)
@@ -3917,9 +4058,10 @@ function buildInboundExternalMigrationSignatureSteps(
 function buildInboundExternalMigrationRevokeSteps(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
+  bundled: boolean,
 ): DisplayStep[] {
   if (!authorizationRequest || useSignatures) return []
-  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke')
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled })
 }
 
 function getRoutedVia(provider: string | null, quote: SwapQuote | null): string | null {

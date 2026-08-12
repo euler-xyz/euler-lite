@@ -46,6 +46,9 @@ const {
   fetchTenderlyEnabled,
   simulateOnTenderly,
   dismissExecutionError,
+  willBundlePrerequisites,
+  prepareBundledExecution,
+  latchedBundledExecution,
 } = useTxBatch()
 
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
@@ -91,17 +94,32 @@ const isExternalProtocolMigrationReview = (review: ReviewWithSteps | undefined):
 const normalizeDisplaySteps = (steps: DisplayStep[] | undefined): DisplayStep[] =>
   (steps ?? []).map((step, idx) => ({ ...step, index: idx + 1 }))
 
+// When a Safe will execute the cart, bundled-capable prerequisites ride in
+// the batch proposal — the rows captured at add-time say "Separate tx", so
+// override the flag at display time to describe the actual ceremony.
+const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[number]): DisplayStep[] =>
+  willBundlePrerequisites.value && entry.buildBundledExecution
+    ? steps.map(step => ({ ...step, isSeparateTx: false }))
+    : steps
+
 const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  // A latched bundled ceremony carries its own rows, derived from the SAME
+  // authorization resolution the proposal executes — the add-time captures
+  // can be stale (authorization state drifts between add and review).
+  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
+  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.grantSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
-    ? normalizeDisplaySteps(review?.signatureSteps)
+    ? overrideBundled(normalizeDisplaySteps(review?.signatureSteps), entry)
     : []
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
+  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.revokeSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
-    ? normalizeDisplaySteps(review?.postSteps)
+    ? overrideBundled(normalizeDisplaySteps(review?.postSteps), entry)
     : []
 }
 
@@ -143,22 +161,39 @@ const postStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   return out
 })
 
-const signatureStepsHeading = (entryId: string): string =>
-  getAuthorizationStepDisplay(
+// Keys on the LATCHED resolution (what this modal session resolved,
+// displayed, and will execute) — never on live wallet classification.
+const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
+  latchedBundledExecution.value !== null && !!entry.buildBundledExecution
+
+const signatureStepsHeading = (entryId: string): string => {
+  const entry = entries.value.find(candidate => candidate.id === entryId)
+  if (entry && isBundledEntry(entry)) return 'Authorization transactions'
+  return getAuthorizationStepDisplay(
     (signatureStepsByEntryId.value[entryId] ?? []).some(step => step.isSeparateTx),
   ).detailHeading
+}
 
 const authorizationRows = computed(() =>
   entries.value.flatMap(entry =>
-    (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
+    (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step, bundledTx: isBundledEntry(entry) })),
   ),
 )
-const authorizationSummaryGroups = computed(() =>
-  [true, false].map((isSeparateTx) => {
-    const rows = authorizationRows.value.filter(({ step }) => step.isSeparateTx === isSeparateTx)
-    return { rows, display: getAuthorizationStepDisplay(isSeparateTx) }
-  }).filter(({ rows }) => rows.length),
-)
+// Three ceremonies, three groups: standalone transactions, transactions
+// riding in the Safe proposal, and wallet signatures.
+const authorizationSummaryGroups = computed(() => {
+  const rows = authorizationRows.value
+  const groups: Array<{ rows: typeof rows, display: { summaryHeading: string, itemCountLabel: string } }> = []
+  const separate = rows.filter(({ step }) => step.isSeparateTx)
+  if (separate.length) groups.push({ rows: separate, display: getAuthorizationStepDisplay(true) })
+  const bundled = rows.filter(({ step, bundledTx }) => !step.isSeparateTx && bundledTx)
+  if (bundled.length) {
+    groups.push({ rows: bundled, display: { summaryHeading: 'Authorization transactions', itemCountLabel: 'bundled in proposal' } })
+  }
+  const signatures = rows.filter(({ step, bundledTx }) => !step.isSeparateTx && !bundledTx)
+  if (signatures.length) groups.push({ rows: signatures, display: getAuthorizationStepDisplay(false) })
+  return groups
+})
 
 // Post-execution transactions (e.g. a migration's approval restoration) are
 // real wallet transactions sent after the batch settles. Surfacing them only
@@ -340,6 +375,9 @@ onMounted(async () => {
   isPreparing.value = true
   prepareError.value = ''
   try {
+    // Resolve the bundled ceremony once for this review session: the same
+    // resolution drives the rows, Copy calldata, and execution.
+    await prepareBundledExecution()
     const prepared = await prepareBatchPlan()
     preparedPlanRef.value = prepared?.plan
     const known = buildKnownSymbols()
@@ -381,6 +419,12 @@ const copyCalldata = async () => {
     const cid = chainId.value
     const sdk = await getEulerSdkForChain(cid)
     const out: { to: string, data: string, value: string }[] = []
+    // The latched Safe proposal wraps the plan with grants/revocations —
+    // the copied JSON must match the actual submission.
+    const latched = latchedBundledExecution.value
+    for (const call of latched?.grants ?? []) {
+      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
+    }
     for (const item of plan) {
       if (item.type === 'requiredApproval') {
         for (const r of item.resolved ?? []) {
@@ -403,6 +447,9 @@ const copyCalldata = async () => {
           value: item.value.toString(),
         })
       }
+    }
+    for (const call of latched?.revokes ?? []) {
+      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
     }
     copyToClipboard(JSON.stringify(out, null, 2), 'calldata')
   }
@@ -690,7 +737,7 @@ const onCloseRequested = () => {
               />
               <span class="truncate">{{ step.label }}</span>
             </span>
-            <span class="text-p3 text-content-tertiary shrink-0">{{ step.isSeparateTx ? '1 transaction' : 'bundled' }}</span>
+            <span class="text-p3 text-content-tertiary shrink-0">{{ step.isSeparateTx ? '1 transaction' : 'bundled in proposal' }}</span>
           </div>
         </div>
       </div>

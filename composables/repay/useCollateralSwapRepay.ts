@@ -90,6 +90,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
   const { entryCount: batchEntryCount, getMergedPlan } = useTxBatch()
+  const { cowSwapForcedOff } = useCowSwapEligibility()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, getBorrowRewardApyForCollaterals } = useRewardsApy()
@@ -158,7 +159,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     slippage,
     clearSimulationError,
     getCurrentDebt,
-    includeCowSwap: () => batchEntryCount.value === 0,
+    includeCowSwap: () => !cowSwapForcedOff.value && batchEntryCount.value === 0,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
     buildGasEstimatePlan: buildBatchAwareGasEstimatePlan,
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
