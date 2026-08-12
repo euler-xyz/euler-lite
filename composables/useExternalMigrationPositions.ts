@@ -838,9 +838,9 @@ export const useExternalMigrationPositions = (options: {
   }
 
   const fetchMorphoMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<(MorphoMigrationCandidate | MetamorphoMigrationCandidate)[]> => {
-    // Morpho's indexer only covers a fixed set of chains. Querying an unindexed
-    // chain (e.g. BSC) returns an "unsupported chainId" error that would surface
-    // as a scan failure, so treat those chains as "nothing to migrate" instead.
+    // Enable discovery only where Morpho indexing, the SDK connector, and Euler
+    // migration infrastructure are all available. Treat every other chain as
+    // "nothing to migrate" instead of surfacing an upstream support error.
     if (!MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS.has(targetChainId)) return []
     try {
       const res = await fetch('/api/internal/proxy/morpho', {
