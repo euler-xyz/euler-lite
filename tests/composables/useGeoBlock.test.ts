@@ -119,6 +119,11 @@ describe('operation geo policy', () => {
     expect(getVaultOperationGeoBlockReason([USDC])).toBe(GEO_POLICY_PENDING_REASON)
   })
 
+  it('blocks state-changing operations when country detection completes without a country', () => {
+    setCountry(null)
+    expect(getVaultOperationGeoBlockReason([])).toBe(GEO_POLICY_BLOCKED_REASON)
+  })
+
   it('reacts when the active country blocks a reviewed vault', () => {
     const vault = '0x1111111111111111111111111111111111111111'
     getVaultMock.mockReturnValue({

@@ -52,6 +52,8 @@ export const useAddressScreen = () => {
 
       const addressIsRestricted = await screenAddress(address, vpnIsUsed)
       if (gen !== screeningGeneration) return false
+      // Both signals are independently blocking: policy does not treat a clean
+      // address-screen response as an override for locally detected VPN use.
       const isRestricted = vpnIsUsed || addressIsRestricted
 
       if (isRestricted) {

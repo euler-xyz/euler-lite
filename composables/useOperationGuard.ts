@@ -9,7 +9,16 @@ import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getVaultOperationGeoBlockReason } from '~/composables/useGeoBlock'
 
-export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[]) => {
+export interface OperationGuardOptions {
+  /** Exit-only actions such as lending withdrawals and debt repayment remain
+   * available even when regional policy blocks new or increased exposure. */
+  enforceGeo?: boolean
+}
+
+export const useOperationGuard = (
+  vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[],
+  options: OperationGuardOptions = {},
+) => {
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
 
@@ -25,7 +34,9 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
   useUnverifiedVaultGuard(addresses)
 
   // --- Geo guard ---
-  const geoBlockReason = computed(() => getVaultOperationGeoBlockReason(addresses.value))
+  const geoBlockReason = computed(() => options.enforceGeo === false
+    ? undefined
+    : getVaultOperationGeoBlockReason(addresses.value))
   watch(geoBlockReason, (reason) => {
     if (reason) registerOperationBlocker('geo', reason)
     else unregisterOperationBlocker('geo')
