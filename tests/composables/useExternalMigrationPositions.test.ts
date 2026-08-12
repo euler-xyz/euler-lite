@@ -439,6 +439,58 @@ describe('useExternalMigrationPositions', () => {
     expect(result.error.value).toBe('')
   })
 
+  it('keeps valid Aave and Morpho rows when an unrelated Aave supply balance read fails', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
+    const baseReadContract = readContract.getMockImplementation() as (
+      call: { address: Address, functionName: string, args?: readonly unknown[] },
+    ) => Promise<unknown>
+    readContract.mockImplementation(async (call: { address: Address, functionName: string, args?: readonly unknown[] }) => {
+      if (call.functionName === 'balanceOf' && getAddress(call.address) === AAVE_USDC) {
+        throw new Error('unrelated USDC balance failure')
+      }
+      return baseReadContract(call)
+    })
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([
+      MARKET_ID,
+      `aave:${AAVE_POOL}:${WETH}:supply`,
+    ])
+    expect(result.error.value).toBe('')
+  })
+
   it('fails Aave discovery when reserve data fails for a configured collateral', async () => {
     aaveUserConfiguration = 2n
     aaveReserves = [WETH, USDC]

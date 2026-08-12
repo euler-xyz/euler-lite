@@ -404,8 +404,8 @@ const readContractsAllowFailure = async (
 }
 
 // Failed root and candidate reads reject the whole Aave fetch rather than
-// decode as "no balance". Individual unconfigured reserve probes may be skipped
-// so an unrelated reserve failure cannot discard already-confirmed positions.
+// decode as "no balance". Unconfigured reserve-data and supply-balance probes
+// may be skipped so an unrelated failure cannot discard confirmed positions.
 const requireReadResult = (result: ContractReadResult | undefined, label: string): unknown => {
   if (result?.status === 'success') return result.result
   const cause = result?.status === 'failure' ? result.error : undefined
@@ -741,8 +741,21 @@ export const useExternalMigrationPositions = (options: {
     const debtAmounts = new Map<Address, { variableDebt: bigint, stableDebt: bigint }>()
     for (const entry of balanceReadEntries) {
       if (!reserveTokensByAsset.has(entry.asset)) continue
-      const amount = parseBigIntAmount(requireReadResult(balanceResults[resultIndex], `balanceOf(${entry.kind}:${entry.asset})`))
+      const result = balanceResults[resultIndex]
       resultIndex += 1
+      if (result?.status !== 'success') {
+        const isConfiguredAsset = configuredAssets.has(entry.asset.toLowerCase())
+        if (entry.kind !== 'supply' || isConfiguredAsset) {
+          requireReadResult(result, `balanceOf(${entry.kind}:${entry.asset})`)
+        }
+        const cause = result?.status === 'failure' ? result.error : new Error('Aave balance result missing')
+        logWarn('externalMigration/aaveBalanceSkipped', cause, {
+          data: { asset: entry.asset, kind: entry.kind },
+        })
+        continue
+      }
+
+      const amount = parseBigIntAmount(result.result)
       if (entry.kind === 'supply') {
         supplyAmounts.set(entry.asset, amount)
         continue
