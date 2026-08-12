@@ -218,6 +218,20 @@ interface PendingSafeBatchSubmission {
   refreshExternalMigrationPositions: boolean
   grantedRevokes: MigrationAuthorizationRevoke[]
 }
+
+export const isPendingSafeSubmissionForContext = (
+  pending: PendingSafeBatchSubmission | null,
+  account: string | undefined,
+  currentChainId: number | undefined,
+): boolean => {
+  if (!pending || !account || !currentChainId) return false
+  try {
+    return getAddress(account) === pending.account && currentChainId === pending.chainId
+  }
+  catch {
+    return false
+  }
+}
 const pendingSafeSubmission = shallowRef<PendingSafeBatchSubmission | null>(null)
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
@@ -1988,6 +2002,11 @@ export const useTxBatch = () => {
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
+        // A Safe submission is scoped to the owner/network that created it.
+        // Never let that stale lock disable a fresh cart after context drift.
+        if (!isPendingSafeSubmissionForContext(pendingSafeSubmission.value, owner.value, chainId.value)) {
+          pendingSafeSubmission.value = null
+        }
         resimToken++
         entries.value = []
         layers.value = []
@@ -2361,6 +2380,7 @@ export const useTxBatch = () => {
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let shouldRefreshExternalMigrationPositions = false
+    let batchExecutionStarted = false
     try {
       if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
@@ -2371,6 +2391,7 @@ export const useTxBatch = () => {
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
       const prepared = await prepareTransactionPlan(executionPlan)
+      batchExecutionStarted = true
       await executePreparedPlan(prepared)
       clearBatchInternal(true)
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
@@ -2379,7 +2400,7 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      if (error instanceof SafeTransactionStatusUnknownError && owner.value && chainId.value) {
+      if (batchExecutionStarted && error instanceof SafeTransactionStatusUnknownError && owner.value && chainId.value) {
         pendingSafeSubmission.value = {
           submittedHash: error.submittedHash,
           account: getAddress(owner.value),

@@ -386,10 +386,12 @@ const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyEr
 const isConfirmDisabled = computed(() =>
   isSpyMode.value
   || isExecuting.value
-  || isPreparing.value
-  || isSimulating.value
-  || (!pendingSafeSubmission.value && !canExecuteBatch.value)
-  || !!prepareError.value,
+  || (!pendingSafeSubmission.value && (
+    isPreparing.value
+    || isSimulating.value
+    || !canExecuteBatch.value
+    || !!prepareError.value
+  )),
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
@@ -722,7 +724,7 @@ const handleClose = () => {
           size="xlarge"
           rounded
           :disabled="isConfirmDisabled"
-          :loading="isExecuting || isPreparing"
+          :loading="isExecuting || (!pendingSafeSubmission && isPreparing)"
           data-testid="batch-review-execute"
           @click="handleExecute"
         >

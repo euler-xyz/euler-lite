@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type Hash, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { awaitFinalPlanningLayer, buildWalletBalanceLayers, buildWalletChanges, fetchBaseAccountSnapshot, isPendingSafeSubmissionForContext, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
   mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
@@ -1350,6 +1350,37 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.pendingSafeSubmission.value).toBeNull()
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('does not misclassify an unresolved prerequisite Safe transaction as the atomic batch', async () => {
+    const batch = useTxBatch()
+    const prerequisiteHash = `0x${'34'.repeat(32)}` as Hash
+    eulerTxMocks.sendPlainTransactions.mockRejectedValue(
+      new SafeTransactionStatusUnknownError(prerequisiteHash, 'timeout'),
+    )
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('timed out')
+  })
+})
+
+describe('isPendingSafeSubmissionForContext', () => {
+  const pending = {
+    submittedHash: `0x${'56'.repeat(32)}` as Hash,
+    account: owner,
+    chainId: 1,
+    refreshExternalMigrationPositions: false,
+    grantedRevokes: [],
+  }
+
+  it('keeps a Safe lock only for the owner and chain that created it', () => {
+    expect(isPendingSafeSubmissionForContext(pending, owner, 1)).toBe(true)
+    expect(isPendingSafeSubmissionForContext(pending, subAccount, 1)).toBe(false)
+    expect(isPendingSafeSubmissionForContext(pending, owner, 8453)).toBe(false)
   })
 })
 

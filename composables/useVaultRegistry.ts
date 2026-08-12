@@ -169,6 +169,9 @@ const clear = (): void => {
   escrowAddressesByChain.delete(chainId)
   escrowVersion.value++
   resolutionGenerations.set(chainId, getResolutionGeneration(chainId) + 1)
+  for (const key of pendingResolutions.keys()) {
+    if (key.startsWith(`${chainId}:`)) pendingResolutions.delete(key)
+  }
   registryVersion.value++
 }
 

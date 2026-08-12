@@ -86,4 +86,29 @@ describe('useVaultRegistry chain-scoped identity', () => {
     chainId.value = 1
     expect(registry.get(VAULT)).toBeUndefined()
   })
+
+  it('starts a fresh resolution after clearing the active chain', async () => {
+    fetchVaultCategoryMock
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce('evk')
+    const fetchVault = vi.fn(async () => ({
+      result: vault(1, ASSET_ONE),
+      errors: [],
+    }))
+    vi.stubGlobal('useEulerSdk', () => ({
+      getEulerSdkForChain: vi.fn(async () => ({
+        eVaultService: { fetchVault },
+      })),
+    }))
+    const registry = useVaultRegistry()
+
+    void registry.getOrFetch(VAULT)
+    await Promise.resolve()
+    registry.clear()
+
+    await expect(registry.getOrFetch(VAULT)).resolves.toMatchObject({
+      asset: { address: ASSET_ONE },
+    })
+    expect(fetchVaultCategoryMock).toHaveBeenCalledTimes(2)
+  })
 })

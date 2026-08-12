@@ -74,6 +74,10 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
 } as const
 type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
 
+export const isSuccessfulTransactionReceipt = (
+  receipt: Pick<TransactionReceipt, 'status'>,
+): boolean => receipt.status === 'success'
+
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
   const id = connector.id?.toLowerCase() ?? ''
@@ -1550,6 +1554,9 @@ export const useEulerTx = () => {
         publicClient: provider as ReceiptClientLike,
         timeoutMs,
       })
+      if (!isSuccessfulTransactionReceipt(execution.receipt)) {
+        return { status: 'not-executed' }
+      }
       finalizeExecution({ receipts: [execution.receipt] })
       return { status: 'executed', receipt: execution.receipt }
     }

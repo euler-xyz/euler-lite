@@ -4,7 +4,7 @@ import { Account, type MigrationAuthorizationRequest, type TransactionPlan, type
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { useEulerTx } from '~/composables/useEulerTx'
+import { isSuccessfulTransactionReceipt, useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 
@@ -37,6 +37,13 @@ const SWAP_VERIFIER = getAddress('0x4000000000000000000000000000000000000000')
 const VAULT = getAddress('0x5000000000000000000000000000000000000000')
 const OTHER_TOKEN = getAddress('0x6000000000000000000000000000000000000000')
 const GRANT_HASH = `0x${'11'.repeat(32)}` as Hash
+
+describe('isSuccessfulTransactionReceipt', () => {
+  it('rejects reverted receipts during Safe reconciliation', () => {
+    expect(isSuccessfulTransactionReceipt({ status: 'success' })).toBe(true)
+    expect(isSuccessfulTransactionReceipt({ status: 'reverted' })).toBe(false)
+  })
+})
 
 const authorizationRequest = {
   kind: 'transaction',
