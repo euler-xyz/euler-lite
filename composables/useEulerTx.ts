@@ -1462,7 +1462,11 @@ export const useEulerTx = () => {
 
   const executePreparedPlan = async (
     prepared: TransactionPlanPrepared,
-    options?: { onProgress?: (progress: TransactionPlanExecutionProgress) => void },
+    options?: {
+      onProgress?: (progress: TransactionPlanExecutionProgress) => void
+      /** Fires as soon as a Safe provider returns its submitted Safe hash, before confirmation polling. */
+      onSafeSubmission?: (submittedHash: Hash) => void
+    },
   ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1485,11 +1489,14 @@ export const useEulerTx = () => {
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
       resolveHash: safeWalletProvider
-        ? async submittedHash => (await waitForSafeTransactionExecution({
-          submittedHash,
-          walletProvider: safeWalletProvider,
-          publicClient: provider as ReceiptClientLike,
-        })).hash
+        ? async (submittedHash) => {
+          options?.onSafeSubmission?.(submittedHash)
+          return (await waitForSafeTransactionExecution({
+            submittedHash,
+            walletProvider: safeWalletProvider,
+            publicClient: provider as ReceiptClientLike,
+          })).hash
+        }
         : undefined,
     })
 

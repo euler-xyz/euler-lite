@@ -3514,6 +3514,7 @@ const addInboundExternalMigrationToBatch = async () => {
         signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures),
         postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures),
         displayPlan: preview.calldataPrepared.plan,
+        calldataUsesPlaceholderSignatures: useSignatures && !!preview.authorizationRequest,
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,

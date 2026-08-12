@@ -1,6 +1,6 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { formatUnits, getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
-import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
+import { Account, fetchErc20SlotHints, flattenBatchEntries, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
   Portfolio,
@@ -8,6 +8,7 @@ import type {
   PortfolioSavingsPosition,
   SlotHints,
   TransactionPlan,
+  TransactionPlanPrepared,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -34,6 +35,13 @@ import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFi
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import { SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
+import { requireReviewedBatchPreparedExecution, type ReviewedSignaturePlaceholderCall } from '~/utils/reviewed-batch-execution'
+import {
+  getPreparedBatchFingerprint,
+  loadPendingSafeBatchSubmissions,
+  savePendingSafeBatchSubmissions,
+  type PersistedPendingSafeBatchSubmission,
+} from '~/utils/pending-safe-batch-submission'
 
 export interface BatchWalletChange {
   token: string
@@ -215,11 +223,15 @@ interface PendingSafeBatchSubmission {
   submittedHash: Hash
   account: Address
   chainId: number
+  batchFingerprint: string
+  batchPlan: TransactionPlan
   entries: BatchEntry[]
   errorMessage: string
   terminalStatus?: 'not-executed' | 'reverted'
   refreshExternalMigrationPositions: boolean
   grantedRevokes: MigrationAuthorizationRevoke[]
+  /** Reloaded locks retain serializable reconciliation state, but not cart builders. */
+  hydrated?: boolean
 }
 
 export const isPendingSafeSubmissionForContext = (
@@ -236,6 +248,56 @@ export const isPendingSafeSubmissionForContext = (
   }
 }
 const pendingSafeSubmissions = shallowRef<PendingSafeBatchSubmission[]>([])
+let pendingSafeSubmissionsHydrated = false
+
+const getPendingSafeStorage = (): Storage | undefined => {
+  if (!import.meta.client) return undefined
+  try {
+    return window.localStorage
+  }
+  catch {
+    return undefined
+  }
+}
+
+const persistPendingSafeSubmissionLocks = () => {
+  const storage = getPendingSafeStorage()
+  if (!storage) return
+  const persisted: PersistedPendingSafeBatchSubmission[] = pendingSafeSubmissions.value
+    .filter(pending => !pending.terminalStatus)
+    .map(pending => ({
+      submittedHash: pending.submittedHash,
+      account: pending.account,
+      chainId: pending.chainId,
+      batchFingerprint: pending.batchFingerprint,
+      batchPlan: pending.batchPlan,
+      errorMessage: pending.errorMessage,
+      refreshExternalMigrationPositions: pending.refreshExternalMigrationPositions,
+      grantedRevokes: pending.grantedRevokes,
+    }))
+  try {
+    savePendingSafeBatchSubmissions(storage, persisted)
+  }
+  catch (error) {
+    logWarn('useTxBatch/persistPendingSafe', error)
+  }
+}
+
+const hydratePendingSafeSubmissionLocks = () => {
+  if (pendingSafeSubmissionsHydrated) return
+  const storage = getPendingSafeStorage()
+  if (!storage) return
+  pendingSafeSubmissionsHydrated = true
+  pendingSafeSubmissions.value = loadPendingSafeBatchSubmissions(storage).map(pending => ({
+    ...pending,
+    entries: [{
+      id: `pending-safe-${pending.submittedHash}`,
+      label: 'Pending Safe batch',
+      plan: pending.batchPlan,
+    }],
+    hydrated: true,
+  }))
+}
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
@@ -1639,6 +1701,7 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 }
 
 export const useTxBatch = () => {
+  hydratePendingSafeSubmissionLocks()
   const { chainId: wagmiChainId } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
@@ -1670,10 +1733,12 @@ export const useTxBatch = () => {
       ),
       pending,
     ]
+    persistPendingSafeSubmissionLocks()
   }
   const clearPendingSafeSubmission = (pending: PendingSafeBatchSubmission | null) => {
     if (!pending) return
     pendingSafeSubmissions.value = pendingSafeSubmissions.value.filter(existing => existing !== pending)
+    persistPendingSafeSubmissionLocks()
   }
   const {
     prepareTransactionPlan,
@@ -2320,7 +2385,11 @@ export const useTxBatch = () => {
    *  modal can list the approvals the user will be asked to sign. */
   const prepareBatchPlan = async () => {
     if (!lastMerged) return null
-    return prepareTransactionPlan(lastMerged)
+    const sdk = await getEulerSdkFresh()
+    const reviewPlans = entries.value.map(entry =>
+      (entry.review?.displayPlan as TransactionPlan | undefined) ?? entry.plan,
+    )
+    return prepareTransactionPlan(sdk.executionService.mergePlans(reviewPlans))
   }
 
   const getExecutionPlanningAccount = async (entryIndex: number): Promise<Account<IHasVaultAddress>> => {
@@ -2356,6 +2425,20 @@ export const useTxBatch = () => {
     }
     return sdk.executionService.mergePlans(plans)
   }
+
+  const getReviewedSignaturePlaceholderCalls = (): ReviewedSignaturePlaceholderCall[] =>
+    entries.value.flatMap((entry) => {
+      if (entry.review?.calldataUsesPlaceholderSignatures !== true) return []
+      const displayPlan = entry.review.displayPlan as TransactionPlan | undefined
+      return (displayPlan ?? []).flatMap(item => item.type === 'evcBatch'
+        ? flattenBatchEntries(item.items).map(call => ({
+            targetContract: call.targetContract,
+            onBehalfOfAccount: call.onBehalfOfAccount,
+            value: call.value,
+            data: call.data,
+          }))
+        : [])
+    })
 
   /**
    * Send each entry's prerequisite grants, mined, before the merged plan is
@@ -2405,8 +2488,8 @@ export const useTxBatch = () => {
    * the preview plan; entries with simulation-only preview state can rebuild a
    * signed execution plan before the merged batch is prepared and sent.
    */
-  const executeBatch = async () => {
-    if (isExecuting.value || pendingSafeSubmission.value || entries.value.length === 0 || !lastMerged) return
+  const executeBatch = async (reviewedPrepared: TransactionPlanPrepared | null | undefined) => {
+    if (isExecuting.value || pendingSafeSubmission.value || entries.value.length === 0 || !lastMerged || !reviewedPrepared) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
     // real `batch` tx would revert, so refuse to send.
@@ -2418,6 +2501,9 @@ export const useTxBatch = () => {
     let batchExecutionStarted = false
     let batchExecutionContext: WalletExecutionContext | undefined
     let batchEntriesSnapshot: BatchEntry[] = []
+    let batchFingerprint = ''
+    let batchPlanSnapshot: TransactionPlan = []
+    let submittedSafeLock: PendingSafeBatchSubmission | undefined
     try {
       if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
@@ -2427,19 +2513,43 @@ export const useTxBatch = () => {
       await sendExecutionPrerequisites(grantedRevokes)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
-      const prepared = await prepareTransactionPlan(executionPlan)
+      const candidatePrepared = await prepareTransactionPlan(executionPlan)
+      const prepared = requireReviewedBatchPreparedExecution(reviewedPrepared, candidatePrepared, {
+        placeholderSignatureCalls: getReviewedSignaturePlaceholderCalls(),
+      })
+      batchFingerprint = getPreparedBatchFingerprint(prepared)
+      batchPlanSnapshot = prepared.plan
       batchExecutionContext = {
         account: getAddress(typeof prepared.account === 'string' ? prepared.account : prepared.account.owner),
         chainId: prepared.chainId,
       }
       batchEntriesSnapshot = [...entries.value]
       await executePreparedPlan(prepared, {
+        onSafeSubmission: (submittedHash) => {
+          batchExecutionStarted = true
+          const errorMessage = `Safe submission is pending confirmation. Submitted Safe hash: ${submittedHash}`
+          submittedSafeLock = {
+            submittedHash,
+            account: batchExecutionContext!.account,
+            chainId: batchExecutionContext!.chainId,
+            batchFingerprint,
+            batchPlan: batchPlanSnapshot,
+            entries: batchEntriesSnapshot,
+            errorMessage,
+            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+            grantedRevokes: [...grantedRevokes],
+          }
+          // Persist synchronously before confirmation polling so a reload cannot
+          // erase the retry lock while the Safe transaction is still pending.
+          setPendingSafeSubmission(submittedSafeLock)
+        },
         onProgress: (progress) => {
           // Required approvals are separate transactions. Only arm Safe batch
           // reconciliation once the executor reaches the terminal EVC send.
           if (progress.status === 'evcBatch') batchExecutionStarted = true
         },
       })
+      clearPendingSafeSubmission(submittedSafeLock ?? null)
       if (isExecutionContextActive(batchExecutionContext)) clearBatchInternal(false)
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
       await revokeAfterSuccess(grantedRevokes)
@@ -2450,14 +2560,18 @@ export const useTxBatch = () => {
       if (batchExecutionStarted && batchExecutionContext && error instanceof SafeTransactionStatusUnknownError) {
         const errorMessage = `${error.message} Submitted Safe hash: ${error.submittedHash}`
         const pending: PendingSafeBatchSubmission = {
+          ...submittedSafeLock,
           submittedHash: error.submittedHash,
           account: batchExecutionContext.account,
           chainId: batchExecutionContext.chainId,
+          batchFingerprint,
+          batchPlan: batchPlanSnapshot,
           entries: batchEntriesSnapshot,
           errorMessage,
           refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
           grantedRevokes: [...grantedRevokes],
         }
+        submittedSafeLock = pending
         setPendingSafeSubmission(pending)
         // The user may have switched away while Safe execution was pending.
         // Only surface this context's error immediately; the snapshot and error
@@ -2468,6 +2582,7 @@ export const useTxBatch = () => {
         }
       }
       else {
+        clearPendingSafeSubmission(submittedSafeLock ?? null)
         // The batch never landed, so no granted authorization should be left
         // standing. Entries stay in the cart for a retry, which re-grants.
         await revokeAfterAbort(grantedRevokes)
@@ -2501,15 +2616,19 @@ export const useTxBatch = () => {
         return
       }
       if (result.status === 'not-executed' || result.status === 'reverted') {
+        const retryMessage = pending.hydrated
+          ? 'Rebuild and review the batch before retrying.'
+          : 'The batch has been rebuilt and can be reviewed again.'
         const errorMessage = result.status === 'reverted'
-          ? 'Safe executed the submitted transaction, but it reverted on-chain. Gas was spent and the Safe nonce advanced. The batch has been rebuilt and can be reviewed again.'
-          : 'Safe confirmed that the submitted transaction was not executed. The batch has been rebuilt and can be reviewed again.'
+          ? `Safe executed the submitted transaction, but it reverted on-chain. Gas was spent and the Safe nonce advanced. ${retryMessage}`
+          : `Safe confirmed that the submitted transaction was not executed. ${retryMessage}`
         await revokeAfterAbort(pending.grantedRevokes)
         const stillActive = isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)
         if (stillActive) {
           clearPendingSafeSubmission(pending)
           execError.value = errorMessage
           lastMerged = null
+          if (pending.hydrated) entries.value = []
         }
         else {
           setPendingSafeSubmission({
@@ -2518,7 +2637,7 @@ export const useTxBatch = () => {
             errorMessage,
           })
         }
-        if (stillActive) await runResimulate()
+        if (stillActive && !pending.hydrated) await runResimulate()
         return
       }
       const errorMessage = `Safe transaction status is still unknown. Submitted Safe hash: ${pending.submittedHash}`
