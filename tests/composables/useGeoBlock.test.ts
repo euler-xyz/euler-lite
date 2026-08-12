@@ -85,12 +85,10 @@ const resetState = () => {
 describe('isAssetBlockedByCountry — loading & sentinel states', () => {
   beforeEach(resetState)
 
-  it('returns false while the country is still loading (undefined)', () => {
+  it('fails closed while the country is still loading (undefined)', () => {
     setCountry(undefined)
-    // Even with a matching rule, a still-loading country is treated as "no decision yet"
-    // so the UI doesn't flicker into a Restricted state on the first paint.
     assetBlocks[USDC.toLowerCase()] = ['DE']
-    expect(isAssetBlockedByCountry(USDC)).toBe(false)
+    expect(isAssetBlockedByCountry(USDC)).toBe(true)
   })
 
   it('returns true once loading completes but country could not be detected (null)', () => {

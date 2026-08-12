@@ -123,7 +123,7 @@ const getVaultUnderlyingAsset = (vaultAddress: string): { address: string, symbo
 export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   const fields = toAssetFields(asset)
   if (!fields) return false
-  if (country.value === undefined) return false // still loading
+  if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
 
   const cacheKey = makeAssetCacheKey(fields)
@@ -164,7 +164,7 @@ export const isAssetRestrictedByCountry = (
 ): boolean => {
   const fields = toAssetFields(asset)
   if (!fields) return false
-  if (country.value === undefined) return false // still loading
+  if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
 
   const cacheKey = makeAssetCacheKey(fields)
@@ -214,7 +214,7 @@ export const isVaultBlockedByCountry = (
   vaultAddress: string,
   opts?: Pick<VaultGeoPolicyOptions, 'asset'>,
 ): boolean => {
-  if (country.value === undefined) return false // still loading
+  if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
 
   // Sanctioned countries are always blocked
@@ -245,7 +245,7 @@ export const isVaultRestrictedByCountry = (
   vaultAddress: string,
   opts?: VaultGeoPolicyOptions,
 ): boolean => {
-  if (country.value === undefined) return false // still loading
+  if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
   if (!vaultAddress) return false
 
@@ -275,12 +275,15 @@ export const getVaultTags = (
   context: VaultTagContext = 'browse',
 ): { tags: string[], disabled: boolean } => {
   const tags: string[] = []
+  const countryResolved = country.value !== undefined
   const blocked = isVaultBlockedByCountry(vaultAddress)
   const restricted = !blocked && isVaultRestrictedByCountry(vaultAddress)
 
-  if (blocked) tags.push('Restricted')
+  // Policy is fail-closed while country detection is pending, but presentation
+  // does not flash a misleading Restricted badge before a country is known.
+  if (blocked && countryResolved) tags.push('Restricted')
   // Soft-restricted: only show tag when the context involves acquiring more exposure
-  if (restricted && context === 'swap-target') tags.push('Restricted')
+  if (restricted && context === 'swap-target' && countryResolved) tags.push('Restricted')
   if (isVaultDeprecated(vaultAddress)) tags.push('Deprecated')
 
   const disabled = blocked

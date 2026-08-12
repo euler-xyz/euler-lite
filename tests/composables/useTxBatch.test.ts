@@ -399,6 +399,38 @@ describe('isBatchEntryGeoBlocked', () => {
   })
 })
 
+describe('batch geo-policy execution gate', () => {
+  it('keeps final execution closed until country policy resolves', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    let countryPending = true
+    geoPolicyMocks.isVaultBlockedByCountry.mockImplementation(() => countryPending)
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Supply USDC',
+      buildPlan: async () => [] as TransactionPlan,
+      subAccount,
+      geoPolicy: [{ vaultAddress: vault, asset: { address: aToken, symbol: 'USDC' } }],
+    })
+
+    await vi.waitFor(() => expect(batch.isSimulating.value).toBe(false))
+    expect(batch.hasGeoBlockedEntries.value).toBe(true)
+    expect(batch.canExecuteBatch.value).toBe(false)
+
+    await batch.executeBatch()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+
+    countryPending = false
+    // The real helper reads the reactive country ref. Replacing the entry array
+    // gives this mocked policy the equivalent invalidation signal.
+    batch.entries.value = [...batch.entries.value]
+
+    expect(batch.hasGeoBlockedEntries.value).toBe(false)
+    expect(batch.canExecuteBatch.value).toBe(true)
+  })
+})
+
 describe('stitchAccount', () => {
   it('merges simulated sub-accounts by canonical address key', () => {
     const base = accountWithPosition(subAccount, subAccount, 1n)
