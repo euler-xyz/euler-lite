@@ -14,6 +14,23 @@ vi.mock('~/utils/tx-errors', () => ({
   getTxErrorMessage: vi.fn(async (err: unknown) => (err as Error).message),
 }))
 
+const wagmiMocks = vi.hoisted(() => ({
+  config: {},
+  account: { address: '0x1000000000000000000000000000000000000000', connector: { id: 'safe' } },
+  onChange: undefined as undefined | ((account: { address?: string, connector?: { id?: string } }) => void),
+}))
+
+vi.mock('@wagmi/vue', () => ({
+  useConfig: () => wagmiMocks.config,
+}))
+
+vi.mock('@wagmi/vue/actions', () => ({
+  getAccount: () => wagmiMocks.account,
+  watchAccount: (_config: unknown, { onChange }: { onChange: (a: never) => void }) => {
+    wagmiMocks.onChange = onChange
+  },
+}))
+
 const importComposable = async () => {
   const mod = await import('~/composables/useSafeExecutionDetachment')
   return { detachment: mod.useSafeExecutionDetachment(), mod }
@@ -132,6 +149,42 @@ describe('useSafeExecutionDetachment', () => {
     expect(mod.shouldSuppressPostTxNavigation()).toBe(false)
     // The next submission can begin immediately.
     expect(detachment.beginTrackedExecution({ safeAtSubmit: true })).not.toBeNull()
+  })
+
+  it('abandons the tracked execution on account or connector switch', async () => {
+    const { detachment } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+    let release!: () => void
+    handle.detach(new Promise<void>((resolve) => {
+      release = resolve
+    }))
+    expect(detachment.hasPendingDetachedExecution.value).toBe(true)
+
+    // Disconnect the Safe, connect an EOA: the gate must not follow the
+    // user to the new wallet.
+    wagmiMocks.onChange?.({ address: '0x2000000000000000000000000000000000000000', connector: { id: 'io.metamask' } })
+    expect(detachment.hasPendingDetachedExecution.value).toBe(false)
+    // A new submission can begin immediately.
+    const next = detachment.beginTrackedExecution({ safeAtSubmit: false })
+    expect(next).not.toBeNull()
+    next!.release()
+
+    // The abandoned execution's continuation stays silent — no toast for a
+    // wallet that is no longer connected.
+    release()
+    await flush()
+    expect(toastMocks.success).not.toHaveBeenCalled()
+    expect(toastMocks.warning).not.toHaveBeenCalled()
+    expect(toastMocks.error).not.toHaveBeenCalled()
+  })
+
+  it('does not abandon on a same-wallet change event', async () => {
+    const { detachment } = await importComposable()
+    const handle = detachment.beginTrackedExecution({ safeAtSubmit: true })!
+    handle.detach(new Promise<void>(() => {}))
+
+    wagmiMocks.onChange?.({ address: '0x1000000000000000000000000000000000000000', connector: { id: 'safe' } })
+    expect(detachment.hasPendingDetachedExecution.value).toBe(true)
   })
 
   it('scopes success marking to the live execution', async () => {
