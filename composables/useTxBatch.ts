@@ -215,6 +215,8 @@ interface PendingSafeBatchSubmission {
   submittedHash: Hash
   account: Address
   chainId: number
+  entries: BatchEntry[]
+  errorMessage: string
   refreshExternalMigrationPositions: boolean
   grantedRevokes: MigrationAuthorizationRevoke[]
 }
@@ -2017,8 +2019,11 @@ export const useTxBatch = () => {
       })
       watch([activeLayer, layers], syncOverlay)
       // Reset the cart when the account or chain changes — layers would be stale.
-      watch([owner, chainId], () => {
+      watch([owner, chainId], ([currentOwner, currentChainId]) => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
+        const pendingForContext = pendingSafeSubmissions.value.find(pending =>
+          isPendingSafeSubmissionForContext(pending, currentOwner, currentChainId),
+        )
         resimToken++
         entries.value = []
         layers.value = []
@@ -2033,6 +2038,10 @@ export const useTxBatch = () => {
         resimulatePromise = null
         tenderly.clearSimulation()
         syncOverlay()
+        if (pendingForContext) {
+          entries.value = [...pendingForContext.entries]
+          execError.value = pendingForContext.errorMessage
+        }
       })
     })
   }
@@ -2394,6 +2403,7 @@ export const useTxBatch = () => {
     let shouldRefreshExternalMigrationPositions = false
     let batchExecutionStarted = false
     let batchExecutionContext: WalletExecutionContext | undefined
+    let batchEntriesSnapshot: BatchEntry[] = []
     try {
       if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
@@ -2408,6 +2418,7 @@ export const useTxBatch = () => {
         account: getAddress(typeof prepared.account === 'string' ? prepared.account : prepared.account.owner),
         chainId: prepared.chainId,
       }
+      batchEntriesSnapshot = [...entries.value]
       await executePreparedPlan(prepared, {
         onProgress: (progress) => {
           // Required approvals are separate transactions. Only arm Safe batch
@@ -2423,14 +2434,24 @@ export const useTxBatch = () => {
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
       if (batchExecutionStarted && batchExecutionContext && error instanceof SafeTransactionStatusUnknownError) {
-        setPendingSafeSubmission({
+        const errorMessage = `${error.message} Submitted Safe hash: ${error.submittedHash}`
+        const pending: PendingSafeBatchSubmission = {
           submittedHash: error.submittedHash,
           account: batchExecutionContext.account,
           chainId: batchExecutionContext.chainId,
+          entries: batchEntriesSnapshot,
+          errorMessage,
           refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
           grantedRevokes: [...grantedRevokes],
-        })
-        execError.value = `${error.message} Submitted Safe hash: ${error.submittedHash}`
+        }
+        setPendingSafeSubmission(pending)
+        // The user may have switched away while Safe execution was pending.
+        // Only surface this context's error immediately; the snapshot and error
+        // are restored together when its owner/chain becomes active again.
+        if (isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)) {
+          entries.value = [...batchEntriesSnapshot]
+          execError.value = errorMessage
+        }
       }
       else {
         // The batch never landed, so no granted authorization should be left

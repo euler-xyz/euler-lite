@@ -1405,11 +1405,15 @@ describe('useTxBatch execution prerequisites', () => {
       account: owner,
       chainId: 1,
     })
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain(safeHash)
 
     eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'not-executed' })
     await batch.reconcilePendingSafeSubmission()
     expect(batch.pendingSafeSubmission.value).toBeNull()
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('batch has been rebuilt')
   })
 
   it('does not misclassify an unresolved prerequisite Safe transaction as the atomic batch', async () => {
@@ -1433,6 +1437,8 @@ describe('isPendingSafeSubmissionForContext', () => {
     submittedHash: `0x${'56'.repeat(32)}` as Hash,
     account: owner,
     chainId: 1,
+    entries: [],
+    errorMessage: 'pending',
     refreshExternalMigrationPositions: false,
     grantedRevokes: [],
   }
