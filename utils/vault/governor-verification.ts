@@ -1,6 +1,17 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
+import { isEVault, type EulerEarn, type EVault, type OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
 import { getEulerRouterGovernor } from '~/entities/oracle'
-import type { EulerEarn, OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
+
+/**
+ * Value-based governance hydration guard. SDK 2.0 EVault instances always
+ * OWN the `governorAdmin` property — the constructor assigns it even when
+ * governance was never fetched — so an `in`-operator check passes on every
+ * real instance and misreads lazily-hydrated vaults as "governance resolved
+ * to nothing", producing false Unknown badges. Only a defined value means
+ * governance actually resolved.
+ */
+export const hasResolvedGovernorAdmin = (vault: unknown): vault is EVault =>
+  isEVault(vault) && vault.governorAdmin !== undefined
 
 interface VerifiableVault {
   address: string
