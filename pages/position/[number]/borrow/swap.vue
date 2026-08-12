@@ -3605,6 +3605,18 @@ const addInboundExternalMigrationToBatch = async () => {
                 postTxsByPreTx: revokesByGrant,
               }
             },
+            // Bundled counterpart for Safe execution: the simulation-variant
+            // plan validates the grant instead of reading the live
+            // allowance, so nothing needs to mine before the proposal is
+            // assembled.
+            buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
+              const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+              const { grants, revokes } = request
+                ? encodeMigrationAuthorizationTxs(request)
+                : { grants: [], revokes: [] }
+              const simulation = await buildInboundExternalMigrationSimulationResult(input, request, account, useSignatures)
+              return { plan: simulation.plan, grants, revokes }
+            },
           }),
       stateOverrides: preview.tenderlySimulation.stateOverrides,
       subAccount: input.eulerTarget.eulerAccount,

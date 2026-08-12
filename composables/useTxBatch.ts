@@ -89,6 +89,19 @@ export interface BatchEntryExecutionPrerequisites {
   postTxsByPreTx?: Array<BatchEntryExternalTx | undefined>
 }
 
+export interface BatchEntryBundledExecution {
+  /**
+   * Execution payload built WITHOUT live authorization reads (the
+   * simulation-variant plan) — the grants ride in the same Safe proposal
+   * and are not mined when this plan is built.
+   */
+  plan: TransactionPlan
+  /** Grant calls to prepend to the proposal, in dependency order. */
+  grants: BatchEntryExternalTx[]
+  /** Revocation calls to append, already in unwind order for this entry. */
+  revokes: BatchEntryExternalTx[]
+}
+
 export interface BatchEntry {
   id: string
   label: string
@@ -104,6 +117,12 @@ export interface BatchEntry {
   buildExecutionPrerequisites?: (
     account: Account<IHasVaultAddress>,
   ) => Promise<BatchEntryExecutionPrerequisites | undefined>
+  /** Bundled-mode counterpart of the two builders above: plan + grant/revoke
+   *  calls for ONE atomic Safe proposal. Entries providing this let the cart
+   *  skip the standalone grant broadcasts entirely when a Safe executes. */
+  buildBundledExecution?: (
+    account: Account<IHasVaultAddress>,
+  ) => Promise<BatchEntryBundledExecution>
   /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
   stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
@@ -1701,7 +1720,8 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
-  const { prepareTransactionPlan, executePreparedPlan, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
+  const { prepareTransactionPlan, executePreparedPlan, executePreparedPlanWithPlainCalls, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
+  const { isSafeWallet } = useSafeWallet()
   const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
@@ -2404,6 +2424,43 @@ export const useTxBatch = () => {
   }
 
   /**
+   * A Safe executes the cart's prerequisites inside the batch proposal when
+   * every prerequisite-bearing entry provides a bundled builder — mixed
+   * carts (a prerequisite entry without bundled support) keep the sequential
+   * ceremony for all entries, so the review never half-describes it.
+   */
+  const willBundlePrerequisites = computed(() =>
+    isSafeWallet.value
+    && entries.value.some(entry => entry.buildBundledExecution)
+    && entries.value.every(entry => !entry.buildExecutionPrerequisites || entry.buildBundledExecution),
+  )
+
+  /**
+   * Assemble the bundled ceremony: each entry's simulation-variant plan plus
+   * its grant/revoke calls. Grants keep entry order; revokes unwind in
+   * reverse entry order (each entry's own revokes are already reversed).
+   */
+  const collectBundledExecution = async () => {
+    const plans: TransactionPlan[] = []
+    const grants: BatchEntryExternalTx[] = []
+    const revokesByEntry: BatchEntryExternalTx[][] = []
+    for (const [index, entry] of entries.value.entries()) {
+      if (entry.buildBundledExecution) {
+        const bundled = await entry.buildBundledExecution(await getExecutionPlanningAccount(index))
+        plans.push(bundled.plan)
+        grants.push(...bundled.grants)
+        revokesByEntry.push(bundled.revokes)
+        continue
+      }
+      plans.push(entry.buildExecutionPlan
+        ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
+        : entry.plan)
+      revokesByEntry.push([])
+    }
+    return { plans, grants, revokes: revokesByEntry.reverse().flat() }
+  }
+
+  /**
    * Send each entry's prerequisite grants, mined, before the merged plan is
    * built — plan builders read live on-chain allowances to decide whether their
    * batch still needs an authorization item.
@@ -2466,6 +2523,38 @@ export const useTxBatch = () => {
       // would revert (against the current chain state, which may have moved since
       // the last simulation), surface the decoded reason and don't send.
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
+
+      if (willBundlePrerequisites.value) {
+        const collected = await collectBundledExecution()
+        if (collected.grants.length || collected.revokes.length) {
+          // One atomic Safe proposal: grants + merged batch + revocations.
+          // No standalone gas estimate — the grants are unmined until the
+          // proposal executes, so a plain estimate against current state
+          // would revert; the cart's continuous simulation (which runs with
+          // the entries' authorization state overrides) is the pre-flight
+          // validation. Atomicity also removes the unwind bookkeeping: a
+          // failed proposal reverts its grants with it.
+          const sdk = await getEulerSdkFresh()
+          const executionPlan = sdk.executionService.mergePlans(collected.plans)
+          const prepared = await prepareTransactionPlan(executionPlan)
+          const result = await executePreparedPlanWithPlainCalls(prepared, {
+            before: collected.grants,
+            after: collected.revokes,
+          })
+          if (!result) {
+            // The review described ONE proposal; never silently degrade to
+            // the sequential multi-proposal ceremony.
+            throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
+          }
+          clearBatch()
+          if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+          await redirectAfterBatchExecution()
+          return
+        }
+        // Every prerequisite resolved empty (grants already live) — the
+        // classic path below is a single proposal anyway.
+      }
+
       await sendExecutionPrerequisites(grantedRevokes)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
@@ -2606,6 +2695,7 @@ export const useTxBatch = () => {
     dismissExecutionError,
     setActiveLayer,
     executeBatch,
+    willBundlePrerequisites,
     // Tenderly "Simulate on Tenderly" for the whole batch.
     tenderlyEnabled,
     isTenderlySimulating: tenderly.isSimulating,

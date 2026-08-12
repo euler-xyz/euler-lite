@@ -1090,6 +1090,17 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
               postTxsByPreTx: revokesByGrant,
             }
           },
+          // Bundled counterpart for Safe execution: the simulation-variant
+          // plan validates the grant instead of reading the live allowance,
+          // so nothing needs to mine before the proposal is assembled.
+          buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
+            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
+            const { grants, revokes } = request
+              ? encodeMigrationAuthorizationTxs(request)
+              : { grants: [], revokes: [] }
+            const simulation = await buildMigrationSimulation(input, migrationPosition, request, account)
+            return { plan: simulation.plan, grants, revokes }
+          },
         }),
     stateOverrides: preview.tenderlySimulation.stateOverrides,
     subAccount: migrationAccount.value,

@@ -46,6 +46,7 @@ const {
   fetchTenderlyEnabled,
   simulateOnTenderly,
   dismissExecutionError,
+  willBundlePrerequisites,
 } = useTxBatch()
 
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
@@ -91,17 +92,25 @@ const isExternalProtocolMigrationReview = (review: ReviewWithSteps | undefined):
 const normalizeDisplaySteps = (steps: DisplayStep[] | undefined): DisplayStep[] =>
   (steps ?? []).map((step, idx) => ({ ...step, index: idx + 1 }))
 
+// When a Safe will execute the cart, bundled-capable prerequisites ride in
+// the batch proposal — the rows captured at add-time say "Separate tx", so
+// override the flag at display time to describe the actual ceremony.
+const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[number]): DisplayStep[] =>
+  willBundlePrerequisites.value && entry.buildBundledExecution
+    ? steps.map(step => ({ ...step, isSeparateTx: false }))
+    : steps
+
 const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
-    ? normalizeDisplaySteps(review?.signatureSteps)
+    ? overrideBundled(normalizeDisplaySteps(review?.signatureSteps), entry)
     : []
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
-    ? normalizeDisplaySteps(review?.postSteps)
+    ? overrideBundled(normalizeDisplaySteps(review?.postSteps), entry)
     : []
 }
 
@@ -143,22 +152,37 @@ const postStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   return out
 })
 
-const signatureStepsHeading = (entryId: string): string =>
-  getAuthorizationStepDisplay(
+const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
+  willBundlePrerequisites.value && !!entry.buildBundledExecution
+
+const signatureStepsHeading = (entryId: string): string => {
+  const entry = entries.value.find(candidate => candidate.id === entryId)
+  if (entry && isBundledEntry(entry)) return 'Authorization transactions'
+  return getAuthorizationStepDisplay(
     (signatureStepsByEntryId.value[entryId] ?? []).some(step => step.isSeparateTx),
   ).detailHeading
+}
 
 const authorizationRows = computed(() =>
   entries.value.flatMap(entry =>
-    (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
+    (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step, bundledTx: isBundledEntry(entry) })),
   ),
 )
-const authorizationSummaryGroups = computed(() =>
-  [true, false].map((isSeparateTx) => {
-    const rows = authorizationRows.value.filter(({ step }) => step.isSeparateTx === isSeparateTx)
-    return { rows, display: getAuthorizationStepDisplay(isSeparateTx) }
-  }).filter(({ rows }) => rows.length),
-)
+// Three ceremonies, three groups: standalone transactions, transactions
+// riding in the Safe proposal, and wallet signatures.
+const authorizationSummaryGroups = computed(() => {
+  const rows = authorizationRows.value
+  const groups: Array<{ rows: typeof rows, display: { summaryHeading: string, itemCountLabel: string } }> = []
+  const separate = rows.filter(({ step }) => step.isSeparateTx)
+  if (separate.length) groups.push({ rows: separate, display: getAuthorizationStepDisplay(true) })
+  const bundled = rows.filter(({ step, bundledTx }) => !step.isSeparateTx && bundledTx)
+  if (bundled.length) {
+    groups.push({ rows: bundled, display: { summaryHeading: 'Authorization transactions', itemCountLabel: 'bundled in proposal' } })
+  }
+  const signatures = rows.filter(({ step, bundledTx }) => !step.isSeparateTx && !bundledTx)
+  if (signatures.length) groups.push({ rows: signatures, display: getAuthorizationStepDisplay(false) })
+  return groups
+})
 
 // Post-execution transactions (e.g. a migration's approval restoration) are
 // real wallet transactions sent after the batch settles. Surfacing them only
@@ -516,7 +540,7 @@ const onCloseRequested = () => {
               />
               <span class="truncate">{{ step.label }}</span>
             </span>
-            <span class="text-p3 text-content-tertiary shrink-0">{{ step.isSeparateTx ? '1 transaction' : 'bundled' }}</span>
+            <span class="text-p3 text-content-tertiary shrink-0">{{ step.isSeparateTx ? '1 transaction' : 'bundled in proposal' }}</span>
           </div>
         </div>
       </div>
