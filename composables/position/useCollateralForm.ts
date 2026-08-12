@@ -4,7 +4,7 @@ import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
-import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
@@ -1095,6 +1095,12 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const send = async () => {
     try {
       isSubmitting.value = true
+      if (isOperationBlocked.value) {
+        plan.value = null
+        preparedPlan.value = null
+        error(operationBlockReason.value || 'This operation is currently unavailable')
+        return
+      }
       if (isPolicyBlocked.value) {
         plan.value = null
         preparedPlan.value = null

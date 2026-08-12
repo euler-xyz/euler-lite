@@ -605,7 +605,7 @@ const canAddToBatch = computed(() => {
 const addToBatch = async () => {
   if (!canAddToBatch.value || !asset.value?.address) return
   await guardWithPriceImpact(async () => {
-    if (!asset.value?.address) return
+    if (!canAddToBatch.value || !asset.value?.address) return
     if (needsSwap.value) {
       const quote = swapEffectiveQuote.value
       if (!quote) return
@@ -618,6 +618,7 @@ const addToBatch = async () => {
         buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
+        geoPolicy: [{ vaultAddress, asset: asset.value, inputAsset: swapAsset, counterpart: swapAsset, acquisition: true }],
       })
     }
     else {
@@ -628,6 +629,7 @@ const addToBatch = async () => {
         buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'supply', asset: asset.value, amount: amount.value },
+        geoPolicy: [{ vaultAddress, asset: asset.value }],
       })
     }
     amount.value = ''

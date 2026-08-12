@@ -411,6 +411,9 @@ const loadVaults = async () => {
       if (!getVaultTags(targetVault.address, 'swap-target').disabled) {
         toVault.value = targetVault
       }
+      else if (!isFromSecuritize) {
+        toVault.value = fromVault.value as EVault
+      }
     }
     else if (!isFromSecuritize) {
       toVault.value = fromVault.value as EVault
