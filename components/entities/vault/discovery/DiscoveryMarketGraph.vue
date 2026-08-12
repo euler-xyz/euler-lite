@@ -3,6 +3,7 @@ import { isEulerEarn, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { stringToColor } from '~/utils/string-utils'
 import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
 
@@ -49,9 +50,10 @@ const isNodeRiskManagerUnknown = (address: string): boolean => {
   if (!vault) return false
   if (isEulerEarn(vault)) return !isEarnVaultOwnerVerified(vault)
   if (isSecuritizeCollateralVault(vault)) return !isSecuritizeGovernorVerified(vault)
-  // Governance info can be absent on lazily-hydrated collateral vaults — don't
-  // flag what simply hasn't been fetched yet (mirrors useMarketGroups).
-  if (!('governorAdmin' in vault)) return false
+  // Governance can be unresolved on lazily-hydrated collateral vaults — the
+  // guard is VALUE-based because SDK EVault instances always own the
+  // property. Don't flag what simply hasn't been fetched yet.
+  if (!hasResolvedGovernorAdmin(vault)) return false
   return !isVaultGovernorVerified(vault)
 }
 </script>
