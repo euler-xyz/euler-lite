@@ -3,10 +3,12 @@ import { flattenBatchEntries, type TransactionPlan, type TransactionPlanPrepared
 import { encodeFunctionData, type Address, type Hex } from 'viem'
 import {
   requirePythOnlyPreparedRefresh,
+  requireReviewedBatchPreparedExecution,
   refreshReviewedPythExecution,
   requireReviewedExecution,
   REVIEWED_EXECUTION_CHANGED_ERROR,
   REVIEWED_EXECUTION_UNAVAILABLE_ERROR,
+  REVIEWED_BATCH_EXECUTION_CHANGED_ERROR,
 } from '~/utils/reviewed-execution'
 
 const pyth = '0x0000000000000000000000000000000000000001' as Address
@@ -40,6 +42,54 @@ const prepared = (update: Hex, operationData: Hex = '0x12345678'): TransactionPl
       data: operationData,
     }],
   }],
+})
+
+describe('requireReviewedBatchPreparedExecution', () => {
+  const dynamicSignature = (bytes: string): Hex =>
+    `0x12345678${'0'.repeat(62)}41${bytes}${'0'.repeat(62)}` as Hex
+
+  it('accepts only the explicitly reviewed placeholder signature slot', () => {
+    const reviewed = prepared('0x01', dynamicSignature('0'.repeat(65 * 2)))
+    const signed = prepared('0x01', dynamicSignature('11'.repeat(65)))
+
+    expect(requireReviewedBatchPreparedExecution(reviewed, signed, {
+      placeholderSignatureCalls: flattenBatchEntries(
+        reviewed.plan[0]?.type === 'evcBatch' ? reviewed.plan[0].items : [],
+      ),
+    })).toBe(signed)
+  })
+
+  it('rejects an approval inserted after review', () => {
+    const reviewed = prepared('0x01')
+    const candidate = prepared('0x01')
+    candidate.plan.unshift({
+      type: 'requiredApproval',
+      token: vault,
+      owner,
+      spender: vault,
+      amount: 1n,
+      resolved: [],
+    })
+
+    expect(() => requireReviewedBatchPreparedExecution(reviewed, candidate))
+      .toThrow(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
+  })
+
+  it('rejects a changed operation outside the signature slot', () => {
+    const reviewed = prepared('0x01', dynamicSignature('0'.repeat(65 * 2)))
+    const changed = prepared('0x01', dynamicSignature('11'.repeat(65)))
+    const batch = changed.plan[0]
+    if (batch?.type === 'evcBatch') {
+      const call = flattenBatchEntries(batch.items)[1]
+      if (call) call.targetContract = pyth
+    }
+
+    expect(() => requireReviewedBatchPreparedExecution(reviewed, changed, {
+      placeholderSignatureCalls: flattenBatchEntries(
+        reviewed.plan[0]?.type === 'evcBatch' ? reviewed.plan[0].items : [],
+      ),
+    })).toThrow(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
+  })
 })
 
 const groupedPrepared = (update: Hex): TransactionPlanPrepared => {

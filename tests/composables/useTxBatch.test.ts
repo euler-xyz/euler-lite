@@ -309,6 +309,14 @@ const createMockSdk = () => ({
 beforeEach(() => {
   vi.restoreAllMocks()
   eulerTxMocks.prepareTransactionPlan.mockReset()
+  eulerTxMocks.prepareTransactionPlan.mockImplementation(async (plan: TransactionPlan) => ({
+    __prepared: true,
+    plan,
+    chainId: 1,
+    account: owner,
+    usePermit2: true,
+    unlimitedApproval: false,
+  }))
   eulerTxMocks.executePreparedPlan.mockReset()
   eulerTxMocks.estimateGasForPlan.mockReset()
   eulerTxMocks.sendPlainTransactions.mockReset()
@@ -325,6 +333,12 @@ beforeEach(() => {
   resetBatchPrefetchState()
   useTxBatch().clearBatch()
 })
+
+const prepareReviewedBatch = async (batch: ReturnType<typeof useTxBatch>) => {
+  const reviewed = await batch.prepareBatchPlan()
+  if (!reviewed) throw new Error('Expected a reviewed batch')
+  return reviewed
+}
 
 describe('stitchAccount', () => {
   it('merges simulated sub-accounts by canonical address key', () => {
@@ -1018,7 +1032,7 @@ describe('useTxBatch execution errors', () => {
       buildPlan: async () => plan,
       refreshExternalMigrationPositions: true,
     })
-    await batch.executeBatch()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
 
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared)
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
@@ -1074,7 +1088,7 @@ describe('useTxBatch execution errors', () => {
     })
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    await batch.executeBatch()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
 
     expect(executionAccount?.getSubAccount(subAccount)?.positions[0]?.shares).toBe(42n)
     expect(sdk.executionService.mergePlans).toHaveBeenLastCalledWith([borrowPlan, migrationExecutionPlan])
@@ -1151,7 +1165,7 @@ describe('useTxBatch execution prerequisites', () => {
     })
     // Let the multi-entry resimulation settle so executeBatch does not bail.
     await new Promise(resolve => setTimeout(resolve, 0))
-    await batch.executeBatch()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
 
     // The first grant is mined and standing. Leaving it would orphan the
     // allowance: a retry sees it already granted, so it registers no revoke.
@@ -1184,9 +1198,10 @@ describe('useTxBatch execution prerequisites', () => {
     migrationFlowMocks.revokeAfterSuccess.mockImplementation(async () => void calls.push('revokeAfterSuccess'))
 
     await addGrantingMigrationEntry(batch)
+    const reviewed = await prepareReviewedBatch(batch)
     // Drop what add-time preview simulation recorded; only execution order matters.
     calls.length = 0
-    await batch.executeBatch()
+    await batch.executeBatch(reviewed)
 
     // The grant must be mined before the plan is built: the connector reads the
     // live allowance to decide whether the batch needs an authorization item.
@@ -1214,7 +1229,7 @@ describe('useTxBatch execution prerequisites', () => {
     eulerTxMocks.sendPlainTransactions.mockRejectedValue(new Error('User rejected the request.'))
 
     await addGrantingMigrationEntry(batch)
-    await batch.executeBatch()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
 
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     expect(batch.entryCount.value).toBe(1)
@@ -1238,7 +1253,7 @@ describe('useTxBatch execution prerequisites', () => {
       postTxs: [secondRevokeTx, revokeTx],
       postTxsByPreTx: [revokeTx, secondRevokeTx],
     })
-    await batch.executeBatch()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
 
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
@@ -1255,7 +1270,7 @@ describe('useTxBatch execution prerequisites', () => {
       eulerTxMocks.executePreparedPlan.mockRejectedValue(new WalletExecutionContextChangedError(kind))
 
       await addGrantingMigrationEntry(batch)
-      await batch.executeBatch()
+      await batch.executeBatch(await prepareReviewedBatch(batch))
 
       expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
       expect(batch.entryCount.value).toBe(1)
@@ -1273,8 +1288,9 @@ describe('useTxBatch execution prerequisites', () => {
     eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('User rejected the request.'))
 
     await addGrantingMigrationEntry(batch)
-    await batch.executeBatch()
-    await batch.executeBatch()
+    const reviewed = await prepareReviewedBatch(batch)
+    await batch.executeBatch(reviewed)
+    await batch.executeBatch(reviewed)
 
     expect(migrationFlowMocks.restorePendingBeforeRetry).toHaveBeenCalledTimes(2)
     expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledTimes(1)
@@ -1292,7 +1308,7 @@ describe('useTxBatch execution prerequisites', () => {
     // An authorization already standing on-chain resolves to no prerequisite,
     // and must not be revoked — we did not grant it.
     await addMigrationEntryWithPrerequisites(batch, undefined)
-    await batch.executeBatch()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
 
     expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
     expect(migrationFlowMocks.revokeAfterSuccess).toHaveBeenCalledWith([])
@@ -1309,7 +1325,7 @@ describe('useTxBatch execution prerequisites', () => {
     migrationFlowMocks.revokeAfterSuccess.mockResolvedValue(undefined)
 
     await addGrantingMigrationEntry(batch)
-    await batch.executeBatch()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
 
     expect(batch.entryCount.value).toBe(0)
     expect(batch.execError.value).toBeUndefined()

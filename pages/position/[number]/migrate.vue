@@ -1010,6 +1010,7 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures),
       postSteps: buildRevokeSteps(authorizationRequest, useSignatures),
       displayPlan: preview.calldataPrepared.plan,
+      calldataUsesPlaceholderSignatures: useSignatures && !!authorizationRequest,
     },
   }
 

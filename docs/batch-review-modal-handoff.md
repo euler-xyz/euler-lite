@@ -90,7 +90,7 @@ All data comes from `useTxBatch()`. The composable already exposes everything ne
 | `simError` / `execError` | `string?` | Top-level batch error row |
 | `isExecuting` / `isSimulating` | `boolean` | Button loading / disabled |
 | `canExecuteBatch` / `hasFailedOps` / `hasInsufficientBalance` | `boolean` | Execute gating + reason |
-| `executeBatch()` | `() => Promise` | Atomic execute (clears batch on success) |
+| `executeBatch(reviewedPrepared)` | `(TransactionPlanPrepared) => Promise` | Executes only when the final prepared envelope matches the one shown in review; clears on success |
 | `prepareBatchPlan()` | `() => Promise<TransactionPlanPrepared\|null>` | Resolve approvals for the approvals section |
 | `getMergedPlan()` | `() => TransactionPlan\|null` | The exact plan that will execute |
 | `tenderlyEnabled`, `isTenderlySimulating`, `tenderlyUrl`, `tenderlyError`, `fetchTenderlyEnabled()`, `simulateOnTenderly()` | — | Tenderly section |

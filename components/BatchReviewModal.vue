@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
-import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries, getSubAccountId, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
@@ -296,6 +296,7 @@ const isPreparing = ref(false)
 const prepareError = ref('')
 // The prepared plan (with approvals resolved) backs "Copy calldata".
 const preparedPlanRef = ref<TransactionPlan | undefined>()
+const preparedExecutionRef = ref<TransactionPlanPrepared | undefined>()
 const hasPermit2Approval = computed(() =>
   hasPermit2TokenApproval(preparedPlanRef.value, eulerCoreAddresses.value?.permit2),
 )
@@ -309,6 +310,7 @@ onMounted(async () => {
   prepareError.value = ''
   try {
     const prepared = await prepareBatchPlan()
+    preparedExecutionRef.value = prepared ?? undefined
     preparedPlanRef.value = prepared?.plan
     const known = buildKnownSymbols()
     const out: Array<{ kind: 'approve' | 'permit', symbol: string }> = []
@@ -394,7 +396,7 @@ const blockedReason = computed(() => {
 
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
-  await executeBatch()
+  await executeBatch(preparedExecutionRef.value)
   // executeBatch clears the cart on success; close once nothing's left to do.
   if (!execError.value && entries.value.length === 0) emit('close')
 }

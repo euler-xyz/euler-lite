@@ -1,6 +1,6 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
-import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
+import { Account, fetchErc20SlotHints, flattenBatchEntries, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
   Portfolio,
@@ -8,6 +8,7 @@ import type {
   PortfolioSavingsPosition,
   SlotHints,
   TransactionPlan,
+  TransactionPlanPrepared,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -33,6 +34,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import { requireReviewedBatchPreparedExecution, type ReviewedSignaturePlaceholderCall } from '~/utils/reviewed-execution'
 
 export interface BatchWalletChange {
   token: string
@@ -2244,7 +2246,11 @@ export const useTxBatch = () => {
    *  modal can list the approvals the user will be asked to sign. */
   const prepareBatchPlan = async () => {
     if (!lastMerged) return null
-    return prepareTransactionPlan(lastMerged)
+    const sdk = await getEulerSdkFresh()
+    const reviewPlans = entries.value.map(entry =>
+      (entry.review?.displayPlan as TransactionPlan | undefined) ?? entry.plan,
+    )
+    return prepareTransactionPlan(sdk.executionService.mergePlans(reviewPlans))
   }
 
   const getExecutionPlanningAccount = async (entryIndex: number): Promise<Account<IHasVaultAddress>> => {
@@ -2280,6 +2286,20 @@ export const useTxBatch = () => {
     }
     return sdk.executionService.mergePlans(plans)
   }
+
+  const getReviewedSignaturePlaceholderCalls = (): ReviewedSignaturePlaceholderCall[] =>
+    entries.value.flatMap((entry) => {
+      if (entry.review?.calldataUsesPlaceholderSignatures !== true) return []
+      const displayPlan = entry.review.displayPlan as TransactionPlan | undefined
+      return (displayPlan ?? []).flatMap(item => item.type === 'evcBatch'
+        ? flattenBatchEntries(item.items).map(call => ({
+            targetContract: call.targetContract,
+            onBehalfOfAccount: call.onBehalfOfAccount,
+            value: call.value,
+            data: call.data,
+          }))
+        : [])
+    })
 
   /**
    * Send each entry's prerequisite grants, mined, before the merged plan is
@@ -2329,8 +2349,8 @@ export const useTxBatch = () => {
    * the preview plan; entries with simulation-only preview state can rebuild a
    * signed execution plan before the merged batch is prepared and sent.
    */
-  const executeBatch = async () => {
-    if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
+  const executeBatch = async (reviewedPrepared: TransactionPlanPrepared | null | undefined) => {
+    if (isExecuting.value || entries.value.length === 0 || !lastMerged || !reviewedPrepared) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
     // real `batch` tx would revert, so refuse to send.
@@ -2347,7 +2367,10 @@ export const useTxBatch = () => {
       await sendExecutionPrerequisites(grantedRevokes)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
-      const prepared = await prepareTransactionPlan(executionPlan)
+      const candidatePrepared = await prepareTransactionPlan(executionPlan)
+      const prepared = requireReviewedBatchPreparedExecution(reviewedPrepared, candidatePrepared, {
+        placeholderSignatureCalls: getReviewedSignaturePlaceholderCalls(),
+      })
       await executePreparedPlan(prepared)
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
