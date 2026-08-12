@@ -217,6 +217,7 @@ interface PendingSafeBatchSubmission {
   chainId: number
   entries: BatchEntry[]
   errorMessage: string
+  terminalStatus?: 'not-executed'
   refreshExternalMigrationPositions: boolean
   grantedRevokes: MigrationAuthorizationRevoke[]
 }
@@ -1649,7 +1650,8 @@ export const useTxBatch = () => {
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
   const pendingSafeSubmission = computed(() =>
     pendingSafeSubmissions.value.find(pending =>
-      isPendingSafeSubmissionForContext(pending, owner.value, chainId.value),
+      !pending.terminalStatus
+      && isPendingSafeSubmissionForContext(pending, owner.value, chainId.value),
     ) ?? null,
   )
   const setPendingSafeSubmission = (pending: PendingSafeBatchSubmission) => {
@@ -2021,7 +2023,7 @@ export const useTxBatch = () => {
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], ([currentOwner, currentChainId]) => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
-        const pendingForContext = pendingSafeSubmissions.value.find(pending =>
+        const savedSubmissionForContext = pendingSafeSubmissions.value.find(pending =>
           isPendingSafeSubmissionForContext(pending, currentOwner, currentChainId),
         )
         resimToken++
@@ -2038,9 +2040,12 @@ export const useTxBatch = () => {
         resimulatePromise = null
         tenderly.clearSimulation()
         syncOverlay()
-        if (pendingForContext) {
-          entries.value = [...pendingForContext.entries]
-          execError.value = pendingForContext.errorMessage
+        if (savedSubmissionForContext) {
+          entries.value = [...savedSubmissionForContext.entries]
+          execError.value = savedSubmissionForContext.errorMessage
+          if (savedSubmissionForContext.terminalStatus === 'not-executed') {
+            clearPendingSafeSubmission(savedSubmissionForContext)
+          }
         }
       })
     })
@@ -2476,26 +2481,48 @@ export const useTxBatch = () => {
         chainId: pending.chainId,
       })
       if (result.status === 'executed') {
-        clearPendingSafeSubmission(pending)
-        clearBatchInternal(true)
-        if (pending.refreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
         await revokeAfterSuccess(pending.grantedRevokes)
-        await redirectAfterBatchExecution()
+        const stillActive = isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)
+        clearPendingSafeSubmission(pending)
+        if (stillActive) clearBatchInternal(false)
+        if (pending.refreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+        if (isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)) {
+          await redirectAfterBatchExecution()
+        }
         return
       }
       if (result.status === 'not-executed') {
-        clearPendingSafeSubmission(pending)
+        const errorMessage = 'Safe confirmed that the submitted transaction was not executed. The batch has been rebuilt and can be reviewed again.'
         await revokeAfterAbort(pending.grantedRevokes)
-        execError.value = 'Safe confirmed that the submitted transaction was not executed. The batch has been rebuilt and can be reviewed again.'
-        lastMerged = null
-        await runResimulate()
+        const stillActive = isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)
+        if (stillActive) {
+          clearPendingSafeSubmission(pending)
+          execError.value = errorMessage
+          lastMerged = null
+        }
+        else {
+          setPendingSafeSubmission({
+            ...pending,
+            terminalStatus: 'not-executed',
+            errorMessage,
+          })
+        }
+        if (stillActive) await runResimulate()
         return
       }
-      execError.value = `Safe transaction status is still unknown. Submitted Safe hash: ${pending.submittedHash}`
+      const errorMessage = `Safe transaction status is still unknown. Submitted Safe hash: ${pending.submittedHash}`
+      setPendingSafeSubmission({ ...pending, errorMessage })
+      if (isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)) {
+        execError.value = errorMessage
+      }
     }
     catch (error) {
       logWarn('useTxBatch/reconcileSafe', error)
-      execError.value = await describeExecError(error)
+      const errorMessage = await describeExecError(error)
+      setPendingSafeSubmission({ ...pending, errorMessage })
+      if (isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)) {
+        execError.value = errorMessage
+      }
     }
     finally {
       isExecuting.value = false

@@ -1416,6 +1416,40 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.execError.value).toContain('batch has been rebuilt')
   })
 
+  it('restores a not-executed Safe batch after reconciliation finishes in another context', async () => {
+    const batch = useTxBatch()
+    const safeHash = `0x${'67'.repeat(32)}` as Hash
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ account: owner, chainId: 1 })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      options?.onProgress?.({ status: 'evcBatch' })
+      throw new SafeTransactionStatusUnknownError(safeHash, 'timeout')
+    })
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+    expect(batch.pendingSafeSubmission.value?.submittedHash).toBe(safeHash)
+
+    eulerTxMocks.reconcileSafeTransaction.mockImplementationOnce(async () => {
+      activeOwner.value = subAccount
+      activeChainId.value = 8453
+      await nextTick()
+      return { status: 'not-executed' as const }
+    })
+    await batch.reconcilePendingSafeSubmission()
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(batch.entryCount.value).toBe(0)
+
+    activeOwner.value = owner
+    activeChainId.value = 1
+    await nextTick()
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('batch has been rebuilt')
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+  })
+
   it('does not misclassify an unresolved prerequisite Safe transaction as the atomic batch', async () => {
     const batch = useTxBatch()
     const prerequisiteHash = `0x${'34'.repeat(32)}` as Hash
