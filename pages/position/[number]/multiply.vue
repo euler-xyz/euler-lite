@@ -27,7 +27,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { reportClientEvent } from '~/utils/client-observability'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -998,8 +998,8 @@ const submitMultiply = async () => {
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await sendMultiply()
+          onConfirm: async (execution) => {
+            await sendMultiply(execution)
           },
         },
       })
@@ -1010,7 +1010,7 @@ const submitMultiply = async () => {
   }
 }
 
-const sendMultiply = async () => {
+const sendMultiply = async (execution: TrackedExecutionScope) => {
   if (!preparedPlan.value) {
     return
   }
@@ -1019,9 +1019,9 @@ const sendMultiply = async () => {
     await executePreparedPlan(preparedPlan.value)
     // Success signal for a detached Safe completion toast; a proposal that
     // confirmed after its modal was closed must not redirect mid-flow.
-    markTrackedExecutionSucceeded()
+    execution.markSucceeded()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
-    if (!shouldSuppressPostTxNavigation()) {
+    if (!execution.suppressPostTxUi()) {
       modal.close()
       setTimeout(() => {
         router.replace({ path: '/portfolio', query: { network: route.query.network } })

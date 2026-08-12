@@ -33,7 +33,7 @@ import { getNewSubAccount } from '~/composables/useSubAccounts'
 import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
 import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
 import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS, useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -3385,8 +3385,8 @@ const reviewInboundExternalMigration = async () => {
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
-        onConfirm: async () => {
-          await sendInboundExternalMigration(preview)
+        onConfirm: async (execution) => {
+          await sendInboundExternalMigration(execution, preview)
         },
         submittingLabel: 'Migrating...',
       },
@@ -3401,7 +3401,7 @@ const reviewInboundExternalMigration = async () => {
   }
 }
 
-const sendInboundExternalMigration = async (preview: InboundExternalMigrationPreview) => {
+const sendInboundExternalMigration = async (execution: TrackedExecutionScope, preview: InboundExternalMigrationPreview) => {
   isSubmitting.value = true
   clearSimulationError()
   try {
@@ -3461,7 +3461,7 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
     }
 
     await revokeAfterSuccess(revokeTxs)
-    finishInboundExternalMigrationSuccess(input)
+    finishInboundExternalMigrationSuccess(execution, input)
   }
   catch (err) {
     showError(err instanceof Error ? err.message : 'Migration failed')
@@ -3781,8 +3781,8 @@ const submit = async () => {
           quoteFetchedAt: effectiveQuoteFetchedAt.value,
           vaultAmounts: refinanceVaultAmounts.value,
           ...refinanceSwapReviewInfo.value,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (execution) => {
+            await send(execution)
           },
           submittingLabel: 'Submitting...',
         },
@@ -3794,7 +3794,7 @@ const submit = async () => {
   }
 }
 
-const send = async () => {
+const send = async (execution: TrackedExecutionScope) => {
   isSubmitting.value = true
   try {
     if (preparedPlan.value) {
@@ -3806,8 +3806,8 @@ const send = async () => {
     }
     // Success signal for a detached Safe completion toast; a proposal that
     // confirmed after its modal was closed must not redirect mid-flow.
-    markTrackedExecutionSucceeded()
-    if (!shouldSuppressPostTxNavigation()) {
+    execution.markSucceeded()
+    if (!execution.suppressPostTxUi()) {
       modal.close()
       setTimeout(() => {
         router.replace({ path: '/portfolio', query: { network: route.query.network } })

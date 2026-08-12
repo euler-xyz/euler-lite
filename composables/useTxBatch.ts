@@ -18,7 +18,7 @@ import {
   mergeBatchPrefetchedSlotHints,
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import {
   activeLayerVaultsRef,
@@ -481,12 +481,14 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
   }
 }
 
-const redirectAfterBatchExecution = async () => {
+const redirectAfterBatchExecution = async (scope?: TrackedExecutionScope) => {
   try {
     // Success signal for a detached Safe completion toast, and the gate that
     // keeps a background-confirmed batch from yanking the user mid-flow.
-    markTrackedExecutionSucceeded()
-    if (shouldSuppressPostTxNavigation()) return
+    // Bound to THIS execution's record — a late tail can never mark or read
+    // a successor execution.
+    scope?.markSucceeded()
+    if (scope?.suppressPostTxUi()) return
     const router = useRouter()
     const route = useRoute()
     const query: Record<string, string> = {}
@@ -2508,7 +2510,7 @@ export const useTxBatch = () => {
    * the preview plan; entries with simulation-only preview state can rebuild a
    * signed execution plan before the merged batch is prepared and sent.
    */
-  const executeBatch = async () => {
+  const executeBatch = async (scope?: TrackedExecutionScope) => {
     if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
@@ -2563,7 +2565,7 @@ export const useTxBatch = () => {
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
       await revokeAfterSuccess(grantedRevokes)
-      await redirectAfterBatchExecution()
+      await redirectAfterBatchExecution(scope)
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)

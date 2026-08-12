@@ -19,7 +19,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const _route = useRoute()
 const router = useRouter()
@@ -707,8 +707,8 @@ const disableCollateral = async (vault: EVault) => {
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send(vault.address)
+        onConfirm: async (execution) => {
+          await send(execution, vault.address)
         },
       },
     })
@@ -717,7 +717,7 @@ const disableCollateral = async (vault: EVault) => {
     isPreparing.value = false
   }
 }
-const send = async (collateralAddress: string) => {
+const send = async (execution: TrackedExecutionScope, collateralAddress: string) => {
   try {
     isSubmitting.value = true
     const subAccount = position.value!.subAccount as Address
@@ -734,8 +734,8 @@ const send = async (collateralAddress: string) => {
 
     // Success signal for a detached Safe completion toast; a proposal that
     // confirmed after its modal was closed must not redirect mid-flow.
-    markTrackedExecutionSucceeded()
-    if (!shouldSuppressPostTxNavigation()) {
+    execution.markSucceeded()
+    if (!execution.suppressPostTxUi()) {
       modal.close()
       setTimeout(() => {
         router.replace({ path: '/portfolio', query: { network: _route.query.network } })

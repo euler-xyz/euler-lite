@@ -13,7 +13,7 @@ import { useStateOverrideResolution } from '~/composables/useStateOverrideOption
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
-import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionHandle, TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 
 const emits = defineEmits(['close', 'confirm'])
@@ -67,7 +67,7 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm?: () => void | Promise<void>
+  onConfirm?: (execution: TrackedExecutionScope) => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
@@ -237,7 +237,7 @@ const handleConfirm = async () => {
   // Single-slot gate: while a detached proposal is pending, no new
   // submission may start (isConfirmDisabled also reflects this).
   if (!handle) return
-  const result = onConfirm()
+  const result = onConfirm(handle.scope)
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
     pendingExecution = result as Promise<void>
