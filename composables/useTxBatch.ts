@@ -36,6 +36,7 @@ import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import {
   getVaultTags,
   isAnyVaultBlockedByCountry,
+  isAssetBlockedByCountry,
   isVaultBlockedByCountry,
   isVaultRestrictedByCountry,
   type AssetLike,
@@ -143,12 +144,13 @@ export interface BatchEntry {
   rewardClaimKey?: string
   /** Chain-scoped vault/asset facts that must still satisfy geo policy when the
    *  cart is finally executed. `acquisition` applies soft restrictions too. */
-  geoPolicy?: Array<{ vaultAddress: string, asset?: AssetLike, counterpart?: AssetLike, acquisition?: boolean }>
+  geoPolicy?: Array<{ vaultAddress: string, asset?: AssetLike, inputAsset?: AssetLike, counterpart?: AssetLike, acquisition?: boolean }>
 }
 
 const isBatchEntryPolicyBlocked = (entry: Pick<BatchEntry, 'geoPolicy'>): boolean =>
   (entry.geoPolicy ?? []).some(policy =>
-    isVaultBlockedByCountry(policy.vaultAddress, { asset: policy.asset })
+    isAssetBlockedByCountry(policy.inputAsset)
+    || isVaultBlockedByCountry(policy.vaultAddress, { asset: policy.asset })
     || (policy.acquisition && isVaultRestrictedByCountry(policy.vaultAddress, {
       asset: policy.asset,
       counterpart: policy.counterpart,

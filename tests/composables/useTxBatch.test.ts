@@ -19,6 +19,7 @@ vi.mock('~/composables/useEulerSdk', () => ({
 }))
 
 const geoPolicyMocks = vi.hoisted(() => ({
+  isAssetBlockedByCountry: vi.fn((_asset?: unknown) => false),
   isAnyVaultBlockedByCountry: vi.fn((..._addresses: string[]) => false),
   isVaultBlockedByCountry: vi.fn(() => false),
   isVaultRestrictedByCountry: vi.fn(() => false),
@@ -318,6 +319,8 @@ const createMockSdk = () => ({
 beforeEach(() => {
   geoPolicyMocks.isAnyVaultBlockedByCountry.mockReset()
   geoPolicyMocks.isAnyVaultBlockedByCountry.mockReturnValue(false)
+  geoPolicyMocks.isAssetBlockedByCountry.mockReset()
+  geoPolicyMocks.isAssetBlockedByCountry.mockReturnValue(false)
   geoPolicyMocks.isVaultBlockedByCountry.mockReset()
   geoPolicyMocks.isVaultBlockedByCountry.mockReturnValue(false)
   geoPolicyMocks.isVaultRestrictedByCountry.mockReset()
@@ -371,6 +374,18 @@ describe('isBatchEntryGeoBlocked', () => {
       geoPolicy: [{ vaultAddress: target, asset, counterpart, acquisition: true }],
     })).toBe(false)
     expect(geoPolicyMocks.isVaultRestrictedByCountry).toHaveBeenCalledWith(target, { asset, counterpart })
+  })
+
+  it('hard-blocks the wallet input asset independently of wrap-pair exemptions', () => {
+    const target = '0x2000000000000000000000000000000000000002'
+    const asset = { address: target, symbol: 'WETH' }
+    const inputAsset = { address: '0x3000000000000000000000000000000000000003', symbol: 'ETH' }
+    geoPolicyMocks.isAssetBlockedByCountry.mockImplementation(candidate => candidate === inputAsset)
+
+    expect(isBatchEntryGeoBlocked({
+      geoPolicy: [{ vaultAddress: target, asset, inputAsset, counterpart: inputAsset, acquisition: true }],
+    })).toBe(true)
+    expect(geoPolicyMocks.isAssetBlockedByCountry).toHaveBeenCalledWith(inputAsset)
   })
 
   it('does not apply soft restrictions to direct supplies', () => {

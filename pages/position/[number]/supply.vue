@@ -222,6 +222,7 @@ const addToBatch = async () => {
         geoPolicy: [{
           vaultAddress: form.collateralVault.value!.address,
           asset: a,
+          inputAsset: sel,
           counterpart: sel,
           acquisition: true,
         }],
