@@ -1320,6 +1320,9 @@ describe('useTxBatch execution prerequisites', () => {
     items: [{ type: 'operation', name: 'bundled-migration', items: [] }],
   }] as unknown as TransactionPlan
 
+  const bundledGrantStep = { index: 1, label: 'Approve aToken transfer', isSeparateTx: false }
+  const bundledRevokeStep = { index: 1, label: 'Restore previous aToken approval', isSeparateTx: false }
+
   const addBundledMigrationEntry = (batch: ReturnType<typeof useTxBatch>) =>
     batch.addEntry({
       label: 'Migrate Aave position',
@@ -1334,6 +1337,8 @@ describe('useTxBatch execution prerequisites', () => {
         plan: singleOpBundledPlan,
         grants: [grantTx],
         revokes: [revokeTx],
+        grantSteps: [bundledGrantStep],
+        revokeSteps: [bundledRevokeStep],
       }),
       refreshExternalMigrationPositions: true,
     })
@@ -1402,7 +1407,7 @@ describe('useTxBatch execution prerequisites', () => {
       // Grant already live: nothing to wrap — but the reviewed ceremony is
       // still ONE provider-bound proposal, never a silent executePreparedPlan
       // whose internals could degrade to sequential sends.
-      buildBundledExecution: async () => ({ plan: singleOpBundledPlan, grants: [], revokes: [] }),
+      buildBundledExecution: async () => ({ plan: singleOpBundledPlan, grants: [], revokes: [], grantSteps: [], revokeSteps: [] }),
     })
     await batch.prepareBundledExecution()
     await batch.executeBatch()
@@ -1412,6 +1417,26 @@ describe('useTxBatch execution prerequisites', () => {
       after: [],
     }, { allowSingleCall: true })
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+  })
+
+  it('latches per-entry review rows from the bundled resolution', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    const latched = await batch.prepareBundledExecution()
+
+    // The modal renders THESE rows — derived from the same authorization
+    // resolution the proposal executes — never the add-time captures, which
+    // can be stale by the time the review opens.
+    const entryId = batch.entries.value[0]!.id
+    expect(latched?.stepsByEntryId[entryId]).toEqual({
+      grantSteps: [bundledGrantStep],
+      revokeSteps: [bundledRevokeStep],
+    })
+    batch.latchedBundledExecution.value = null
   })
 
   it('throws a re-review error when the wallet stopped being a safe after latching', async () => {

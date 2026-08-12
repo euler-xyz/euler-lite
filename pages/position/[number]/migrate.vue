@@ -35,6 +35,7 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
+  migrationAuthorizationPayloadKey,
   type MigrationAuthorizationRevoke,
 } from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
@@ -713,6 +714,19 @@ const outgoingPreviewKeyFor = (target: OutgoingMigrationTarget) => {
   return base ? `${base}|${target.id}` : ''
 }
 
+/**
+ * Evict one cached preview so the next review rebuilds it. Used when the
+ * confirmation gate detects that authorization state drifted since review —
+ * returning the stale cache would re-present the very ceremony that was
+ * rejected.
+ */
+function invalidateOutgoingMigrationPreview(key: string) {
+  if (!(key in outgoingPreviews.value)) return
+  outgoingPreviews.value = Object.fromEntries(
+    Object.entries(outgoingPreviews.value).filter(([cachedKey]) => cachedKey !== key),
+  )
+}
+
 async function prepareOutgoingMigrationPreview(
   target: OutgoingMigrationTarget,
 ): Promise<OutgoingMigrationPreview> {
@@ -901,6 +915,17 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
     const input = reviewedInput
     const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, reviewedAccount, useSignatures)
 
+    // The reviewed ceremony is defined by the authorization payload the modal
+    // displayed and copied. Authorization state can drift between review and
+    // confirmation (an allowance granted or revoked elsewhere, a restore
+    // value that moved) — executing the fresh payload would add or remove
+    // grant/revoke calls the user never reviewed. Evict the cached preview so
+    // the re-review builds against the current state.
+    if (migrationAuthorizationPayloadKey(authorizationRequest) !== migrationAuthorizationPayloadKey(preview.authorizationRequest)) {
+      invalidateOutgoingMigrationPreview(preview.key)
+      throw new Error('Authorization requirements changed since review — please review the migration again.')
+    }
+
     // An undefined request means the grant is already live on-chain: nothing to
     // sign, nothing to grant, and nothing of ours to revoke afterwards.
     let authorization: SignedMigrationAuthorization | undefined
@@ -915,14 +940,17 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
         if (!isSafeWallet.value) {
           throw new Error('Wallet changed since review — please review the migration again.')
         }
-        if (authorizationRequest) {
-          const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
-          if (outcome === 'aborted') return
-          finishMigrationSuccess(execution)
-          return
+        // bundledReview implies the review carried a request, and payload
+        // equality above pins the fresh one to it — reaching here without
+        // one is drift the gate somehow missed, so fail closed.
+        if (!authorizationRequest) {
+          invalidateOutgoingMigrationPreview(preview.key)
+          throw new Error('Authorization requirements changed since review — please review the migration again.')
         }
-        // The grant went live since review (fresh request is empty): nothing
-        // to wrap; the plain plan below still submits as one Safe proposal.
+        const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
+        if (outcome === 'aborted') return
+        finishMigrationSuccess(execution)
+        return
       }
 
       if (authorizationRequest) {
@@ -1093,14 +1121,22 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
           },
           // Bundled counterpart for Safe execution: the simulation-variant
           // plan validates the grant instead of reading the live allowance,
-          // so nothing needs to mine before the proposal is assembled.
+          // so nothing needs to mine before the proposal is assembled. The
+          // review rows come from the SAME resolution so the modal cannot
+          // display a ceremony other than the one that executes.
           buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
             const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
             const { grants, revokes } = request
               ? encodeMigrationAuthorizationTxs(request)
               : { grants: [], revokes: [] }
             const simulation = await buildMigrationSimulation(input, migrationPosition, request, account)
-            return { plan: simulation.plan, grants, revokes }
+            return {
+              plan: simulation.plan,
+              grants,
+              revokes,
+              grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
+              revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
+            }
           },
         }),
     stateOverrides: preview.tenderlySimulation.stateOverrides,

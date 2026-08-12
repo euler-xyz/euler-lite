@@ -5,6 +5,7 @@ import type { MigrationAuthorizationRequest } from '@eulerxyz/euler-v2-sdk'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
+  migrationAuthorizationPayloadKey,
 } from '~/utils/migrationAuthorizationTxs'
 
 const owner = '0x0000000000000000000000000000000000000001' as Address
@@ -215,5 +216,56 @@ describe('buildMigrationAuthorizationTxSteps', () => {
     expect(buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true })[0]!.isSeparateTx).toBe(false)
     // Default stays standalone.
     expect(buildMigrationAuthorizationTxSteps(request, 'grant')[0]!.isSeparateTx).toBe(true)
+  })
+})
+
+describe('migrationAuthorizationPayloadKey', () => {
+  it('is stable for the same request and distinguishes no request from one', () => {
+    expect(migrationAuthorizationPayloadKey(aaveApprovalRequest()))
+      .toBe(migrationAuthorizationPayloadKey(aaveApprovalRequest()))
+    expect(migrationAuthorizationPayloadKey(undefined)).toBe('none')
+    expect(migrationAuthorizationPayloadKey(aaveApprovalRequest())).not.toBe('none')
+  })
+
+  it('changes when the encoded grant or restoration drifts', () => {
+    const base = migrationAuthorizationPayloadKey(aaveApprovalRequest())
+
+    // The restore value moved (allowance changed elsewhere since review).
+    const driftedRevocation = {
+      ...aaveApprovalRequest(),
+      revocation: { to: aToken, abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 999n] },
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(driftedRevocation)).not.toBe(base)
+
+    // A restoration disappeared entirely.
+    const noRevocation = {
+      ...aaveApprovalRequest(),
+      revocation: undefined,
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(noRevocation)).not.toBe(base)
+
+    // A chained authorization appeared.
+    const chained = {
+      ...aaveApprovalRequest(),
+      postMigrationAuthorization: morphoAuthorizationRequest(),
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(chained)).not.toBe(base)
+  })
+
+  it('keys typed-data requests without choking on bigint fields', () => {
+    const key = migrationAuthorizationPayloadKey(typedDataRequest())
+    expect(key).toContain('typedData:')
+    expect(key).toBe(migrationAuthorizationPayloadKey(typedDataRequest()))
+
+    const drifted = {
+      ...typedDataRequest(),
+      typedData: {
+        domain: { verifyingContract: aToken, chainId: 1 },
+        types: { Permit: [] },
+        primaryType: 'Permit',
+        message: { owner, spender: swapVerifier, value: 2000n },
+      },
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(drifted)).not.toBe(key)
   })
 })

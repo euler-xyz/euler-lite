@@ -57,6 +57,7 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
+  migrationAuthorizationPayloadKey,
   type MigrationAuthorizationRevoke,
 } from '~/utils/migrationAuthorizationTxs'
 import {
@@ -2842,15 +2843,16 @@ const buildInboundExternalMigrationCalldataPreview = async (
 
 /**
  * Resolve the migration authorization: sign it, or grant it on-chain and return
- * the revokes to send once the batch has settled.
+ * the revokes to send once the batch has settled. Takes the request the
+ * confirmation gate already fetched and validated against the review — never
+ * re-fetches, so what executes is exactly what passed the payload-equality
+ * check.
  */
 const resolveInboundExternalMigrationAuthorization = async (
-  input: InboundExternalMigrationInput,
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
   revokeTxs: MigrationAuthorizationRevoke[],
   useSignatures: boolean,
 ): Promise<SignedMigrationAuthorization | undefined> => {
-  const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-  inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
   // No request means the grant is already live on-chain: nothing to sign, and
   // nothing of ours to revoke afterwards.
   if (!authorizationRequest) return undefined
@@ -3418,6 +3420,20 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
     })
     if (!await restorePendingBeforeRetry()) return
     inboundExternalPreparedPlan.value = null
+    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+    inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
+
+    // The reviewed ceremony is defined by the authorization payload the modal
+    // displayed and copied. Authorization state can drift between review and
+    // confirmation (an allowance granted or revoked elsewhere, a restore
+    // value that moved) — executing the fresh payload would add or remove
+    // grant/revoke calls the user never reviewed. Drop the cached preview so
+    // the re-review builds against the current state.
+    if (migrationAuthorizationPayloadKey(authorizationRequest) !== migrationAuthorizationPayloadKey(preview.authorizationRequest)) {
+      inboundExternalMigrationPreview.value = null
+      throw new Error('Authorization requirements changed since review — please review the migration again.')
+    }
+
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
       if (preview.bundledReview) {
@@ -3429,19 +3445,20 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
         if (!isSafeWallet.value) {
           throw new Error('Wallet changed since review — please review the migration again.')
         }
-        const bundleAuthorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-        inboundExternalAuthorizationConnector.value = bundleAuthorizationRequest ? input.source.connectorId : null
-        if (bundleAuthorizationRequest) {
-          const outcome = await sendInboundExternalMigrationAsSafeBundle(input, bundleAuthorizationRequest, account, useSignatures)
-          if (outcome === 'aborted') return
-          finishInboundExternalMigrationSuccess(execution, input)
-          return
+        // bundledReview implies the review carried a request, and payload
+        // equality above pins the fresh one to it — reaching here without
+        // one is drift the gate somehow missed, so fail closed.
+        if (!authorizationRequest) {
+          inboundExternalMigrationPreview.value = null
+          throw new Error('Authorization requirements changed since review — please review the migration again.')
         }
-        // The grant went live since review (fresh request is empty): nothing
-        // to wrap; the plain plan below still submits as one Safe proposal.
+        const outcome = await sendInboundExternalMigrationAsSafeBundle(input, authorizationRequest, account, useSignatures)
+        if (outcome === 'aborted') return
+        finishInboundExternalMigrationSuccess(execution, input)
+        return
       }
 
-      const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)
+      const authorization = await resolveInboundExternalMigrationAuthorization(authorizationRequest, revokeTxs, useSignatures)
       inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
       inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, {
         account,
@@ -3612,14 +3629,22 @@ const addInboundExternalMigrationToBatch = async () => {
             // Bundled counterpart for Safe execution: the simulation-variant
             // plan validates the grant instead of reading the live
             // allowance, so nothing needs to mine before the proposal is
-            // assembled.
+            // assembled. The review rows come from the SAME resolution so
+            // the modal cannot display a ceremony other than the one that
+            // executes.
             buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
               const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
               const { grants, revokes } = request
                 ? encodeMigrationAuthorizationTxs(request)
                 : { grants: [], revokes: [] }
               const simulation = await buildInboundExternalMigrationSimulationResult(input, request, account, useSignatures)
-              return { plan: simulation.plan, grants, revokes }
+              return {
+                plan: simulation.plan,
+                grants,
+                revokes,
+                grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
+                revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
+              }
             },
           }),
       stateOverrides: preview.tenderlySimulation.stateOverrides,

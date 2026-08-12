@@ -27,7 +27,7 @@ import {
   type LayeredVaultMap,
 } from '~/composables/useLayeredVaults'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import { buildPlanMarketLabel } from '~/utils/stepDecoding'
+import { buildPlanMarketLabel, type DisplayStep } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
@@ -100,6 +100,14 @@ export interface BatchEntryBundledExecution {
   grants: BatchEntryExternalTx[]
   /** Revocation calls to append, already in unwind order for this entry. */
   revokes: BatchEntryExternalTx[]
+  /**
+   * Review rows for the grants above, derived from the SAME authorization
+   * resolution — the modal renders these, never the add-time captures, so
+   * the displayed ceremony cannot drift from the executed one.
+   */
+  grantSteps: DisplayStep[]
+  /** Review rows for the revocations above, same resolution. */
+  revokeSteps: DisplayStep[]
 }
 
 export interface BatchEntry {
@@ -230,6 +238,8 @@ const latchedBundledExecution = shallowRef<{
   plans: TransactionPlan[]
   grants: BatchEntryExternalTx[]
   revokes: BatchEntryExternalTx[]
+  /** Per-entry review rows from the same resolution, for the modal to render. */
+  stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }>
 } | null>(null)
 // Per-entry fixed plan (keyed by entry id), used by the review modal and by the
 // merged whole-batch plan. These are captured once when the entry is added.
@@ -2480,12 +2490,14 @@ export const useTxBatch = () => {
     const plans: TransactionPlan[] = []
     const grants: BatchEntryExternalTx[] = []
     const revokesByEntry: BatchEntryExternalTx[][] = []
+    const stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }> = {}
     for (const [index, entry] of entries.value.entries()) {
       if (entry.buildBundledExecution) {
         const bundled = await entry.buildBundledExecution(await getExecutionPlanningAccount(index))
         plans.push(bundled.plan)
         grants.push(...bundled.grants)
         revokesByEntry.push(bundled.revokes)
+        stepsByEntryId[entry.id] = { grantSteps: bundled.grantSteps, revokeSteps: bundled.revokeSteps }
         continue
       }
       plans.push(entry.buildExecutionPlan
@@ -2493,7 +2505,7 @@ export const useTxBatch = () => {
         : entry.plan)
       revokesByEntry.push([])
     }
-    return { plans, grants, revokes: revokesByEntry.reverse().flat() }
+    return { plans, grants, revokes: revokesByEntry.reverse().flat(), stepsByEntryId }
   }
 
   /**

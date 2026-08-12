@@ -103,6 +103,11 @@ const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[numbe
     : steps
 
 const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  // A latched bundled ceremony carries its own rows, derived from the SAME
+  // authorization resolution the proposal executes — the add-time captures
+  // can be stale (authorization state drifts between add and review).
+  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
+  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.grantSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? overrideBundled(normalizeDisplaySteps(review?.signatureSteps), entry)
@@ -110,6 +115,8 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
+  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.revokeSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? overrideBundled(normalizeDisplaySteps(review?.postSteps), entry)
