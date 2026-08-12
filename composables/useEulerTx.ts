@@ -1568,10 +1568,7 @@ export const useEulerTx = () => {
       if (error instanceof SafeTransactionStatusUnknownError) {
         return { status: 'unknown' }
       }
-      if (error instanceof Error && (
-        error.message === 'Safe transaction was cancelled'
-        || error.message === 'Safe transaction failed'
-      )) {
+      if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
         return { status: 'not-executed' }
       }
       throw error

@@ -163,13 +163,9 @@ describe('waitForSafeTransactionExecution', () => {
     })
   })
 
-  it.each([
-    [400, 'Safe transaction was cancelled'],
-    [500, 'Safe transaction failed'],
-    [600, 'Safe transaction failed'],
-  ])('stops on terminal Safe status %s', async (status, message) => {
+  it('stops on an off-chain Safe cancellation', async () => {
     const walletProvider: WalletProviderLike = {
-      request: vi.fn().mockResolvedValue({ status }),
+      request: vi.fn().mockResolvedValue({ status: 400 }),
     }
     const publicClient: ReceiptClientLike = {
       getTransactionReceipt: vi.fn().mockRejectedValue(new Error('Transaction receipt not found')),
@@ -180,7 +176,59 @@ describe('waitForSafeTransactionExecution', () => {
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
-    })).rejects.toThrow(message)
+    })).rejects.toThrow('Safe transaction was cancelled')
+  })
+
+  it.each([500, 600])('resolves the reverted receipt from terminal Safe status %s', async (status) => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({
+        status,
+        receipts: [{ transactionHash: EXECUTION_HASH }],
+      }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn(async ({ hash }) => {
+        if (hash === EXECUTION_HASH) return receipt(EXECUTION_HASH, 'reverted')
+        throw new Error('Transaction receipt not found')
+      }),
+    }
+
+    await expect(waitForSafeTransactionExecution({
+      submittedHash: SAFE_HASH,
+      walletProvider,
+      publicClient,
+      pollingIntervalMs: 0,
+    })).resolves.toEqual({
+      hash: EXECUTION_HASH,
+      receipt: receipt(EXECUTION_HASH, 'reverted'),
+    })
+  })
+
+  it('keeps a failed Safe status unresolved when no execution hash is available', async () => {
+    vi.useFakeTimers()
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({ status: 500 }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('Transaction receipt not found')),
+    }
+
+    try {
+      const pending = waitForSafeTransactionExecution({
+        submittedHash: SAFE_HASH,
+        walletProvider,
+        publicClient,
+        pollingIntervalMs: 1_000,
+        timeoutMs: 5_000,
+      })
+      const rejection = expect(pending).rejects.toBeInstanceOf(SafeTransactionStatusUnknownError)
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      await rejection
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 
   it('stops with an unknown status when neither provider returns a receipt', async () => {

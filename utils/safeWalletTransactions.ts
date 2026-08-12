@@ -270,24 +270,23 @@ export const waitForSafeTransactionExecution = async ({
           const callsStatus = parseCallsStatus(rawStatus)
           const status = parseStatus(callsStatus?.status)
 
-          if (status === 400) {
-            throw new Error('Safe transaction was cancelled')
-          }
-          if (status !== undefined && status >= 500) {
-            throw new Error('Safe transaction failed')
-          }
-
+          // A failed EIP-5792 batch (500/600) can still be mined and consume
+          // gas/advance the Safe nonce. Safe includes the real execution hash
+          // in that terminal response, so retain it and let the public RPC
+          // resolve the reverted receipt on the next poll instead of treating
+          // the batch as an off-chain cancellation.
           const resolvedHash = callsStatus?.receipts
             ?.map(item => item.transactionHash)
             .find(isHash)
           if (resolvedHash) executionHash = resolvedHash
+
+          if (status === 400) {
+            throw new Error('Safe transaction was cancelled')
+          }
         }
         catch (error) {
           if (error instanceof SafeTransactionStatusUnknownError) throw error
-          if (error instanceof Error && (
-            error.message === 'Safe transaction was cancelled'
-            || error.message === 'Safe transaction failed'
-          )) {
+          if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
             throw error
           }
           if (isUnsupportedMethodError(error)) callsStatusSupported = false
