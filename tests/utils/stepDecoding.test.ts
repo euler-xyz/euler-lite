@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodeAbiParameters, encodeFunctionData, maxUint256, parseAbi, type Address, type Hex } from 'viem'
+import { encodeAbiParameters, encodeFunctionData, maxUint160, maxUint256, parseAbi, type Address, type Hex } from 'viem'
 import { SwapperMode, type EVCBatchItem, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 import { buildTransactionPlanDisplaySteps, type StepDecodingContext, type VaultLookup } from '~/utils/stepDecoding'
@@ -361,6 +361,27 @@ describe('buildTransactionPlanDisplaySteps approval rows', () => {
         spender: wethVault,
         amount: maxUint256,
         data: '0x',
+      }],
+    }]
+
+    const [step] = buildTransactionPlanDisplaySteps(plan, ctx, getVault, () => '')
+
+    expect(step?.assetInfo?.amount).toBe('Unlimited')
+  })
+
+  it('renders the Permit2 uint160 max sentinel as unlimited', () => {
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: wethAsset,
+      owner: account,
+      spender: wethVault,
+      amount: 1n,
+      resolved: [{
+        type: 'permit2',
+        token: wethAsset,
+        owner: account,
+        spender: wethVault,
+        amount: maxUint160,
       }],
     }]
 

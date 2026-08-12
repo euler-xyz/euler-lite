@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { encodeFunctionData, type Address, type Hex } from 'viem'
 import {
   requirePythOnlyPreparedRefresh,
@@ -41,6 +41,19 @@ const prepared = (update: Hex, operationData: Hex = '0x12345678'): TransactionPl
     }],
   }],
 })
+
+const groupedPrepared = (update: Hex): TransactionPlanPrepared => {
+  const result = prepared(update)
+  const batch = result.plan[0]
+  if (batch?.type === 'evcBatch') {
+    batch.items = [{
+      type: 'operation',
+      name: 'Pyth-backed operation',
+      items: flattenBatchEntries(batch.items),
+    }]
+  }
+  return result
+}
 
 describe('requireReviewedExecution', () => {
   it('returns the exact reviewed artifact by identity', () => {
@@ -120,5 +133,13 @@ describe('refreshReviewedPythExecution', () => {
       return reviewed
     })).resolves.toBe(reviewed)
     expect(called).toBe(false)
+  })
+
+  it('detects and canonicalizes Pyth updates inside an SDK operation group', async () => {
+    const reviewed = groupedPrepared('0x01')
+    const refreshed = groupedPrepared('0x02')
+    const prepare = async () => refreshed
+
+    await expect(refreshReviewedPythExecution(reviewed, reviewed.plan, prepare)).resolves.toBe(refreshed)
   })
 })

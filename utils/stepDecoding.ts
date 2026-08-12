@@ -1,4 +1,4 @@
-import { decodeAbiParameters, decodeFunctionData, formatUnits, getAddress, maxUint256, parseAbi, toFunctionSelector, zeroAddress, type Address, type Hex } from 'viem'
+import { decodeAbiParameters, decodeFunctionData, formatUnits, getAddress, maxUint160, maxUint256, parseAbi, toFunctionSelector, zeroAddress, type Address, type Hex } from 'viem'
 import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 
@@ -1161,7 +1161,9 @@ export function buildTransactionPlanDisplaySteps(
         index++
         const token = r.token ?? item.token
         const approvalAsset = getKnownAsset(token, ctx, getVault, knownAssets)
-        const approvalAmount = r.amount === maxUint256 ? 'Unlimited' : undefined
+        const approvalAmount = r.amount === maxUint256 || (r.type === 'permit2' && r.amount === maxUint160)
+          ? 'Unlimited'
+          : undefined
         const assetInfo: StepAssetInfo = approvalAsset
           ? {
               ...buildAssetInfo(approvalAsset, r.amount),

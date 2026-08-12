@@ -102,7 +102,7 @@ const unlock = async (
 
     const result = await runWithFreshREULLockReview(
       reviewedLock,
-      () => refreshLocks(false),
+      () => refreshLocks(true),
       async () => {
         if (isBatchActive.value) {
           modal.close()
@@ -158,7 +158,7 @@ const onUnlockClick = async () => {
   try {
     await ensureWalletOnSiteChain()
 
-    const validation = await refreshREULLockReview(item, () => refreshLocks(false))
+    const validation = await refreshREULLockReview(item, () => refreshLocks(true))
     if (validation.status !== 'fresh') {
       showReviewRefreshError(validation.status)
       return

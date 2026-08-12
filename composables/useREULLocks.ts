@@ -90,7 +90,7 @@ export const useREULLocks = () => {
       foregroundGuard.next()
       locks.value = []
       isLocksLoading.value = false
-      return []
+      return null
     }
     // Foreground review freshness must not share the poll generation: a 60s
     // poll starting while this RPC is in flight must not turn a valid required

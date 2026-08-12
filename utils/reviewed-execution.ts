@@ -1,4 +1,4 @@
-import { isEVCBatchOperation, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries, isEVCBatchOperation, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { toFunctionSelector } from 'viem'
 
 export const REVIEWED_EXECUTION_UNAVAILABLE_ERROR
@@ -24,9 +24,10 @@ const canonicalizePythUpdate = (item: Record<string, unknown>): Record<string, u
 }
 
 export const hasPreparedPythUpdate = (prepared: TransactionPlanPrepared): boolean =>
-  prepared.plan.some(item => item.type === 'evcBatch' && item.items.some(entry =>
-    (isEVCBatchOperation(entry) ? entry.items : [entry]).some(call => isPythUpdate(call)),
-  ))
+  prepared.plan.some(item =>
+    item.type === 'evcBatch'
+    && flattenBatchEntries(item.items).some(call => isPythUpdate(call)),
+  )
 
 const canonicalizeReviewedPlan = (prepared: TransactionPlanPrepared): string => JSON.stringify({
   chainId: prepared.chainId,
