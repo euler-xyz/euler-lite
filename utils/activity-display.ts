@@ -9,7 +9,7 @@ import type {
   ActivityVaultType,
   LiquidationRecord,
 } from '@eulerxyz/euler-v2-sdk'
-import { formatUnits, isAddress, maxUint256, zeroAddress, type Address } from 'viem'
+import { formatUnits, getAddress, isAddress, maxUint256, zeroAddress, type Address } from 'viem'
 import { compactNumber, formatCompactUsdValue, formatSmartAmount, shortenAddress } from '~/utils/string-utils'
 import { CFG_DONT_SOCIALIZE_DEBT } from '~/entities/constants'
 import { decodeHookedOperationsMask, getHookedOperationMetas } from '~/utils/vault-hooks'
@@ -76,6 +76,7 @@ const CATEGORY_LABELS: Record<ActivityCategory, string> = {
   governance: 'Governance',
 }
 
+const UINT128_MAX = 2n ** 128n - 1n
 const UINT136_MAX = 2n ** 136n - 1n
 
 const ACCOUNT_ACTIVITY_EVENT_TYPES = [
@@ -447,6 +448,7 @@ export const getActivityTransferDirection = (
 export const formatActivityEventLabel = (
   event: ActivityEventLabelSource,
 ): string => {
+  if (event.type === 'set_flow_caps') return 'Public allocator limits updated'
   const sourceLabel = event.label?.trim()
   if (sourceLabel) return sourceLabel
   const normalizedLabel = {
@@ -832,6 +834,7 @@ export interface ActivityChangeEntry {
   value?: string
   summary?: string
   addresses?: ActivityChangeAddress[]
+  addressDetails?: string[]
 }
 
 type ActivityChangeEventSource = Pick<ActivityEvent, 'change' | 'type' | 'vault' | 'vaultType'>
@@ -863,6 +866,56 @@ const parseActivityInteger = (value: ActivityChangeValue): bigint | null => {
   if (typeof value !== 'string' && typeof value !== 'number') return null
   try {
     return BigInt(value)
+  }
+  catch {
+    return null
+  }
+}
+
+interface ActivityFlowCapsConfig {
+  id: Address
+  maxIn: string
+  maxOut: string
+}
+
+const isActivityRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isActivityUint128 = (value: unknown): value is string =>
+  typeof value === 'string'
+  && value.length <= UINT128_MAX.toString().length
+  && /^\d+$/.test(value)
+  && BigInt(value) <= UINT128_MAX
+
+/**
+ * The activity API serializes FlowCapsConfig[] into a string because the SDK
+ * change-value contract intentionally accepts only scalars and string arrays.
+ * Keep this parser event-specific and fail closed to the generic raw display.
+ */
+const parseActivityFlowCapsConfig = (
+  value: ActivityChangeValue | undefined,
+): ActivityFlowCapsConfig[] | null => {
+  if (typeof value !== 'string') return null
+
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return null
+
+    const configs: ActivityFlowCapsConfig[] = []
+    for (const item of parsed) {
+      if (
+        !isActivityRecord(item)
+        || typeof item.id !== 'string'
+        || !isAddress(item.id)
+        || !isActivityRecord(item.caps)
+      ) {
+        return null
+      }
+      const { maxIn, maxOut } = item.caps
+      if (!isActivityUint128(maxIn) || !isActivityUint128(maxOut)) return null
+      configs.push({ id: getAddress(item.id), maxIn, maxOut })
+    }
+    return configs
   }
   catch {
     return null
@@ -1094,14 +1147,51 @@ const resolveOracleAssetPair = (
   }
 }
 
+const resolveFlowCapsConfig = (
+  event: ActivityChangeEventSource,
+  getVaultMetadata: ActivityVaultMetadataLookup | undefined,
+  getTokenSymbol: ActivityAddressLabelLookup | undefined,
+): ActivityChangeEntry | null => {
+  if (event.type !== 'set_flow_caps') return null
+  const configs = parseActivityFlowCapsConfig(event.change?.fields.config)
+  if (configs === null) return null
+  if (configs.length === 0) {
+    return { field: 'config', label: 'Strategies', value: 'None' }
+  }
+
+  const addresses = resolveChangeAddresses(
+    event,
+    'strategy',
+    configs.map(config => config.id),
+    getVaultMetadata,
+    getTokenSymbol,
+  )
+  if (!addresses) return null
+
+  const asset = event.vault ? getVaultMetadata?.(event.vault)?.asset : undefined
+  const formatCap = (value: string) =>
+    formatActivityTokenAmount(value, asset, true) ?? value
+  return {
+    field: 'config',
+    label: configs.length === 1 ? 'Strategy' : 'Strategies',
+    ...(configs.length > 1 ? { summary: `${configs.length} strategies` } : {}),
+    addresses,
+    addressDetails: configs.map(config =>
+      `Max in ${formatCap(config.maxIn)} · Max out ${formatCap(config.maxOut)}`),
+  }
+}
+
 export const getActivityChangeEntries = (
   event: ActivityChangeEventSource,
   getVaultMetadata?: ActivityVaultMetadataLookup,
   getTokenSymbol?: ActivityAddressLabelLookup,
 ): ActivityChangeEntry[] => {
   const assetPair = resolveOracleAssetPair(event, getTokenSymbol)
+  const flowCapsConfig = resolveFlowCapsConfig(event, getVaultMetadata, getTokenSymbol)
   const fields = orderedActivityChangeFields(event)
-    .filter(([field]) => !assetPair || (field !== 'asset0' && field !== 'asset1'))
+    .filter(([field]) =>
+      (!assetPair || (field !== 'asset0' && field !== 'asset1'))
+      && (!flowCapsConfig || field !== 'config'))
 
   const entries = fields.map(([field, value]): ActivityChangeEntry => {
   // The zero address reads better as an explicit "None" than as a linked,
@@ -1179,7 +1269,11 @@ export const getActivityChangeEntries = (
       value: formatted ?? formatActivityChangeValue(value),
     }
   })
-  return assetPair ? [assetPair, ...entries] : entries
+  return [
+    ...(assetPair ? [assetPair] : []),
+    ...(flowCapsConfig ? [flowCapsConfig] : []),
+    ...entries,
+  ]
 }
 
 interface ActivityParticipantSource {
@@ -1233,6 +1327,11 @@ export const getActivityResolvableVaultAddresses = (
     const value = event.change?.fields[field]
     for (const item of Array.isArray(value) ? value : [value]) {
       if (typeof item === 'string' && isAddress(item)) addresses.add(item as Address)
+    }
+  }
+  if (event.type === 'set_flow_caps') {
+    for (const config of parseActivityFlowCapsConfig(event.change?.fields.config) ?? []) {
+      addresses.add(config.id)
     }
   }
   return [...addresses]

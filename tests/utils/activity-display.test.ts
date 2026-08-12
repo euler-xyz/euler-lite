@@ -21,6 +21,7 @@ import {
   getActivityChangeEntries,
   getActivityEventIcon,
   getActivityLiquidationDisplayDetails,
+  getActivityResolvableVaultAddresses,
   getPortfolioActivityPositionParticipant,
   getActivityTransferDirection,
   getActivityTransactionGroupLabel,
@@ -201,6 +202,7 @@ describe('activity display helpers', () => {
     expect(formatActivityEventLabel({ type: 'set_interest_rate_model' })).toBe('Interest rate model updated')
     expect(formatActivityEventLabel({ type: 'set_liquidation_cool_off_time' })).toBe('Liquidation cool-off time updated')
     expect(formatActivityEventLabel({ type: 'set_is_allocator' })).toBe('Allocator status updated')
+    expect(formatActivityEventLabel({ label: 'Flow caps updated', type: 'set_flow_caps' })).toBe('Public allocator limits updated')
     expect(formatActivityEventLabel({ type: 'set_oracle_config' })).toBe('Oracle route updated')
     expect(formatActivityEventLabel({ type: 'set_fallback_oracle' })).toBe('Fallback oracle updated')
     expect(formatActivityEventLabel({ type: 'set_resolved_vault' })).toBe('Resolved vault updated')
@@ -713,6 +715,51 @@ describe('activity display helpers', () => {
     }, getVaultMetadata)).toEqual([
       { field: 'new_supply_cap', label: 'New supply cap', value: '155M USDC' },
     ])
+
+    const flowCapsConfig = JSON.stringify([
+      { id: OTHER_VAULT, caps: { maxIn: '10000000000', maxOut: '2500000000' } },
+      { id: SHARES, caps: { maxIn: '0', maxOut: '10000000000' } },
+    ])
+    expect(getActivityChangeEntries({
+      type: 'set_flow_caps',
+      vault: VAULT,
+      vaultType: 'earn',
+      change: { fields: { config: flowCapsConfig } },
+    }, getVaultMetadata)).toEqual([{
+      field: 'config',
+      label: 'Strategies',
+      summary: '2 strategies',
+      addresses: [
+        {
+          address: OTHER_VAULT,
+          label: 'Collateral vault',
+          linkKind: 'vault',
+          vaultType: 'evk',
+        },
+        { address: SHARES, linkKind: 'explorer' },
+      ],
+      addressDetails: [
+        'Max in 10K USDC · Max out 2.5K USDC',
+        'Max in 0 USDC · Max out 10K USDC',
+      ],
+    }])
+    expect(getActivityResolvableVaultAddresses({
+      type: 'set_flow_caps',
+      vault: VAULT,
+      change: { fields: { config: flowCapsConfig } },
+    })).toEqual([VAULT, OTHER_VAULT, SHARES])
+
+    const malformedFlowCapsConfig = '[{"id":"not-an-address"}]'
+    expect(getActivityChangeEntries({
+      type: 'set_flow_caps',
+      vault: VAULT,
+      vaultType: 'earn',
+      change: { fields: { config: malformedFlowCapsConfig } },
+    }, getVaultMetadata)).toEqual([{
+      field: 'config',
+      label: 'Config',
+      value: malformedFlowCapsConfig,
+    }])
 
     expect(getActivityChangeEntries({
       type: 'set_oracle_config',
