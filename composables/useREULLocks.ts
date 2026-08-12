@@ -13,6 +13,8 @@ const locks: Ref<REULLock[]> = ref([])
 let interval: NodeJS.Timeout | null = null
 const pollConsumers = new Map<symbol, () => void>()
 const lockGuard = createRaceGuard()
+const foregroundGuard = createRaceGuard()
+let foregroundRefreshes = 0
 
 export const useREULLocks = () => {
   const consumerId = Symbol('reul-locks-consumer')
@@ -85,15 +87,61 @@ export const useREULLocks = () => {
     }
     if (!effectiveAddress.value) {
       lockGuard.next()
+      foregroundGuard.next()
       locks.value = []
       isLocksLoading.value = false
       return []
     }
-    return await loadREULLocksInfo(effectiveAddress.value, isInitialLoading)
+    // Foreground review freshness must not share the poll generation: a 60s
+    // poll starting while this RPC is in flight must not turn a valid required
+    // refresh into an unavailable result. Invalidate older background work and
+    // pause new polls until the foreground read settles.
+    lockGuard.next()
+    const gen = foregroundGuard.next()
+    const userAddress = effectiveAddress.value
+    foregroundRefreshes++
+    await until(addressesReady).toBeTruthy({ timeout: 10_000, throwOnTimeout: false })
+    const chainId = selectedChainId.value
+    if (foregroundGuard.isStale(gen)) {
+      foregroundRefreshes--
+      return null
+    }
+    if (!addressesReady.value || !chainId) {
+      foregroundRefreshes--
+      if (isInitialLoading) isLocksLoading.value = false
+      return null
+    }
+
+    try {
+      const sdk = await getEulerSdkForChain(chainId)
+      const nextLocks = await sdk.reulLockService.fetchLocks({
+        chainId,
+        account: userAddress as Address,
+        rEulAddress: reulTokenContractAddress.value as Address,
+      })
+      if (
+        foregroundGuard.isStale(gen)
+        || effectiveAddress.value !== userAddress
+        || selectedChainId.value !== chainId
+      ) return null
+      locks.value = nextLocks
+      return nextLocks
+    }
+    catch (e) {
+      if (foregroundGuard.isStale(gen)) return null
+      logWarn('reulLocks/fetch', e)
+      return null
+    }
+    finally {
+      foregroundRefreshes--
+      if (!foregroundGuard.isStale(gen) && isInitialLoading) {
+        isLocksLoading.value = false
+      }
+    }
   }
 
   pollConsumers.set(consumerId, () => {
-    if (effectiveAddress.value) {
+    if (effectiveAddress.value && foregroundRefreshes === 0) {
       void loadREULLocksInfo(effectiveAddress.value, false)
     }
   })
@@ -101,6 +149,7 @@ export const useREULLocks = () => {
   watch([isActive, selectedChainId], ([active, currentChainId], [_oldActive, oldChainId]) => {
     if (oldChainId && currentChainId !== oldChainId) {
       lockGuard.next()
+      foregroundGuard.next()
       isLoaded.value = false
       locks.value = []
     }
@@ -117,6 +166,7 @@ export const useREULLocks = () => {
     }
     else if (!active) {
       lockGuard.next()
+      foregroundGuard.next()
       locks.value = []
       isLocksLoading.value = false
       if (interval) {
@@ -130,6 +180,7 @@ export const useREULLocks = () => {
   watch(effectiveAddress, (addr, oldAddr) => {
     if (addr && addr !== oldAddr) {
       lockGuard.next()
+      foregroundGuard.next()
       locks.value = []
       isLoaded.value = false
       loadREULLocksInfo(addr)
@@ -137,6 +188,7 @@ export const useREULLocks = () => {
     }
     else if (oldAddr && !addr) {
       lockGuard.next()
+      foregroundGuard.next()
       locks.value = []
     }
   })

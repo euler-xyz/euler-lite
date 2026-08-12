@@ -187,4 +187,31 @@ describe('useREULLocks', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(fetchLocks).toHaveBeenCalledTimes(callsAfterUnmount)
   })
+
+  it('does not let the shared poller supersede a foreground review refresh', async () => {
+    vi.useFakeTimers()
+    const { useREULLocks, fetchLocks, lock } = await importUseREULLocks()
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await vi.waitFor(() => expect(fetchLocks).toHaveBeenCalledTimes(1))
+
+    const refreshedLock = { ...lock, unlockableAmount: lock.unlockableAmount + 1n }
+    let resolveRefresh!: (value: typeof lock[]) => void
+    fetchLocks.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRefresh = resolve
+    }))
+
+    const refreshPromise = locks.refreshLocks(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchLocks).toHaveBeenCalledTimes(2)
+
+    resolveRefresh([refreshedLock])
+    await expect(refreshPromise).resolves.toEqual([refreshedLock])
+    expect(locks.locks.value).toEqual([refreshedLock])
+  })
 })

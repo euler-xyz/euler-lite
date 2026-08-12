@@ -1,4 +1,4 @@
-import { isEVCBatchOperation, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { isEVCBatchOperation, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { toFunctionSelector } from 'viem'
 
 export const REVIEWED_EXECUTION_UNAVAILABLE_ERROR
@@ -9,15 +9,24 @@ export const REVIEWED_EXECUTION_CHANGED_ERROR
 
 const PYTH_UPDATE_SELECTOR = toFunctionSelector('function updatePriceFeeds(bytes[])')
 
-const canonicalizePythUpdate = (item: Record<string, unknown>): Record<string, unknown> => {
+const isPythUpdate = (item: Record<string, unknown>): boolean => {
   const data = typeof item.data === 'string' ? item.data : ''
-  if (data.slice(0, 10).toLowerCase() !== PYTH_UPDATE_SELECTOR.toLowerCase()) return item
+  return data.slice(0, 10).toLowerCase() === PYTH_UPDATE_SELECTOR.toLowerCase()
+}
+
+const canonicalizePythUpdate = (item: Record<string, unknown>): Record<string, unknown> => {
+  if (!isPythUpdate(item)) return item
   return {
     ...item,
     data: '__fresh_pyth_update__',
     value: '__fresh_pyth_fee__',
   }
 }
+
+export const hasPreparedPythUpdate = (prepared: TransactionPlanPrepared): boolean =>
+  prepared.plan.some(item => item.type === 'evcBatch' && item.items.some(entry =>
+    (isEVCBatchOperation(entry) ? entry.items : [entry]).some(call => isPythUpdate(call)),
+  ))
 
 const canonicalizeReviewedPlan = (prepared: TransactionPlanPrepared): string => JSON.stringify({
   chainId: prepared.chainId,
@@ -47,6 +56,30 @@ export const requirePythOnlyPreparedRefresh = (
     throw new Error(REVIEWED_EXECUTION_CHANGED_ERROR)
   }
   return refreshed
+}
+
+type PrepareReviewedPlan = (
+  plan: TransactionPlan,
+  options: Pick<TransactionPlanPrepared, 'account' | 'chainId' | 'usePermit2'>,
+) => Promise<TransactionPlanPrepared>
+
+/**
+ * Refresh short-lived Pyth payloads at the shared confirmation boundary while
+ * pinning preparation to the exact account, chain and Permit2 mode reviewed.
+ */
+export const refreshReviewedPythExecution = async (
+  reviewed: TransactionPlanPrepared,
+  rawPlan: TransactionPlan | undefined,
+  prepare: PrepareReviewedPlan,
+): Promise<TransactionPlanPrepared> => {
+  if (!hasPreparedPythUpdate(reviewed)) return reviewed
+  if (!rawPlan?.length) throw new Error(REVIEWED_EXECUTION_UNAVAILABLE_ERROR)
+  const refreshed = await prepare(rawPlan, {
+    account: reviewed.account,
+    chainId: reviewed.chainId,
+    usePermit2: reviewed.usePermit2,
+  })
+  return requirePythOnlyPreparedRefresh(reviewed, refreshed)
 }
 
 export const requireReviewedExecution = (

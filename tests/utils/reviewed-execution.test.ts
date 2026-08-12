@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { encodeFunctionData, type Address, type Hex } from 'viem'
 import {
   requirePythOnlyPreparedRefresh,
+  refreshReviewedPythExecution,
   requireReviewedExecution,
   REVIEWED_EXECUTION_CHANGED_ERROR,
   REVIEWED_EXECUTION_UNAVAILABLE_ERROR,
@@ -83,5 +84,41 @@ describe('requirePythOnlyPreparedRefresh', () => {
 
     expect(() => requirePythOnlyPreparedRefresh(prepared('0x01'), refreshed))
       .toThrow(REVIEWED_EXECUTION_CHANGED_ERROR)
+  })
+})
+
+describe('refreshReviewedPythExecution', () => {
+  it('re-prepares Pyth plans with the reviewed execution context', async () => {
+    const reviewed = prepared('0x01')
+    const refreshed = prepared('0x02')
+    const rawPlan = reviewed.plan
+    let received: unknown[] = []
+    const prepare = async (
+      candidate: TransactionPlan,
+      options: Pick<TransactionPlanPrepared, 'account' | 'chainId' | 'usePermit2'>,
+    ) => {
+      received = [candidate, options]
+      return refreshed
+    }
+
+    await expect(refreshReviewedPythExecution(reviewed, rawPlan, prepare)).resolves.toBe(refreshed)
+    expect(received).toEqual([rawPlan, {
+      account: reviewed.account,
+      chainId: reviewed.chainId,
+      usePermit2: reviewed.usePermit2,
+    }])
+  })
+
+  it('does not re-prepare plans without Pyth updates', async () => {
+    const reviewed = prepared('0x01')
+    const batch = reviewed.plan[0]
+    if (batch?.type === 'evcBatch') batch.items.shift()
+    let called = false
+
+    await expect(refreshReviewedPythExecution(reviewed, reviewed.plan, async () => {
+      called = true
+      return reviewed
+    })).resolves.toBe(reviewed)
+    expect(called).toBe(false)
   })
 })

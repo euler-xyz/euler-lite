@@ -12,7 +12,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import { REVIEWED_EXECUTION_UNAVAILABLE_ERROR } from '~/utils/reviewed-execution'
+import { refreshReviewedPythExecution, REVIEWED_EXECUTION_UNAVAILABLE_ERROR } from '~/utils/reviewed-execution'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -222,7 +222,24 @@ const handleConfirm = async () => {
     prepareError.value = REVIEWED_EXECUTION_UNAVAILABLE_ERROR
     return
   }
-  const result = onConfirm(reviewedExecution.value)
+  let confirmedExecution = reviewedExecution.value
+  if (confirmedExecution) {
+    internalSubmitting.value = true
+    try {
+      confirmedExecution = await refreshReviewedPythExecution(
+        confirmedExecution,
+        plan,
+        (rawPlan, options) => prepareTransactionPlan(rawPlan, options),
+      )
+    }
+    catch (err) {
+      logWarn('OperationReviewModal/refreshReviewedPythExecution', err)
+      prepareError.value = err instanceof Error ? err.message : REVIEWED_EXECUTION_UNAVAILABLE_ERROR
+      internalSubmitting.value = false
+      return
+    }
+  }
+  const result = onConfirm(confirmedExecution)
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
     try {

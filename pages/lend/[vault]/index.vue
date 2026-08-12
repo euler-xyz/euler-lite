@@ -572,6 +572,7 @@ const submit = async () => {
           type: reviewType,
           asset: reviewAsset,
           amount: amount.value,
+          plan: plan.value || undefined,
           prepared: preparedPlan.value || undefined,
           quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? asset.value : undefined,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getSubAccountAddress, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress, isSecuritizeCollateralVault, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isSecuritizeVault } from '~/utils/vault/categories'
@@ -468,8 +468,9 @@ const submit = async () => {
       const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
 
       preparedPlan.value = null
+      let rawPlan: TransactionPlan | undefined
       try {
-        const rawPlan = await planWithdrawOrRedeem({
+        rawPlan = await planWithdrawOrRedeem({
           vaultAddress: vaultAddress as Address,
           owner: (subAccount.value ?? effectiveAddress.value!) as Address,
           isMax,
@@ -501,6 +502,7 @@ const submit = async () => {
           type: reviewType,
           asset: asset.value,
           amount: amount.value,
+          plan: rawPlan,
           prepared: preparedPlan.value!,
           quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
           swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,

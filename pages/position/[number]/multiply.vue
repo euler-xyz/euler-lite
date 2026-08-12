@@ -991,6 +991,7 @@ const submitMultiply = async () => {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: reviewBorrowAmount,
+          plan: plan.value || undefined,
           prepared: preparedPlan.value || undefined,
           quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,

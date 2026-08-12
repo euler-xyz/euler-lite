@@ -1059,7 +1059,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             type: reviewType,
             asset: reviewAsset,
             amount: amount.value,
-            plan: usePreparedPipeline ? undefined : (plan.value || undefined),
+            plan: plan.value || undefined,
             prepared: usePreparedPipeline ? (preparedPlan.value || undefined) : undefined,
             quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
             subAccount: position.value?.subAccount,

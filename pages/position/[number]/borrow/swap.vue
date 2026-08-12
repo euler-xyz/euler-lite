@@ -3660,7 +3660,7 @@ const submit = async () => {
           type: 'refinance',
           asset: sourceDebtVault.value.asset,
           amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
-          plan: preparedPlan.value ? undefined : plan.value,
+          plan: plan.value,
           prepared: preparedPlan.value || undefined,
           quoteFetchedAt: effectiveQuoteFetchedAt.value,
           vaultAmounts: refinanceVaultAmounts.value,

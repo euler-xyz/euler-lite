@@ -3,6 +3,7 @@ import type { DisplayStep } from '~/utils/stepDecoding'
 import { formatUnits } from 'viem'
 import { formatNumber, shortenAddress } from '~/utils/string-utils'
 import { getChainById } from '~/entities/chainRegistry'
+import { getDisplayStepAmountLabel } from '~/utils/display-step-amount'
 
 defineProps<{
   steps: DisplayStep[]
@@ -17,7 +18,7 @@ const formatNativeValueWithSymbol = (value: bigint) => `${formatNativeValue(valu
 
 const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
   const amount = assetInfo?.amount
-  if (!assetInfo || amount === undefined || amount === 'max' || amount === 'remaining') return undefined
+  if (!assetInfo || amount === undefined || getDisplayStepAmountLabel(amount) !== undefined) return undefined
   return `${String(amount)} ${assetInfo.symbol}`
 }
 </script>
@@ -42,8 +43,8 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
           v-if="!step.iconOnly"
           class="text-p3"
         >
-          <template v-if="step.assetInfo.amount === 'max' || step.assetInfo.amount === 'remaining'">
-            {{ step.assetInfo.amount }}&nbsp;{{ step.assetInfo.symbol }}
+          <template v-if="getDisplayStepAmountLabel(step.assetInfo.amount)">
+            {{ getDisplayStepAmountLabel(step.assetInfo.amount) }}&nbsp;{{ step.assetInfo.symbol }}
           </template>
           <template v-else-if="getFullAmountText(step.assetInfo)">
             <UiExactAmount
@@ -80,7 +81,10 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
           v-if="!step.iconOnly"
           class="text-p3"
         >
-          <template v-if="getFullAmountText(step.toAssetInfo)">
+          <template v-if="getDisplayStepAmountLabel(step.toAssetInfo.amount)">
+            {{ getDisplayStepAmountLabel(step.toAssetInfo.amount) }}&nbsp;{{ step.toAssetInfo.symbol }}
+          </template>
+          <template v-else-if="getFullAmountText(step.toAssetInfo)">
             <UiExactAmount
               :exact="getFullAmountText(step.toAssetInfo)!"
               :placement="step.index === 1 ? 'bottom' : 'top'"

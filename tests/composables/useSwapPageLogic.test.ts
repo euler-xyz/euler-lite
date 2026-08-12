@@ -226,6 +226,7 @@ describe('useSwapPageLogic', () => {
     const toVaultRef = shallowRef<EVault | undefined>(toVault)
     const buildPlan = vi.fn(async () => ({ type: 'rebuilt' }) as unknown as TransactionPlan)
     const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
+    const rawPlan = { type: 'quote-plan' } as unknown as TransactionPlan
     const prepared = {
       __prepared: true,
       plan: [{ type: 'evcBatch', items: [] }],
@@ -237,7 +238,7 @@ describe('useSwapPageLogic', () => {
     captured.selectedQuoteCard.value = {
       provider: 'provider',
       quote,
-      plan: { type: 'quote-plan' },
+      plan: rawPlan,
       preparedPlan: prepared,
     }
 
@@ -266,7 +267,7 @@ describe('useSwapPageLogic', () => {
     expect(captured.modalOpen).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       props: expect.objectContaining({
         prepared,
-        plan: undefined,
+        plan: rawPlan,
       }),
     }))
 

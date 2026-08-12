@@ -221,7 +221,7 @@ const onClaimClick = async () => {
         },
         assetIconUrl: externalIconUrl.value,
         amount: rewardAmount.value,
-        plan: reviewedFuulPlan ? undefined : (plan.value || undefined),
+        plan: plan.value || undefined,
         prepared: reviewedFuulPlan,
         submittingLabel: 'Claiming...',
         onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {

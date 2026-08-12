@@ -563,7 +563,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
             swapMode: showSwapAmounts ? swapperMode : undefined,
             swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
-            plan: preparedPlan.value ? undefined : (plan.value || undefined),
+            plan: plan.value || undefined,
             prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
             onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
