@@ -1066,8 +1066,11 @@ const buildRefinancePlan = async (
   return planRefinancePosition(input)
 }
 
+const { cowSwapForcedOff } = useCowSwapEligibility()
+
 const canRequestCollateralCowSwap = computed(() =>
-  collateralNeedsSwap.value
+  !cowSwapForcedOff.value
+  && collateralNeedsSwap.value
   && !hasDebtChange.value
   && currentCollateralShares.value > 0n
   && !!getCowSwapChainConfig(currentChainId.value ?? 0),
