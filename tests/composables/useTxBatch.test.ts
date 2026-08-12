@@ -1416,6 +1416,45 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.execError.value).toContain('batch has been rebuilt')
   })
 
+  it('does not clear the active context pending Safe lock when another context execution succeeds', async () => {
+    const batch = useTxBatch()
+    const safeHash = `0x${'78'.repeat(32)}` as Hash
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ account: owner, chainId: 1 })
+    eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options) => {
+      options?.onProgress?.({ status: 'evcBatch' })
+      throw new SafeTransactionStatusUnknownError(safeHash, 'timeout')
+    })
+
+    await addMigrationEntryWithPrerequisites(batch, undefined)
+    await batch.executeBatch()
+    expect(batch.pendingSafeSubmission.value?.submittedHash).toBe(safeHash)
+
+    activeOwner.value = subAccount
+    activeChainId.value = 8453
+    await nextTick()
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ account: subAccount, chainId: 8453 })
+    eulerTxMocks.executePreparedPlan.mockImplementationOnce(async () => {
+      activeOwner.value = owner
+      activeChainId.value = 1
+      await nextTick()
+    })
+
+    await batch.addEntry({
+      label: 'Deposit in another context',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    await batch.executeBatch()
+
+    expect(batch.pendingSafeSubmission.value?.submittedHash).toBe(safeHash)
+    expect(batch.entryCount.value).toBe(1)
+    expect(routerReplace).not.toHaveBeenCalled()
+
+    eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'not-executed' })
+    await batch.reconcilePendingSafeSubmission()
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+  })
+
   it('restores a not-executed Safe batch after reconciliation finishes in another context', async () => {
     const batch = useTxBatch()
     const safeHash = `0x${'67'.repeat(32)}` as Hash

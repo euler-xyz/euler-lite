@@ -1391,7 +1391,7 @@ export const useEulerTx = () => {
     triggerPortfolioRefresh()
   }
 
-  const finalizeExecution = (result: { receipts: TransactionReceipt[] }) => {
+  const finalizeExecution = (result: { receipts: TransactionReceipt[] }, executionChainId?: number) => {
     let lastReceipt: TransactionReceipt | undefined
     if (result.receipts.length) {
       lastReceipt = result.receipts[result.receipts.length - 1]
@@ -1403,7 +1403,7 @@ export const useEulerTx = () => {
     // portfolio page renders; the two are complementary.
     void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
     triggerPortfolioRefresh()
-    const cid = chainId.value
+    const cid = executionChainId ?? chainId.value
     if (lastReceipt && cid) {
       void runPostTxSubgraphSync(cid, lastReceipt.blockNumber)
         .catch(err => logWarn('useEulerTx/subgraphPoll', err))
@@ -1456,7 +1456,7 @@ export const useEulerTx = () => {
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
     })
 
-    finalizeExecution(result)
+    finalizeExecution(result, cid)
     return result
   }
 
@@ -1513,7 +1513,7 @@ export const useEulerTx = () => {
       onProgress: options?.onProgress,
     })
 
-    finalizeExecution(result)
+    finalizeExecution(result, prepared.chainId)
     return result
   }
 
@@ -1560,7 +1560,7 @@ export const useEulerTx = () => {
       if (!isSuccessfulTransactionReceipt(execution.receipt)) {
         return { status: 'not-executed' }
       }
-      finalizeExecution({ receipts: [execution.receipt] })
+      finalizeExecution({ receipts: [execution.receipt] }, expectedChainId)
       return { status: 'executed', receipt: execution.receipt }
     }
     catch (error) {

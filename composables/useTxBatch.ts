@@ -1648,6 +1648,15 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
+  const isExecutionContextActive = (context: WalletExecutionContext | undefined): boolean => {
+    if (!context || !owner.value || !chainId.value) return false
+    try {
+      return getAddress(owner.value) === context.account && chainId.value === context.chainId
+    }
+    catch {
+      return false
+    }
+  }
   const pendingSafeSubmission = computed(() =>
     pendingSafeSubmissions.value.find(pending =>
       !pending.terminalStatus
@@ -2431,10 +2440,10 @@ export const useTxBatch = () => {
           if (progress.status === 'evcBatch') batchExecutionStarted = true
         },
       })
-      clearBatchInternal(true)
+      if (isExecutionContextActive(batchExecutionContext)) clearBatchInternal(false)
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
       await revokeAfterSuccess(grantedRevokes)
-      await redirectAfterBatchExecution()
+      if (isExecutionContextActive(batchExecutionContext)) await redirectAfterBatchExecution()
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
