@@ -1529,6 +1529,7 @@ export const useEulerTx = () => {
     timeoutMs?: number
   }): Promise<
     | { status: 'executed', receipt: TransactionReceipt }
+    | { status: 'reverted', receipt: TransactionReceipt }
     | { status: 'not-executed' }
     | { status: 'unknown' }
   > => {
@@ -1558,7 +1559,7 @@ export const useEulerTx = () => {
         timeoutMs,
       })
       if (!isSuccessfulTransactionReceipt(execution.receipt)) {
-        return { status: 'not-executed' }
+        return { status: 'reverted', receipt: execution.receipt }
       }
       finalizeExecution({ receipts: [execution.receipt] }, expectedChainId)
       return { status: 'executed', receipt: execution.receipt }

@@ -217,7 +217,7 @@ interface PendingSafeBatchSubmission {
   chainId: number
   entries: BatchEntry[]
   errorMessage: string
-  terminalStatus?: 'not-executed'
+  terminalStatus?: 'not-executed' | 'reverted'
   refreshExternalMigrationPositions: boolean
   grantedRevokes: MigrationAuthorizationRevoke[]
 }
@@ -2052,7 +2052,7 @@ export const useTxBatch = () => {
         if (savedSubmissionForContext) {
           entries.value = [...savedSubmissionForContext.entries]
           execError.value = savedSubmissionForContext.errorMessage
-          if (savedSubmissionForContext.terminalStatus === 'not-executed') {
+          if (savedSubmissionForContext.terminalStatus) {
             clearPendingSafeSubmission(savedSubmissionForContext)
           }
         }
@@ -2500,8 +2500,10 @@ export const useTxBatch = () => {
         }
         return
       }
-      if (result.status === 'not-executed') {
-        const errorMessage = 'Safe confirmed that the submitted transaction was not executed. The batch has been rebuilt and can be reviewed again.'
+      if (result.status === 'not-executed' || result.status === 'reverted') {
+        const errorMessage = result.status === 'reverted'
+          ? 'Safe executed the submitted transaction, but it reverted on-chain. Gas was spent and the Safe nonce advanced. The batch has been rebuilt and can be reviewed again.'
+          : 'Safe confirmed that the submitted transaction was not executed. The batch has been rebuilt and can be reviewed again.'
         await revokeAfterAbort(pending.grantedRevokes)
         const stillActive = isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)
         if (stillActive) {
@@ -2512,7 +2514,7 @@ export const useTxBatch = () => {
         else {
           setPendingSafeSubmission({
             ...pending,
-            terminalStatus: 'not-executed',
+            terminalStatus: result.status,
             errorMessage,
           })
         }

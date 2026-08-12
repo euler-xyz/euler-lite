@@ -1416,6 +1416,33 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.execError.value).toContain('batch has been rebuilt')
   })
 
+  it('reports a mined and reverted Safe batch distinctly from a transaction that was not executed', async () => {
+    const batch = useTxBatch()
+    const safeHash = `0x${'79'.repeat(32)}` as Hash
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ account: owner, chainId: 1 })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      options?.onProgress?.({ status: 'evcBatch' })
+      throw new SafeTransactionStatusUnknownError(safeHash, 'timeout')
+    })
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({
+      status: 'reverted',
+      receipt: { status: 'reverted' },
+    })
+    await batch.reconcilePendingSafeSubmission()
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('reverted on-chain')
+    expect(batch.execError.value).toContain('Gas was spent and the Safe nonce advanced')
+    expect(batch.execError.value).not.toContain('was not executed')
+  })
+
   it('does not clear the active context pending Safe lock when another context execution succeeds', async () => {
     const batch = useTxBatch()
     const safeHash = `0x${'78'.repeat(32)}` as Hash
