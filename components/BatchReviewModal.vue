@@ -47,6 +47,8 @@ const {
   simulateOnTenderly,
   dismissExecutionError,
   willBundlePrerequisites,
+  prepareBundledExecution,
+  latchedBundledExecution,
 } = useTxBatch()
 
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
@@ -152,8 +154,10 @@ const postStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   return out
 })
 
+// Keys on the LATCHED resolution (what this modal session resolved,
+// displayed, and will execute) — never on live wallet classification.
 const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
-  willBundlePrerequisites.value && !!entry.buildBundledExecution
+  latchedBundledExecution.value !== null && !!entry.buildBundledExecution
 
 const signatureStepsHeading = (entryId: string): string => {
   const entry = entries.value.find(candidate => candidate.id === entryId)
@@ -349,6 +353,9 @@ onMounted(async () => {
   isPreparing.value = true
   prepareError.value = ''
   try {
+    // Resolve the bundled ceremony once for this review session: the same
+    // resolution drives the rows, Copy calldata, and execution.
+    await prepareBundledExecution()
     const prepared = await prepareBatchPlan()
     preparedPlanRef.value = prepared?.plan
     const known = buildKnownSymbols()
@@ -390,6 +397,12 @@ const copyCalldata = async () => {
     const cid = chainId.value
     const sdk = await getEulerSdkForChain(cid)
     const out: { to: string, data: string, value: string }[] = []
+    // The latched Safe proposal wraps the plan with grants/revocations —
+    // the copied JSON must match the actual submission.
+    const latched = latchedBundledExecution.value
+    for (const call of latched?.grants ?? []) {
+      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
+    }
     for (const item of plan) {
       if (item.type === 'requiredApproval') {
         for (const r of item.resolved ?? []) {
@@ -412,6 +425,9 @@ const copyCalldata = async () => {
           value: item.value.toString(),
         })
       }
+    }
+    for (const call of latched?.revokes ?? []) {
+      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
     }
     copyToClipboard(JSON.stringify(out, null, 2), 'calldata')
   }

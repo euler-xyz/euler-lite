@@ -3431,7 +3431,7 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
         if (bundleAuthorizationRequest) {
           const outcome = await sendInboundExternalMigrationAsSafeBundle(input, bundleAuthorizationRequest, account, useSignatures)
           if (outcome === 'aborted') return
-          finishInboundExternalMigrationSuccess(input)
+          finishInboundExternalMigrationSuccess(execution, input)
           return
         }
         // The grant went live since review (fresh request is empty): nothing
@@ -3489,12 +3489,13 @@ function buildInboundExternalCalldataWrapCalls(
   return { before: grants, after: revokes }
 }
 
-function finishInboundExternalMigrationSuccess(input: InboundExternalMigrationInput) {
+function finishInboundExternalMigrationSuccess(execution: TrackedExecutionScope, input: InboundExternalMigrationInput) {
   // Success signal for a detached Safe completion toast; a proposal that
   // confirmed after its modal was closed must not yank the user mid-flow.
-  markTrackedExecutionSucceeded()
+  // Bound to THIS execution's record.
+  execution.markSucceeded()
   schedulePostMigrationRefreshes(input.owner)
-  if (shouldSuppressPostTxNavigation()) return
+  if (execution.suppressPostTxUi()) return
   modal.close()
   // Land on the Positions (or Deposits) list rather than returning to the
   // external migration route, which no longer has a source position after tx.
@@ -3543,7 +3544,7 @@ const sendInboundExternalMigrationAsSafeBundle = async (
   )
   if (!ok) return 'aborted'
 
-  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes })
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true })
   if (!result) {
     // The review showed ONE atomic proposal. A Safe whose provider cannot be
     // acquired at confirm time must abort loudly, never silently degrade

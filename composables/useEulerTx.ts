@@ -1421,7 +1421,7 @@ export const useEulerTx = () => {
    * bundling brings no benefit (fewer than two calls) — callers fall back to
    * sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
@@ -1434,6 +1434,12 @@ export const useEulerTx = () => {
       before?: readonly PlainTxRequest[]
       after?: readonly PlainTxRequest[]
     }
+    /**
+     * Submit even a single-call bundle. Callers that promised the review a
+     * Safe proposal use this so "no benefit" can never be conflated with
+     * "no Safe context" — with it set, undefined strictly means the latter.
+     */
+    allowSingleCall?: boolean
   }) => {
     let planCalls
     try {
@@ -1459,7 +1465,7 @@ export const useEulerTx = () => {
       ...planCalls,
       ...(extraCalls?.after ?? []).map(toPlanCall),
     ]
-    if (calls.length < 2) return undefined
+    if (calls.length < 2 && !allowSingleCall) return undefined
 
     const currentAccount = getAccount(config)
     assertWalletExecutionContext({
@@ -1688,6 +1694,7 @@ export const useEulerTx = () => {
       before?: readonly PlainTxRequest[]
       after?: readonly PlainTxRequest[]
     },
+    options?: { allowSingleCall?: boolean },
   ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1730,6 +1737,7 @@ export const useEulerTx = () => {
       safeWalletProvider,
       sdk,
       extraCalls,
+      allowSingleCall: options?.allowSingleCall,
     })
     if (!bundled) return undefined
     finalizeExecution(bundled)

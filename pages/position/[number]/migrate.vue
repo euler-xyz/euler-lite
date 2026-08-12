@@ -918,7 +918,7 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
         if (authorizationRequest) {
           const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
           if (outcome === 'aborted') return
-          finishMigrationSuccess()
+          finishMigrationSuccess(execution)
           return
         }
         // The grant went live since review (fresh request is empty): nothing
@@ -983,12 +983,13 @@ function buildCalldataWrapCalls(
   return { before: grants, after: revokes }
 }
 
-function finishMigrationSuccess() {
+function finishMigrationSuccess(execution: TrackedExecutionScope) {
   // Success signal for a detached Safe completion toast; a proposal that
   // confirmed after its modal was closed must not yank the user mid-flow.
-  markTrackedExecutionSucceeded()
+  // Bound to THIS execution's record.
+  execution.markSucceeded()
   schedulePostMigrationRefreshes()
-  if (shouldSuppressPostTxNavigation()) return
+  if (execution.suppressPostTxUi()) return
   modal.close()
   setTimeout(() => {
     void router.replace({ path: '/portfolio', query: { network: route.query.network } })
@@ -1028,7 +1029,7 @@ async function sendMigrationAsSafeBundle(
   )
   if (!ok) return 'aborted'
 
-  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes })
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true })
   if (!result) {
     throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
   }

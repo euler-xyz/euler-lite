@@ -218,6 +218,19 @@ export interface WalletShortfall {
 // --- module-scoped state (single shared cart for the session) ---
 const entries: Ref<BatchEntry[]> = ref([])
 const layers = shallowRef<BatchLayer[]>([])
+/**
+ * Bundled ceremony resolved ONCE when the review modal opens, displayed,
+ * copied, and executed verbatim — the latch that keeps the reviewed
+ * ceremony, the copied payload, and the submitted proposal identical. A
+ * cart edit or account/chain reset clears it; executeBatch treats its
+ * presence as the reviewed promise of ONE proposal. Module-scoped like the
+ * rest of the cart state so every component instance shares it.
+ */
+const latchedBundledExecution = shallowRef<{
+  plans: TransactionPlan[]
+  grants: BatchEntryExternalTx[]
+  revokes: BatchEntryExternalTx[]
+} | null>(null)
 // Per-entry fixed plan (keyed by entry id), used by the review modal and by the
 // merged whole-batch plan. These are captured once when the entry is added.
 const entryPlans = computed<Record<string, TransactionPlan>>(() =>
@@ -2111,6 +2124,9 @@ export const useTxBatch = () => {
       watch(entries, () => {
         logBatchDiag('watch:entries-changed')
         tenderly.clearSimulation()
+        // A cart edit invalidates the latched bundled ceremony — the modal
+        // re-latches on next open.
+        latchedBundledExecution.value = null
         void runResimulate()
       })
       watch([activeLayer, layers], syncOverlay)
@@ -2119,6 +2135,7 @@ export const useTxBatch = () => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
         resimToken++
         entries.value = []
+        latchedBundledExecution.value = null
         layers.value = []
         activeLayer.value = 0
         isSimulating.value = false
@@ -2438,6 +2455,23 @@ export const useTxBatch = () => {
   )
 
   /**
+   * Bundled ceremony resolved ONCE when the review modal opens, displayed,
+   * copied, and executed verbatim — the latch that keeps the reviewed
+   * ceremony, the copied payload, and the submitted proposal identical. A
+   * cart edit or account/chain reset clears it; executeBatch treats its
+   * presence as the reviewed promise of ONE proposal.
+   */
+  const prepareBundledExecution = async () => {
+    if (!willBundlePrerequisites.value) {
+      latchedBundledExecution.value = null
+      return null
+    }
+    const collected = await collectBundledExecution()
+    latchedBundledExecution.value = collected
+    return collected
+  }
+
+  /**
    * Assemble the bundled ceremony: each entry's simulation-variant plan plus
    * its grant/revoke calls. Grants keep entry order; revokes unwind in
    * reverse entry order (each entry's own revokes are already reversed).
@@ -2526,35 +2560,37 @@ export const useTxBatch = () => {
       // the last simulation), surface the decoded reason and don't send.
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
 
-      if (willBundlePrerequisites.value) {
-        const collected = await collectBundledExecution()
-        if (collected.grants.length || collected.revokes.length) {
-          // One atomic Safe proposal: grants + merged batch + revocations.
-          // No standalone gas estimate — the grants are unmined until the
-          // proposal executes, so a plain estimate against current state
-          // would revert; the cart's continuous simulation (which runs with
-          // the entries' authorization state overrides) is the pre-flight
-          // validation. Atomicity also removes the unwind bookkeeping: a
-          // failed proposal reverts its grants with it.
-          const sdk = await getEulerSdkFresh()
-          const executionPlan = sdk.executionService.mergePlans(collected.plans)
-          const prepared = await prepareTransactionPlan(executionPlan)
-          const result = await executePreparedPlanWithPlainCalls(prepared, {
-            before: collected.grants,
-            after: collected.revokes,
-          })
-          if (!result) {
-            // The review described ONE proposal; never silently degrade to
-            // the sequential multi-proposal ceremony.
-            throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
-          }
-          clearBatch()
-          if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
-          await redirectAfterBatchExecution()
-          return
+      if (latchedBundledExecution.value) {
+        // The review modal latched and displayed ONE atomic proposal built
+        // from this exact resolution — execute it verbatim (payload
+        // identity), even when the grants resolved empty: the provider-bound
+        // Safe path must not silently degrade into anything else.
+        if (!isSafeWallet.value) {
+          throw new Error('Wallet changed since review — please review the batch again.')
         }
-        // Every prerequisite resolved empty (grants already live) — the
-        // classic path below is a single proposal anyway.
+        const collected = latchedBundledExecution.value
+        // No standalone gas estimate — grants are unmined until the
+        // proposal executes; the cart's continuous simulation (which runs
+        // with the entries' authorization state overrides) is the
+        // pre-flight validation. Atomicity also removes the unwind
+        // bookkeeping: a failed proposal reverts its grants with it.
+        const sdk = await getEulerSdkFresh()
+        const executionPlan = sdk.executionService.mergePlans(collected.plans)
+        const prepared = await prepareTransactionPlan(executionPlan)
+        const result = await executePreparedPlanWithPlainCalls(prepared, {
+          before: collected.grants,
+          after: collected.revokes,
+        }, { allowSingleCall: true })
+        if (!result) {
+          // The review described ONE proposal; never silently degrade to
+          // the sequential multi-proposal ceremony.
+          throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
+        }
+        latchedBundledExecution.value = null
+        clearBatch()
+        if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+        await redirectAfterBatchExecution(scope)
+        return
       }
 
       await sendExecutionPrerequisites(grantedRevokes)
@@ -2698,6 +2734,8 @@ export const useTxBatch = () => {
     setActiveLayer,
     executeBatch,
     willBundlePrerequisites,
+    prepareBundledExecution,
+    latchedBundledExecution,
     // Tenderly "Simulate on Tenderly" for the whole batch.
     tenderlyEnabled,
     isTenderlySimulating: tenderly.isSimulating,
