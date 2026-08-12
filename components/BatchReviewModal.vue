@@ -163,11 +163,23 @@ const authorizationSummaryGroups = computed(() =>
 // Post-execution transactions (e.g. a migration's approval restoration) are
 // real wallet transactions sent after the batch settles. Surfacing them only
 // inside the expanded row undercounts the ceremony in the collapsed summary.
-const postExecutionSummaryRows = computed(() =>
-  entries.value.flatMap(entry =>
+//
+// Rows render in EXECUTION order: restorations unwind in reverse entry order
+// (each entry's own steps are already reversed by the encoder). Rows that
+// resolve to the identical restoration are consolidated — a grant an earlier
+// entry already made resolves to no prerequisite at execution, so its
+// duplicate displayed revoke would never run.
+const postExecutionSummaryRows = computed(() => {
+  const rows = [...entries.value].reverse().flatMap(entry =>
     (postStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
-  ),
-)
+  )
+  const seen = new Set<string>()
+  return rows.filter(({ step }) => {
+    if (seen.has(step.label)) return false
+    seen.add(step.label)
+    return true
+  })
+})
 
 // Unverified vaults the batch touches — surfaced as a warning. A vault is the
 // target of an op's core action; we read targets off each op's contextual plan
@@ -420,7 +432,7 @@ const handleExecute = async () => {
   // rejects new submissions while a detached proposal is pending.
   const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
   if (!handle) return
-  const run = executeBatch()
+  const run = executeBatch(handle.scope)
   pendingBatchExecution = run
   executionHandle = handle
   try {
@@ -497,29 +509,6 @@ const onCloseRequested = () => {
           </div>
         </div>
       </template>
-
-      <!-- Transactions sent after the batch settles (e.g. approval restoration). -->
-      <div v-if="postExecutionSummaryRows.length">
-        <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
-          After execution
-        </p>
-        <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
-          <div
-            v-for="({ entry, step }, i) in postExecutionSummaryRows"
-            :key="`${entry.id}-post-${i}`"
-            class="flex items-center justify-between gap-12 py-10"
-          >
-            <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
-              <SvgIcon
-                name="check-circle"
-                class="!w-16 !h-16 text-accent-500 shrink-0"
-              />
-              <span class="truncate">{{ step.label }}</span>
-            </span>
-            <span class="text-p3 text-content-tertiary shrink-0">{{ step.isSeparateTx ? '1 transaction' : 'bundled' }}</span>
-          </div>
-        </div>
-      </div>
 
       <!-- Approvals -->
       <div v-if="approvals.length">
@@ -679,6 +668,29 @@ const onCloseRequested = () => {
         title="rEUL burn mechanics"
         :description="warning.description"
       />
+
+      <!-- Transactions sent after the batch settles (e.g. approval restoration). -->
+      <div v-if="postExecutionSummaryRows.length">
+        <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
+          After execution
+        </p>
+        <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
+          <div
+            v-for="({ entry, step }, i) in postExecutionSummaryRows"
+            :key="`${entry.id}-post-${i}`"
+            class="flex items-center justify-between gap-12 py-10"
+          >
+            <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
+              <SvgIcon
+                name="check-circle"
+                class="!w-16 !h-16 text-accent-500 shrink-0"
+              />
+              <span class="truncate">{{ step.label }}</span>
+            </span>
+            <span class="text-p3 text-content-tertiary shrink-0">{{ step.isSeparateTx ? '1 transaction' : 'bundled' }}</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Wallet changes -->
       <BatchWalletChanges

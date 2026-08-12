@@ -42,7 +42,7 @@ import {
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const router = useRouter()
 const _route = useRoute()
@@ -459,8 +459,8 @@ const submit = async () => {
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (execution) => {
+          await send(execution)
         },
       },
     })
@@ -495,7 +495,7 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio', { subAccount: borrowAccount })
 }
 
-const send = async () => {
+const send = async (execution: TrackedExecutionScope) => {
   try {
     isSubmitting.value = true
     if (!collateralVault.value || !borrowVault.value || !position.value) {
@@ -511,9 +511,9 @@ const send = async () => {
 
     // Success signal for a detached Safe completion toast; a proposal that
     // confirmed after its modal was closed must not redirect mid-flow.
-    markTrackedExecutionSucceeded()
+    execution.markSucceeded()
     updateBalance()
-    if (!shouldSuppressPostTxNavigation()) {
+    if (!execution.suppressPostTxUi()) {
       modal.close()
       setTimeout(() => {
         router.replace({ path: '/portfolio', query: { network: _route.query.network } })

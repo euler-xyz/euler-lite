@@ -14,7 +14,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
 import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal } from '#components'
-import { markTrackedExecutionSucceeded, shouldSuppressPostTxNavigation } from '~/composables/useSafeExecutionDetachment'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const router = useRouter()
 const route = useRoute()
@@ -185,8 +185,8 @@ const submit = async () => {
         amount: amount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
+        onConfirm: async (execution) => {
+          await send(execution)
         },
       },
     })
@@ -210,7 +210,7 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
 }
 
-const send = async () => {
+const send = async (execution: TrackedExecutionScope) => {
   try {
     isSubmitting.value = true
     if (!asset.value?.address) {
@@ -226,9 +226,9 @@ const send = async () => {
 
     // Success signal for a detached Safe completion toast; a proposal that
     // confirmed after its modal was closed must not redirect mid-flow.
-    markTrackedExecutionSucceeded()
+    execution.markSucceeded()
     await updateEstimates()
-    if (!shouldSuppressPostTxNavigation()) {
+    if (!execution.suppressPostTxUi()) {
       modal.close()
       setTimeout(() => {
         router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })

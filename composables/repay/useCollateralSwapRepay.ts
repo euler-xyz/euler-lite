@@ -33,6 +33,7 @@ import { COWSWAP_ORDER_DEADLINE_SECONDS, getCowSwapChainConfig, getCowSwapQuoteO
 import { type CowSwapClosePositionExecuteParams, useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -726,8 +727,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (execution) => {
+            await send(execution)
           },
           submittingLabel: 'Submitting...',
         },
@@ -738,14 +739,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
   }
 
-  const send = async () => {
+  const send = async (execution: TrackedExecutionScope) => {
     if (!position.value || !borrowVault.value) return
     if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
     try {
       isSubmitting.value = true
       const txPlan = await buildRepayPlan()
       await executePlan(txPlan)
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       error('Transaction failed')
