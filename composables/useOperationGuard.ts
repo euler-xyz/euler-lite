@@ -8,6 +8,7 @@ import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregis
 import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getVaultOperationGeoBlockReason } from '~/composables/useGeoBlock'
+import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 
 export interface OperationGuardOptions {
   /** Exit-only actions such as lending withdrawals and debt repayment remain
@@ -21,6 +22,7 @@ export const useOperationGuard = (
 ) => {
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
+  const { registryVersion } = useVaultRegistry()
 
   const addresses = computed((): string[] => {
     const raw = isRef(vaultAddresses) ? vaultAddresses.value : vaultAddresses
@@ -34,9 +36,15 @@ export const useOperationGuard = (
   useUnverifiedVaultGuard(addresses)
 
   // --- Geo guard ---
-  const geoBlockReason = computed(() => options.enforceGeo === false
-    ? undefined
-    : getVaultOperationGeoBlockReason(addresses.value))
+  const geoBlockReason = computed(() => {
+    if (options.enforceGeo === false) return undefined
+    // Geo resolution consults both the labels snapshot and lazily populated
+    // vault metadata. Track their versions explicitly so an initially allowed
+    // result cannot remain cached after either source finishes loading.
+    getEulerLabelsVersion()
+    void registryVersion.value
+    return getVaultOperationGeoBlockReason(addresses.value)
+  })
   watch(geoBlockReason, (reason) => {
     if (reason) registerOperationBlocker('geo', reason)
     else unregisterOperationBlocker('geo')
