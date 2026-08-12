@@ -92,14 +92,14 @@ describe('useAddressScreen', () => {
     expect(screening.isAddressScreened(USER)).toBe(false)
   })
 
-  it('disconnects when local VPN detection is positive even if address screening is clean', async () => {
+  it('disconnects immediately when local VPN detection is positive', async () => {
     mocks.detectVpn.mockResolvedValue(true)
-    mocks.screenAddress.mockResolvedValue(false)
+    mocks.screenAddress.mockRejectedValue(new Error('address screening unavailable'))
 
     const screening = useAddressScreen()
     await screening.screenConnectedAddress(USER)
 
-    expect(mocks.screenAddress).toHaveBeenCalledWith(USER, true)
+    expect(mocks.screenAddress).not.toHaveBeenCalled()
     expect(mocks.disconnect).toHaveBeenCalledTimes(1)
     expect(mocks.modalOpen).toHaveBeenCalledTimes(1)
     expect(screening.isAddressScreened(USER)).toBe(false)

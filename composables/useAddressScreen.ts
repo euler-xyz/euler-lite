@@ -50,11 +50,20 @@ export const useAddressScreen = () => {
       const vpnIsUsed = await detectVpn()
       if (gen !== screeningGeneration) return false
 
+      // A positive local VPN signal is independently blocking. Do not make
+      // that verdict depend on the availability of the remote address screen.
+      if (vpnIsUsed) {
+        await disconnect()
+        if (gen !== screeningGeneration) return false
+        showBlockedModal(address)
+        return true
+      }
+
       const addressIsRestricted = await screenAddress(address, vpnIsUsed)
       if (gen !== screeningGeneration) return false
-      // Both signals are independently blocking: policy does not treat a clean
-      // address-screen response as an override for locally detected VPN use.
-      const isRestricted = vpnIsUsed || addressIsRestricted
+      // The positive-VPN path returned above; this is the independent remote
+      // address-screen verdict.
+      const isRestricted = addressIsRestricted
 
       if (isRestricted) {
         await disconnect()

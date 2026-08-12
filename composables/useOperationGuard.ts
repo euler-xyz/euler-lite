@@ -16,6 +16,8 @@ export interface OperationGuardOptions {
   enforceGeo?: boolean
 }
 
+let operationGuardInstanceSequence = 0
+
 export const useOperationGuard = (
   vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[],
   options: OperationGuardOptions = {},
@@ -23,6 +25,7 @@ export const useOperationGuard = (
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
   const { registryVersion } = useVaultRegistry()
+  const geoBlockerKey = `geo:${++operationGuardInstanceSequence}`
 
   const addresses = computed((): string[] => {
     const raw = isRef(vaultAddresses) ? vaultAddresses.value : vaultAddresses
@@ -46,8 +49,8 @@ export const useOperationGuard = (
     return getVaultOperationGeoBlockReason(addresses.value)
   })
   watch(geoBlockReason, (reason) => {
-    if (reason) registerOperationBlocker('geo', reason)
-    else unregisterOperationBlocker('geo')
+    if (reason) registerOperationBlocker(geoBlockerKey, reason)
+    else unregisterOperationBlocker(geoBlockerKey)
   }, { immediate: true })
 
   // --- Keyring guard ---
@@ -141,6 +144,6 @@ export const useOperationGuard = (
   onUnmounted(() => {
     clearOperationMeta('keyring')
     unregisterOperationBlocker('keyring')
-    unregisterOperationBlocker('geo')
+    unregisterOperationBlocker(geoBlockerKey)
   })
 }

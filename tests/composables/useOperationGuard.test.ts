@@ -63,6 +63,8 @@ const mountGuard = () => {
   return app
 }
 
+const activeGeoBlockers = () => operationBlockerEntries.value.filter(([key]) => key.startsWith('geo:'))
+
 describe('useOperationGuard geo reactivity', () => {
   beforeEach(() => {
     labelsVersion.value = 0
@@ -73,24 +75,40 @@ describe('useOperationGuard geo reactivity', () => {
   })
 
   afterEach(() => {
-    unregisterOperationBlocker('geo')
     unregisterOperationBlocker('keyring')
     vi.unstubAllGlobals()
   })
 
   it('re-evaluates cached geo policy after labels or vault metadata refreshes', async () => {
     const app = mountGuard()
-    expect(operationBlockerEntries.value).not.toContainEqual(['geo', expect.any(String)])
+    expect(activeGeoBlockers()).toEqual([])
 
     geoBlocked = true
     labelsVersion.value++
     await nextTick()
-    expect(operationBlockerEntries.value).toContainEqual(['geo', 'This operation is not available in your region'])
+    expect(activeGeoBlockers()).toHaveLength(1)
+    expect(activeGeoBlockers()[0]?.[1]).toBe('This operation is not available in your region')
 
     geoBlocked = false
     registryVersion.value++
     await nextTick()
-    expect(operationBlockerEntries.value).not.toContainEqual(['geo', expect.any(String)])
+    expect(activeGeoBlockers()).toEqual([])
     app.unmount()
+  })
+
+  it('keeps a sibling geo block registered when another guard unmounts', async () => {
+    geoBlocked = true
+    const first = mountGuard()
+    const second = mountGuard()
+    await nextTick()
+    expect(activeGeoBlockers()).toHaveLength(2)
+
+    first.unmount()
+    await nextTick()
+    expect(activeGeoBlockers()).toHaveLength(1)
+    expect(activeGeoBlockers()[0]?.[1]).toBe('This operation is not available in your region')
+
+    second.unmount()
+    expect(activeGeoBlockers()).toEqual([])
   })
 })
