@@ -417,4 +417,13 @@ describe('isVaultRestrictedByCountry — asset-level OR', () => {
     expect(isVaultBlockedByCountry('')).toBe(false)
     expect(isVaultRestrictedByCountry('')).toBe(false)
   })
+
+  it('does not let an empty vault erase unknown-country or sanctions blocks', () => {
+    setCountry(null)
+    expect(isVaultBlockedByCountry('')).toBe(true)
+    expect(isVaultRestrictedByCountry('')).toBe(true)
+
+    setCountry('IR')
+    expect(isVaultBlockedByCountry('')).toBe(true)
+  })
 })

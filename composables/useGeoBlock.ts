@@ -214,12 +214,12 @@ export const isVaultBlockedByCountry = (
   vaultAddress: string,
   opts?: Pick<VaultGeoPolicyOptions, 'asset'>,
 ): boolean => {
-  if (!vaultAddress) return false
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
   // Sanctioned countries are always blocked
   if (isCountryInList(SANCTIONED_COUNTRIES)) return true
+  if (!vaultAddress) return false
 
   const productBlock = getVaultBlock(vaultAddress)
   if (productBlock?.length && isCountryInList(expandBlockList(productBlock))) return true
@@ -245,9 +245,9 @@ export const isVaultRestrictedByCountry = (
   vaultAddress: string,
   opts?: VaultGeoPolicyOptions,
 ): boolean => {
-  if (!vaultAddress) return false
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
+  if (!vaultAddress) return false
 
   const vaultRestricted = getVaultRestricted(vaultAddress)
   if (vaultRestricted?.length && isCountryInList(expandBlockList(vaultRestricted))) return true

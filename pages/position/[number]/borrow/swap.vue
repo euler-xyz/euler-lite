@@ -3517,6 +3517,9 @@ const addInboundExternalMigrationToBatch = async () => {
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
+        geoVaultAddresses: getOperationVaultAddresses(),
+        geoTargetVaultAddresses: [targetCollateral.address, targetDebt?.address]
+          .filter((value): value is Address => !!value),
       },
     }
 
@@ -3594,6 +3597,10 @@ const addToBatch = async () => {
       const swapReviewInfo = refinanceSwapReviewInfo.value
       const collateralChanged = hasCollateralChange.value
       const debtChanged = hasDebtChange.value
+      const geoTargetVaultAddresses = [
+        collateralChanged ? effectiveCollateralVault.value.address : undefined,
+        debtChanged ? effectiveDebtVault.value.address : undefined,
+      ].filter((value): value is Address => !!value)
 
       await addBatchEntry({
         label: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetCollateralSymbol}/${targetDebtSymbol}`,
@@ -3610,6 +3617,8 @@ const addToBatch = async () => {
           vaultAmounts,
           sourceDebtVault: sourceDebtVault.value.address,
           sourceCollateralVaults: sourceCollateralVaultAddresses.value,
+          geoVaultAddresses: getOperationVaultAddresses(),
+          geoTargetVaultAddresses,
           ...swapReviewInfo,
         },
       })

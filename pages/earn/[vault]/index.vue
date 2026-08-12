@@ -204,6 +204,7 @@ const addToBatch = async () => {
     label,
     buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: amt, account }),
     review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
+    geoPolicy: [{ vaultAddress, asset: asset.value }],
   })
   amount.value = ''
   redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })

@@ -850,6 +850,11 @@ const addToBatch = async () => {
       subAccount: receiver,
       multiply: true,
       review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
+      geoPolicy: [
+        { vaultAddress: supply, asset: multiplySupplyVault.value!.asset },
+        { vaultAddress: long, asset: multiplyLongVault.value!.asset, inputAsset: multiplyShortVault.value!.asset, counterpart: multiplyShortVault.value!.asset, acquisition: true },
+        { vaultAddress: short, asset: multiplyShortVault.value!.asset, acquisition: true },
+      ],
     })
     redirectAfterAdd('/portfolio', { subAccount: receiver })
   })

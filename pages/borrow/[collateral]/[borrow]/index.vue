@@ -298,7 +298,16 @@ const addToBatch = async () => {
       quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
     }
     const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-    await addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
+    await addBatchEntry({
+      label,
+      buildPlan: account => borrow.buildBorrowPlan(snap, account),
+      subAccount,
+      review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null },
+      geoPolicy: [
+        { vaultAddress: bVault.address, asset: bVault.asset, acquisition: true },
+        { vaultAddress: cVault.address, asset: cVault.asset, inputAsset: snap.selectedAsset, counterpart: snap.selectedAsset, acquisition: snap.needsSwap },
+      ],
+    })
     borrow.collateralAmount.value = ''
     borrow.borrowAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount })
@@ -338,7 +347,18 @@ const addMultiplyToBatch = async () => {
       savingShares: multiply.multiplySavingBalance.value,
       quote: sameAsset ? undefined : multiply.multiplyEffectiveQuote.value ?? undefined,
     }
-    await addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
+    await addBatchEntry({
+      label: `Multiply → ${longVault.asset.symbol}`,
+      buildPlan: account => multiply.buildMultiplyPlan(snap, account),
+      subAccount,
+      multiply: true,
+      review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value },
+      geoPolicy: [
+        { vaultAddress: supplyVault.address, asset: supplyVault.asset },
+        { vaultAddress: longVault.address, asset: longVault.asset, inputAsset: shortVault.asset, counterpart: shortVault.asset, acquisition: true },
+        { vaultAddress: shortVault.address, asset: shortVault.asset, acquisition: true },
+      ],
+    })
     redirectAfterAdd('/portfolio', { subAccount })
   })
 }

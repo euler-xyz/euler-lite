@@ -489,6 +489,12 @@ const addToBatch = async () => {
     buildPlan: account => planBorrow({ vaultAddress, amount, borrowAccount, account, subAccountSnapshotApplied: true }),
     subAccount: borrowAccount,
     review: { type: 'borrow', asset: borrowVault.value.asset, amount: borrowAmount.value },
+    geoPolicy: [
+      { vaultAddress, asset: borrowVault.value.asset, acquisition: true },
+      ...(collateralVault.value
+        ? [{ vaultAddress: collateralVault.value.address, asset: collateralVault.value.asset }]
+        : []),
+    ],
   })
   borrowAmount.value = ''
   redirectAfterAdd('/portfolio', { subAccount: borrowAccount })

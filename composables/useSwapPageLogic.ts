@@ -605,7 +605,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   const send = async () => {
     if (!fromVault.value || !toVault.value) return
-    if (!isSameAsset.value && !selectedQuote.value) return
+    if (!isSameAsset.value && !selectedQuote.value) {
+      showError('The swap quote changed. Review the operation again')
+      modal.close()
+      return
+    }
     if (isGeoBlocked.value) {
       invalidatePreparedSwap()
       showError('This operation is not available in your region')

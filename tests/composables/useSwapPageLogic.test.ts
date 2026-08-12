@@ -421,4 +421,52 @@ describe('useSwapPageLogic', () => {
     await nextTick()
     expect(captured.resetQuotes).toHaveBeenCalled()
   })
+
+  it('closes an open review with feedback when a country refresh invalidates its quote', async () => {
+    const toVault = makeVault(
+      '0x0000000000000000000000000000000000000002',
+      '0x0000000000000000000000000000000000000003',
+      'WETH',
+    )
+    const fromVault = shallowRef<EVault | SecuritizeCollateralVault | undefined>(makeVault(
+      '0x0000000000000000000000000000000000000004',
+      '0x0000000000000000000000000000000000000005',
+      'USDC',
+    ))
+    const toVaultRef = shallowRef<EVault | undefined>(toVault)
+    captured.selectedQuote.value = { amountIn: '100', amountOut: '200' } as SwapQuote
+
+    const swap = useSwapPageLogic({
+      amountField: 'amountOut',
+      compare: 'max',
+      fromVault,
+      toVault: toVaultRef,
+      balance: computed(() => 1000n),
+      vaultOptions: computed(() => [toVault]),
+      displayAmountField: 'amountOut',
+      quoteDiffPrefix: '-',
+      buildQuoteRequest: () => null,
+      buildPlan: vi.fn(async () => []),
+      getBalanceError: () => null,
+      getGeoBlockedAddresses: () => [fromVault.value!.address, toVaultRef.value!.address],
+      redirectPath: '/portfolio/saving',
+      swapperMode: SwapperMode.EXACT_IN,
+    })
+
+    await swap.submit()
+    const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
+    expect(modalArgs).toBeDefined()
+
+    captured.country.value = 'US'
+    await nextTick()
+    // The production quote composable clears this ref from reset(); the test
+    // double records reset calls, so mirror that state transition explicitly.
+    captured.selectedQuote.value = null
+    await modalArgs.props.onConfirm()
+
+    expect(captured.executePreparedPlan).not.toHaveBeenCalled()
+    expect(captured.executePlan).not.toHaveBeenCalled()
+    expect(captured.toastError).toHaveBeenCalledWith('The swap quote changed. Review the operation again')
+    expect(captured.modalClose).toHaveBeenCalled()
+  })
 })
