@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type Hash, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -29,6 +29,8 @@ const targetVault = getAddress('0x3000000000000000000000000000000000000000')
 const WAD = 10n ** 18n
 const routeQuery: { network?: string } = { network: '1' }
 const routerReplace = vi.fn()
+const activeOwner = ref<Address | undefined>(owner)
+const activeChainId = ref<number | undefined>(1)
 const eulerTxMocks = {
   prepareTransactionPlan: vi.fn(),
   executePreparedPlan: vi.fn(),
@@ -263,14 +265,14 @@ const accountWithPositions = (
 })
 
 const stubBatchComposableGlobals = () => {
-  vi.stubGlobal('useWagmi', () => ({ address: ref(owner), chainId: ref(1) }))
+  vi.stubGlobal('useWagmi', () => ({ address: activeOwner, chainId: activeChainId }))
   vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
   vi.stubGlobal('useEffectiveAddress', () => ({
-    address: ref(owner),
+    address: activeOwner,
     isConnected: ref(true),
     isSpyMode: ref(false),
     spyAddress: ref(undefined),
-    effectiveAddress: ref(owner),
+    effectiveAddress: activeOwner,
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useEulerTx', () => eulerTxMocks)
@@ -323,6 +325,8 @@ beforeEach(() => {
   migrationFlowMocks.restorePendingBeforeRetry.mockResolvedValue(true)
   scheduleExternalMigrationRefreshes.mockReset()
   routerReplace.mockReset()
+  activeOwner.value = owner
+  activeChainId.value = 1
   routeQuery.network = '1'
   stubBatchComposableGlobals()
   vi.mocked(getEulerSdkFresh).mockResolvedValue(createMockSdk() as never)
@@ -1010,7 +1014,7 @@ describe('useTxBatch execution errors', () => {
 
   it('redirects to the portfolio after a successful mined batch execution', async () => {
     const batch = useTxBatch()
-    const prepared = { kind: 'prepared' }
+    const prepared = { kind: 'prepared', account: owner, chainId: 1 }
     const plan: TransactionPlan = []
     routeQuery.network = '8453'
     eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
@@ -1024,7 +1028,9 @@ describe('useTxBatch execution errors', () => {
     })
     await batch.executeBatch()
 
-    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared)
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, {
+      onProgress: expect.any(Function),
+    })
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
     expect(batch.entryCount.value).toBe(0)
     expect(routerReplace).toHaveBeenCalledWith({
@@ -1053,7 +1059,7 @@ describe('useTxBatch execution errors', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
 
     const batch = useTxBatch()
-    const prepared = { kind: 'prepared' }
+    const prepared = { kind: 'prepared', account: owner, chainId: 1 }
     const borrowPlan = [{ type: 'borrow' }] as unknown as TransactionPlan
     const migrationPreviewPlan = [{ type: 'migration-preview' }] as unknown as TransactionPlan
     const migrationExecutionPlan = [{ type: 'migration-execution' }] as unknown as TransactionPlan
@@ -1179,7 +1185,7 @@ describe('useTxBatch execution prerequisites', () => {
       return []
     })
     eulerTxMocks.estimateGasForPlan.mockImplementation(async () => void calls.push('estimateGasForPlan'))
-    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared', account: owner, chainId: 1 })
     eulerTxMocks.executePreparedPlan.mockImplementation(async () => void calls.push('executePreparedPlan'))
     migrationFlowMocks.restorePendingBeforeRetry.mockImplementation(async () => {
       calls.push('restorePendingBeforeRetry')
@@ -1255,7 +1261,7 @@ describe('useTxBatch execution prerequisites', () => {
       const batch = useTxBatch()
       eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
       eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
-      eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+      eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared', account: owner, chainId: 1 })
       eulerTxMocks.executePreparedPlan.mockRejectedValue(new WalletExecutionContextChangedError(kind))
 
       await addGrantingMigrationEntry(batch)
@@ -1273,7 +1279,7 @@ describe('useTxBatch execution prerequisites', () => {
       .mockResolvedValueOnce(false)
     eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
     eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
-    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared', account: owner, chainId: 1 })
     eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('User rejected the request.'))
 
     await addGrantingMigrationEntry(batch)
@@ -1290,7 +1296,7 @@ describe('useTxBatch execution prerequisites', () => {
   it('sends no transactions when an entry reports no prerequisites', async () => {
     const batch = useTxBatch()
     eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
-    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared', account: owner, chainId: 1 })
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
 
     // An authorization already standing on-chain resolves to no prerequisite,
@@ -1307,7 +1313,7 @@ describe('useTxBatch execution prerequisites', () => {
     const batch = useTxBatch()
     eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
     eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
-    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared', account: owner, chainId: 1 })
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
     // revokeAfterSuccess swallows failures internally; it must never throw.
     migrationFlowMocks.revokeAfterSuccess.mockResolvedValue(undefined)
@@ -1323,10 +1329,11 @@ describe('useTxBatch execution prerequisites', () => {
     const batch = useTxBatch()
     const safeHash = `0x${'12'.repeat(32)}` as Hash
     eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
-    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
-    eulerTxMocks.executePreparedPlan.mockRejectedValue(
-      new SafeTransactionStatusUnknownError(safeHash, 'timeout'),
-    )
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ account: owner, chainId: 1 })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      options?.onProgress?.({ status: 'evcBatch' })
+      throw new SafeTransactionStatusUnknownError(safeHash, 'timeout')
+    })
 
     await addGrantingMigrationEntry(batch)
     await batch.executeBatch()
@@ -1350,6 +1357,59 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.pendingSafeSubmission.value).toBeNull()
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('does not misclassify an unresolved approval Safe transaction as the atomic batch', async () => {
+    const batch = useTxBatch()
+    const approvalHash = `0x${'23'.repeat(32)}` as Hash
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ account: owner, chainId: 1 })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      options?.onProgress?.({ status: 'approval' })
+      throw new SafeTransactionStatusUnknownError(approvalHash, 'timeout')
+    })
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+    expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('retains a pending Safe submission under its prepared owner and chain', async () => {
+    const batch = useTxBatch()
+    const safeHash = `0x${'45'.repeat(32)}` as Hash
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ account: owner, chainId: 1 })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      options?.onProgress?.({ status: 'evcBatch' })
+      activeOwner.value = subAccount
+      activeChainId.value = 8453
+      await nextTick()
+      throw new SafeTransactionStatusUnknownError(safeHash, 'timeout')
+    })
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch()
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(batch.entryCount.value).toBe(0)
+
+    activeOwner.value = owner
+    activeChainId.value = 1
+    await nextTick()
+
+    expect(batch.pendingSafeSubmission.value).toMatchObject({
+      submittedHash: safeHash,
+      account: owner,
+      chainId: 1,
+    })
+
+    eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'not-executed' })
+    await batch.reconcilePendingSafeSubmission()
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
   })
 
   it('does not misclassify an unresolved prerequisite Safe transaction as the atomic batch', async () => {

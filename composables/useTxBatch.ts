@@ -232,7 +232,7 @@ export const isPendingSafeSubmissionForContext = (
     return false
   }
 }
-const pendingSafeSubmission = shallowRef<PendingSafeBatchSubmission | null>(null)
+const pendingSafeSubmissions = shallowRef<PendingSafeBatchSubmission[]>([])
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
@@ -1645,6 +1645,23 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
+  const pendingSafeSubmission = computed(() =>
+    pendingSafeSubmissions.value.find(pending =>
+      isPendingSafeSubmissionForContext(pending, owner.value, chainId.value),
+    ) ?? null,
+  )
+  const setPendingSafeSubmission = (pending: PendingSafeBatchSubmission) => {
+    pendingSafeSubmissions.value = [
+      ...pendingSafeSubmissions.value.filter(existing =>
+        !isPendingSafeSubmissionForContext(existing, pending.account, pending.chainId),
+      ),
+      pending,
+    ]
+  }
+  const clearPendingSafeSubmission = (pending: PendingSafeBatchSubmission | null) => {
+    if (!pending) return
+    pendingSafeSubmissions.value = pendingSafeSubmissions.value.filter(existing => existing !== pending)
+  }
   const {
     prepareTransactionPlan,
     executePreparedPlan,
@@ -2002,11 +2019,6 @@ export const useTxBatch = () => {
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
-        // A Safe submission is scoped to the owner/network that created it.
-        // Never let that stale lock disable a fresh cart after context drift.
-        if (!isPendingSafeSubmissionForContext(pendingSafeSubmission.value, owner.value, chainId.value)) {
-          pendingSafeSubmission.value = null
-        }
         resimToken++
         entries.value = []
         layers.value = []
@@ -2203,7 +2215,7 @@ export const useTxBatch = () => {
 
   const clearBatchInternal = (safeTerminal: boolean) => {
     if (pendingSafeSubmission.value && !safeTerminal) return
-    if (safeTerminal) pendingSafeSubmission.value = null
+    if (safeTerminal) clearPendingSafeSubmission(pendingSafeSubmission.value)
     resimToken++
     entries.value = []
     layers.value = []
@@ -2381,6 +2393,7 @@ export const useTxBatch = () => {
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let shouldRefreshExternalMigrationPositions = false
     let batchExecutionStarted = false
+    let batchExecutionContext: WalletExecutionContext | undefined
     try {
       if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
@@ -2391,8 +2404,17 @@ export const useTxBatch = () => {
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
       const prepared = await prepareTransactionPlan(executionPlan)
-      batchExecutionStarted = true
-      await executePreparedPlan(prepared)
+      batchExecutionContext = {
+        account: getAddress(typeof prepared.account === 'string' ? prepared.account : prepared.account.owner),
+        chainId: prepared.chainId,
+      }
+      await executePreparedPlan(prepared, {
+        onProgress: (progress) => {
+          // Required approvals are separate transactions. Only arm Safe batch
+          // reconciliation once the executor reaches the terminal EVC send.
+          if (progress.status === 'evcBatch') batchExecutionStarted = true
+        },
+      })
       clearBatchInternal(true)
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
       await revokeAfterSuccess(grantedRevokes)
@@ -2400,14 +2422,14 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      if (batchExecutionStarted && error instanceof SafeTransactionStatusUnknownError && owner.value && chainId.value) {
-        pendingSafeSubmission.value = {
+      if (batchExecutionStarted && batchExecutionContext && error instanceof SafeTransactionStatusUnknownError) {
+        setPendingSafeSubmission({
           submittedHash: error.submittedHash,
-          account: getAddress(owner.value),
-          chainId: chainId.value,
+          account: batchExecutionContext.account,
+          chainId: batchExecutionContext.chainId,
           refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
           grantedRevokes: [...grantedRevokes],
-        }
+        })
         execError.value = `${error.message} Submitted Safe hash: ${error.submittedHash}`
       }
       else {
@@ -2433,7 +2455,7 @@ export const useTxBatch = () => {
         chainId: pending.chainId,
       })
       if (result.status === 'executed') {
-        pendingSafeSubmission.value = null
+        clearPendingSafeSubmission(pending)
         clearBatchInternal(true)
         if (pending.refreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
         await revokeAfterSuccess(pending.grantedRevokes)
@@ -2441,7 +2463,7 @@ export const useTxBatch = () => {
         return
       }
       if (result.status === 'not-executed') {
-        pendingSafeSubmission.value = null
+        clearPendingSafeSubmission(pending)
         await revokeAfterAbort(pending.grantedRevokes)
         execError.value = 'Safe confirmed that the submitted transaction was not executed. The batch has been rebuilt and can be reviewed again.'
         lastMerged = null

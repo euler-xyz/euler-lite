@@ -313,6 +313,34 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith(expect.objectContaining({ account: OWNER }))
   })
 
+  it('forwards prepared-plan progress to the caller', async () => {
+    const progress = { completed: 0, total: 1, status: 'evcBatch' as const }
+    const executePreparedTransactionPlan = vi.fn(async ({ onProgress }: {
+      onProgress?: (value: typeof progress) => void
+    }) => {
+      onProgress?.(progress)
+      return { receipts: [] }
+    })
+    const provider = { waitForTransactionReceipt: vi.fn() }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const onProgress = vi.fn()
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan({
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared, { onProgress })
+
+    expect(onProgress).toHaveBeenCalledWith(progress)
+  })
+
   it.each([
     ['account', () => { currentAccount = OTHER_OWNER }],
     ['chain', () => { currentChainId = 8453 }],

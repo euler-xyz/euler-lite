@@ -15,6 +15,7 @@ const {
   isSimulating,
   simError,
   execError,
+  pendingSafeSubmission,
   insufficientBalanceMessage,
   walletChanges,
   removeEntry,
@@ -38,7 +39,7 @@ const openEntryReview = (entry: BatchEntry) => {
 }
 
 const openBatchReview = () => {
-  if (!entries.value.length) return
+  if (!entries.value.length && !pendingSafeSubmission.value) return
   modal.open(BatchReviewModal, { onClose: dismissExecutionError })
 }
 
@@ -182,11 +183,11 @@ const simEyeLabel = computed(() =>
       <button
         type="button"
         class="w-full h-40 rounded-12 bg-accent-600 hover:bg-accent-700 text-black text-p2 font-semibold shadow-accent-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-        :disabled="!entries.length || isSimulating"
+        :disabled="(!entries.length && !pendingSafeSubmission) || isSimulating"
         data-testid="batch-review"
         @click="openBatchReview"
       >
-        {{ isSimulating ? 'Simulating…' : 'Review batch' }}
+        {{ isSimulating ? 'Simulating…' : pendingSafeSubmission ? 'Check Safe status' : 'Review batch' }}
       </button>
     </div>
   </div>

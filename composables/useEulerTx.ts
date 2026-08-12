@@ -1460,7 +1460,10 @@ export const useEulerTx = () => {
     return result
   }
 
-  const executePreparedPlan = async (prepared: TransactionPlanPrepared) => {
+  const executePreparedPlan = async (
+    prepared: TransactionPlanPrepared,
+    options?: { onProgress?: (progress: TransactionPlanExecutionProgress) => void },
+  ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
@@ -1507,7 +1510,7 @@ export const useEulerTx = () => {
         })
         return signature as Hex
       },
-      onProgress: (_progress: TransactionPlanExecutionProgress) => {},
+      onProgress: options?.onProgress,
     })
 
     finalizeExecution(result)
