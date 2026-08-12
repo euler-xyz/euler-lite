@@ -1,7 +1,7 @@
 /**
  * Per-chain "labels view" shared by /api/public/is-known and
  * /api/public/metadata. It keeps Lite's public API/cache policy in the app,
- * but sources normalized labels and vault entities through the SDK.
+ * and reads normalized label content from the shared Public Labels V3 source.
  */
 import {
   StandardEVaultPerspectives,
@@ -23,6 +23,7 @@ import { logger } from './logger'
 import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
+import { getPublicEulerLabelsData } from './public-labels-source'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
 
 export interface ChainVaultsSnapshot {
@@ -331,7 +332,7 @@ async function buildSnapshot(
 async function assembleLabelsView(chainId: number): Promise<LabelsView> {
   const sdk = await getSdk(chainId)
   const [labels, tokens] = await Promise.allSettled([
-    sdk.eulerLabelsService.fetchEulerLabelsData(chainId),
+    getPublicEulerLabelsData(chainId),
     fetchTokenList(chainId),
   ])
 

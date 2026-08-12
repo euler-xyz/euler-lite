@@ -182,8 +182,8 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 ├─────────────────────────────────────────────────────────────────┤
 │              Server-Side Proxy Layer (Nuxt server/)             │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│  │ /api/internal│ │ /api/internal/pyth   │ │ /api/internal/labels │                │
-│  │ /token-list │ │ /updates    │ │ /rpc/[chain]│                │
+│  │ /api/internal│ │ /api/internal/pyth   │ │ /api/internal/public │                │
+│  │ /token-list │ │ /updates    │ │ -labels, /rpc/[chain]│       │
 │  └─────────────┘ └─────────────┘ └─────────────┘                │
 ├─────────────────────────────────────────────────────────────────┤
 │                    External Services                            │
@@ -195,14 +195,13 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, Public Labels, oracle checks, RPC) are reached through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
 
 **Proxy cache strategy**:
 
 | Endpoint | TTL | Notes |
 |----------|-----|-------|
-| `/api/internal/labels/{file}` | 5 min | Query-shape labels endpoint (`?chainId=N`); used internally by Lite helpers. 404 → empty shape; stale-fallback on upstream error |
-| `/api/internal/labels/{chainId}/{file}` | 5 min | Path-shape labels endpoint matching the SDK's default `eulerLabelsBaseUrl` template; shares the underlying cache with the query-shape route |
+| `/api/internal/public-labels` | 5 min | One chain/version-scoped Public Labels V3 bundle; in-flight dedup and bounded stale fallback |
 | `/api/internal/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
 | `/api/internal/oracle-adapter` | 5 min | Lazy per-address fetch |
 | `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
@@ -215,7 +214,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`. The per-host proxies (`/api/internal/proxy/{merkl,fuul,incentra,subgraph}`) share a common forwarder at `server/utils/external-proxy.ts`.
 
-`server/plugins/warm-cache.ts` pre-populates labels and token-list for every enabled chain, plus `/api/internal/euler-chains` once globally, on a 5-min cycle. The vault snapshot runs on its own faster timer (1 min when V3 is configured, 5 min otherwise) so V3-backed refreshes stay tight without hammering upstream. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ TTL − 2 s) and the entry would then expire with no refresh until the next cycle — leaving a stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh previous entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates the Public Labels bundle, its temporary effective-policy overlay, and the token list for every enabled chain, plus Euler Chains once globally, on a 5-minute cycle. The vault snapshot runs on its own faster timer (1 minute when V3 is configured, 5 minutes otherwise). Warm calls refresh the shared utilities directly; concurrent requests deduplicate against the same in-flight work, and stale fallback is bounded by `createTtlCache`.
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
@@ -246,7 +245,7 @@ The Explore page (`pages/explore/index.vue`) provides a market discovery interfa
 
 The `useMarketGroups` composable (`composables/useMarketGroups.ts`) implements a hybrid grouping algorithm:
 
-1. **Product-label groups** — Vaults are first assigned to groups using `products` metadata from euler-labels. Each product defines a curator entity, name, and list of vault addresses.
+1. **Product-label groups** — Vaults are first assigned to groups using versioned Public Labels product metadata from V3. Each product defines its managing entity, optional display-only co-brands, name, and assigned vaults. Manager ownership and governance verification use only the managing entity.
 2. **Collateral graph augmentation** — For each group, external collateral vaults (referenced by member vaults but not in the group) are resolved and attached.
 3. **Orphan clustering** — Vaults not assigned to any product are clustered using a BFS connected-component algorithm over their collateral relationships. This produces "Ungrouped" markets.
 4. **Async TVL resolution** — Group metrics (TVL, available liquidity, borrowed) are resolved asynchronously using USD pricing.

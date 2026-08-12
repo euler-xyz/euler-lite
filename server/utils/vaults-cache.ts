@@ -34,11 +34,7 @@ import { reportStatus } from './log'
 import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
-import {
-  LABEL_FILES,
-  refreshLabelFile,
-  type LabelFile,
-} from '~/server/api/internal/labels/[file].get'
+import { getPublicEulerLabelsData } from './public-labels-source'
 import { encodeBigints } from '~/utils/snapshot-codec'
 import { readV3ApiUrl } from '~/utils/api-url-env'
 import {
@@ -90,39 +86,6 @@ const uniqueAddresses = (addresses: Iterable<string>): Address[] => {
     if (checksummed) result.set(checksummed.toLowerCase(), checksummed)
   }
   return [...result.values()]
-}
-
-interface LabelProduct { vaults?: string[], deprecatedVaults?: string[] }
-interface EarnVaultEntry { address?: string }
-
-const fetchLabel = async <T>(scope: number | 'all', file: LabelFile, fallback: T): Promise<T> => {
-  try {
-    return (await refreshLabelFile(scope, file)) as T
-  }
-  catch (err) {
-    logger.warn({ ctx: 'vaults-cache', scope, file, err }, 'failed to fetch label')
-    return fallback
-  }
-}
-
-const getLabels = async (chainId: number) => {
-  const [products, earn] = await Promise.all([
-    fetchLabel<Record<string, LabelProduct>>(chainId, 'products.json', {}),
-    fetchLabel<Array<string | EarnVaultEntry>>(chainId, 'earn-vaults.json', []),
-  ])
-  const verified = new Set<string>()
-  for (const product of Object.values(products)) {
-    product.vaults?.forEach(addr => verified.add(addr))
-    product.deprecatedVaults?.forEach(addr => verified.add(addr))
-  }
-  const earnVaults: string[] = earn.flatMap((entry) => {
-    if (typeof entry === 'string') return [entry]
-    return typeof entry?.address === 'string' ? [entry.address] : []
-  })
-  return {
-    verifiedVaultAddresses: uniqueAddresses(verified),
-    earnVaults: uniqueAddresses(earnVaults),
-  }
 }
 
 const partitionVerified = async (
@@ -219,13 +182,13 @@ const fetchEVaultsForSnapshot = async (
 export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot> =>
   inFlight.run(chainId, async () => {
     const sdk = await getServerSdk(chainId)
-    const labels = await getLabels(chainId)
+    const labels = await getPublicEulerLabelsData(chainId)
     const escrowAddrs = await fetchEscrowAddrs(sdk, chainId)
     const { evkAddrs, securitizeAddrs, earnAddrs } = await partitionVerified(
       sdk,
       chainId,
-      labels.verifiedVaultAddresses,
-      labels.earnVaults,
+      uniqueAddresses(labels.verifiedVaultAddresses),
+      uniqueAddresses(labels.earnVaults),
     )
 
     // populateCollaterals / populateStrategyVaults DISABLED — deferred to
@@ -285,7 +248,3 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     reportStatus('vaults-cache', `chain=${chainId}`, 'ok')
     return payload
   })
-
-// silence unused: LABEL_FILES is re-exported by callers via the labels
-// endpoint module, importing here keeps the file dependency edge explicit.
-void LABEL_FILES

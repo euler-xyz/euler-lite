@@ -110,7 +110,7 @@ This list is checked first. If the user's country matches, the function returns 
 
 ### 2. Product-Level Blocks
 
-Each product in `products.json` (from the euler-labels repo) can have a `block` array of country codes or group aliases:
+Each product in the temporary effective-policy `products.json` can have a `block` array of country codes or group aliases:
 
 ```json
 {
@@ -143,7 +143,7 @@ When a vault has an override with a `block` field, the override **replaces** (no
 
 ### 4. Earn Vault Blocks
 
-Earn vaults have a separate blocking mechanism in `earn-vaults.json`. Entries can be a plain address string (no blocking) or an object with a `block` array:
+Earn vaults have a separate blocking mechanism in the temporary effective-policy `earn-vaults.json`. Entries can be a plain address string (no blocking) or an object with a `block` array:
 
 ```json
 [
@@ -156,7 +156,7 @@ These are stored in a dedicated `earnVaultBlocks` map (keyed by lowercase addres
 
 ### 5. Asset-Level Blocks
 
-A vault's **underlying ERC-20 asset** can carry its own block rules in `assets.json` (from the euler-labels repo). When the user's country matches a rule for a vault's underlying asset, the vault is treated as blocked — in addition to any product-level or earn-level rules. This is the primary mechanism for compliance-driven blocks that apply to a token regardless of which vault wraps it.
+A vault's **underlying ERC-20 asset** can carry its own block rules in the temporary effective-policy `assets.json`. When the user's country matches a rule for a vault's underlying asset, the vault is treated as blocked — in addition to any product-level or earn-level rules. This is the primary mechanism for compliance-driven blocks that apply to a token regardless of which vault wraps it.
 
 The same rules also drive the `SwapTokenSelector`, so users cannot route around a vault block by picking the blocked underlying as a pay-with, withdraw-to, borrow swap-in, or swap-deposit source.
 
@@ -173,7 +173,7 @@ Stored in the `assetBlocks` and `assetRestrictions` maps (keyed by lowercase add
 
 #### Pattern-based entries
 
-External token lists (Uniswap, DefiLlama, Merkl) surface addresses the labels repo hasn't enumerated. When a given issuer publishes many tokens with a shared naming convention (e.g. Ondo's USDY, OUSG, OMPL), pattern rules match by symbol or name instead of address:
+External token lists (Uniswap, DefiLlama, Merkl) surface addresses the temporary effective-policy source has not enumerated. When a given issuer publishes many tokens with a shared naming convention (e.g. Ondo's USDY, OUSG, OMPL), pattern rules match by symbol or name instead of address:
 
 ```json
 [
@@ -191,7 +191,7 @@ External token lists (Uniswap, DefiLlama, Merkl) surface addresses the labels re
 
 #### Cross-chain rules: `all/assets.json`
 
-Per-chain `assets.json` files (e.g. `1/assets.json`, `8453/assets.json`) are the right home for address-based rules because addresses are chain-specific. Pattern rules usually apply identically across every chain (USDY is USDY wherever it's deployed), so the labels repo hosts them in a special cross-chain directory:
+Per-chain `assets.json` files (e.g. `1/assets.json`, `8453/assets.json`) are the right home for address-based rules because addresses are chain-specific. Pattern rules usually apply identically across every chain (USDY is USDY wherever it is deployed), so the temporary effective-policy repository hosts them in a cross-chain directory:
 
 ```text
 euler-labels/
@@ -200,7 +200,7 @@ euler-labels/
 └── all/assets.json        ← cross-chain rules (usually patterns)
 ```
 
-The `/api/internal/labels/assets.json?chainId=N` proxy transparently **unions** the per-chain file with `all/assets.json` before returning — the client sees a single merged list. If either file is absent upstream the proxy serves only the present side (empty-shape fallback on 404, matching every other label file). Both files accept both shapes; conventionally addresses live per-chain and patterns live in `all/`, but nothing enforces that split.
+`server/utils/labels-source.ts` **unions** the per-chain file with `all/assets.json` while assembling the server-side effective policy. If either file is absent upstream it uses only the present side. Both files accept both shapes; conventionally addresses live per-chain and patterns live in `all/`, but nothing enforces that split.
 
 The global file is warmed once on server boot in `warm-cache.ts` alongside the per-chain entries.
 
@@ -417,18 +417,13 @@ App Startup
   │                  undefined → null (fail-closed) on unknown/error (prod)
   │                  undefined → "--" (non-null sentinel, fail-open) on unknown in dev
   │
-  └─ loadLabels() ──► euler-labels data source (GitHub or S3/CDN) ─► products.json ─► product.block
-                                                                    product.vaultOverrides[addr].block
-                                                                    product.vaultOverrides[addr].restricted
-                                                 ► earn-vaults.json ─► earnVaultBlocks map
-                                                                       earnVaultRestrictions map
-                                                 ► assets.json ─────► union of {chainId}/assets.json
-                                                                       + all/assets.json
-                                                                     → assetBlocks / assetRestrictions maps
-                                                                       (address entries)
-                                                                     → assetPatternRules list
-                                                                       (compiled symbols/regex)
-                                                   (5-min cache)
+  └─ loadLabels() ──► /api/internal/public-labels
+                       ├─ Public Labels V3: products, vault content, entities, campaigns
+                       └─ temporary effective policy:
+                            products.json ─► product/vault block + restriction maps
+                            earn-vaults.json ─► Earn block + restriction maps
+                            chain/all assets.json ─► exact + pattern asset rules
+                          (5-min server cache)
 
 Server-Side (every API request):
   geo-gate.ts reads CF-IPCountry
@@ -492,16 +487,16 @@ All blocking and restriction configuration lives outside the app codebase:
 |------|-------|--------|
 | Global sanctions list | `entities/constants.ts` — `SANCTIONED_COUNTRIES` | Blocks all vaults for listed countries |
 | Country group definitions | `entities/constants.ts` — `COUNTRY_GROUPS` | Defines EU, EEA, EFTA aliases |
-| Product-level blocks | `euler-labels` repo — `products.json` `block` field | Blocks all vaults in a product |
-| Per-vault block overrides | `euler-labels` repo — `products.json` `vaultOverrides[addr].block` | Overrides product block for one vault |
-| Per-vault restrictions | `euler-labels` repo — `products.json` `vaultOverrides[addr].restricted` | Soft-restricts one vault (no product fallback) |
-| Earn vault blocks | `euler-labels` repo — `earn-vaults.json` `block` field | Hard-blocks specific earn vaults |
-| Earn vault restrictions | `euler-labels` repo — `earn-vaults.json` `restricted` field | Soft-restricts specific earn vaults |
-| Asset-level blocks/restrictions (per-chain) | `euler-labels` repo — `{chainId}/assets.json` | Blocks/restricts any vault whose underlying is listed + the token in the swap picker |
-| Asset-level blocks/restrictions (cross-chain) | `euler-labels` repo — `all/assets.json` | Same as per-chain, usually pattern rules (`symbols`/`symbolRegex`/`names`/`nameRegex`) that apply on every chain |
+| Product-level blocks | Effective-policy source — `products.json` `block` field | Blocks all vaults in a product |
+| Per-vault block overrides | Effective-policy source — `products.json` `vaultOverrides[addr].block` | Overrides product block for one vault |
+| Per-vault restrictions | Effective-policy source — `products.json` `vaultOverrides[addr].restricted` | Soft-restricts one vault (no product fallback) |
+| Earn vault blocks | Effective-policy source — `earn-vaults.json` `block` field | Hard-blocks specific earn vaults |
+| Earn vault restrictions | Effective-policy source — `earn-vaults.json` `restricted` field | Soft-restricts specific earn vaults |
+| Asset-level blocks/restrictions (per-chain) | Effective-policy source — `{chainId}/assets.json` | Blocks/restricts any vault whose underlying is listed + the token in the swap picker |
+| Asset-level blocks/restrictions (cross-chain) | Effective-policy source — `all/assets.json` | Same as per-chain, usually pattern rules (`symbols`/`symbolRegex`/`names`/`nameRegex`) that apply on every chain |
 | Dev country simulation | `.env` — `DEV_GEO_COUNTRY=GB` | Simulates a country in dev (no effect outside dev) |
 
-Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all/assets.json` in the euler-labels data source (GitHub repo or S3/CDN) take effect within 5 minutes (the label cache TTL) without any app deployment.
+Changes to the effective-policy files take effect within 5 minutes without an app deployment. This compatibility source remains necessary until V3 publishes the resolved global/product/vault/asset precedence; raw V3 geo-policy rows are not applied directly.
 
 ## Key Files
 
@@ -511,10 +506,11 @@ Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all
 | `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from `CF-IPCountry`, emits as response header |
 | `server/middleware/geo-gate.ts` | Server-side sanctioned-country block; fail-closed on unknown country in prod |
 | `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `isAssetBlockedByCountry`, `isAssetRestrictedByCountry`, `getVaultTags`; `AssetLike` type |
-| `composables/useEulerLabels.ts` | SDK-backed label loading and current label snapshot |
+| `composables/useEulerLabels.ts` | Aggregate Public Labels loading and current normalized snapshot |
 | `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted`, `getAssetPatternRules` |
-| `server/api/internal/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
-| `server/plugins/warm-cache.ts` | Warms `all/assets.json` once globally plus per-chain label files |
+| `server/utils/labels-source.ts` | Server-only compatibility policy fetch, validation, chain/global asset union, caching, and bounded stale fallback |
+| `server/utils/public-labels-source.ts` | Combines Public Labels V3 content with effective policy into one cached bundle |
+| `server/plugins/warm-cache.ts` | Warms Public Labels and effective policy |
 | `entities/constants.ts` | `SANCTIONED_COUNTRIES`, `COUNTRY_GROUPS` (EU/EEA/EFTA) |
 | `entities/euler/labels.ts` | TypeScript types (`EulerLabelProduct`, `EulerLabelVaultOverride`, `EulerLabelAssetEntry` union with address + pattern fields) |
 | `components/entities/asset/SwapTokenSelector.vue` | Arbitrary-asset selector. Disables blocked/restricted rows (mode-aware) via `getAssetGeoState(asset, mode)` |

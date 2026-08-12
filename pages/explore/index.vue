@@ -111,7 +111,7 @@ const marketOptions = computed(() => {
       seenInGroup.add(market.name)
       const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
       const entityObj = entityName ? entities[entityName] : null
-      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
+      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -141,7 +141,7 @@ const riskManagerOptions = computed(() => {
   for (const group of marketGroups.value) {
     if (group.source !== 'product') continue
     for (const entity of getUniqueEntitiesByVaults(group.vaults)) {
-      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
+      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)

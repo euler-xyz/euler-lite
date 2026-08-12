@@ -1,6 +1,6 @@
 # Server-Side Caching
 
-Lite ships a layered cache between the browser and every external data source — third-party reward APIs, the Goldsky subgraph, the labels repo, the Euler V3 backend, and the chain RPC. The layer accomplishes four things:
+Lite ships a layered cache between the browser and every external data source — third-party reward APIs, the Goldsky subgraph, Public Labels V3, the temporary effective-policy source, and the chain RPC. The layer accomplishes four things:
 
 1. **Cross-tab sharing.** Every browser session against the same origin hits the same in-process cache.
 2. **Authentication / credentials stay server-side.** Browsers don't need V3 API keys, subgraph project IDs, or any provider tokens.
@@ -18,8 +18,9 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/fuul/[...path].ts` | Proxies Fuul (`api.fuul.xyz/api/v1`) |
 | `server/api/internal/proxy/incentra/[...path].ts` | Proxies Incentra / Brevis (`incentra-prd.brevis.network`) |
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
-| `server/api/internal/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
-| `server/api/internal/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
+| `server/api/internal/public-labels.get.ts` | Chain/version-scoped aggregate Public Labels endpoint |
+| `server/utils/public-labels-source.ts` | Public Labels V3 pagination, 5-minute cache, in-flight dedup, and bounded stale fallback |
+| `server/utils/labels-source.ts` | Temporary effective visibility/geo policy source used until V3 publishes resolved policy |
 | `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
@@ -67,16 +68,11 @@ Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disa
 - **Goldsky subgraph**: Each chain's URL is a per-deployment Goldsky deployment ID. Proxying keeps the project ID server-side and amortizes GraphQL responses across tabs.
 - **Merkl**: CORS, plus credential handling.
 
-### Labels
+### Public Labels
 
-Two endpoints, same `refreshLabelFile` engine:
+`/api/internal/public-labels?chainId=N&version=latest` is the browser's single label read. `server/utils/public-labels-source.ts` paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3, then combines that immutable display dataset with the temporary effective-policy overlay. The result is cached for 5 minutes by chain and version, concurrent misses share one in-flight operation, and an upstream failure can serve only the bounded stale entry.
 
-- **`/api/internal/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
-- **`/api/internal/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/internal/labels`, default templates land here.
-
-Both endpoints write to and fall back on the same in-memory TTL cache, but only the query-shape handler reads through it. It checks `cache.get()` first (and uses the `getOrRefresh` helper for the `assets.json` union), so a fresh entry short-circuits without touching upstream. The path-shape handler calls `refreshLabelFile` directly, and that function is the force-refresh primitive — it skips the fresh-entry check and only deduplicates while a fetch is in flight. Every path-shape request therefore reaches upstream unless it coincides with an in-flight fetch for the same key, so the warm-cache entry acts as a stale fallback on that route rather than as a read-through cache. Since the SDK's default template targets the path shape, that is the route most label traffic takes. Warm callers (`warm-cache.ts`, `vaults-cache.ts`) use `refreshLabelFile` intentionally — see [Warm-Cache Plugin](#warm-cache-plugin) for why. The path handler's file header documents the shared TTL cache / upstream-fetch pipeline and that this route force-refreshes rather than reading through.
-
-Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
+The legacy `/api/internal/labels/*` browser and SDK routes do not exist. `server/utils/labels-source.ts` still reads only `products.json`, `earn-vaults.json`, and chain/global `assets.json` as a server-internal compatibility contract for effective `block`, `restricted`, and discovery visibility. It does not contribute names, descriptions, entities, logos, products, tags, campaigns, or deprecation content. `EFFECTIVE_POLICY_BASE_URL` configures only that policy source until V3 publishes the resolved effective decision. The former `NUXT_PUBLIC_CONFIG_LABELS_*` names remain server-side fallbacks for existing deployments but are no longer part of Nuxt public runtime config.
 
 ### V3 proxy
 
@@ -183,7 +179,7 @@ Pipeline:
 
 ```text
 1. getServerSdk(chainId)          // lazy per-chain server SDK; reused across requests
-2. getLabels(chainId)             // verified addresses, earn vaults (read via refreshLabelFile)
+2. getPublicEulerLabelsData(chainId) // shared normalized Public Labels bundle
 3. sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [ESCROW])   // escrow set
 4. sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)          // partition EVK vs Securitize vs Earn
 5. Promise.all([
@@ -313,11 +309,11 @@ The pipeline always succeeds eventually — the snapshot is the *fast path*, not
 ```text
 Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 ─────────────────────                  ──────────────────────────────────────
-- /api/internal/euler-chains                    - refreshChainVaults(chain) for each
-- labels/all/assets.json                 enabled non-deprecated chain,
-- per-chain:                             sequential (lets cross-chain V3
-    labels/{file}.json (×5)              upstreams dedupe via in-flight)
-    /api/internal/token-list
+- Euler Chains                         - refreshChainVaults(chain) for each
+- cross-chain effective asset policy     enabled non-deprecated chain
+- per-chain Public Labels bundle
+- per-chain effective policy
+- per-chain token list
 ```
 
 Vault snapshot has its own faster timer because V3-backed refreshes are cheap — one batched POST per chain hitting V3's own cache. Pulling a fresh snapshot every minute keeps it tight without hammering upstream. Without V3, the snapshot is built from heavier onchain lens multicalls, so it falls back to the global 5-min cadence.
@@ -326,9 +322,7 @@ When the two intervals are equal (V3 off), the timers naturally double-warm at e
 
 ### Why warm directly (not via HTTP)
 
-Every warm task is a **direct function call** (`refreshChainVaults(chainId)`, `refreshLabelFile(...)`, etc.) that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. If we warm via HTTP, the handler short-circuits on the still-fresh previous entry (age ≈ TTL − 2 s) and the entry then expires without refresh until the next cycle — leaving a stale window per cycle. Direct calls ensure the entry is always rewritten *before* it expires.
-
-User requests arriving during a refresh continue to read the still-fresh previous entry via the handler's own `cache.get()` short-circuit, so there's no blocking on the in-flight refresh. This holds for handlers that actually short-circuit — the vault snapshot endpoint and the query-shape labels endpoint. The path-shape labels endpoint calls `refreshLabelFile` instead of reading through, so a concurrent request there joins the in-flight refresh rather than being served the previous entry (see [Labels](#labels)).
+Every warm task is a **direct function call** (`refreshChainVaults(chainId)`, `refreshPublicLabelsBundle(...)`, `refreshLabelFile(...)`, etc.) that replaces the cache before expiry. The Public Labels and policy refreshers deduplicate concurrent work, while normal reads use the previous fresh value and failures can fall back only within the configured stale ceiling.
 
 ### Boot behaviour
 

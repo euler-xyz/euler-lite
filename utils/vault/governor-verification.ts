@@ -95,9 +95,9 @@ export const isEarnVaultOwnerVerified = (
   if (!earnVault.verified) return false
 
   const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
-  // Earn vaults outside any product are trusted on the strength of being in
-  // earn-vaults.json alone — earn curation lives in that file, not in
-  // products.json. Differs from EVK behaviour.
+  // A published Earn vault can be trusted without a product assignment.
+  // This differs from EVK governance verification, which requires a product
+  // with a declared managing entity.
   if (declaredKeys === undefined) return true
   // But if the earn vault IS in a product whose entity is empty/undefined,
   // the product has no on-chain authority to claim it — treat as unverified.

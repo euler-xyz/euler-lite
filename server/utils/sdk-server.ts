@@ -33,7 +33,6 @@ import {
 } from '~/utils/api-url-env'
 import { parseChainIds } from '~/utils/parseChainIds'
 import { resolveRpcUrl } from './rpc'
-import { resolveLabelsBaseUrl } from './labels-base-url'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -81,7 +80,6 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   return {
     rpcUrls: { [chainId]: rpcUrl },
     v3ApiUrl,
-    eulerLabelsBaseUrl: resolveLabelsBaseUrl(),
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
     ...adapterConfigForSource(source),
