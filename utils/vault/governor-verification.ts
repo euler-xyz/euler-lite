@@ -1,5 +1,5 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
-import type { EulerEarn, OracleDetailedInfo, isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EulerEarn, type EVault, type OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
 import { getEulerRouterGovernor } from '~/entities/oracle'
 
 /**
