@@ -68,7 +68,7 @@ const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>
 const positionCollateralVaults = computed(() =>
   resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
 )
-useOperationGuard(computed(() => [borrowVault.value?.address].filter(Boolean)), { enforceGeo: false })
+useOperationGuard(computed(() => [borrowVault.value?.address].filter(Boolean)), { enforceGeo: false, enforceUnverified: false })
 const assets = computed<VaultAsset[]>(() => [collateralVault.value?.asset, borrowVault.value?.asset].filter((asset): asset is VaultAsset => !!asset))
 const assetsLabel = usePositionPairLabel(position)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)

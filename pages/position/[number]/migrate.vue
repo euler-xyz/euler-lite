@@ -440,7 +440,7 @@ const noTargetsFound = computed(() =>
 useOperationGuard(computed(() => [
   sourceDebtVault.value?.address,
   sourceCollateralVault.value?.address,
-].filter(Boolean)))
+].filter(Boolean)), { enforceUnverified: false })
 
 watch(
   [

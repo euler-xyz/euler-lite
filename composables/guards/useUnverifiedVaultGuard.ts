@@ -8,6 +8,8 @@ export interface UnverifiedVaultGuardState {
   acknowledgeRisk: () => void
 }
 
+let unverifiedVaultGuardInstanceSequence = 0
+
 export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) => {
   const { get, getOrFetch, registryVersion } = useVaultRegistry()
   const { chainId } = useEulerAddresses()
@@ -19,6 +21,7 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
 
   const sessionAccepted = ref(false)
   let resolutionGeneration = 0
+  const blockerKey = `unverified-vault:${++unverifiedVaultGuardInstanceSequence}`
 
   watch([vaultAddresses, chainId], async ([addresses, activeChainId]) => {
     const generation = ++resolutionGeneration
@@ -62,15 +65,15 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
 
   watch(isAcknowledgmentRequired, (required) => {
     if (required) {
-      registerOperationBlocker('unverified-vault', 'Unverified vault risk acknowledgment required')
+      registerOperationBlocker(blockerKey, 'Unverified vault risk acknowledgment required')
     }
     else {
-      unregisterOperationBlocker('unverified-vault')
+      unregisterOperationBlocker(blockerKey)
     }
   }, { immediate: true })
 
   onUnmounted(() => {
-    unregisterOperationBlocker('unverified-vault')
+    unregisterOperationBlocker(blockerKey)
   })
 
   provide('unverified-vault-guard', reactive({

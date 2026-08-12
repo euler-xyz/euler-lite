@@ -24,6 +24,8 @@ export const TOS_ACCEPTANCE_PENDING_REASON = 'Checking Terms of Use acceptance'
 export const TOS_LOAD_FAILED_REASON = 'Unable to load Terms of Use'
 export const TOS_ACCEPTANCE_REQUIRED_REASON = 'Terms of Use acceptance required'
 
+let tosGuardInstanceSequence = 0
+
 export const isTosAcceptanceRequired = ({
   hasWalletAddress,
   enableTosSignature,
@@ -60,8 +62,9 @@ export const useTosGuard = () => {
   const hasSigned = useState<boolean | null>('tosGuardHasSigned', () => null)
   const sessionAccepted = useState<boolean>('tosGuardSessionAccepted', () => false)
   const tosLoadFailed = useState<boolean>('tosGuardLoadFailed', () => false)
+  const checkGeneration = useState<number>('tosGuardCheckGeneration', () => 0)
   const tosData = ref<TosData | null>(null)
-  let checkGeneration = 0
+  const blockerKey = `tos:${++tosGuardInstanceSequence}`
 
   const tosRequirementState = computed<TosRequirementState>(() => ({
     hasWalletAddress: !!address.value,
@@ -78,11 +81,11 @@ export const useTosGuard = () => {
   )
 
   const checkHasSigned = async () => {
-    const generation = ++checkGeneration
+    const generation = ++checkGeneration.value
     const checkedAddress = address.value
     const checkedChainId = chainId.value
     const isCurrentCheck = () =>
-      generation === checkGeneration
+      generation === checkGeneration.value
       && address.value === checkedAddress
       && chainId.value === checkedChainId
 
@@ -184,8 +187,8 @@ export const useTosGuard = () => {
   // is pending or TOS data is unavailable, without showing the acceptance UI
   // until the account is confirmed unsigned.
   watch(tosBlockReason, (reason) => {
-    if (reason) registerOperationBlocker('tos', reason)
-    else unregisterOperationBlocker('tos')
+    if (reason) registerOperationBlocker(blockerKey, reason)
+    else unregisterOperationBlocker(blockerKey)
   }, { immediate: true })
 
   watch(address, (next, prev) => {
@@ -219,7 +222,7 @@ export const useTosGuard = () => {
   // (and its guard) is gone. Clearing here would strip signTermsOfUse from the
   // prepared batch. Account/chain switches are handled by the watches above.
   onUnmounted(() => {
-    unregisterOperationBlocker('tos')
+    unregisterOperationBlocker(blockerKey)
   })
 
   provide('tos-guard', reactive({

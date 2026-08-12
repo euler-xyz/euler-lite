@@ -192,7 +192,7 @@ const openTermsModal = () => {
 // acknowledgements. TOS is special: the add path may open the TOS modal, then
 // continue only if no non-TOS blockers remain.
 const nonTosOperationBlockReason = computed(() =>
-  operationBlockerEntries.value.find(([key]) => key !== 'tos')?.[1],
+  operationBlockerEntries.value.find(([key]) => !key.startsWith('tos:'))?.[1],
 )
 const hasNonTosOperationBlocker = computed(() => !!nonTosOperationBlockReason.value)
 const isAddToBatchBaseDisabled = computed(() =>

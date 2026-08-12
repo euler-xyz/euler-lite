@@ -1,6 +1,6 @@
 import { computed, createRenderer, h, inject, nextTick, ref, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { isOperationBlocked, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockerEntries, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { useUnverifiedVaultGuard, type UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
 
 const VAULT = '0x00000000000000000000000000000000000000a1'
@@ -69,7 +69,9 @@ describe('useUnverifiedVaultGuard canonical verification', () => {
   })
 
   afterEach(() => {
-    unregisterOperationBlocker('unverified-vault')
+    for (const [key] of operationBlockerEntries.value) {
+      if (key.startsWith('unverified-vault:')) unregisterOperationBlocker(key)
+    }
     vi.unstubAllGlobals()
   })
 

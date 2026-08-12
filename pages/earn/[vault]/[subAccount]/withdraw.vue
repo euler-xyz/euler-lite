@@ -29,7 +29,7 @@ const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { viewer, visibleTotal } = useApyVisibility()
 const vaultAddress = route.params.vault as string
-useOperationGuard([vaultAddress], { enforceGeo: false })
+useOperationGuard([vaultAddress], { enforceGeo: false, enforceUnverified: false })
 const product = useEulerProductOfVault(vaultAddress)
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {

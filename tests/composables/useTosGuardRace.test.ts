@@ -28,8 +28,10 @@ describe('useTosGuard account-switch checks', () => {
   })
 
   afterEach(async () => {
-    const { unregisterOperationBlocker } = await import('~/utils/operationGuardRegistry')
-    unregisterOperationBlocker('tos')
+    const { operationBlockerEntries, unregisterOperationBlocker } = await import('~/utils/operationGuardRegistry')
+    for (const [key] of operationBlockerEntries.value) {
+      if (key.startsWith('tos:')) unregisterOperationBlocker(key)
+    }
     vi.unstubAllGlobals()
   })
 
@@ -64,8 +66,10 @@ describe('useTosGuard account-switch checks', () => {
     vi.stubGlobal('onUnmounted', () => undefined)
 
     const { useTosGuard } = await import('~/composables/guards/useTosGuard')
-    const { isOperationBlocked, operationBlockReason, unregisterOperationBlocker } = await import('~/utils/operationGuardRegistry')
-    unregisterOperationBlocker('tos')
+    const { isOperationBlocked, operationBlockerEntries, operationBlockReason, unregisterOperationBlocker } = await import('~/utils/operationGuardRegistry')
+    for (const [key] of operationBlockerEntries.value) {
+      if (key.startsWith('tos:')) unregisterOperationBlocker(key)
+    }
 
     useTosGuard()
     await flush()
@@ -85,6 +89,56 @@ describe('useTosGuard account-switch checks', () => {
     expect(operationBlockReason.value).toBe('Checking Terms of Use acceptance')
 
     pendingReads[1]!.resolve(0n)
+    await flush()
+    expect(operationBlockReason.value).toBe('Terms of Use acceptance required')
+  })
+
+  it('lets the newest composable instance own the shared acceptance result', async () => {
+    const address = ref<string | undefined>(ACCOUNT_A)
+    const chainId = ref(1)
+    const states = new Map<string, Ref<unknown>>()
+    const client = {
+      readContract: vi.fn((request: { args: readonly unknown[] }) =>
+        new Promise<bigint>((resolve) => {
+          pendingReads.push({ args: request.args, resolve })
+        })),
+    }
+
+    vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
+      if (!states.has(key)) states.set(key, ref(init()))
+      return states.get(key) as Ref<T>
+    })
+    vi.stubGlobal('useWagmi', () => ({ address }))
+    vi.stubGlobal('useEulerAddresses', () => ({
+      eulerPeripheryAddresses: ref({ termsOfUseSigner: SIGNER }),
+      isReady: ref(true),
+      loadEulerConfig: vi.fn(),
+      chainId,
+    }))
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(client) }))
+    vi.stubGlobal('useDeployConfig', () => ({
+      enableTosSignature: true,
+      tosUrl: 'https://example.invalid/terms',
+    }))
+    vi.stubGlobal('onMounted', (callback: () => void) => callback())
+    vi.stubGlobal('onUnmounted', () => undefined)
+
+    const { useTosGuard } = await import('~/composables/guards/useTosGuard')
+    const { operationBlockReason } = await import('~/utils/operationGuardRegistry')
+
+    useTosGuard()
+    await flush()
+    expect(pendingReads).toHaveLength(1)
+
+    useTosGuard()
+    await flush()
+    expect(pendingReads).toHaveLength(2)
+
+    pendingReads[1]!.resolve(0n)
+    await flush()
+    expect(operationBlockReason.value).toBe('Terms of Use acceptance required')
+
+    pendingReads[0]!.resolve(1n)
     await flush()
     expect(operationBlockReason.value).toBe('Terms of Use acceptance required')
   })

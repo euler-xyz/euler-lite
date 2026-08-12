@@ -14,6 +14,8 @@ export interface OperationGuardOptions {
   /** Exit-only actions such as lending withdrawals and debt repayment remain
    * available even when regional policy blocks new or increased exposure. */
   enforceGeo?: boolean
+  /** Exit-only actions do not require acknowledging the source vault again. */
+  enforceUnverified?: boolean
 }
 
 let operationGuardInstanceSequence = 0
@@ -36,7 +38,7 @@ export const useOperationGuard = (
   useTosGuard()
 
   // --- Unverified vault guard ---
-  useUnverifiedVaultGuard(addresses)
+  if (options.enforceUnverified !== false) useUnverifiedVaultGuard(addresses)
 
   // --- Geo guard ---
   const geoBlockReason = computed(() => {

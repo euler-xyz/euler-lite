@@ -12,7 +12,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -411,6 +411,7 @@ const isConfirmDisabled = computed(() => isSpyMode.value || isOperationBlocked.v
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
+  if (isOperationBlocked.value) return 'Action required'
   if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
   return internalSubmitting.value && submittingLabel ? submittingLabel : (providedConfirmLabel || btnLabel.value)
 })
@@ -547,6 +548,13 @@ const confirmLabel = computed(() => {
         title="Preparation failed"
         variant="error"
         :description="prepareError"
+        size="compact"
+      />
+      <UiAlert
+        v-if="operationBlockReason"
+        title="Action required"
+        variant="warning"
+        :description="operationBlockReason"
         size="compact"
       />
 
