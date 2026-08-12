@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from 'viem'
+import { encodeAbiParameters, encodeFunctionData, maxUint256, parseAbi, type Address, type Hex } from 'viem'
 import { SwapperMode, type EVCBatchItem, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 import { buildTransactionPlanDisplaySteps, type StepDecodingContext, type VaultLookup } from '~/utils/stepDecoding'
@@ -345,6 +345,28 @@ describe('buildTransactionPlanDisplaySteps approval rows', () => {
         amount: '2',
       },
     }])
+  })
+
+  it('renders unlimited approvals without exposing the max uint value', () => {
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: wethAsset,
+      owner: account,
+      spender: wethVault,
+      amount: maxUint256,
+      resolved: [{
+        type: 'approve',
+        token: wethAsset,
+        owner: account,
+        spender: wethVault,
+        amount: maxUint256,
+        data: '0x',
+      }],
+    }]
+
+    const [step] = buildTransactionPlanDisplaySteps(plan, ctx, getVault, () => '')
+
+    expect(step?.assetInfo?.amount).toBe('Unlimited')
   })
 
   it('does not fall back to the primary asset when approval token metadata is unknown', () => {

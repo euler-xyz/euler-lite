@@ -1,4 +1,4 @@
-import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { areProjectedRatesComplete, type ProjectedRates, getPositionMultiplier, getProjectedRatesBatch } from '~/utils/vault/apy'
 import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -43,7 +43,7 @@ import {
   type ProjectedYieldRateLine,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
-import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import { requirePythOnlyPreparedRefresh, requireReviewedExecution } from '~/utils/reviewed-execution'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -1312,6 +1312,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       }
 
       profMark('review', 'submitMultiply.modalOpen')
+      const reviewedRawPlan = multiplyPlan.value
+      const reviewedAccount = planAccount.value
       modal.open(OperationReviewModal, {
         props: {
           type: 'borrow',
@@ -1327,7 +1329,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           subAccount,
           submittingLabel: 'Submitting...',
           onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-            await sendMultiply(reviewed)
+            await sendMultiply(reviewed, reviewedRawPlan, reviewedAccount)
           },
         },
       })
@@ -1337,10 +1339,20 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
   }
 
-  const sendMultiply = async (reviewed: TransactionPlanPrepared | undefined) => {
+  const sendMultiply = async (
+    reviewed: TransactionPlanPrepared | undefined,
+    rawPlan: TransactionPlan | null,
+    account: Account<IHasVaultAddress> | undefined,
+  ) => {
     isMultiplySubmitting.value = true
     try {
-      await executePreparedPlan(requireReviewedExecution(reviewed))
+      const reviewedPlan = requireReviewedExecution(reviewed)
+      if (!rawPlan) throw new Error('The reviewed multiply plan is unavailable')
+      // Pyth payloads are short-lived. Re-run preparation at confirmation time,
+      // then accept the result only if Pyth update bytes/fees are the sole
+      // difference from the exact plan the user reviewed.
+      const refreshedPlan = await prepareTransactionPlan(rawPlan, { account })
+      await executePreparedPlan(requirePythOnlyPreparedRefresh(reviewedPlan, refreshedPlan))
       await finalizeTxAndRedirect()
     }
     catch (e) {
