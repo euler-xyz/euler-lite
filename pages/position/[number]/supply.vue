@@ -219,7 +219,12 @@ const addToBatch = async () => {
         buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
         subAccount: pos.subAccount as Address,
         review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
-        geoPolicy: [{ vaultAddress: form.collateralVault.value!.address, asset: a, acquisition: true }],
+        geoPolicy: [{
+          vaultAddress: form.collateralVault.value!.address,
+          asset: a,
+          counterpart: sel,
+          acquisition: true,
+        }],
       })
     }
     else {
@@ -231,7 +236,7 @@ const addToBatch = async () => {
         buildPlan: account => planDeposit({ vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address, account }),
         subAccount: pos.subAccount as Address,
         review: { type: 'supply', asset: a, amount: form.amount.value },
-        geoPolicy: [{ vaultAddress, asset: a, acquisition: true }],
+        geoPolicy: [{ vaultAddress, asset: a }],
       })
     }
     form.amount.value = ''

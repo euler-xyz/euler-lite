@@ -283,7 +283,7 @@ Group aliases can be mixed with individual codes: `["EU", "CH", "US"]` blocks al
 
 ### `isVaultBlockedByCountry(address): boolean`
 
-The core hard-block check. Returns `true` if the vault is blocked for the detected country.
+The core hard-block check. Returns `true` if the vault is blocked for the detected country. A non-empty vault address whose underlying asset metadata cannot be resolved fails closed after country detection; an empty address means no vault is selected and remains neutral.
 
 ### `isAnyVaultBlockedByCountry(...addresses): boolean`
 
@@ -291,7 +291,7 @@ Returns `true` if **any** of the provided vault addresses are blocked. Used on a
 
 ### `isVaultRestrictedByCountry(address): boolean`
 
-The soft-restriction check. Returns `true` if the vault has a `restricted` entry matching the user's country. Only checks vault-level overrides and earn vault restrictions (no product-level fallback).
+The soft-restriction check. Returns `true` if the vault or its underlying asset has a `restricted` entry matching the user's country. A non-empty unresolved vault fails closed after country detection, while an empty address remains neutral.
 
 ### `isAnyVaultRestrictedByCountry(...addresses): boolean`
 

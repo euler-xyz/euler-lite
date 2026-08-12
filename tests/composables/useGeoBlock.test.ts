@@ -410,4 +410,11 @@ describe('isVaultRestrictedByCountry — asset-level OR', () => {
       asset: { address: WETH, symbol: 'WETH', name: 'Wrapped Ether' },
     })).toBe(false)
   })
+
+  it('treats an empty vault address as no selected vault', () => {
+    setCountry('DE')
+
+    expect(isVaultBlockedByCountry('')).toBe(false)
+    expect(isVaultRestrictedByCountry('')).toBe(false)
+  })
 })

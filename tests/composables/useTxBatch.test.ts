@@ -20,6 +20,8 @@ vi.mock('~/composables/useEulerSdk', () => ({
 
 const geoPolicyMocks = vi.hoisted(() => ({
   isAnyVaultBlockedByCountry: vi.fn((..._addresses: string[]) => false),
+  isVaultBlockedByCountry: vi.fn(() => false),
+  isVaultRestrictedByCountry: vi.fn(() => false),
   getVaultTags: vi.fn((_address: string, _context?: string) => ({ tags: [], disabled: false })),
 }))
 
@@ -316,6 +318,10 @@ const createMockSdk = () => ({
 beforeEach(() => {
   geoPolicyMocks.isAnyVaultBlockedByCountry.mockReset()
   geoPolicyMocks.isAnyVaultBlockedByCountry.mockReturnValue(false)
+  geoPolicyMocks.isVaultBlockedByCountry.mockReset()
+  geoPolicyMocks.isVaultBlockedByCountry.mockReturnValue(false)
+  geoPolicyMocks.isVaultRestrictedByCountry.mockReset()
+  geoPolicyMocks.isVaultRestrictedByCountry.mockReturnValue(false)
   geoPolicyMocks.getVaultTags.mockReset()
   geoPolicyMocks.getVaultTags.mockReturnValue({ tags: [], disabled: false })
   vi.restoreAllMocks()
@@ -354,6 +360,27 @@ describe('isBatchEntryGeoBlocked', () => {
     })).toBe(true)
     expect(geoPolicyMocks.isAnyVaultBlockedByCountry).toHaveBeenCalledWith(source, target)
     expect(geoPolicyMocks.getVaultTags).toHaveBeenCalledWith(target, 'swap-target')
+  })
+
+  it('passes the acquired asset and swap counterpart to soft-restriction policy', () => {
+    const target = '0x2000000000000000000000000000000000000002'
+    const asset = { address: target, symbol: 'WETH' }
+    const counterpart = { address: '0x3000000000000000000000000000000000000003', symbol: 'ETH' }
+
+    expect(isBatchEntryGeoBlocked({
+      geoPolicy: [{ vaultAddress: target, asset, counterpart, acquisition: true }],
+    })).toBe(false)
+    expect(geoPolicyMocks.isVaultRestrictedByCountry).toHaveBeenCalledWith(target, { asset, counterpart })
+  })
+
+  it('does not apply soft restrictions to direct supplies', () => {
+    const target = '0x2000000000000000000000000000000000000002'
+    geoPolicyMocks.isVaultRestrictedByCountry.mockReturnValue(true)
+
+    expect(isBatchEntryGeoBlocked({
+      geoPolicy: [{ vaultAddress: target, asset: { address: target } }],
+    })).toBe(false)
+    expect(geoPolicyMocks.isVaultRestrictedByCountry).not.toHaveBeenCalled()
   })
 })
 

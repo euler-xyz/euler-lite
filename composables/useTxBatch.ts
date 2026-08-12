@@ -143,13 +143,16 @@ export interface BatchEntry {
   rewardClaimKey?: string
   /** Chain-scoped vault/asset facts that must still satisfy geo policy when the
    *  cart is finally executed. `acquisition` applies soft restrictions too. */
-  geoPolicy?: Array<{ vaultAddress: string, asset?: AssetLike, acquisition?: boolean }>
+  geoPolicy?: Array<{ vaultAddress: string, asset?: AssetLike, counterpart?: AssetLike, acquisition?: boolean }>
 }
 
 const isBatchEntryPolicyBlocked = (entry: Pick<BatchEntry, 'geoPolicy'>): boolean =>
   (entry.geoPolicy ?? []).some(policy =>
     isVaultBlockedByCountry(policy.vaultAddress, { asset: policy.asset })
-    || (policy.acquisition && isVaultRestrictedByCountry(policy.vaultAddress, { asset: policy.asset })),
+    || (policy.acquisition && isVaultRestrictedByCountry(policy.vaultAddress, {
+      asset: policy.asset,
+      counterpart: policy.counterpart,
+    })),
   )
 
 type BatchEntryBuildResult = TransactionPlan | {

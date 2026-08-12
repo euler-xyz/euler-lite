@@ -214,6 +214,7 @@ export const isVaultBlockedByCountry = (
   vaultAddress: string,
   opts?: Pick<VaultGeoPolicyOptions, 'asset'>,
 ): boolean => {
+  if (!vaultAddress) return false
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 
@@ -244,6 +245,7 @@ export const isVaultRestrictedByCountry = (
   vaultAddress: string,
   opts?: VaultGeoPolicyOptions,
 ): boolean => {
+  if (!vaultAddress) return false
   if (country.value === undefined) return false // still loading
   if (country.value === null) return true // loaded, country unknown
 

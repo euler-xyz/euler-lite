@@ -14,7 +14,7 @@ import type { SwapQuoteInput } from '~/composables/useSwapApi'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
-import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -606,9 +606,14 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const send = async () => {
     if (!fromVault.value || !toVault.value) return
     if (!isSameAsset.value && !selectedQuote.value) return
-    if (isOperationBlocked.value || isGeoBlocked.value) {
+    if (isGeoBlocked.value) {
       invalidatePreparedSwap()
       showError('This operation is not available in your region')
+      return
+    }
+    if (isOperationBlocked.value) {
+      invalidatePreparedSwap()
+      showError(operationBlockReason.value || 'This operation is currently unavailable')
       return
     }
 
