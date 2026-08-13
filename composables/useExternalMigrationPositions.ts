@@ -73,6 +73,7 @@ export type MetamorphoMigrationCandidate = BaseMigrationCandidate<typeof METAMOR
   shares: bigint
 }
 export type ExternalMigrationCandidate = MorphoMigrationCandidate | AaveMigrationCandidate | MetamorphoMigrationCandidate
+export type ExternalMigrationSource = 'Aave V3' | 'Morpho'
 
 export const EXTERNAL_MIGRATION_DUST_USD = 0.01
 export const POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
@@ -621,6 +622,7 @@ export const useExternalMigrationPositions = (options: {
   const positions = useState<ExternalMigrationCandidate[]>('external-migration:positions', () => [])
   const isLoading = useState('external-migration:is-loading', () => false)
   const error = useState('external-migration:error', () => '')
+  const unavailableSources = useState<ExternalMigrationSource[]>('external-migration:unavailable-sources', () => [])
   const hasLoaded = useState('external-migration:has-loaded', () => false)
   const lastLoadedAt = useState<number | null>('external-migration:last-loaded-at', () => null)
   const loadedFor = useState<ExternalMigrationStateKey>('external-migration:loaded-for', () => ({}))
@@ -924,6 +926,7 @@ export const useExternalMigrationPositions = (options: {
   const resetForMissingOwner = () => {
     positions.value = []
     error.value = ''
+    unavailableSources.value = []
     hasLoaded.value = false
     lastLoadedAt.value = null
     loadedFor.value = {}
@@ -949,6 +952,7 @@ export const useExternalMigrationPositions = (options: {
     if (!loadedKeyMatches) {
       positions.value = []
       error.value = ''
+      unavailableSources.value = []
       hasLoaded.value = false
       lastLoadedAt.value = null
       loadedFor.value = { owner: targetOwner, chainId: targetChainId }
@@ -956,6 +960,7 @@ export const useExternalMigrationPositions = (options: {
 
     isLoading.value = true
     error.value = ''
+    unavailableSources.value = []
     try {
       const [morphoResult, aaveResult] = await Promise.allSettled([
         fetchMorphoMigrationPositions(targetChainId, targetOwner),
@@ -977,6 +982,10 @@ export const useExternalMigrationPositions = (options: {
       }
       if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
       positions.value = nextPositions
+      unavailableSources.value = [
+        ...(aaveResult.status === 'rejected' ? ['Aave V3' as const] : []),
+        ...(morphoResult.status === 'rejected' ? ['Morpho' as const] : []),
+      ]
       hasLoaded.value = true
       lastLoadedAt.value = Date.now()
     }
@@ -984,6 +993,7 @@ export const useExternalMigrationPositions = (options: {
       if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
       positions.value = []
       error.value = err instanceof Error ? err.message : 'Failed to load external positions'
+      unavailableSources.value = []
       hasLoaded.value = true
       lastLoadedAt.value = Date.now()
       logWarn('externalMigration/positions', err)
@@ -1007,6 +1017,7 @@ export const useExternalMigrationPositions = (options: {
     positions,
     isLoading,
     error,
+    unavailableSources,
     hasLoaded,
     lastLoadedAt,
     load,

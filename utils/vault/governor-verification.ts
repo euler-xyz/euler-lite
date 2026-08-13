@@ -88,9 +88,13 @@ export const isVaultGovernorVerified = (
   }
 
   if ('oracleDetailedInfo' in vault) {
-    const routerGovernor = getEulerRouterGovernor(vault.oracleDetailedInfo)
-    if (routerGovernor && routerGovernor !== zeroAddress) {
-      if (!findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
+    const oracleInfo = vault.oracleDetailedInfo
+    if (oracleInfo?.name === 'EulerRouter') {
+      const routerGovernor = getEulerRouterGovernor(oracleInfo)
+      // An identified EulerRouter is a governance boundary. Its metadata must
+      // decode before the vault can inherit verified entity branding.
+      if (!routerGovernor) return false
+      if (routerGovernor !== zeroAddress && !findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
         return false
       }
     }

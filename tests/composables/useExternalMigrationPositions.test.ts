@@ -428,6 +428,36 @@ describe('useExternalMigrationPositions', () => {
     expect(result.error.value).toContain('Aave discovery read failed')
   })
 
+  it('keeps Morpho rows and identifies Aave when only the Aave scan fails', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH]
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([MARKET_ID])
+    expect(result.error.value).toBe('')
+    expect(result.unavailableSources.value).toEqual(['Aave V3'])
+  })
+
   it('keeps valid Aave and Morpho rows when an unrelated Aave reserve read fails', async () => {
     aaveUserConfiguration = 2n
     aaveReserves = [WETH, USDC]
