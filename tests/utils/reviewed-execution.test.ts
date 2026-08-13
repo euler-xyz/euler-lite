@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { flattenBatchEntries, type MigrationAuthorizationRequest, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { encodeFunctionData, parseAbi, zeroHash, type Address, type Hex } from 'viem'
+import { aaveATokenAbi, aaveDebtTokenAbi, flattenBatchEntries, metamorphoAbi, morphoBlueAbi, type MigrationAuthorizationRequest, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { encodeFunctionData, zeroHash, type Address, type Hex } from 'viem'
 import {
   collectReviewedSignaturePlaceholderCalls,
   requirePythOnlyPreparedRefresh,
@@ -25,12 +25,6 @@ const pythAbi = [{
   outputs: [],
   stateMutability: 'payable',
 }] as const
-const migrationAuthorizationAbi = parseAbi([
-  'function delegationWithSig(address delegator,address delegatee,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
-  'function permit(address owner,address spender,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
-  'function setAuthorizationWithSig((address authorizer,address authorized,bool isAuthorized,uint256 nonce,uint256 deadline) authorization,(uint8 v,bytes32 r,bytes32 s) signature)',
-])
-
 const prepared = (update: Hex, operationData: Hex = '0x12345678'): TransactionPlanPrepared => ({
   __prepared: true,
   chainId: 1,
@@ -54,64 +48,85 @@ const prepared = (update: Hex, operationData: Hex = '0x12345678'): TransactionPl
 })
 
 describe('requireReviewedBatchPreparedExecution', () => {
+  type AuthorizationKind = 'aave-delegation' | 'aave-permit' | 'metamorpho-permit' | 'morpho-authorization'
   const authData = (
-    kind: 'delegationWithSig' | 'permit' | 'setAuthorizationWithSig',
+    kind: AuthorizationKind,
     signed: boolean,
   ): Hex => {
     const r = signed ? `0x${'11'.repeat(32)}` as Hex : zeroHash
     const s = signed ? `0x${'22'.repeat(32)}` as Hex : zeroHash
     const v = signed ? 27 : 0
-    if (kind === 'setAuthorizationWithSig') {
+    if (kind === 'morpho-authorization') {
       return encodeFunctionData({
-        abi: migrationAuthorizationAbi,
-        functionName: kind,
+        abi: morphoBlueAbi,
+        functionName: 'setAuthorizationWithSig',
         args: [
           { authorizer: owner, authorized: vault, isAuthorized: true, nonce: 1n, deadline: 2n },
           { v, r, s },
         ],
       })
     }
+    if (kind === 'aave-delegation') {
+      return encodeFunctionData({
+        abi: aaveDebtTokenAbi,
+        functionName: 'delegationWithSig',
+        args: [owner, vault, 1n, 2n, v, r, s],
+      })
+    }
     return encodeFunctionData({
-      abi: migrationAuthorizationAbi,
-      functionName: kind,
+      abi: kind === 'metamorpho-permit' ? metamorphoAbi : aaveATokenAbi,
+      functionName: 'permit',
       args: [owner, vault, 1n, 2n, v, r, s],
     })
   }
 
   const authorizationRequest = (
-    kind: 'delegationWithSig' | 'permit' | 'setAuthorizationWithSig',
+    kind: AuthorizationKind,
     targetContract: Address = vault,
   ): MigrationAuthorizationRequest => {
     const common = {
       kind: 'typedData' as const,
       chainId: 1,
       owner,
-      protocol: kind === 'setAuthorizationWithSig' ? 'Morpho' : 'Aave V3',
+      protocol: kind === 'morpho-authorization'
+        ? 'Morpho'
+        : kind === 'metamorpho-permit'
+          ? 'Morpho Vaults'
+          : 'Aave V3',
       typedData: {
         domain: { chainId: 1, verifyingContract: targetContract },
         types: {},
-        primaryType: kind === 'setAuthorizationWithSig' ? 'Authorization' : 'Permit',
-        message: kind === 'setAuthorizationWithSig'
+        primaryType: kind === 'morpho-authorization' ? 'Authorization' : 'Permit',
+        message: kind === 'morpho-authorization'
           ? { authorizer: owner, authorized: vault, isAuthorized: true, nonce: 1n, deadline: 2n }
-          : kind === 'delegationWithSig'
+          : kind === 'aave-delegation'
             ? { delegatee: vault, value: 1n, nonce: 0n, deadline: 2n }
             : { owner, spender: vault, value: 1n, nonce: 0n, deadline: 2n },
       },
     }
-    if (kind === 'setAuthorizationWithSig') {
+    if (kind === 'morpho-authorization') {
       return { ...common, connectorId: 'morpho' }
+    }
+    if (kind === 'metamorpho-permit') {
+      return {
+        ...common,
+        connectorId: 'metamorpho',
+        authorizationType: 'metamorphoPermit',
+        token: vault,
+        allowanceSlotIndex: 1n,
+      } as MigrationAuthorizationRequest
     }
     return {
       ...common,
       connectorId: 'aave',
-      authorizationType: kind === 'delegationWithSig' ? 'variableDebtDelegation' : 'aTokenPermit',
+      authorizationType: kind === 'aave-delegation' ? 'variableDebtDelegation' : 'aTokenPermit',
       token: vault,
-      ...(kind === 'delegationWithSig' ? { delegator: owner } : {}),
+      ...(kind === 'aave-delegation' ? { delegator: owner } : {}),
     } as MigrationAuthorizationRequest
   }
 
-  it.each(['delegationWithSig', 'permit', 'setAuthorizationWithSig'] as const)(
-    'accepts only the decoded %s signature fields',
+  it.each(['aave-delegation', 'aave-permit', 'metamorpho-permit', 'morpho-authorization'] as const)(
+    'accepts only the real %s ABI signature fields',
     (kind) => {
       const reviewed = prepared('0x01', authData(kind, false))
       const signed = prepared('0x01', authData(kind, true))
@@ -127,12 +142,12 @@ describe('requireReviewedBatchPreparedExecution', () => {
 
   it('does not treat a zero-rs call with a non-placeholder recovery id as reviewed', () => {
     const reviewed = prepared('0x01', encodeFunctionData({
-      abi: migrationAuthorizationAbi,
+      abi: aaveATokenAbi,
       functionName: 'permit',
       args: [owner, vault, 1n, 2n, 27, zeroHash, zeroHash],
     }))
 
-    expect(collectReviewedSignaturePlaceholderCalls(reviewed.plan, authorizationRequest('permit'))).toEqual([])
+    expect(collectReviewedSignaturePlaceholderCalls(reviewed.plan, authorizationRequest('aave-permit'))).toEqual([])
   })
 
   it('rejects an approval inserted after review', () => {
@@ -152,8 +167,8 @@ describe('requireReviewedBatchPreparedExecution', () => {
   })
 
   it('rejects a changed operation outside the signature slot', () => {
-    const reviewed = prepared('0x01', authData('delegationWithSig', false))
-    const changed = prepared('0x01', authData('delegationWithSig', true))
+    const reviewed = prepared('0x01', authData('aave-delegation', false))
+    const changed = prepared('0x01', authData('aave-delegation', true))
     const batch = changed.plan[0]
     if (batch?.type === 'evcBatch') {
       const call = flattenBatchEntries(batch.items)[1]
@@ -163,7 +178,7 @@ describe('requireReviewedBatchPreparedExecution', () => {
     expect(() => requireReviewedBatchPreparedExecution(reviewed, changed, {
       placeholderSignatureCalls: collectReviewedSignaturePlaceholderCalls(
         reviewed.plan,
-        authorizationRequest('delegationWithSig'),
+        authorizationRequest('aave-delegation'),
       ),
     })).toThrow(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
   })
@@ -174,21 +189,21 @@ describe('requireReviewedBatchPreparedExecution', () => {
     const reviewed = prepared('0x01', dynamicField('0'.repeat(65 * 2)))
     const changed = prepared('0x01', dynamicField('11'.repeat(65)))
 
-    expect(collectReviewedSignaturePlaceholderCalls(reviewed.plan, authorizationRequest('permit'))).toEqual([])
+    expect(collectReviewedSignaturePlaceholderCalls(reviewed.plan, authorizationRequest('aave-permit'))).toEqual([])
     expect(() => requireReviewedBatchPreparedExecution(reviewed, changed, {
       placeholderSignatureCalls: collectReviewedSignaturePlaceholderCalls(
         reviewed.plan,
-        authorizationRequest('permit'),
+        authorizationRequest('aave-permit'),
       ),
     })).toThrow(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
   })
 
   it('rejects a supported authorization selector on a target not named by its connector request', () => {
-    const reviewed = prepared('0x01', authData('permit', false))
-    const changed = prepared('0x01', authData('permit', true))
+    const reviewed = prepared('0x01', authData('aave-permit', false))
+    const changed = prepared('0x01', authData('aave-permit', true))
     const calls = collectReviewedSignaturePlaceholderCalls(
       reviewed.plan,
-      authorizationRequest('permit', nonPyth),
+      authorizationRequest('aave-permit', nonPyth),
     )
 
     expect(calls).toEqual([])
