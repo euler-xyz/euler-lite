@@ -24,6 +24,8 @@ import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
+import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
 
 export interface ChainVaultsSnapshot {
   evkVaults: EVault[]
@@ -283,7 +285,17 @@ async function buildSnapshot(
     }
   }
 
-  const evkVaults = (evk.result.filter(Boolean) as EVault[]).map(vault =>
+  const fetchedEVaults = evk.result.filter(Boolean) as EVault[]
+  await resolveEulerRouterGovernors(fetchedEVaults, (router) => {
+    const provider = sdk.providerService.getProvider(chainId)
+    return provider.readContract({
+      address: router,
+      abi: governableGovernorAbi,
+      functionName: 'governor',
+      authorizationList: undefined,
+    })
+  })
+  const evkVaults = fetchedEVaults.map(vault =>
     withVaultMetadata(vault, {
       verified: true,
       vaultCategory: escrowAddresses.has(vault.address) ? 'escrow' : 'standard',
