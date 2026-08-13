@@ -45,6 +45,10 @@ const encodeCall = (call: MigrationAuthorizationCall): PlainTxRequest => ({
   ...(call.value === undefined ? {} : { value: call.value }),
 })
 
+/** Stable identity of an encoded transaction, for consolidating display rows. */
+const plainTxKey = (tx: PlainTxRequest): string =>
+  `${tx.to.toLowerCase()}:${(tx.value ?? 0n).toString()}:${tx.data}`
+
 const flattenRequests = (
   request: MigrationAuthorizationRequest | undefined,
 ): MigrationAuthorizationRequest[] =>
@@ -114,6 +118,7 @@ export const buildMigrationAuthorizationTxSteps = (
       index: startIndex + steps.length,
       label: (authorizationType && labels[authorizationType]) || fallback,
       isSeparateTx: true,
+      txKey: plainTxKey(encodeCall(phase === 'grant' ? entry.call : entry.revocation!)),
     })
   }
 

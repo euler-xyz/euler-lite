@@ -8,12 +8,13 @@ import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
+import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 
 // -- Helpers --
 
 const hasGovernorAdmin = (vault: AnyVault): vault is EVault =>
-  isEVault(vault) && 'governorAdmin' in vault
+  hasResolvedGovernorAdmin(vault)
 
 const isBorrowableVault = (vault: AnyVault): boolean =>
   isEVault(vault) && isVaultBorrowable(vault)

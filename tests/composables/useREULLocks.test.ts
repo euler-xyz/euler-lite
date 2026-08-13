@@ -163,6 +163,49 @@ describe('useREULLocks', () => {
     expect(locks.locks.value).toEqual([refreshedLock])
   })
 
+  it('clears shared state and invalidates in-flight loads after the final consumer unmounts', async () => {
+    const { useREULLocks, fetchLocks, lock, unmountCallbacks } = await importUseREULLocks()
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await vi.waitFor(() => expect(locks?.locks.value).toEqual([lock]))
+
+    const staleLock = {
+      ...lock,
+      unlockableAmount: lock.unlockableAmount + 1n,
+    }
+    let resolveRefresh!: (value: typeof lock[]) => void
+    const pendingRefresh = new Promise<typeof lock[]>((resolve) => {
+      resolveRefresh = resolve
+    })
+    fetchLocks.mockImplementationOnce(() => pendingRefresh)
+
+    const refreshPromise = locks.refreshLocks()
+    await vi.waitFor(() => expect(fetchLocks).toHaveBeenCalledTimes(2))
+
+    scope.stop()
+    scope = undefined
+    unmountCallbacks[0]?.()
+    expect(locks.locks.value).toEqual([])
+    expect(locks.isLocksLoading.value).toBe(false)
+
+    resolveRefresh([staleLock])
+    await expect(refreshPromise).resolves.toBeNull()
+    expect(locks.locks.value).toEqual([])
+
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+    await vi.waitFor(() => expect(fetchLocks).toHaveBeenCalledTimes(3))
+    expect(locks.locks.value).toEqual([lock])
+  })
+
   it('keeps the shared poller alive until the last sibling consumer unmounts', async () => {
     vi.useFakeTimers()
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
@@ -174,12 +217,13 @@ describe('useREULLocks', () => {
       useREULLocks()
     })
 
+    await vi.waitFor(() => expect(fetchLocks).toHaveBeenCalledTimes(1))
     expect(unmountCallbacks).toHaveLength(2)
     unmountCallbacks[0]?.()
     expect(clearIntervalSpy).not.toHaveBeenCalled()
     const callsBeforePoll = fetchLocks.mock.calls.length
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(fetchLocks.mock.calls.length).toBeGreaterThan(callsBeforePoll)
+    expect(fetchLocks).toHaveBeenCalledTimes(callsBeforePoll + 1)
 
     unmountCallbacks[1]?.()
     expect(clearIntervalSpy).toHaveBeenCalledTimes(1)
@@ -187,7 +231,6 @@ describe('useREULLocks', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(fetchLocks).toHaveBeenCalledTimes(callsAfterUnmount)
   })
-
   it('does not let the shared poller supersede a foreground review refresh', async () => {
     vi.useFakeTimers()
     const { useREULLocks, fetchLocks, lock } = await importUseREULLocks()

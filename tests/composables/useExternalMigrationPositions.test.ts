@@ -19,6 +19,7 @@ const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const WETH = getAddress('0x4200000000000000000000000000000000000006')
 const AAVE_POOL = getAddress('0xA238Dd80C259a72e81d7e4664a9801593F98d1c5')
 const AAVE_WETH = getAddress('0xD4a0e0b9149BCee3C920d2E00b5dE09138fd8bb7')
+const AAVE_USDC = getAddress('0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB')
 const AAVE_STABLE_DEBT_USDC = getAddress('0x0000000000000000000000000000000000000001')
 const AAVE_VARIABLE_DEBT_USDC = getAddress('0x59dca05b6c26dbd64b5381374aAaC5CD05644C28')
 const MORPHO_ORACLE = getAddress('0xFEa2D58cEfCb9fcb597723c6bAE66fFE4193aFE4')
@@ -243,10 +244,10 @@ describe('useExternalMigrationPositions', () => {
     expect(result.isLoading.value).toBe(false)
   })
 
-  it('skips Morpho discovery on chains its indexer does not support', async () => {
-    // BNB Smart Chain (56) is not indexed by api.morpho.org, and no Aave pool is
-    // registered there either — so the scan must resolve to an empty list rather
-    // than surfacing the API's "unsupported chainId" error.
+  it('skips Morpho discovery outside the supported migration chains', async () => {
+    // BNB Smart Chain (56) is outside Lite's end-to-end Morpho migration set,
+    // and no Aave pool is registered there either, so the scan resolves to an
+    // empty list without an unnecessary proxy request.
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(56) }))
 
     const result = useExternalMigrationPositions()
@@ -258,6 +259,33 @@ describe('useExternalMigrationPositions', () => {
       String((init as RequestInit | undefined)?.body ?? '').includes('LiteMorphoMigrationPositions'),
     )
     expect(morphoQueried).toBe(false)
+    expect(result.positions.value).toEqual([])
+    expect(result.error.value).toBe('')
+  })
+
+  it.each([
+    { chainId: 130, name: 'Unichain' },
+    { chainId: 143, name: 'Monad' },
+    { chainId: 999, name: 'HyperEVM' },
+    { chainId: 42161, name: 'Arbitrum' },
+  ])('discovers Morpho positions on $name ($chainId)', async ({ chainId }) => {
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(chainId) }))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    const morphoRequest = fetchMock.mock.calls.find(([, init]) =>
+      String((init as RequestInit | undefined)?.body ?? '').includes('LiteMorphoMigrationPositions'),
+    )
+    expect(morphoRequest).toBeDefined()
+    expect(JSON.parse(String((morphoRequest?.[1] as RequestInit | undefined)?.body))).toMatchObject({
+      variables: {
+        chainId,
+        address: OWNER,
+      },
+    })
     expect(result.positions.value).toEqual([])
     expect(result.error.value).toBe('')
   })
@@ -400,6 +428,167 @@ describe('useExternalMigrationPositions', () => {
     expect(result.error.value).toContain('Aave discovery read failed')
   })
 
+  it('keeps valid Aave and Morpho rows when an unrelated Aave reserve read fails', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([
+      MARKET_ID,
+      `aave:${AAVE_POOL}:${WETH}:supply`,
+    ])
+    expect(result.error.value).toBe('')
+  })
+
+  it('keeps valid Aave and Morpho rows when an unrelated Aave supply balance read fails', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
+    const baseReadContract = readContract.getMockImplementation() as (
+      call: { address: Address, functionName: string, args?: readonly unknown[] },
+    ) => Promise<unknown>
+    readContract.mockImplementation(async (call: { address: Address, functionName: string, args?: readonly unknown[] }) => {
+      if (call.functionName === 'balanceOf' && getAddress(call.address) === AAVE_USDC) {
+        throw new Error('unrelated USDC balance failure')
+      }
+      return baseReadContract(call)
+    })
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([
+      MARKET_ID,
+      `aave:${AAVE_POOL}:${WETH}:supply`,
+    ])
+    expect(result.error.value).toBe('')
+  })
+
+  it('keeps valid Aave and Morpho rows when another supplied asset metadata read fails', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
+    balancesByToken.set(AAVE_USDC, 4_000_001n)
+    const baseReadContract = readContract.getMockImplementation() as (
+      call: { address: Address, functionName: string, args?: readonly unknown[] },
+    ) => Promise<unknown>
+    readContract.mockImplementation(async (call: { address: Address, functionName: string, args?: readonly unknown[] }) => {
+      if (call.functionName === 'symbol' && getAddress(call.address) === USDC) {
+        throw new Error('USDC symbol failure')
+      }
+      return baseReadContract(call)
+    })
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([
+      MARKET_ID,
+      `aave:${AAVE_POOL}:${WETH}:supply`,
+    ])
+    expect(result.error.value).toBe('')
+  })
+
+  it('fails Aave discovery when reserve data fails for a configured collateral', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value).toEqual([])
+    expect(result.error.value).toContain(`Aave discovery read failed: getReserveData(${WETH})`)
+  })
+
   it('discovers Aave V3 supply-only positions when the wallet has collateral and no debt', async () => {
     aaveUserConfiguration = 2n
     aaveReserves = [WETH, USDC]
@@ -407,6 +596,11 @@ describe('useExternalMigrationPositions', () => {
       aTokenAddress: AAVE_WETH,
       stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
       variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
     })
     balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
@@ -449,6 +643,70 @@ describe('useExternalMigrationPositions', () => {
     })
   })
 
+  it('discovers Aave V3 supply-only positions that are not enabled as collateral', async () => {
+    aaveUserConfiguration = 0n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_USDC, 4_000_001n)
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value).toHaveLength(1)
+    expect(result.positions.value[0]).toMatchObject({
+      connectorId: 'aave',
+      protocol: 'Aave V3',
+      id: `aave:${AAVE_POOL}:${USDC}:supply`,
+      owner: OWNER,
+      debt: null,
+      collateral: expect.objectContaining({
+        address: USDC,
+        amount: 4_000_001n,
+        amountUsd: 4.000001,
+        symbol: 'USDC',
+      }),
+    })
+  })
+
+  it('keeps non-collateral supplies separate from debt-backed Aave positions', async () => {
+    aaveUserConfiguration = 6n
+    aaveReserves = [WETH, USDC]
+    reserveTokensByAsset.set(WETH, {
+      aTokenAddress: AAVE_WETH,
+      stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
+      variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
+    })
+    balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
+    balancesByToken.set(AAVE_USDC, 4_000_001n)
+    balancesByToken.set(AAVE_VARIABLE_DEBT_USDC, 1_000_000n)
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => ({ id: position.id, debt: position.debt?.amount ?? null }))).toEqual([
+      { id: `aave:${AAVE_POOL}:${USDC}:supply`, debt: null },
+      { id: `aave:${AAVE_POOL}:${WETH}:${USDC}:variable`, debt: 1_000_000n },
+    ])
+  })
+
   it('sorts discovered positions by net asset or deposit value descending', async () => {
     aaveUserConfiguration = 2n
     aaveReserves = [WETH, USDC]
@@ -456,6 +714,11 @@ describe('useExternalMigrationPositions', () => {
       aTokenAddress: AAVE_WETH,
       stableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000011'),
       variableDebtTokenAddress: getAddress('0x0000000000000000000000000000000000000012'),
+    })
+    reserveTokensByAsset.set(USDC, {
+      aTokenAddress: AAVE_USDC,
+      stableDebtTokenAddress: AAVE_STABLE_DEBT_USDC,
+      variableDebtTokenAddress: AAVE_VARIABLE_DEBT_USDC,
     })
     balancesByToken.set(AAVE_WETH, 1_000_000_000_000_000n)
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
