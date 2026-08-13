@@ -8,6 +8,7 @@ import type {
   PortfolioSavingsPosition,
   SlotHints,
   TransactionPlan,
+  TransactionPlanPrepared,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -235,7 +236,8 @@ const layers = shallowRef<BatchLayer[]>([])
  * rest of the cart state so every component instance shares it.
  */
 const latchedBundledExecution = shallowRef<{
-  plans: TransactionPlan[]
+  /** Prepared core envelope shared by review export and Safe execution. */
+  prepared: TransactionPlanPrepared
   grants: BatchEntryExternalTx[]
   revokes: BatchEntryExternalTx[]
   /** Per-entry review rows from the same resolution, for the modal to render. */
@@ -2414,6 +2416,7 @@ export const useTxBatch = () => {
   /** Resolve approvals/permits/plugins for the merged batch plan, so the review
    *  modal can list the approvals the user will be asked to sign. */
   const prepareBatchPlan = async () => {
+    if (latchedBundledExecution.value) return latchedBundledExecution.value.prepared
     if (!lastMerged) return null
     return prepareTransactionPlan(lastMerged)
   }
@@ -2476,9 +2479,13 @@ export const useTxBatch = () => {
       latchedBundledExecution.value = null
       return null
     }
-    const collected = await collectBundledExecution()
-    latchedBundledExecution.value = collected
-    return collected
+    const { plans, ...ceremony } = await collectBundledExecution()
+    const sdk = await getEulerSdkFresh()
+    const executionPlan = sdk.executionService.mergePlans(plans)
+    const prepared = await prepareTransactionPlan(executionPlan)
+    const latched = { ...ceremony, prepared }
+    latchedBundledExecution.value = latched
+    return latched
   }
 
   /**
@@ -2586,10 +2593,7 @@ export const useTxBatch = () => {
         // with the entries' authorization state overrides) is the
         // pre-flight validation. Atomicity also removes the unwind
         // bookkeeping: a failed proposal reverts its grants with it.
-        const sdk = await getEulerSdkFresh()
-        const executionPlan = sdk.executionService.mergePlans(collected.plans)
-        const prepared = await prepareTransactionPlan(executionPlan)
-        const result = await executePreparedPlanWithPlainCalls(prepared, {
+        const result = await executePreparedPlanWithPlainCalls(collected.prepared, {
           before: collected.grants,
           after: collected.revokes,
         }, { allowSingleCall: true })

@@ -1376,6 +1376,55 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.entryCount.value).toBe(0)
   })
 
+  it('reuses the latched prepared core plan for review export and safe execution', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const previewPlan = [{
+      type: 'evcBatch',
+      items: [{ type: 'operation', name: 'stale-preview', items: [] }],
+    }] as unknown as TransactionPlan
+    const latchedPlan = [{
+      type: 'evcBatch',
+      items: [{ type: 'operation', name: 'fresh-latched-execution', items: [] }],
+    }] as unknown as TransactionPlan
+    const latchedPrepared = { plan: latchedPlan, chainId: 1, account: owner }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(latchedPrepared)
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockResolvedValue({ receipts: [] })
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Migrate Aave position',
+      buildPlan: async () => previewPlan,
+      buildExecutionPrerequisites: async () => ({
+        preTxs: [grantTx],
+        walletContext: grantWalletContext,
+        postTxs: [revokeTx],
+        postTxsByPreTx: [revokeTx],
+      }),
+      buildBundledExecution: async () => ({
+        plan: latchedPlan,
+        grants: [grantTx],
+        revokes: [revokeTx],
+        grantSteps: [bundledGrantStep],
+        revokeSteps: [bundledRevokeStep],
+      }),
+    })
+
+    const latched = await batch.prepareBundledExecution()
+    const reviewPrepared = await batch.prepareBatchPlan()
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenCalledTimes(1)
+    expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenCalledWith(latchedPlan)
+    expect(reviewPrepared).toBe(latchedPrepared)
+    expect(latched?.prepared).toBe(latchedPrepared)
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledWith(latchedPrepared, {
+      before: [grantTx],
+      after: [revokeTx],
+    }, { allowSingleCall: true })
+  })
+
   it('throws instead of degrading when the safe bundle context is unavailable', async () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
