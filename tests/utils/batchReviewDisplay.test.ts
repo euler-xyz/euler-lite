@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, getBatchReviewDisplayPlan, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 
 describe('getAuthorizationStepDisplay', () => {
   it('describes signature-mode authorization rows as signatures', () => {
@@ -24,6 +25,16 @@ describe('isBundledReviewEntry', () => {
     expect(isBundledReviewEntry(true, true)).toBe(true)
     expect(isBundledReviewEntry(false, true)).toBe(false)
     expect(isBundledReviewEntry(true, false)).toBe(false)
+  })
+})
+
+describe('getBatchReviewDisplayPlan', () => {
+  it('shows the ceremony plan instead of a stale captured preview', () => {
+    const freshCeremonyPlan = [{ type: 'evcBatch', items: [{ name: 'fresh-execution' }] }] as unknown as TransactionPlan
+    const stalePreviewPlan = [{ type: 'evcBatch', items: [{ name: 'stale-preview' }] }] as unknown as TransactionPlan
+    const entryPlan = [{ type: 'evcBatch', items: [{ name: 'entry-plan' }] }] as unknown as TransactionPlan
+
+    expect(getBatchReviewDisplayPlan(freshCeremonyPlan, stalePreviewPlan, entryPlan)).toBe(freshCeremonyPlan)
   })
 })
 

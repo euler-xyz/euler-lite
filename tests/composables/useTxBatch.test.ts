@@ -1419,7 +1419,9 @@ describe('useTxBatch execution prerequisites', () => {
     })
 
     const [ceremonyA, ceremonyB] = await Promise.all([preparationA, preparationB])
+    const ceremonyC = await batch.prepareBundledExecution()
     expect(ceremonyA).toBe(ceremonyB)
+    expect(ceremonyC).toBe(ceremonyA)
     expect(Object.isFrozen(ceremonyA)).toBe(true)
     expect(Object.isFrozen(ceremonyA?.grants)).toBe(true)
   })
@@ -1557,11 +1559,13 @@ describe('useTxBatch execution prerequisites', () => {
     })
 
     const ceremony = await batch.prepareBundledExecution()
+    const entryId = batch.entries.value[0]!.id
     await batch.executeBatch(undefined, ceremony ?? undefined)
 
     expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenCalledTimes(1)
     expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenCalledWith(latchedPlan)
     expect(ceremony?.prepared).toBe(latchedPrepared)
+    expect(ceremony?.reviewByEntryId[entryId]?.plan).toBe(latchedPlan)
     expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledWith(latchedPrepared, {
       before: [grantTx],
       after: [revokeTx],
@@ -1701,7 +1705,8 @@ describe('useTxBatch execution prerequisites', () => {
     // resolution the proposal executes — never the add-time captures, which
     // can be stale by the time the review opens.
     const entryId = batch.entries.value[0]!.id
-    expect(latched?.stepsByEntryId[entryId]).toEqual({
+    expect(latched?.reviewByEntryId[entryId]).toEqual({
+      plan: singleOpBundledPlan,
       grantSteps: [bundledGrantStep],
       revokeSteps: [bundledRevokeStep],
     })
@@ -1729,7 +1734,7 @@ describe('useTxBatch execution prerequisites', () => {
     const latched = await batch.prepareBundledExecution()
 
     expect(latched?.revokes).toEqual([revokeTx, revokeTx])
-    expect(Object.values(latched?.stepsByEntryId ?? {}).flatMap(steps => steps.revokeSteps)).toEqual([
+    expect(Object.values(latched?.reviewByEntryId ?? {}).flatMap(review => review.revokeSteps)).toEqual([
       bundledRevokeStep,
       bundledRevokeStep,
     ])

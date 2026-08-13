@@ -1,4 +1,5 @@
 import type { DisplayStep } from '~/utils/stepDecoding'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 export interface AuthorizationStepsDisplay {
   detailHeading: 'Authorization transactions' | 'Signatures'
@@ -10,6 +11,13 @@ export const isBundledReviewEntry = (
   hasLatchedBundledExecution: boolean,
   hasBundledExecutionBuilder: boolean,
 ): boolean => hasLatchedBundledExecution && hasBundledExecutionBuilder
+
+/** Prefer the fresh per-entry plan owned by the Safe review ceremony. */
+export const getBatchReviewDisplayPlan = (
+  ceremonyPlan: TransactionPlan | undefined,
+  capturedDisplayPlan: TransactionPlan | undefined,
+  entryPlan: TransactionPlan | undefined,
+): TransactionPlan | undefined => ceremonyPlan ?? capturedDisplayPlan ?? entryPlan
 
 export const groupRestorationSummaryRows = <TRow extends { step: Pick<DisplayStep, 'isSeparateTx'> }>(
   rows: readonly TRow[],

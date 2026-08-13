@@ -119,7 +119,8 @@ export interface PreparedBatchBundledExecution {
   readonly prepared: TransactionPlanPrepared
   readonly grants: readonly BatchEntryExternalTx[]
   readonly revokes: readonly BatchEntryExternalTx[]
-  readonly stepsByEntryId: Readonly<Record<string, {
+  readonly reviewByEntryId: Readonly<Record<string, {
+    readonly plan: TransactionPlan
     readonly grantSteps: readonly DisplayStep[]
     readonly revokeSteps: readonly DisplayStep[]
   }>>
@@ -2512,14 +2513,15 @@ export const useTxBatch = () => {
     const reviewOwner = getAddress(currentOwner)
 
     const preparationPromise = (async (): Promise<PreparedBatchBundledExecution> => {
-      const { plans, grants, revokes, stepsByEntryId } = await collectBundledExecution()
+      const { plans, grants, revokes, reviewByEntryId } = await collectBundledExecution()
       const sdk = await getEulerSdkFresh()
       const executionPlan = sdk.executionService.mergePlans(plans)
       const prepared = await prepareTransactionPlan(executionPlan)
-      const frozenSteps = Object.freeze(Object.fromEntries(
-        Object.entries(stepsByEntryId).map(([entryId, steps]) => [entryId, Object.freeze({
-          grantSteps: Object.freeze([...steps.grantSteps]),
-          revokeSteps: Object.freeze([...steps.revokeSteps]),
+      const frozenReview = Object.freeze(Object.fromEntries(
+        Object.entries(reviewByEntryId).map(([entryId, review]) => [entryId, Object.freeze({
+          plan: review.plan,
+          grantSteps: Object.freeze([...review.grantSteps]),
+          revokeSteps: Object.freeze([...review.revokeSteps]),
         })]),
       ))
       const ceremony: PreparedBatchBundledExecution = Object.freeze({
@@ -2529,14 +2531,15 @@ export const useTxBatch = () => {
         prepared,
         grants: Object.freeze([...grants]),
         revokes: Object.freeze([...revokes]),
-        stepsByEntryId: frozenSteps,
+        reviewByEntryId: frozenReview,
       })
       assertBundledExecutionCurrent(ceremony)
       return ceremony
     })()
 
-    const trackedPromise = preparationPromise.finally(() => {
+    const trackedPromise = preparationPromise.catch((error) => {
       if (bundledPreparation?.promise === trackedPromise) bundledPreparation = null
+      throw error
     })
     bundledPreparation = { generation, promise: trackedPromise }
     return trackedPromise
@@ -2551,22 +2554,32 @@ export const useTxBatch = () => {
     const plans: TransactionPlan[] = []
     const grants: BatchEntryExternalTx[] = []
     const revokesByEntry: BatchEntryExternalTx[][] = []
-    const stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }> = {}
+    const reviewByEntryId: Record<string, {
+      plan: TransactionPlan
+      grantSteps: DisplayStep[]
+      revokeSteps: DisplayStep[]
+    }> = {}
     for (const [index, entry] of entries.value.entries()) {
       if (entry.buildBundledExecution) {
         const bundled = await entry.buildBundledExecution(await getExecutionPlanningAccount(index))
         plans.push(bundled.plan)
         grants.push(...bundled.grants)
         revokesByEntry.push(bundled.revokes)
-        stepsByEntryId[entry.id] = { grantSteps: bundled.grantSteps, revokeSteps: bundled.revokeSteps }
+        reviewByEntryId[entry.id] = {
+          plan: bundled.plan,
+          grantSteps: bundled.grantSteps,
+          revokeSteps: bundled.revokeSteps,
+        }
         continue
       }
-      plans.push(entry.buildExecutionPlan
+      const plan = entry.buildExecutionPlan
         ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
-        : entry.plan)
+        : entry.plan
+      plans.push(plan)
       revokesByEntry.push([])
+      reviewByEntryId[entry.id] = { plan, grantSteps: [], revokeSteps: [] }
     }
-    return { plans, grants, revokes: revokesByEntry.reverse().flat(), stepsByEntryId }
+    return { plans, grants, revokes: revokesByEntry.reverse().flat(), reviewByEntryId }
   }
 
   /**

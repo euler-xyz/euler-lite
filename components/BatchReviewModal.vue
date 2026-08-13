@@ -10,7 +10,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
-import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
+import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, getBatchReviewDisplayPlan, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
@@ -111,7 +111,7 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
   // A bundled ceremony carries its own rows, derived from the SAME
   // authorization resolution the proposal executes — the add-time captures
   // can be stale (authorization state drifts between add and review).
-  const latchedSteps = bundledExecutionRef.value?.stepsByEntryId[entry.id]
+  const latchedSteps = bundledExecutionRef.value?.reviewByEntryId[entry.id]
   if (latchedSteps) return normalizeDisplaySteps(latchedSteps.grantSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
@@ -120,7 +120,7 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
-  const latchedSteps = bundledExecutionRef.value?.stepsByEntryId[entry.id]
+  const latchedSteps = bundledExecutionRef.value?.reviewByEntryId[entry.id]
   if (latchedSteps) return normalizeDisplaySteps(latchedSteps.revokeSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
@@ -135,7 +135,11 @@ const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] =
 const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   const out: Record<string, DisplayStep[]> = {}
   for (const entry of entries.value) {
-    const plan = (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan ?? entryPlans.value[entry.id]
+    const plan = getBatchReviewDisplayPlan(
+      bundledExecutionRef.value?.reviewByEntryId[entry.id]?.plan,
+      (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan,
+      entryPlans.value[entry.id],
+    )
     const ctx = entry.review as unknown as StepDecodingContext | undefined
     if (!plan?.length || !ctx) continue
     try {
