@@ -6,8 +6,10 @@ import {
   resolveGoverningEntityKeys,
   resolveEarnGoverningEntityKeys,
   type VerificationLabels,
+  hasResolvedGovernorAdmin,
 } from '~/utils/vault/governor-verification'
-import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { EVault as SdkEVault } from '@eulerxyz/euler-v2-sdk'
+import type { EulerEarn, EVault, IEVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 
 type Vault = EVault & { verified?: boolean, vaultCategory?: 'standard' | 'escrow' }
 type SecuritizeVault = SecuritizeCollateralVault & { verified?: boolean, vaultCategory?: 'standard' | 'escrow' }
@@ -332,5 +334,52 @@ describe('resolveEarnGoverningEntityKeys', () => {
       entityAddresses: { euler: [GOV_A], dao: [GOV_A] },
     })
     expect(resolveEarnGoverningEntityKeys(earn, labels)).toEqual(['euler', 'dao'])
+  })
+})
+
+describe('hasResolvedGovernorAdmin', () => {
+  // A REAL SDK EVault instance, not a plain-object stub: the constructor
+  // assigns `governorAdmin` even when undefined, so property-existence
+  // (`in`) checks pass on every instance — the false-Unknown-badge bug.
+  const makeSdkVault = (governorAdmin: Address | undefined): EVault =>
+    Object.assign(
+      new SdkEVault({
+        address: VAULT_ADDR,
+        governorAdmin,
+        // Minimal nested shapes the constructor dereferences.
+        oracle: { oracle: GOV_B, name: 'EulerRouter' },
+        asset: { address: GOV_B, symbol: 'TST', decimals: 18 },
+        shares: { decimals: 18 },
+        collaterals: [],
+      } as unknown as IEVault),
+      // The adapters stamp the discriminant on real instances post-construction.
+      { type: 'EVault' },
+    )
+
+  it('treats an unresolved (constructor-assigned undefined) governor as not hydrated', () => {
+    const vault = makeSdkVault(undefined)
+    // The in-operator lies on real instances — this is the wrong guard:
+    expect('governorAdmin' in vault).toBe(true)
+    // The value-based guard reads it correctly:
+    expect(hasResolvedGovernorAdmin(vault)).toBe(false)
+  })
+
+  it('passes once governance resolves — even to an unmatched governor', () => {
+    const vault = makeSdkVault(GOV_A)
+    expect(hasResolvedGovernorAdmin(vault)).toBe(true)
+    // Unmatched governor → verification legitimately fails (real Unknown).
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_B] },
+    })
+    expect(isVaultGovernorVerified(
+      Object.assign(vault, { verified: true }) as never,
+      labels,
+    )).toBe(false)
+  })
+
+  it('rejects non-EVault shapes', () => {
+    expect(hasResolvedGovernorAdmin(undefined)).toBe(false)
+    expect(hasResolvedGovernorAdmin({ governorAdmin: GOV_A })).toBe(false)
   })
 })

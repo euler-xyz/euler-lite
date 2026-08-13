@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
-import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries, getSubAccountId, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
@@ -13,6 +13,7 @@ import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 import { getAuthorizationStepDisplay } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { formatNumber } from '~/utils/string-utils'
+import { buildUnverifiedVaultConsentKey, collectUnverifiedVaultConsentTargets } from '~/utils/unverified-vault-consent'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -158,6 +159,30 @@ const authorizationSummaryGroups = computed(() =>
   }).filter(({ rows }) => rows.length),
 )
 
+// Post-execution transactions (e.g. a migration's approval restoration) are
+// real wallet transactions sent after the batch settles. Surfacing them only
+// inside the expanded row undercounts the ceremony in the collapsed summary.
+//
+// Rows render in EXECUTION order: restorations unwind in reverse entry order
+// (each entry's own steps are already reversed by the encoder). Rows carrying
+// the identical encoded restoration TRANSACTION are consolidated — a grant an
+// earlier entry already made resolves to no prerequisite at execution, so its
+// duplicate displayed revoke would never run. Labels are NOT identity: two
+// different aTokens share "Restore previous aToken approval", so rows without
+// a txKey are never collapsed.
+const postExecutionSummaryRows = computed(() => {
+  const rows = [...entries.value].reverse().flatMap(entry =>
+    (postStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
+  )
+  const seen = new Set<string>()
+  return rows.filter(({ step }) => {
+    if (!step.txKey) return true
+    if (seen.has(step.txKey)) return false
+    seen.add(step.txKey)
+    return true
+  })
+})
+
 // Prepared plan (with plugins and approvals resolved) shared by review,
 // calldata export, and the unverified-vault consent gate.
 const preparedPlanRef = ref<TransactionPlan | undefined>()
@@ -166,35 +191,18 @@ const preparedPlanRef = ref<TransactionPlan | undefined>()
 // derived from the exact prepared envelope that backs calldata and execution,
 // so a transformed plan cannot silently change the consent set.
 const unverifiedVaults = computed<Array<{ address: string, name: string }>>(() => {
-  const vaults = new Map<string, string>()
   const plans = preparedPlanRef.value?.length
     ? [preparedPlanRef.value]
     : entries.value.map(entry => entryPlans.value[entry.id]).filter(Boolean)
-  for (const plan of plans) {
-    for (const item of plan ?? []) {
-      if (item.type !== 'evcBatch') continue
-      for (const bi of flattenBatchEntries(item.items)) {
-        try {
-          const addr = getAddress(bi.targetContract)
-          const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
-          if (vault && !isVerifiedVault(addr)) {
-            const name = vault.shares?.name || vault.asset?.symbol || ''
-            vaults.set(addr.toLowerCase(), name || addr)
-          }
-        }
-        catch { /* skip malformed address */ }
-      }
-    }
-  }
-  return [...vaults].map(([address, name]) => ({ address, name }))
+  return collectUnverifiedVaultConsentTargets(plans, getVault, isVerifiedVault)
 })
 const unverifiedVaultNames = computed(() => unverifiedVaults.value.map(vault => vault.name))
 const hasUnverified = computed(() => unverifiedVaultNames.value.length > 0)
-const unverifiedContextKey = computed(() => JSON.stringify([
-  chainId.value ?? null,
-  ownerSubAccountKey.value ?? '',
-  unverifiedVaults.value.map(vault => vault.address).sort(),
-]))
+const unverifiedContextKey = computed(() => buildUnverifiedVaultConsentKey(
+  chainId.value,
+  ownerSubAccountKey.value,
+  unverifiedVaults.value,
+))
 const acknowledgedUnverifiedContextKey = ref('')
 const hasAcknowledgedUnverifiedBatch = computed({
   get: () => !hasUnverified.value || acknowledgedUnverifiedContextKey.value === unverifiedContextKey.value,
@@ -419,7 +427,27 @@ const blockedReason = computed(() => {
 
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
-  await executeBatch()
+  const reviewedConsentKey = unverifiedContextKey.value
+  await executeBatch({
+    assertPreparedPlan: (prepared: TransactionPlanPrepared) => {
+      const preparedAccount = typeof prepared.account === 'string'
+        ? getAddress(prepared.account)
+        : getAddress(prepared.account.owner)
+      const finalVaults = collectUnverifiedVaultConsentTargets(
+        [prepared.plan],
+        getVault,
+        isVerifiedVault,
+      )
+      const finalConsentKey = buildUnverifiedVaultConsentKey(
+        prepared.chainId,
+        preparedAccount,
+        finalVaults,
+      )
+      if (finalConsentKey !== reviewedConsentKey) {
+        throw new Error('The final transaction targets a different vault set. Close this review and review it again.')
+      }
+    },
+  })
   // executeBatch clears the cart on success; close once nothing's left to do.
   if (!execError.value && entries.value.length === 0) emit('close')
 }
@@ -624,6 +652,29 @@ const handleClose = () => {
         title="rEUL burn mechanics"
         :description="warning.description"
       />
+
+      <!-- Transactions sent after the batch settles (e.g. approval restoration). -->
+      <div v-if="postExecutionSummaryRows.length">
+        <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
+          After execution
+        </p>
+        <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
+          <div
+            v-for="({ entry, step }, i) in postExecutionSummaryRows"
+            :key="`${entry.id}-post-${i}`"
+            class="flex items-center justify-between gap-12 py-10"
+          >
+            <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
+              <SvgIcon
+                name="check-circle"
+                class="!w-16 !h-16 text-accent-500 shrink-0"
+              />
+              <span class="truncate">{{ step.label }}</span>
+            </span>
+            <span class="text-p3 text-content-tertiary shrink-0">{{ step.isSeparateTx ? '1 transaction' : 'bundled' }}</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Wallet changes -->
       <BatchWalletChanges

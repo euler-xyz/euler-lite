@@ -73,6 +73,23 @@ describe('rewardCampaignDisplay', () => {
     }).sourceUrl).toBe('https://app.merkl.xyz/opportunities/monad/EULER/example')
   })
 
+  it.each([
+    'javascript:alert(document.domain)',
+    'data:text/html,<script>alert(1)</script>',
+    'vbscript:msgbox(1)',
+    '//evil.example/drainer',
+  ])('drops an unsafe provider sourceUrl (%s)', (sourceUrl) => {
+    expect(rewardCampaignDisplay({ ...baseCampaign, sourceUrl }).sourceUrl).toBeUndefined()
+  })
+
+  it('does not disguise a rejected URL with a provider fallback', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      source: 'turtle',
+      sourceUrl: 'javascript:alert(1)',
+    }).sourceUrl).toBeUndefined()
+  })
+
   it('links Turtle campaigns to the Turtle stream dashboard', () => {
     expect(rewardCampaignDisplay({
       ...baseCampaign,
