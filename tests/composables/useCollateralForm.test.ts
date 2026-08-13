@@ -160,7 +160,14 @@ vi.mock('~/composables/useSwapQuotesParallel', async () => {
     requestQuotes: vi.fn(async () => {}),
     selectProvider: vi.fn(),
   }
-  return { useSwapQuotesParallel: () => api, __swapApi: api }
+  return {
+    getCurrentPreparedQuotePlan: (card: { quote?: unknown, plan?: unknown, preparedPlan?: { plan: unknown } } | null, quote: unknown) => {
+      if (!card?.preparedPlan || card.quote !== quote) return null
+      return { plan: card.plan ?? card.preparedPlan.plan, prepared: card.preparedPlan }
+    },
+    useSwapQuotesParallel: () => api,
+    __swapApi: api,
+  }
 })
 
 vi.mock('~/composables/useStateOverrideOptions', () => ({

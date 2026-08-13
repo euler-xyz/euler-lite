@@ -7,7 +7,7 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedB
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { getCurrentPreparedQuotePlan, useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import type { SwapQuoteInput } from '~/composables/useSwapApi'
@@ -991,12 +991,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   const getSelectedPreparedSwapPlan = () => {
     if (!options.needsSwap.value || !swapSelectedQuote.value) return null
-    const card = swapSelectedQuoteCard.value
-    if (!card?.preparedPlan || card.quote !== swapSelectedQuote.value) return null
-    return {
-      plan: card.plan ?? card.preparedPlan.plan,
-      prepared: card.preparedPlan as TransactionPlanPrepared,
-    }
+    return getCurrentPreparedQuotePlan(swapSelectedQuoteCard.value, swapSelectedQuote.value)
   }
 
   // --- Submit ---

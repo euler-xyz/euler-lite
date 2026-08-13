@@ -5,6 +5,7 @@ import type {
   EulerPlugin,
   EVCBatchItem,
   TransactionPlan,
+  TransactionPlanPrepared,
 } from '@eulerxyz/euler-v2-sdk'
 import { tosSignerWriteAbi } from '~/abis/tos'
 
@@ -16,6 +17,7 @@ interface StoredTosSignature {
 }
 
 const signatures = new Map<SignatureKey, StoredTosSignature>()
+const preparedPlanContextVersions = new WeakMap<TransactionPlanPrepared, number>()
 let tosContextVersion = 0
 
 const keyFor = (chainId: number, account: Address): SignatureKey =>
@@ -47,6 +49,26 @@ export const clearLiteTosSignature = (args: { chainId: number, account: Address 
 }
 
 export const getLiteTosContextVersion = (): number => tosContextVersion
+
+export const bindLiteTosContextToPreparedPlan = (
+  prepared: TransactionPlanPrepared,
+  contextVersion = getLiteTosContextVersion(),
+): TransactionPlanPrepared => {
+  preparedPlanContextVersions.set(prepared, contextVersion)
+  return prepared
+}
+
+export const assertPreparedPlanLiteTosContextCurrent = (
+  prepared: TransactionPlanPrepared,
+) => {
+  const preparedVersion = preparedPlanContextVersions.get(prepared)
+  if (
+    preparedVersion !== undefined
+    && preparedVersion !== getLiteTosContextVersion()
+  ) {
+    throw new Error('Terms of Use context changed after this transaction was prepared. Prepare and review it again.')
+  }
+}
 
 const ownerOf = (account: AddressOrAccount): Address =>
   typeof account === 'string' ? getAddress(account) : getAddress(account.owner)

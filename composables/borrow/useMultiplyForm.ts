@@ -12,7 +12,7 @@ import { getPlanHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning,
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useMultiplyCollateralOptions } from '~/composables/useMultiplyCollateralOptions'
 import { withProjectedVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { getCurrentPreparedQuotePlan, useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
@@ -1267,6 +1267,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           && quote.accountIn?.toLowerCase() === subAccount.toLowerCase()
           ? multiplySelectedQuoteCard.value
           : null
+        const cachedPrepared = getCurrentPreparedQuotePlan(matchingCard, quote)
         if (planAccount.value) {
           try {
             await preloadSubAccountSnapshot(planAccount.value, subAccount as Address)
@@ -1275,10 +1276,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
             logWarn('multiply/review/preloadSubAccountSnapshot', e)
           }
         }
-        if (matchingCard?.preparedPlan) {
+        if (cachedPrepared) {
           // Lazy-prepared envelope is available — short-circuit prepare entirely.
-          multiplyPlan.value = matchingCard.plan ?? null
-          preparedMultiplyPlan.value = matchingCard.preparedPlan as TransactionPlanPrepared
+          multiplyPlan.value = cachedPrepared.plan
+          preparedMultiplyPlan.value = cachedPrepared.prepared as TransactionPlanPrepared
         }
         else {
           // Reuse the raw plan from the selected quote card when possible.

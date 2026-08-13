@@ -97,6 +97,10 @@ vi.mock('~/composables/useStateOverrideOptions', () => ({
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
+  getCurrentPreparedQuotePlan: (card: { quote?: unknown, plan?: unknown, preparedPlan?: { plan: unknown } } | null, quote: unknown) => {
+    if (!card?.preparedPlan || card.quote !== quote) return null
+    return { plan: card.plan ?? card.preparedPlan.plan, prepared: card.preparedPlan }
+  },
   useSwapQuotesParallel: () => ({
     sortedQuoteCards: ref([]),
     selectedProvider: ref(null),

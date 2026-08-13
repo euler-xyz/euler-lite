@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, nextTick, ref, watch } from 'vue'
-import { SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
-import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { SwapperMode, type SwapQuote, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { getCurrentPreparedQuotePlan, useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
+import { clearLiteTosSignature, getLiteTosContextVersion, setLiteTosSignature } from '~/utils/sdk-tos'
 
 const { getTokenUsdValueMock } = vi.hoisted(() => ({
   getTokenUsdValueMock: vi.fn(),
@@ -92,6 +93,30 @@ describe('useSwapQuotesParallel', () => {
     expect(quotes.selectedProvider.value).toBe('first')
     expect(quotes.selectedQuote.value).toBe(quotes.effectiveQuote.value)
     expect(changes).toEqual([])
+  })
+
+  it('rejects a cached prepared quote after the TOS context changes', () => {
+    const account = '0x00000000000000000000000000000000000000a1'
+    const quote = makeQuote('100', '200')
+    const prepared = { plan: [] } as unknown as TransactionPlanPrepared
+    const card = {
+      provider: 'test',
+      quote,
+      preparedPlan: prepared,
+      tosContextVersion: getLiteTosContextVersion(),
+    }
+
+    expect(getCurrentPreparedQuotePlan(card, quote)?.prepared).toBe(prepared)
+
+    setLiteTosSignature({
+      chainId: 1,
+      account,
+      tosMessage: 'current terms',
+      tosMessageHash: `0x${'11'.repeat(32)}`,
+    })
+    expect(getCurrentPreparedQuotePlan(card, quote)).toBeNull()
+
+    clearLiteTosSignature({ chainId: 1, account })
   })
 
   it('updates effectiveQuote when selecting a non-best provider', async () => {

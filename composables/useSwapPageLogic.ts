@@ -6,7 +6,7 @@ import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
-import { useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
+import { getCurrentPreparedQuotePlan, useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
@@ -501,14 +501,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   const getSelectedPreparedQuotePlan = () => {
     if (isSameAsset.value || !selectedQuote.value) return null
-    const card = selectedQuoteCard.value
-    if (!card?.preparedPlan || card.quote !== selectedQuote.value) return null
-    if (card.tosContextVersion !== getLiteTosContextVersion()) return null
-    return {
-      plan: card.plan ?? card.preparedPlan.plan,
-      prepared: card.preparedPlan as TransactionPlanPrepared,
-      tosContextVersion: card.tosContextVersion,
-    }
+    return getCurrentPreparedQuotePlan(selectedQuoteCard.value, selectedQuote.value)
   }
 
   const currentPlanAccount = () => getPlanAccount?.() ?? defaultPlanAccount.value

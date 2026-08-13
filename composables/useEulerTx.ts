@@ -80,6 +80,11 @@ import {
   assertWalletExecutionContext,
   type WalletExecutionContext,
 } from '~/utils/walletExecutionContext'
+import {
+  assertPreparedPlanLiteTosContextCurrent,
+  bindLiteTosContextToPreparedPlan,
+  getLiteTosContextVersion,
+} from '~/utils/sdk-tos'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -1178,13 +1183,15 @@ export const useEulerTx = () => {
       const owner = requireOwner()
       const cid = options?.chainId ?? requireChainId()
       const sdk = await getEulerSdkForChain(cid)
-      return sdk.executionService.prepareTransactionPlan({
+      const tosContextVersion = getLiteTosContextVersion()
+      const prepared = await sdk.executionService.prepareTransactionPlan({
         plan,
         chainId: cid,
         account: options?.account ?? owner,
         usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
         prefetch: options?.prefetch,
       })
+      return bindLiteTosContextToPreparedPlan(prepared, tosContextVersion)
     })
   }
 
@@ -1821,6 +1828,7 @@ export const useEulerTx = () => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
+    assertPreparedPlanLiteTosContextCurrent(prepared)
     const sdk = await getEulerSdkFresh()
     const provider = sdk.providerService?.getProvider(prepared.chainId)
     if (!provider) {
@@ -2021,6 +2029,7 @@ export const useEulerTx = () => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
+    assertPreparedPlanLiteTosContextCurrent(prepared)
     const sdk = await getEulerSdkFresh()
     const provider = sdk.providerService?.getProvider(prepared.chainId)
     if (!provider) {

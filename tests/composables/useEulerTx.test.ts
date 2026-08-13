@@ -9,6 +9,7 @@ import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizatio
 import { loadPendingSafeBundleSubmissions } from '~/utils/pending-safe-bundle-submission'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import * as safeWalletTransactions from '~/utils/safeWalletTransactions'
+import { clearLiteTosSignature, setLiteTosSignature } from '~/utils/sdk-tos'
 
 const wagmiMocks = vi.hoisted(() => ({
   sendTransactionAsync: vi.fn(),
@@ -178,6 +179,36 @@ describe('useEulerTx migration authorization cleanup', () => {
     await prepareTransactionPlan([] as TransactionPlan, { usePermit2: false })
 
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
+  })
+
+  it('does not execute a prepared plan after the TOS context changes', async () => {
+    clearLiteTosSignature({ chainId: 1, account: OWNER })
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+    vi.mocked(getEulerSdkForChain).mockResolvedValue({
+      executionService: { prepareTransactionPlan: vi.fn().mockResolvedValue(prepared) },
+    } as never)
+    const { prepareTransactionPlan, executePreparedPlan } = useEulerTx()
+    const trackedPrepared = await prepareTransactionPlan([] as TransactionPlan)
+
+    setLiteTosSignature({
+      chainId: 1,
+      account: OWNER,
+      tosMessage: 'current terms',
+      tosMessageHash: `0x${'22'.repeat(32)}`,
+    })
+
+    await expect(executePreparedPlan(trackedPrepared))
+      .rejects.toThrow('Terms of Use context changed')
+    expect(getEulerSdkFresh).not.toHaveBeenCalled()
+
+    clearLiteTosSignature({ chainId: 1, account: OWNER })
   })
 
   it('rejects a preloaded plan account from another chain', async () => {

@@ -29,7 +29,7 @@ import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { profAsync, profMark } from '~/utils/profiler'
-import { getLiteTosContextVersion } from '~/utils/sdk-tos'
+import { bindLiteTosContextToPreparedPlan, getLiteTosContextVersion } from '~/utils/sdk-tos'
 
 export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
 export type SwapQuotePlanContext = {
@@ -79,6 +79,19 @@ type SwapQuotesRequestOptions = {
   /** Per-provider overrides for individual request fields — e.g. CoW needing
    *  a different `accountIn`/`accountOut` than the EVC batch path. */
   providerParams?: Partial<Record<string, Partial<SwapQuoteInput>>>
+}
+
+export const getCurrentPreparedQuotePlan = (
+  card: SwapQuoteCard | null | undefined,
+  quote: SwapQuote | null | undefined,
+) => {
+  if (!card?.preparedPlan || !quote || card.quote !== quote) return null
+  if (card.tosContextVersion !== getLiteTosContextVersion()) return null
+  return {
+    plan: card.plan ?? card.preparedPlan.plan,
+    prepared: card.preparedPlan,
+    tosContextVersion: card.tosContextVersion,
+  }
 }
 
 export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
@@ -332,6 +345,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
       tosContextVersion = getLiteTosContextVersion()
       prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))
+      bindLiteTosContextToPreparedPlan(prepared, tosContextVersion)
       const gasPlan = await profAsync(`quote:${provider}`, 'buildGasEstimatePlan', () => buildGasEstimatePlan(plan))
       const gasPrepared = gasPlan === plan
         ? prepared
