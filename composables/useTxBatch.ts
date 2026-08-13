@@ -35,7 +35,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
-import { SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
+import { SafeSubmissionStatusUnknownError, SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
 import { requireReviewedBatchPreparedExecution, type ReviewedSignaturePlaceholderCall } from '~/utils/reviewed-batch-execution'
 import {
   getPreparedBatchFingerprint,
@@ -2946,7 +2946,16 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      if (safeSubmissionKind && batchExecutionContext && error instanceof SafeTransactionStatusUnknownError) {
+      if (safeSubmissionKind === 'batch' && batchExecutionContext && error instanceof SafeSubmissionStatusUnknownError) {
+        // sendCalls crossed the terminal boundary but yielded no trustworthy
+        // hash. The hashless reservation written before the wallet opened is
+        // the only protection against proposing the same batch twice.
+        if (isPendingSafeSubmissionForContext(submittedSafeLock ?? null, owner.value, chainId.value)) {
+          entries.value = [...batchEntriesSnapshot]
+          execError.value = error.message
+        }
+      }
+      else if (safeSubmissionKind && batchExecutionContext && error instanceof SafeTransactionStatusUnknownError) {
         const errorMessage = safeSubmissionKind === 'batch'
           ? `${error.message} Submitted Safe hash: ${error.submittedHash}`
           : `${error.message} Submitted prerequisite Safe hash: ${error.submittedHash}. The terminal batch has not been submitted.`

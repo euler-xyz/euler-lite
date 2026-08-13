@@ -6,6 +6,7 @@ import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { isSuccessfulTransactionReceipt, useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
+import { loadPendingSafeBundleSubmissions } from '~/utils/pending-safe-bundle-submission'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import * as safeWalletTransactions from '~/utils/safeWalletTransactions'
 
@@ -15,6 +16,15 @@ const wagmiMocks = vi.hoisted(() => ({
   sendCalls: vi.fn(),
   config: {},
 }))
+
+const memoryStorage = () => {
+  const values = new Map<string, string>()
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  }
+}
 
 vi.mock('@wagmi/vue', () => ({
   useConfig: () => wagmiMocks.config,
@@ -91,6 +101,10 @@ describe('useEulerTx migration authorization cleanup', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { localStorage: memoryStorage() },
+    })
     currentAccount = OWNER
     currentChainId = 1
     walletAddress = ref(OWNER)
@@ -539,6 +553,10 @@ describe('useEulerTx Safe wallet bundling', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { localStorage: memoryStorage() },
+    })
     currentAccount = OWNER
     currentChainId = 1
 
@@ -606,6 +624,60 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
   })
 
+  it('durably reserves ordinary Safe bundles before opening the wallet', async () => {
+    wagmiMocks.sendCalls.mockImplementationOnce(async () => {
+      const pending = loadPendingSafeBundleSubmissions(window.localStorage)[0]
+      expect(pending).toMatchObject({
+        account: OWNER,
+        chainId: 1,
+      })
+      expect(pending?.submittedHash).toBeUndefined()
+      return { id: SAFE_TX_HASH }
+    })
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan(buildPrepared(approvedPlan))
+
+    expect(loadPendingSafeBundleSubmissions(window.localStorage)).toEqual([])
+  })
+
+  it('retains the hashless reservation when sendCalls rejects ambiguously', async () => {
+    wagmiMocks.sendCalls.mockRejectedValueOnce(new Error('Safe relay unavailable'))
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toBeInstanceOf(safeWalletTransactions.SafeSubmissionStatusUnknownError)
+    const pending = loadPendingSafeBundleSubmissions(window.localStorage)[0]
+    expect(pending).toMatchObject({
+      account: OWNER,
+      chainId: 1,
+    })
+    expect(pending?.submittedHash).toBeUndefined()
+  })
+
+  it('retains the hashless reservation when Safe returns no usable bundle id', async () => {
+    wagmiMocks.sendCalls.mockResolvedValueOnce({ id: undefined } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toBeInstanceOf(safeWalletTransactions.SafeSubmissionStatusUnknownError)
+    const pending = loadPendingSafeBundleSubmissions(window.localStorage)[0]
+    expect(pending).toMatchObject({
+      account: OWNER,
+      chainId: 1,
+    })
+    expect(pending?.submittedHash).toBeUndefined()
+  })
+
+  it('clears the reservation for an explicit wallet rejection', async () => {
+    const rejection = Object.assign(new Error('User rejected the request'), { code: 4001 })
+    wagmiMocks.sendCalls.mockRejectedValueOnce(rejection)
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan))).rejects.toBe(rejection)
+    expect(loadPendingSafeBundleSubmissions(window.localStorage)).toEqual([])
+  })
+
   it('falls back to sequential execution for single-call plans', async () => {
     const { executePreparedPlan } = useEulerTx()
     const batchOnly = [approvedPlan[1]] as TransactionPlan
@@ -665,12 +737,12 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
   })
 
-  it('rejects bundle ids that are not hash-shaped', async () => {
+  it('treats bundle ids that are not hash-shaped as submission-ambiguous', async () => {
     wagmiMocks.sendCalls.mockResolvedValue({ id: 'bundle-1' })
     const { executePreparedPlan } = useEulerTx()
 
     await expect(executePreparedPlan(buildPrepared(approvedPlan)))
-      .rejects.toThrow('unexpected call bundle id')
+      .rejects.toBeInstanceOf(safeWalletTransactions.SafeSubmissionStatusUnknownError)
   })
 
   it('throws on a mined-but-reverted Safe bundle instead of finalizing it', async () => {

@@ -50,8 +50,34 @@ export class SafeTransactionStatusUnknownError extends Error {
   }
 }
 
+/**
+ * The wallet request crossed the durable terminal-submission boundary, but no
+ * trustworthy Safe hash was captured. Retrying could duplicate a proposal, so
+ * callers must retain their hashless reservation for manual reconciliation.
+ */
+export class SafeSubmissionStatusUnknownError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = 'SafeSubmissionStatusUnknownError'
+    if (cause !== undefined) this.cause = cause
+  }
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object'
+
+/** Only errors carrying a wallet-standard rejection code are safe to unwind. */
+export const isExplicitSafeSubmissionRejection = (error: unknown): boolean => {
+  let current = error
+  const seen = new WeakSet<object>()
+  for (let depth = 0; depth < 8 && isRecord(current); depth++) {
+    if (seen.has(current)) return false
+    seen.add(current)
+    if (current.code === 4001 || current.code === '4001' || current.code === 'ACTION_REJECTED') return true
+    current = current.cause
+  }
+  return false
+}
 
 const isHash = (value: unknown): value is Hash =>
   typeof value === 'string' && /^0x[0-9a-f]{64}$/i.test(value)

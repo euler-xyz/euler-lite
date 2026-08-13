@@ -55,12 +55,21 @@ import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
 import {
   getSafeWalletProvider,
+  isExplicitSafeSubmissionRejection,
   SafeTransactionStatusUnknownError,
+  SafeSubmissionStatusUnknownError,
   isSafeConnectorIdentity,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
   type WalletProviderLike,
 } from '~/utils/safeWalletTransactions'
+import {
+  clearPendingSafeBundleSubmission,
+  findPendingSafeBundleSubmission,
+  reservePendingSafeBundleSubmission,
+  updatePendingSafeBundleSubmission,
+  type PendingSafeBundleSubmission,
+} from '~/utils/pending-safe-bundle-submission'
 import {
   PlanNotBundleableError,
   transactionPlanToCalls,
@@ -75,6 +84,7 @@ import {
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
 const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
+let nextSafeBundleReservationId = 1
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
   populateMarketPrices: false,
@@ -1445,6 +1455,125 @@ export const useEulerTx = () => {
     onSafeSubmission?: (submittedHash: Hash) => void
   }
 
+  const hasDurableSafeSubmissionLifecycle = (
+    lifecycle?: SafeSubmissionLifecycle,
+  ): lifecycle is Required<SafeSubmissionLifecycle> => Boolean(
+    lifecycle?.onSafePreflight
+    && lifecycle.onSafeTerminalSubmissionStart
+    && lifecycle.onSafeSubmission,
+  )
+
+  const getSafeBundleStorage = (): Storage => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) return window.localStorage
+    }
+    catch {
+      // Fail closed below: a Safe request must not open without a durable lock.
+    }
+    throw new Error('Durable Safe submission storage is unavailable. Enable browser storage before submitting.')
+  }
+
+  const reconcileIntrinsicSafeBundleReservation = async ({
+    storage,
+    account,
+    chainId,
+    safeWalletProvider,
+    provider,
+  }: {
+    storage: Storage
+    account: Address
+    chainId: number
+    safeWalletProvider: WalletProviderLike
+    provider: ReceiptClientLike
+  }) => {
+    const pending = findPendingSafeBundleSubmission(storage, account, chainId)
+    if (!pending) return
+    if (!pending.submittedHash) throw new SafeSubmissionStatusUnknownError(pending.errorMessage)
+
+    let execution
+    try {
+      execution = await waitForSafeTransactionExecution({
+        submittedHash: pending.submittedHash,
+        walletProvider: safeWalletProvider,
+        publicClient: provider,
+        timeoutMs: 15_000,
+      })
+    }
+    catch (error) {
+      if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
+        clearPendingSafeBundleSubmission(storage, pending.reservationId)
+        return
+      }
+      throw error
+    }
+
+    clearPendingSafeBundleSubmission(storage, pending.reservationId)
+    if (isSuccessfulTransactionReceipt(execution.receipt)) {
+      finalizeExecution({ receipts: [execution.receipt] }, chainId)
+      throw new Error(`The previous Safe bundle already executed (${execution.hash}). Refresh the transaction review before submitting again.`)
+    }
+    // A mined revert is terminal and changed no protocol state, so a freshly
+    // reviewed retry may proceed after its durable reservation is removed.
+  }
+
+  const createIntrinsicSafeSubmissionLifecycle = ({
+    account,
+    chainId,
+    safeWalletProvider,
+    provider,
+  }: {
+    account: Address
+    chainId: number
+    safeWalletProvider: WalletProviderLike
+    provider: ReceiptClientLike
+  }) => {
+    let storage: Storage | undefined
+    let reservation: PendingSafeBundleSubmission | undefined
+
+    const clear = () => {
+      if (storage && reservation) clearPendingSafeBundleSubmission(storage, reservation.reservationId)
+    }
+
+    const lifecycle: Required<SafeSubmissionLifecycle> = {
+      onSafePreflight: async () => {
+        storage = getSafeBundleStorage()
+        await reconcileIntrinsicSafeBundleReservation({
+          storage,
+          account,
+          chainId,
+          safeWalletProvider,
+          provider,
+        })
+        reservation = {
+          reservationId: `${Date.now().toString(36)}-${nextSafeBundleReservationId++}`,
+          account,
+          chainId,
+          errorMessage: 'Safe bundle submission was armed without a verifiable hash. Verify this account in Safe before retrying.',
+        }
+        // Reserve before the wallet opens. A write failure aborts submission.
+        reservePendingSafeBundleSubmission(storage, reservation)
+      },
+      onSafeTerminalSubmissionStart: () => {
+        if (!storage || !reservation) {
+          throw new Error('Durable Safe submission preflight did not complete')
+        }
+      },
+      onSafeSubmission: (submittedHash) => {
+        if (!storage || !reservation) {
+          throw new SafeSubmissionStatusUnknownError('Safe returned a hash without a durable submission reservation.')
+        }
+        reservation = {
+          ...reservation,
+          submittedHash,
+          errorMessage: `Safe bundle submission is pending confirmation. Submitted Safe hash: ${submittedHash}`,
+        }
+        updatePendingSafeBundleSubmission(storage, reservation)
+      },
+    }
+
+    return { lifecycle, clear }
+  }
+
   /**
    * Submit every plan transaction as one EIP-5792 call bundle. Safe turns
    * the bundle into a single MultiSend proposal, so signers approve once
@@ -1510,32 +1639,81 @@ export const useEulerTx = () => {
       currentChainId: currentAccount.chainId,
     })
 
-    await submissionLifecycle?.onSafePreflight?.()
-    submissionLifecycle?.onSafeTerminalSubmissionStart?.()
+    const intrinsicLifecycle = hasDurableSafeSubmissionLifecycle(submissionLifecycle)
+      ? undefined
+      : createIntrinsicSafeSubmissionLifecycle({
+          account: owner,
+          chainId,
+          safeWalletProvider,
+          provider: provider as ReceiptClientLike,
+        })
+    const lifecycle = hasDurableSafeSubmissionLifecycle(submissionLifecycle)
+      ? submissionLifecycle
+      : intrinsicLifecycle!.lifecycle
+
+    await lifecycle.onSafePreflight()
+    lifecycle.onSafeTerminalSubmissionStart()
 
     // Pin submission to the connector whose provider was identified as Safe.
     // Without it, wagmi resolves the currently-active connector, and a
     // same-account connector switch would submit through one provider while
     // status polling watches another.
-    const { id } = await sendCalls(config, {
-      account: owner,
-      chainId,
-      connector,
-      forceAtomic: true,
-      calls,
-    })
+    let id: unknown
+    try {
+      const response = await sendCalls(config, {
+        account: owner,
+        chainId,
+        connector,
+        forceAtomic: true,
+        calls,
+      })
+      id = response.id
+    }
+    catch (error) {
+      if (isExplicitSafeSubmissionRejection(error)) {
+        intrinsicLifecycle?.clear()
+        throw error
+      }
+      throw new SafeSubmissionStatusUnknownError(
+        'Safe wallet request failed after submission was armed. Its status is unknown; verify it in Safe before retrying.',
+        error,
+      )
+    }
     // Safe returns the safeTxHash as the bundle id; the status poller needs
     // a hash-shaped id to resolve it to the executed transaction.
-    if (!/^0x[0-9a-f]{64}$/i.test(id)) {
-      throw new Error('Safe wallet returned an unexpected call bundle id')
+    if (typeof id !== 'string' || !/^0x[0-9a-f]{64}$/i.test(id)) {
+      throw new SafeSubmissionStatusUnknownError(
+        'Safe wallet returned no verifiable call bundle id after submission was armed. Verify it in Safe before retrying.',
+      )
     }
-    submissionLifecycle?.onSafeSubmission?.(id as Hash)
+    try {
+      lifecycle.onSafeSubmission(id as Hash)
+    }
+    catch (error) {
+      if (error instanceof SafeTransactionStatusUnknownError || error instanceof SafeSubmissionStatusUnknownError) throw error
+      throw new SafeSubmissionStatusUnknownError(
+        'Safe returned a bundle hash, but its durable submission record could not be updated. Verify it in Safe before retrying.',
+        error,
+      )
+    }
 
-    const execution = await waitForSafeTransactionExecution({
-      submittedHash: id as Hash,
-      walletProvider: safeWalletProvider,
-      publicClient: provider as ReceiptClientLike,
-    })
+    let execution
+    try {
+      execution = await waitForSafeTransactionExecution({
+        submittedHash: id as Hash,
+        walletProvider: safeWalletProvider,
+        publicClient: provider as ReceiptClientLike,
+      })
+    }
+    catch (error) {
+      if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
+        intrinsicLifecycle?.clear()
+        throw error
+      }
+      if (error instanceof SafeTransactionStatusUnknownError) throw error
+      throw new SafeTransactionStatusUnknownError(id as Hash, 'aborted')
+    }
+    intrinsicLifecycle?.clear()
     if (execution.receipt.status !== 'success') {
       throw new Error('Safe transaction reverted')
     }

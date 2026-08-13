@@ -13,7 +13,7 @@ import {
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
-import { SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
+import { SafeSubmissionStatusUnknownError, SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
 import { loadPendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
 
 vi.mock('~/composables/useEulerSdk', () => ({
@@ -1616,6 +1616,72 @@ describe('useTxBatch execution prerequisites', () => {
     // discarded it with the page.
     eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'not-executed' })
     await batch.reconcilePendingSafeSubmission()
+  })
+
+  it('retains the terminal reservation when Safe submission has no trustworthy hash', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared,
+      _extraCalls,
+      options: {
+        onSafePreflight?: () => void | Promise<void>
+        onSafeTerminalSubmissionStart?: () => void
+      },
+    ) => {
+      await options.onSafePreflight?.()
+      options.onSafeTerminalSubmissionStart?.()
+      throw new SafeSubmissionStatusUnknownError('Safe submission status is unknown')
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    await batch.executeBatch()
+
+    expect(batch.pendingSafeSubmission.value).toMatchObject({ submissionKind: 'batch' })
+    expect(batch.pendingSafeSubmission.value?.submittedHash).toBeUndefined()
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)[0]).toMatchObject({ submissionKind: 'batch' })
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)[0]?.submittedHash).toBeUndefined()
+    expect(batch.canExecuteBatch.value).toBe(false)
+    expect(batch.execError.value).toBe('Safe submission status is unknown')
+    expect(migrationFlowMocks.revokeAfterAbort).not.toHaveBeenCalled()
+
+    // Test cleanup: hashless reservations intentionally have no user-facing
+    // automatic unlock, so give this fixture a known cancelled hash.
+    batch.pendingSafeSubmission.value!.submittedHash = `0x${'28'.repeat(32)}` as Hash
+    eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'not-executed' })
+    await batch.reconcilePendingSafeSubmission()
+  })
+
+  it('clears the terminal reservation after an explicit wallet rejection', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const rejection = Object.assign(new Error('User rejected the request'), { code: 4001 })
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared,
+      _extraCalls,
+      options: {
+        onSafePreflight?: () => void | Promise<void>
+        onSafeTerminalSubmissionStart?: () => void
+      },
+    ) => {
+      await options.onSafePreflight?.()
+      options.onSafeTerminalSubmissionStart?.()
+      throw rejection
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    await batch.executeBatch()
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([])
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([])
+    expect(batch.entryCount.value).toBe(1)
   })
 
   it('throws instead of degrading when the safe bundle context is unavailable', async () => {
