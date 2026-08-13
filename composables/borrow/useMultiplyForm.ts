@@ -43,6 +43,7 @@ import {
   type ProjectedYieldRateLine,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -103,6 +104,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { entryCount: batchEntryCount } = useTxBatch()
+  const { cowSwapForcedOff } = useCowSwapEligibility()
   const {
     version: rewardsVersion,
     getSupplyRewardApy,
@@ -167,7 +169,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
     compare: 'max',
-    includeCowSwap: () => batchEntryCount.value === 0 && !isMultiplySavingCollateral.value,
+    includeCowSwap: () => !cowSwapForcedOff.value && batchEntryCount.value === 0 && !isMultiplySavingCollateral.value,
     buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
     getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
     // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
@@ -1325,8 +1327,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await sendMultiply()
+          onConfirm: async (execution) => {
+            await sendMultiply(execution)
           },
         },
       })
@@ -1336,7 +1338,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
   }
 
-  const sendMultiply = async () => {
+  const sendMultiply = async (execution: TrackedExecutionScope) => {
     // Use the unprepared plan and let executeTransactionPlan re-run plugins
     // at submit time — keeps the on-chain Pyth update payload fresh so the
     // staleness check can't bite us between Review-click and broadcast.
@@ -1344,7 +1346,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     isMultiplySubmitting.value = true
     try {
       await executePlan(multiplyPlan.value)
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       logWarn('multiply/send', e)

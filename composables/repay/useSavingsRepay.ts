@@ -23,6 +23,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseSavingsRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -494,8 +495,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           transferAmounts,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (execution) => {
+            await send(execution)
           },
           submittingLabel: 'Submitting...',
         },
@@ -506,14 +507,14 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (execution: TrackedExecutionScope) => {
     if (!position.value || !borrowVault.value || !sourceVault.value) return
     if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
     try {
       isSubmitting.value = true
       const txPlan = await buildRepayPlan()
       await executePlan(txPlan)
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       error('Transaction failed')

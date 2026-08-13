@@ -1,3 +1,4 @@
+import type { StateOverride } from 'viem'
 import type { SimulationStateOverrideOptions, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import {
   formatSimulationFailure,
@@ -62,11 +63,15 @@ export const useTransactionPlanSimulation = () => {
     }
   }
 
-  const runPreparedSimulation = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
+  const runPreparedSimulation = async (
+    prepared: TransactionPlanPrepared,
+    stateOverrideOptions?: SimulationStateOverrideOptions,
+    extraStateOverrides?: StateOverride,
+  ) => {
     clearSimulationError()
     isSimulating.value = true
     try {
-      return handleResult(prepared, await simulatePreparedPlan(prepared, stateOverrideOptions))
+      return handleResult(prepared, await simulatePreparedPlan(prepared, stateOverrideOptions, extraStateOverrides))
     }
     catch (e) {
       if (await isNonBlockingApprovalSimulationError(prepared, e)) return true

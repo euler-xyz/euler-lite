@@ -218,6 +218,7 @@ describe('useCollateralSwapRepay', () => {
       entryCount: ref(0),
       getMergedPlan: vi.fn(() => null),
     }))
+    vi.stubGlobal('useCowSwapEligibility', () => ({ cowSwapForcedOff: ref(false) }))
     vi.stubGlobal('useUserSettings', () => ({
       settings: ref({ enableIntrinsicApy: false }),
     }))

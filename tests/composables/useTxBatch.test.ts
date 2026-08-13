@@ -35,9 +35,11 @@ const eulerTxMocks = {
   prepareTransactionPlan: vi.fn(),
   executePreparedPlan: vi.fn(),
   reconcileSafeTransaction: vi.fn(),
+  executePreparedPlanWithPlainCalls: vi.fn(),
   estimateGasForPlan: vi.fn(),
   sendPlainTransactions: vi.fn(),
 }
+const isSafeWalletRef = ref(false)
 const grantWalletContext: WalletExecutionContext = { account: owner, chainId: 1 }
 type PlainTxSendOptions = {
   onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
@@ -288,6 +290,8 @@ const stubBatchComposableGlobals = () => {
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useEulerTx', () => eulerTxMocks)
+  isSafeWalletRef.value = false
+  vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet: isSafeWalletRef, isSafeWalletResolved: ref(true) }))
   vi.stubGlobal('useMigrationAuthorizationFlow', () => migrationFlowMocks)
   vi.stubGlobal('useExternalMigrationRefresh', () => ({ scheduleExternalMigrationRefreshes }))
   vi.stubGlobal('useRouter', () => ({ replace: routerReplace }))
@@ -346,6 +350,7 @@ beforeEach(() => {
   eulerTxMocks.executePreparedPlan.mockReset()
   eulerTxMocks.reconcileSafeTransaction.mockReset()
   eulerTxMocks.reconcileSafeTransaction.mockResolvedValue({ status: 'unknown' })
+  eulerTxMocks.executePreparedPlanWithPlainCalls.mockReset()
   eulerTxMocks.estimateGasForPlan.mockReset()
   eulerTxMocks.sendPlainTransactions.mockReset()
   eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
@@ -1257,6 +1262,7 @@ describe('useTxBatch execution errors', () => {
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, expect.objectContaining({
       onProgress: expect.any(Function),
       onSafePrerequisiteSubmission: expect.any(Function),
+      onSafeTerminalSubmissionStart: expect.any(Function),
       onSafeSubmission: expect.any(Function),
     }))
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
@@ -1357,6 +1363,169 @@ describe('useTxBatch execution prerequisites', () => {
       postTxs: [revokeTx],
       postTxsByPreTx: [revokeTx],
     })
+
+  const singleOpBundledPlan = [{
+    type: 'evcBatch',
+    items: [{ type: 'operation', name: 'bundled-migration', items: [] }],
+  }] as unknown as TransactionPlan
+
+  const bundledGrantStep = { index: 1, label: 'Approve aToken transfer', isSeparateTx: false }
+  const bundledRevokeStep = { index: 1, label: 'Restore previous aToken approval', isSeparateTx: false }
+
+  const addBundledMigrationEntry = (batch: ReturnType<typeof useTxBatch>) =>
+    batch.addEntry({
+      label: 'Migrate Aave position',
+      buildPlan: async () => singleOpBundledPlan,
+      buildExecutionPrerequisites: async () => ({
+        preTxs: [grantTx],
+        walletContext: grantWalletContext,
+        postTxs: [revokeTx],
+        postTxsByPreTx: [revokeTx],
+      }),
+      buildBundledExecution: async () => ({
+        plan: singleOpBundledPlan,
+        grants: [grantTx],
+        revokes: [revokeTx],
+        grantSteps: [bundledGrantStep],
+        revokeSteps: [bundledRevokeStep],
+      }),
+      refreshExternalMigrationPositions: true,
+    })
+
+  it('bundles grants + batch + revokes into one safe proposal', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const prepared = { kind: 'prepared' }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockResolvedValue({ receipts: [] })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    // The review modal latches the ceremony at open; execution consumes it.
+    await batch.prepareBundledExecution()
+    await batch.executeBatch()
+
+    // Grants ride in the proposal — no standalone broadcasts, no unwind
+    // bookkeeping, no standalone gas estimate against unmined grants.
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    expect(eulerTxMocks.estimateGasForPlan).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledWith(prepared, {
+      before: [grantTx],
+      after: [revokeTx],
+    }, { allowSingleCall: true })
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    // Revokes rode in the proposal — nothing standalone to send afterwards.
+    expect(migrationFlowMocks.revokeAfterSuccess).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(0)
+  })
+
+  it('throws instead of degrading when the safe bundle context is unavailable', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockResolvedValue(undefined)
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    await batch.executeBatch()
+
+    expect(batch.execError.value).toBeTruthy()
+    // Nothing broadcast standalone, nothing to unwind, cart retained.
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([])
+    expect(batch.entryCount.value).toBe(1)
+    batch.latchedBundledExecution.value = null
+  })
+
+  it('bundles a latched ceremony even when its grants resolved empty', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const prepared = { kind: 'prepared' }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockResolvedValue({ receipts: [] })
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Migrate Aave position',
+      buildPlan: async () => singleOpBundledPlan,
+      buildExecutionPrerequisites: async () => undefined,
+      // Grant already live: nothing to wrap — but the reviewed ceremony is
+      // still ONE provider-bound proposal, never a silent executePreparedPlan
+      // whose internals could degrade to sequential sends.
+      buildBundledExecution: async () => ({ plan: singleOpBundledPlan, grants: [], revokes: [], grantSteps: [], revokeSteps: [] }),
+    })
+    await batch.prepareBundledExecution()
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledWith(prepared, {
+      before: [],
+      after: [],
+    }, { allowSingleCall: true })
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+  })
+
+  it('latches per-entry review rows from the bundled resolution', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    const latched = await batch.prepareBundledExecution()
+
+    // The modal renders THESE rows — derived from the same authorization
+    // resolution the proposal executes — never the add-time captures, which
+    // can be stale by the time the review opens.
+    const entryId = batch.entries.value[0]!.id
+    expect(latched?.stepsByEntryId[entryId]).toEqual({
+      grantSteps: [bundledGrantStep],
+      revokeSteps: [bundledRevokeStep],
+    })
+    batch.latchedBundledExecution.value = null
+  })
+
+  it('throws a re-review error when the wallet stopped being a safe after latching', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    // Safe disconnected between review and confirm.
+    isSafeWalletRef.value = false
+    await batch.executeBatch()
+
+    expect(batch.execError.value).toBeTruthy()
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    batch.latchedBundledExecution.value = null
+  })
+
+  it('keeps the sequential ceremony for non-safe wallets', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = false
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+    eulerTxMocks.sendPlainTransactions.mockImplementation(async (txs: { data: Hex }[], options?: PlainTxSendOptions) => {
+      txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
+      return []
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    await batch.executeBatch(await prepareReviewedBatch(batch))
+
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalled()
+  })
 
   it('revokes an already-granted entry when a later entry\'s grant is rejected', async () => {
     // A two-entry batch needs a simulated account per layer, or executeBatch
@@ -1664,6 +1833,87 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.entryCount.value).toBe(1)
     expect(batch.execError.value).toContain('terminal batch was not submitted')
     expect(routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('retains an unreconcilable terminal reservation when terminal hash persistence fails', async () => {
+    const originalWindow = globalThis.window
+    const backing = memoryStorage()
+    let writeCount = 0
+    let rejectTerminalHashWrites = true
+    const storage: Storage = {
+      get length() { return backing.length },
+      clear: () => backing.clear(),
+      getItem: key => backing.getItem(key),
+      key: index => backing.key(index),
+      removeItem: key => backing.removeItem(key),
+      setItem: (key, value) => {
+        writeCount += 1
+        // 1: preflight reservation; 2: prerequisite hash; 3: terminal
+        // reservation before the wallet request. Reject the terminal hash and
+        // the outer catch-path retry after Safe has already returned it.
+        if (rejectTerminalHashWrites && writeCount >= 4) {
+          throw new Error('localStorage degraded before terminal hash capture')
+        }
+        backing.setItem(key, value)
+      },
+    }
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { localStorage: storage },
+    })
+    const batch = useTxBatch()
+    const approvalHash = `0x${'24'.repeat(32)}` as Hash
+    const batchHash = `0x${'25'.repeat(32)}` as Hash
+    const terminalSafeSend = vi.fn()
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(preparedEnvelope())
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      await options?.onSafePreflight?.()
+      options?.onProgress?.({ status: 'approval' })
+      options?.onSafePrerequisiteSubmission?.(approvalHash)
+      options?.onSafeTerminalSubmissionStart?.()
+      options?.onProgress?.({ status: 'evcBatch' })
+      terminalSafeSend()
+      options?.onSafeSubmission?.(batchHash)
+    })
+
+    try {
+      await addGrantingMigrationEntry(batch)
+      await batch.executeBatch(await prepareReviewedBatch(batch))
+
+      expect(terminalSafeSend).toHaveBeenCalledTimes(1)
+      expect(writeCount).toBe(5)
+      expect(batch.pendingSafeSubmission.value?.submissionKind).toBe('batch')
+      expect(batch.pendingSafeSubmission.value?.submittedHash).toBeUndefined()
+      expect(batch.entryCount.value).toBe(1)
+      expect(batch.canExecuteBatch.value).toBe(false)
+
+      eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'executed', receipt: { status: 'success' } })
+      await batch.reconcilePendingSafeSubmission()
+
+      // The prerequisite hash is no longer eligible for reconciliation: the
+      // terminal transaction may be live, so only manual Safe inspection can
+      // resolve this no-hash reservation.
+      expect(eulerTxMocks.reconcileSafeTransaction).not.toHaveBeenCalled()
+      expect(batch.pendingSafeSubmission.value?.submissionKind).toBe('batch')
+      expect(batch.pendingSafeSubmission.value?.submittedHash).toBeUndefined()
+      expect(batch.execError.value).toContain('locked before hash capture')
+    }
+    finally {
+      // Clean the module-scoped cart/lock without weakening the production
+      // path under test: make storage writable, give the test lock a terminal
+      // hash, and reconcile it as not executed.
+      rejectTerminalHashWrites = false
+      const pending = batch.pendingSafeSubmission.value
+      if (pending) {
+        pending.submittedHash = batchHash
+        eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'not-executed' })
+        await batch.reconcilePendingSafeSubmission()
+      }
+      batch.clearBatch()
+      if (originalWindow === undefined) delete (globalThis as { window?: Window }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+    }
   })
 
   it('retains a pending Safe submission under its prepared owner and chain', async () => {

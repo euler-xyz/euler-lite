@@ -77,6 +77,19 @@ const hasRequest = (value: unknown): value is WalletProviderLike =>
   isRecord(value) && typeof value.request === 'function'
 
 /**
+ * Synchronous check: the connector itself is identifiably Safe (wagmi's
+ * iframe `safe` connector id or a Safe wallet name), before and without
+ * provider acquisition. Safe-via-WalletConnect is NOT covered — that
+ * identification needs the provider's peer metadata.
+ */
+export const isSafeConnectorIdentity = (
+  connector?: Pick<WalletConnectorLike, 'id' | 'name'>,
+): boolean => {
+  const id = connector?.id?.toLowerCase() ?? ''
+  return id === 'safe' || isSafeWalletName(connector?.name ?? '')
+}
+
+/**
  * Return the connector provider only when the connected wallet is Safe.
  *
  * Safe can arrive either through wagmi's iframe connector or through a
@@ -88,9 +101,8 @@ export const getSafeWalletProvider = async (
 ): Promise<WalletProviderLike | undefined> => {
   if (!connector?.getProvider) return undefined
 
-  const id = connector.id?.toLowerCase() ?? ''
-  const connectorIsSafe = id === 'safe' || isSafeWalletName(connector.name ?? '')
-  const connectorIsWalletConnect = id === 'walletconnect'
+  const connectorIsSafe = isSafeConnectorIdentity(connector)
+  const connectorIsWalletConnect = connector.id?.toLowerCase() === 'walletconnect'
   if (!connectorIsSafe && !connectorIsWalletConnect) return undefined
 
   let provider: unknown
