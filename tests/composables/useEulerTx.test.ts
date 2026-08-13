@@ -342,6 +342,60 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(onProgress).toHaveBeenCalledWith(progress)
   })
 
+  it('routes prerequisite and terminal Safe hashes to separate callbacks', async () => {
+    const approvalHash = `0x${'21'.repeat(32)}` as Hash
+    const batchHash = `0x${'22'.repeat(32)}` as Hash
+    wagmiMocks.sendTransactionAsync
+      .mockResolvedValueOnce(approvalHash)
+      .mockResolvedValueOnce(batchHash)
+    const executePreparedTransactionPlan = vi.fn(async ({ onProgress, sendTransaction }: {
+      onProgress?: (value: { completed: number, total: number, status: 'approval' | 'evcBatch' }) => void
+      sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
+    }) => {
+      onProgress?.({ completed: 0, total: 2, status: 'approval' })
+      await sendTransaction({ to: TOKEN, data: '0x1234' })
+      onProgress?.({ completed: 1, total: 2, status: 'evcBatch' })
+      await sendTransaction({ to: VAULT, data: '0x5678' })
+      return { receipts: [] }
+    })
+    const provider = { waitForTransactionReceipt: vi.fn() }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const safeProviderSpy = vi.spyOn(safeWalletTransactions, 'getSafeWalletProvider')
+      .mockResolvedValue({ request: vi.fn() } as never)
+    const waitSpy = vi.spyOn(safeWalletTransactions, 'waitForSafeTransactionExecution')
+      .mockImplementation(async ({ submittedHash }) => ({
+        hash: submittedHash,
+        receipt: { transactionHash: submittedHash, status: 'success' } as TransactionReceipt,
+      }))
+    const onSafePrerequisiteSubmission = vi.fn()
+    const onSafeSubmission = vi.fn()
+    const { executePreparedPlan } = useEulerTx()
+
+    try {
+      await executePreparedPlan({
+        __prepared: true,
+        plan: [],
+        chainId: 1,
+        account: OWNER,
+        usePermit2: false,
+        unlimitedApproval: false,
+      } as TransactionPlanPrepared, {
+        onSafePrerequisiteSubmission,
+        onSafeSubmission,
+      })
+
+      expect(onSafePrerequisiteSubmission).toHaveBeenCalledExactlyOnceWith(approvalHash)
+      expect(onSafeSubmission).toHaveBeenCalledExactlyOnceWith(batchHash)
+    }
+    finally {
+      waitSpy.mockRestore()
+      safeProviderSpy.mockRestore()
+    }
+  })
+
   it('blocks Safe execution before the SDK can submit when durable preflight fails', async () => {
     const executePreparedTransactionPlan = vi.fn()
     const provider = { waitForTransactionReceipt: vi.fn() }

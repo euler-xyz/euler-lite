@@ -1256,6 +1256,7 @@ describe('useTxBatch execution errors', () => {
 
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, expect.objectContaining({
       onProgress: expect.any(Function),
+      onSafePrerequisiteSubmission: expect.any(Function),
       onSafeSubmission: expect.any(Function),
     }))
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
@@ -1640,15 +1641,29 @@ describe('useTxBatch execution prerequisites', () => {
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(preparedEnvelope())
     eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
       options?.onProgress?.({ status: 'approval' })
+      options?.onSafePrerequisiteSubmission?.(approvalHash)
       throw new SafeTransactionStatusUnknownError(approvalHash, 'timeout')
     })
 
     await addGrantingMigrationEntry(batch)
     await batch.executeBatch(await prepareReviewedBatch(batch))
 
+    expect(batch.pendingSafeSubmission.value).toMatchObject({
+      submittedHash: approvalHash,
+      submissionKind: 'prerequisite',
+    })
+    expect(migrationFlowMocks.revokeAfterAbort).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(1)
+
+    eulerTxMocks.reconcileSafeTransaction.mockResolvedValueOnce({ status: 'executed', receipt: { status: 'success' } })
+    await batch.reconcilePendingSafeSubmission()
+
     expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(migrationFlowMocks.revokeAfterSuccess).not.toHaveBeenCalled()
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('terminal batch was not submitted')
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 
   it('retains a pending Safe submission under its prepared owner and chain', async () => {

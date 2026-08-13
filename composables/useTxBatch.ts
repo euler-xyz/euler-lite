@@ -222,13 +222,15 @@ const execError = ref<string | undefined>(undefined)
 interface PendingSafeBatchSubmission {
   /** Absent only for the durable reservation created before Safe is opened. */
   submittedHash?: Hash
+  /** Submitted Safe transactions are reconciled according to their execution role. */
+  submissionKind?: 'batch' | 'prerequisite'
   account: Address
   chainId: number
   batchFingerprint: string
   batchPlan: TransactionPlan
   entries: BatchEntry[]
   errorMessage: string
-  terminalStatus?: 'not-executed' | 'reverted'
+  terminalStatus?: 'not-executed' | 'reverted' | 'prerequisite-executed'
   refreshExternalMigrationPositions: boolean
   grantedRevokes: MigrationAuthorizationRevoke[]
   /** Reloaded locks retain serializable reconciliation state, but not cart builders. */
@@ -268,6 +270,7 @@ const persistPendingSafeSubmissionLocks = () => {
     .filter(pending => !pending.terminalStatus)
     .map(pending => ({
       submittedHash: pending.submittedHash,
+      submissionKind: pending.submissionKind,
       account: pending.account,
       chainId: pending.chainId,
       batchFingerprint: pending.batchFingerprint,
@@ -291,6 +294,7 @@ const persistPendingSafeSubmissionLocks = () => {
     && expected.chainId === actual.chainId
     && expected.batchFingerprint === actual.batchFingerprint
     && expected.submittedHash === actual.submittedHash
+    && expected.submissionKind === actual.submissionKind
   if (
     restored.length !== persisted.length
     || persisted.some(expected => !restored.some(actual => isSameLock(expected, actual)))
@@ -2645,7 +2649,7 @@ export const useTxBatch = () => {
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let shouldRefreshExternalMigrationPositions = false
-    let batchExecutionStarted = false
+    let safeSubmissionKind: 'batch' | 'prerequisite' | undefined
     let batchExecutionContext: WalletExecutionContext | undefined
     let batchEntriesSnapshot: BatchEntry[] = []
     let batchFingerprint = ''
@@ -2688,11 +2692,36 @@ export const useTxBatch = () => {
           setPendingSafeSubmission(reservation)
           submittedSafeLock = reservation
         },
+        onSafePrerequisiteSubmission: (submittedHash) => {
+          safeSubmissionKind = 'prerequisite'
+          const errorMessage = `Safe prerequisite submission is pending confirmation. Submitted Safe hash: ${submittedHash}. The terminal batch has not been submitted.`
+          const submitted: PendingSafeBatchSubmission = {
+            submittedHash,
+            submissionKind: 'prerequisite',
+            account: batchExecutionContext!.account,
+            chainId: batchExecutionContext!.chainId,
+            batchFingerprint,
+            batchPlan: batchPlanSnapshot,
+            entries: batchEntriesSnapshot,
+            errorMessage,
+            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+            grantedRevokes: [...grantedRevokes],
+          }
+          try {
+            setPendingSafeSubmission(submitted)
+          }
+          catch (error) {
+            logWarn('useTxBatch/persistSubmittedSafePrerequisite', error)
+            throw new SafeTransactionStatusUnknownError(submittedHash, 'aborted')
+          }
+          submittedSafeLock = submitted
+        },
         onSafeSubmission: (submittedHash) => {
-          batchExecutionStarted = true
+          safeSubmissionKind = 'batch'
           const errorMessage = `Safe submission is pending confirmation. Submitted Safe hash: ${submittedHash}`
           const submitted: PendingSafeBatchSubmission = {
             submittedHash,
+            submissionKind: 'batch',
             account: batchExecutionContext!.account,
             chainId: batchExecutionContext!.chainId,
             batchFingerprint,
@@ -2714,9 +2743,8 @@ export const useTxBatch = () => {
           submittedSafeLock = submitted
         },
         onProgress: (progress) => {
-          // Required approvals are separate transactions. Only arm Safe batch
-          // reconciliation once the executor reaches the terminal EVC send.
-          if (progress.status === 'evcBatch') batchExecutionStarted = true
+          if (progress.status === 'evcBatch') safeSubmissionKind = 'batch'
+          else if (progress.status === 'approval') safeSubmissionKind = 'prerequisite'
         },
       })
       clearPendingSafeSubmission(submittedSafeLock ?? null)
@@ -2727,11 +2755,14 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      if (batchExecutionStarted && batchExecutionContext && error instanceof SafeTransactionStatusUnknownError) {
-        const errorMessage = `${error.message} Submitted Safe hash: ${error.submittedHash}`
+      if (safeSubmissionKind && batchExecutionContext && error instanceof SafeTransactionStatusUnknownError) {
+        const errorMessage = safeSubmissionKind === 'batch'
+          ? `${error.message} Submitted Safe hash: ${error.submittedHash}`
+          : `${error.message} Submitted prerequisite Safe hash: ${error.submittedHash}. The terminal batch has not been submitted.`
         const pending: PendingSafeBatchSubmission = {
           ...submittedSafeLock,
           submittedHash: error.submittedHash,
+          submissionKind: safeSubmissionKind,
           account: batchExecutionContext.account,
           chainId: batchExecutionContext.chainId,
           batchFingerprint,
@@ -2791,6 +2822,29 @@ export const useTxBatch = () => {
         chainId: pending.chainId,
       })
       if (result.status === 'executed') {
+        if (pending.submissionKind === 'prerequisite') {
+          const retryMessage = pending.hydrated
+            ? 'Rebuild and review the batch before retrying.'
+            : 'The batch has been rebuilt and can be reviewed again.'
+          const errorMessage = `Safe executed the prerequisite transaction, but the terminal batch was not submitted. ${retryMessage}`
+          await revokeAfterAbort(pending.grantedRevokes)
+          const stillActive = isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)
+          if (stillActive) {
+            clearPendingSafeSubmission(pending)
+            execError.value = errorMessage
+            lastMerged = null
+            if (pending.hydrated) entries.value = []
+          }
+          else {
+            setPendingSafeSubmission({
+              ...pending,
+              terminalStatus: 'prerequisite-executed',
+              errorMessage,
+            })
+          }
+          if (stillActive && !pending.hydrated) await runResimulate()
+          return
+        }
         await revokeAfterSuccess(pending.grantedRevokes)
         const stillActive = isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)
         clearPendingSafeSubmission(pending)
@@ -2805,9 +2859,13 @@ export const useTxBatch = () => {
         const retryMessage = pending.hydrated
           ? 'Rebuild and review the batch before retrying.'
           : 'The batch has been rebuilt and can be reviewed again.'
-        const errorMessage = result.status === 'reverted'
-          ? `Safe executed the submitted transaction, but it reverted on-chain. Gas was spent and the Safe nonce advanced. ${retryMessage}`
-          : `Safe confirmed that the submitted transaction was not executed. ${retryMessage}`
+        const errorMessage = pending.submissionKind === 'prerequisite'
+          ? result.status === 'reverted'
+            ? `Safe executed the prerequisite transaction, but it reverted on-chain. The terminal batch was not submitted. Gas was spent and the Safe nonce advanced. ${retryMessage}`
+            : `Safe confirmed that the prerequisite transaction was not executed. The terminal batch was not submitted. ${retryMessage}`
+          : result.status === 'reverted'
+            ? `Safe executed the submitted transaction, but it reverted on-chain. Gas was spent and the Safe nonce advanced. ${retryMessage}`
+            : `Safe confirmed that the submitted transaction was not executed. ${retryMessage}`
         await revokeAfterAbort(pending.grantedRevokes)
         const stillActive = isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)
         if (stillActive) {
@@ -2826,7 +2884,9 @@ export const useTxBatch = () => {
         if (stillActive && !pending.hydrated) await runResimulate()
         return
       }
-      const errorMessage = `Safe transaction status is still unknown. Submitted Safe hash: ${pending.submittedHash}`
+      const errorMessage = pending.submissionKind === 'prerequisite'
+        ? `Safe prerequisite transaction status is still unknown. Submitted Safe hash: ${pending.submittedHash}. The terminal batch has not been submitted.`
+        : `Safe transaction status is still unknown. Submitted Safe hash: ${pending.submittedHash}`
       setPendingSafeSubmission({ ...pending, errorMessage })
       if (isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)) {
         execError.value = errorMessage

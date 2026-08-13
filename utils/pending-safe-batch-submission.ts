@@ -7,6 +7,8 @@ export const PENDING_SAFE_BATCH_STORAGE_KEY = 'euler-lite:pending-safe-batch-sub
 export interface PersistedPendingSafeBatchSubmission {
   /** Absent while durable storage is reserved before the Safe wallet is opened. */
   submittedHash?: Hash
+  /** Distinguishes a prerequisite transaction from the terminal EVC batch. */
+  submissionKind?: 'batch' | 'prerequisite'
   account: Address
   chainId: number
   batchFingerprint: string
@@ -69,6 +71,9 @@ const normalizeRecord = (value: unknown): PersistedPendingSafeBatchSubmission | 
   const candidate = value as Partial<PersistedPendingSafeBatchSubmission>
   if (
     (candidate.submittedHash !== undefined && !isHash(candidate.submittedHash))
+    || (candidate.submissionKind !== undefined
+      && candidate.submissionKind !== 'batch'
+      && candidate.submissionKind !== 'prerequisite')
     || typeof candidate.account !== 'string'
     || !Number.isSafeInteger(candidate.chainId)
     || typeof candidate.batchFingerprint !== 'string'
@@ -83,6 +88,7 @@ const normalizeRecord = (value: unknown): PersistedPendingSafeBatchSubmission | 
   try {
     return {
       ...(candidate.submittedHash === undefined ? {} : { submittedHash: candidate.submittedHash }),
+      ...(candidate.submissionKind === undefined ? {} : { submissionKind: candidate.submissionKind }),
       account: getAddress(candidate.account),
       chainId: candidate.chainId!,
       batchFingerprint: candidate.batchFingerprint,

@@ -23,6 +23,7 @@ describe('pending Safe batch persistence', () => {
     const storage = memoryStorage()
     savePendingSafeBatchSubmissions(storage, [{
       submittedHash,
+      submissionKind: 'prerequisite',
       account: owner,
       chainId: 1,
       batchFingerprint: '0123456789abcdef',
@@ -37,6 +38,7 @@ describe('pending Safe batch persistence', () => {
 
     expect(loadPendingSafeBatchSubmissions(storage)).toEqual([{
       submittedHash,
+      submissionKind: 'prerequisite',
       account: owner,
       chainId: 1,
       batchFingerprint: '0123456789abcdef',
@@ -71,6 +73,22 @@ describe('pending Safe batch persistence', () => {
       refreshExternalMigrationPositions: false,
       grantedRevokes: [],
     }])
+  })
+
+  it('keeps legacy submitted locks without a kind compatible', () => {
+    const storage = memoryStorage()
+    savePendingSafeBatchSubmissions(storage, [{
+      submittedHash,
+      account: owner,
+      chainId: 1,
+      batchFingerprint: '0123456789abcdef',
+      batchPlan: [],
+      errorMessage: 'legacy batch status unknown',
+      refreshExternalMigrationPositions: false,
+      grantedRevokes: [],
+    }])
+
+    expect(loadPendingSafeBatchSubmissions(storage)[0]?.submissionKind).toBeUndefined()
   })
 
   it('fingerprints the full prepared batch envelope', () => {

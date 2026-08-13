@@ -1466,7 +1466,9 @@ export const useEulerTx = () => {
       onProgress?: (progress: TransactionPlanExecutionProgress) => void
       /** Must complete before a Safe wallet can receive any transaction request. */
       onSafePreflight?: () => void | Promise<void>
-      /** Fires as soon as a Safe provider returns its submitted Safe hash, before confirmation polling. */
+      /** Fires for prerequisite Safe transactions, such as approvals, before confirmation polling. */
+      onSafePrerequisiteSubmission?: (submittedHash: Hash) => void
+      /** Fires only for the terminal EVC batch Safe transaction, before confirmation polling. */
       onSafeSubmission?: (submittedHash: Hash) => void
     },
   ) => {
@@ -1487,13 +1489,19 @@ export const useEulerTx = () => {
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
+    let safeSubmissionPhase: TransactionPlanExecutionProgress['status']
     const sendTransaction = buildSendTransaction({
       isOkx,
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
       resolveHash: safeWalletProvider
         ? async (submittedHash) => {
-          options?.onSafeSubmission?.(submittedHash)
+          if (safeSubmissionPhase === 'evcBatch') {
+            options?.onSafeSubmission?.(submittedHash)
+          }
+          else {
+            options?.onSafePrerequisiteSubmission?.(submittedHash)
+          }
           return (await waitForSafeTransactionExecution({
             submittedHash,
             walletProvider: safeWalletProvider,
@@ -1520,7 +1528,10 @@ export const useEulerTx = () => {
         })
         return signature as Hex
       },
-      onProgress: options?.onProgress,
+      onProgress: (progress) => {
+        safeSubmissionPhase = progress.status
+        options?.onProgress?.(progress)
+      },
     })
 
     finalizeExecution(result, prepared.chainId)
