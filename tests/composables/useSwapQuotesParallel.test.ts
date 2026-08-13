@@ -226,4 +226,131 @@ describe('useSwapQuotesParallel', () => {
     expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
     expect(quotes.selectedProvider.value).toBeNull()
   })
+
+  it('drops an in-flight CoW response that resolves after the gate flips to false', async () => {
+    const includeCowSwap = ref(true)
+    const otherQuote = makeQuote('100', '200')
+    let releaseCowQuote!: (quotes: SwapQuote[]) => void
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      provider === 'cow'
+        ? new Promise<SwapQuote[]>((resolve) => {
+            releaseCowQuote = resolve
+          })
+        : Promise.resolve([otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+
+    // The gate flips (e.g. Safe detection lands) while the CoW request is
+    // still in flight — same sweep generation, so the staleness guard does
+    // not cover it.
+    includeCowSwap.value = false
+    await nextTick()
+
+    releaseCowQuote([makeQuote('100', '300')])
+    await flushPromises()
+    await nextTick()
+
+    // The resolved CoW card must not reinsert past the eviction.
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+  })
+
+  it('replays the sweep when CoW eligibility resolves after a gated sweep', async () => {
+    const includeCowSwap = ref(false)
+    const cowQuote = makeQuote('100', '300')
+    const otherQuote = makeQuote('100', '200')
+    getSwapProviders.mockImplementation(async ({ includeCowSwap: include }: { includeCowSwap?: boolean }) =>
+      include ? ['cow', 'other'] : ['other'],
+    )
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    // Sweep made during the fail-closed detection window — CoW resolved out
+    // of the provider list entirely.
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+
+    // Detection lands on a regular wallet: eligibility resolves to true.
+    includeCowSwap.value = true
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    // The reduced quote set must not persist until the next input change —
+    // the sweep replays with the full provider list.
+    expect(getSwapProviders).toHaveBeenLastCalledWith({ includeCowSwap: true })
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+  })
+
+  it('re-fetches evicted CoW quotes when eligibility returns', async () => {
+    const includeCowSwap = ref(true)
+    const cowQuote = makeQuote('100', '300')
+    const otherQuote = makeQuote('100', '200')
+    getSwapProviders.mockImplementation(async ({ includeCowSwap: include }: { includeCowSwap?: boolean }) =>
+      include ? ['cow', 'other'] : ['other'],
+    )
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+
+    // Gate flips off (e.g. switch to a Safe): CoW cards evict.
+    includeCowSwap.value = false
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+
+    // Gate returns (switch back to the EOA): eviction was one-way, so the
+    // sweep replays to restore the CoW route.
+    includeCowSwap.value = true
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+  })
+
+  it('does not fetch when eligibility resolves before any sweep', async () => {
+    const includeCowSwap = ref(false)
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+
+    useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    includeCowSwap.value = true
+    await nextTick()
+    await flushPromises()
+
+    expect(getSwapProviders).not.toHaveBeenCalled()
+  })
 })
