@@ -2881,10 +2881,12 @@ export const useTxBatch = () => {
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
         }
         clearPendingSafeSubmission(submittedSafeLock ?? null)
-        latchedBundledExecution.value = null
-        clearBatch()
+        if (isExecutionContextActive(batchExecutionContext)) {
+          latchedBundledExecution.value = null
+          clearBatch()
+        }
         if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
-        await redirectAfterBatchExecution(scope)
+        if (isExecutionContextActive(batchExecutionContext)) await redirectAfterBatchExecution(scope)
         return
       }
 

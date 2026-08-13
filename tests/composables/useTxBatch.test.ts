@@ -1426,6 +1426,55 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.entryCount.value).toBe(0)
   })
 
+  it('preserves the active wallet cart when an earlier Safe bundle confirms', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const safeHash = `0x${'25'.repeat(32)}` as Hash
+    let resolveExecution!: (result: { receipts: never[] }) => void
+    const executionResult = new Promise<{ receipts: never[] }>((resolve) => {
+      resolveExecution = resolve
+    })
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared,
+      _extraCalls,
+      options: {
+        onSafePreflight?: () => void | Promise<void>
+        onSafeTerminalSubmissionStart?: () => void
+        onSafeSubmission?: (submittedHash: Hash) => void
+      },
+    ) => {
+      await options.onSafePreflight?.()
+      options.onSafeTerminalSubmissionStart?.()
+      options.onSafeSubmission?.(safeHash)
+      return executionResult
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    const walletAExecution = batch.executeBatch()
+    await vi.waitFor(() =>
+      expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledTimes(1),
+    )
+
+    activeOwner.value = subAccount
+    activeChainId.value = 8453
+    await nextTick()
+    await addBundledMigrationEntry(batch)
+    const walletBExecution = await batch.prepareBundledExecution()
+    expect(batch.entryCount.value).toBe(1)
+    expect(walletBExecution).not.toBeNull()
+
+    resolveExecution({ receipts: [] })
+    await walletAExecution
+
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([])
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.latchedBundledExecution.value).toBe(walletBExecution)
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
+
   it('persists an unresolved Safe bundle and blocks retry until reconciliation', async () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
