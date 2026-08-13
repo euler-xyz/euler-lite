@@ -5,6 +5,7 @@ import type { MigrationAuthorizationRequest } from '@eulerxyz/euler-v2-sdk'
 import {
   buildMigrationAuthorizationTxSteps,
   encodeMigrationAuthorizationTxs,
+  migrationAuthorizationPayloadKey,
 } from '~/utils/migrationAuthorizationTxs'
 
 const owner = '0x0000000000000000000000000000000000000001' as Address
@@ -139,14 +140,49 @@ describe('encodeMigrationAuthorizationTxs', () => {
   })
 })
 
+const txKeyOf = (to: Address, data: string): string => `${to.toLowerCase()}:0:${data}`
+
 describe('buildMigrationAuthorizationTxSteps', () => {
   it('labels grant and restoration rows per connector', () => {
     expect(buildMigrationAuthorizationTxSteps(aaveApprovalRequest(), 'grant')).toEqual([
-      { index: 1, label: 'Approve aToken transfer', isSeparateTx: true },
+      {
+        index: 1,
+        label: 'Approve aToken transfer',
+        isSeparateTx: true,
+        txKey: txKeyOf(aToken, encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 1000n] })),
+      },
     ])
     expect(buildMigrationAuthorizationTxSteps(morphoAuthorizationRequest(), 'revoke', 4)).toEqual([
-      { index: 4, label: 'Restore previous Morpho authorization', isSeparateTx: true },
+      {
+        index: 4,
+        label: 'Restore previous Morpho authorization',
+        isSeparateTx: true,
+        txKey: txKeyOf(morphoBlue, encodeFunctionData({ abi: setAuthorizationAbi, functionName: 'setAuthorization', args: [swapVerifier, false] })),
+      },
     ])
+  })
+
+  it('keys row identity on the encoded transaction, not the label', () => {
+    const otherAToken = '0x0000000000000000000000000000000000000009' as Address
+    const otherRequest = {
+      ...aaveApprovalRequest(),
+      token: otherAToken,
+      call: { to: otherAToken, abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 1000n] },
+      revocation: { to: otherAToken, abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 250n] },
+    } as unknown as MigrationAuthorizationRequest
+
+    const [first] = buildMigrationAuthorizationTxSteps(aaveApprovalRequest(), 'revoke')
+    const [second] = buildMigrationAuthorizationTxSteps(otherRequest, 'revoke')
+
+    // Two different aTokens share a generic label but are distinct
+    // restoration transactions — consolidating them by label would hide a
+    // real transaction from the batch summary.
+    expect(first!.label).toBe(second!.label)
+    expect(first!.txKey).not.toBe(second!.txKey)
+
+    // Identical requests resolve to the identical transaction identity.
+    const [repeat] = buildMigrationAuthorizationTxSteps(aaveApprovalRequest(), 'revoke')
+    expect(repeat!.txKey).toBe(first!.txKey)
   })
 
   it('orders restoration rows to match the transactions actually sent', () => {
@@ -171,5 +207,65 @@ describe('buildMigrationAuthorizationTxSteps', () => {
   it('renders nothing for a typed-data request or no request', () => {
     expect(buildMigrationAuthorizationTxSteps(typedDataRequest(), 'grant')).toEqual([])
     expect(buildMigrationAuthorizationTxSteps(undefined, 'grant')).toEqual([])
+  })
+
+  it('marks rows as same-submission when bundled into a Safe proposal', () => {
+    const request = aaveApprovalRequest() as unknown as MigrationAuthorizationRequest
+
+    expect(buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true })[0]!.isSeparateTx).toBe(false)
+    expect(buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true })[0]!.isSeparateTx).toBe(false)
+    // Default stays standalone.
+    expect(buildMigrationAuthorizationTxSteps(request, 'grant')[0]!.isSeparateTx).toBe(true)
+  })
+})
+
+describe('migrationAuthorizationPayloadKey', () => {
+  it('is stable for the same request and distinguishes no request from one', () => {
+    expect(migrationAuthorizationPayloadKey(aaveApprovalRequest()))
+      .toBe(migrationAuthorizationPayloadKey(aaveApprovalRequest()))
+    expect(migrationAuthorizationPayloadKey(undefined)).toBe('none')
+    expect(migrationAuthorizationPayloadKey(aaveApprovalRequest())).not.toBe('none')
+  })
+
+  it('changes when the encoded grant or restoration drifts', () => {
+    const base = migrationAuthorizationPayloadKey(aaveApprovalRequest())
+
+    // The restore value moved (allowance changed elsewhere since review).
+    const driftedRevocation = {
+      ...aaveApprovalRequest(),
+      revocation: { to: aToken, abi: erc20Abi, functionName: 'approve', args: [swapVerifier, 999n] },
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(driftedRevocation)).not.toBe(base)
+
+    // A restoration disappeared entirely.
+    const noRevocation = {
+      ...aaveApprovalRequest(),
+      revocation: undefined,
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(noRevocation)).not.toBe(base)
+
+    // A chained authorization appeared.
+    const chained = {
+      ...aaveApprovalRequest(),
+      postMigrationAuthorization: morphoAuthorizationRequest(),
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(chained)).not.toBe(base)
+  })
+
+  it('keys typed-data requests without choking on bigint fields', () => {
+    const key = migrationAuthorizationPayloadKey(typedDataRequest())
+    expect(key).toContain('typedData:')
+    expect(key).toBe(migrationAuthorizationPayloadKey(typedDataRequest()))
+
+    const drifted = {
+      ...typedDataRequest(),
+      typedData: {
+        domain: { verifyingContract: aToken, chainId: 1 },
+        types: { Permit: [] },
+        primaryType: 'Permit',
+        message: { owner, spender: swapVerifier, value: 2000n },
+      },
+    } as unknown as MigrationAuthorizationRequest
+    expect(migrationAuthorizationPayloadKey(drifted)).not.toBe(key)
   })
 })

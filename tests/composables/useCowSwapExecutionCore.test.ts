@@ -1,5 +1,6 @@
+import { computed, ref, type Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import {
@@ -27,6 +28,7 @@ describe('useCowSwapExecutionCore policy freshness', () => {
     currentChainId = ref(1)
     vi.stubGlobal('useWagmi', () => ({ address: currentAddress, chainId: currentChainId }))
     vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false) }))
+    vi.stubGlobal('useCowSwapEligibility', () => ({ cowSwapForcedOff: computed(() => false) }))
     vi.stubGlobal('usePortfolioRefresh', () => ({ triggerPortfolioRefresh: vi.fn() }))
   })
 
@@ -75,5 +77,51 @@ describe('useCowSwapExecutionCore policy freshness', () => {
       cancellationMode: 'cow-api',
     })).rejects.toThrow(COW_SWAP_REVIEW_CONTEXT_CHANGED_ERROR)
     expect(executeCowSwapTransactionPlan).not.toHaveBeenCalled()
+  })
+})
+
+vi.mock('~/composables/usePortfolioRefresh', () => ({
+  usePortfolioRefresh: () => ({ triggerPortfolioRefresh: vi.fn() }),
+}))
+
+const OWNER = '0x1000000000000000000000000000000000000000'
+
+describe('useCowSwapExecutionCore Safe backstop', () => {
+  let isSafeWallet: Ref<boolean>
+  let isSafeWalletResolved: Ref<boolean>
+
+  const setupCore = () => useCowSwapExecutionCore()
+
+  const dummyFlow = {
+    plan: [] as TransactionPlan,
+    account: OWNER as Address,
+    chainId: 1,
+    cancellationMode: 'cow-api' as const,
+    orderbookUrl: 'https://api.cow.fi/mainnet',
+  }
+
+  beforeEach(() => {
+    isSafeWallet = ref(false)
+    isSafeWalletResolved = ref(true)
+    vi.stubGlobal('useWagmi', () => ({ address: ref(OWNER), chainId: ref(1) }))
+    vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false) }))
+    vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet, isSafeWalletResolved }))
+    vi.stubGlobal('useCowSwapEligibility', () => ({
+      cowSwapForcedOff: computed(() => isSafeWallet.value || !isSafeWalletResolved.value),
+    }))
+  })
+
+  it('rejects execution for Safe wallets before any transaction is sent', async () => {
+    isSafeWallet.value = true
+    const core = setupCore()
+
+    await expect(core.executePlan(dummyFlow)).rejects.toThrow('CoW Swap is not available with Safe wallets')
+  })
+
+  it('rejects execution while Safe detection is pending', async () => {
+    isSafeWalletResolved.value = false
+    const core = setupCore()
+
+    await expect(core.executePlan(dummyFlow)).rejects.toThrow('CoW Swap is not available with Safe wallets')
   })
 })

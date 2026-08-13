@@ -51,6 +51,7 @@ export const useCowSwapExecutionCore = () => {
   const { signTypedDataAsync } = useSignTypedData()
   const { sendTransactionAsync } = useSendTransaction()
   const { isSpyMode } = useSpyMode()
+  const { cowSwapForcedOff } = useCowSwapEligibility()
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
 
   const status = ref<CowSwapExecutionStatus>('idle')
@@ -74,6 +75,10 @@ export const useCowSwapExecutionCore = () => {
 
   const assertTransactionsEnabled = () => {
     if (isSpyMode.value) throw new Error('Transactions are disabled in spy mode')
+    // Backstop behind the quote-level gate: a Safe cannot produce the ECDSA
+    // order signature the CoW executor requires, and failing here is cheaper
+    // than failing after the approval transactions have been sent.
+    if (cowSwapForcedOff.value) throw new Error('CoW Swap is not available with Safe wallets')
   }
 
   const requireWallet = () => {

@@ -275,6 +275,7 @@ describe('useMultiplyForm cap validation', () => {
     vi.stubGlobal('useTxBatch', () => ({
       entryCount: ref(0),
     }))
+    vi.stubGlobal('useCowSwapEligibility', () => ({ cowSwapForcedOff: ref(false) }))
     vi.stubGlobal('useTxFinalization', () => ({
       finalizeTxAndRedirect: vi.fn(),
     }))
