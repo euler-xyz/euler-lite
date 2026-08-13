@@ -111,6 +111,20 @@ export interface BatchEntryBundledExecution {
   revokeSteps: DisplayStep[]
 }
 
+/** One immutable Safe review ceremony used for display, export, and execution. */
+export interface PreparedBatchBundledExecution {
+  readonly generation: number
+  readonly owner: Address
+  readonly chainId: number
+  readonly prepared: TransactionPlanPrepared
+  readonly grants: readonly BatchEntryExternalTx[]
+  readonly revokes: readonly BatchEntryExternalTx[]
+  readonly stepsByEntryId: Readonly<Record<string, {
+    readonly grantSteps: readonly DisplayStep[]
+    readonly revokeSteps: readonly DisplayStep[]
+  }>>
+}
+
 export interface BatchEntry {
   id: string
   label: string
@@ -227,22 +241,16 @@ export interface WalletShortfall {
 // --- module-scoped state (single shared cart for the session) ---
 const entries: Ref<BatchEntry[]> = ref([])
 const layers = shallowRef<BatchLayer[]>([])
-/**
- * Bundled ceremony resolved ONCE when the review modal opens, displayed,
- * copied, and executed verbatim — the latch that keeps the reviewed
- * ceremony, the copied payload, and the submitted proposal identical. A
- * cart edit or account/chain reset clears it; executeBatch treats its
- * presence as the reviewed promise of ONE proposal. Module-scoped like the
- * rest of the cart state so every component instance shares it.
- */
-const latchedBundledExecution = shallowRef<{
-  /** Prepared core envelope shared by review export and Safe execution. */
-  prepared: TransactionPlanPrepared
-  grants: BatchEntryExternalTx[]
-  revokes: BatchEntryExternalTx[]
-  /** Per-entry review rows from the same resolution, for the modal to render. */
-  stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }>
-} | null>(null)
+const batchGeneration = ref(0)
+let bundledPreparation: {
+  generation: number
+  promise: Promise<PreparedBatchBundledExecution>
+} | null = null
+
+const invalidateBatchReview = () => {
+  batchGeneration.value++
+  bundledPreparation = null
+}
 // Per-entry fixed plan (keyed by entry id), used by the review modal and by the
 // merged whole-batch plan. These are captured once when the entry is added.
 const entryPlans = computed<Record<string, TransactionPlan>>(() =>
@@ -2136,18 +2144,15 @@ export const useTxBatch = () => {
       watch(entries, () => {
         logBatchDiag('watch:entries-changed')
         tenderly.clearSimulation()
-        // A cart edit invalidates the latched bundled ceremony — the modal
-        // re-latches on next open.
-        latchedBundledExecution.value = null
         void runResimulate()
       })
       watch([activeLayer, layers], syncOverlay)
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
+        invalidateBatchReview()
         resimToken++
         entries.value = []
-        latchedBundledExecution.value = null
         layers.value = []
         activeLayer.value = 0
         isSimulating.value = false
@@ -2245,6 +2250,9 @@ export const useTxBatch = () => {
     const signature = `${entry.subAccount ?? ''}|${entry.label}`
     if (pendingAddSignatures.has(signature)) return
     pendingAddSignatures.add(signature)
+    // Invalidate synchronously when the edit starts, not after its async plan
+    // build finishes, so an open review cannot execute while an add is pending.
+    invalidateBatchReview()
 
     const add = async () => {
       execError.value = undefined
@@ -2321,6 +2329,8 @@ export const useTxBatch = () => {
   const removeEntry = (id: string) => {
     const nextEntries = entries.value.filter(entry => entry.id !== id)
     execError.value = undefined
+    if (nextEntries.length === entries.value.length) return
+    invalidateBatchReview()
     entries.value = nextEntries
     if (nextEntries.length === 0) {
       resimToken++
@@ -2339,6 +2349,7 @@ export const useTxBatch = () => {
   }
 
   const clearBatch = () => {
+    invalidateBatchReview()
     resimToken++
     entries.value = []
     layers.value = []
@@ -2416,7 +2427,6 @@ export const useTxBatch = () => {
   /** Resolve approvals/permits/plugins for the merged batch plan, so the review
    *  modal can list the approvals the user will be asked to sign. */
   const prepareBatchPlan = async () => {
-    if (latchedBundledExecution.value) return latchedBundledExecution.value.prepared
     if (!lastMerged) return null
     return prepareTransactionPlan(lastMerged)
   }
@@ -2467,25 +2477,69 @@ export const useTxBatch = () => {
     && entries.value.every(entry => !entry.buildExecutionPrerequisites || entry.buildBundledExecution),
   )
 
-  /**
-   * Bundled ceremony resolved ONCE when the review modal opens, displayed,
-   * copied, and executed verbatim — the latch that keeps the reviewed
-   * ceremony, the copied payload, and the submitted proposal identical. A
-   * cart edit or account/chain reset clears it; executeBatch treats its
-   * presence as the reviewed promise of ONE proposal.
-   */
-  const prepareBundledExecution = async () => {
-    if (!willBundlePrerequisites.value) {
-      latchedBundledExecution.value = null
-      return null
+  const isBundledExecutionCurrent = (ceremony: PreparedBatchBundledExecution): boolean => {
+    if (ceremony.generation !== batchGeneration.value || ceremony.chainId !== chainId.value || !owner.value) {
+      return false
     }
-    const { plans, ...ceremony } = await collectBundledExecution()
-    const sdk = await getEulerSdkFresh()
-    const executionPlan = sdk.executionService.mergePlans(plans)
-    const prepared = await prepareTransactionPlan(executionPlan)
-    const latched = { ...ceremony, prepared }
-    latchedBundledExecution.value = latched
-    return latched
+    try {
+      return getAddress(owner.value) === ceremony.owner
+    }
+    catch {
+      return false
+    }
+  }
+
+  const assertBundledExecutionCurrent = (ceremony: PreparedBatchBundledExecution) => {
+    if (!isBundledExecutionCurrent(ceremony)) {
+      throw new Error('Batch or wallet changed since review preparation — reopen review and try again.')
+    }
+  }
+
+  /**
+   * Resolve one ceremony per cart generation. Concurrent review modals share
+   * the same in-flight promise and immutable result; stale work can finish but
+   * cannot be used after a cart, account, or chain change.
+   */
+  const prepareBundledExecution = (): Promise<PreparedBatchBundledExecution | null> => {
+    if (!willBundlePrerequisites.value) return Promise.resolve(null)
+
+    const generation = batchGeneration.value
+    if (bundledPreparation?.generation === generation) return bundledPreparation.promise
+
+    const currentOwner = owner.value
+    const currentChainId = chainId.value
+    if (!currentOwner || !currentChainId) return Promise.reject(new Error('Account not loaded'))
+    const reviewOwner = getAddress(currentOwner)
+
+    const preparationPromise = (async (): Promise<PreparedBatchBundledExecution> => {
+      const { plans, grants, revokes, stepsByEntryId } = await collectBundledExecution()
+      const sdk = await getEulerSdkFresh()
+      const executionPlan = sdk.executionService.mergePlans(plans)
+      const prepared = await prepareTransactionPlan(executionPlan)
+      const frozenSteps = Object.freeze(Object.fromEntries(
+        Object.entries(stepsByEntryId).map(([entryId, steps]) => [entryId, Object.freeze({
+          grantSteps: Object.freeze([...steps.grantSteps]),
+          revokeSteps: Object.freeze([...steps.revokeSteps]),
+        })]),
+      ))
+      const ceremony: PreparedBatchBundledExecution = Object.freeze({
+        generation,
+        owner: reviewOwner,
+        chainId: currentChainId,
+        prepared,
+        grants: Object.freeze([...grants]),
+        revokes: Object.freeze([...revokes]),
+        stepsByEntryId: frozenSteps,
+      })
+      assertBundledExecutionCurrent(ceremony)
+      return ceremony
+    })()
+
+    const trackedPromise = preparationPromise.finally(() => {
+      if (bundledPreparation?.promise === trackedPromise) bundledPreparation = null
+    })
+    bundledPreparation = { generation, promise: trackedPromise }
+    return trackedPromise
   }
 
   /**
@@ -2563,7 +2617,10 @@ export const useTxBatch = () => {
    * the preview plan; entries with simulation-only preview state can rebuild a
    * signed execution plan before the merged batch is prepared and sent.
    */
-  const executeBatch = async (scope?: TrackedExecutionScope) => {
+  const executeBatch = async (
+    scope?: TrackedExecutionScope,
+    bundledExecution?: PreparedBatchBundledExecution,
+  ) => {
     if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
@@ -2579,34 +2636,35 @@ export const useTxBatch = () => {
       // the last simulation), surface the decoded reason and don't send.
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
 
-      if (latchedBundledExecution.value) {
-        // The review modal latched and displayed ONE atomic proposal built
-        // from this exact resolution — execute it verbatim (payload
-        // identity), even when the grants resolved empty: the provider-bound
-        // Safe path must not silently degrade into anything else.
+      if (bundledExecution) {
+        // Execute the exact immutable ceremony owned by this review modal.
+        // Never combine its prepared core with wrappers from another review.
+        assertBundledExecutionCurrent(bundledExecution)
         if (!isSafeWallet.value) {
           throw new Error('Wallet changed since review — please review the batch again.')
         }
-        const collected = latchedBundledExecution.value
         // No standalone gas estimate — grants are unmined until the
         // proposal executes; the cart's continuous simulation (which runs
         // with the entries' authorization state overrides) is the
         // pre-flight validation. Atomicity also removes the unwind
         // bookkeeping: a failed proposal reverts its grants with it.
-        const result = await executePreparedPlanWithPlainCalls(collected.prepared, {
-          before: collected.grants,
-          after: collected.revokes,
+        const result = await executePreparedPlanWithPlainCalls(bundledExecution.prepared, {
+          before: bundledExecution.grants,
+          after: bundledExecution.revokes,
         }, { allowSingleCall: true })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
           // the sequential multi-proposal ceremony.
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
         }
-        latchedBundledExecution.value = null
         clearBatch()
         if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
         await redirectAfterBatchExecution(scope)
         return
+      }
+
+      if (willBundlePrerequisites.value) {
+        throw new Error('Safe batch review expired — reopen review before submitting.')
       }
 
       await sendExecutionPrerequisites(grantedRevokes)
@@ -2751,7 +2809,7 @@ export const useTxBatch = () => {
     executeBatch,
     willBundlePrerequisites,
     prepareBundledExecution,
-    latchedBundledExecution,
+    isBundledExecutionCurrent,
     // Tenderly "Simulate on Tenderly" for the whole batch.
     tenderlyEnabled,
     isTenderlySimulating: tenderly.isSimulating,
