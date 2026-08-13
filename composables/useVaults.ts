@@ -340,7 +340,7 @@ const updateEVaults = async (vaultAddresses: string[], generation?: number, sile
         verified,
         vaultCategory,
       }
-    }))
+    }), targetChainId)
 
     if (!silent) {
       isEVaultLoading.value = false
@@ -391,7 +391,7 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
       vault,
       type: 'earn' as const,
       verified: true,
-    })))
+    })), targetChainId)
 
     if (!silent) {
       isEarnLoading.value = false
@@ -472,7 +472,7 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number, 
       verified: true,
       vaultCategory: 'escrow' as const,
     }))
-  registrySetMany(entries)
+  registrySetMany(entries, targetChainId)
 }
 
 /**
@@ -582,7 +582,7 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
         type: 'securitize' as const,
         verified: true,
       }))
-    registrySetMany(entries)
+    registrySetMany(entries, targetChainId)
   }
   catch (e) {
     logWarn('useVaults/updateSecuritizeVaults', e)
@@ -759,7 +759,7 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
     }
 
     const escrowAddrs: string[] = escrow.map(h => h.vault.address)
-    setEscrowAddresses(escrowAddrs)
+    setEscrowAddresses(escrowAddrs, targetChainId)
 
     registrySetMany([
       ...evk.map(h => ({ address: h.vault.address, vault: h.vault, type: 'evk' as const, verified: true })),
@@ -772,7 +772,7 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
       })),
       ...earn.map(h => ({ address: h.vault.address, vault: h.vault, type: 'earn' as const, verified: true })),
       ...securitize.map(h => ({ address: h.vault.address, vault: h.vault, type: 'securitize' as const, verified: true })),
-    ])
+    ], targetChainId)
 
     markHydratedSnapshotReady(targetChainId)
     scheduleHydratedSnapshotEnrichment({ evk, earn, securitize, escrow }, generation)
@@ -842,7 +842,7 @@ const loadVaults = async () => {
     // Seed the registry's escrow set from SDK-backed categorization. The SDK
     // service reads the escrow verified array, so no duplicate local RPC check
     // is needed here.
-    setEscrowAddresses(categories.escrow)
+    setEscrowAddresses(categories.escrow, startChainId)
 
     // Phase 2: fetch EVault, Earn, Securitize in parallel; follow with escrow
     // vault info once EVault collaterals + Earn strategies are known (the
@@ -994,10 +994,11 @@ const getEarnVault = async (address: string): Promise<EulerEarn> => {
   const { getVault: registryGetVault, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
   const { earnVaults } = useEulerLabels()
+  const targetChainId = resolveTargetChainId()
 
   const fetchAndStoreEarnVault = async () => {
-    const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'earn') as EulerEarn
-    registrySet(normalizedAddress, vault, 'earn')
+    const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'earn', targetChainId) as EulerEarn
+    registrySet(normalizedAddress, vault, 'earn', undefined, targetChainId)
     return vault
   }
 
@@ -1016,17 +1017,18 @@ const updateVault = async (vaultAddress: string): Promise<EVault | SecuritizeCol
   const { set: registrySet, isKnownEscrowAddress, getType } = useVaultRegistry()
   const address = getAddress(vaultAddress)
   const { fetchVaultByType } = useVaultRegistry()
+  const targetChainId = resolveTargetChainId()
 
   // Use appropriate fetch function based on vault type
   if (getType(address) === 'securitize') {
-    const vault = await fetchVaultByType(address, 'securitize') as SecuritizeCollateralVault
-    registrySet(address, vault, 'securitize')
+    const vault = await fetchVaultByType(address, 'securitize', targetChainId) as SecuritizeCollateralVault
+    registrySet(address, vault, 'securitize', undefined, targetChainId)
     return vault
   }
 
-  const vault = await fetchVaultByType(address, 'evk') as EVault
+  const vault = await fetchVaultByType(address, 'evk', targetChainId) as EVault
 
-  registrySet(address, vault, 'evk', isKnownEscrowAddress(address) ? { verified: true, vaultCategory: 'escrow' } : undefined)
+  registrySet(address, vault, 'evk', isKnownEscrowAddress(address) ? { verified: true, vaultCategory: 'escrow' } : undefined, targetChainId)
   return vault
 }
 /**
@@ -1065,14 +1067,16 @@ const refreshVaults = async () => {
 const updateEarnVault = async (vaultAddress: string): Promise<EulerEarn> => {
   const { set: registrySet } = useVaultRegistry()
   const address = getAddress(vaultAddress)
-  const vault = await useVaultRegistry().fetchVaultByType(address, 'earn') as EulerEarn
-  registrySet(address, vault, 'earn')
+  const targetChainId = resolveTargetChainId()
+  const vault = await useVaultRegistry().fetchVaultByType(address, 'earn', targetChainId) as EulerEarn
+  registrySet(address, vault, 'earn', undefined, targetChainId)
   return vault
 }
 
 const getEscrowVault = async (address: string): Promise<EVault> => {
   const { getVault: registryGetVault, isEscrowVault: registryIsEscrow, isKnownEscrowAddress, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
+  const targetChainId = resolveTargetChainId()
 
   // Wait for escrow loading to complete (address set populated, needed vaults loaded).
   // Timeout prevents an indefinite hang when a superseded loadVaults generation
@@ -1093,35 +1097,37 @@ const getEscrowVault = async (address: string): Promise<EVault> => {
   // If it's a known escrow address but not in registry (wasn't needed during initial load),
   // fetch on-demand
   if (isKnownEscrowAddress(normalizedAddress)) {
-    const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'evk') as EVault
-    registrySet(normalizedAddress, vault, 'evk', { verified: true, vaultCategory: 'escrow' })
+    const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'evk', targetChainId) as EVault
+    registrySet(normalizedAddress, vault, 'evk', { verified: true, vaultCategory: 'escrow' }, targetChainId)
     return vault
   }
 
   // Last resort: try fetching anyway (might be an escrow vault not in perspective yet)
-  const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'evk') as EVault
-  registrySet(normalizedAddress, vault, 'evk')
+  const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'evk', targetChainId) as EVault
+  registrySet(normalizedAddress, vault, 'evk', undefined, targetChainId)
   return vault
 }
 
 const updateEscrowVault = async (vaultAddress: string): Promise<EVault> => {
   const { set: registrySet } = useVaultRegistry()
   const address = getAddress(vaultAddress)
-  const vault = await useVaultRegistry().fetchVaultByType(address, 'evk') as EVault
-  registrySet(address, vault, 'evk', { verified: true, vaultCategory: 'escrow' })
+  const targetChainId = resolveTargetChainId()
+  const vault = await useVaultRegistry().fetchVaultByType(address, 'evk', targetChainId) as EVault
+  registrySet(address, vault, 'evk', { verified: true, vaultCategory: 'escrow' }, targetChainId)
   return vault
 }
 
 const getSecuritizeVault = async (address: string): Promise<SecuritizeCollateralVault> => {
   const normalizedAddress = getAddress(address)
   const { getVault: registryGetVault, getType, set: registrySet } = useVaultRegistry()
+  const targetChainId = resolveTargetChainId()
 
   if (getType(normalizedAddress) === 'securitize') {
     return registryGetVault(normalizedAddress) as SecuritizeCollateralVault
   }
 
-  const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'securitize') as SecuritizeCollateralVault
-  registrySet(normalizedAddress, vault, 'securitize')
+  const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'securitize', targetChainId) as SecuritizeCollateralVault
+  registrySet(normalizedAddress, vault, 'securitize', undefined, targetChainId)
   return vault
 }
 
@@ -1138,6 +1144,7 @@ const getBorrowVaultPair = async (
   } = useVaultRegistry()
   const collateralAddr = getAddress(collateralAddress)
   const borrowAddr = getAddress(borrowAddress)
+  const targetChainId = resolveTargetChainId()
 
   // Wait for snapshot enrichment / RPC refresh before resolving a one-time
   // direct-route pair; otherwise the page can capture vault instances before
@@ -1174,11 +1181,11 @@ const getBorrowVaultPair = async (
   }
 
   // Fallback: fetch borrow vault if not in registry
-  const borrowVault = await fetchVaultByType(borrowAddr, 'evk') as EVault
+  const borrowVault = await fetchVaultByType(borrowAddr, 'evk', targetChainId) as EVault
   if (!borrowVault) {
     throw '[getBorrowVaultPair]: Borrow vault not found'
   }
-  registrySet(borrowAddr, borrowVault, 'evk')
+  registrySet(borrowAddr, borrowVault, 'evk', undefined, targetChainId)
 
   const collateralLTV = borrowVault.collaterals.find(c => getAddress(c.address) === collateralAddr)
   if (!collateralLTV) {
@@ -1197,8 +1204,8 @@ const getBorrowVaultPair = async (
   }
   else {
     try {
-      collateralVault = await fetchVaultByType(collateralAddr, 'evk') as EVault
-      registrySet(collateralAddr, collateralVault, 'evk')
+      collateralVault = await fetchVaultByType(collateralAddr, 'evk', targetChainId) as EVault
+      registrySet(collateralAddr, collateralVault, 'evk', undefined, targetChainId)
     }
     catch {
       // Try escrow vault first
@@ -1209,9 +1216,9 @@ const getBorrowVaultPair = async (
         // Check if it's a securitize vault
         const isSecuritize = await isSecuritizeVault(collateralAddr)
         if (isSecuritize) {
-          collateralVault = await fetchVaultByType(collateralAddr, 'securitize') as SecuritizeCollateralVault
+          collateralVault = await fetchVaultByType(collateralAddr, 'securitize', targetChainId) as SecuritizeCollateralVault
           // Add to registry so balances can be fetched
-          registrySet(collateralAddr, collateralVault, 'securitize')
+          registrySet(collateralAddr, collateralVault, 'securitize', undefined, targetChainId)
         }
         else {
           throw '[getBorrowVaultPair]: Failed to fetch collateral vault'
