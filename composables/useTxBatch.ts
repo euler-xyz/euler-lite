@@ -614,11 +614,9 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
 
 const redirectAfterBatchExecution = async (scope?: TrackedExecutionScope) => {
   try {
-    // Success signal for a detached Safe completion toast, and the gate that
-    // keeps a background-confirmed batch from yanking the user mid-flow.
-    // Bound to THIS execution's record — a late tail can never mark or read
-    // a successor execution.
-    scope?.markSucceeded()
+    // Detached or abandoned executions finalize without mutating the active
+    // route. The scope is bound to this execution, so a late tail cannot read
+    // a successor execution's suppression state.
     if (scope?.suppressPostTxUi()) return
     const router = useRouter()
     const route = useRoute()
@@ -2880,6 +2878,7 @@ export const useTxBatch = () => {
           // the sequential multi-proposal ceremony.
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
         }
+        scope?.markSucceeded()
         clearPendingSafeSubmission(submittedSafeLock ?? null)
         if (isExecutionContextActive(batchExecutionContext)) {
           latchedBundledExecution.value = null
@@ -2938,6 +2937,7 @@ export const useTxBatch = () => {
           else if (progress.status === 'approval') safeSubmissionKind = 'prerequisite'
         },
       })
+      scope?.markSucceeded()
       clearPendingSafeSubmission(submittedSafeLock ?? null)
       if (isExecutionContextActive(batchExecutionContext)) clearBatchInternal(false)
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()

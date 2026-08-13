@@ -1274,6 +1274,38 @@ describe('useTxBatch execution errors', () => {
     })
   })
 
+  it('marks a detached sequential batch successful after chain drift without redirecting', async () => {
+    const batch = useTxBatch()
+    let resolveExecution!: () => void
+    const executionResult = new Promise<void>((resolve) => {
+      resolveExecution = resolve
+    })
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(preparedEnvelope())
+    eulerTxMocks.executePreparedPlan.mockReturnValue(executionResult)
+    const scope = {
+      markSucceeded: vi.fn(),
+      suppressPostTxUi: vi.fn(() => true),
+    }
+
+    await batch.addEntry({
+      label: 'Withdraw USDC',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    const execution = batch.executeBatch(await prepareReviewedBatch(batch), scope)
+    await vi.waitFor(() =>
+      expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1),
+    )
+
+    activeChainId.value = 8453
+    await nextTick()
+    resolveExecution()
+    await execution
+
+    expect(scope.markSucceeded).toHaveBeenCalledTimes(1)
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
+
   it('passes the pre-entry simulated account to execution plan builders', async () => {
     const sdk = createMockSdk()
     const preMigrationAccount = accountWithPosition(subAccount, subAccount, 42n)
@@ -1472,6 +1504,52 @@ describe('useTxBatch execution prerequisites', () => {
     expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([])
     expect(batch.entryCount.value).toBe(1)
     expect(batch.latchedBundledExecution.value).toBe(walletBExecution)
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
+
+  it('marks a detached Safe bundle successful after chain drift without redirecting', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const safeHash = `0x${'27'.repeat(32)}` as Hash
+    let resolveExecution!: (result: { receipts: never[] }) => void
+    const executionResult = new Promise<{ receipts: never[] }>((resolve) => {
+      resolveExecution = resolve
+    })
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared,
+      _extraCalls,
+      options: {
+        onSafePreflight?: () => void | Promise<void>
+        onSafeTerminalSubmissionStart?: () => void
+        onSafeSubmission?: (submittedHash: Hash) => void
+      },
+    ) => {
+      await options.onSafePreflight?.()
+      options.onSafeTerminalSubmissionStart?.()
+      options.onSafeSubmission?.(safeHash)
+      return executionResult
+    })
+    const scope = {
+      markSucceeded: vi.fn(),
+      suppressPostTxUi: vi.fn(() => true),
+    }
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    const execution = batch.executeBatch(undefined, scope)
+    await vi.waitFor(() =>
+      expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledTimes(1),
+    )
+
+    activeChainId.value = 8453
+    await nextTick()
+    resolveExecution({ receipts: [] })
+    await execution
+
+    expect(scope.markSucceeded).toHaveBeenCalledTimes(1)
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([])
     expect(routerReplace).not.toHaveBeenCalled()
   })
 
