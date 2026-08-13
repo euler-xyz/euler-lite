@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import type { Address, Hex } from 'viem'
+import { isAddressEqual, type Address, type Hex } from 'viem'
 import { useSendTransaction, useSignTypedData } from '@wagmi/vue'
 import {
   type CowSwapCancellationMode,
@@ -33,6 +33,7 @@ const SDK_STATUS_TO_LITE: Record<CowSwapTransactionPlanExecutionStatus, CowSwapE
 
 export type CowSwapPlanFlow = {
   plan: TransactionPlan
+  account: Address
   chainId: number
   /** How a *future* user-initiated cancellation should be performed for this flow. */
   cancellationMode: CowSwapCancellationMode
@@ -42,8 +43,11 @@ export type CowSwapPlanFlow = {
   settlementContract?: Address
 }
 
+export const COW_SWAP_REVIEW_CONTEXT_CHANGED_ERROR
+  = 'The connected wallet or network changed after review. Close this review and try again.'
+
 export const useCowSwapExecutionCore = () => {
-  const { address } = useWagmi()
+  const { address, chainId } = useWagmi()
   const { signTypedDataAsync } = useSignTypedData()
   const { sendTransactionAsync } = useSendTransaction()
   const { isSpyMode } = useSpyMode()
@@ -79,6 +83,15 @@ export const useCowSwapExecutionCore = () => {
     return userAddress as Address
   }
 
+  const assertReviewedContext = (flow: CowSwapPlanFlow) => {
+    const currentAddress = address.value as Address | undefined
+    if (
+      !currentAddress
+      || !isAddressEqual(currentAddress, flow.account)
+      || chainId.value !== flow.chainId
+    ) throw new Error(COW_SWAP_REVIEW_CONTEXT_CHANGED_ERROR)
+  }
+
   const sendTransaction = ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) =>
     sendTransactionAsync({ to, data, value: value ?? 0n })
 
@@ -106,7 +119,11 @@ export const useCowSwapExecutionCore = () => {
     flow: CowSwapPlanFlow,
     policyChecks: OperationPolicyCheck[] = [],
   ): Promise<CowSwapOrderUid> => {
-    assertOperationPolicyChecks(policyChecks)
+    const assertCurrentExecutionPolicy = () => {
+      assertReviewedContext(flow)
+      assertOperationPolicyChecks(policyChecks)
+    }
+    assertCurrentExecutionPolicy()
     const userAddress = requireWallet()
     error.value = null
     locallyCancelled.value = false
@@ -120,23 +137,23 @@ export const useCowSwapExecutionCore = () => {
 
     try {
       const sdk = await getEulerSdkFresh()
-      assertOperationPolicyChecks(policyChecks)
+      assertCurrentExecutionPolicy()
       const result = await sdk.executionService.executeCowSwapTransactionPlan({
         plan: flow.plan,
         chainId: flow.chainId,
         account: userAddress,
         sendTransaction: (transaction) => {
-          assertOperationPolicyChecks(policyChecks)
+          assertCurrentExecutionPolicy()
           return sendTransaction(transaction)
         },
         signTypedData: (typedData) => {
-          assertOperationPolicyChecks(policyChecks)
+          assertCurrentExecutionPolicy()
           return signTypedData(typedData)
         },
         onProgress: (progress) => {
           // The SDK emits before each CoW phase, including submitOrder. This
           // closes the interval after signing but before the order is posted.
-          assertOperationPolicyChecks(policyChecks)
+          assertCurrentExecutionPolicy()
           onProgress(progress)
         },
       })

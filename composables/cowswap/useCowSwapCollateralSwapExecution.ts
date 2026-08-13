@@ -19,6 +19,7 @@ export const useCowSwapCollateralSwapExecution = () => {
 
     return core.executePlan({
       plan,
+      account: params.account.owner,
       chainId: params.chainId,
       cancellationMode: 'cow-api',
       orderbookUrl: chainConfig.orderbookUrl,

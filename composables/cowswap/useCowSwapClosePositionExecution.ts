@@ -16,6 +16,7 @@ export const useCowSwapClosePositionExecution = () => {
 
     return core.executePlan({
       plan,
+      account: params.account.owner,
       chainId: params.chainId,
       cancellationMode: 'evc-permit',
     }, policyChecks)
