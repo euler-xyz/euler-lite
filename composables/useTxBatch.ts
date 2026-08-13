@@ -622,6 +622,80 @@ export const normalizeSimulatedVaultLayers = <T>(
   return null
 }
 
+/**
+ * Mirror of the SDK simulator's `collectOperations` grouping: every top-level
+ * entry of an evcBatch — a named operation or a loose item — is one
+ * simulation operation, producing one state layer and one slot in the
+ * `failedBatchItems.operationIndex` space. Non-evcBatch plan items produce
+ * neither.
+ */
+export const countPlanOperations = (plan: TransactionPlan): number => {
+  let count = 0
+  for (const item of plan) {
+    if (item.type !== 'evcBatch') continue
+    count += item.items.length
+  }
+  return count
+}
+
+export interface BatchOperationEntryMap {
+  /**
+   * Operations the simulated plan carries ahead of the entries' own —
+   * plan plugins (ToS registration, Pyth updates) prepend loose items, each
+   * of which the simulator treats as its own operation.
+   */
+  pluginOperations: number
+  /** Operations contributed by each cart entry, in entry order. */
+  operationCounts: number[]
+  /** Simulation layer index holding the state after entry i completed. */
+  entryLayerIndices: number[]
+  /** Cart entry owning an SDK operationIndex; null for plugin operations. */
+  entryOfOperation: (operationIndex: number) => number | null
+}
+
+/**
+ * Explicit SDK-operation ↔ cart-entry boundary map.
+ *
+ * Layer/failure cardinality cannot be inferred from entry count alone: a
+ * single cart entry may contribute several operations (a collateral+debt
+ * refinance is the concrete case), and plan plugins prepend operations of
+ * their own. Entry operation counts come from the entry plans the cart
+ * holds; the plugin prefix is the difference against the simulated plan's
+ * operation count (plugins run inside `simulateTransactionPlan`, so the app
+ * never holds the plan that was actually simulated). Known plugins prepend —
+ * a negative difference means the shapes disagree and the caller must treat
+ * the simulation as unusable.
+ */
+export const buildOperationEntryMap = (
+  entryPlans: TransactionPlan[],
+  simulatedOperationCount: number,
+): BatchOperationEntryMap | null => {
+  const operationCounts = entryPlans.map(countPlanOperations)
+  const totalEntryOperations = operationCounts.reduce((sum, count) => sum + count, 0)
+  const pluginOperations = simulatedOperationCount - totalEntryOperations
+  if (pluginOperations < 0) return null
+
+  const entryLayerIndices: number[] = []
+  let cumulative = pluginOperations
+  for (const count of operationCounts) {
+    cumulative += count
+    entryLayerIndices.push(cumulative)
+  }
+
+  return {
+    pluginOperations,
+    operationCounts,
+    entryLayerIndices,
+    entryOfOperation: (operationIndex: number) => {
+      if (operationIndex < pluginOperations || operationIndex >= simulatedOperationCount) return null
+      for (let i = 0; i < entryLayerIndices.length; i++) {
+        if (operationIndex < entryLayerIndices[i]!) return i
+      }
+      return null
+    },
+  }
+}
+
 type BatchSimulationWalletBalances = {
   simulatedWalletBalances?: Record<string, bigint>[]
 }
@@ -1857,25 +1931,52 @@ export const useTxBatch = () => {
       // layer's touched positions onto the previous full account. This preserves
       // the user's existing positions in vaults the batch never touched.
       const rawSimAccounts = (sim.simulatedAccounts ?? []) as Account<IHasVaultAddress>[]
-      const simAccounts = rawSimAccounts.length === plans.length
+      const paddedSimAccounts = rawSimAccounts.length === plans.length
         ? [baseAccount, ...rawSimAccounts]
         : rawSimAccounts
+      // The simulator emits one layer per SDK operation — where an operation
+      // is any top-level batch unit, so plan plugins (ToS registration, Pyth
+      // updates) contribute prefix operations and a single cart entry may
+      // contribute several (collateral+debt refinance). Map those operations
+      // back to cart entries explicitly: each entry's display layer is the
+      // state after its LAST operation, plugin prefix layers fold into the
+      // base, and failedBatchItems.operationIndex resolves through the same
+      // map so failures mark the right row.
+      const simulatedOperationCount = Math.max(0, paddedSimAccounts.length - 1)
+      const operationMap = buildOperationEntryMap(plans, simulatedOperationCount)
+      if (operationMap && operationMap.pluginOperations > 0) {
+        logBatchDiag('resimulate:plugin-operations-mapped', {
+          token,
+          pluginOperations: operationMap.pluginOperations,
+          operationCounts: operationMap.operationCounts,
+          simulatedOperationCount,
+        }, 'warn')
+      }
+      const selectEntryLayers = <T>(baseInclusiveLayers: T[]): T[] => [
+        baseInclusiveLayers[0]!,
+        ...(operationMap?.entryLayerIndices ?? []).map(k => baseInclusiveLayers[k]!),
+      ]
+      const simAccounts = operationMap ? selectEntryLayers(paddedSimAccounts) : paddedSimAccounts
       const rawSimVaultLayers = sim.simulatedVaultsLayers ?? []
-      const normalizedSimVaultLayers = normalizeSimulatedVaultLayers(rawSimVaultLayers, plans.length)
-      const simVaultLayers = normalizedSimVaultLayers ?? []
+      const normalizedSimVaultLayers = normalizeSimulatedVaultLayers(rawSimVaultLayers, simulatedOperationCount)
+      const simVaultLayers = normalizedSimVaultLayers === null || normalizedSimVaultLayers.length === 0
+        ? []
+        : operationMap
+          ? selectEntryLayers(normalizedSimVaultLayers)
+          : normalizedSimVaultLayers
       if (normalizedSimVaultLayers === null) {
         logBatchDiag('resimulate:vault-layer-cardinality-invalid', {
           token,
           rawVaultLayers: rawSimVaultLayers.length,
-          plans: plans.length,
-          acceptedVaultLayerCounts: [0, plans.length, plans.length + 1],
+          simulatedOperationCount,
+          acceptedVaultLayerCounts: [0, simulatedOperationCount, simulatedOperationCount + 1],
         }, 'error')
       }
-      // A healthy sim returns exactly one account per operation on top of the
-      // pre-batch snapshot, i.e. simAccounts.length === plans.length + 1. Anything
-      // else is the smoking gun for the "not loaded" symptom (getCurrentFinalLayer
-      // needs layers.length === entries.length + 1), so escalate to error on a
-      // mismatch.
+      // After entry-boundary selection a healthy sim yields exactly
+      // entries + 1 layers (getCurrentFinalLayer's contract). A null map means
+      // the simulated plan carries FEWER operations than the entry plans
+      // declare — an SDK build without layered simulation, or a plan-shape
+      // disagreement — and the layers cannot be trusted.
       logBatchDiag(
         'resimulate:sim-resolved',
         {
@@ -1883,6 +1984,8 @@ export const useTxBatch = () => {
           rawSimAccounts: rawSimAccounts.length,
           simAccounts: simAccounts.length,
           plans: plans.length,
+          simulatedOperationCount,
+          pluginOperations: operationMap?.pluginOperations ?? null,
           expectedLayers: plans.length + 1,
           countMatchesExpected: simAccounts.length === plans.length + 1,
           simulationError: !!sim.simulationError,
@@ -1891,15 +1994,10 @@ export const useTxBatch = () => {
         },
         simAccounts.length === plans.length + 1 ? 'warn' : 'error',
       )
-      // Version guard: the builder needs one simulated account per operation on
-      // top of the pre-batch snapshot (the layered simulation API). An SDK build
-      // without it would otherwise silently render the real state forever. The
-      // final-only shape is still enough for one operation, so normalize that
-      // case into [base, afterOp0].
-      if (!simError.value && simAccounts.length < plans.length + 1) {
+      if (!simError.value && !operationMap) {
         logBatchDiag('resimulate:version-guard-tripped', {
           token,
-          simAccounts: simAccounts.length,
+          simulatedOperationCount,
           plans: plans.length,
         }, 'error')
         simError.value = 'Batch simulation did not return per-operation state layers — the installed @eulerxyz/euler-v2-sdk build does not support the batch builder.'
@@ -1947,7 +2045,16 @@ export const useTxBatch = () => {
         }
         return out
       }
-      const simWb = ((sim as BatchSimulationWalletBalances).simulatedWalletBalances ?? []).map(normalizeWalletBalances)
+      const rawSimWb = (sim as BatchSimulationWalletBalances).simulatedWalletBalances ?? []
+      // Same base-inclusive normalization + entry-boundary selection as the
+      // account/vault layers, so wallet indices keep mapping to cart entries.
+      const baseInclusiveSimWb = rawSimWb.length === simulatedOperationCount
+        ? [{}, ...rawSimWb]
+        : rawSimWb
+      const selectedSimWb = operationMap && baseInclusiveSimWb.length === simulatedOperationCount + 1
+        ? selectEntryLayers(baseInclusiveSimWb)
+        : baseInclusiveSimWb
+      const simWb = selectedSimWb.map(normalizeWalletBalances)
       const touchedTokens = collectWalletBalanceTokens(simWb)
       const realWallet: Record<string, bigint> = {}
       if (touchedTokens.length) {
@@ -2015,7 +2122,17 @@ export const useTxBatch = () => {
       const failedEntries = new Map<number, string>()
       for (const f of sim.failedBatchItems ?? []) {
         const failedIndex = 'operationIndex' in f && typeof f.operationIndex === 'number' ? f.operationIndex : f.index
-        if (typeof failedIndex === 'number') failedEntries.set(failedIndex, failureMessage)
+        if (typeof failedIndex !== 'number') continue
+        // operationIndex counts plugin prefix operations too — resolve it to
+        // the owning cart entry through the boundary map. A failing plugin
+        // operation belongs to no row; block the batch instead of leaving
+        // hasFailedOps (and the Execute gate) silently green.
+        const entryIdx = operationMap ? operationMap.entryOfOperation(failedIndex) : failedIndex
+        if (entryIdx === null) {
+          if (!simError.value) simError.value = failureMessage
+          continue
+        }
+        if (!failedEntries.has(entryIdx)) failedEntries.set(entryIdx, failureMessage)
       }
       const planTargets = plans.map(collectPlanTargets)
       for (const e of sim.vaultStatusErrors ?? []) {
