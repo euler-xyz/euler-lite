@@ -37,6 +37,7 @@ const eulerTxMocks = {
 }
 const grantWalletContext: WalletExecutionContext = { account: owner, chainId: 1 }
 type PlainTxSendOptions = {
+  beforeSend?: (index: number) => void
   onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
   walletContext?: WalletExecutionContext
 }
@@ -44,7 +45,10 @@ const broadcastAllTransactions = async (
   txs: Array<{ data: Hex }>,
   options?: PlainTxSendOptions,
 ) => {
-  txs.forEach((_tx, index) => options?.onBroadcast?.(index, options?.walletContext ?? grantWalletContext))
+  txs.forEach((_tx, index) => {
+    options?.beforeSend?.(index)
+    options?.onBroadcast?.(index, options?.walletContext ?? grantWalletContext)
+  })
   return []
 }
 const migrationFlowMocks = {
@@ -1248,6 +1252,36 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.execError.value).toBeDefined()
     // Nothing landed, so there is nothing of ours to revoke.
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([])
+  })
+
+  it('blocks prerequisite writes when policy changes while their builder is awaiting', async () => {
+    const batch = useTxBatch()
+    let policyBlocked = false
+    registerOperationPolicyCheck(
+      'test-prerequisite-policy',
+      () => policyBlocked ? 'Operation policy changed' : undefined,
+    )
+    await batch.addEntry({
+      label: 'Migrate Aave position',
+      buildPlan: async () => [] as TransactionPlan,
+      buildExecutionPrerequisites: async () => {
+        policyBlocked = true
+        return {
+          preTxs: [grantTx],
+          walletContext: grantWalletContext,
+          postTxs: [revokeTx],
+          postTxsByPreTx: [revokeTx],
+        }
+      },
+    })
+    unregisterOperationPolicyCheck('test-prerequisite-policy')
+
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('Operation policy changed')
   })
 
   it('revokes a broadcast grant when receipt confirmation fails before later grants', async () => {

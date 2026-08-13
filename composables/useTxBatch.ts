@@ -2306,10 +2306,14 @@ export const useTxBatch = () => {
       if (!entry.buildExecutionPrerequisites) continue
       const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
       if (!prerequisites) continue
+      // The async builder may span a policy change. Recheck after it resolves,
+      // and again at each wallet-write boundary inside sendPlainTransactions.
+      assertOperationPolicyChecks(entry.policyChecks)
       let grantWalletContext: WalletExecutionContext | undefined
       if (prerequisites.preTxs.length) {
         await sendPlainTransactions(prerequisites.preTxs, {
           walletContext: prerequisites.walletContext,
+          beforeSend: () => assertOperationPolicyChecks(entry.policyChecks),
           onBroadcast: (preTxIndex, walletContext) => {
             grantWalletContext = walletContext
             const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]

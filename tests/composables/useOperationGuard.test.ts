@@ -1,11 +1,13 @@
 import { createRenderer, h, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { operationBlockerEntries, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import { captureOperationPolicyChecks, getOperationPolicyBlockReason, operationBlockerEntries, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { useOperationGuard } from '~/composables/useOperationGuard'
 
 const labelsVersion = ref(0)
 const registryVersion = ref(0)
 let geoBlocked = false
+let keyringVault = false
+const credentialData = ref<{ validUntil: number }>()
 
 vi.mock('@wagmi/vue', () => ({
   useChainId: () => ref(1),
@@ -18,13 +20,15 @@ vi.mock('~/composables/useGeoBlock', () => ({
 }))
 vi.mock('~/composables/guards/useTosGuard', () => ({ useTosGuard: vi.fn() }))
 vi.mock('~/composables/guards/useUnverifiedVaultGuard', () => ({ useUnverifiedVaultGuard: vi.fn() }))
-vi.mock('~/utils/eulerLabelsUtils', () => ({ isVaultKeyring: () => false }))
+vi.mock('~/utils/eulerLabelsUtils', () => ({ isVaultKeyring: () => keyringVault }))
 vi.mock('~/composables/useKeyring', () => ({
+  isCredentialUnexpired: (credential: { validUntil: number } | null | undefined) =>
+    Boolean(credential && credential.validUntil > Math.floor(Date.now() / 1000)),
   useKeyring: () => ({
     isVerificationRequired: ref(false),
     isExpired: ref(false),
     flowState: ref('idle'),
-    credentialData: ref(undefined),
+    credentialData,
     isCheckingStatus: ref(false),
     statusMessage: ref(''),
     error: ref(''),
@@ -70,13 +74,30 @@ describe('useOperationGuard geo reactivity', () => {
     labelsVersion.value = 0
     registryVersion.value = 0
     geoBlocked = false
+    keyringVault = false
+    credentialData.value = undefined
     vi.stubGlobal('useWagmi', () => ({ address: ref(undefined) }))
     vi.stubGlobal('useVaultRegistry', () => ({ registryVersion }))
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     unregisterOperationBlocker('keyring')
     vi.unstubAllGlobals()
+  })
+
+  it('fails a retained policy check when its Keyring credential expires after unmount', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-13T08:00:00Z'))
+    keyringVault = true
+    credentialData.value = { validUntil: Math.floor(Date.now() / 1000) + 60 }
+    const app = mountGuard()
+    const checks = captureOperationPolicyChecks()
+
+    app.unmount()
+    vi.setSystemTime(new Date('2026-08-13T08:02:00Z'))
+
+    expect(getOperationPolicyBlockReason(checks)).toBe('Identity verification required')
   })
 
   it('re-evaluates cached geo policy after labels or vault metadata refreshes', async () => {

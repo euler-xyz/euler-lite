@@ -1237,6 +1237,7 @@ export const useEulerTx = () => {
   const sendPlainTransactions = async (
     txs: readonly PlainTxRequest[],
     options?: {
+      beforeSend?: (index: number) => void
       onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
       walletContext?: WalletExecutionContext
     },
@@ -1273,6 +1274,7 @@ export const useEulerTx = () => {
     let lastBroadcastData: Hex | undefined
     try {
       for (const [index, tx] of txs.entries()) {
+        options?.beforeSend?.(index)
         const hash = await send(tx)
         lastBroadcastData = tx.data
         // Once a hash exists the transaction may land even if receipt polling

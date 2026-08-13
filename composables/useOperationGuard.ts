@@ -1,7 +1,7 @@
 import { computed, isRef, watch, onUnmounted, provide, reactive, type Ref } from 'vue'
 import { useChainId } from '@wagmi/vue'
 import type { Address } from 'viem'
-import { useKeyring } from '~/composables/useKeyring'
+import { isCredentialUnexpired, useKeyring } from '~/composables/useKeyring'
 import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
 import {
@@ -89,6 +89,14 @@ export const useOperationGuard = (
 
     const unverifiedReason = unverifiedGuard?.getBlockReason?.()
     if (unverifiedReason) return unverifiedReason
+    // The source component may have unmounted, which stops useKeyring's expiry
+    // timer. Evaluate the retained credential against wall-clock time at every
+    // final policy boundary so it cannot remain valid indefinitely.
+    if (
+      keyringVaultAddress.value
+      && keyring.credentialData.value
+      && !isCredentialUnexpired(keyring.credentialData.value)
+    ) return 'Identity verification required'
     return keyring.isVerificationRequired.value ? 'Identity verification required' : undefined
   }
 
