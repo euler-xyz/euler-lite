@@ -32,6 +32,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 // Snapshot of all borrow inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may have been reset), so the plan
@@ -1113,8 +1114,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
             swapMode: SwapperMode.EXACT_IN,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (execution) => {
+              await send(execution)
             },
             submittingLabel: 'Submitting...',
           },
@@ -1196,8 +1197,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           plan: plan.value || undefined,
           supplyingAssetForBorrow: collateralVault.value?.asset,
           supplyingAmount: collateralAmount.value,
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (execution) => {
+            await send(execution)
           },
           submittingLabel: 'Submitting...',
         },
@@ -1208,7 +1209,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (execution: TrackedExecutionScope) => {
     try {
       isSubmitting.value = true
       if (!collateralVault.value || !borrowVault.value) {
@@ -1234,7 +1235,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         txPlan = await buildStandardBorrowPlan(account, subAccountAddr, subAccountSnapshotApplied)
       }
       await executePlan(txPlan)
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       logWarn('borrow/send', e)

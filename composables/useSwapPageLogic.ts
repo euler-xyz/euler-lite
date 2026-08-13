@@ -15,6 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -590,8 +591,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             plan: preparedPlan.value ? undefined : (plan.value || undefined),
             prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
-            onConfirm: async () => {
-              await send()
+            onConfirm: async (execution) => {
+              await send(execution)
             },
             submittingLabel: 'Submitting...',
           },
@@ -603,7 +604,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     }
   }
 
-  const send = async () => {
+  const send = async (execution: TrackedExecutionScope) => {
     if (!fromVault.value || !toVault.value) return
     if (!isSameAsset.value && !selectedQuote.value) {
       showError('The swap quote changed. Review the operation again')
@@ -630,10 +631,15 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         const txPlan = await buildPlan(undefined, currentPlanContext())
         await executePlan(txPlan)
       }
-      modal.close()
-      setTimeout(() => {
-        router.replace({ path: redirectPath, query: { network: route.query.network } })
-      }, 400)
+      // Success signal for a detached Safe completion toast; a proposal that
+      // confirmed after its modal was closed must not redirect mid-flow.
+      execution.markSucceeded()
+      if (!execution.suppressPostTxUi()) {
+        modal.close()
+        setTimeout(() => {
+          router.replace({ path: redirectPath, query: { network: route.query.network } })
+        }, 400)
+      }
     }
     catch (e) {
       showError('Transaction failed')

@@ -1,4 +1,4 @@
-import { getAddress, type Address, type Hash, type Hex, type TransactionReceipt } from 'viem'
+import { getAddress, type Address, type Hash, type Hex, type StateOverride, type TransactionReceipt } from 'viem'
 import type {
   Account,
   CollateralShareSource,
@@ -41,7 +41,7 @@ import type {
   WrappedNativeInfo, SwapQuote,
 } from '@eulerxyz/euler-v2-sdk'
 import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
-import { getAccount } from '@wagmi/vue/actions'
+import { getAccount, sendCalls } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import {
   encodeMigrationAuthorizationTxs,
@@ -55,9 +55,17 @@ import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
 import {
   getSafeWalletProvider,
+  isSafeConnectorIdentity,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
+  type WalletProviderLike,
 } from '~/utils/safeWalletTransactions'
+import {
+  PlanNotBundleableError,
+  transactionPlanToCalls,
+  type PlanEncodingSdk,
+} from '~/utils/transaction-plan-calls'
+import { hasPermit2Signature } from '~/utils/transactionPlanApprovals'
 import {
   assertWalletExecutionContext,
   type WalletExecutionContext,
@@ -1176,12 +1184,20 @@ export const useEulerTx = () => {
     })
   }
 
-  const simulatePreparedPlan = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
+  const simulatePreparedPlan = async (
+    prepared: TransactionPlanPrepared,
+    stateOverrideOptions?: SimulationStateOverrideOptions,
+    extraStateOverrides?: StateOverride,
+  ) => {
     return profAsync('sdk', 'simulatePreparedTransactionPlan', async () => {
       const sdk = await getEulerSdkForChain(prepared.chainId)
       return sdk.executionService.simulatePreparedTransactionPlan(prepared, {
         stateOverrides: true,
         stateOverrideOptions,
+        // Caller-supplied overrides for state the plan assumes but which is
+        // not on-chain yet (e.g. migration authorizations that will be
+        // granted inside the same Safe bundle).
+        ...(extraStateOverrides?.length ? { extraStateOverrides } : {}),
       })
     })
   }
@@ -1190,11 +1206,19 @@ export const useEulerTx = () => {
     isOkx,
     expectedAccount,
     expectedChainId,
+    connector,
     resolveHash,
   }: {
     isOkx: boolean
     expectedAccount: Address
     expectedChainId: number
+    /**
+     * Pin submissions to the connector captured when this sender was built.
+     * Without it wagmi resolves the currently-active connector, and a
+     * same-account/same-chain connector switch mid-sequence would submit
+     * through one provider while hash resolution polls another.
+     */
+    connector?: ReturnType<typeof getAccount>['connector']
     resolveHash?: (hash: Hash) => Promise<Hash>
   }) => {
     let okxDelayPending = false
@@ -1213,6 +1237,7 @@ export const useEulerTx = () => {
       const hash = await sendTransactionAsync({
         account: expectedAccount,
         chainId: expectedChainId,
+        ...(connector ? { connector } : {}),
         to,
         data: data as Hex,
         value: value ?? 0n,
@@ -1267,6 +1292,7 @@ export const useEulerTx = () => {
       isOkx,
       expectedAccount: owner,
       expectedChainId: cid,
+      connector,
     })
 
     const receipts: TransactionReceipt[] = []
@@ -1385,6 +1411,98 @@ export const useEulerTx = () => {
     }
   }
 
+  /**
+   * Submit every plan transaction as one EIP-5792 call bundle. Safe turns
+   * the bundle into a single MultiSend proposal, so signers approve once
+   * instead of once per transaction (approve + EVC batch collapse into one
+   * proposal). `extraCalls` wrap the plan inside the same bundle (migration
+   * authorization grants before it, revocations after it). Returns undefined
+   * when the plan cannot be bundled (permit2 / CoW swap items) or when
+   * bundling brings no benefit (fewer than two calls) — callers fall back to
+   * sequential execution.
+   */
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall }: {
+    plan: TransactionPlan
+    chainId: number
+    owner: Address
+    provider: unknown
+    /** The connector whose provider was identified as Safe. */
+    connector: NonNullable<ReturnType<typeof getAccount>['connector']>
+    safeWalletProvider: WalletProviderLike
+    sdk: PlanEncodingSdk
+    extraCalls?: {
+      before?: readonly PlainTxRequest[]
+      after?: readonly PlainTxRequest[]
+    }
+    /**
+     * Submit even a single-call bundle. Callers that promised the review a
+     * Safe proposal use this so "no benefit" can never be conflated with
+     * "no Safe context" — with it set, undefined strictly means the latter.
+     */
+    allowSingleCall?: boolean
+  }) => {
+    let planCalls
+    try {
+      planCalls = transactionPlanToCalls(plan, sdk, chainId)
+    }
+    catch (err) {
+      if (err instanceof PlanNotBundleableError) return undefined
+      throw err
+    }
+    if (planCalls.length === 0) {
+      // Wrapper calls must never satisfy the bundle on their own: submitting
+      // [grant, revoke] around an empty plan would finalize a no-op
+      // migration as success. Without wrappers an empty plan simply has
+      // nothing to bundle and falls back to sequential execution.
+      if (extraCalls?.before?.length || extraCalls?.after?.length) {
+        throw new Error('Transaction plan produced no calls to bundle')
+      }
+      return undefined
+    }
+    const toPlanCall = (tx: PlainTxRequest) => ({ to: tx.to, data: tx.data, value: tx.value ?? 0n })
+    const calls = [
+      ...(extraCalls?.before ?? []).map(toPlanCall),
+      ...planCalls,
+      ...(extraCalls?.after ?? []).map(toPlanCall),
+    ]
+    if (calls.length < 2 && !allowSingleCall) return undefined
+
+    const currentAccount = getAccount(config)
+    assertWalletExecutionContext({
+      expectedAccount: owner,
+      expectedChainId: chainId,
+      currentAccount: currentAccount.address,
+      currentChainId: currentAccount.chainId,
+    })
+
+    // Pin submission to the connector whose provider was identified as Safe.
+    // Without it, wagmi resolves the currently-active connector, and a
+    // same-account connector switch would submit through one provider while
+    // status polling watches another.
+    const { id } = await sendCalls(config, {
+      account: owner,
+      chainId,
+      connector,
+      forceAtomic: true,
+      calls,
+    })
+    // Safe returns the safeTxHash as the bundle id; the status poller needs
+    // a hash-shaped id to resolve it to the executed transaction.
+    if (!/^0x[0-9a-f]{64}$/i.test(id)) {
+      throw new Error('Safe wallet returned an unexpected call bundle id')
+    }
+
+    const execution = await waitForSafeTransactionExecution({
+      submittedHash: id as Hash,
+      walletProvider: safeWalletProvider,
+      publicClient: provider as ReceiptClientLike,
+    })
+    if (execution.receipt.status !== 'success') {
+      throw new Error('Safe transaction reverted')
+    }
+    return { plan, hashes: [execution.hash], receipts: [execution.receipt] }
+  }
+
   const executePlan = async (plan: TransactionPlan) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1405,10 +1523,42 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
+    // Known Safe even when provider acquisition failed — degraded execution
+    // must still never take the permit2 path.
+    const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
+
+    if (safeWalletProvider && connector) {
+      // Mirror what executeTransactionPlan would do to the plan (plugins,
+      // approval resolution), then try to submit it as one Safe proposal.
+      // The provider positively identified a Safe, so permit2 is forced off
+      // here regardless of the (possibly lagging) reactive preference.
+      const processedPlan = await sdk.executionService.processPlanPlugins(plan, owner, cid)
+      const resolvedPlan = await sdk.executionService.resolveRequiredApprovals({
+        plan: processedPlan,
+        chainId: cid,
+        account: owner,
+        usePermit2: false,
+      })
+      const bundled = await executePlanAsSafeBundle({
+        plan: resolvedPlan,
+        chainId: cid,
+        owner,
+        provider,
+        connector,
+        safeWalletProvider,
+        sdk,
+      })
+      if (bundled) {
+        finalizeExecution(bundled)
+        return bundled
+      }
+    }
+
     const sendTransaction = buildSendTransaction({
       isOkx,
       expectedAccount: owner,
       expectedChainId: cid,
+      connector,
       resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
@@ -1422,7 +1572,9 @@ export const useEulerTx = () => {
       plan,
       chainId: cid,
       account: owner,
-      usePermit2: signaturesEnabled.value,
+      // A known Safe never uses permit2, even on the sequential fallback
+      // and even when its provider could not be acquired.
+      usePermit2: isKnownSafe ? false : signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
@@ -1452,10 +1604,55 @@ export const useEulerTx = () => {
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
+
+    // Known Safe even when provider acquisition failed — the degraded
+    // sequential path must still never sign permit2 messages.
+    const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
+
+    let effectivePrepared = prepared
+    if (isKnownSafe) {
+      // A Safe never signs permit2 messages. If the envelope was prepared
+      // before Safe detection resolved, re-resolve its approvals with
+      // permit2 off — resolution overwrites `resolved` on each item, so the
+      // repaired plan is used for both the bundle and the fallback.
+      if (hasPermit2Signature(prepared.plan)) {
+        const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
+          plan: prepared.plan,
+          chainId: prepared.chainId,
+          account: preparedOwner,
+          usePermit2: false,
+        })
+        effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+      }
+      else if (prepared.usePermit2) {
+        // Invariant: an envelope executed for a Safe never carries
+        // usePermit2, even when no permit2 items happened to resolve.
+        effectivePrepared = { ...prepared, usePermit2: false }
+      }
+    }
+
+    if (safeWalletProvider && connector) {
+      // Prepared plans already ran plugins and approval resolution.
+      const bundled = await executePlanAsSafeBundle({
+        plan: effectivePrepared.plan,
+        chainId: prepared.chainId,
+        owner: preparedOwner,
+        provider,
+        connector,
+        safeWalletProvider,
+        sdk,
+      })
+      if (bundled) {
+        finalizeExecution(bundled)
+        return bundled
+      }
+    }
+
     const sendTransaction = buildSendTransaction({
       isOkx,
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
+      connector,
       resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
@@ -1466,7 +1663,7 @@ export const useEulerTx = () => {
     })
 
     const result = await sdk.executionService.executePreparedTransactionPlan({
-      prepared,
+      prepared: effectivePrepared,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
@@ -1477,6 +1674,74 @@ export const useEulerTx = () => {
 
     finalizeExecution(result)
     return result
+  }
+
+  /**
+   * Execute a prepared plan as one Safe call bundle wrapped by extra plain
+   * calls: migration authorization grants before the plan, revocations after
+   * it. Atomicity is the point — a failed migration reverts its grants with
+   * it, and the revocations land in the same proposal, so no standing
+   * authorization ever needs unwind bookkeeping.
+   *
+   * Returns undefined when no Safe bundle context is available (regular
+   * wallet, or a Safe whose provider could not be acquired) — the caller
+   * owns the sequential fallback, which must broadcast the grants and wait
+   * for them to mine before the migration plan is rebuilt.
+   */
+  const executePreparedPlanWithPlainCalls = async (
+    prepared: TransactionPlanPrepared,
+    extraCalls: {
+      before?: readonly PlainTxRequest[]
+      after?: readonly PlainTxRequest[]
+    },
+    options?: { allowSingleCall?: boolean },
+  ) => {
+    if (isSpyMode.value) {
+      throw new Error('Transactions are disabled in spy mode')
+    }
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(prepared.chainId)
+    if (!provider) {
+      throw new Error('No provider available to confirm the transaction')
+    }
+    const connector = getAccount(config).connector
+    const safeWalletProvider = await getSafeWalletProvider(connector)
+    if (!safeWalletProvider || !connector) return undefined
+
+    const preparedOwner = typeof prepared.account === 'string'
+      ? getAddress(prepared.account)
+      : getAddress(prepared.account.owner)
+
+    // Same invariant as executePreparedPlan: an envelope executed for a Safe
+    // never carries permit2.
+    let effectivePrepared = prepared
+    if (hasPermit2Signature(prepared.plan)) {
+      const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
+        plan: prepared.plan,
+        chainId: prepared.chainId,
+        account: preparedOwner,
+        usePermit2: false,
+      })
+      effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+    }
+    else if (prepared.usePermit2) {
+      effectivePrepared = { ...prepared, usePermit2: false }
+    }
+
+    const bundled = await executePlanAsSafeBundle({
+      plan: effectivePrepared.plan,
+      chainId: prepared.chainId,
+      owner: preparedOwner,
+      provider,
+      connector,
+      safeWalletProvider,
+      sdk,
+      extraCalls,
+      allowSingleCall: options?.allowSingleCall,
+    })
+    if (!bundled) return undefined
+    finalizeExecution(bundled)
+    return bundled
   }
 
   /**
@@ -1539,6 +1804,7 @@ export const useEulerTx = () => {
     estimateGasForPlan,
     prefetchPluginData,
     simulatePreparedPlan,
+    executePreparedPlanWithPlainCalls,
     executePlan,
     executePreparedPlan,
   }

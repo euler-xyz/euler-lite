@@ -2,6 +2,7 @@ import { computed, nextTick, ref, shallowRef, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { untrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
   captured: {
@@ -282,7 +283,7 @@ describe('useSwapPageLogic', () => {
     }))
 
     const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm()
+    await modalArgs.props.onConfirm(untrackedExecutionScope)
 
     expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
     expect(captured.executePlan).not.toHaveBeenCalled()
@@ -326,7 +327,7 @@ describe('useSwapPageLogic', () => {
 
     await swap.submit()
     const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm()
+    await modalArgs.props.onConfirm(untrackedExecutionScope)
 
     expect(buildPlan).toHaveBeenCalledTimes(1)
     expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(1)
@@ -411,7 +412,7 @@ describe('useSwapPageLogic', () => {
     expect(modalArgs).toBeDefined()
 
     captured.targetDisabled.value = true
-    await modalArgs.props.onConfirm()
+    await modalArgs.props.onConfirm(untrackedExecutionScope)
 
     expect(captured.executePreparedPlan).not.toHaveBeenCalled()
     expect(captured.executePlan).not.toHaveBeenCalled()
@@ -462,7 +463,7 @@ describe('useSwapPageLogic', () => {
     // The production quote composable clears this ref from reset(); the test
     // double records reset calls, so mirror that state transition explicitly.
     captured.selectedQuote.value = null
-    await modalArgs.props.onConfirm()
+    await modalArgs.props.onConfirm(untrackedExecutionScope)
 
     expect(captured.executePreparedPlan).not.toHaveBeenCalled()
     expect(captured.executePlan).not.toHaveBeenCalled()
