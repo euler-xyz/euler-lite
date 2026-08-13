@@ -1895,6 +1895,7 @@ export const useEulerTx = () => {
 
     let safeSubmissionPhase: TransactionPlanExecutionProgress['status']
     let terminalSafeSubmissionArmed = false
+    let terminalSafeHashCaptured = false
     const sendTransaction = buildSendTransaction({
       isOkx,
       expectedAccount: preparedOwner,
@@ -1903,6 +1904,7 @@ export const useEulerTx = () => {
       resolveHash: safeWalletProvider
         ? async (submittedHash) => {
           if (safeSubmissionPhase === 'evcBatch') {
+            terminalSafeHashCaptured = true
             options?.onSafeSubmission?.(submittedHash)
           }
           else {
@@ -1917,7 +1919,7 @@ export const useEulerTx = () => {
         : undefined,
     })
 
-    const result = await sdk.executionService.executePreparedTransactionPlan({
+    const runPreparedPlan = () => sdk.executionService.executePreparedTransactionPlan({
       prepared: effectivePrepared,
       sendTransaction,
       signTypedData: async (typedData) => {
@@ -1943,6 +1945,23 @@ export const useEulerTx = () => {
         options?.onProgress?.(progress)
       },
     })
+    let result: Awaited<ReturnType<typeof runPreparedPlan>>
+    try {
+      result = await runPreparedPlan()
+    }
+    catch (error) {
+      if (safeWalletProvider && terminalSafeSubmissionArmed && !terminalSafeHashCaptured) {
+        // Only a wallet-standard rejection proves that no terminal Safe
+        // proposal exists; every other pre-hash failure remains ambiguous.
+        if (error instanceof SafeTransactionStatusUnknownError || error instanceof SafeSubmissionStatusUnknownError) throw error
+        if (isExplicitSafeSubmissionRejection(error)) throw error
+        throw new SafeSubmissionStatusUnknownError(
+          'Safe wallet request failed after submission was armed. Its status is unknown; verify it in Safe before retrying.',
+          error,
+        )
+      }
+      throw error
+    }
 
     finalizeExecution(result, prepared.chainId)
     return result

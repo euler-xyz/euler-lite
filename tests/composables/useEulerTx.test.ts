@@ -722,6 +722,41 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(executePreparedTransactionPlan.mock.calls[0][0].prepared.usePermit2).toBe(false)
   })
 
+  it('treats a pre-hash terminal Safe fallback failure as submission-ambiguous', async () => {
+    const transportError = new Error('Safe relay connection closed')
+    wagmiMocks.sendTransactionAsync.mockRejectedValueOnce(transportError)
+    executePreparedTransactionPlan.mockImplementationOnce(async ({ onProgress, sendTransaction }) => {
+      onProgress({ completed: 0, total: 1, status: 'evcBatch' })
+      await sendTransaction({ to: EVC, data: BATCH_DATA, value: 0n })
+      return { receipts: [] }
+    })
+    const onSafeTerminalSubmissionStart = vi.fn()
+    const { executePreparedPlan } = useEulerTx()
+    const batchOnly = [approvedPlan[1]] as TransactionPlan
+
+    await expect(executePreparedPlan(buildPrepared(batchOnly), {
+      onSafeTerminalSubmissionStart,
+    })).rejects.toMatchObject({
+      name: safeWalletTransactions.SafeSubmissionStatusUnknownError.name,
+      cause: transportError,
+    })
+    expect(onSafeTerminalSubmissionStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('propagates an explicit rejection from the terminal Safe fallback', async () => {
+    const rejection = Object.assign(new Error('User rejected the request'), { code: 4001 })
+    wagmiMocks.sendTransactionAsync.mockRejectedValueOnce(rejection)
+    executePreparedTransactionPlan.mockImplementationOnce(async ({ onProgress, sendTransaction }) => {
+      onProgress({ completed: 0, total: 1, status: 'evcBatch' })
+      await sendTransaction({ to: EVC, data: BATCH_DATA, value: 0n })
+      return { receipts: [] }
+    })
+    const { executePreparedPlan } = useEulerTx()
+    const batchOnly = [approvedPlan[1]] as TransactionPlan
+
+    await expect(executePreparedPlan(buildPrepared(batchOnly))).rejects.toBe(rejection)
+  })
+
   it('executes the repaired envelope sequentially when the repair leaves one call', async () => {
     const permitPrepared = buildPrepared([
       {

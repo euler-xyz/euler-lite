@@ -2995,11 +2995,34 @@ export const useTxBatch = () => {
         }
       }
       else {
-        clearPendingSafeSubmission(submittedSafeLock ?? null)
+        const terminalSafeSettled = safeSubmissionKind === 'batch' && Boolean(batchExecutionContext)
         // The batch never landed, so no granted authorization should be left
         // standing. Entries stay in the cart for a retry, which re-grants.
         await revokeAfterAbort(grantedRevokes)
-        execError.value = await describeExecError(error)
+        const errorMessage = await describeExecError(error)
+        if (terminalSafeSettled && batchExecutionContext && !isExecutionContextActive(batchExecutionContext)) {
+          // Keep the terminal outcome with the execution context that owns it.
+          // Its cart snapshot and message restore together when that account
+          // and chain becomes active again.
+          setPendingSafeSubmission({
+            ...submittedSafeLock,
+            submittedHash: submittedSafeLock?.submittedHash,
+            submissionKind: 'batch',
+            account: batchExecutionContext.account,
+            chainId: batchExecutionContext.chainId,
+            batchFingerprint,
+            batchPlan: batchPlanSnapshot,
+            entries: batchEntriesSnapshot,
+            errorMessage,
+            terminalStatus: 'reverted',
+            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+            grantedRevokes: [...grantedRevokes],
+          })
+        }
+        else {
+          clearPendingSafeSubmission(submittedSafeLock ?? null)
+          execError.value = errorMessage
+        }
       }
     }
     finally {

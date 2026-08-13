@@ -124,3 +124,16 @@ export const clearPendingSafeBundleSubmission = (
     submissions.filter(submission => submission.reservationId !== reservationId),
   )
 }
+
+export const clearHashlessPendingSafeBundleSubmission = (
+  storage: StorageLike,
+  reservationId: string,
+) => {
+  const pending = loadPendingSafeBundleSubmissions(storage)
+    .find(submission => submission.reservationId === reservationId)
+  if (!pending) throw new Error('The pending Safe bundle reservation no longer exists.')
+  if (pending.submittedHash) {
+    throw new Error('Submitted Safe bundles must be reconciled by transaction hash.')
+  }
+  clearPendingSafeBundleSubmission(storage, reservationId)
+}

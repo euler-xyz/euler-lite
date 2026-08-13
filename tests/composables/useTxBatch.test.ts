@@ -1507,6 +1507,60 @@ describe('useTxBatch execution prerequisites', () => {
     expect(routerReplace).not.toHaveBeenCalled()
   })
 
+  it('does not surface an earlier Safe failure in the active wallet context', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const safeHash = `0x${'29'.repeat(32)}` as Hash
+    let rejectExecution!: (error: Error) => void
+    const executionResult = new Promise<{ receipts: never[] }>((_resolve, reject) => {
+      rejectExecution = reject
+    })
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared,
+      _extraCalls,
+      options: {
+        onSafePreflight?: () => void | Promise<void>
+        onSafeTerminalSubmissionStart?: () => void
+        onSafeSubmission?: (submittedHash: Hash) => void
+      },
+    ) => {
+      await options.onSafePreflight?.()
+      options.onSafeTerminalSubmissionStart?.()
+      options.onSafeSubmission?.(safeHash)
+      return executionResult
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    const walletAExecution = batch.executeBatch()
+    await vi.waitFor(() =>
+      expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledTimes(1),
+    )
+
+    activeOwner.value = subAccount
+    activeChainId.value = 8453
+    await nextTick()
+    await addBundledMigrationEntry(batch)
+    const walletBExecution = await batch.prepareBundledExecution()
+    expect(walletBExecution).not.toBeNull()
+
+    rejectExecution(new Error('Safe transaction reverted'))
+    await walletAExecution
+
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.latchedBundledExecution.value).toBe(walletBExecution)
+    expect(batch.execError.value).toBeUndefined()
+
+    activeOwner.value = owner
+    activeChainId.value = 1
+    await nextTick()
+
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('Safe transaction reverted')
+  })
+
   it('marks a detached Safe bundle successful after chain drift without redirecting', async () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
