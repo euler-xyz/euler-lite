@@ -1426,6 +1426,60 @@ describe('useTxBatch execution prerequisites', () => {
     expect(Object.isFrozen(ceremonyA?.grants)).toBe(true)
   })
 
+  it('invalidates a ceremony prepared while another entry is still building', async () => {
+    const sdk = createMockSdk()
+    sdk.executionService.simulateTransactionPlan.mockImplementation(async (...args: unknown[]) => ({
+      simulatedAccounts: Array.from(
+        { length: countPlanOperations(args[2] as TransactionPlan) },
+        (_, index) => accountWithPosition(subAccount, subAccount, BigInt(index + 2)),
+      ),
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    }))
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockResolvedValue({ receipts: [] })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+
+    let resolveSecondPlan!: (plan: TransactionPlan) => void
+    const secondPlan = new Promise<TransactionPlan>((resolve) => {
+      resolveSecondPlan = resolve
+    })
+    const buildSecondPlan = vi.fn(() => secondPlan)
+    const pendingAdd = batch.addEntry({
+      label: 'Second migration',
+      buildPlan: buildSecondPlan,
+      buildExecutionPrerequisites: async () => undefined,
+      buildBundledExecution: async () => ({
+        plan: singleOpBundledPlan,
+        grants: [],
+        revokes: [],
+        grantSteps: [],
+        revokeSteps: [],
+      }),
+    })
+    await vi.waitFor(() => expect(buildSecondPlan).toHaveBeenCalledTimes(1))
+
+    const oldCartCeremony = await batch.prepareBundledExecution()
+    expect(oldCartCeremony?.reviewByEntryId).toHaveProperty(batch.entries.value[0]!.id)
+    expect(Object.keys(oldCartCeremony?.reviewByEntryId ?? {})).toHaveLength(1)
+
+    resolveSecondPlan(singleOpBundledPlan)
+    await pendingAdd
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(3))
+
+    expect(batch.entryCount.value).toBe(2)
+    expect(batch.isBundledExecutionCurrent(oldCartCeremony!)).toBe(false)
+    await batch.executeBatch(undefined, oldCartCeremony!)
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('Batch or wallet changed since review preparation')
+  })
+
   it('rejects an older preparation that resolves after a new cart ceremony', async () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)

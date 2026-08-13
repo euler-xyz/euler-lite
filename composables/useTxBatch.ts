@@ -2298,6 +2298,10 @@ export const useTxBatch = () => {
         ...fixedEntry
       } = entry
       registerReviewAssetMeta(fixedEntry.review)
+      // A ceremony can be prepared while this async add is building against
+      // the prior cart. Advance again at the commit edge so that ceremony is
+      // stale before the completed entry becomes visible.
+      invalidateBatchReview()
       entries.value = [...entries.value, {
         ...fixedEntry,
         ...(builtStateOverrides ? { stateOverrides: builtStateOverrides } : {}),
