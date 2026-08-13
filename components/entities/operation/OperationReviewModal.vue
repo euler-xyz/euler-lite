@@ -222,13 +222,16 @@ const handleConfirm = async () => {
     prepareError.value = REVIEWED_EXECUTION_UNAVAILABLE_ERROR
     return
   }
-  let confirmedExecution = reviewedExecution.value
+  // Display-only migration reviews still carry a prepared placeholder envelope
+  // in calldataPrepared. Pass it to the caller so the freshly signed/granted
+  // execution can be compared with exactly what this modal displayed.
+  let confirmedExecution = reviewedExecution.value ?? (allowConfirmWithoutPlan ? calldataPrepared : undefined)
   if (confirmedExecution) {
     internalSubmitting.value = true
     try {
       confirmedExecution = await refreshReviewedPythExecution(
         confirmedExecution,
-        plan,
+        plan ?? (allowConfirmWithoutPlan ? calldataPrepared?.plan : undefined),
         (rawPlan, options) => prepareTransactionPlan(rawPlan, options),
       )
     }

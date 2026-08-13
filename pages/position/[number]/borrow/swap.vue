@@ -92,7 +92,13 @@ import {
   type ProjectedYieldState,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
-import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import {
+  collectReviewedSignaturePlaceholderCalls,
+  requireReviewedBatchPreparedExecution,
+  requireReviewedExecution,
+  requireReviewedPrerequisiteEnvelope,
+  type ReviewedPrerequisiteEnvelope,
+} from '~/utils/reviewed-execution'
 
 const route = useRoute()
 const router = useRouter()
@@ -2631,6 +2637,19 @@ type InboundExternalMigrationPreview = {
   prefetch?: PluginPrefetchData
 }
 
+const buildReviewedPrerequisiteEnvelope = (
+  request: MigrationAuthorizationRequest | undefined,
+  account: Address,
+  targetChainId: number,
+): ReviewedPrerequisiteEnvelope => {
+  const encoded = request ? encodeMigrationAuthorizationTxs(request) : undefined
+  return {
+    preTxs: encoded?.grants ?? [],
+    postTxs: encoded?.revokes ?? [],
+    walletContext: { account, chainId: targetChainId },
+  }
+}
+
 let inboundExternalMigrationPreviewRequestId = 0
 let inboundExternalMigrationPreviewPromise: Promise<InboundExternalMigrationPreview> | null = null
 let inboundExternalMigrationPreviewPromiseKey = ''
@@ -2836,9 +2855,16 @@ const resolveInboundExternalMigrationAuthorization = async (
   input: InboundExternalMigrationInput,
   revokeTxs: MigrationAuthorizationRevoke[],
   useSignatures: boolean,
+  reviewedAuthorizationRequest?: MigrationAuthorizationRequest,
 ): Promise<SignedMigrationAuthorization | undefined> => {
   const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
   inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
+  if (!useSignatures) {
+    requireReviewedPrerequisiteEnvelope(
+      buildReviewedPrerequisiteEnvelope(reviewedAuthorizationRequest, input.owner, input.position.chainId),
+      buildReviewedPrerequisiteEnvelope(authorizationRequest, input.owner, input.position.chainId),
+    )
+  }
   // No request means the grant is already live on-chain: nothing to sign, and
   // nothing of ours to revoke afterwards.
   if (!authorizationRequest) return undefined
@@ -3374,8 +3400,8 @@ const reviewInboundExternalMigration = async () => {
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
-        onConfirm: async () => {
-          await sendInboundExternalMigration(preview)
+        onConfirm: async (reviewed) => {
+          await sendInboundExternalMigration(preview, reviewed)
         },
         submittingLabel: 'Migrating...',
       },
@@ -3390,11 +3416,15 @@ const reviewInboundExternalMigration = async () => {
   }
 }
 
-const sendInboundExternalMigration = async (preview: InboundExternalMigrationPreview) => {
+const sendInboundExternalMigration = async (
+  preview: InboundExternalMigrationPreview,
+  reviewedPrepared: TransactionPlanPrepared | undefined,
+) => {
   isSubmitting.value = true
   clearSimulationError()
   try {
     const { input, account, useSignatures } = preview
+    const reviewedExecution = requireReviewedExecution(reviewedPrepared)
     const migrationChainId = input.position.chainId
     assertWalletExecutionContext({
       expectedAccount: input.owner,
@@ -3406,13 +3436,27 @@ const sendInboundExternalMigration = async (preview: InboundExternalMigrationPre
     inboundExternalPreparedPlan.value = null
     const revokeTxs: MigrationAuthorizationRevoke[] = []
     try {
-      const authorization = await resolveInboundExternalMigrationAuthorization(input, revokeTxs, useSignatures)
+      const authorization = await resolveInboundExternalMigrationAuthorization(
+        input,
+        revokeTxs,
+        useSignatures,
+        preview.authorizationRequest,
+      )
       inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
-      inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, {
+      const candidatePrepared = await prepareTransactionPlan(inboundExternalPlan.value, {
         account,
         chainId: migrationChainId,
         usePermit2: useSignatures,
       })
+      inboundExternalPreparedPlan.value = requireReviewedBatchPreparedExecution(
+        reviewedExecution,
+        candidatePrepared,
+        {
+          placeholderSignatureCalls: useSignatures
+            ? collectReviewedSignaturePlaceholderCalls(reviewedExecution.plan, preview.authorizationRequest)
+            : [],
+        },
+      )
       const ok = await runPreparedSimulation(inboundExternalPreparedPlan.value, buildRefinanceStateOverrideOptions())
       if (!ok) {
         await revokeAfterAbort(revokeTxs)
@@ -3515,6 +3559,23 @@ const addInboundExternalMigrationToBatch = async () => {
         postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures),
         displayPlan: preview.calldataPrepared.plan,
         calldataUsesPlaceholderSignatures: useSignatures && !!preview.authorizationRequest,
+        ...(useSignatures && preview.authorizationRequest
+          ? {
+              reviewedSignaturePlaceholderCalls: collectReviewedSignaturePlaceholderCalls(
+                preview.calldataPrepared.plan,
+                preview.authorizationRequest,
+              ),
+            }
+          : {}),
+        ...(!useSignatures
+          ? {
+              reviewedExecutionPrerequisites: buildReviewedPrerequisiteEnvelope(
+                preview.authorizationRequest,
+                input.owner,
+                input.position.chainId,
+              ),
+            }
+          : {}),
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,

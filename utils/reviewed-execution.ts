@@ -1,5 +1,5 @@
-import { flattenBatchEntries, isEVCBatchOperation, type EVCBatchItem, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { decodeFunctionData, encodeFunctionData, isHex, type Address, type Hex } from 'viem'
+import { flattenBatchEntries, isEVCBatchOperation, type EVCBatchItem, type MigrationAuthorizationRequest, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { decodeFunctionData, encodeFunctionData, getAddress, isHex, parseAbi, zeroHash, type Address, type Hex } from 'viem'
 import { PYTH_ABI } from '~/abis/pyth'
 
 export const REVIEWED_EXECUTION_UNAVAILABLE_ERROR
@@ -101,13 +101,25 @@ const canonicalizePythUpdate = (item: Record<string, unknown>, chainId: number):
   }
 }
 
-const DYNAMIC_SIGNATURE_LENGTH_WORD = `${'0'.repeat(62)}41`
-const PLACEHOLDER_SIGNATURE_DATA = '0'.repeat(65 * 2)
+const MIGRATION_AUTHORIZATION_ABI = parseAbi([
+  'function delegationWithSig(address delegator,address delegatee,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
+  'function permit(address owner,address spender,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
+  'function setAuthorizationWithSig((address authorizer,address authorized,bool isAuthorized,uint256 nonce,uint256 deadline) authorization,(uint8 v,bytes32 r,bytes32 s) signature)',
+])
+
+export type ReviewedSignaturePlaceholderKind
+  = 'aave-delegation' | 'erc2612-permit' | 'morpho-authorization'
 
 export type ReviewedSignaturePlaceholderCall = Pick<
   EVCBatchItem,
   'targetContract' | 'onBehalfOfAccount' | 'value' | 'data'
->
+> & { signatureKind: ReviewedSignaturePlaceholderKind }
+
+type ReviewedSignaturePlaceholderSlot = {
+  targetContract: Address
+  data: Hex
+  signatureKind: ReviewedSignaturePlaceholderKind
+}
 
 const signatureCallKey = (call: ReviewedSignaturePlaceholderCall): string => [
   call.targetContract.toLowerCase(),
@@ -116,45 +128,195 @@ const signatureCallKey = (call: ReviewedSignaturePlaceholderCall): string => [
   call.data.toLowerCase(),
 ].join(':')
 
-const canonicalizeReviewedSignature = (data: string): string => {
-  const normalized = data.toLowerCase()
-  let searchFrom = 0
-  let result = normalized
-  while (searchFrom < result.length) {
-    const lengthWordIndex = result.indexOf(DYNAMIC_SIGNATURE_LENGTH_WORD, searchFrom)
-    if (lengthWordIndex < 0) break
-    const signatureStart = lengthWordIndex + DYNAMIC_SIGNATURE_LENGTH_WORD.length
-    const signatureEnd = signatureStart + PLACEHOLDER_SIGNATURE_DATA.length
-    if (result.slice(signatureStart, signatureEnd) === PLACEHOLDER_SIGNATURE_DATA) {
-      result = `${result.slice(0, signatureStart)}__reviewed_signature__${result.slice(signatureEnd)}`
-      searchFrom = signatureStart + '__reviewed_signature__'.length
-    }
-    else {
-      searchFrom = signatureStart
-    }
-  }
-  return result
+type DecodedMigrationAuthorization = {
+  kind: ReviewedSignaturePlaceholderKind
+  functionName: 'delegationWithSig' | 'permit' | 'setAuthorizationWithSig'
+  args: readonly unknown[]
 }
 
-const canonicalizeMatchingSignature = (reviewedData: string, candidateData: string): string => {
-  const reviewed = reviewedData.toLowerCase()
-  let candidate = candidateData.toLowerCase()
-  if (reviewed.length !== candidate.length) return candidate
-  let searchFrom = 0
-  while (searchFrom < reviewed.length) {
-    const lengthWordIndex = reviewed.indexOf(DYNAMIC_SIGNATURE_LENGTH_WORD, searchFrom)
-    if (lengthWordIndex < 0) break
-    const signatureStart = lengthWordIndex + DYNAMIC_SIGNATURE_LENGTH_WORD.length
-    const signatureEnd = signatureStart + PLACEHOLDER_SIGNATURE_DATA.length
-    if (reviewed.slice(signatureStart, signatureEnd) === PLACEHOLDER_SIGNATURE_DATA) {
-      candidate = `${candidate.slice(0, signatureStart)}__reviewed_signature__${candidate.slice(signatureEnd)}`
-      searchFrom = signatureEnd
+const decodeCanonicalMigrationAuthorization = (data: unknown): DecodedMigrationAuthorization | undefined => {
+  if (typeof data !== 'string' || !isHex(data)) return undefined
+  try {
+    const decoded = decodeFunctionData({ abi: MIGRATION_AUTHORIZATION_ABI, data })
+    const functionName = decoded.functionName
+    const kind: ReviewedSignaturePlaceholderKind = functionName === 'delegationWithSig'
+      ? 'aave-delegation'
+      : functionName === 'permit'
+        ? 'erc2612-permit'
+        : 'morpho-authorization'
+    const canonical = encodeFunctionData({
+      abi: MIGRATION_AUTHORIZATION_ABI,
+      functionName,
+      args: decoded.args as never,
+    })
+    if (canonical.toLowerCase() !== data.toLowerCase()) return undefined
+    return { kind, functionName, args: decoded.args as readonly unknown[] }
+  }
+  catch {
+    return undefined
+  }
+}
+
+const isZeroPlaceholderSignature = (decoded: DecodedMigrationAuthorization): boolean => {
+  if (decoded.kind === 'morpho-authorization') {
+    const signature = decoded.args[1] as { v?: unknown, r?: unknown, s?: unknown } | undefined
+    return signature?.v === 0 && signature.r === zeroHash && signature.s === zeroHash
+  }
+  return decoded.args[4] === 0 && decoded.args[5] === zeroHash && decoded.args[6] === zeroHash
+}
+
+export const getReviewedSignaturePlaceholderKind = (
+  data: unknown,
+): ReviewedSignaturePlaceholderKind | undefined => {
+  const decoded = decodeCanonicalMigrationAuthorization(data)
+  return decoded && isZeroPlaceholderSignature(decoded) ? decoded.kind : undefined
+}
+
+const getReviewedSignaturePlaceholderSlot = (
+  request: MigrationAuthorizationRequest,
+): ReviewedSignaturePlaceholderSlot | undefined => {
+  if (request.kind !== 'typedData') return undefined
+  const verifyingContract = request.typedData.domain.verifyingContract
+  if (typeof verifyingContract !== 'string') return undefined
+
+  try {
+    const message = request.typedData.message as Record<string, unknown>
+    const authorizationType = 'authorizationType' in request
+      ? request.authorizationType
+      : undefined
+    let signatureKind: ReviewedSignaturePlaceholderKind
+    let data: Hex
+    if (request.connectorId === 'aave' && authorizationType === 'variableDebtDelegation') {
+      signatureKind = 'aave-delegation'
+      data = encodeFunctionData({
+        abi: MIGRATION_AUTHORIZATION_ABI,
+        functionName: 'delegationWithSig',
+        args: [
+          request.owner,
+          message.delegatee as Address,
+          message.value as bigint,
+          message.deadline as bigint,
+          0,
+          zeroHash,
+          zeroHash,
+        ],
+      })
+    }
+    else if (
+      (request.connectorId === 'aave' && authorizationType === 'aTokenPermit')
+      || (request.connectorId === 'metamorpho' && authorizationType === 'metamorphoPermit')
+    ) {
+      signatureKind = 'erc2612-permit'
+      data = encodeFunctionData({
+        abi: MIGRATION_AUTHORIZATION_ABI,
+        functionName: 'permit',
+        args: [
+          message.owner as Address,
+          message.spender as Address,
+          message.value as bigint,
+          message.deadline as bigint,
+          0,
+          zeroHash,
+          zeroHash,
+        ],
+      })
+    }
+    else if (request.connectorId === 'morpho') {
+      signatureKind = 'morpho-authorization'
+      data = encodeFunctionData({
+        abi: MIGRATION_AUTHORIZATION_ABI,
+        functionName: 'setAuthorizationWithSig',
+        args: [
+          {
+            authorizer: message.authorizer as Address,
+            authorized: message.authorized as Address,
+            isAuthorized: message.isAuthorized as boolean,
+            nonce: message.nonce as bigint,
+            deadline: message.deadline as bigint,
+          },
+          { v: 0, r: zeroHash, s: zeroHash },
+        ],
+      })
     }
     else {
-      searchFrom = signatureStart
+      return undefined
+    }
+
+    return {
+      targetContract: getAddress(verifyingContract),
+      data,
+      signatureKind,
     }
   }
-  return candidate
+  catch {
+    return undefined
+  }
+}
+
+const collectReviewedSignaturePlaceholderSlots = (
+  request: MigrationAuthorizationRequest | undefined,
+): ReviewedSignaturePlaceholderSlot[] => {
+  if (!request) return []
+  const current = getReviewedSignaturePlaceholderSlot(request)
+  return [
+    ...(current ? [current] : []),
+    ...collectReviewedSignaturePlaceholderSlots(request.postMigrationAuthorization),
+  ]
+}
+
+export const collectReviewedSignaturePlaceholderCalls = (
+  plan: TransactionPlan,
+  request: MigrationAuthorizationRequest | undefined,
+): ReviewedSignaturePlaceholderCall[] => {
+  const slots = collectReviewedSignaturePlaceholderSlots(request)
+  if (!slots.length) return []
+
+  const remainingSlots = [...slots]
+  return plan.flatMap(item => item.type === 'evcBatch'
+    ? flattenBatchEntries(item.items).flatMap((call) => {
+        const slotIndex = remainingSlots.findIndex(slot =>
+          slot.targetContract.toLowerCase() === call.targetContract.toLowerCase()
+          && slot.data.toLowerCase() === call.data.toLowerCase(),
+        )
+        if (slotIndex < 0) return []
+        const [slot] = remainingSlots.splice(slotIndex, 1)
+        return slot
+          ? [{
+              targetContract: call.targetContract,
+              onBehalfOfAccount: call.onBehalfOfAccount,
+              value: call.value,
+              data: call.data,
+              signatureKind: slot.signatureKind,
+            }]
+          : []
+      })
+    : [])
+}
+
+const replaceCandidateSignatureWithReviewed = (
+  reviewedData: unknown,
+  candidateData: unknown,
+  expectedKind: ReviewedSignaturePlaceholderKind,
+): Hex | undefined => {
+  const reviewed = decodeCanonicalMigrationAuthorization(reviewedData)
+  const candidate = decodeCanonicalMigrationAuthorization(candidateData)
+  if (
+    !reviewed
+    || !candidate
+    || reviewed.kind !== expectedKind
+    || candidate.kind !== expectedKind
+    || reviewed.functionName !== candidate.functionName
+    || !isZeroPlaceholderSignature(reviewed)
+  ) return undefined
+
+  const args = candidate.kind === 'morpho-authorization'
+    ? [candidate.args[0], reviewed.args[1]]
+    : [...candidate.args.slice(0, 4), ...reviewed.args.slice(4, 7)]
+  return encodeFunctionData({
+    abi: MIGRATION_AUTHORIZATION_ABI,
+    functionName: candidate.functionName,
+    args: args as never,
+  })
 }
 
 const canonicalizePreparedPair = (
@@ -162,18 +324,16 @@ const canonicalizePreparedPair = (
   candidate: TransactionPlanPrepared,
   placeholderSignatureCalls: readonly ReviewedSignaturePlaceholderCall[],
 ): [string, string] => {
-  const allowedSignatureCalls = new Set(placeholderSignatureCalls.map(signatureCallKey))
+  const allowedSignatureCalls = new Map(
+    placeholderSignatureCalls.map(call => [signatureCallKey(call), call.signatureKind]),
+  )
   const reviewedPlan = reviewed.plan.map((item) => {
     if (item.type !== 'evcBatch') return item
     return {
       ...item,
       items: item.items.map((entry) => {
         const reviewedCalls = isEVCBatchOperation(entry) ? entry.items : [entry]
-        const calls = reviewedCalls.map((call) => {
-          const canonical = canonicalizePythUpdate(call, reviewed.chainId)
-          if (!allowedSignatureCalls.has(signatureCallKey(call)) || typeof canonical.data !== 'string') return canonical
-          return { ...canonical, data: canonicalizeReviewedSignature(canonical.data) }
-        })
+        const calls = reviewedCalls.map(call => canonicalizePythUpdate(call, reviewed.chainId))
         return isEVCBatchOperation(entry) ? { ...entry, items: calls } : calls[0]
       }),
     }
@@ -190,13 +350,17 @@ const canonicalizePreparedPair = (
         const calls = candidateCalls.map((call, callIndex) => {
           const canonical = canonicalizePythUpdate(call, candidate.chainId)
           const reviewedCall = reviewedCalls[callIndex] as Record<string, unknown> | undefined
-          if (
-            !reviewedCall
-            || !allowedSignatureCalls.has(signatureCallKey(reviewedCall as ReviewedSignaturePlaceholderCall))
-            || typeof canonical.data !== 'string'
-            || typeof reviewedCall.data !== 'string'
-          ) return canonical
-          return { ...canonical, data: canonicalizeMatchingSignature(reviewedCall.data, canonical.data) }
+          if (!reviewedCall) return canonical
+          const signatureKind = allowedSignatureCalls.get(
+            signatureCallKey(reviewedCall as ReviewedSignaturePlaceholderCall),
+          )
+          if (!signatureKind) return canonical
+          const data = replaceCandidateSignatureWithReviewed(
+            reviewedCall.data,
+            canonical.data,
+            signatureKind,
+          )
+          return data ? { ...canonical, data } : canonical
         })
         return isEVCBatchOperation(entry) ? { ...entry, items: calls } : calls[0]
       }),
@@ -231,6 +395,60 @@ export const requireReviewedBatchPreparedExecution = (
   )
   if (reviewedCanonical !== candidateCanonical) {
     throw new Error(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
+  }
+  return candidate
+}
+
+export const REVIEWED_PREREQUISITES_CHANGED_ERROR
+  = 'The prerequisite transactions changed after review. Close this review and try again.'
+
+export interface ReviewedPrerequisiteEnvelope {
+  preTxs: readonly { to: Address, data: Hex, value?: bigint }[]
+  postTxs?: readonly { to: Address, data: Hex, value?: bigint }[]
+  walletContext: { account: Address, chainId: number }
+}
+
+const prerequisiteTxKey = (tx: ReviewedPrerequisiteEnvelope['preTxs'][number]): string => [
+  tx.to.toLowerCase(),
+  tx.data.toLowerCase(),
+  tx.value?.toString() ?? '0',
+].join(':')
+
+/** Bind prerequisite writes to the exact reviewed account, chain, targets,
+ * calldata, native values, and order. Batch execution may omit a reviewed
+ * duplicate after an earlier entry has already satisfied the same grant. */
+export const requireReviewedPrerequisiteEnvelope = (
+  reviewed: ReviewedPrerequisiteEnvelope | undefined,
+  candidate: ReviewedPrerequisiteEnvelope | undefined,
+  options: { allowOmissions?: boolean } = {},
+): ReviewedPrerequisiteEnvelope | undefined => {
+  const candidateTxs = candidate?.preTxs ?? []
+  if (!candidateTxs.length) return candidate
+  if (!reviewed) throw new Error(REVIEWED_PREREQUISITES_CHANGED_ERROR)
+  if (
+    reviewed.walletContext.chainId !== candidate!.walletContext.chainId
+    || reviewed.walletContext.account.toLowerCase() !== candidate!.walletContext.account.toLowerCase()
+  ) throw new Error(REVIEWED_PREREQUISITES_CHANGED_ERROR)
+
+  const reviewedKeys = reviewed.preTxs.map(prerequisiteTxKey)
+  const candidateKeys = candidateTxs.map(prerequisiteTxKey)
+  const reviewedPostKeys = (reviewed.postTxs ?? []).map(prerequisiteTxKey)
+  const candidatePostKeys = (candidate?.postTxs ?? []).map(prerequisiteTxKey)
+  if (JSON.stringify(reviewedPostKeys) !== JSON.stringify(candidatePostKeys)) {
+    throw new Error(REVIEWED_PREREQUISITES_CHANGED_ERROR)
+  }
+  if (!options.allowOmissions) {
+    if (JSON.stringify(reviewedKeys) !== JSON.stringify(candidateKeys)) {
+      throw new Error(REVIEWED_PREREQUISITES_CHANGED_ERROR)
+    }
+    return candidate
+  }
+
+  let reviewedIndex = 0
+  for (const key of candidateKeys) {
+    reviewedIndex = reviewedKeys.indexOf(key, reviewedIndex)
+    if (reviewedIndex < 0) throw new Error(REVIEWED_PREREQUISITES_CHANGED_ERROR)
+    reviewedIndex += 1
   }
   return candidate
 }

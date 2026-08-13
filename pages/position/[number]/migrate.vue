@@ -41,6 +41,13 @@ import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
+import {
+  collectReviewedSignaturePlaceholderCalls,
+  requireReviewedBatchPreparedExecution,
+  requireReviewedExecution,
+  requireReviewedPrerequisiteEnvelope,
+  type ReviewedPrerequisiteEnvelope,
+} from '~/utils/reviewed-execution'
 import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -78,6 +85,19 @@ type OutgoingMigrationPreview = {
   authorizationRequest?: MigrationAuthorizationRequest
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
+}
+
+const buildReviewedPrerequisiteEnvelope = (
+  request: MigrationAuthorizationRequest | undefined,
+  account: Address,
+  targetChainId: number,
+): ReviewedPrerequisiteEnvelope => {
+  const encoded = request ? encodeMigrationAuthorizationTxs(request) : undefined
+  return {
+    preTxs: encoded?.grants ?? [],
+    postTxs: encoded?.revokes ?? [],
+    walletContext: { account, chainId: targetChainId },
+  }
 }
 
 type MigrationTargetAssetLike = {
@@ -854,8 +874,8 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         tenderlyPrepared: preview.tenderlySimulation.prepared,
         tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
-        onConfirm: async () => {
-          await sendMigration(preview)
+        onConfirm: async (reviewed) => {
+          await sendMigration(preview, reviewed)
         },
         submittingLabel: 'Migrating...',
       },
@@ -870,9 +890,13 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   }
 }
 
-async function sendMigration(preview: OutgoingMigrationPreview) {
+async function sendMigration(
+  preview: OutgoingMigrationPreview,
+  reviewedPrepared: TransactionPlanPrepared | undefined,
+) {
   const { input: reviewedInput, account: reviewedAccount, position: migrationPosition, useSignatures } = preview
   const { target } = reviewedInput
+  const reviewedExecution = requireReviewedExecution(reviewedPrepared)
   submittingTargetId.value = target.id
   clearSimulationError()
   try {
@@ -889,6 +913,12 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
     if (!await restorePendingBeforeRetry()) return
     const input = reviewedInput
     const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, reviewedAccount, useSignatures)
+    if (!useSignatures) {
+      requireReviewedPrerequisiteEnvelope(
+        buildReviewedPrerequisiteEnvelope(preview.authorizationRequest, reviewedInput.owner, target.chainId),
+        buildReviewedPrerequisiteEnvelope(authorizationRequest, reviewedInput.owner, target.chainId),
+      )
+    }
 
     // An undefined request means the grant is already live on-chain: nothing to
     // sign, nothing to grant, and nothing of ours to revoke afterwards.
@@ -906,10 +936,15 @@ async function sendMigration(preview: OutgoingMigrationPreview) {
         }
       }
       const plan = await buildMigrationPlan(input, authorization, migrationPosition, reviewedAccount)
-      const prepared = await prepareTransactionPlan(plan, {
+      const candidatePrepared = await prepareTransactionPlan(plan, {
         account: reviewedAccount,
         chainId: input.target.chainId,
         usePermit2: useSignatures,
+      })
+      const prepared = requireReviewedBatchPreparedExecution(reviewedExecution, candidatePrepared, {
+        placeholderSignatureCalls: useSignatures
+          ? collectReviewedSignaturePlaceholderCalls(reviewedExecution.plan, preview.authorizationRequest)
+          : [],
       })
       const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
       if (!ok) {
@@ -1011,6 +1046,23 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       postSteps: buildRevokeSteps(authorizationRequest, useSignatures),
       displayPlan: preview.calldataPrepared.plan,
       calldataUsesPlaceholderSignatures: useSignatures && !!authorizationRequest,
+      ...(useSignatures && authorizationRequest
+        ? {
+            reviewedSignaturePlaceholderCalls: collectReviewedSignaturePlaceholderCalls(
+              preview.calldataPrepared.plan,
+              authorizationRequest,
+            ),
+          }
+        : {}),
+      ...(!useSignatures
+        ? {
+            reviewedExecutionPrerequisites: buildReviewedPrerequisiteEnvelope(
+              authorizationRequest,
+              input.owner,
+              input.target.chainId,
+            ),
+          }
+        : {}),
     },
   }
 

@@ -55,6 +55,7 @@ import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
 import {
   getSafeWalletProvider,
+  SafeTransactionStatusUnknownError,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
 } from '~/utils/safeWalletTransactions'
@@ -72,6 +73,10 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateUserRewards: false,
 } as const
 type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
+
+export const isSuccessfulTransactionReceipt = (
+  receipt: Pick<TransactionReceipt, 'status'>,
+): boolean => receipt.status === 'success'
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -1011,7 +1016,10 @@ export const useEulerTx = () => {
       currentAccount: currentAccount.address,
       currentChainId: currentAccount.chainId,
     })
-    const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    const signature = await signTypedDataAsync({
+      ...(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+      account: request.owner,
+    })
     const postMigrationAuthorization = request.postMigrationAuthorization
       ? await signMigrationAuthorization(request.postMigrationAuthorization)
       : undefined
@@ -1366,7 +1374,7 @@ export const useEulerTx = () => {
     triggerPortfolioRefresh()
   }
 
-  const finalizeExecution = (result: { receipts: TransactionReceipt[] }) => {
+  const finalizeExecution = (result: { receipts: TransactionReceipt[] }, executionChainId?: number) => {
     let lastReceipt: TransactionReceipt | undefined
     if (result.receipts.length) {
       lastReceipt = result.receipts[result.receipts.length - 1]
@@ -1378,7 +1386,7 @@ export const useEulerTx = () => {
     // portfolio page renders; the two are complementary.
     void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
     triggerPortfolioRefresh()
-    const cid = chainId.value
+    const cid = executionChainId ?? chainId.value
     if (lastReceipt && cid) {
       void runPostTxSubgraphSync(cid, lastReceipt.blockNumber)
         .catch(err => logWarn('useEulerTx/subgraphPoll', err))
@@ -1437,17 +1445,36 @@ export const useEulerTx = () => {
       usePermit2: signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        const currentAccount = getAccount(config)
+        assertWalletExecutionContext({
+          expectedAccount: owner,
+          expectedChainId: cid,
+          currentAccount: currentAccount.address,
+          currentChainId: currentAccount.chainId,
+        })
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          account: owner,
+        })
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
     })
 
-    finalizeExecution(result)
+    finalizeExecution(result, cid)
     return result
   }
 
-  const executePreparedPlan = async (prepared: TransactionPlanPrepared) => {
+  const executePreparedPlan = async (
+    prepared: TransactionPlanPrepared,
+    options?: {
+      onProgress?: (progress: TransactionPlanExecutionProgress) => void
+      /** Must complete before a Safe wallet receives any transaction request. */
+      onSafePreflight?: () => void | Promise<void>
+      /** Fires after Safe returns its submitted hash and before polling. */
+      onSafeSubmission?: (submittedHash: Hash) => void
+    },
+  ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
@@ -1461,6 +1488,7 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
+    if (safeWalletProvider) await options?.onSafePreflight?.()
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
@@ -1469,11 +1497,14 @@ export const useEulerTx = () => {
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
       resolveHash: safeWalletProvider
-        ? async submittedHash => (await waitForSafeTransactionExecution({
-          submittedHash,
-          walletProvider: safeWalletProvider,
-          publicClient: provider as ReceiptClientLike,
-        })).hash
+        ? async (submittedHash) => {
+          options?.onSafeSubmission?.(submittedHash)
+          return (await waitForSafeTransactionExecution({
+            submittedHash,
+            walletProvider: safeWalletProvider,
+            publicClient: provider as ReceiptClientLike,
+          })).hash
+        }
         : undefined,
     })
 
@@ -1481,14 +1512,77 @@ export const useEulerTx = () => {
       prepared,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        const currentAccount = getAccount(config)
+        assertWalletExecutionContext({
+          expectedAccount: preparedOwner,
+          expectedChainId: prepared.chainId,
+          currentAccount: currentAccount.address,
+          currentChainId: currentAccount.chainId,
+        })
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          account: preparedOwner,
+        })
         return signature as Hex
       },
-      onProgress: (_progress: TransactionPlanExecutionProgress) => {},
+      onProgress: options?.onProgress,
     })
 
-    finalizeExecution(result)
+    finalizeExecution(result, prepared.chainId)
     return result
+  }
+
+  const reconcileSafeTransaction = async ({
+    submittedHash,
+    account,
+    chainId: expectedChainId,
+    timeoutMs = 15_000,
+  }: {
+    submittedHash: Hash
+    account: Address
+    chainId: number
+    timeoutMs?: number
+  }): Promise<
+    | { status: 'executed', receipt: TransactionReceipt }
+    | { status: 'reverted', receipt: TransactionReceipt }
+    | { status: 'not-executed' }
+    | { status: 'unknown' }
+  > => {
+    const currentAccount = getAccount(config)
+    assertWalletExecutionContext({
+      expectedAccount: account,
+      expectedChainId,
+      currentAccount: currentAccount.address,
+      currentChainId: currentAccount.chainId,
+    })
+    const safeWalletProvider = await getSafeWalletProvider(currentAccount.connector)
+    if (!safeWalletProvider) {
+      throw new Error('Reconnect the Safe wallet to reconcile the submitted transaction')
+    }
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(expectedChainId)
+    if (!provider) throw new Error('No provider available to reconcile the Safe transaction')
+
+    try {
+      const execution = await waitForSafeTransactionExecution({
+        submittedHash,
+        walletProvider: safeWalletProvider,
+        publicClient: provider as ReceiptClientLike,
+        timeoutMs,
+      })
+      if (!isSuccessfulTransactionReceipt(execution.receipt)) {
+        return { status: 'reverted', receipt: execution.receipt }
+      }
+      finalizeExecution({ receipts: [execution.receipt] }, expectedChainId)
+      return { status: 'executed', receipt: execution.receipt }
+    }
+    catch (error) {
+      if (error instanceof SafeTransactionStatusUnknownError) return { status: 'unknown' }
+      if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
+        return { status: 'not-executed' }
+      }
+      throw error
+    }
   }
 
   /**
@@ -1553,5 +1647,6 @@ export const useEulerTx = () => {
     simulatePreparedPlan,
     executePlan,
     executePreparedPlan,
+    reconcileSafeTransaction,
   }
 }
