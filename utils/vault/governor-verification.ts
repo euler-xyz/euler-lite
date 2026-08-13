@@ -17,7 +17,12 @@ interface VerifiableVault {
   address: string
   governorAdmin?: string
   governor?: string
+  oracle?: {
+    oracle?: string
+    name?: string
+  } | null
   oracleDetailedInfo?: OracleDetailedInfo | null
+  eulerRouterGovernor?: Address | null
   verified?: boolean
   vaultCategory?: 'standard' | 'escrow'
 }
@@ -87,16 +92,19 @@ export const isVaultGovernorVerified = (
     return false
   }
 
-  if ('oracleDetailedInfo' in vault) {
-    const oracleInfo = vault.oracleDetailedInfo
-    if (oracleInfo?.name === 'EulerRouter') {
-      const routerGovernor = getEulerRouterGovernor(oracleInfo)
-      // An identified EulerRouter is a governance boundary. Its metadata must
-      // decode before the vault can inherit verified entity branding.
-      if (!routerGovernor) return false
-      if (routerGovernor !== zeroAddress && !findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
-        return false
-      }
+  const oracleInfo = vault.oracleDetailedInfo
+  const isEulerRouter = vault.oracle?.name === 'EulerRouter' || oracleInfo?.name === 'EulerRouter'
+  if (isEulerRouter) {
+    const routerGovernor = 'eulerRouterGovernor' in vault
+      ? vault.eulerRouterGovernor
+      : oracleInfo?.name === 'EulerRouter'
+        ? getEulerRouterGovernor(oracleInfo)
+        : null
+    // EulerRouter governance must resolve independently before the vault can
+    // inherit verified entity branding.
+    if (!routerGovernor) return false
+    if (routerGovernor !== zeroAddress && !findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
+      return false
     }
   }
 

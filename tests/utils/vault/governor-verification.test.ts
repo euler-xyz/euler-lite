@@ -407,6 +407,30 @@ describe('hasResolvedGovernorAdmin', () => {
     )).toBe(false)
   })
 
+  it('fails closed for a real SDK EulerRouter vault without retained router governance', () => {
+    const vault = Object.assign(makeSdkVault(GOV_A), { verified: true })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_A, ROUTER_GOV_A] },
+    })
+
+    expect('oracleDetailedInfo' in vault).toBe(false)
+    expect(isVaultGovernorVerified(vault, labels)).toBe(false)
+  })
+
+  it('accepts a real SDK EulerRouter vault with retained matching router governance', () => {
+    const vault = Object.assign(makeSdkVault(GOV_A), {
+      verified: true,
+      eulerRouterGovernor: ROUTER_GOV_A,
+    })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_A, ROUTER_GOV_A] },
+    })
+
+    expect(isVaultGovernorVerified(vault, labels)).toBe(true)
+  })
+
   it('rejects non-EVault shapes', () => {
     expect(hasResolvedGovernorAdmin(undefined)).toBe(false)
     expect(hasResolvedGovernorAdmin({ governorAdmin: GOV_A })).toBe(false)

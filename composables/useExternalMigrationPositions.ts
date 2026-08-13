@@ -79,6 +79,7 @@ export const EXTERNAL_MIGRATION_DUST_USD = 0.01
 export const POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
 
 const externalMigrationRefreshCounter = ref(0)
+let externalMigrationLoadGeneration = 0
 
 export const useExternalMigrationRefresh = () => {
   const triggerExternalMigrationRefresh = () => {
@@ -924,6 +925,7 @@ export const useExternalMigrationPositions = (options: {
   }
 
   const resetForMissingOwner = () => {
+    externalMigrationLoadGeneration += 1
     positions.value = []
     error.value = ''
     unavailableSources.value = []
@@ -958,6 +960,12 @@ export const useExternalMigrationPositions = (options: {
       loadedFor.value = { owner: targetOwner, chainId: targetChainId }
     }
 
+    const generation = ++externalMigrationLoadGeneration
+    const isCurrentLoad = () =>
+      generation === externalMigrationLoadGeneration
+      && loadedFor.value.owner === targetOwner
+      && loadedFor.value.chainId === targetChainId
+
     isLoading.value = true
     error.value = ''
     unavailableSources.value = []
@@ -980,7 +988,7 @@ export const useExternalMigrationPositions = (options: {
       if (firstError && nextPositions.length === 0) {
         throw firstError
       }
-      if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
+      if (!isCurrentLoad()) return
       positions.value = nextPositions
       unavailableSources.value = [
         ...(aaveResult.status === 'rejected' ? ['Aave V3' as const] : []),
@@ -990,7 +998,7 @@ export const useExternalMigrationPositions = (options: {
       lastLoadedAt.value = Date.now()
     }
     catch (err) {
-      if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
+      if (!isCurrentLoad()) return
       positions.value = []
       error.value = err instanceof Error ? err.message : 'Failed to load external positions'
       unavailableSources.value = []
@@ -999,7 +1007,7 @@ export const useExternalMigrationPositions = (options: {
       logWarn('externalMigration/positions', err)
     }
     finally {
-      if (loadedFor.value.owner === targetOwner && loadedFor.value.chainId === targetChainId) {
+      if (isCurrentLoad()) {
         isLoading.value = false
       }
     }

@@ -1,4 +1,4 @@
-import type { EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { EVault as SdkEVault, type EVault, type EulerEarn, type IEVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
@@ -14,6 +14,8 @@ const VISIBLE_WETH_EVAULT = '0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2'
 const HIDDEN_WETH_LENDING_EVAULT = '0x2ff5F1Ca35f5100226ac58E1BFE5aac56919443B'
 const HIDDEN_TELOSC_WORMHOLE_EVAULT = '0x2e6Dff8907aFdA5D62A278e21B2e65c8595D746E'
 const BASE_EARN_VAULT = '0x8bF41Ad2b816F7c220b22F4BCD63fC2A35Ab4247'
+const EULER_ROUTER = getAddress('0x0000000000000000000000000000000000000201')
+const EULER_ROUTER_GOVERNOR = getAddress('0x0000000000000000000000000000000000000202')
 
 const makeVault = (address: string): EVault => ({
   address: getAddress(address),
@@ -29,6 +31,7 @@ const fetchEarnVaults = vi.fn()
 const fetchEarnVault = vi.fn()
 const fetchVerifiedVaultAddresses = vi.fn()
 const fetchVaultTypes = vi.fn()
+const readContract = vi.fn()
 const chainId = ref(1)
 
 describe('useVaults EVault verification metadata', () => {
@@ -38,6 +41,7 @@ describe('useVaults EVault verification metadata', () => {
     fetchEarnVault.mockReset()
     fetchVerifiedVaultAddresses.mockReset()
     fetchVaultTypes.mockReset()
+    readContract.mockReset()
 
     fetchVaults.mockImplementation(async (_chainId: number, addresses: Address[]) => ({
       errors: [],
@@ -64,6 +68,7 @@ describe('useVaults EVault verification metadata', () => {
       eVaultService: { fetchVaults, fetchVerifiedVaultAddresses },
       eulerEarnService: { fetchVaults: fetchEarnVaults, fetchVault: fetchEarnVault },
       vaultMetaService: { fetchVaultTypes },
+      providerService: { getProvider: vi.fn(() => ({ readContract })) },
     }
     vi.stubGlobal('useEulerSdk', () => ({
       getEulerSdk: vi.fn(async () => sdk),
@@ -98,6 +103,33 @@ describe('useVaults EVault verification metadata', () => {
     const registry = useVaultRegistry()
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(true)
     expect(registry.getVerifiedEVaults().map(vault => vault.address)).toEqual([getAddress(LABELED_EVAULT)])
+  })
+
+  it('retains independently resolved EulerRouter governance on a real SDK EVault', async () => {
+    const vault = Object.assign(new SdkEVault({
+      address: getAddress(LABELED_EVAULT),
+      governorAdmin: EULER_ROUTER_GOVERNOR,
+      oracle: { oracle: EULER_ROUTER, name: 'EulerRouter' },
+      asset: { address: EULER_ROUTER, symbol: 'TST', decimals: 18 },
+      shares: { decimals: 18 },
+      collaterals: [],
+    } as unknown as IEVault), { type: 'EVault' })
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [vault] })
+    readContract.mockResolvedValueOnce(EULER_ROUTER_GOVERNOR)
+
+    await useVaults().updateEVaults([LABELED_EVAULT], undefined, true, {
+      verifiedAddresses: new Set([getAddress(LABELED_EVAULT).toLowerCase()]),
+    })
+
+    const stored = useVaultRegistry().get(LABELED_EVAULT)?.vault as EVault & {
+      eulerRouterGovernor?: Address | null
+    }
+    expect(stored).toBeInstanceOf(SdkEVault)
+    expect(stored.eulerRouterGovernor).toBe(EULER_ROUTER_GOVERNOR)
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({
+      address: EULER_ROUTER,
+      functionName: 'governor',
+    }))
   })
 
   it('hides not-explorable deprecated WETH lend vaults unless showAll is enabled', () => {
