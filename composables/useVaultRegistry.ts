@@ -5,6 +5,8 @@ import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
 
 // Vault type enum - 3 types (escrow is a category of evk, not a separate type)
 export type VaultType = 'evk' | 'earn' | 'securitize'
@@ -297,6 +299,15 @@ const fetchVaultByType = async (
     default: {
       const { result } = await sdk.eVaultService.fetchVault(targetChainId, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`EVault not found for ${address}`)
+      await resolveEulerRouterGovernors([result], (router) => {
+        const provider = sdk.providerService.getProvider(targetChainId)
+        return provider.readContract({
+          address: router,
+          abi: governableGovernorAbi,
+          functionName: 'governor',
+          authorizationList: undefined,
+        })
+      })
       return result
     }
   }

@@ -1403,7 +1403,12 @@ describe('useTxBatch execution prerequisites', () => {
   }] as unknown as TransactionPlan
 
   const bundledGrantStep = { index: 1, label: 'Approve aToken transfer', isSeparateTx: false }
-  const bundledRevokeStep = { index: 1, label: 'Restore previous aToken approval', isSeparateTx: false }
+  const bundledRevokeStep = {
+    index: 1,
+    label: 'Restore previous aToken approval',
+    isSeparateTx: false,
+    txKey: `${aToken.toLowerCase()}:0:${revokeTx.data}`,
+  }
 
   const addBundledMigrationEntry = (batch: ReturnType<typeof useTxBatch>) =>
     batch.addEntry({
@@ -1808,6 +1813,35 @@ describe('useTxBatch execution prerequisites', () => {
       grantSteps: [bundledGrantStep],
       revokeSteps: [bundledRevokeStep],
     })
+    batch.latchedBundledExecution.value = null
+  })
+
+  it('keeps duplicate bundled restoration rows in parity with proposal calls', async () => {
+    const sdk = createMockSdk()
+    sdk.executionService.simulateTransactionPlan.mockImplementation(async (...args: unknown[]) => ({
+      simulatedAccounts: Array.from(
+        { length: countPlanOperations(args[2] as TransactionPlan) },
+        (_, index) => accountWithPosition(subAccount, subAccount, BigInt(index + 2)),
+      ),
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    }))
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await addBundledMigrationEntry(batch)
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(3))
+    const latched = await batch.prepareBundledExecution()
+
+    expect(latched?.revokes).toEqual([revokeTx, revokeTx])
+    expect(Object.values(latched?.stepsByEntryId ?? {}).flatMap(steps => steps.revokeSteps)).toEqual([
+      bundledRevokeStep,
+      bundledRevokeStep,
+    ])
     batch.latchedBundledExecution.value = null
   })
 

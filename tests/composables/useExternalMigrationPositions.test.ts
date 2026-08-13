@@ -26,6 +26,13 @@ const MORPHO_ORACLE = getAddress('0xFEa2D58cEfCb9fcb597723c6bAE66fFE4193aFE4')
 const MORPHO_IRM = getAddress('0x46415998764C29aB2a25CbeA6254146D50D22687')
 
 const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0))
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
 const priceResult = (price: string) => {
   const amountOutMid = parseUnits(price, 18)
   return {
@@ -335,6 +342,55 @@ describe('useExternalMigrationPositions', () => {
     })
   })
 
+  it('does not let an older forced scan overwrite a newer result', async () => {
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(130) }))
+    const first = deferred<Response>()
+    const second = deferred<Response>()
+    fetchMock
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const result = useExternalMigrationPositions()
+    const secondLoad = result.load({ force: true })
+
+    second.resolve(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+    await secondLoad
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([MARKET_ID])
+    expect(result.isLoading.value).toBe(false)
+
+    first.resolve(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [],
+        },
+      },
+    })))
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([MARKET_ID])
+    expect(result.isLoading.value).toBe(false)
+  })
+
   it('discovers Aave V3 collateral and variable debt positions from reserve data', async () => {
     aaveUserConfiguration = 6n
     aaveReserves = [WETH, USDC]
@@ -426,6 +482,36 @@ describe('useExternalMigrationPositions', () => {
 
     expect(result.positions.value).toEqual([])
     expect(result.error.value).toContain('Aave discovery read failed')
+  })
+
+  it('keeps Morpho rows and identifies Aave when only the Aave scan fails', async () => {
+    aaveUserConfiguration = 2n
+    aaveReserves = [WETH]
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        userByAddress: {
+          address: OWNER,
+          marketPositions: [{
+            market,
+            state: {
+              borrowAssets: '25',
+              borrowAssetsUsd: '25',
+              collateral: '100',
+              collateralUsd: '250000',
+            },
+          }],
+        },
+      },
+    })))
+
+    const result = useExternalMigrationPositions()
+
+    await flushPromises()
+    await nextTick()
+
+    expect(result.positions.value.map(position => position.id)).toEqual([MARKET_ID])
+    expect(result.error.value).toBe('')
+    expect(result.unavailableSources.value).toEqual(['Aave V3'])
   })
 
   it('keeps valid Aave and Morpho rows when an unrelated Aave reserve read fails', async () => {

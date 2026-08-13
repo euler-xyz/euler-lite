@@ -3654,8 +3654,8 @@ const addInboundExternalMigrationToBatch = async () => {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        // Batch prerequisites broadcast as standalone transactions
-        // (sendPlainTransactions), never inside the cart's Safe bundle.
+        // Add-time rows describe the sequential fallback. A latched Safe review
+        // uses rows from the exact bundled resolution instead.
         signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures, false),
         postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures, false),
         displayPlan: preview.calldataPrepared.plan,

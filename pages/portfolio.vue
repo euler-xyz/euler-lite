@@ -33,6 +33,7 @@ const {
   positions: migrationPositions,
   isLoading: isMigrationLoading,
   error: migrationError,
+  unavailableSources: migrationUnavailableSources,
   hasLoaded: hasMigrationLoaded,
 } = useExternalMigrationPositions()
 const activityAvailability = useActivityAvailability({ kind: 'account' }, chainId)
@@ -90,6 +91,7 @@ const showMigrationTab = computed(() =>
   && (
     visibleMigrationPositionCount.value > 0
     || isMigrationLoading.value
+    || migrationUnavailableSources.value.length > 0
     || (!!migrationError.value && hasShownMigrationTab.value)
   ),
 )

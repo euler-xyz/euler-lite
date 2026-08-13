@@ -38,6 +38,8 @@ import {
   type SnapshotArgsByAddress,
 } from '~/utils/sdk-snapshot-populate-stubs'
 import type { SerialisedSnapshot, SerialisedVault } from '~/utils/snapshot-types'
+import { resolveEulerRouterGovernors, retainEulerRouterGovernor } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -315,8 +317,19 @@ const updateEVaults = async (vaultAddresses: string[], generation?: number, sile
     )
     if (!isCurrentVaultLoad(gen, targetChainId)) return
     result.errors.forEach(issue => logWarn('useVaults/updateEVaults', issue))
+    const fetchedVaults = result.result.filter(Boolean) as EVault[]
+    await resolveEulerRouterGovernors(fetchedVaults, (router) => {
+      const provider = sdk.providerService.getProvider(targetChainId)
+      return provider.readContract({
+        address: router,
+        abi: governableGovernorAbi,
+        functionName: 'governor',
+        authorizationList: undefined,
+      })
+    })
+    if (!isCurrentVaultLoad(gen, targetChainId)) return
 
-    registrySetMany((result.result.filter(Boolean) as EVault[]).map((vault) => {
+    registrySetMany(fetchedVaults.map((vault) => {
       const existing = registryGet(vault.address)
       const vaultCategory = existing?.vaultCategory ?? (isKnownEscrowAddress(vault.address) ? 'escrow' : undefined)
       const verified = vaultCategory === 'escrow' || existing?.verified === true || options.verifiedAddresses?.has(vault.address.toLowerCase()) === true
@@ -616,7 +629,9 @@ const decodeArgs = (entry: SerialisedVault): Record<string, unknown> | undefined
 
 const instantiateEvk = (entry: SerialisedVault): Hydrated<EVaultClass> | undefined => {
   const args = decodeArgs(entry)
-  return args ? { vault: new EVault(args as unknown as IEVault), args } : undefined
+  if (!args) return undefined
+  const vault = retainEulerRouterGovernor(new EVault(args as unknown as IEVault), args.eulerRouterGovernor)
+  return { vault, args }
 }
 
 const instantiateEarn = (entry: SerialisedVault): Hydrated<EulerEarnClass> | undefined => {
