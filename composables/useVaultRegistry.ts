@@ -21,7 +21,6 @@ interface RegistryToken {
 
 export interface AnyVault {
   type: string
-  chainId: number
   address: Address
   shares: RegistryToken
   asset: RegistryToken
@@ -117,8 +116,15 @@ const inferEntryMetadata = (_vault: AnyVault, _type: VaultType, metadata?: Vault
   vaultCategory: metadata?.vaultCategory,
 })
 
-const set = (address: string, vault: AnyVault, type: VaultType, metadata?: VaultEntryMetadata): void => {
-  const key = registryKey(vault.chainId, address)
+const set = (
+  address: string,
+  vault: AnyVault,
+  type: VaultType,
+  metadata?: VaultEntryMetadata,
+  targetChainId = getActiveChainId(),
+): void => {
+  if (!targetChainId) throw new Error('Cannot register a vault without a chain')
+  const key = registryKey(targetChainId, address)
   // Preserve existing verification/category when the caller doesn't supply it.
   // Refresh paths (updateVault, getBorrowVaultPair fallbacks) re-set a vault
   // with no metadata; without this they'd downgrade an already-verified vault
@@ -138,10 +144,14 @@ const set = (address: string, vault: AnyVault, type: VaultType, metadata?: Vault
 }
 
 // Register multiple vaults
-const setMany = (entries: Array<{ address: string, vault: AnyVault, type: VaultType } & VaultEntryMetadata>): void => {
+const setMany = (
+  entries: Array<{ address: string, vault: AnyVault, type: VaultType } & VaultEntryMetadata>,
+  targetChainId = getActiveChainId(),
+): void => {
+  if (!targetChainId) throw new Error('Cannot register vaults without a chain')
   entries.forEach(({ address, vault, type, verified, vaultCategory }) => {
     const entryMetadata = inferEntryMetadata(vault, type, { verified, vaultCategory })
-    registry.value.set(registryKey(vault.chainId, address), {
+    registry.value.set(registryKey(targetChainId, address), {
       vault,
       type,
       verified: entryMetadata.verified ?? false,
@@ -346,7 +356,7 @@ const resolveUnknown = async (
     try {
       const vault = await fetchVaultByType(normalized, 'securitize', targetChainId)
       if (!isCurrentResolution(targetChainId, generation)) return undefined
-      set(normalized, vault, 'securitize')
+      set(normalized, vault, 'securitize', undefined, targetChainId)
       return getForChain(targetChainId, normalized)
     }
     catch {
@@ -357,13 +367,13 @@ const resolveUnknown = async (
   if (type === 'evk' && category === 'escrow') {
     const vault = await fetchVaultByType(normalized, 'evk', targetChainId)
     if (!isCurrentResolution(targetChainId, generation)) return undefined
-    set(normalized, vault, 'evk', { verified: true, vaultCategory: 'escrow' })
+    set(normalized, vault, 'evk', { verified: true, vaultCategory: 'escrow' }, targetChainId)
     return getForChain(targetChainId, normalized)
   }
 
   const vault = await fetchVaultByType(normalized, type, targetChainId)
   if (!isCurrentResolution(targetChainId, generation)) return undefined
-  set(normalized, vault, type)
+  set(normalized, vault, type, undefined, targetChainId)
   return getForChain(targetChainId, normalized)
 }
 

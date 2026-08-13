@@ -17,14 +17,12 @@ const BASE_EARN_VAULT = '0x8bF41Ad2b816F7c220b22F4BCD63fC2A35Ab4247'
 const EULER_ROUTER = getAddress('0x0000000000000000000000000000000000000201')
 const EULER_ROUTER_GOVERNOR = getAddress('0x0000000000000000000000000000000000000202')
 
-const makeVault = (address: string, targetChainId = 1): EVault => ({
-  chainId: targetChainId,
+const makeVault = (address: string): EVault => ({
   address: getAddress(address),
   collaterals: [],
 }) as unknown as EVault
 
-const makeEarnVault = (address: string, targetChainId = 1): EulerEarn => ({
-  chainId: targetChainId,
+const makeEarnVault = (address: string): EulerEarn => ({
   address: getAddress(address),
 }) as unknown as EulerEarn
 
@@ -45,14 +43,14 @@ describe('useVaults EVault verification metadata', () => {
     fetchVaultTypes.mockReset()
     readContract.mockReset()
 
-    fetchVaults.mockImplementation(async (targetChainId: number, addresses: Address[]) => ({
+    fetchVaults.mockImplementation(async (_targetChainId: number, addresses: Address[]) => ({
       errors: [],
-      result: addresses.map(address => makeVault(address, targetChainId)),
+      result: addresses.map(address => makeVault(address)),
     }))
     fetchEarnVaults.mockResolvedValue({ errors: [], result: [] })
-    fetchEarnVault.mockImplementation(async (targetChainId: number, address: Address) => ({
+    fetchEarnVault.mockImplementation(async (_targetChainId: number, address: Address) => ({
       errors: [],
-      result: makeEarnVault(address, targetChainId),
+      result: makeEarnVault(address),
     }))
     fetchVerifiedVaultAddresses.mockResolvedValue([])
     fetchVaultTypes.mockResolvedValue({})

@@ -16,9 +16,8 @@ const ASSET_ONE = getAddress('0x00000000000000000000000000000000000000b1')
 const ASSET_TWO = getAddress('0x00000000000000000000000000000000000000b2')
 const chainId = ref<number | undefined>()
 
-const vault = (targetChainId: number, asset: string) => ({
+const vault = (asset: string) => ({
   type: 'EVault',
-  chainId: targetChainId,
   address: VAULT,
   asset: { address: asset, name: 'Asset', symbol: 'AST', decimals: 18 },
   shares: { address: VAULT, name: 'Vault', symbol: 'vAST', decimals: 18 },
@@ -37,15 +36,26 @@ describe('useVaultRegistry chain-scoped identity', () => {
 
   it('keeps the same address isolated by chain', () => {
     const registry = useVaultRegistry()
-    registry.set(VAULT, vault(1, ASSET_ONE) as never, 'evk')
+    registry.set(VAULT, vault(ASSET_ONE) as never, 'evk')
 
     expect(registry.getVault(VAULT)?.asset.address).toBe(ASSET_ONE)
 
     chainId.value = 8453
     expect(registry.get(VAULT)).toBeUndefined()
-    registry.set(VAULT, vault(8453, ASSET_TWO) as never, 'evk')
+    registry.set(VAULT, vault(ASSET_TWO) as never, 'evk')
     expect(registry.getVault(VAULT)?.asset.address).toBe(ASSET_TWO)
 
+    chainId.value = 1
+    expect(registry.getVault(VAULT)?.asset.address).toBe(ASSET_ONE)
+  })
+
+  it('registers against an explicitly captured chain after the active chain changes', () => {
+    const registry = useVaultRegistry()
+    chainId.value = 8453
+
+    registry.set(VAULT, vault(ASSET_ONE) as never, 'evk', undefined, 1)
+
+    expect(registry.get(VAULT)).toBeUndefined()
     chainId.value = 1
     expect(registry.getVault(VAULT)?.asset.address).toBe(ASSET_ONE)
   })
@@ -92,7 +102,7 @@ describe('useVaultRegistry chain-scoped identity', () => {
       .mockImplementationOnce(() => new Promise(() => {}))
       .mockResolvedValueOnce('evk')
     const fetchVault = vi.fn(async () => ({
-      result: vault(1, ASSET_ONE),
+      result: vault(ASSET_ONE),
       errors: [],
     }))
     vi.stubGlobal('useEulerSdk', () => ({
