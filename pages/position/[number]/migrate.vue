@@ -1150,8 +1150,8 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       type: 'migration',
       asset: sourceDebtAsset,
       amount: debtAmount,
-      // Batch prerequisites broadcast as standalone transactions
-      // (sendPlainTransactions), never inside the cart's Safe bundle.
+      // Add-time rows describe the sequential fallback. A latched Safe review
+      // uses rows from the exact bundled resolution instead.
       signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures, false),
       postSteps: buildRevokeSteps(authorizationRequest, useSignatures, false),
       displayPlan: preview.calldataPrepared.plan,
