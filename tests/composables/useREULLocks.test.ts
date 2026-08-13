@@ -51,8 +51,6 @@ const importUseREULLocks = async (wallet: {
     eulerTokenAddresses: ref({
       EUL: eulAddress,
       rEUL: reulAddress,
-      eUSD: undefined,
-      seUSD: undefined,
     }),
   }))
   vi.stubGlobal('useSpyMode', () => ({

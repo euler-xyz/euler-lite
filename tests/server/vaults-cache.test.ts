@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { EVault as SdkEVault, type IEVault } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
 import type { SerialisedSnapshot } from '~/server/utils/vaults-cache'
 
 const VAULTS = [
@@ -18,16 +20,7 @@ const mocks = vi.hoisted(() => ({
   refreshLabelFile: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
-}))
-
-vi.mock('@eulerxyz/euler-v2-sdk', () => ({
-  StandardEVaultPerspectives: {
-    ESCROW: 'escrow',
-  },
-  VaultType: {
-    EulerEarn: 'EulerEarn',
-    SecuritizeCollateral: 'SecuritizeCollateral',
-  },
+  readContract: vi.fn(),
 }))
 
 vi.mock('~/server/api/internal/labels/[file].get', () => ({
@@ -50,6 +43,9 @@ vi.mock('~/server/utils/sdk-server', () => ({
     vaultMetaService: {
       fetchVaultTypes: mocks.fetchVaultTypes,
     },
+    providerService: {
+      getProvider: vi.fn(() => ({ readContract: mocks.readContract })),
+    },
   })),
 }))
 
@@ -69,6 +65,7 @@ describe('vaults cache', () => {
     mocks.refreshLabelFile.mockReset()
     mocks.warn.mockReset()
     mocks.error.mockReset()
+    mocks.readContract.mockReset()
     process.env.EVAULT_FETCH_CHUNK_CHAINS = '146'
 
     mocks.fetchVerifiedVaultAddresses.mockResolvedValue([])
@@ -116,5 +113,38 @@ describe('vaults cache', () => {
       }),
       'eVault chunk fetch failed',
     )
+  })
+
+  it('serialises resolved EulerRouter governance from real SDK EVaults', async () => {
+    const router = getAddress('0x0000000000000000000000000000000000000101')
+    const governor = getAddress('0x0000000000000000000000000000000000000102')
+    const sdkVault = Object.assign(new SdkEVault({
+      address: getAddress(VAULTS[0]),
+      governorAdmin: governor,
+      oracle: { oracle: router, name: 'EulerRouter' },
+      asset: { address: router, symbol: 'TST', decimals: 18 },
+      shares: { decimals: 18 },
+      collaterals: [],
+    } as unknown as IEVault), {
+      type: 'EVault',
+      caps: { supplyCap: 0n, borrowCap: 0n },
+    })
+    mocks.fetchVaults.mockImplementation(async (_chainId, addresses: string[]) => ({
+      result: addresses.map(address => getAddress(address) === sdkVault.address ? sdkVault : { address }),
+      errors: [],
+    }))
+    mocks.readContract.mockResolvedValue(governor)
+
+    const { refreshChainVaults } = await import('~/server/utils/vaults-cache')
+    const snapshot = await refreshChainVaults(1)
+    const data = snapshot.evkVaults.find(entry =>
+      (entry.data as { address?: string }).address === sdkVault.address,
+    )?.data as { eulerRouterGovernor?: string }
+
+    expect(data.eulerRouterGovernor).toBe(governor)
+    expect(mocks.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      address: router,
+      functionName: 'governor',
+    }))
   })
 })

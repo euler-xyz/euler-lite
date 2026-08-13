@@ -10,7 +10,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
-import { getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
+import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
@@ -200,23 +200,16 @@ const authorizationSummaryGroups = computed(() => {
 // transactions; the collapsed summary keeps those ceremonies distinct.
 //
 // Rows render in EXECUTION order: restorations unwind in reverse entry order
-// (each entry's own steps are already reversed by the encoder). Rows carrying
-// the identical encoded restoration TRANSACTION are consolidated — a grant an
-// earlier entry already made resolves to no prerequisite at execution, so its
-// duplicate displayed revoke would never run. Labels are NOT identity: two
-// different aTokens share "Restore previous aToken approval", so rows without
-// a txKey are never collapsed.
+// (each entry's own steps are already reversed by the encoder). Identical
+// standalone restorations are consolidated because sequential prerequisite
+// resolution sends them once. Bundled Safe restorations are already collected
+// proposal calls, so every call remains visible. Labels are NOT identity: two
+// different aTokens can share a label while representing distinct transactions.
 const restorationSummaryRows = computed(() => {
   const rows = [...entries.value].reverse().flatMap(entry =>
     (postStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
   )
-  const seen = new Set<string>()
-  return rows.filter(({ step }) => {
-    if (!step.txKey) return true
-    if (seen.has(step.txKey)) return false
-    seen.add(step.txKey)
-    return true
-  })
+  return consolidateRestorationSummaryRows(rows)
 })
 
 const restorationSummaryGroups = computed(() => {

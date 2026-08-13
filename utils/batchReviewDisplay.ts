@@ -33,3 +33,24 @@ export const getAuthorizationStepDisplay = (
         itemCountLabel: '1 signature',
       }
 }
+
+type RestorationSummaryRow = {
+  step: Pick<DisplayStep, 'isSeparateTx' | 'txKey'>
+}
+
+/**
+ * Standalone prerequisites resolve sequentially, so a repeated restoration
+ * transaction is sent only once. Bundled Safe calls are already resolved and
+ * every collected call remains in the proposal, so every row stays visible.
+ */
+export const consolidateRestorationSummaryRows = <TRow extends RestorationSummaryRow>(
+  rows: readonly TRow[],
+): TRow[] => {
+  const seenStandaloneTransactions = new Set<string>()
+  return rows.filter(({ step }) => {
+    if (!step.isSeparateTx || !step.txKey) return true
+    if (seenStandaloneTransactions.has(step.txKey)) return false
+    seenStandaloneTransactions.add(step.txKey)
+    return true
+  })
+}

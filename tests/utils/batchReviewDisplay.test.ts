@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
+import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 
 describe('getAuthorizationStepDisplay', () => {
   it('describes signature-mode authorization rows as signatures', () => {
@@ -43,5 +43,21 @@ describe('groupRestorationSummaryRows', () => {
       bundled: [],
       postExecution: [],
     })
+  })
+})
+
+describe('consolidateRestorationSummaryRows', () => {
+  it('keeps every bundled Safe call visible', () => {
+    const first = { id: 'first', step: { isSeparateTx: false, txKey: 'same-transaction' } }
+    const second = { id: 'second', step: { isSeparateTx: false, txKey: 'same-transaction' } }
+
+    expect(consolidateRestorationSummaryRows([first, second])).toEqual([first, second])
+  })
+
+  it('consolidates identical standalone restorations resolved sequentially', () => {
+    const first = { id: 'first', step: { isSeparateTx: true, txKey: 'same-transaction' } }
+    const second = { id: 'second', step: { isSeparateTx: true, txKey: 'same-transaction' } }
+
+    expect(consolidateRestorationSummaryRows([first, second])).toEqual([first])
   })
 })
