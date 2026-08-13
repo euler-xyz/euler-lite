@@ -11,9 +11,10 @@ import {
   REVIEWED_BATCH_EXECUTION_CHANGED_ERROR,
 } from '~/utils/reviewed-execution'
 
-const pyth = '0x0000000000000000000000000000000000000001' as Address
+const pyth = '0x4305FB66699C3B2702D4d05CF36551390A4c69C6' as Address
 const owner = '0x0000000000000000000000000000000000000002' as Address
 const vault = '0x0000000000000000000000000000000000000003' as Address
+const nonPyth = '0x0000000000000000000000000000000000000004' as Address
 const pythAbi = [{
   type: 'function',
   name: 'updatePriceFeeds',
@@ -90,6 +91,20 @@ describe('requireReviewedBatchPreparedExecution', () => {
       ),
     })).toThrow(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
   })
+
+  it('rejects selector collisions on non-Pyth targets', () => {
+    const reviewed = prepared('0x01')
+    const candidate = prepared('0x02')
+    for (const plan of [reviewed, candidate]) {
+      const batch = plan.plan[0]
+      if (batch?.type === 'evcBatch' && !('type' in batch.items[0]!)) {
+        batch.items[0]!.targetContract = nonPyth
+      }
+    }
+
+    expect(() => requireReviewedBatchPreparedExecution(reviewed, candidate))
+      .toThrow(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
+  })
 })
 
 const groupedPrepared = (update: Hex): TransactionPlanPrepared => {
@@ -146,6 +161,47 @@ describe('requirePythOnlyPreparedRefresh', () => {
     if (batch?.type === 'evcBatch') batch.items.shift()
 
     expect(() => requirePythOnlyPreparedRefresh(prepared('0x01'), refreshed))
+      .toThrow(REVIEWED_EXECUTION_CHANGED_ERROR)
+  })
+
+  it('rejects selector collisions on non-Pyth targets', () => {
+    const reviewed = prepared('0x01')
+    const refreshed = prepared('0x02')
+    for (const plan of [reviewed, refreshed]) {
+      const batch = plan.plan[0]
+      if (batch?.type === 'evcBatch' && !('type' in batch.items[0]!)) {
+        batch.items[0]!.targetContract = nonPyth
+      }
+    }
+
+    expect(() => requirePythOnlyPreparedRefresh(reviewed, refreshed))
+      .toThrow(REVIEWED_EXECUTION_CHANGED_ERROR)
+  })
+
+  it.each(['malformed', 'extra'] as const)('rejects %s Pyth calldata', (kind) => {
+    const reviewed = prepared('0x01')
+    const refreshed = prepared('0x02')
+    const batch = refreshed.plan[0]
+    if (batch?.type === 'evcBatch' && !('type' in batch.items[0]!)) {
+      const call = batch.items[0]!
+      call.data = kind === 'malformed'
+        ? `${call.data.slice(0, 10)}deadbeef` as Hex
+        : `${call.data}deadbeef` as Hex
+    }
+
+    expect(() => requirePythOnlyPreparedRefresh(reviewed, refreshed))
+      .toThrow(REVIEWED_EXECUTION_CHANGED_ERROR)
+  })
+
+  it('rejects a Pyth fee above the configured bound', () => {
+    const reviewed = prepared('0x01')
+    const refreshed = prepared('0x02')
+    const batch = refreshed.plan[0]
+    if (batch?.type === 'evcBatch' && !('type' in batch.items[0]!)) {
+      batch.items[0]!.value = 10n ** 16n + 1n
+    }
+
+    expect(() => requirePythOnlyPreparedRefresh(reviewed, refreshed))
       .toThrow(REVIEWED_EXECUTION_CHANGED_ERROR)
   })
 })
