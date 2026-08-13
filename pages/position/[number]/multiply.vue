@@ -27,6 +27,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { reportClientEvent } from '~/utils/client-observability'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -999,8 +1000,8 @@ const submitMultiply = async () => {
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-            await sendMultiply(reviewed)
+          onConfirm: async (execution, reviewed) => {
+            await sendMultiply(execution, reviewed)
           },
         },
       })
@@ -1011,15 +1012,23 @@ const submitMultiply = async () => {
   }
 }
 
-const sendMultiply = async (reviewed: TransactionPlanPrepared | undefined) => {
+const sendMultiply = async (
+  execution: TrackedExecutionScope,
+  reviewed: TransactionPlanPrepared | undefined,
+) => {
   isSubmitting.value = true
   try {
     await executePreparedPlan(requireReviewedExecution(reviewed))
-    modal.close()
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    execution.markSucceeded()
     refreshAllPositions(eulerLensAddresses.value, address.value || '')
-    setTimeout(() => {
-      router.replace({ path: '/portfolio', query: { network: route.query.network } })
-    }, 400)
+    if (!execution.suppressPostTxUi()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio', query: { network: route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     console.warn(e)

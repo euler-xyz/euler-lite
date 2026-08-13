@@ -35,6 +35,7 @@ import {
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseWalletSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -962,8 +963,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-            await send(reviewed)
+          onConfirm: async (execution, reviewed) => {
+            await send(execution, reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -974,11 +975,14 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     }
   }
 
-  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
+  const send = async (
+    execution: TrackedExecutionScope,
+    reviewed: TransactionPlanPrepared | undefined,
+  ) => {
     try {
       isSubmitting.value = true
       await executePreparedPlan(requireReviewedExecution(reviewed))
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       error('Transaction failed')

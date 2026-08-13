@@ -44,6 +44,7 @@ import {
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -104,6 +105,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { getBalance } = useWallets()
   const { finalizeTxAndRedirect } = useTxFinalization()
   const { entryCount: batchEntryCount } = useTxBatch()
+  const { cowSwapForcedOff } = useCowSwapEligibility()
   const {
     version: rewardsVersion,
     getSupplyRewardApy,
@@ -168,7 +170,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
     compare: 'max',
-    includeCowSwap: () => batchEntryCount.value === 0 && !isMultiplySavingCollateral.value,
+    includeCowSwap: () => !cowSwapForcedOff.value && batchEntryCount.value === 0 && !isMultiplySavingCollateral.value,
     buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
     getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
     // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
@@ -1327,8 +1329,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-            await sendMultiply(reviewed)
+          onConfirm: async (execution, reviewed) => {
+            await sendMultiply(execution, reviewed)
           },
         },
       })
@@ -1339,12 +1341,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   const sendMultiply = async (
+    execution: TrackedExecutionScope,
     reviewed: TransactionPlanPrepared | undefined,
   ) => {
     isMultiplySubmitting.value = true
     try {
       await executePreparedPlan(requireReviewedExecution(reviewed))
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       logWarn('multiply/send', e)

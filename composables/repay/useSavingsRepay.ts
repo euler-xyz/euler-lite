@@ -24,6 +24,7 @@ import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseSavingsRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -495,8 +496,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           transferAmounts,
-          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-            await send(reviewed)
+          onConfirm: async (execution, reviewed) => {
+            await send(execution, reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -507,11 +508,14 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     }
   }
 
-  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
+  const send = async (
+    execution: TrackedExecutionScope,
+    reviewed: TransactionPlanPrepared | undefined,
+  ) => {
     try {
       isSubmitting.value = true
       await executePreparedPlan(requireReviewedExecution(reviewed))
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       error('Transaction failed')

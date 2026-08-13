@@ -2,6 +2,7 @@ import { computed, nextTick, ref, shallowRef, watch, watchEffect, type Ref } fro
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress, PortfolioSavingsPosition, TransactionPlan, TransactionPlanPrepared, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
+import { untrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 
@@ -428,12 +429,12 @@ describe('useBorrowForm savings collateral', () => {
 
     const callsBeforeConfirm = mocks.planBorrow.mock.calls.length
     const onConfirm = mocks.modalOpen.mock.calls.at(-1)?.[1]?.props?.onConfirm as
-      | ((reviewed: TransactionPlanPrepared | undefined) => Promise<void>)
+      | ((execution: typeof untrackedExecutionScope, reviewed: TransactionPlanPrepared | undefined) => Promise<void>)
       | undefined
     const reviewed = { plan: reviewedPlan, chainId: 1, account: USER } as unknown as TransactionPlanPrepared
 
     form.borrowAmount.value = '2'
-    await onConfirm?.(reviewed)
+    await onConfirm?.(untrackedExecutionScope, reviewed)
 
     expect(mocks.executePreparedPlan).toHaveBeenCalledOnce()
     expect(mocks.executePreparedPlan).toHaveBeenCalledWith(reviewed)

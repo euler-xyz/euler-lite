@@ -11,6 +11,9 @@ import { formatNumber } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
+import { isPlanBundleable } from '~/utils/transaction-plan-calls'
+import type { TrackedExecutionHandle, TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { refreshReviewedPythExecution, REVIEWED_EXECUTION_UNAVAILABLE_ERROR } from '~/utils/reviewed-execution'
 
@@ -23,7 +26,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -39,6 +42,13 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   calldataPrepared?: TransactionPlanPrepared
   /** The copy-calldata-only plan contains placeholder wallet signatures. */
   calldataUsesPlaceholderSignatures?: boolean
+  /**
+   * Plain calls that execution wraps around the plan in the same Safe
+   * submission (migration authorization grants before it, revocations
+   * after). Included in Copy calldata so the copied JSON matches the actual
+   * proposal.
+   */
+  calldataWrapCalls?: { before: PlainTxRequest[], after: PlainTxRequest[] }
   /** Tenderly-only raw plan fallback. */
   tenderlyPlan?: TransactionPlan
   /** Additional simulation overrides required by the Tenderly-only plan. */
@@ -58,7 +68,7 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm?: (reviewed?: TransactionPlanPrepared) => void | Promise<void>
+  onConfirm?: (execution: TrackedExecutionScope, reviewed?: TransactionPlanPrepared) => void | Promise<void>
   subAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
@@ -81,6 +91,7 @@ const { address: walletAddress, isSpyMode, effectiveAddress } = useEffectiveAddr
 const { chainId: currentChainId } = useWagmi()
 const { getVault } = useVaultRegistry()
 const { prepareTransactionPlan } = useEulerTx()
+const { isSafeWallet } = useSafeWallet()
 const { eulerCoreAddresses } = useEulerAddresses()
 const { isResolvingStateOverrideHints } = useStateOverrideResolution()
 const {
@@ -215,11 +226,21 @@ const handleTenderlySimulate = async () => {
 }
 
 const internalSubmitting = ref(false)
+const { beginTrackedExecution, hasPendingDetachedExecution } = useSafeExecutionDetachment()
+
+let pendingExecution: Promise<void> | null = null
+let executionHandle: TrackedExecutionHandle | null = null
 
 const handleConfirm = async () => {
   if (isConfirmDisabled.value || !onConfirm) return
+  // Latch the wallet classification at submission time — detachability must
+  // not follow a mid-flight connector switch. The single-slot gate also
+  // prevents another submission while this review refreshes external inputs.
+  const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
+  if (!handle) return
   if (!reviewedExecution.value && !allowConfirmWithoutPlan) {
     prepareError.value = REVIEWED_EXECUTION_UNAVAILABLE_ERROR
+    handle.release()
     return
   }
   // Display-only migration reviews still carry a prepared placeholder envelope
@@ -239,22 +260,47 @@ const handleConfirm = async () => {
       logWarn('OperationReviewModal/refreshReviewedPythExecution', err)
       prepareError.value = err instanceof Error ? err.message : REVIEWED_EXECUTION_UNAVAILABLE_ERROR
       internalSubmitting.value = false
+      handle.release()
       return
     }
   }
-  const result = onConfirm(confirmedExecution)
+  const result = onConfirm(handle.scope, confirmedExecution)
   if (result && typeof (result as Promise<void>).then === 'function') {
     internalSubmitting.value = true
+    pendingExecution = result as Promise<void>
+    executionHandle = handle
     try {
       await result
     }
     finally {
       internalSubmitting.value = false
+      pendingExecution = null
+      executionHandle?.release()
+      executionHandle = null
     }
   }
   else {
+    handle.release()
     emits('close')
   }
+}
+
+// Safe proposals can wait on co-signers for minutes to days — the modal must
+// not hold the app hostage. Closing hands the execution to background
+// completion toasts and suppresses the flow's post-transaction navigation.
+// Uses the classification latched at submit, not live detection.
+const canDetachExecution = computed(() =>
+  internalSubmitting.value && executionHandle?.safeAtSubmit === true)
+
+const onCloseRequested = () => {
+  if (internalSubmitting.value) {
+    if (!canDetachExecution.value) return
+    if (pendingExecution && executionHandle) {
+      executionHandle.detach(pendingExecution)
+      executionHandle = null
+    }
+  }
+  emits('close')
 }
 
 const isWalletSignatureStep = (step: DisplayStep) =>
@@ -267,6 +313,9 @@ const rawDisplaySteps = computed((): DisplayStep[] => {
     type, asset, assetIconUrl, amount,
     supplyingAssetForBorrow, supplyingAmount,
     swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs,
+    // Bundle eligibility mirrors execution: Safe wallet AND a plan that can
+    // actually submit as one bundle — otherwise approves stay "Separate tx".
+    bundledApprovals: isSafeWallet.value && isPlanBundleable(currentPlan),
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })
@@ -324,6 +373,16 @@ const copyCalldata = async () => {
     const sdk = await getEulerSdkForChain(cid)
     const entries: { to: string, data: string, value: string }[] = []
 
+    const pushWrapCalls = (calls: PlainTxRequest[] | undefined) => {
+      for (const call of calls ?? []) {
+        entries.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
+      }
+    }
+
+    // Execution wraps the plan with these in the same Safe submission —
+    // the copied JSON must match the actual proposal.
+    pushWrapCalls(calldataWrapCalls?.before)
+
     for (const item of currentPlan) {
       if (item.type === 'requiredApproval') {
         for (const r of item.resolved ?? []) {
@@ -354,6 +413,8 @@ const copyCalldata = async () => {
         })
       }
     }
+
+    pushWrapCalls(calldataWrapCalls?.after)
 
     await copyToClipboard(JSON.stringify(entries, null, 2), 'calldata')
     hasCopiedCalldata.value = true
@@ -432,10 +493,11 @@ const isSwapQuoteStale = computed(() => {
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
-const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
+const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
+  if (hasPendingDetachedExecution.value && !internalSubmitting.value) return 'Awaiting Safe signatures…'
   if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
   return internalSubmitting.value && submittingLabel ? submittingLabel : (providedConfirmLabel || btnLabel.value)
 })
@@ -444,7 +506,7 @@ const confirmLabel = computed(() => {
 <template>
   <BaseModalWrapper
     :title="hideExecute ? 'Operations' : 'Transaction review'"
-    @close="!internalSubmitting && $emit('close')"
+    @close="onCloseRequested"
   >
     <div class="flex flex-col gap-24">
       <!-- Operation context (market + position) grouped tightly above its steps,

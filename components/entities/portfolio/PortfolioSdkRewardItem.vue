@@ -8,6 +8,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { executeReviewedFuulClaim } from '~/utils/fuulRewardClaim'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
@@ -93,7 +94,10 @@ const ensureWalletOnClaimChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const claim = async (reviewed: TransactionPlanPrepared | undefined) => {
+const claim = async (
+  execution: TrackedExecutionScope,
+  reviewed: TransactionPlanPrepared | undefined,
+) => {
   if (isREULBatchBlocked.value) {
     error('Clear the current batch before claiming rEUL')
     return
@@ -117,10 +121,17 @@ const claim = async (reviewed: TransactionPlanPrepared | undefined) => {
     else {
       await executePreparedPlan(requireReviewedExecution(reviewed))
     }
+    // Success signal for a detached Safe completion toast — always mark.
+    execution.markSucceeded()
     if (isREULReward.value) {
       await refreshLocks(true)
     }
-    modal.close()
+    // Unscoped modal.close() pops the top of the modal stack; after
+    // detachment the user may have opened a different modal, so global UI
+    // teardown is suppressed like navigation.
+    if (!execution.suppressPostTxUi()) {
+      modal.close()
+    }
     await refreshRewards({ delayedRetry: true })
   }
   catch (e) {
@@ -224,8 +235,8 @@ const onClaimClick = async () => {
         plan: plan.value || undefined,
         prepared: reviewedFuulPlan,
         submittingLabel: 'Claiming...',
-        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-          await claim(reviewed)
+        onConfirm: async (execution, reviewed) => {
+          await claim(execution, reviewed)
         },
       },
     })

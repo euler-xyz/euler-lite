@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { untrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
   captured: {
@@ -272,7 +273,7 @@ describe('useSwapPageLogic', () => {
     }))
 
     const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm(prepared)
+    await modalArgs.props.onConfirm(untrackedExecutionScope, prepared)
 
     expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
     expect(captured.executePlan).not.toHaveBeenCalled()
@@ -316,7 +317,7 @@ describe('useSwapPageLogic', () => {
 
     await swap.submit()
     const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm(prepared)
+    await modalArgs.props.onConfirm(untrackedExecutionScope, prepared)
 
     expect(buildPlan).toHaveBeenCalledTimes(1)
     expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(1)

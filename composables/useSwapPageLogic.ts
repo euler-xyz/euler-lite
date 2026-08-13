@@ -15,6 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
 
 export interface UseSwapPageLogicOptions {
@@ -566,8 +567,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             plan: plan.value || undefined,
             prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
-            onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-              await send(reviewed)
+            onConfirm: async (execution, reviewed) => {
+              await send(execution, reviewed)
             },
             submittingLabel: 'Submitting...',
           },
@@ -579,14 +580,25 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     }
   }
 
-  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
+  const send = async (
+    execution: TrackedExecutionScope,
+    reviewed: TransactionPlanPrepared | undefined,
+  ) => {
+    if (!fromVault.value || !toVault.value) return
+    if (!isSameAsset.value && !selectedQuote.value) return
+
     isSubmitting.value = true
     try {
       await executePreparedPlan(requireReviewedExecution(reviewed))
-      modal.close()
-      setTimeout(() => {
-        router.replace({ path: redirectPath, query: { network: route.query.network } })
-      }, 400)
+      // Success signal for a detached Safe completion toast; a proposal that
+      // confirmed after its modal was closed must not redirect mid-flow.
+      execution.markSucceeded()
+      if (!execution.suppressPostTxUi()) {
+        modal.close()
+        setTimeout(() => {
+          router.replace({ path: redirectPath, query: { network: route.query.network } })
+        }, 400)
+      }
     }
     catch (e) {
       showError('Transaction failed')

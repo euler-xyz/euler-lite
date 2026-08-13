@@ -33,6 +33,7 @@ import {
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 // Snapshot of all borrow inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may have been reset), so the plan
@@ -1056,8 +1057,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             swapToAsset: collateralVault.value.asset,
             swapToAmount: borrowSwapEstimatedCollateral.value,
             swapMode: SwapperMode.EXACT_IN,
-            onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-              await send(reviewed)
+            onConfirm: async (execution, reviewed) => {
+              await send(execution, reviewed)
             },
             submittingLabel: 'Submitting...',
           },
@@ -1139,8 +1140,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           plan: plan.value || undefined,
           supplyingAssetForBorrow: collateralVault.value?.asset,
           supplyingAmount: collateralAmount.value,
-          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-            await send(reviewed)
+          onConfirm: async (execution, reviewed) => {
+            await send(execution, reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -1151,11 +1152,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
   }
 
-  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
+  const send = async (
+    execution: TrackedExecutionScope,
+    reviewed: TransactionPlanPrepared | undefined,
+  ) => {
     try {
       isSubmitting.value = true
       await executePreparedPlan(requireReviewedExecution(reviewed))
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       logWarn('borrow/send', e)

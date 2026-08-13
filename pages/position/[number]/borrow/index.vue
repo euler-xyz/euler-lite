@@ -43,6 +43,7 @@ import {
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const router = useRouter()
 const _route = useRoute()
@@ -455,8 +456,8 @@ const submit = async () => {
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-          await send(reviewed)
+        onConfirm: async (execution, reviewed) => {
+          await send(execution, reviewed)
         },
       },
     })
@@ -491,16 +492,24 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio', { subAccount: borrowAccount })
 }
 
-const send = async (reviewed: TransactionPlanPrepared | undefined) => {
+const send = async (
+  execution: TrackedExecutionScope,
+  reviewed: TransactionPlanPrepared | undefined,
+) => {
   try {
     isSubmitting.value = true
     await executePreparedPlan(requireReviewedExecution(reviewed))
 
-    modal.close()
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    execution.markSucceeded()
     updateBalance()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
-    }, 400)
+    if (!execution.suppressPostTxUi()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     console.warn(e)

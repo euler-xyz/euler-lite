@@ -31,6 +31,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -1067,8 +1068,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
             swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
             swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-            onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-              await send(reviewed)
+            onConfirm: async (execution, reviewed) => {
+              await send(execution, reviewed)
             },
             submittingLabel: 'Submitting...',
           },
@@ -1081,11 +1082,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   }
 
   // --- Send ---
-  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
+  const send = async (
+    execution: TrackedExecutionScope,
+    reviewed: TransactionPlanPrepared | undefined,
+  ) => {
     try {
       isSubmitting.value = true
       await executePreparedPlan(requireReviewedExecution(reviewed))
-      await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend })
+      await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend, scope: execution })
     }
     catch (e) {
       logWarn('collateral/send', e)

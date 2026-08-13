@@ -34,6 +34,7 @@ import { type CowSwapClosePositionExecuteParams, useCowSwapClosePositionExecutio
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { requireReviewedExecution } from '~/utils/reviewed-execution'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -90,6 +91,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
   const { entryCount: batchEntryCount, getMergedPlan } = useTxBatch()
+  const { cowSwapForcedOff } = useCowSwapEligibility()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { getSupplyRewardApy, getBorrowRewardApyForCollaterals } = useRewardsApy()
@@ -158,7 +160,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     slippage,
     clearSimulationError,
     getCurrentDebt,
-    includeCowSwap: () => batchEntryCount.value === 0,
+    includeCowSwap: () => !cowSwapForcedOff.value && batchEntryCount.value === 0,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
     buildGasEstimatePlan: buildBatchAwareGasEstimatePlan,
     prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
@@ -726,8 +728,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-            await send(reviewed)
+          onConfirm: async (execution, reviewed) => {
+            await send(execution, reviewed)
           },
           submittingLabel: 'Submitting...',
         },
@@ -738,11 +740,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
   }
 
-  const send = async (reviewed: TransactionPlanPrepared | undefined) => {
+  const send = async (
+    execution: TrackedExecutionScope,
+    reviewed: TransactionPlanPrepared | undefined,
+  ) => {
     try {
       isSubmitting.value = true
       await executePreparedPlan(requireReviewedExecution(reviewed))
-      await finalizeTxAndRedirect()
+      await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {
       error('Transaction failed')

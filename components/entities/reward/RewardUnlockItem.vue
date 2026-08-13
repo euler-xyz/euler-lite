@@ -9,6 +9,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import {
   prepareREULUnlockPlan,
   refreshREULLockReview,
@@ -101,6 +102,7 @@ const showPreparationError = async (cause: unknown) => {
 }
 
 const unlock = async (
+  execution: TrackedExecutionScope,
   reviewedLock: REULLock,
   reviewed: TransactionPlanPrepared | undefined,
 ) => {
@@ -117,19 +119,32 @@ const unlock = async (
       () => refreshLocks(true),
       async () => {
         if (isBatchActive.value) {
-          modal.close()
+          // Unscoped close pops the top of the modal stack; if the review
+          // submission was detached the user may be in a different modal.
+          if (!execution.suppressPostTxUi()) {
+            modal.close()
+          }
           error('Clear the current batch before unlocking rEUL')
           return false
         }
 
         await executePreparedPlan(requireReviewedExecution(reviewed))
-        modal.close()
+        // Success signal for a detached Safe completion toast — always mark.
+        execution.markSucceeded()
+        // Unscoped modal.close() pops the top of the modal stack; after
+        // detachment the user may have opened a different modal, so global
+        // UI teardown is suppressed like navigation.
+        if (!execution.suppressPostTxUi()) {
+          modal.close()
+        }
         await refreshLocks(true)
         return true
       },
     )
     if (result.status === 'changed' || result.status === 'missing' || result.status === 'unavailable') {
-      modal.close()
+      if (!execution.suppressPostTxUi()) {
+        modal.close()
+      }
       showReviewRefreshError(result.status)
     }
   }
@@ -207,8 +222,8 @@ const onUnlockClick = async () => {
       props: {
         ...getReviewProps(reviewedLock),
         plan: preparation.plan,
-        onConfirm: async (reviewed: TransactionPlanPrepared | undefined) => {
-          await unlock(reviewedLock, reviewed)
+        onConfirm: async (execution, reviewed) => {
+          await unlock(execution, reviewedLock, reviewed)
         },
       },
     })

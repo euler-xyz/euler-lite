@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, watch, watchEffect, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, SwapQuote, TransactionPlan, TransactionPlanPrepared, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
+import { untrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const { USER, borrowVault, collateralVault, walletAsset, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001' as `0x${string}`
@@ -349,13 +350,13 @@ describe('useWalletSwapRepay', () => {
 
     const callsBeforeConfirm = mocks.planSwapAndRepay.mock.calls.length
     const onConfirm = mocks.modalOpen.mock.calls.at(-1)?.[1]?.props?.onConfirm as
-      | ((reviewed: TransactionPlanPrepared | undefined) => Promise<void>)
+      | ((execution: typeof untrackedExecutionScope, reviewed: TransactionPlanPrepared | undefined) => Promise<void>)
       | undefined
     const reviewed = { plan: reviewedPlan, chainId: 1, account: USER } as unknown as TransactionPlanPrepared
     repay.amount.value = '200'
     mocks.quoteStates[0]!.selectedQuote.value = { ...quote, amountIn: '200' }
 
-    await onConfirm?.(reviewed)
+    await onConfirm?.(untrackedExecutionScope, reviewed)
 
     expect(mocks.executePreparedPlan).toHaveBeenCalledOnce()
     expect(mocks.executePreparedPlan).toHaveBeenCalledWith(reviewed)
