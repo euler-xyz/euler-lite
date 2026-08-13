@@ -6,6 +6,18 @@ export interface AuthorizationStepsDisplay {
   itemCountLabel: '1 transaction' | '1 signature'
 }
 
+export const isBundledReviewEntry = (
+  hasLatchedBundledExecution: boolean,
+  hasBundledExecutionBuilder: boolean,
+): boolean => hasLatchedBundledExecution && hasBundledExecutionBuilder
+
+export const groupRestorationSummaryRows = <TRow extends { step: Pick<DisplayStep, 'isSeparateTx'> }>(
+  rows: readonly TRow[],
+): { bundled: TRow[], postExecution: TRow[] } => ({
+  bundled: rows.filter(({ step }) => !step.isSeparateTx),
+  postExecution: rows.filter(({ step }) => step.isSeparateTx),
+})
+
 export const getAuthorizationStepDisplay = (
   isSeparateTx: DisplayStep['isSeparateTx'],
 ): AuthorizationStepsDisplay => {
