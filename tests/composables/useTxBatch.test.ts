@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -1426,7 +1426,7 @@ describe('useTxBatch execution prerequisites', () => {
     expect(Object.isFrozen(ceremonyA?.grants)).toBe(true)
   })
 
-  it('invalidates a ceremony prepared while another entry is still building', async () => {
+  it('invalidates the current ceremony while another entry is building', async () => {
     const sdk = createMockSdk()
     sdk.executionService.simulateTransactionPlan.mockImplementation(async (...args: unknown[]) => ({
       simulatedAccounts: Array.from(
@@ -1445,6 +1445,9 @@ describe('useTxBatch execution prerequisites', () => {
 
     const batch = useTxBatch()
     await addBundledMigrationEntry(batch)
+    const oldCartCeremony = await batch.prepareBundledExecution()
+    expect(oldCartCeremony?.reviewByEntryId).toHaveProperty(batch.entries.value[0]!.id)
+    expect(Object.keys(oldCartCeremony?.reviewByEntryId ?? {})).toHaveLength(1)
 
     let resolveSecondPlan!: (plan: TransactionPlan) => void
     const secondPlan = new Promise<TransactionPlan>((resolve) => {
@@ -1465,9 +1468,8 @@ describe('useTxBatch execution prerequisites', () => {
     })
     await vi.waitFor(() => expect(buildSecondPlan).toHaveBeenCalledTimes(1))
 
-    const oldCartCeremony = await batch.prepareBundledExecution()
-    expect(oldCartCeremony?.reviewByEntryId).toHaveProperty(batch.entries.value[0]!.id)
-    expect(Object.keys(oldCartCeremony?.reviewByEntryId ?? {})).toHaveLength(1)
+    expect(batch.isBundledExecutionCurrent(oldCartCeremony!)).toBe(false)
+    await expect(batch.prepareBundledExecution()).rejects.toThrow('still being added')
 
     resolveSecondPlan(singleOpBundledPlan)
     await pendingAdd
@@ -1478,6 +1480,140 @@ describe('useTxBatch execution prerequisites', () => {
     await batch.executeBatch(undefined, oldCartCeremony!)
     expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
     expect(batch.execError.value).toContain('Batch or wallet changed since review preparation')
+  })
+
+  it('keeps review unavailable until every queued add settles', async () => {
+    const sdk = createMockSdk()
+    sdk.executionService.simulateTransactionPlan.mockImplementation(async (...args: unknown[]) => ({
+      simulatedAccounts: Array.from(
+        { length: countPlanOperations(args[2] as TransactionPlan) },
+        (_, index) => accountWithPosition(subAccount, subAccount, BigInt(index + 2)),
+      ),
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    }))
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+
+    let resolveFirstPlan!: (plan: TransactionPlan) => void
+    let resolveSecondPlan!: (plan: TransactionPlan) => void
+    const firstPlan = new Promise<TransactionPlan>((resolve) => {
+      resolveFirstPlan = resolve
+    })
+    const secondPlan = new Promise<TransactionPlan>((resolve) => {
+      resolveSecondPlan = resolve
+    })
+    const buildFirstPlan = vi.fn(() => firstPlan)
+    const buildSecondPlan = vi.fn(() => secondPlan)
+    const bundled = async () => ({
+      plan: singleOpBundledPlan,
+      grants: [],
+      revokes: [],
+      grantSteps: [],
+      revokeSteps: [],
+    })
+
+    const batch = useTxBatch()
+    const firstAdd = batch.addEntry({
+      label: 'First migration',
+      buildPlan: buildFirstPlan,
+      requiresPlanningAccount: false,
+      buildExecutionPrerequisites: async () => undefined,
+      buildBundledExecution: bundled,
+    })
+    await vi.waitFor(() => expect(buildFirstPlan).toHaveBeenCalledTimes(1))
+    const secondAdd = batch.addEntry({
+      label: 'Second migration',
+      buildPlan: buildSecondPlan,
+      requiresPlanningAccount: false,
+      buildExecutionPrerequisites: async () => undefined,
+      buildBundledExecution: bundled,
+    })
+
+    resolveFirstPlan(singleOpBundledPlan)
+    await firstAdd
+    await vi.waitFor(() => expect(buildSecondPlan).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.hasPendingAdds.value).toBe(true)
+    expect(batch.canExecuteBatch.value).toBe(false)
+    await expect(batch.prepareBundledExecution()).rejects.toThrow('still being added')
+    await batch.executeBatch()
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+
+    resolveSecondPlan(singleOpBundledPlan)
+    await secondAdd
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(3))
+
+    expect(batch.hasPendingAdds.value).toBe(false)
+    const ceremony = await batch.prepareBundledExecution()
+    expect(Object.keys(ceremony?.reviewByEntryId ?? {})).toHaveLength(2)
+  })
+
+  it.each([
+    ['account', async () => {
+      effectiveAddressRef.value = getAddress('0x2000000000000000000000000000000000000000')
+      await nextTick()
+    }],
+    ['chain', async () => {
+      walletChainIdRef.value = 2
+      await nextTick()
+    }],
+    ['account switch away and back', async () => {
+      effectiveAddressRef.value = getAddress('0x2000000000000000000000000000000000000000')
+      await nextTick()
+      effectiveAddressRef.value = owner
+      await nextTick()
+    }],
+  ])('rejects a plan built across an %s change', async (_label, changeContext) => {
+    let resolvePlan!: (plan: TransactionPlan) => void
+    const deferredPlan = new Promise<TransactionPlan>((resolve) => {
+      resolvePlan = resolve
+    })
+    const buildPlan = vi.fn(() => deferredPlan)
+    const batch = useTxBatch()
+    const pendingAdd = batch.addEntry({
+      label: 'Context-bound operation',
+      buildPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(buildPlan).toHaveBeenCalledTimes(1))
+
+    await changeContext()
+    resolvePlan(singleOpBundledPlan)
+
+    await expect(pendingAdd).rejects.toThrow('Wallet or batch changed while adding this operation')
+    expect(batch.entryCount.value).toBe(0)
+    expect(batch.hasPendingAdds.value).toBe(false)
+  })
+
+  it.each(['clear', 'remove'] as const)('rejects a pending plan after a cart %s', async (edit) => {
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+
+    let resolvePlan!: (plan: TransactionPlan) => void
+    const deferredPlan = new Promise<TransactionPlan>((resolve) => {
+      resolvePlan = resolve
+    })
+    const buildPlan = vi.fn(() => deferredPlan)
+    const pendingAdd = batch.addEntry({
+      label: 'Pending migration',
+      buildPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(buildPlan).toHaveBeenCalledTimes(1))
+
+    if (edit === 'clear') batch.clearBatch()
+    else batch.removeEntry(batch.entries.value[0]!.id)
+    resolvePlan(singleOpBundledPlan)
+
+    await expect(pendingAdd).rejects.toThrow('Wallet or batch changed while adding this operation')
+    expect(batch.entryCount.value).toBe(0)
+    expect(batch.hasPendingAdds.value).toBe(false)
   })
 
   it('rejects an older preparation that resolves after a new cart ceremony', async () => {
@@ -1805,6 +1941,9 @@ describe('useTxBatch execution prerequisites', () => {
     const ceremony = await batch.prepareBundledExecution()
     // Safe disconnected between review and confirm.
     isSafeWalletRef.value = false
+    await nextTick()
+
+    expect(batch.isBundledExecutionCurrent(ceremony!)).toBe(false)
     await batch.executeBatch(undefined, ceremony ?? undefined)
 
     expect(batch.execError.value).toBeTruthy()

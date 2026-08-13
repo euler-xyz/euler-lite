@@ -243,6 +243,8 @@ export interface WalletShortfall {
 const entries: Ref<BatchEntry[]> = ref([])
 const layers = shallowRef<BatchLayer[]>([])
 const batchGeneration = ref(0)
+const pendingAddCount = ref(0)
+let addContextGeneration = 0
 let bundledPreparation: {
   generation: number
   promise: Promise<PreparedBatchBundledExecution>
@@ -251,6 +253,23 @@ let bundledPreparation: {
 const invalidateBatchReview = () => {
   batchGeneration.value++
   bundledPreparation = null
+}
+
+const invalidatePendingAddContext = () => {
+  addContextGeneration++
+}
+
+interface BatchAddContext {
+  generation: number
+  owner?: Address
+  chainId?: number
+}
+
+class BatchAddContextChangedError extends Error {
+  constructor() {
+    super('Wallet or batch changed while adding this operation — add it again.')
+    this.name = 'BatchAddContextChangedError'
+  }
 }
 // Per-entry fixed plan (keyed by entry id), used by the review modal and by the
 // merged whole-batch plan. These are captured once when the entry is added.
@@ -489,7 +508,11 @@ const collectRequiredApprovalTokens = (plan: TransactionPlan): Address[] => {
   return tokens
 }
 
-const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promise<void> => {
+const primeBatchSlotHintsFor = async (
+  chainId: number,
+  tokens: Address[],
+  isCurrent: () => boolean = () => true,
+): Promise<void> => {
   if (!tokens.length) return
   try {
     const sdk = await getEulerSdkFresh()
@@ -507,8 +530,10 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
         logWarn('useTxBatch/primeBatchSlotHintsFor', error)
       }
     }))
-    batchSlotHints = next
-    mergeBatchPrefetchedSlotHints(chainId, next)
+    if (isCurrent()) {
+      batchSlotHints = next
+      mergeBatchPrefetchedSlotHints(chainId, next)
+    }
   }
   catch (error) {
     logWarn('useTxBatch/primeBatchSlotHintsFor', error)
@@ -2151,6 +2176,7 @@ export const useTxBatch = () => {
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
+        invalidatePendingAddContext()
         invalidateBatchReview()
         resimToken++
         entries.value = []
@@ -2167,10 +2193,17 @@ export const useTxBatch = () => {
         tenderly.clearSimulation()
         syncOverlay()
       })
+      // Safe classification is part of a bundled ceremony's wallet context.
+      // Connector detection can change without changing the owner or chain.
+      watch(isSafeWallet, () => {
+        invalidateBatchReview()
+      })
     })
   }
 
-  const getEntryPlanningAccount = async (): Promise<Account<IHasVaultAddress>> => {
+  const getEntryPlanningAccount = async (
+    isAddContextCurrent: () => boolean,
+  ): Promise<Account<IHasVaultAddress>> => {
     const getCurrentFinalLayer = () => (
       entries.value.length > 0 && layers.value.length === entries.value.length + 1
         ? layers.value[layers.value.length - 1]?.account
@@ -2240,22 +2273,57 @@ export const useTxBatch = () => {
 
     logBatchDiag('getEntryPlanningAccount:base-snapshot-fetch', { owner: o, chainId: cid })
     const sdk = await getEulerSdkFresh()
-    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, ownerAddress)
-    return baseAccountSnapshot
+    const fetched = await fetchBaseAccountSnapshot(sdk, cid, ownerAddress)
+    if (!isAddContextCurrent()) throw new BatchAddContextChangedError()
+    baseAccountSnapshot = fetched
+    return fetched
+  }
+
+  const captureAddContext = (): BatchAddContext => {
+    let currentOwner: Address | undefined
+    try {
+      currentOwner = owner.value ? getAddress(owner.value) : undefined
+    }
+    catch {
+      currentOwner = undefined
+    }
+    return {
+      generation: addContextGeneration,
+      owner: currentOwner,
+      chainId: chainId.value,
+    }
+  }
+
+  const isAddContextCurrent = (context: BatchAddContext): boolean => {
+    if (context.generation !== addContextGeneration || context.chainId !== chainId.value) return false
+    try {
+      const currentOwner = owner.value ? getAddress(owner.value) : undefined
+      return currentOwner === context.owner
+    }
+    catch {
+      return context.owner === undefined
+    }
+  }
+
+  const assertAddContextCurrent = (context: BatchAddContext) => {
+    if (!isAddContextCurrent(context)) throw new BatchAddContextChangedError()
   }
 
   const addEntry = async (entry: BatchEntryInput) => {
+    const addContext = captureAddContext()
     // Ignore a rapid duplicate click while an identical add is still in flight
     // (same target sub-account + label). Sequential re-adds are unaffected — the
     // signature is released once the add settles.
-    const signature = `${entry.subAccount ?? ''}|${entry.label}`
+    const signature = `${addContext.generation}|${addContext.owner ?? ''}|${addContext.chainId ?? ''}|${entry.subAccount ?? ''}|${entry.label}`
     if (pendingAddSignatures.has(signature)) return
     pendingAddSignatures.add(signature)
+    pendingAddCount.value++
     // Invalidate synchronously when the edit starts, not after its async plan
     // build finishes, so an open review cannot execute while an add is pending.
     invalidateBatchReview()
 
     const add = async () => {
+      assertAddContextCurrent(addContext)
       execError.value = undefined
       logBatchDiag('addEntry:building', {
         label: entry.label,
@@ -2276,9 +2344,15 @@ export const useTxBatch = () => {
           // The simulator will surface the normal account-loading error later.
         }
       }
+      let planningAccount: Account<IHasVaultAddress> | undefined
+      if (entry.requiresPlanningAccount !== false) {
+        planningAccount = await getEntryPlanningAccount(() => isAddContextCurrent(addContext))
+        assertAddContextCurrent(addContext)
+      }
       const buildResult = entry.requiresPlanningAccount === false
         ? await entry.buildPlan()
-        : await entry.buildPlan(await getEntryPlanningAccount())
+        : await entry.buildPlan(planningAccount!)
+      assertAddContextCurrent(addContext)
       const plan = Array.isArray(buildResult) ? buildResult : buildResult.plan
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
@@ -2290,8 +2364,9 @@ export const useTxBatch = () => {
         // Probe only what no form or earlier batch entry has resolved yet.
         const missingSlotHintTokens = collectRequiredApprovalTokens(plan)
           .filter(token => batchSlotHints[token] === undefined)
-        await primeBatchSlotHintsFor(cid, missingSlotHintTokens)
+        await primeBatchSlotHintsFor(cid, missingSlotHintTokens, () => isAddContextCurrent(addContext))
       }
+      assertAddContextCurrent(addContext)
       const {
         buildPlan: _buildPlan,
         requiresPlanningAccount: _requiresPlanningAccount,
@@ -2323,11 +2398,14 @@ export const useTxBatch = () => {
         error: error instanceof Error ? error.message : String(error),
       }, 'error')
       logWarn('useTxBatch/addEntry', error)
-      simError.value = error instanceof Error ? error.message : String(error)
+      if (!(error instanceof BatchAddContextChangedError)) {
+        simError.value = error instanceof Error ? error.message : String(error)
+      }
       throw error
     }
     finally {
       pendingAddSignatures.delete(signature)
+      pendingAddCount.value = Math.max(0, pendingAddCount.value - 1)
     }
   }
 
@@ -2335,6 +2413,7 @@ export const useTxBatch = () => {
     const nextEntries = entries.value.filter(entry => entry.id !== id)
     execError.value = undefined
     if (nextEntries.length === entries.value.length) return
+    invalidatePendingAddContext()
     invalidateBatchReview()
     entries.value = nextEntries
     if (nextEntries.length === 0) {
@@ -2354,6 +2433,7 @@ export const useTxBatch = () => {
   }
 
   const clearBatch = () => {
+    invalidatePendingAddContext()
     invalidateBatchReview()
     resimToken++
     entries.value = []
@@ -2432,6 +2512,9 @@ export const useTxBatch = () => {
   /** Resolve approvals/permits/plugins for the merged batch plan, so the review
    *  modal can list the approvals the user will be asked to sign. */
   const prepareBatchPlan = async () => {
+    if (pendingAddCount.value > 0) {
+      throw new Error('An operation is still being added — wait for the batch to finish updating.')
+    }
     if (!lastMerged) return null
     return prepareTransactionPlan(lastMerged)
   }
@@ -2483,7 +2566,13 @@ export const useTxBatch = () => {
   )
 
   const isBundledExecutionCurrent = (ceremony: PreparedBatchBundledExecution): boolean => {
-    if (ceremony.generation !== batchGeneration.value || ceremony.chainId !== chainId.value || !owner.value) {
+    if (
+      pendingAddCount.value > 0
+      || !isSafeWallet.value
+      || ceremony.generation !== batchGeneration.value
+      || ceremony.chainId !== chainId.value
+      || !owner.value
+    ) {
       return false
     }
     try {
@@ -2506,6 +2595,9 @@ export const useTxBatch = () => {
    * cannot be used after a cart, account, or chain change.
    */
   const prepareBundledExecution = (): Promise<PreparedBatchBundledExecution | null> => {
+    if (pendingAddCount.value > 0) {
+      return Promise.reject(new Error('An operation is still being added — wait for the batch to finish updating.'))
+    }
     if (!willBundlePrerequisites.value) return Promise.resolve(null)
 
     const generation = batchGeneration.value
@@ -2638,6 +2730,10 @@ export const useTxBatch = () => {
     scope?: TrackedExecutionScope,
     bundledExecution?: PreparedBatchBundledExecution,
   ) => {
+    if (pendingAddCount.value > 0) {
+      execError.value = 'An operation is still being added — wait for the batch to finish updating.'
+      return
+    }
     if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
@@ -2729,6 +2825,7 @@ export const useTxBatch = () => {
   // when this is false — this only gates the Execute action.
   const canExecuteBatch = computed(() =>
     entries.value.length > 0
+    && pendingAddCount.value === 0
     && !isSimulating.value
     && !isExecuting.value
     && !hasFailedOps.value
@@ -2814,6 +2911,7 @@ export const useTxBatch = () => {
     removedKeys: activeLayerRemovedKeysRef,
     walletChanges,
     entryCount,
+    hasPendingAdds: computed(() => pendingAddCount.value > 0),
     marketByEntryId,
     isDrawerOpen: drawerOpen,
     toggleDrawer: () => { drawerOpen.value = !drawerOpen.value },
