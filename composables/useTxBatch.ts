@@ -2595,6 +2595,7 @@ export const useTxBatch = () => {
           throw new Error('Wallet changed since review — please review the batch again.')
         }
         const collected = latchedBundledExecution.value
+        const policyChecks = entries.value.flatMap(entry => entry.policyChecks)
         // No standalone gas estimate — grants are unmined until the
         // proposal executes; the cart's continuous simulation (which runs
         // with the entries' authorization state overrides) is the
@@ -2603,10 +2604,14 @@ export const useTxBatch = () => {
         const sdk = await getEulerSdkFresh()
         const executionPlan = sdk.executionService.mergePlans(collected.plans)
         const prepared = await prepareTransactionPlan(executionPlan)
+        assertOperationPolicyChecks(policyChecks)
         const result = await executePreparedPlanWithPlainCalls(prepared, {
           before: collected.grants,
           after: collected.revokes,
-        }, { allowSingleCall: true })
+        }, {
+          allowSingleCall: true,
+          beforeSend: () => assertOperationPolicyChecks(policyChecks),
+        })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
           // the sequential multi-proposal ceremony.

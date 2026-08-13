@@ -607,6 +607,22 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
   })
 
+  it('runs the Safe bundle pre-send assertion at the wallet-write boundary', async () => {
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+    const beforeSend = vi.fn(() => {
+      throw new Error('Operation policy changed')
+    })
+
+    await expect(executePreparedPlanWithPlainCalls(buildPrepared([approvedPlan[1]] as TransactionPlan), {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    }, { beforeSend })).rejects.toThrow('Operation policy changed')
+
+    expect(beforeSend).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
   it('rejects wrapper calls around a plan that encodes no calls', async () => {
     const { executePreparedPlanWithPlainCalls } = useEulerTx()
 

@@ -1423,7 +1423,7 @@ export const useEulerTx = () => {
    * bundling brings no benefit (fewer than two calls) — callers fall back to
    * sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, beforeSend }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
@@ -1442,6 +1442,8 @@ export const useEulerTx = () => {
      * "no Safe context" — with it set, undefined strictly means the latter.
      */
     allowSingleCall?: boolean
+    /** Revalidate caller-owned policy after all bundle preparation awaits. */
+    beforeSend?: () => void
   }) => {
     let planCalls
     try {
@@ -1476,6 +1478,7 @@ export const useEulerTx = () => {
       currentAccount: currentAccount.address,
       currentChainId: currentAccount.chainId,
     })
+    beforeSend?.()
 
     // Pin submission to the connector whose provider was identified as Safe.
     // Without it, wagmi resolves the currently-active connector, and a
@@ -1696,7 +1699,10 @@ export const useEulerTx = () => {
       before?: readonly PlainTxRequest[]
       after?: readonly PlainTxRequest[]
     },
-    options?: { allowSingleCall?: boolean },
+    options?: {
+      allowSingleCall?: boolean
+      beforeSend?: () => void
+    },
   ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1740,6 +1746,7 @@ export const useEulerTx = () => {
       sdk,
       extraCalls,
       allowSingleCall: options?.allowSingleCall,
+      beforeSend: options?.beforeSend,
     })
     if (!bundled) return undefined
     finalizeExecution(bundled)

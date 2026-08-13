@@ -1395,11 +1395,37 @@ describe('useTxBatch execution prerequisites', () => {
     expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledWith(prepared, {
       before: [grantTx],
       after: [revokeTx],
-    }, { allowSingleCall: true })
+    }, expect.objectContaining({ allowSingleCall: true, beforeSend: expect.any(Function) }))
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     // Revokes rode in the proposal — nothing standalone to send afterwards.
     expect(migrationFlowMocks.revokeAfterSuccess).not.toHaveBeenCalled()
     expect(batch.entryCount.value).toBe(0)
+  })
+
+  it('blocks a Safe bundle when retained policy changes during preparation', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const policyBlocked = ref(false)
+    registerOperationPolicyCheck(
+      'test-safe-bundle-policy',
+      () => policyBlocked.value ? 'Operation policy changed' : undefined,
+    )
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async () => {
+      policyBlocked.value = true
+      return { kind: 'prepared' }
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    unregisterOperationPolicyCheck('test-safe-bundle-policy')
+    await batch.prepareBundledExecution()
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('Operation policy changed')
+    expect(batch.entryCount.value).toBe(1)
+    batch.latchedBundledExecution.value = null
   })
 
   it('throws instead of degrading when the safe bundle context is unavailable', async () => {
@@ -1446,7 +1472,7 @@ describe('useTxBatch execution prerequisites', () => {
     expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledWith(prepared, {
       before: [],
       after: [],
-    }, { allowSingleCall: true })
+    }, expect.objectContaining({ allowSingleCall: true, beforeSend: expect.any(Function) }))
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
   })
 
