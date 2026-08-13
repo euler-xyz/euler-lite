@@ -577,8 +577,13 @@ describe('useEulerTx Safe wallet bundling', () => {
 
   it('submits approve + EVC batch as one Safe call bundle', async () => {
     const { executePreparedPlan } = useEulerTx()
+    const lifecycle: string[] = []
 
-    const result = await executePreparedPlan(buildPrepared(approvedPlan))
+    const result = await executePreparedPlan(buildPrepared(approvedPlan), {
+      onSafePreflight: () => { lifecycle.push('preflight') },
+      onSafeTerminalSubmissionStart: () => { lifecycle.push('terminal') },
+      onSafeSubmission: (hash) => { lifecycle.push(`submitted:${hash}`) },
+    })
 
     expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
     expect(wagmiMocks.sendCalls).toHaveBeenCalledWith(wagmiMocks.config, {
@@ -595,6 +600,7 @@ describe('useEulerTx Safe wallet bundling', () => {
     })
     expect(result.hashes).toEqual([SAFE_TX_HASH])
     expect(result.receipts[0].transactionHash).toBe(SAFE_TX_HASH)
+    expect(lifecycle).toEqual(['preflight', 'terminal', `submitted:${SAFE_TX_HASH}`])
     // The sequential path never runs: no per-transaction sends.
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
@@ -855,6 +861,26 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(result?.hashes).toEqual([SAFE_TX_HASH])
     expect(result?.receipts[0].transactionHash).toBe(SAFE_TX_HASH)
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
+  it('arms and records a plain-calls Safe bundle before confirmation polling', async () => {
+    const lifecycle: string[] = []
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+
+    await executePreparedPlanWithPlainCalls(buildPrepared([approvedPlan[1]] as TransactionPlan), {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    }, {
+      onSafePreflight: () => { lifecycle.push('preflight') },
+      onSafeTerminalSubmissionStart: () => { lifecycle.push('terminal') },
+      onSafeSubmission: (hash) => { lifecycle.push(`submitted:${hash}`) },
+    })
+
+    expect(lifecycle).toEqual([
+      'preflight',
+      'terminal',
+      `submitted:${SAFE_TX_HASH}`,
+    ])
   })
 
   it('rejects wrapper calls around a plan that encodes no calls', async () => {

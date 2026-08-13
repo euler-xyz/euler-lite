@@ -1436,6 +1436,15 @@ export const useEulerTx = () => {
     }
   }
 
+  interface SafeSubmissionLifecycle {
+    /** Must complete before Safe receives the transaction request. */
+    onSafePreflight?: () => void | Promise<void>
+    /** Durably marks the terminal proposal as armed before submission. */
+    onSafeTerminalSubmissionStart?: () => void
+    /** Persists the Safe hash before confirmation polling begins. */
+    onSafeSubmission?: (submittedHash: Hash) => void
+  }
+
   /**
    * Submit every plan transaction as one EIP-5792 call bundle. Safe turns
    * the bundle into a single MultiSend proposal, so signers approve once
@@ -1446,7 +1455,7 @@ export const useEulerTx = () => {
    * bundling brings no benefit (fewer than two calls) — callers fall back to
    * sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, submissionLifecycle }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
@@ -1465,6 +1474,7 @@ export const useEulerTx = () => {
      * "no Safe context" — with it set, undefined strictly means the latter.
      */
     allowSingleCall?: boolean
+    submissionLifecycle?: SafeSubmissionLifecycle
   }) => {
     let planCalls
     try {
@@ -1500,6 +1510,9 @@ export const useEulerTx = () => {
       currentChainId: currentAccount.chainId,
     })
 
+    await submissionLifecycle?.onSafePreflight?.()
+    submissionLifecycle?.onSafeTerminalSubmissionStart?.()
+
     // Pin submission to the connector whose provider was identified as Safe.
     // Without it, wagmi resolves the currently-active connector, and a
     // same-account connector switch would submit through one provider while
@@ -1516,6 +1529,7 @@ export const useEulerTx = () => {
     if (!/^0x[0-9a-f]{64}$/i.test(id)) {
       throw new Error('Safe wallet returned an unexpected call bundle id')
     }
+    submissionLifecycle?.onSafeSubmission?.(id as Hash)
 
     const execution = await waitForSafeTransactionExecution({
       submittedHash: id as Hash,
@@ -1639,7 +1653,6 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
-    if (safeWalletProvider) await options?.onSafePreflight?.()
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
@@ -1680,12 +1693,19 @@ export const useEulerTx = () => {
         connector,
         safeWalletProvider,
         sdk,
+        submissionLifecycle: {
+          onSafePreflight: options?.onSafePreflight,
+          onSafeTerminalSubmissionStart: options?.onSafeTerminalSubmissionStart,
+          onSafeSubmission: options?.onSafeSubmission,
+        },
       })
       if (bundled) {
         finalizeExecution(bundled)
         return bundled
       }
     }
+
+    if (safeWalletProvider) await options?.onSafePreflight?.()
 
     let safeSubmissionPhase: TransactionPlanExecutionProgress['status']
     let terminalSafeSubmissionArmed = false
@@ -1818,7 +1838,7 @@ export const useEulerTx = () => {
       before?: readonly PlainTxRequest[]
       after?: readonly PlainTxRequest[]
     },
-    options?: { allowSingleCall?: boolean },
+    options?: SafeSubmissionLifecycle & { allowSingleCall?: boolean },
   ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1862,6 +1882,7 @@ export const useEulerTx = () => {
       sdk,
       extraCalls,
       allowSingleCall: options?.allowSingleCall,
+      submissionLifecycle: options,
     })
     if (!bundled) return undefined
     finalizeExecution(bundled)

@@ -2770,6 +2770,68 @@ export const useTxBatch = () => {
     let batchFingerprint = ''
     let batchPlanSnapshot: TransactionPlan = []
     let submittedSafeLock: PendingSafeBatchSubmission | undefined
+    const safeSubmissionLifecycle = {
+      onSafePreflight: () => {
+        const reservation: PendingSafeBatchSubmission = {
+          account: batchExecutionContext!.account,
+          chainId: batchExecutionContext!.chainId,
+          batchFingerprint,
+          batchPlan: batchPlanSnapshot,
+          entries: batchEntriesSnapshot,
+          errorMessage: 'Safe submission is reserved. Verify the Safe account before retrying if this page reloads before a transaction hash is shown.',
+          refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+          grantedRevokes: [...grantedRevokes],
+        }
+        // Reserve the complete execution context before opening Safe. A
+        // storage failure must abort before the wallet can submit anything.
+        setPendingSafeSubmission(reservation)
+        submittedSafeLock = reservation
+      },
+      onSafeTerminalSubmissionStart: () => {
+        safeSubmissionKind = 'batch'
+        const reservation: PendingSafeBatchSubmission = {
+          submissionKind: 'batch',
+          account: batchExecutionContext!.account,
+          chainId: batchExecutionContext!.chainId,
+          batchFingerprint,
+          batchPlan: batchPlanSnapshot,
+          entries: batchEntriesSnapshot,
+          errorMessage: 'Safe terminal batch submission is armed before hash capture. Verify the Safe account manually before retrying.',
+          refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+          grantedRevokes: [...grantedRevokes],
+        }
+        // A terminal reservation cannot be cleared by prerequisite
+        // reconciliation if the submitted-hash update later fails.
+        setPendingSafeSubmission(reservation)
+        submittedSafeLock = reservation
+      },
+      onSafeSubmission: (submittedHash: Hash) => {
+        safeSubmissionKind = 'batch'
+        const errorMessage = `Safe submission is pending confirmation. Submitted Safe hash: ${submittedHash}`
+        const submitted: PendingSafeBatchSubmission = {
+          submittedHash,
+          submissionKind: 'batch',
+          account: batchExecutionContext!.account,
+          chainId: batchExecutionContext!.chainId,
+          batchFingerprint,
+          batchPlan: batchPlanSnapshot,
+          entries: batchEntriesSnapshot,
+          errorMessage,
+          refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+          grantedRevokes: [...grantedRevokes],
+        }
+        // Persist synchronously before confirmation polling so a reload cannot
+        // erase the retry lock while the Safe transaction is still pending.
+        try {
+          setPendingSafeSubmission(submitted)
+        }
+        catch (error) {
+          logWarn('useTxBatch/persistSubmittedSafe', error)
+          throw new SafeTransactionStatusUnknownError(submittedHash, 'aborted')
+        }
+        submittedSafeLock = submitted
+      },
+    }
     try {
       if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
@@ -2799,15 +2861,26 @@ export const useTxBatch = () => {
               placeholderSignatureCalls: getReviewedSignaturePlaceholderCalls(),
             })
           : candidatePrepared
+        batchFingerprint = getPreparedBatchFingerprint(prepared)
+        batchPlanSnapshot = prepared.plan
+        batchExecutionContext = {
+          account: getAddress(typeof prepared.account === 'string' ? prepared.account : prepared.account.owner),
+          chainId: prepared.chainId,
+        }
+        batchEntriesSnapshot = [...entries.value]
         const result = await executePreparedPlanWithPlainCalls(prepared, {
           before: collected.grants,
           after: collected.revokes,
-        }, { allowSingleCall: true })
+        }, {
+          allowSingleCall: true,
+          ...safeSubmissionLifecycle,
+        })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
           // the sequential multi-proposal ceremony.
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
         }
+        clearPendingSafeSubmission(submittedSafeLock ?? null)
         latchedBundledExecution.value = null
         clearBatch()
         if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
@@ -2833,22 +2906,7 @@ export const useTxBatch = () => {
       }
       batchEntriesSnapshot = [...entries.value]
       await executePreparedPlan(prepared, {
-        onSafePreflight: () => {
-          const reservation: PendingSafeBatchSubmission = {
-            account: batchExecutionContext!.account,
-            chainId: batchExecutionContext!.chainId,
-            batchFingerprint,
-            batchPlan: batchPlanSnapshot,
-            entries: batchEntriesSnapshot,
-            errorMessage: 'Safe submission is reserved. Verify the Safe account before retrying if this page reloads before a transaction hash is shown.',
-            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
-            grantedRevokes: [...grantedRevokes],
-          }
-          // Reserve the complete execution context before opening Safe. A
-          // storage failure must abort before the wallet can submit anything.
-          setPendingSafeSubmission(reservation)
-          submittedSafeLock = reservation
-        },
+        ...safeSubmissionLifecycle,
         onSafePrerequisiteSubmission: (submittedHash) => {
           safeSubmissionKind = 'prerequisite'
           const errorMessage = `Safe prerequisite submission is pending confirmation. Submitted Safe hash: ${submittedHash}. The terminal batch has not been submitted.`
@@ -2869,52 +2927,6 @@ export const useTxBatch = () => {
           }
           catch (error) {
             logWarn('useTxBatch/persistSubmittedSafePrerequisite', error)
-            throw new SafeTransactionStatusUnknownError(submittedHash, 'aborted')
-          }
-          submittedSafeLock = submitted
-        },
-        onSafeTerminalSubmissionStart: () => {
-          safeSubmissionKind = 'batch'
-          const reservation: PendingSafeBatchSubmission = {
-            submissionKind: 'batch',
-            account: batchExecutionContext!.account,
-            chainId: batchExecutionContext!.chainId,
-            batchFingerprint,
-            batchPlan: batchPlanSnapshot,
-            entries: batchEntriesSnapshot,
-            errorMessage: 'Safe terminal batch submission is armed before hash capture. Verify the Safe account manually before retrying.',
-            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
-            grantedRevokes: [...grantedRevokes],
-          }
-          // Replace any earlier prerequisite hash with an unreconcilable
-          // terminal reservation before the terminal wallet request. If the
-          // later hash update cannot be stored, reconciling the prerequisite
-          // can never clear this lock and reopen a duplicate terminal send.
-          setPendingSafeSubmission(reservation)
-          submittedSafeLock = reservation
-        },
-        onSafeSubmission: (submittedHash) => {
-          safeSubmissionKind = 'batch'
-          const errorMessage = `Safe submission is pending confirmation. Submitted Safe hash: ${submittedHash}`
-          const submitted: PendingSafeBatchSubmission = {
-            submittedHash,
-            submissionKind: 'batch',
-            account: batchExecutionContext!.account,
-            chainId: batchExecutionContext!.chainId,
-            batchFingerprint,
-            batchPlan: batchPlanSnapshot,
-            entries: batchEntriesSnapshot,
-            errorMessage,
-            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
-            grantedRevokes: [...grantedRevokes],
-          }
-          // Persist synchronously before confirmation polling so a reload cannot
-          // erase the retry lock while the Safe transaction is still pending.
-          try {
-            setPendingSafeSubmission(submitted)
-          }
-          catch (error) {
-            logWarn('useTxBatch/persistSubmittedSafe', error)
             throw new SafeTransactionStatusUnknownError(submittedHash, 'aborted')
           }
           submittedSafeLock = submitted
