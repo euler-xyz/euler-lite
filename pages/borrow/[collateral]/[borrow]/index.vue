@@ -129,8 +129,15 @@ const borrowApy = computed(() => withVaultIntrinsicApy(
 // --- Geo-blocking ---
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(collateralAddress, borrowAddress))
 const isBorrowRestricted = computed(() => isVaultRestrictedByCountry(borrowAddress))
+const multiplyPolicyVaultAddresses = computed(() => [
+  multiply.multiplySupplyVault.value?.address,
+  multiply.multiplyLongVault.value?.address,
+  multiply.multiplyShortVault.value?.address,
+].filter((value): value is Address => !!value))
+const isMultiplyGeoBlocked = computed(() =>
+  isAnyVaultBlockedByCountry(...multiplyPolicyVaultAddresses.value))
 const isMultiplyRestricted = computed(() =>
-  isVaultRestrictedByCountry(collateralAddress) || isVaultRestrictedByCountry(borrowAddress))
+  multiplyPolicyVaultAddresses.value.some(address => isVaultRestrictedByCountry(address)))
 const isPairFullyRestricted = computed(() =>
   !isGeoBlocked.value && isVaultRestrictedByCountry(collateralAddress) && isVaultRestrictedByCountry(borrowAddress))
 
@@ -176,7 +183,7 @@ const multiply = useMultiplyForm({
   formTab,
   resolvePendingSubAccount,
   isPendingSubAccountLoading,
-  isGeoBlocked,
+  isGeoBlocked: isMultiplyGeoBlocked,
   isMultiplyRestricted,
 })
 const showMultiplyRoe = computed(() =>
@@ -224,7 +231,7 @@ const { guardWithPriceImpact: guardWithBorrowSwapPriceImpact } = usePriceImpactG
 
 // --- Submit disabled ---
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isBorrowPayWithBlocked.value || borrow.isSubmitDisabled.value)
-const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
+const reviewMultiplyDisabled = computed(() => isMultiplyGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
 const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
@@ -239,7 +246,7 @@ const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => 
 })
 
 const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
   if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
   if (multiply.multiplyCapErrorText.value) return { message: multiply.multiplyCapErrorText.value, variant: 'error' }
@@ -318,7 +325,7 @@ const addToBatch = async () => {
 // Same-asset multiply needs no quote; cross-asset needs a non-CoW quote (CoW
 // can't merge into an EVC batch). Region/geo blocks gate it like direct execute.
 const canAddMultiplyToBatch = computed(() => {
-  if (isGeoBlocked.value || isMultiplyRestricted.value) return false
+  if (isMultiplyGeoBlocked.value || isMultiplyRestricted.value) return false
   if (multiply.multiplyDebtAmountNano.value <= 0n) return false
   if (!multiply.multiplySupplyVault.value || !multiply.multiplyLongVault.value || !multiply.multiplyShortVault.value) return false
   if (multiply.multiplyIsSameAsset.value) return true
@@ -953,7 +960,7 @@ watch(
                     />
 
                     <UiAlert
-                      v-if="isGeoBlocked"
+                      v-if="isMultiplyGeoBlocked"
                       title="Region restricted"
                       description="This operation is not available in your region. You can still repay existing debt."
                       variant="warning"
@@ -967,7 +974,7 @@ watch(
                       size="compact"
                     />
                     <UiAlert
-                      v-if="!isGeoBlocked && !isPairFullyRestricted && isMultiplyRestricted"
+                      v-if="!isMultiplyGeoBlocked && !isPairFullyRestricted && isMultiplyRestricted"
                       title="Asset restricted"
                       description="Multiply is not available for this pair in your region."
                       variant="warning"

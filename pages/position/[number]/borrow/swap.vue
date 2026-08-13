@@ -51,7 +51,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/utils/collateralOptions'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultTags, isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
@@ -2395,7 +2395,22 @@ const { guardWithPriceImpact } = usePriceImpactGate({
   shouldGateUnknown: shouldGateUnknownPriceImpact,
 })
 
-const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...getOperationVaultAddresses()))
+const isGeoBlocked = computed(() =>
+  isAnyVaultBlockedByCountry(...getOperationVaultAddresses())
+  || getOperationTargetVaultAddresses().some(address => getVaultTags(address, 'swap-target').disabled),
+)
+
+const rejectGeoBlockedReview = (): boolean => {
+  if (!isGeoBlocked.value) return false
+  plan.value = null
+  preparedPlan.value = null
+  inboundExternalPlan.value = null
+  inboundExternalPreparedPlan.value = null
+  inboundExternalMigrationPreview.value = null
+  showError('This operation is not available in your region')
+  modal.close()
+  return true
+}
 const isBatchActive = computed(() => batchEntryCount.value > 0)
 const directInboundMigrationDisabledReason = computed(() =>
   isExternalSourceRoute.value && isBatchActive.value ? BATCH_ACTIVE_REASON : null,
@@ -3373,6 +3388,7 @@ const reviewInboundExternalMigration = async () => {
     inboundExternalPlan.value = null
     const preview = await prepareInboundExternalMigrationPreview()
     inboundExternalAuthorizationConnector.value = preview.authorizationRequest ? preview.input.source.connectorId : null
+    if (rejectGeoBlockedReview()) return
 
     modal.open(OperationReviewModal, {
       props: {
@@ -3407,6 +3423,7 @@ const reviewInboundExternalMigration = async () => {
 }
 
 const sendInboundExternalMigration = async (execution: TrackedExecutionScope, preview: InboundExternalMigrationPreview) => {
+  if (rejectGeoBlockedReview()) return
   isSubmitting.value = true
   clearSimulationError()
   try {
@@ -3419,6 +3436,7 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
       currentChainId: walletChainId.value,
     })
     if (!await restorePendingBeforeRetry()) return
+    if (rejectGeoBlockedReview()) return
     inboundExternalPreparedPlan.value = null
     const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
     inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
@@ -3467,6 +3485,10 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
       })
       const ok = await runPreparedSimulation(inboundExternalPreparedPlan.value, buildRefinanceStateOverrideOptions())
       if (!ok) {
+        await revokeAfterAbort(revokeTxs)
+        return
+      }
+      if (rejectGeoBlockedReview()) {
         await revokeAfterAbort(revokeTxs)
         return
       }
@@ -3563,6 +3585,7 @@ const sendInboundExternalMigrationAsSafeBundle = async (
     simulation.stateOverrides,
   )
   if (!ok) return 'aborted'
+  if (rejectGeoBlockedReview()) return 'aborted'
 
   const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true })
   if (!result) {
@@ -3808,6 +3831,7 @@ const submit = async () => {
         ? await runPreparedSimulation(preparedPlan.value, buildRefinanceStateOverrideOptions())
         : await runSimulation(plan.value, buildRefinanceStateOverrideOptions())
       if (!ok) return
+      if (rejectGeoBlockedReview()) return
 
       modal.open(OperationReviewModal, {
         props: {
@@ -3833,6 +3857,7 @@ const submit = async () => {
 }
 
 const send = async (execution: TrackedExecutionScope) => {
+  if (rejectGeoBlockedReview()) return
   isSubmitting.value = true
   try {
     if (preparedPlan.value) {
@@ -3840,6 +3865,7 @@ const send = async (execution: TrackedExecutionScope) => {
     }
     else {
       const txPlan = await buildRefinancePlan()
+      if (rejectGeoBlockedReview()) return
       await executePlan(txPlan)
     }
     // Success signal for a detached Safe completion toast; a proposal that
@@ -4094,6 +4120,13 @@ function getOperationVaultAddresses(): string[] {
     targetCollateralVault.value?.address,
   ]
   return addresses.filter((value): value is string => !!value)
+}
+
+function getOperationTargetVaultAddresses(): string[] {
+  return [
+    targetDebtVault.value?.address,
+    targetCollateralVault.value?.address,
+  ].filter((value): value is Address => !!value)
 }
 </script>
 

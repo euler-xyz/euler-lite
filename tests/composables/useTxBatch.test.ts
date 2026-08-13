@@ -435,6 +435,58 @@ describe('batch geo-policy execution gate', () => {
     expect(batch.hasGeoBlockedEntries.value).toBe(false)
     expect(batch.canExecuteBatch.value).toBe(true)
   })
+
+  it('re-checks policy after pending reconciliation before sending prerequisites', async () => {
+    let blocked = false
+    geoPolicyMocks.isAnyVaultBlockedByCountry.mockImplementation(() => blocked)
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Migration',
+      buildPlan: async () => [] as TransactionPlan,
+      buildExecutionPrerequisites: async () => ({
+        preTxs: [{ to: morphoBlue, data: '0xgrant' as Hex }],
+        walletContext: grantWalletContext,
+        postTxs: [],
+      }),
+      review: { geoVaultAddresses: [vault] },
+    })
+    await vi.waitFor(() => expect(batch.isSimulating.value).toBe(false))
+    migrationFlowMocks.restorePendingBeforeRetry.mockImplementation(async () => {
+      blocked = true
+      batch.entries.value = [...batch.entries.value]
+      return true
+    })
+
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('not available in your region')
+  })
+
+  it('re-checks policy after preparing the final sequential plan', async () => {
+    let blocked = false
+    geoPolicyMocks.isAnyVaultBlockedByCountry.mockImplementation(() => blocked)
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Supply',
+      buildPlan: async () => [] as TransactionPlan,
+      review: { geoVaultAddresses: [vault] },
+    })
+    await vi.waitFor(() => expect(batch.isSimulating.value).toBe(false))
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async () => {
+      blocked = true
+      batch.entries.value = [...batch.entries.value]
+      return { kind: 'prepared' }
+    })
+
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('not available in your region')
+  })
 })
 
 describe('stitchAccount', () => {
@@ -1545,6 +1597,41 @@ describe('useTxBatch execution prerequisites', () => {
     expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
     expect(batch.entryCount.value).toBe(1)
     expect(batch.execError.value).toContain('different vault set')
+    batch.latchedBundledExecution.value = null
+  })
+
+  it('re-checks policy after preparing the final safe bundle', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    let blocked = false
+    geoPolicyMocks.isAnyVaultBlockedByCountry.mockImplementation(() => blocked)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Bundled migration',
+      buildPlan: async () => singleOpBundledPlan,
+      buildBundledExecution: async () => ({
+        plan: singleOpBundledPlan,
+        grants: [],
+        revokes: [],
+        grantSteps: [],
+        revokeSteps: [],
+      }),
+      review: { geoVaultAddresses: [vault] },
+    })
+    await batch.prepareBundledExecution()
+    await batch.executeBatch({
+      assertPreparedPlan: () => {
+        blocked = true
+        batch.entries.value = [...batch.entries.value]
+      },
+    })
+
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(batch.entryCount.value).toBe(1)
+    expect(batch.execError.value).toContain('not available in your region')
     batch.latchedBundledExecution.value = null
   })
 

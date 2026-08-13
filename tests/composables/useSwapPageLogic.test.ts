@@ -417,6 +417,14 @@ describe('useSwapPageLogic', () => {
     expect(captured.executePreparedPlan).not.toHaveBeenCalled()
     expect(captured.executePlan).not.toHaveBeenCalled()
     expect(captured.toastError).toHaveBeenCalledWith('This operation is not available in your region')
+    expect(captured.modalClose).toHaveBeenCalled()
+
+    captured.targetDisabled.value = false
+    await swap.submit()
+    expect(captured.executePreparedPlan).not.toHaveBeenCalled()
+    expect(captured.executePlan).not.toHaveBeenCalled()
+    expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(2)
+    expect(captured.modalOpen).toHaveBeenCalledTimes(2)
 
     captured.country.value = 'US'
     await nextTick()

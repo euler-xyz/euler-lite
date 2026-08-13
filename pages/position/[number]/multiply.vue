@@ -1071,14 +1071,17 @@ const isMultiplySubmitDisabled = computed(() => {
 })
 const isGeoBlocked = computed(() => {
   const addresses: string[] = []
+  if (multiplySupplyVault.value) addresses.push(multiplySupplyVault.value.address)
   if (multiplyLongVault.value) addresses.push(multiplyLongVault.value.address)
   if (multiplyShortVault.value) addresses.push(multiplyShortVault.value.address)
   return isAnyVaultBlockedByCountry(...addresses)
 })
 const isMultiplyRestricted = computed(() => {
+  const supply = multiplySupplyVault.value
   const long = multiplyLongVault.value
   const short = multiplyShortVault.value
-  return (long && isVaultRestrictedByCountry(long.address))
+  return (supply && isVaultRestrictedByCountry(supply.address))
+    || (long && isVaultRestrictedByCountry(long.address))
     || (short && isVaultRestrictedByCountry(short.address))
 })
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || isMultiplySubmitDisabled.value)

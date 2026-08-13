@@ -614,11 +614,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     if (isGeoBlocked.value) {
       invalidatePreparedSwap()
       showError('This operation is not available in your region')
+      modal.close()
       return
     }
     if (isOperationBlocked.value) {
       invalidatePreparedSwap()
       showError(operationBlockReason.value || 'This operation is currently unavailable')
+      modal.close()
       return
     }
 

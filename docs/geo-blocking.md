@@ -206,7 +206,7 @@ The global file is warmed once on server boot in `warm-cache.ts` alongside the p
 
 #### Resolution via the vault registry
 
-`isVaultBlockedByCountry(address)` resolves the vault's underlying asset via `useVaultRegistry().getVault(address).asset` and calls `isAssetBlockedByCountry(asset)`, passing the full asset object (address + symbol + name) so pattern rules also fire. Before the registry is warm the lookup returns `undefined` and the asset-level branch is a no-op — product/earn-level rules still apply as before.
+`isVaultBlockedByCountry(address, { asset? })` and `isVaultRestrictedByCountry(address, { asset?, counterpart? })` resolve the vault's underlying asset via `useVaultRegistry().getVault(address).asset` when the caller does not provide an already resolved, chain-scoped asset. They pass the full asset object (address + symbol + name) so pattern rules also fire. A non-empty vault whose asset metadata is still unresolved fails closed for both hard blocks and soft restrictions. Once country detection completes, an empty, unselected address remains neutral; while detection is pending, policy remains globally fail-closed. The optional `counterpart` preserves the explicit wrap-pair exemption for soft-restricted acquisition checks.
 
 ## Restriction Rules (Soft Block)
 
@@ -281,7 +281,7 @@ Group aliases can be mixed with individual codes: `["EU", "CH", "US"]` blocks al
 
 ## Helper Functions
 
-### `isVaultBlockedByCountry(address): boolean`
+### `isVaultBlockedByCountry(address, { asset? }): boolean`
 
 The core hard-block check. Returns `true` if the vault is blocked for the detected country. A non-empty vault address whose underlying asset metadata cannot be resolved fails closed after country detection; an empty address means no vault is selected and remains neutral.
 
@@ -289,7 +289,7 @@ The core hard-block check. Returns `true` if the vault is blocked for the detect
 
 Returns `true` if **any** of the provided vault addresses are blocked. Used on action pages that involve multiple vaults (e.g. a borrow position has both a collateral vault and a borrow vault).
 
-### `isVaultRestrictedByCountry(address): boolean`
+### `isVaultRestrictedByCountry(address, { asset?, counterpart? }): boolean`
 
 The soft-restriction check. Returns `true` if the vault or its underlying asset has a `restricted` entry matching the user's country. A non-empty unresolved vault fails closed after country detection, while an empty address remains neutral.
 

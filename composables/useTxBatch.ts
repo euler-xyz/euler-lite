@@ -2604,8 +2604,14 @@ export const useTxBatch = () => {
     execError.value = undefined
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
+    const assertGeoPolicyCurrent = () => {
+      if (hasGeoBlockedEntries.value) {
+        throw new Error('This batch is not available in your region.')
+      }
+    }
     try {
       if (!await restorePendingBeforeRetry()) return
+      assertGeoPolicyCurrent()
       // Final on-chain gas estimate before asking the user to sign. If the batch
       // would revert (against the current chain state, which may have moved since
       // the last simulation), surface the decoded reason and don't send.
@@ -2629,6 +2635,7 @@ export const useTxBatch = () => {
         const executionPlan = sdk.executionService.mergePlans(collected.plans)
         const prepared = await prepareTransactionPlan(executionPlan)
         options.assertPreparedPlan?.(prepared)
+        assertGeoPolicyCurrent()
         const result = await executePreparedPlanWithPlainCalls(prepared, {
           before: collected.grants,
           after: collected.revokes,
@@ -2650,6 +2657,7 @@ export const useTxBatch = () => {
       await estimateGasForPlan(executionPlan)
       const prepared = await prepareTransactionPlan(executionPlan)
       options.assertPreparedPlan?.(prepared)
+      assertGeoPolicyCurrent()
       await executePreparedPlan(prepared)
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
