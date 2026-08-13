@@ -5,7 +5,8 @@ import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizatio
 export const PENDING_SAFE_BATCH_STORAGE_KEY = 'euler-lite:pending-safe-batch-submissions:v1'
 
 export interface PersistedPendingSafeBatchSubmission {
-  submittedHash: Hash
+  /** Absent while durable storage is reserved before the Safe wallet is opened. */
+  submittedHash?: Hash
   account: Address
   chainId: number
   batchFingerprint: string
@@ -67,7 +68,7 @@ const normalizeRecord = (value: unknown): PersistedPendingSafeBatchSubmission | 
   if (!value || typeof value !== 'object') return undefined
   const candidate = value as Partial<PersistedPendingSafeBatchSubmission>
   if (
-    !isHash(candidate.submittedHash)
+    (candidate.submittedHash !== undefined && !isHash(candidate.submittedHash))
     || typeof candidate.account !== 'string'
     || !Number.isSafeInteger(candidate.chainId)
     || typeof candidate.batchFingerprint !== 'string'
@@ -81,7 +82,7 @@ const normalizeRecord = (value: unknown): PersistedPendingSafeBatchSubmission | 
   if (grantedRevokes.some(revoke => !revoke)) return undefined
   try {
     return {
-      submittedHash: candidate.submittedHash,
+      ...(candidate.submittedHash === undefined ? {} : { submittedHash: candidate.submittedHash }),
       account: getAddress(candidate.account),
       chainId: candidate.chainId!,
       batchFingerprint: candidate.batchFingerprint,

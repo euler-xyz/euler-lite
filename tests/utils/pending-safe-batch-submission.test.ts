@@ -50,6 +50,29 @@ describe('pending Safe batch persistence', () => {
     }])
   })
 
+  it('round-trips a pre-submission reservation without inventing a Safe hash', () => {
+    const storage = memoryStorage()
+    savePendingSafeBatchSubmissions(storage, [{
+      account: owner,
+      chainId: 1,
+      batchFingerprint: 'fedcba9876543210',
+      batchPlan: [{ type: 'evcBatch', items: [] }],
+      errorMessage: 'reserved before Safe submission',
+      refreshExternalMigrationPositions: false,
+      grantedRevokes: [],
+    }])
+
+    expect(loadPendingSafeBatchSubmissions(storage)).toEqual([{
+      account: owner,
+      chainId: 1,
+      batchFingerprint: 'fedcba9876543210',
+      batchPlan: [{ type: 'evcBatch', items: [] }],
+      errorMessage: 'reserved before Safe submission',
+      refreshExternalMigrationPositions: false,
+      grantedRevokes: [],
+    }])
+  })
+
   it('fingerprints the full prepared batch envelope', () => {
     const base = {
       __prepared: true as const,

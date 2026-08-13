@@ -412,6 +412,7 @@ const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyEr
 const isConfirmDisabled = computed(() =>
   isSpyMode.value
   || isExecuting.value
+  || (pendingSafeSubmission.value !== null && !pendingSafeSubmission.value.submittedHash)
   || (!pendingSafeSubmission.value && (
     isPreparing.value
     || isSimulating.value
@@ -421,6 +422,7 @@ const isConfirmDisabled = computed(() =>
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
+  if (pendingSafeSubmission.value && !pendingSafeSubmission.value.submittedHash) return 'Safe submission is locked before hash capture. Verify the Safe account manually before taking further action.'
   if (pendingSafeSubmission.value) return `Safe submission ${pendingSafeSubmission.value.submittedHash} must be reconciled before this batch can be retried`
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
   if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
@@ -777,7 +779,7 @@ const handleClose = () => {
           data-testid="batch-review-execute"
           @click="handleExecute"
         >
-          {{ isExecuting ? (pendingSafeSubmission ? 'Reconciling…' : 'Executing…') : (pendingSafeSubmission ? 'Check Safe status' : 'Execute batch') }}
+          {{ isExecuting ? (pendingSafeSubmission ? 'Reconciling…' : 'Executing…') : (pendingSafeSubmission ? (pendingSafeSubmission.submittedHash ? 'Check Safe status' : 'Safe submission locked') : 'Execute batch') }}
         </UiButton>
         <p
           v-if="blockedReason"

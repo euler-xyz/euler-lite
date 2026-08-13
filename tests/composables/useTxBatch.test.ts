@@ -58,6 +58,18 @@ const migrationFlowMocks = {
 }
 const scheduleExternalMigrationRefreshes = vi.fn()
 
+const memoryStorage = (): Storage => {
+  const values = new Map<string, string>()
+  return {
+    get length() { return values.size },
+    clear: () => values.clear(),
+    getItem: key => values.get(key) ?? null,
+    key: index => [...values.keys()][index] ?? null,
+    removeItem: key => values.delete(key),
+    setItem: (key, value) => values.set(key, value),
+  }
+}
+
 const position = (account: Address, shares: bigint) => ({
   account,
   vaultAddress: vault,
@@ -325,6 +337,10 @@ const preparedEnvelope = (
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { localStorage: memoryStorage() },
+  })
   eulerTxMocks.prepareTransactionPlan.mockReset()
   eulerTxMocks.prepareTransactionPlan.mockImplementation(async (plan: TransactionPlan) => preparedEnvelope(plan))
   eulerTxMocks.executePreparedPlan.mockReset()
@@ -1578,6 +1594,43 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.pendingSafeSubmission.value).toBeNull()
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('does not open Safe when the durable pre-submission reservation cannot be written', async () => {
+    const originalWindow = globalThis.window
+    const storage = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(() => { throw new Error('localStorage quota exceeded') }),
+      removeItem: vi.fn(),
+    } as unknown as Storage
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { localStorage: storage },
+    })
+    const safeBatchSubmitted = vi.fn()
+
+    try {
+      const batch = useTxBatch()
+      eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+      eulerTxMocks.prepareTransactionPlan.mockResolvedValue(preparedEnvelope())
+      eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+        await options?.onSafePreflight?.()
+        safeBatchSubmitted()
+      })
+
+      await addGrantingMigrationEntry(batch)
+      await batch.executeBatch(await prepareReviewedBatch(batch))
+
+      expect(storage.setItem).toHaveBeenCalledTimes(1)
+      expect(safeBatchSubmitted).not.toHaveBeenCalled()
+      expect(batch.pendingSafeSubmission.value).toBeNull()
+      expect(batch.execError.value).toContain('Safe submission was blocked')
+      expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+    }
+    finally {
+      if (originalWindow === undefined) delete (globalThis as { window?: Window }).window
+      else Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+    }
   })
 
   it('does not misclassify an unresolved approval Safe transaction as the atomic batch', async () => {

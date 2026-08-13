@@ -7,6 +7,7 @@ import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk
 import { isSuccessfulTransactionReceipt, useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
+import * as safeWalletTransactions from '~/utils/safeWalletTransactions'
 
 const wagmiMocks = vi.hoisted(() => ({
   sendTransactionAsync: vi.fn(),
@@ -339,6 +340,40 @@ describe('useEulerTx migration authorization cleanup', () => {
     } as TransactionPlanPrepared, { onProgress })
 
     expect(onProgress).toHaveBeenCalledWith(progress)
+  })
+
+  it('blocks Safe execution before the SDK can submit when durable preflight fails', async () => {
+    const executePreparedTransactionPlan = vi.fn()
+    const provider = { waitForTransactionReceipt: vi.fn() }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const safeProviderSpy = vi.spyOn(safeWalletTransactions, 'getSafeWalletProvider')
+      .mockResolvedValue({ request: vi.fn() } as never)
+    const storageError = new Error('localStorage quota exceeded')
+    const onSafePreflight = vi.fn(() => {
+      throw storageError
+    })
+    const { executePreparedPlan } = useEulerTx()
+
+    try {
+      await expect(executePreparedPlan({
+        __prepared: true,
+        plan: [],
+        chainId: 1,
+        account: OWNER,
+        usePermit2: false,
+        unlimitedApproval: false,
+      } as TransactionPlanPrepared, { onSafePreflight })).rejects.toBe(storageError)
+
+      expect(onSafePreflight).toHaveBeenCalledTimes(1)
+      expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+      expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+    }
+    finally {
+      safeProviderSpy.mockRestore()
+    }
   })
 
   it.each([

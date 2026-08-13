@@ -1464,6 +1464,8 @@ export const useEulerTx = () => {
     prepared: TransactionPlanPrepared,
     options?: {
       onProgress?: (progress: TransactionPlanExecutionProgress) => void
+      /** Must complete before a Safe wallet can receive any transaction request. */
+      onSafePreflight?: () => void | Promise<void>
       /** Fires as soon as a Safe provider returns its submitted Safe hash, before confirmation polling. */
       onSafeSubmission?: (submittedHash: Hash) => void
     },
@@ -1481,6 +1483,7 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
+    if (safeWalletProvider) await options?.onSafePreflight?.()
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)

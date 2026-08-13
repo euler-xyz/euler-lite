@@ -220,7 +220,8 @@ const simError = ref<string | undefined>(undefined)
 const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
 interface PendingSafeBatchSubmission {
-  submittedHash: Hash
+  /** Absent only for the durable reservation created before Safe is opened. */
+  submittedHash?: Hash
   account: Address
   chainId: number
   batchFingerprint: string
@@ -251,7 +252,7 @@ const pendingSafeSubmissions = shallowRef<PendingSafeBatchSubmission[]>([])
 let pendingSafeSubmissionsHydrated = false
 
 const getPendingSafeStorage = (): Storage | undefined => {
-  if (!import.meta.client) return undefined
+  if (typeof window === 'undefined') return undefined
   try {
     return window.localStorage
   }
@@ -262,7 +263,7 @@ const getPendingSafeStorage = (): Storage | undefined => {
 
 const persistPendingSafeSubmissionLocks = () => {
   const storage = getPendingSafeStorage()
-  if (!storage) return
+  if (!storage) throw new Error('Durable browser storage is unavailable; Safe submission was blocked')
   const persisted: PersistedPendingSafeBatchSubmission[] = pendingSafeSubmissions.value
     .filter(pending => !pending.terminalStatus)
     .map(pending => ({
@@ -280,6 +281,21 @@ const persistPendingSafeSubmissionLocks = () => {
   }
   catch (error) {
     logWarn('useTxBatch/persistPendingSafe', error)
+    throw new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked', { cause: error })
+  }
+  const restored = loadPendingSafeBatchSubmissions(storage)
+  const isSameLock = (
+    expected: PersistedPendingSafeBatchSubmission,
+    actual: PersistedPendingSafeBatchSubmission,
+  ) => expected.account === actual.account
+    && expected.chainId === actual.chainId
+    && expected.batchFingerprint === actual.batchFingerprint
+    && expected.submittedHash === actual.submittedHash
+  if (
+    restored.length !== persisted.length
+    || persisted.some(expected => !restored.some(actual => isSameLock(expected, actual)))
+  ) {
+    throw new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked')
   }
 }
 
@@ -291,7 +307,7 @@ const hydratePendingSafeSubmissionLocks = () => {
   pendingSafeSubmissions.value = loadPendingSafeBatchSubmissions(storage).map(pending => ({
     ...pending,
     entries: [{
-      id: `pending-safe-${pending.submittedHash}`,
+      id: `pending-safe-${pending.submittedHash ?? pending.batchFingerprint}`,
       label: 'Pending Safe batch',
       plan: pending.batchPlan,
     }],
@@ -1801,18 +1817,32 @@ export const useTxBatch = () => {
     ) ?? null,
   )
   const setPendingSafeSubmission = (pending: PendingSafeBatchSubmission) => {
+    const previous = pendingSafeSubmissions.value
     pendingSafeSubmissions.value = [
       ...pendingSafeSubmissions.value.filter(existing =>
         !isPendingSafeSubmissionForContext(existing, pending.account, pending.chainId),
       ),
       pending,
     ]
-    persistPendingSafeSubmissionLocks()
+    try {
+      persistPendingSafeSubmissionLocks()
+    }
+    catch (error) {
+      pendingSafeSubmissions.value = previous
+      throw error
+    }
   }
   const clearPendingSafeSubmission = (pending: PendingSafeBatchSubmission | null) => {
     if (!pending) return
+    const previous = pendingSafeSubmissions.value
     pendingSafeSubmissions.value = pendingSafeSubmissions.value.filter(existing => existing !== pending)
-    persistPendingSafeSubmissionLocks()
+    try {
+      persistPendingSafeSubmissionLocks()
+    }
+    catch (error) {
+      pendingSafeSubmissions.value = previous
+      throw error
+    }
   }
   const {
     prepareTransactionPlan,
@@ -2642,10 +2672,26 @@ export const useTxBatch = () => {
       }
       batchEntriesSnapshot = [...entries.value]
       await executePreparedPlan(prepared, {
+        onSafePreflight: () => {
+          const reservation: PendingSafeBatchSubmission = {
+            account: batchExecutionContext!.account,
+            chainId: batchExecutionContext!.chainId,
+            batchFingerprint,
+            batchPlan: batchPlanSnapshot,
+            entries: batchEntriesSnapshot,
+            errorMessage: 'Safe submission is reserved. Verify the Safe account before retrying if this page reloads before a transaction hash is shown.',
+            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+            grantedRevokes: [...grantedRevokes],
+          }
+          // Reserve the complete execution context before opening Safe. A
+          // storage failure must abort before the wallet can submit anything.
+          setPendingSafeSubmission(reservation)
+          submittedSafeLock = reservation
+        },
         onSafeSubmission: (submittedHash) => {
           batchExecutionStarted = true
           const errorMessage = `Safe submission is pending confirmation. Submitted Safe hash: ${submittedHash}`
-          submittedSafeLock = {
+          const submitted: PendingSafeBatchSubmission = {
             submittedHash,
             account: batchExecutionContext!.account,
             chainId: batchExecutionContext!.chainId,
@@ -2658,7 +2704,14 @@ export const useTxBatch = () => {
           }
           // Persist synchronously before confirmation polling so a reload cannot
           // erase the retry lock while the Safe transaction is still pending.
-          setPendingSafeSubmission(submittedSafeLock)
+          try {
+            setPendingSafeSubmission(submitted)
+          }
+          catch (error) {
+            logWarn('useTxBatch/persistSubmittedSafe', error)
+            throw new SafeTransactionStatusUnknownError(submittedHash, 'aborted')
+          }
+          submittedSafeLock = submitted
         },
         onProgress: (progress) => {
           // Required approvals are separate transactions. Only arm Safe batch
@@ -2688,8 +2741,20 @@ export const useTxBatch = () => {
           refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
           grantedRevokes: [...grantedRevokes],
         }
-        submittedSafeLock = pending
-        setPendingSafeSubmission(pending)
+        try {
+          setPendingSafeSubmission(pending)
+        }
+        catch (persistError) {
+          // The preflight reservation is already durable, so never unwind it
+          // after a Safe hash exists. Keep the retry path closed even if the
+          // richer submitted-hash update cannot be stored.
+          logWarn('useTxBatch/persistSubmittedSafe', persistError)
+          if (isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)) {
+            entries.value = [...batchEntriesSnapshot]
+            execError.value = `${errorMessage}. The durable pre-submission lock remains active because its hash update could not be stored.`
+          }
+          return
+        }
         // The user may have switched away while Safe execution was pending.
         // Only surface this context's error immediately; the snapshot and error
         // are restored together when its owner/chain becomes active again.
@@ -2714,6 +2779,10 @@ export const useTxBatch = () => {
   const reconcilePendingSafeSubmission = async () => {
     const pending = pendingSafeSubmission.value
     if (!pending || isExecuting.value) return
+    if (!pending.submittedHash) {
+      execError.value = 'Safe submission is locked before hash capture. Verify the Safe account manually; this batch cannot be retried automatically.'
+      return
+    }
     isExecuting.value = true
     try {
       const result = await reconcileSafeTransaction({
