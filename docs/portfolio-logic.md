@@ -350,6 +350,8 @@ After each fetch, `updateBalances()` schedules a follow-up run if its inputs (ch
 - [Pyth Oracle Handling](./pyth-oracle-handling.md) — How Pyth oracles affect position loading
 - [Vault Labels & Verification](./vault-labels-and-verification.md) — How vault verification affects position visibility
 - [Activity Feed](./activity-feed.md) — Portfolio and vault activity history (V3-backed)
+- [External Migration Discovery](./external-migration.md) — Aave / Morpho position scanning for Migrate
+- [Safe Wallet Compatibility](./safe-wallets.md) — Multisig detection, bundling, and detached execution
 
 ### Reactive Update Triggers
 
