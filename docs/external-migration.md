@@ -54,14 +54,22 @@ still move supply into Euler.
 
 ## Failure isolation
 
-Aave discovery fans out reserve / balance / metadata / price reads. Individual
-asset failures are logged and **skipped** so one bad token cannot discard the
-whole scan:
+Aave discovery fans out reserve / balance / metadata / price reads. Isolation
+is **not** "any per-asset failure is skipped." Failed **root** and
+**configured-position** reads reject the whole Aave fetch rather than decode
+as "no balance":
 
-- Reserve discovery failures isolate per reserve.
-- Balance read failures isolate per asset.
-- ERC-20 `symbol` / `decimals` multicall failures skip that asset's metadata
-  (and therefore its candidates) without aborting siblings.
+- **Whole-source reject** — `getReservesList` / `getUserConfiguration` failures;
+  `getReserveData` failure (or invalid reserve data) for an asset marked as
+  collateral or debt in the user-configuration bitmap; `balanceOf` failure for
+  a configured asset, including any variable/stable debt-token read. These
+  throw `Aave discovery read failed: …` and fail the Aave source (Morpho can
+  still succeed via `Promise.allSettled`).
+- **Per-asset skip** — unrelated reserve / unconfigured-supply probes (assets
+  not set as collateral or debt) are logged and skipped. ERC-20 `symbol` /
+  `decimals` failures skip that asset's metadata (and therefore its candidates)
+  without aborting siblings. Per-asset USD price failures store `null` and
+  still emit the candidate.
 
 Top-level Morpho vs Aave loads use `Promise.allSettled`:
 
@@ -96,14 +104,15 @@ inside the atomic proposal — see [Safe Wallet Compatibility](./safe-wallets.md
 | Symptom | Likely cause |
 |---------|----------------|
 | Morpho empty on a live Morpho chain | Chain missing from `MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS`, or proxy/indexer error (check `unavailableSources`) |
-| Aave supply missing from Migrate | Metadata/balance isolation skipped the asset — check `externalMigration/aave*` warn logs |
+| Aave supply missing from Migrate | Unrelated reserve/supply or metadata skip — check `externalMigration/aave*` warn logs. Configured collateral/debt reserve or balance failures instead reject the whole Aave source (`unavailableSources` / top-level error). |
 | Whole tab errors when only Morpho is down | Should not happen after allSettled isolation; verify both results rejected |
 | Stale positions after migrate | Missing `refreshExternalMigrationPositions` on the cart entry / flow |
 
 ## Tests
 
 - `tests/composables/useExternalMigrationPositions.test.ts` — supply-only Aave,
-  Morpho chain gating, per-stage isolation, allSettled partial failure
+  Morpho chain gating, per-asset skip vs whole-source configured-read
+  failures, allSettled partial failure
 
 ## Files
 

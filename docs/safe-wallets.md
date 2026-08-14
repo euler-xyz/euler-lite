@@ -10,12 +10,16 @@ EOA flows can:
 
 - collect Permit2 / typed-data signatures in the wallet UI
 - send approve → wait → EVC `batch()` as separate transactions
-- place CoW orders that require a recoverable 65-byte ECDSA signature
+- place CoW orders that require a recoverable ECDSA signature (65-byte
+  standard or 64-byte EIP-2098 compact)
 
 A Safe cannot do those things the same way. Message signatures need EIP-1271
 collection across owners, Permit2 still needs an on-chain approval to the
-Permit2 contract, and the SDK's CoW executor rejects non-ECDSA signatures
-**after** approvals may already have been sent. Lite therefore:
+Permit2 contract, and the SDK's CoW executor (`normalizeCowSignature` in
+`@eulerxyz/euler-v2-sdk@2.0.0`) accepts only a standard 65-byte ECDSA
+signature (`0x` length 132) or an EIP-2098 compact 64-byte ECDSA signature
+(`0x` length 130). Safe contract-signature payloads use other lengths and
+are rejected **after** approvals may already have been sent. Lite therefore:
 
 1. Detects Safe connectors reliably (including WalletConnect peer metadata).
 2. Force-disables message signatures while a Safe (or unresolved detection) is active.
@@ -124,6 +128,9 @@ cards can reappear.
 
 Defence in depth: `useCowSwapExecutionCore.assertTransactionsEnabled` throws
 before any CoW transaction if a Safe (or unresolved) wallet reaches submit.
+The gating conclusion is the contract-signature incompatibility, not a
+65-byte-only length check: compact EIP-2098 ECDSA signatures from a regular
+wallet are accepted.
 
 ## Batch cart: latched bundled ceremony
 
