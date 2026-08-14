@@ -204,7 +204,7 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |
 | `composables/useTxBatch.ts` | Multi-tx cart: plan merge, resimulate, plugin-layer map, slot-hint reuse, Safe latched ceremony |
 | `composables/useSafeWallet.ts` | Reactive Safe detection (`isSafeWallet` / `isSafeWalletResolved`) |
-| `composables/useSafeExecutionDetachment.ts` | Close-review-while-cosigning without losing completion toasts |
+| `composables/useSafeExecutionDetachment.ts` | Close-review-while-cosigning; toasts until confirm or 5-min poll timeout |
 | `utils/transaction-plan-calls.ts` | Resolved plan → EIP-5792 call list for Safe bundles |
 | `components/entities/operation/OperationReviewModal.vue` | Prepared-plan review, calldata copy, and Tenderly simulation |
 | `utils/stepDecoding.ts` | SDK plan item decoding for review display |

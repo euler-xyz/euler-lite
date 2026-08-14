@@ -24,8 +24,10 @@ Permit2 contract, and the SDK's CoW executor rejects non-ECDSA signatures
 4. Removes CoW from the quote pipeline for Safe wallets.
 5. Bundles migration / batch prerequisites into that same proposal when every
    cart entry supports it.
-6. Lets review modals close while co-signers finish, without losing completion
-   toasts or double-attributing success.
+6. Lets review modals close while co-signers finish. Lite tracks that
+   execution until confirmation or the five-minute polling timeout; after
+   timeout, verify execution in Safe. Account/connector switch abandons
+   tracking so success is never attributed to the next wallet.
 
 ## Detection
 
@@ -82,7 +84,9 @@ Safe provider is present:
 4. `sendCalls({ forceAtomic: true, connector, … })` pinned to the connector that
    was identified as Safe.
 5. Poll `waitForSafeTransactionExecution` — Safe returns `safeTxHash` as the
-   bundle id; the poller resolves the executed on-chain hash.
+   bundle id; the poller resolves the executed on-chain hash. Polling stops
+   after five minutes (`SAFE_STATUS_POLL_TIMEOUT_MS`) and throws
+   `SafeTransactionStatusUnknownError`; Lite does not keep watching after that.
 
 ### Bundleability rules (`utils/transaction-plan-calls.ts`)
 
@@ -156,9 +160,14 @@ reviewed authorization payload still matches.
 execution:
 
 - Review modals may close while a Safe proposal awaits co-signers (`detach`).
+- Tracking continues until confirmation or the five-minute polling timeout
+  (`SAFE_STATUS_POLL_TIMEOUT_MS` in `waitForSafeTransactionExecution`). After
+  timeout Lite reports unknown status, releases the tracking slot, and a later
+  on-chain execution will **not** produce a success toast — verify in Safe.
 - Completion surfaces as a toast: success only if the flow called
-  `scope.markSucceeded()`, warning if the promise resolved without finalize,
-  error if it rejected.
+  `scope.markSucceeded()` before the waiter settled, warning if the promise
+  resolved without finalize, error if it rejected (including the timeout
+  unknown-status error).
 - `scope.suppressPostTxUi()` skips navigation / unscoped modal teardown for
   detached or abandoned executions.
 - Account or connector switch calls `abandonTrackedExecution()` — gate and
@@ -186,6 +195,7 @@ thread the scope through finalize / redirect helpers.
 | "Batch simulation not loaded" on fresh Safe | Plugin prefix layers (ToS) — see [Transaction Building](./transaction-building.md#batch-simulation-plugin-layers) |
 | CoW quotes flash then vanish | Detection landing after first sweep — expected eviction; replay restores CoW for EOAs |
 | Success toast on wrong wallet | Fixed by abandon-on-switch; do not reintroduce global success flags |
+| Detached success toast never appears | Co-signers took longer than five minutes — polling timed out and tracking was released; check Safe |
 | Review said one proposal, confirm sent many | Latch missing / cart edited after review — re-open review |
 
 ## Tests
