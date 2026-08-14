@@ -76,7 +76,7 @@ Plans may include `requiredApproval` items. During review and execution, `resolv
 - an ERC-20 approval transaction, or
 - a Permit2 signature request.
 
-`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Incentra chooses whether message signatures are enabled through `useSignaturePreference()`; disabling them makes approval-capable flows use transactions instead.
+`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Whether message signatures (Permit2 and other typed-data prompts) are enabled is controlled globally by `useSignaturePreference()` — a Settings toggle persisted as `signatures-enabled` (one-time seed from legacy `permit2-enabled`). Disabling signatures makes approval-capable flows use on-chain approval transactions instead. While a Safe multisig is connected (or Safe detection is still pending), signatures are force-disabled regardless of the stored preference — see [Safe Wallet Compatibility](./safe-wallets.md).
 
 ## Operation Guards
 
@@ -162,6 +162,22 @@ Both accounts are stored **pre-overlay**. Never read them back from layer-aware 
 
 `resimulate` calls `simulateTransactionPlan(cid, ownerAddr, merged, …)` with the **current owner Address**, not a pinned `Account` object, so plugins resolve against the live owner. Layer 0 still comes from the pinned `baseAccountSnapshot` after the SDK stitch — entry plans are immutable add-time payloads, and later real-state drift must not rebuild the whole cart around a different base.
 
+### Batch simulation plugin layers
+
+The SDK emits one simulated account layer per top-level batch **operation**. Plan plugins (ToS `signTermsOfUse`, Pyth price updates, Keyring credential injection) prepend loose operations ahead of cart entries, so a one-entry cart can return `[base, plugin…, afterOp]` instead of `[base, afterOp]`.
+
+`buildOperationEntryMap(entryPlans, simulatedOperationCount)` in `useTxBatch` maps those operations back to cart rows:
+
+- Prefix plugin operations fold into the base (layer 0 stays the pre-batch snapshot).
+- Each entry's display layer is the state after its **last** operation.
+- `failedBatchItems.operationIndex` resolves through the same map so failures mark the correct row.
+
+After selection, a healthy sim must yield exactly `entries + 1` layers (`getCurrentFinalLayer`'s contract). Fresh Safes hit the ToS plugin path often because every Safe address is a new on-chain account — without the map, `awaitFinalPlanningLayer` exhausts retries into the generic "Batch simulation not loaded" error.
+
+### Safe bundled batch ceremony
+
+When the wallet is a Safe and every prerequisite-bearing entry provides `buildBundledExecution`, the cart latches one atomic proposal at review open (grants + merged plans + in-proposal restorations) and executes that exact payload. Mixed carts keep the sequential grant → batch → revoke path for everyone. Details, detachment, and CoW/signature gates: [Safe Wallet Compatibility](./safe-wallets.md).
+
 ## Swap Quotes
 
 `useSwapApi()` fetches swap quotes and normalizes the backend token shape into the SDK `SwapQuote` shape at the API boundary. Downstream planners pass `SwapApiQuote` directly into SDK planner methods.
@@ -186,7 +202,10 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
 | `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |
-| `composables/useTxBatch.ts` | Multi-tx cart: plan merge, resimulate, slot-hint reuse, execution |
+| `composables/useTxBatch.ts` | Multi-tx cart: plan merge, resimulate, plugin-layer map, slot-hint reuse, Safe latched ceremony |
+| `composables/useSafeWallet.ts` | Reactive Safe detection (`isSafeWallet` / `isSafeWalletResolved`) |
+| `composables/useSafeExecutionDetachment.ts` | Close-review-while-cosigning without losing completion toasts |
+| `utils/transaction-plan-calls.ts` | Resolved plan → EIP-5792 call list for Safe bundles |
 | `components/entities/operation/OperationReviewModal.vue` | Prepared-plan review, calldata copy, and Tenderly simulation |
 | `utils/stepDecoding.ts` | SDK plan item decoding for review display |
 | `utils/operationGuardRegistry.ts` | Guard transformer and blocker registry |

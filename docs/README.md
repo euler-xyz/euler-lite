@@ -41,19 +41,32 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Position discovery and categorization
 - Lens contract usage
 - Borrow, deposit, and earn position loading
+- External Aave / Morpho migrate discovery is covered in [External Migration Discovery](./external-migration.md)
 
 ### 🏷️ [Vault Labels & Verification](./vault-labels-and-verification.md)
 
 - Vault verification and trust levels
 - Label data sources and types
 - Unknown vault resolution
+- SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
 
 ### 🔧 [Transaction Building](./transaction-building.md)
 
 - SDK TransactionPlan architecture and composite operations
-- EVC batching and Permit2 integration
+- EVC batching and Permit2 / gasless-signature preference
 - Sub-accounts and position isolation
-- Simulation performance tuning and batch-cart slot-hint / account prefetch
+- Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
+
+### 🔐 [Safe Wallet Compatibility](./safe-wallets.md)
+
+- Safe detection (iframe connector, named wallet, WalletConnect peer metadata)
+- Force-disabled signatures and CoW quotes while Safe / detection-pending
+- EIP-5792 atomic bundles, latched batch ceremonies, detached co-signer waits
+
+### 🔄 [External Migration Discovery](./external-migration.md)
+
+- Aave v3 and Morpho / MetaMorpho position scanning for Portfolio Migrate
+- Supply-only Aave candidates, Morpho chain allowlist, per-source failure isolation
 
 ### 📜 [Activity Feed](./activity-feed.md)
 
