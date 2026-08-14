@@ -23,12 +23,17 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *     call, and no row uses that today. Non-listed queries inherit
  *     `staleTimeMs`.
  *
- *   - `invalidateAfterTx` (optional, boolean): evict matching cache entries
- *     after every successful transaction (`finalizeExecution`, the post-tx
- *     subgraph sync, and CoW settlement). Nothing evicts at form mount — a
- *     form opened inside a row's window reads the cached value. Used by
- *     display surfaces (vault list, portfolio etc.) that read via the
- *     browsing SDK with a long staleTime — without explicit eviction they
+ *   - `invalidateAfterTx` (optional, boolean): mark matching cache entries
+ *     stale after every successful transaction (`finalizeExecution`, the
+ *     post-tx subgraph sync, and CoW settlement). `invalidateSdkQueries` calls
+ *     TanStack's `invalidateQueries`, so data entries are flagged stale and
+ *     active observers refetch — they are not removed from the query cache
+ *     (the short-lived failure cache is a separate map and is cleared). SDK
+ *     queries run through `fetchQuery` and have no standing observers, so the
+ *     effect is that the next read re-fetches instead of reusing it. Nothing is
+ *     invalidated at form mount — a form opened inside a row's window reads
+ *     the cached value. Used by display surfaces (vault list, portfolio etc.)
+ *     that read via the browsing SDK with a long staleTime — without this they
  *     would serve pre-tx data for up to `staleTimeMs`. This is also the only
  *     unconditional refetch the plan-time path gets, since `formStaleTimeMs`
  *     alone can reuse a snapshot up to its window old.
@@ -127,7 +132,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   // multicalls). External position balances and authorization state back
   // plan sizing and signature prompts — debt accrues per block and the user
   // can grant/revoke authorization mid-flow — so they get the balance-class
-  // short windows plus post-tx eviction (a completed migration must not
+  // short windows plus post-tx invalidation (a completed migration must not
   // serve the pre-migration position for 5 minutes). Euler-side target
   // vault data (assets + borrow LTV) is governance config; source vault
   // asset addresses are immutable in practice.
@@ -169,7 +174,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
 const policyEntries = (): [EulerSDKQueryName, SdkQueryPolicyEntry][] =>
   Object.entries(SDK_QUERY_POLICY) as [EulerSDKQueryName, SdkQueryPolicyEntry][]
 
-/** Names where `invalidateAfterTx === true` — used by post-tx eviction. */
+/** Names where `invalidateAfterTx === true` — marked stale after a successful tx. */
 export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]
   = policyEntries()
     .filter(([, p]) => p.invalidateAfterTx === true)

@@ -481,8 +481,9 @@ export const useEulerTx = () => {
    * That fetch is on-chain-backed but is not a forced refetch: it resolves
    * through the shared QueryClient at each row's form stale time (a minute for
    * `queryAccountVaults`), so a recent snapshot is reused rather than re-read
-   * from the latest block. Post-tx `invalidateAfterTx` eviction is what
-   * guarantees a re-read after the user's own state changes.
+   * from the latest block. Post-tx `invalidateAfterTx` invalidation marks
+   * those rows stale, which is what guarantees a re-read after the user's own
+   * state changes.
    *
    * Cheap reads in this fetch path (labels, ABIs, deployments, prices) still
    * hit the QueryClient cache shared with the fast SDK, so the extra RPC
