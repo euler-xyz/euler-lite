@@ -111,8 +111,8 @@ inside the atomic proposal — see [Safe Wallet Compatibility](./safe-wallets.md
 |------|---------|
 | `composables/useExternalMigrationPositions.ts` | Discovery, cache, unavailableSources |
 | `entities/migration/constants.ts` | Connector ids + Morpho chain allowlist |
-| `server/api/internal/proxy/morpho/` | Morpho GraphQL proxy |
-| `server/api/internal/proxy/aave/` | Aave helper proxy (where used) |
+| `server/api/internal/proxy/morpho.post.ts` | Morpho GraphQL proxy |
+| `server/api/internal/proxy/aave.post.ts` | Aave helper proxy (where used) |
 | `utils/migrationAuthorizationTxs.ts` | Grant/revoke encode + review steps |
 | `pages/portfolio/migrate.vue` | Inbound Migrate tab |
 | `pages/position/[number]/migrate.vue` | Outbound migrate ceremony |
