@@ -271,17 +271,16 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | Vault Source | Verification Method |
 |-------------|---------------------|
 | **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
-| **Earn vaults** | Default repo: loaded from `eulerEarnGovernedPerspective` on-chain. Alternative repos: verified if in `earnVaults` from labels |
+| **Earn vaults** | Verified if in `earnVaults` from labels (`earn-vaults.json`) |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
 
 ### On-Chain Perspectives
 
-Two on-chain perspective contracts provide additional verification:
+One on-chain perspective contract provides additional verification:
 
 - **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true` and `vaultCategory: 'escrow'`.
-- **`eulerEarnGovernedPerspective`**: Lists all governed EulerEarn vaults. Vaults from this perspective are always verified.
 
 ## Vault Categories and Types
 

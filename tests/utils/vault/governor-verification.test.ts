@@ -1,13 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { getAddress, type Address } from 'viem'
+import { encodeAbiParameters, getAddress, type Address, zeroAddress } from 'viem'
 import {
   isVaultGovernorVerified,
   isEarnVaultOwnerVerified,
   resolveGoverningEntityKeys,
   resolveEarnGoverningEntityKeys,
   type VerificationLabels,
+  hasResolvedGovernorAdmin,
 } from '~/utils/vault/governor-verification'
-import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { EVault as SdkEVault } from '@eulerxyz/euler-v2-sdk'
+import type { EulerEarn, EVault, IEVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { EULER_ROUTER_COMPONENTS } from '~/entities/constants'
 
 type Vault = EVault & { verified?: boolean, vaultCategory?: 'standard' | 'escrow' }
 type SecuritizeVault = SecuritizeCollateralVault & { verified?: boolean, vaultCategory?: 'standard' | 'escrow' }
@@ -74,19 +77,29 @@ const makeEarn = (overrides: Partial<EarnVault> & { owner?: string } = {}): Earn
   } as unknown as EarnVault
 }
 
-const makeRouterOracle = (governor: Address | typeof getAddress = ROUTER_GOV_A) => {
-  // Encode an EulerRouter info payload with the given governor in the
-  // governor slot. The rule reads via decodeEulerRouterInfo -> .governor.
-  // Construct a tuple: (governor, fallbackOracle, fallbackOracleInfo(...),
-  // bases, quotes, resolvedAssets, resolvedOracles, resolvedOraclesInfo).
-  // For test purposes we just need the governor decoding to succeed; the
-  // exact ABI must match EULER_ROUTER_COMPONENTS, so we mock the helper.
-  return {
-    oracle: getAddress('0x000000000000000000000000000000000000DEAD'),
-    name: 'EulerRouter',
-    oracleInfo: governor as unknown as `0x${string}`,
-  }
-}
+const makeRouterOracle = (governor: Address = ROUTER_GOV_A) => ({
+  oracle: getAddress('0x000000000000000000000000000000000000DEAD'),
+  name: 'EulerRouter',
+  oracleInfo: encodeAbiParameters(
+    [{ type: 'tuple', components: EULER_ROUTER_COMPONENTS }],
+    [{
+      governor,
+      fallbackOracle: zeroAddress,
+      fallbackOracleInfo: { oracle: zeroAddress, name: '', oracleInfo: '0x' },
+      bases: [],
+      quotes: [],
+      resolvedAssets: [],
+      resolvedOracles: [],
+      resolvedOraclesInfo: [],
+    }],
+  ),
+})
+
+const makeMalformedRouterOracle = () => ({
+  oracle: getAddress('0x000000000000000000000000000000000000DEAD'),
+  name: 'EulerRouter',
+  oracleInfo: '0xdead' as const,
+})
 
 describe('isVaultGovernorVerified', () => {
   it('returns true for escrow vaults regardless of governor', () => {
@@ -149,22 +162,40 @@ describe('isVaultGovernorVerified', () => {
     expect(isVaultGovernorVerified(vault, labels)).toBe(true)
   })
 
-  it('skips the router governor check when oracleInfo cannot be decoded', () => {
+  it('fails closed when EulerRouter metadata cannot be decoded', () => {
+    const vault = makeVault({
+      governorAdmin: GOV_A,
+      oracleDetailedInfo: makeMalformedRouterOracle(),
+    } as Partial<Vault>)
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_A] },
+    })
+    expect(isVaultGovernorVerified(vault, labels)).toBe(false)
+  })
+
+  it('accepts a decoded EulerRouter governor owned by the declared entity', () => {
+    const vault = makeVault({
+      governorAdmin: GOV_A,
+      oracleDetailedInfo: makeRouterOracle(ROUTER_GOV_A),
+    } as Partial<Vault>)
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_A, ROUTER_GOV_A] },
+    })
+    expect(isVaultGovernorVerified(vault, labels)).toBe(true)
+  })
+
+  it('rejects a decoded EulerRouter governor outside the declared entity', () => {
     const vault = makeVault({
       governorAdmin: GOV_A,
       oracleDetailedInfo: makeRouterOracle(ROUTER_GOV_OTHER),
     } as Partial<Vault>)
     const labels = buildLabels({
       declaredKeys: { [VAULT_ADDR]: ['euler'] },
-      entityAddresses: { euler: [GOV_A] },
+      entityAddresses: { euler: [GOV_A, ROUTER_GOV_A] },
     })
-    // The router governor is decoded from oracleInfo via decodeEulerRouterInfo.
-    // Decoding fails on our placeholder payload (not a valid ABI-encoded
-    // EulerRouter tuple), so the rule's `routerGovernor` is null and the
-    // router-gate is a no-op — the vault stays verified on governorAdmin alone.
-    // A real "router mismatch" path needs an end-to-end test with a real
-    // encoded payload.
-    expect(isVaultGovernorVerified(vault, labels)).toBe(true)
+    expect(isVaultGovernorVerified(vault, labels)).toBe(false)
   })
 
   it('works for SecuritizeVault (no oracleDetailedInfo branch)', () => {
@@ -332,5 +363,76 @@ describe('resolveEarnGoverningEntityKeys', () => {
       entityAddresses: { euler: [GOV_A], dao: [GOV_A] },
     })
     expect(resolveEarnGoverningEntityKeys(earn, labels)).toEqual(['euler', 'dao'])
+  })
+})
+
+describe('hasResolvedGovernorAdmin', () => {
+  // A REAL SDK EVault instance, not a plain-object stub: the constructor
+  // assigns `governorAdmin` even when undefined, so property-existence
+  // (`in`) checks pass on every instance — the false-Unknown-badge bug.
+  const makeSdkVault = (governorAdmin: Address | undefined): EVault =>
+    Object.assign(
+      new SdkEVault({
+        address: VAULT_ADDR,
+        governorAdmin,
+        // Minimal nested shapes the constructor dereferences.
+        oracle: { oracle: GOV_B, name: 'EulerRouter' },
+        asset: { address: GOV_B, symbol: 'TST', decimals: 18 },
+        shares: { decimals: 18 },
+        collaterals: [],
+      } as unknown as IEVault),
+      // The adapters stamp the discriminant on real instances post-construction.
+      { type: 'EVault' },
+    )
+
+  it('treats an unresolved (constructor-assigned undefined) governor as not hydrated', () => {
+    const vault = makeSdkVault(undefined)
+    // The in-operator lies on real instances — this is the wrong guard:
+    expect('governorAdmin' in vault).toBe(true)
+    // The value-based guard reads it correctly:
+    expect(hasResolvedGovernorAdmin(vault)).toBe(false)
+  })
+
+  it('passes once governance resolves — even to an unmatched governor', () => {
+    const vault = makeSdkVault(GOV_A)
+    expect(hasResolvedGovernorAdmin(vault)).toBe(true)
+    // Unmatched governor → verification legitimately fails (real Unknown).
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_B] },
+    })
+    expect(isVaultGovernorVerified(
+      Object.assign(vault, { verified: true }) as never,
+      labels,
+    )).toBe(false)
+  })
+
+  it('fails closed for a real SDK EulerRouter vault without retained router governance', () => {
+    const vault = Object.assign(makeSdkVault(GOV_A), { verified: true })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_A, ROUTER_GOV_A] },
+    })
+
+    expect('oracleDetailedInfo' in vault).toBe(false)
+    expect(isVaultGovernorVerified(vault, labels)).toBe(false)
+  })
+
+  it('accepts a real SDK EulerRouter vault with retained matching router governance', () => {
+    const vault = Object.assign(makeSdkVault(GOV_A), {
+      verified: true,
+      eulerRouterGovernor: ROUTER_GOV_A,
+    })
+    const labels = buildLabels({
+      declaredKeys: { [VAULT_ADDR]: ['euler'] },
+      entityAddresses: { euler: [GOV_A, ROUTER_GOV_A] },
+    })
+
+    expect(isVaultGovernorVerified(vault, labels)).toBe(true)
+  })
+
+  it('rejects non-EVault shapes', () => {
+    expect(hasResolvedGovernorAdmin(undefined)).toBe(false)
+    expect(hasResolvedGovernorAdmin({ governorAdmin: GOV_A })).toBe(false)
   })
 })

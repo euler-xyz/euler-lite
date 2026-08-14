@@ -29,6 +29,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Pyth oracle simulation for price reads
 - SDK/V3-populated intrinsic APY for yield-bearing assets
 
+### 📐 [Projected Yield](./projected-yield.md)
+
+- Utilization-aware supply and borrow rate projections
+- USD-weighted multi-collateral snapshots
+- Net APY, ROE, intrinsic yield, and reward breakdowns
+- Transaction-batch layer consistency and fail-closed estimates
+
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
 
 - Position discovery and categorization
@@ -66,6 +73,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - Per-host external proxies (Merkl, Fuul, Incentra, Goldsky subgraph) with TTL + in-flight dedup
 - Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
+- V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
 - Bigint wire codec and adversary-safe wrapper tag
 
@@ -110,6 +118,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - `GET /api/public/is-known` — verified-vault lookup by address (or list mode)
 - `GET /api/public/metadata` — uniform vault display metadata (name / description / governing entity / asset) across EVK, Securitize, and Earn
 - Request/response shape, caching, rate limits, and examples
+
+### 📣 [Announcement Modal](./announcement-modal.md)
+
+- Deployment-controlled one-time modal for operational notices
+- `CONFIG_ANNOUNCEMENT_*` and `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` setup
+- Dismissal token lifecycle, URL safety rules, and rollout troubleshooting
 
 ## 🎯 Project Overview
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ONE_18,
   conservativePriceRatio,
+  formatAssetValue,
   getAssetUsdPrice,
   getAssetUsdValue,
   getAssetUsdValueForEstimate,
@@ -28,6 +29,21 @@ describe('sdk-prices', () => {
       amountOutBid: 2n * ONE_18,
     })
     await expect(getAssetUsdValue(1_500_000n, vault, 'off-chain')).resolves.toBe(3)
+  })
+
+  it('preserves the normalized uncovered-loss amount when formatting it for display', async () => {
+    const vault = {
+      address: addressA,
+      asset: { decimals: 6, symbol: 'USDT' },
+      marketPriceUsd: ONE_18,
+    }
+
+    await expect(formatAssetValue(6_361_518_648_400n, vault, 'off-chain')).resolves.toMatchObject({
+      assetAmount: 6_361_518.6484,
+      usdValue: 6_361_518.6484,
+      hasPrice: true,
+      assetSymbol: 'USDT',
+    })
   })
 
   it('distinguishes an empty estimate leg from a positive unpriced amount', async () => {

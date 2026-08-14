@@ -73,11 +73,13 @@ export type MetamorphoMigrationCandidate = BaseMigrationCandidate<typeof METAMOR
   shares: bigint
 }
 export type ExternalMigrationCandidate = MorphoMigrationCandidate | AaveMigrationCandidate | MetamorphoMigrationCandidate
+export type ExternalMigrationSource = 'Aave V3' | 'Morpho'
 
 export const EXTERNAL_MIGRATION_DUST_USD = 0.01
 export const POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS = [0, 5_000, 15_000, 30_000] as const
 
 const externalMigrationRefreshCounter = ref(0)
+let externalMigrationLoadGeneration = 0
 
 export const useExternalMigrationRefresh = () => {
   const triggerExternalMigrationRefresh = () => {
@@ -403,9 +405,9 @@ const readContractsAllowFailure = async (
   }
 }
 
-// Failed reads must reject the whole Aave fetch (mirroring the Morpho fetch)
-// rather than decode as "no balance" — otherwise an RPC blip silently makes a
-// real position disappear from discovery with zero observability.
+// Failed root and configured-position reads reject the whole Aave fetch rather
+// than decode as "no balance". Unconfigured reserve probes and per-asset
+// metadata failures are isolated so they cannot discard confirmed positions.
 const requireReadResult = (result: ContractReadResult | undefined, label: string): unknown => {
   if (result?.status === 'success') return result.result
   const cause = result?.status === 'failure' ? result.error : undefined
@@ -621,6 +623,7 @@ export const useExternalMigrationPositions = (options: {
   const positions = useState<ExternalMigrationCandidate[]>('external-migration:positions', () => [])
   const isLoading = useState('external-migration:is-loading', () => false)
   const error = useState('external-migration:error', () => '')
+  const unavailableSources = useState<ExternalMigrationSource[]>('external-migration:unavailable-sources', () => [])
   const hasLoaded = useState('external-migration:has-loaded', () => false)
   const lastLoadedAt = useState<number | null>('external-migration:last-loaded-at', () => null)
   const loadedFor = useState<ExternalMigrationStateKey>('external-migration:loaded-for', () => ({}))
@@ -668,18 +671,16 @@ export const useExternalMigrationPositions = (options: {
           }
         })
       : []
-    if (userConfiguration === 0n || reserves.length === 0) return []
+    if (reserves.length === 0) return []
 
     const collateralAssets = reserves.filter((_, index) => hasAaveCollateralBit(userConfiguration, index))
     const debtAssets = reserves.filter((_, index) => hasAaveBorrowBit(userConfiguration, index))
-    if (!collateralAssets.length) return []
 
-    const activeAssets = [...new Set([...collateralAssets, ...debtAssets].map(asset => asset.toLowerCase()))]
-      .map(asset => getAddress(asset))
-
+    // Aave's configuration bitmap omits supplies that are not enabled as
+    // collateral, so aToken balances must be checked across every reserve.
     const reserveDataResults = await readContractsAllowFailure(
       client,
-      activeAssets.map(asset => ({
+      reserves.map(asset => ({
         address: pool,
         abi: AAVE_POOL_DISCOVERY_ABI,
         functionName: 'getReserveData',
@@ -688,11 +689,95 @@ export const useExternalMigrationPositions = (options: {
       'externalMigration/aaveReserveMulticall',
     )
     const reserveTokensByAsset = new Map<Address, AaveReserveTokens>()
-    activeAssets.forEach((asset, index) => {
-      const tokens = parseAaveReserveTokens(requireReadResult(reserveDataResults[index], `getReserveData(${asset})`))
-      if (tokens) reserveTokensByAsset.set(asset, tokens)
+    const configuredAssets = new Set(
+      [...collateralAssets, ...debtAssets].map(asset => asset.toLowerCase()),
+    )
+    reserves.forEach((asset, index) => {
+      const result = reserveDataResults[index]
+      const isConfiguredAsset = configuredAssets.has(asset.toLowerCase())
+      if (result?.status !== 'success') {
+        if (isConfiguredAsset) requireReadResult(result, `getReserveData(${asset})`)
+        const cause = result?.status === 'failure' ? result.error : new Error('Aave reserve data result missing')
+        logWarn('externalMigration/aaveReserveDataSkipped', cause, { data: { asset } })
+        return
+      }
+
+      const tokens = parseAaveReserveTokens(result.result)
+      if (!tokens) {
+        const invalidResult = new Error(`Aave discovery read returned invalid reserve data: ${asset}`)
+        if (isConfiguredAsset) throw invalidResult
+        logWarn('externalMigration/aaveReserveDataSkipped', invalidResult, { data: { asset } })
+        return
+      }
+      reserveTokensByAsset.set(asset, tokens)
     })
 
+    const balanceReadEntries: { kind: 'supply' | 'variableDebt' | 'stableDebt', asset: Address }[] = [
+      ...reserves.map(asset => ({ kind: 'supply' as const, asset })),
+      ...debtAssets.flatMap(asset => [
+        { kind: 'variableDebt' as const, asset },
+        { kind: 'stableDebt' as const, asset },
+      ]),
+    ]
+    const balanceResults = await readContractsAllowFailure(
+      client,
+      balanceReadEntries.flatMap((entry) => {
+        const tokens = reserveTokensByAsset.get(entry.asset)
+        if (!tokens) return []
+        const address = entry.kind === 'supply'
+          ? tokens.aTokenAddress
+          : entry.kind === 'variableDebt'
+            ? tokens.variableDebtTokenAddress
+            : tokens.stableDebtTokenAddress
+        return [{
+          address,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [targetOwner],
+        }]
+      }),
+      'externalMigration/aaveBalancesMulticall',
+    )
+
+    let resultIndex = 0
+    const supplyAmounts = new Map<Address, bigint>()
+    const debtAmounts = new Map<Address, { variableDebt: bigint, stableDebt: bigint }>()
+    for (const entry of balanceReadEntries) {
+      if (!reserveTokensByAsset.has(entry.asset)) continue
+      const result = balanceResults[resultIndex]
+      resultIndex += 1
+      if (result?.status !== 'success') {
+        const isConfiguredAsset = configuredAssets.has(entry.asset.toLowerCase())
+        if (entry.kind !== 'supply' || isConfiguredAsset) {
+          requireReadResult(result, `balanceOf(${entry.kind}:${entry.asset})`)
+        }
+        const cause = result?.status === 'failure' ? result.error : new Error('Aave balance result missing')
+        logWarn('externalMigration/aaveBalanceSkipped', cause, {
+          data: { asset: entry.asset, kind: entry.kind },
+        })
+        continue
+      }
+
+      const amount = parseBigIntAmount(result.result)
+      if (entry.kind === 'supply') {
+        supplyAmounts.set(entry.asset, amount)
+        continue
+      }
+      const debt = debtAmounts.get(entry.asset) ?? { variableDebt: 0n, stableDebt: 0n }
+      if (entry.kind === 'variableDebt') debt.variableDebt = amount
+      else debt.stableDebt = amount
+      debtAmounts.set(entry.asset, debt)
+    }
+
+    const suppliedAssets = reserves.filter(asset => (supplyAmounts.get(asset) ?? 0n) > 0n)
+    const borrowedAssets = debtAssets.filter((asset) => {
+      const debt = debtAmounts.get(asset)
+      return !!debt && debt.variableDebt + debt.stableDebt > 0n
+    })
+    if (!suppliedAssets.length) return []
+
+    const activeAssets = [...new Set([...suppliedAssets, ...borrowedAssets].map(asset => asset.toLowerCase()))]
+      .map(asset => getAddress(asset))
     const metadataResults = await readContractsAllowFailure(
       client,
       activeAssets.flatMap(asset => [
@@ -711,66 +796,35 @@ export const useExternalMigrationPositions = (options: {
     )
     const assetsByAddress = new Map<Address, ExternalMigrationAsset>()
     activeAssets.forEach((asset, index) => {
+      const symbolResult = metadataResults[index * 2]
+      const decimalsResult = metadataResults[index * 2 + 1]
+      if (symbolResult?.status !== 'success' || decimalsResult?.status !== 'success') {
+        const field = symbolResult?.status !== 'success' ? 'symbol' : 'decimals'
+        const result = field === 'symbol' ? symbolResult : decimalsResult
+        const cause = result?.status === 'failure' ? result.error : new Error(`Aave ${field} result missing`)
+        logWarn('externalMigration/aaveMetadataSkipped', cause, {
+          data: { asset, field },
+        })
+        return
+      }
+
       assetsByAddress.set(asset, parseAaveAsset(
         asset,
-        requireReadResult(metadataResults[index * 2], `symbol(${asset})`),
-        requireReadResult(metadataResults[index * 2 + 1], `decimals(${asset})`),
+        symbolResult.result,
+        decimalsResult.result,
       ))
     })
 
-    const balanceReadEntries: { kind: 'collateral' | 'variableDebt' | 'stableDebt', asset: Address }[] = [
-      ...collateralAssets.map(asset => ({ kind: 'collateral' as const, asset })),
-      ...debtAssets.flatMap(asset => [
-        { kind: 'variableDebt' as const, asset },
-        { kind: 'stableDebt' as const, asset },
-      ]),
-    ]
-    const balanceResults = await readContractsAllowFailure(
-      client,
-      balanceReadEntries.flatMap((entry) => {
-        const tokens = reserveTokensByAsset.get(entry.asset)
-        if (!tokens) return []
-        const address = entry.kind === 'collateral'
-          ? tokens.aTokenAddress
-          : entry.kind === 'variableDebt'
-            ? tokens.variableDebtTokenAddress
-            : tokens.stableDebtTokenAddress
-        return [{
-          address,
-          abi: erc20Abi,
-          functionName: 'balanceOf',
-          args: [targetOwner],
-        }]
-      }),
-      'externalMigration/aaveBalancesMulticall',
-    )
-
-    let resultIndex = 0
-    const collateralAmounts = new Map<Address, bigint>()
-    const debtAmounts = new Map<Address, { variableDebt: bigint, stableDebt: bigint }>()
-    for (const entry of balanceReadEntries) {
-      if (!reserveTokensByAsset.has(entry.asset)) continue
-      const amount = parseBigIntAmount(requireReadResult(balanceResults[resultIndex], `balanceOf(${entry.kind}:${entry.asset})`))
-      resultIndex += 1
-      if (entry.kind === 'collateral') {
-        collateralAmounts.set(entry.asset, amount)
-        continue
-      }
-      const debt = debtAmounts.get(entry.asset) ?? { variableDebt: 0n, stableDebt: 0n }
-      if (entry.kind === 'variableDebt') debt.variableDebt = amount
-      else debt.stableDebt = amount
-      debtAmounts.set(entry.asset, debt)
-    }
-
-    const usdPricesByAsset = await fetchAaveAssetUsdPrices(targetChainId, activeAssets)
+    const usdPricesByAsset = await fetchAaveAssetUsdPrices(targetChainId, [...assetsByAddress.keys()])
 
     const candidates: AaveMigrationCandidate[] = []
-    for (const collateralAsset of collateralAssets) {
-      const collateralAmount = collateralAmounts.get(collateralAsset) ?? 0n
+    for (const collateralAsset of suppliedAssets) {
+      const collateralAmount = supplyAmounts.get(collateralAsset) ?? 0n
       const collateral = assetsByAddress.get(collateralAsset)
       if (collateralAmount <= 0n || !collateral) continue
 
-      if (!debtAssets.length) {
+      const isCollateralEnabled = collateralAssets.includes(collateralAsset)
+      if (!isCollateralEnabled || !borrowedAssets.length) {
         const ref: AavePositionRef = {
           collateralAsset,
           pool,
@@ -798,7 +852,7 @@ export const useExternalMigrationPositions = (options: {
         continue
       }
 
-      for (const debtAsset of debtAssets) {
+      for (const debtAsset of borrowedAssets) {
         const debt = debtAmounts.get(debtAsset) ?? { variableDebt: 0n, stableDebt: 0n }
         const debtAmount = debt.variableDebt + debt.stableDebt
         const debtMeta = assetsByAddress.get(debtAsset)
@@ -838,9 +892,9 @@ export const useExternalMigrationPositions = (options: {
   }
 
   const fetchMorphoMigrationPositions = async (targetChainId: number, targetOwner: Address): Promise<(MorphoMigrationCandidate | MetamorphoMigrationCandidate)[]> => {
-    // Morpho's indexer only covers a fixed set of chains. Querying an unindexed
-    // chain (e.g. BSC) returns an "unsupported chainId" error that would surface
-    // as a scan failure, so treat those chains as "nothing to migrate" instead.
+    // Enable discovery only where Morpho indexing, the SDK connector, and Euler
+    // migration infrastructure are all available. Treat every other chain as
+    // "nothing to migrate" instead of surfacing an upstream support error.
     if (!MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS.has(targetChainId)) return []
     try {
       const res = await fetch('/api/internal/proxy/morpho', {
@@ -871,8 +925,10 @@ export const useExternalMigrationPositions = (options: {
   }
 
   const resetForMissingOwner = () => {
+    externalMigrationLoadGeneration += 1
     positions.value = []
     error.value = ''
+    unavailableSources.value = []
     hasLoaded.value = false
     lastLoadedAt.value = null
     loadedFor.value = {}
@@ -898,13 +954,21 @@ export const useExternalMigrationPositions = (options: {
     if (!loadedKeyMatches) {
       positions.value = []
       error.value = ''
+      unavailableSources.value = []
       hasLoaded.value = false
       lastLoadedAt.value = null
       loadedFor.value = { owner: targetOwner, chainId: targetChainId }
     }
 
+    const generation = ++externalMigrationLoadGeneration
+    const isCurrentLoad = () =>
+      generation === externalMigrationLoadGeneration
+      && loadedFor.value.owner === targetOwner
+      && loadedFor.value.chainId === targetChainId
+
     isLoading.value = true
     error.value = ''
+    unavailableSources.value = []
     try {
       const [morphoResult, aaveResult] = await Promise.allSettled([
         fetchMorphoMigrationPositions(targetChainId, targetOwner),
@@ -924,21 +988,26 @@ export const useExternalMigrationPositions = (options: {
       if (firstError && nextPositions.length === 0) {
         throw firstError
       }
-      if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
+      if (!isCurrentLoad()) return
       positions.value = nextPositions
+      unavailableSources.value = [
+        ...(aaveResult.status === 'rejected' ? ['Aave V3' as const] : []),
+        ...(morphoResult.status === 'rejected' ? ['Morpho' as const] : []),
+      ]
       hasLoaded.value = true
       lastLoadedAt.value = Date.now()
     }
     catch (err) {
-      if (loadedFor.value.owner !== targetOwner || loadedFor.value.chainId !== targetChainId) return
+      if (!isCurrentLoad()) return
       positions.value = []
       error.value = err instanceof Error ? err.message : 'Failed to load external positions'
+      unavailableSources.value = []
       hasLoaded.value = true
       lastLoadedAt.value = Date.now()
       logWarn('externalMigration/positions', err)
     }
     finally {
-      if (loadedFor.value.owner === targetOwner && loadedFor.value.chainId === targetChainId) {
+      if (isCurrentLoad()) {
         isLoading.value = false
       }
     }
@@ -956,6 +1025,7 @@ export const useExternalMigrationPositions = (options: {
     positions,
     isLoading,
     error,
+    unavailableSources,
     hasLoaded,
     lastLoadedAt,
     load,
