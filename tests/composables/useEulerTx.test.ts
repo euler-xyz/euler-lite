@@ -156,6 +156,27 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
   })
 
+  it('estimates a prepared envelope without rerunning the raw plan pipeline', async () => {
+    const estimatePrepared = vi.fn().mockResolvedValue(123n)
+    vi.mocked(getEulerSdkForChain).mockResolvedValue({
+      executionService: { estimateGasForPreparedTransactionPlan: estimatePrepared },
+    } as never)
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 8453,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+    const { estimateGasForPreparedPlan } = useEulerTx()
+
+    await expect(estimateGasForPreparedPlan(prepared)).resolves.toBe(123n)
+
+    expect(getEulerSdkForChain).toHaveBeenCalledWith(8453)
+    expect(estimatePrepared).toHaveBeenCalledWith(prepared)
+  })
+
   it('does not broadcast a reviewed migration after account drift', async () => {
     const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction }: {
       sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>

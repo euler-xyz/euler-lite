@@ -1782,7 +1782,7 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
-  const { prepareTransactionPlan, executePreparedPlan, executePreparedPlanWithPlainCalls, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
+  const { prepareTransactionPlan, executePreparedPlan, executePreparedPlanWithPlainCalls, estimateGasForPreparedPlan, sendPlainTransactions } = useEulerTx()
   const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
   const connectorKey = computed(() => {
     const current = connector.value
@@ -2897,7 +2897,7 @@ export const useTxBatch = () => {
       // Final on-chain gas estimate before the irreversible core broadcast. If
       // chain state moved since review, surface the decoded reason and retain
       // the cart. A pending edit during this await invalidates the ceremony.
-      await estimateGasForPlan(prepared.plan)
+      await estimateGasForPreparedPlan(prepared)
       assertBatchExecutionCurrent(execution)
       await executePreparedPlan(prepared, {
         beforeBroadcast: () => assertBatchExecutionCurrent(execution),

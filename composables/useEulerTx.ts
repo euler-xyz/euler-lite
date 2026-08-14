@@ -1165,6 +1165,12 @@ export const useEulerTx = () => {
     return sdk.executionService.estimateGasForTransactionPlan(cid, owner, plan)
   }
 
+  /** Estimate the exact prepared envelope without rerunning plan plugins. */
+  const estimateGasForPreparedPlan = async (prepared: TransactionPlanPrepared): Promise<bigint> => {
+    const sdk = await getEulerSdkForChain(prepared.chainId)
+    return sdk.executionService.estimateGasForPreparedTransactionPlan(prepared)
+  }
+
   /**
    * Resolve each plugin's prefetch payload for a representative plan once per
    * form-load. Pass the returned record to prepare/simulate/estimate via the
@@ -1820,6 +1826,7 @@ export const useEulerTx = () => {
     simulatePlan,
     prepareTransactionPlan,
     estimateGasForPlan,
+    estimateGasForPreparedPlan,
     prefetchPluginData,
     simulatePreparedPlan,
     executePreparedPlanWithPlainCalls,

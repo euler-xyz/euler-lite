@@ -46,7 +46,7 @@ const eulerTxMocks = {
   prepareTransactionPlan: vi.fn(),
   executePreparedPlan: vi.fn(),
   executePreparedPlanWithPlainCalls: vi.fn(),
-  estimateGasForPlan: vi.fn(),
+  estimateGasForPreparedPlan: vi.fn(),
   sendPlainTransactions: vi.fn(),
 }
 const isSafeWalletRef = ref(false)
@@ -339,7 +339,7 @@ beforeEach(() => {
   eulerTxMocks.prepareTransactionPlan.mockReset()
   eulerTxMocks.executePreparedPlan.mockReset()
   eulerTxMocks.executePreparedPlanWithPlainCalls.mockReset()
-  eulerTxMocks.estimateGasForPlan.mockReset()
+  eulerTxMocks.estimateGasForPreparedPlan.mockReset()
   eulerTxMocks.sendPlainTransactions.mockReset()
   eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
   txErrorMocks.getTxErrorMessage.mockReset()
@@ -1277,7 +1277,7 @@ describe('useTxBatch execution errors', () => {
     const prepared = { kind: 'prepared' }
     const plan: TransactionPlan = []
     routeQuery.network = '8453'
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
 
@@ -1288,6 +1288,7 @@ describe('useTxBatch execution errors', () => {
     })
     await batch.executeBatch()
 
+    expect(eulerTxMocks.estimateGasForPreparedPlan).toHaveBeenCalledWith(prepared)
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, {
       beforeBroadcast: expect.any(Function),
     })
@@ -1330,7 +1331,7 @@ describe('useTxBatch execution errors', () => {
     const migrationPreviewPlan = singleOpPlan('migration-preview')
     const migrationExecutionPlan = singleOpPlan('migration-execution')
     let executionAccount: Account<IHasVaultAddress> | undefined
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
 
@@ -1500,7 +1501,7 @@ describe('useTxBatch execution prerequisites', () => {
       }
     })
     eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
 
     const batch = useTxBatch()
@@ -1623,7 +1624,7 @@ describe('useTxBatch execution prerequisites', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     let releaseHelper!: () => void
     const helperGate = new Promise<void>((resolve) => {
       releaseHelper = resolve
@@ -1660,7 +1661,7 @@ describe('useTxBatch execution prerequisites', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     let releaseHelper!: () => void
     const helperGate = new Promise<void>((resolve) => {
       releaseHelper = resolve
@@ -1696,7 +1697,7 @@ describe('useTxBatch execution prerequisites', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     let releaseCompletion!: () => void
     const completionGate = new Promise<void>((resolve) => {
       releaseCompletion = resolve
@@ -1742,7 +1743,7 @@ describe('useTxBatch execution prerequisites', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('old wallet execution failed'))
     let resolveDecodedError!: (message: string) => void
     txErrorMocks.getTxErrorMessage.mockReturnValue(new Promise<string>((resolve) => {
@@ -1793,7 +1794,7 @@ describe('useTxBatch execution prerequisites', () => {
     // Grants ride in the proposal — no standalone broadcasts, no unwind
     // bookkeeping, no standalone gas estimate against unmined grants.
     expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
-    expect(eulerTxMocks.estimateGasForPlan).not.toHaveBeenCalled()
+    expect(eulerTxMocks.estimateGasForPreparedPlan).not.toHaveBeenCalled()
     expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledWith(prepared, {
       before: [grantTx],
       after: [revokeTx],
@@ -2029,7 +2030,7 @@ describe('useTxBatch execution prerequisites', () => {
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
     let releaseEstimate!: () => void
-    eulerTxMocks.estimateGasForPlan.mockImplementation(() => new Promise<void>((resolve) => {
+    eulerTxMocks.estimateGasForPreparedPlan.mockImplementation(() => new Promise<void>((resolve) => {
       releaseEstimate = resolve
     }))
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
@@ -2043,7 +2044,7 @@ describe('useTxBatch execution prerequisites', () => {
     await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
     const ceremony = await batch.prepareBatchExecution()
     const execution = batch.executeBatch(undefined, ceremony)
-    await vi.waitFor(() => expect(eulerTxMocks.estimateGasForPlan).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(eulerTxMocks.estimateGasForPreparedPlan).toHaveBeenCalledTimes(1))
 
     let resolvePendingPlan!: (plan: TransactionPlan) => void
     const pendingPlan = new Promise<TransactionPlan>((resolve) => {
@@ -2257,7 +2258,7 @@ describe('useTxBatch execution prerequisites', () => {
     }] as unknown as TransactionPlan
     const reviewedPrepared = { kind: 'reviewed', plan: reviewedPlan, chainId: 1, account: owner }
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(reviewedPrepared)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
 
     const batch = useTxBatch()
@@ -2584,7 +2585,7 @@ describe('useTxBatch execution prerequisites', () => {
     isSafeWalletRef.value = false
     const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.sendPlainTransactions.mockImplementation(async (txs: { data: Hex }[], options?: PlainTxSendOptions) => {
       txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
@@ -2626,7 +2627,7 @@ describe('useTxBatch execution prerequisites', () => {
     isSafeWalletRef.value = false
     const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
 
     const batch = useTxBatch()
@@ -2717,7 +2718,7 @@ describe('useTxBatch execution prerequisites', () => {
       txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
       return []
     })
-    eulerTxMocks.estimateGasForPlan.mockImplementation(async () => void calls.push('estimateGasForPlan'))
+    eulerTxMocks.estimateGasForPreparedPlan.mockImplementation(async () => void calls.push('estimateGasForPreparedPlan'))
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
     eulerTxMocks.executePreparedPlan.mockImplementation(async () => void calls.push('executePreparedPlan'))
     migrationFlowMocks.restorePendingBeforeRetry.mockImplementation(async () => {
@@ -2737,7 +2738,7 @@ describe('useTxBatch execution prerequisites', () => {
       'restorePendingBeforeRetry',
       'mergePlans',
       'sendPlainTransactions',
-      'estimateGasForPlan',
+      'estimateGasForPreparedPlan',
       'executePreparedPlan',
       'revokeAfterSuccess',
     ])
@@ -2799,7 +2800,7 @@ describe('useTxBatch execution prerequisites', () => {
     async (kind) => {
       const batch = useTxBatch()
       eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
-      eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+      eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
       eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
       eulerTxMocks.executePreparedPlan.mockRejectedValue(new WalletExecutionContextChangedError(kind))
 
@@ -2819,7 +2820,7 @@ describe('useTxBatch execution prerequisites', () => {
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false)
     eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
     eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('User rejected the request.'))
 
@@ -2838,7 +2839,7 @@ describe('useTxBatch execution prerequisites', () => {
 
   it('sends no transactions when an entry reports no prerequisites', async () => {
     const batch = useTxBatch()
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
 
@@ -2857,7 +2858,7 @@ describe('useTxBatch execution prerequisites', () => {
   it('still clears the batch when the revoke fails after a successful execution', async () => {
     const batch = useTxBatch()
     eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
-    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
     // revokeAfterSuccess swallows failures internally; it must never throw.

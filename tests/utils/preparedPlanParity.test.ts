@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Address, Hex } from 'viem'
+import { encodeFunctionData, type Address, type Hex } from 'viem'
 import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { assertPreparedPlanSignatureParity } from '~/utils/preparedPlanParity'
 
@@ -7,7 +7,33 @@ const owner = '0x1000000000000000000000000000000000000000' as Address
 const target = '0x2000000000000000000000000000000000000000' as Address
 const otherTarget = '0x3000000000000000000000000000000000000000' as Address
 const placeholder = `0x${'00'.repeat(65)}` as Hex
-const signature = `0x${'11'.repeat(65)}` as Hex
+const signature = `0x${'11'.repeat(32)}${'22'.repeat(32)}01` as Hex
+
+const permitAbi = [{
+  type: 'function',
+  name: 'permit',
+  inputs: [
+    { name: 'owner', type: 'address' },
+    { name: 'spender', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+    { name: 'v', type: 'uint8' },
+    { name: 'r', type: 'bytes32' },
+    { name: 's', type: 'bytes32' },
+  ],
+  outputs: [],
+  stateMutability: 'nonpayable',
+}] as const
+
+const splitSignature = (authorization: Hex) => {
+  let v = Number.parseInt(authorization.slice(130, 132), 16)
+  if (v < 27) v += 27
+  return {
+    r: authorization.slice(0, 66) as Hex,
+    s: `0x${authorization.slice(66, 130)}` as Hex,
+    v,
+  }
+}
 
 const planWithSignature = (authorization: Hex): TransactionPlan => [{
   type: 'evcBatch',
@@ -22,6 +48,27 @@ const planWithSignature = (authorization: Hex): TransactionPlan => [{
     }],
   }],
 }]
+
+const planWithAbiSignature = (authorization: Hex): TransactionPlan => {
+  const { r, s, v } = splitSignature(authorization)
+  return [{
+    type: 'evcBatch',
+    items: [{
+      type: 'operation',
+      name: 'aave-migration',
+      items: [{
+        targetContract: target,
+        onBehalfOfAccount: owner,
+        value: 0n,
+        data: encodeFunctionData({
+          abi: permitAbi,
+          functionName: 'permit',
+          args: [owner, otherTarget, 7n, 123n, v, r, s],
+        }),
+      }],
+    }],
+  }]
+}
 
 const prepared = (plan: TransactionPlan): TransactionPlanPrepared => ({
   __prepared: true,
@@ -41,6 +88,27 @@ const assertParity = (resolvedPlan: TransactionPlan) => assertPreparedPlanSignat
 describe('assertPreparedPlanSignatureParity', () => {
   it('accepts exactly one reviewed placeholder-to-signature substitution', () => {
     expect(() => assertParity(planWithSignature(signature))).not.toThrow()
+  })
+
+  it('accepts the production ABI v/r/s encoding at the reviewed offsets', () => {
+    expect(() => assertPreparedPlanSignatureParity({
+      reviewed: prepared(planWithAbiSignature(placeholder)),
+      resolved: prepared(planWithAbiSignature(signature)),
+      substitutions: [{ placeholder, signature }],
+    })).not.toThrow()
+  })
+
+  it('rejects an unrelated change beside a production ABI v/r/s substitution', () => {
+    const resolved = planWithAbiSignature(signature)
+    const batch = resolved[0] as Extract<TransactionPlan[number], { type: 'evcBatch' }>
+    const operation = batch.items[0]
+    if ('items' in operation) operation.items[0]!.value = 1n
+
+    expect(() => assertPreparedPlanSignatureParity({
+      reviewed: prepared(planWithAbiSignature(placeholder)),
+      resolved: prepared(resolved),
+      substitutions: [{ placeholder, signature }],
+    })).toThrow('transaction plan changed after review')
   })
 
   it.each([
