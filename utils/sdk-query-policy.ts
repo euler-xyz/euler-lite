@@ -25,7 +25,8 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *
  *   - `invalidateAfterTx` (optional, boolean): mark matching cache entries
  *     stale after every successful transaction (`finalizeExecution`, the
- *     post-tx subgraph sync, and CoW settlement). `invalidateSdkQueries` calls
+ *     post-tx subgraph sync, and the CoW permit hard-cancellation that writes
+ *     the EVC nonce — not CoW settlement). `invalidateSdkQueries` calls
  *     TanStack's `invalidateQueries`, so data entries are flagged stale and
  *     active observers refetch — they are not removed from the query cache
  *     (the short-lived failure cache is a separate map and is cleared). SDK

@@ -17,7 +17,7 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 | `points.json` | `GET /api/internal/labels/points.json?chainId=X` | `[]` |
 | `earn-vaults.json` | `GET /api/internal/labels/earn-vaults.json?chainId=X` | `[]` |
 
-All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are logged once per refresh so genuine outages stay visible.
+All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are reported through `reportStatus`, which logs on *transitions* rather than once per refresh: the first observation of a given status warns, an unchanged status stays silent on later refreshes, and a return to `ok` logs a recovery. A persistent outage therefore surfaces once and then goes quiet until it changes.
 
 Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/internal/oracle-adapter?chainId=X&address=0x...`.
 

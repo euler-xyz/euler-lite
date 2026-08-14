@@ -142,7 +142,7 @@ export const SDK_QUERY_POLICY = {
   queryPythUpdateData: { staleTimeMs: 30 * SECOND },
 
   // Balances
-  queryBalanceOf:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND },
+  queryBalanceOf:      { staleTimeMs: MINUTE, formStaleTimeMs: 15 * SECOND, invalidateAfterTx: true },
 
   // Position migration
   queryListPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
@@ -204,12 +204,13 @@ Key properties:
 
 ### Invalidation
 
-`invalidateSdkQueries(queryNames)` walks the QueryClient and invalidates any cache key whose `queryName` matches. Two callers pass the whole `INVALIDATE_AFTER_TX` list:
+`invalidateSdkQueries(queryNames)` walks the QueryClient and invalidates any cache key whose `queryName` matches. Three call sites, across two modules, pass the whole `INVALIDATE_AFTER_TX` list:
 
-- `composables/useEulerTx.ts:finalizeExecution` — fires after every successful tx with `[...INVALIDATE_AFTER_TX]`.
-- `composables/cowswap/useCowSwapExecutionCore.ts` — same, post-CoW-swap settlement.
+- `composables/useEulerTx.ts:finalizeExecution` — fires after every successful tx.
+- `composables/useEulerTx.ts:runPostTxSubgraphSync` — fires again once the subgraph has caught up to the tx's block, so subgraph-backed reads (notably `queryAccountVaults`) re-run against an indexed head rather than a lagging one.
+- `composables/cowswap/useCowSwapExecutionCore.ts:cancelOrder` — the permit **hard-cancellation** branch only. That path plans and executes an EVC nonce write to invalidate the permit, which is a real on-chain state change. CoW order submission and settlement do not invalidate, and neither does the `cow-api` soft-cancellation branch.
 
-Both import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
+All three import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
 
 Other callers pass their own narrower name list for an explicit refresh: `composables/useSdkRewards.ts` (user reward rows before a portfolio rebuild), `composables/useEulerLabels.ts` (the five label queries on `loadLabels(true)`), and the lend withdraw page (wallet token balances after a swap output changes). Nothing invalidates on form mount — a form that opens within a row's stale window reads the cached value.
 
@@ -220,7 +221,7 @@ Other callers pass their own narrower name list for an explicit refresh: `compos
 - `composables/useFreshAccount.ts` reloads the plan-time account snapshot. It races the fast SDK and fresh SDK account reads; fast can fill an empty ref, but the fresh result always wins for the current load cursor.
 - `pages/portfolio.vue` calls `updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })`. That calls `refreshAllPositions(..., { source: 'fresh', preempt: true })`, so `composables/useEulerAccount.ts` loads the visible portfolio through `getEulerSdkFresh()` for the post-tx refresh. `preempt: true` advances the position race guard and resets the refresh coordinator so preempted fast portfolio reads cannot write stale portfolio data or diagnostics over the fresh result.
 
-Normal portfolio page activation and 60-second polling call `updatePositions()` without options, so routine browsing still uses the fast SDK path.
+Normal portfolio page activation and 60-second polling call `updatePositions()` without options. That leaves `source` undefined, and `useEulerAccount` selects the fast SDK only on an explicit `source === 'fast'` — so routine browsing also reads through `getEulerSdkFresh()`. The post-tx call differs from routine polling only in passing `preempt: true` and in the invalidation that precedes it, not in which SDK instance it uses. `'fast'` is opt-in and no current caller passes it.
 
 ## Plan-Time Fresh Fetch
 
