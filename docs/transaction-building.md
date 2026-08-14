@@ -55,7 +55,7 @@ Combined helpers keep page code simpler where a workflow can use either a same-a
 - `planDebtChange`
 - `planWithdrawOrRedeem`
 
-The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain id, Permit2 preference, and wallet callbacks. The quote and vault inputs stay explicit at the page/composable boundary.
+The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain id, the effective gasless-signature flag (`usePermit2` from `signaturesEnabled`, with an extra Safe pin at execute time), and wallet callbacks. The quote and vault inputs stay explicit at the page/composable boundary.
 
 ## Execution Flow
 
@@ -69,14 +69,48 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain 
 
 The review modal is fail-closed: if preparation does not produce a plan, it shows an error and disables confirmation.
 
-## Approvals and Permit2
+## Approvals and Gasless Signatures
 
 Plans may include `requiredApproval` items. During review and execution, `resolveRequiredApprovals` resolves each approval to either:
 
 - an ERC-20 approval transaction, or
 - a Permit2 signature request.
 
-`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required. Whether message signatures (Permit2 and other typed-data prompts) are enabled is controlled globally by `useSignaturePreference()` — a Settings toggle persisted as `signatures-enabled` (one-time seed from legacy `permit2-enabled`). Disabling signatures makes approval-capable flows use on-chain approval transactions instead. While a Safe multisig is connected (or Safe detection is still pending), signatures are force-disabled regardless of the stored preference — see [Safe Wallet Compatibility](./safe-wallets.md).
+`executeTransactionPlan` sends approval transactions before the main EVC batch and inserts Permit2 signature data into the next batch where required.
+
+### User preference (`useSignaturePreference`)
+
+Users choose whether message signatures are enabled via **Settings → Gasless signatures** (`components/entities/wallet/SignatureSettings.vue`). The **stored** preference defaults to **on**. The **effective** value is read everywhere through `composables/useSignaturePreference.ts` as `signaturesEnabled`.
+
+Do not treat the stored preference as the value that reaches planning or execution. A connected Safe (or pending Safe detection) forces the effective flag off without rewriting storage, so reconnecting a regular wallet restores the user's choice.
+
+| Concern | Detail |
+| ------- | ------ |
+| Storage key | `signatures-enabled` (`SIGNATURES_PREFERENCE_STORAGE_KEY`) |
+| Legacy key | `permit2-enabled` — copied once into the new key by `seedSignaturePreference`, then removed |
+| Default stored | `true` (gasless / typed-data path) |
+| Effective `signaturesEnabled` | `userPreference && !signaturesForcedOff` |
+| Forced off | `isSafeWallet` or `!isSafeWalletResolved` — fail closed while Safe detection is pending; Settings switch is disabled. Copy explaining the Safe restriction appears only after a Safe is positively identified. |
+| `prepareTransactionPlan` | Accepts `options?.usePermit2 ?? signaturesEnabled.value` (effective value, not the raw stored toggle) |
+| `executePlan` | Independently pins `usePermit2: isKnownSafe ? false : signaturesEnabled.value` (no per-call override). `isKnownSafe` is a Safe provider or `isSafeConnectorIdentity(connector)`, so a known Safe never takes Permit2 even if provider acquisition failed. |
+| `executePreparedPlan` | Same Safe pin: if the envelope was prepared before detection resolved, re-resolve approvals with `usePermit2: false` (or strip the flag when no Permit2 items resolved) |
+
+When the **effective** flag is **off**, approval-capable flows fall back to on-chain approval transactions instead of Permit2 (and other) message signatures. Users can still turn the setting off on regular wallets that cannot sign typed data reliably. Safe wallets do not use that toggle: they are forced onto the approval / batched-transaction path.
+
+Do not treat this as an Incentra- or rewards-specific switch — it is a global Lite setting for every message signature the app collects, then narrowed by the Safe override above.
+
+### Cross-protocol migrations
+
+Outgoing migrate (`pages/position/[number]/migrate.vue`) threads the same **effective** flag as `useSignatures`:
+
+- **On** → `authorizationKind: 'typedData'`; Morpho can append a signed post-migration disable (`removeAuthorizationAfterMigration`) inside the batch.
+- **Off** → `authorizationKind: 'transaction'`; connectors return `msg.sender` grant txs instead of a signed disable. The ceremony then splits by wallet:
+  - **Regular wallets** — standalone grant transactions, then the migration, then separate post-settle revoke/restore steps (`isSeparateTx: true`).
+  - **Safe wallets** — review latches `bundledReview` and executes grant + migration + revoke as one atomic Safe proposal (`sendMigrationAsSafeBundle` / `executePreparedPlanWithPlainCalls`). Review rows pass `{ bundled: true }` so `isSeparateTx` is false. Confirmation revalidates that the wallet is still a Safe; a degraded or unavailable Safe connection throws rather than silently falling back to sequential grants. The batch cart uses the same atomic path when `useTxBatch` can bundle prerequisites (`willBundlePrerequisites`: every prerequisite-bearing entry provides `buildBundledExecution`).
+
+Inbound external migrate (`pages/position/[number]/borrow/swap.vue`) uses the same `bundledReview` latch and sequential-vs-atomic split.
+
+`composables/useMigrationAuthorizationFlow.ts` owns restore/revoke queuing after success or abort **only on the sequential (non-bundled) fallback**, where a temporary authorization can remain standing. Failed restorations stay queued and must complete before another migration retry. The atomic Safe bundle includes the revokes in the same proposal, so that flow does not leave a standing grant for the sequential restorer to unwind.
 
 ## Operation Guards
 

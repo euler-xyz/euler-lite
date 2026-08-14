@@ -53,7 +53,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🔧 [Transaction Building](./transaction-building.md)
 
 - SDK TransactionPlan architecture and composite operations
-- EVC batching and Permit2 / gasless-signature preference
+- EVC batching and Permit2 integration
+- Gasless-signature preference (`useSignaturePreference`), Safe forced-off override, and sequential vs atomic Safe migration authorization paths
 - Sub-accounts and position isolation
 - Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
 
