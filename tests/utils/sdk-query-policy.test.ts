@@ -2,9 +2,11 @@
  * Invariants for the SDK_QUERY_POLICY table.
  *
  * Policy drives:
- *   - INVALIDATE_AFTER_TX — names marked stale in the QueryClient after every
- *     successful tx so display surfaces refresh. Entries are invalidated, not
- *     removed, and nothing is invalidated at form mount.
+ *   - INVALIDATE_AFTER_TX — names marked stale in the QueryClient after plan
+ *     finalization (and subgraph sync / CoW hard-cancel), not after standalone
+ *     migration grant/revoke receipts. Entries are invalidated, not removed;
+ *     in-flight fetchQuery joins are not cancelled; nothing is invalidated at
+ *     form mount.
  *   - STALE_TIMES — staleTime applied by the browsing SDK's wrapper.
  *   - FORM_STALE_TIMES — staleTime applied by the plan-time/form SDK's
  *     wrapper. Pre-resolved as `formStaleTimeMs ?? staleTimeMs` so runtime

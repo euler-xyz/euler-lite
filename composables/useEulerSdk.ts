@@ -67,7 +67,8 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     not zero: pinning the adapters selects the data source, it does not
  *     force a refetch, so this instance bounds staleness rather than
  *     guaranteeing a latest-block read. Post-tx `invalidateAfterTx`
- *     invalidation is what forces a re-read. The fresh instance's refetches
+ *     invalidation marks those rows stale for a later idle read; it does
+ *     not cancel an in-flight `fetchQuery`. The fresh instance's refetches
  *     write back to the shared cache, so a subsequent fast read sees the
  *     just-refreshed value within its own staleness window. Consumed by
  *     `useEulerTx` planners and simulate/execute.

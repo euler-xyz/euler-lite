@@ -482,8 +482,10 @@ export const useEulerTx = () => {
    * through the shared QueryClient at each row's form stale time (a minute for
    * `queryAccountVaults`), so a recent snapshot is reused rather than re-read
    * from the latest block. Post-tx `invalidateAfterTx` invalidation marks
-   * those rows stale, which is what guarantees a re-read after the user's own
-   * state changes.
+   * those rows stale so a later idle read re-fetches after the user's own
+   * state changes. It does not run after standalone migration grant/revoke
+   * receipts, and it does not cancel an in-flight `fetchQuery` for the same
+   * key — that pending result can still land.
    *
    * Cheap reads in this fetch path (labels, ABIs, deployments, prices) still
    * hit the QueryClient cache shared with the fast SDK, so the extra RPC
