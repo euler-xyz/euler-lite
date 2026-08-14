@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
-import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, type PreparedBatchBundledExecution, useTxBatch } from '~/composables/useTxBatch'
+import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, type PreparedBatchExecution, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -37,7 +37,6 @@ const {
   hasInsufficientBalance,
   insufficientBalanceMessage,
   executeBatch,
-  prepareBatchPlan,
   entryPlans,
   marketByEntryId,
   tenderlyEnabled,
@@ -47,21 +46,19 @@ const {
   fetchTenderlyEnabled,
   simulateOnTenderly,
   dismissExecutionError,
-  prepareBundledExecution,
-  isBundledExecutionCurrent,
+  prepareBatchExecution,
+  isBatchExecutionCurrent,
 } = useTxBatch()
 
-const bundledExecutionRef = shallowRef<PreparedBatchBundledExecution | null>(null)
+const executionCeremonyRef = shallowRef<PreparedBatchExecution | null>(null)
 
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
-const { chainId: wagmiChainId } = useWagmi()
 const { isSafeWallet } = useSafeWallet()
-const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
+const { eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
 const owner = computed(() => effectiveAddress.value || '')
-const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
 const ownerSubAccountKey = computed(() => {
   try {
     return owner.value ? getAddress(owner.value).toLowerCase() : undefined
@@ -100,7 +97,7 @@ const normalizeDisplaySteps = (steps: readonly DisplayStep[] | undefined): Displ
 // Safe detection can resolve later, but it cannot change what this review will
 // execute without a fresh review.
 const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
-  isBundledReviewEntry(bundledExecutionRef.value !== null, !!entry.buildBundledExecution)
+  isBundledReviewEntry(executionCeremonyRef.value?.mode === 'safe-bundled', !!entry.buildBundledExecution)
 
 const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[number]): DisplayStep[] =>
   isBundledEntry(entry)
@@ -111,7 +108,7 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
   // A bundled ceremony carries its own rows, derived from the SAME
   // authorization resolution the proposal executes — the add-time captures
   // can be stale (authorization state drifts between add and review).
-  const latchedSteps = bundledExecutionRef.value?.reviewByEntryId[entry.id]
+  const latchedSteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
   if (latchedSteps) return normalizeDisplaySteps(latchedSteps.grantSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
@@ -120,7 +117,7 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
-  const latchedSteps = bundledExecutionRef.value?.reviewByEntryId[entry.id]
+  const latchedSteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
   if (latchedSteps) return normalizeDisplaySteps(latchedSteps.revokeSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
@@ -136,7 +133,7 @@ const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   const out: Record<string, DisplayStep[]> = {}
   for (const entry of entries.value) {
     const plan = getBatchReviewDisplayPlan(
-      bundledExecutionRef.value?.reviewByEntryId[entry.id]?.plan,
+      executionCeremonyRef.value?.reviewByEntryId[entry.id]?.plan,
       (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan,
       entryPlans.value[entry.id],
     )
@@ -376,12 +373,12 @@ const hasPermit2Approval = computed(() =>
 // Mirrors execution eligibility: only claim bundling when the merged plan
 // would actually submit as one Safe bundle.
 const bundlesApprovals = computed(() =>
-  (bundledExecutionRef.value !== null || isSafeWallet.value)
+  (executionCeremonyRef.value?.safeWallet ?? isSafeWallet.value)
   && !!preparedPlanRef.value
   && isPlanBundleable(preparedPlanRef.value),
 )
 const isReviewCurrent = computed(() =>
-  !bundledExecutionRef.value || isBundledExecutionCurrent(bundledExecutionRef.value),
+  !!executionCeremonyRef.value && isBatchExecutionCurrent(executionCeremonyRef.value),
 )
 
 onMounted(async () => {
@@ -392,11 +389,11 @@ onMounted(async () => {
   isPreparing.value = true
   prepareError.value = ''
   try {
-    // Resolve the bundled ceremony once for this review session: the same
-    // resolution drives the rows, Copy calldata, and execution.
-    const bundledExecution = await prepareBundledExecution()
-    bundledExecutionRef.value = bundledExecution
-    const prepared = bundledExecution?.prepared ?? await prepareBatchPlan()
+    // Resolve one ceremony for this review session. Its exact prepared core,
+    // prerequisite calls, rows, calldata export, and execution stay together.
+    const executionCeremony = await prepareBatchExecution()
+    executionCeremonyRef.value = executionCeremony
+    const prepared = executionCeremony.prepared
     preparedPlanRef.value = prepared?.plan
     const known = buildKnownSymbols()
     const out: Array<{ kind: 'approve' | 'permit', symbol: string }> = []
@@ -431,17 +428,17 @@ const isCalldataCopyDisabled = computed(() =>
   isPreparing.value || !!prepareError.value || !isReviewCurrent.value || !preparedPlanRef.value?.length,
 )
 const copyCalldata = async () => {
-  const bundledExecution = bundledExecutionRef.value
-  const plan = bundledExecution?.prepared.plan ?? preparedPlanRef.value
+  const executionCeremony = executionCeremonyRef.value
+  const plan = executionCeremony?.prepared.plan ?? preparedPlanRef.value
   if (!plan?.length) return
   try {
-    if (bundledExecution && !isBundledExecutionCurrent(bundledExecution)) return
-    const cid = bundledExecution?.chainId ?? chainId.value
+    if (!executionCeremony || !isBatchExecutionCurrent(executionCeremony)) return
+    const cid = executionCeremony.chainId
     const sdk = await getEulerSdkForChain(cid)
     const out = buildBatchReviewCalldata({
       plan,
-      before: bundledExecution?.grants,
-      after: bundledExecution?.revokes,
+      before: executionCeremony.grants,
+      after: executionCeremony.revokes,
       sdk,
       chainId: cid,
     })
@@ -477,7 +474,7 @@ const handleExecute = async () => {
   // rejects new submissions while a detached proposal is pending.
   const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
   if (!handle) return
-  const run = executeBatch(handle.scope, bundledExecutionRef.value ?? undefined)
+  const run = executeBatch(handle.scope, executionCeremonyRef.value ?? undefined)
   pendingBatchExecution = run
   executionHandle = handle
   try {

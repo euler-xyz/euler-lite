@@ -926,6 +926,49 @@ describe('useTxBatch execution errors', () => {
     expect(buildAccount?.owner).toBe(owner)
   })
 
+  it('does not publish a stale resimulation snapshot after an account reset', async () => {
+    const sdk = createMockSdk()
+    const oldAccount = accountWithPosition(subAccount, subAccount, 11n)
+    const nextOwner = getAddress('0x2000000000000000000000000000000000000002')
+    const nextAccount = accountWithPosition(subAccount, subAccount, 22n)
+    nextAccount.owner = nextOwner
+    let resolveOldFetch!: (value: { result: Account<IHasVaultAddress>, errors: never[] }) => void
+    const oldFetch = new Promise<{ result: Account<IHasVaultAddress>, errors: never[] }>((resolve) => {
+      resolveOldFetch = resolve
+    })
+    sdk.accountService.fetchAccount
+      .mockImplementationOnce(() => oldFetch)
+      .mockResolvedValueOnce({ result: nextAccount, errors: [] })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Account A operation',
+      buildPlan: async () => [] as TransactionPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(sdk.accountService.fetchAccount).toHaveBeenCalledTimes(1))
+
+    effectiveAddressRef.value = nextOwner
+    walletAddressRef.value = nextOwner
+    await nextTick()
+    resolveOldFetch({ result: oldAccount, errors: [] })
+    await Promise.resolve()
+
+    let planningAccount: Account<IHasVaultAddress> | undefined
+    await batch.addEntry({
+      label: 'Account B operation',
+      buildPlan: async (account) => {
+        planningAccount = account
+        return [] as TransactionPlan
+      },
+    })
+
+    expect(sdk.accountService.fetchAccount).toHaveBeenCalledTimes(2)
+    expect(planningAccount).toBe(nextAccount)
+    expect(planningAccount).not.toBe(oldAccount)
+  })
+
   it('publishes per-layer simulated vault state even without an enriched account position', async () => {
     const sdk = createMockSdk()
     const simulatedVault = {
@@ -1310,6 +1353,13 @@ describe('useTxBatch execution prerequisites', () => {
       label: 'Migrate Aave position',
       buildPlan: async () => [] as TransactionPlan,
       buildExecutionPrerequisites: async () => prerequisites,
+      buildBundledExecution: async () => ({
+        plan: [] as TransactionPlan,
+        grants: prerequisites?.preTxs ?? [],
+        revokes: prerequisites?.postTxs ?? [],
+        grantSteps: [],
+        revokeSteps: [],
+      }),
       refreshExternalMigrationPositions: true,
     })
   }
@@ -1554,6 +1604,88 @@ describe('useTxBatch execution prerequisites', () => {
     expect(Object.keys(ceremony?.reviewByEntryId ?? {})).toHaveLength(2)
   })
 
+  it('does not execute an old ceremony when an add starts during retry restoration', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+    let releaseRestore!: (value: boolean) => void
+    migrationFlowMocks.restorePendingBeforeRetry.mockImplementation(() => new Promise<boolean>((resolve) => {
+      releaseRestore = resolve
+    }))
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Reviewed operation',
+      buildPlan: async () => singleOpBundledPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    const ceremony = await batch.prepareBatchExecution()
+    const execution = batch.executeBatch(undefined, ceremony)
+    await vi.waitFor(() => expect(migrationFlowMocks.restorePendingBeforeRetry).toHaveBeenCalledTimes(1))
+
+    let resolvePendingPlan!: (plan: TransactionPlan) => void
+    const pendingPlan = new Promise<TransactionPlan>((resolve) => {
+      resolvePendingPlan = resolve
+    })
+    const pendingAdd = batch.addEntry({
+      label: 'Pending operation',
+      buildPlan: () => pendingPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.hasPendingAdds.value).toBe(true))
+    releaseRestore(true)
+    await execution
+
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('Batch or wallet changed since review preparation')
+
+    resolvePendingPlan(singleOpBundledPlan)
+    await pendingAdd
+  })
+
+  it('rechecks ceremony freshness after the final gas-estimate await', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
+    let releaseEstimate!: () => void
+    eulerTxMocks.estimateGasForPlan.mockImplementation(() => new Promise<void>((resolve) => {
+      releaseEstimate = resolve
+    }))
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Reviewed operation',
+      buildPlan: async () => singleOpBundledPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    const ceremony = await batch.prepareBatchExecution()
+    const execution = batch.executeBatch(undefined, ceremony)
+    await vi.waitFor(() => expect(eulerTxMocks.estimateGasForPlan).toHaveBeenCalledTimes(1))
+
+    let resolvePendingPlan!: (plan: TransactionPlan) => void
+    const pendingPlan = new Promise<TransactionPlan>((resolve) => {
+      resolvePendingPlan = resolve
+    })
+    const pendingAdd = batch.addEntry({
+      label: 'Pending operation',
+      buildPlan: () => pendingPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.hasPendingAdds.value).toBe(true))
+    releaseEstimate()
+    await execution
+
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('Batch or wallet changed since review preparation')
+
+    resolvePendingPlan(singleOpBundledPlan)
+    await pendingAdd
+  })
+
   it.each([
     ['account', async () => {
       effectiveAddressRef.value = getAddress('0x2000000000000000000000000000000000000000')
@@ -1711,6 +1843,39 @@ describe('useTxBatch execution prerequisites', () => {
     })
 
     await expect(preparation).rejects.toThrow('Batch or wallet changed since review preparation')
+  })
+
+  it.each([
+    ['ordinary Safe', true],
+    ['EOA', false],
+  ])('executes the exact reviewed prepared core for %s batches', async (_label, safeWallet) => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = safeWallet
+    const reviewedPlan = [{
+      type: 'evcBatch',
+      items: [{ type: 'operation', name: 'reviewed-standard-core', items: [] }],
+    }] as unknown as TransactionPlan
+    const reviewedPrepared = { kind: 'reviewed', plan: reviewedPlan, chainId: 1, account: owner }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(reviewedPrepared)
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Standard operation',
+      buildPlan: async () => reviewedPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+
+    const ceremony = await batch.prepareBatchExecution()
+    await batch.executeBatch(undefined, ceremony)
+
+    expect(ceremony.mode).toBe('standard')
+    expect(ceremony.safeWallet).toBe(safeWallet)
+    expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenCalledTimes(1)
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(reviewedPrepared)
   })
 
   it('uses one prepared core plan for review export and safe execution', async () => {
@@ -1955,7 +2120,9 @@ describe('useTxBatch execution prerequisites', () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
     isSafeWalletRef.value = false
-    eulerTxMocks.prepareTransactionPlan.mockResolvedValue({ kind: 'prepared' })
+    const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
     eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
     eulerTxMocks.sendPlainTransactions.mockImplementation(async (txs: { data: Hex }[], options?: PlainTxSendOptions) => {
       txs.forEach((_tx, index) => options?.onBroadcast?.(index, grantWalletContext))
@@ -1964,12 +2131,19 @@ describe('useTxBatch execution prerequisites', () => {
 
     const batch = useTxBatch()
     await addBundledMigrationEntry(batch)
-    await batch.prepareBundledExecution()
-    await batch.executeBatch()
+    const ceremony = await batch.prepareBatchExecution()
+    await batch.executeBatch(undefined, ceremony)
 
+    expect(ceremony.mode).toBe('standard')
+    expect(ceremony.grants).toEqual([grantTx])
+    expect(ceremony.revokes).toEqual([revokeTx])
+    expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenCalledTimes(1)
     expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
-    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalled()
-    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalled()
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledWith(
+      [grantTx],
+      expect.objectContaining({ walletContext: grantWalletContext }),
+    )
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared)
   })
 
   it('revokes an already-granted entry when a later entry\'s grant is rejected', async () => {
@@ -2046,12 +2220,12 @@ describe('useTxBatch execution prerequisites', () => {
     calls.length = 0
     await batch.executeBatch()
 
-    // The grant must be mined before the plan is built: the connector reads the
-    // live allowance to decide whether the batch needs an authorization item.
+    // The exact core is prepared once, then its prerequisite grant is mined
+    // before that reviewed core is estimated and executed.
     expect(calls).toEqual([
       'restorePendingBeforeRetry',
-      'sendPlainTransactions',
       'mergePlans',
+      'sendPlainTransactions',
       'estimateGasForPlan',
       'executePreparedPlan',
       'revokeAfterSuccess',
