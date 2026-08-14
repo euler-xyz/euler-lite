@@ -20,14 +20,12 @@ import {
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
-import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import {
   activeLayerVaultsRef,
   collectAccountVaults,
   mergeLayeredVaults,
   type LayeredVaultMap,
 } from '~/composables/useLayeredVaults'
-import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { buildPlanMarketLabel, type DisplayStep } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
@@ -35,6 +33,10 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import {
+  assertPreparedPlanSignatureParity,
+  type PreparedPlanSignatureSubstitution,
+} from '~/utils/preparedPlanParity'
 
 export interface BatchWalletChange {
   token: string
@@ -110,7 +112,10 @@ export interface BatchEntryExecutionCeremony {
    * ceremony. The callback receives the ceremony freshness guard and returns
    * the same plan with real signature bytes.
    */
-  resolveExecutionPlan?: (beforeWalletAction: () => void) => Promise<TransactionPlan>
+  resolveExecutionPlan?: (beforeWalletAction: () => void) => Promise<{
+    plan: TransactionPlan
+    signatureSubstitutions: readonly PreparedPlanSignatureSubstitution[]
+  }>
   /** The review/copy plan contains placeholder authorization signatures. */
   usesPlaceholderSignatures?: boolean
 }
@@ -296,15 +301,6 @@ const drawerOpen = ref(true)
 // executeBatch so the executed batch is exactly what was simulated.
 let lastMerged: TransactionPlan | null = null
 let baseAccountSnapshot: Account<IHasVaultAddress> | null = null
-
-// "Simulate on Tenderly" for the whole batch — runs the exact merged plan
-// through the server-side Tenderly endpoint and returns a shareable dashboard
-// URL. Shared (module-level) so the result persists across the laptop drawer
-// and the mobile full-page view. Mirrors the per-operation flow in
-// OperationReviewModal, just fed the batch's merged plan instead of one op.
-const tenderly = useTenderlySimulation()
-const tenderlyEnabled = ref(false)
-let tenderlyEnabledFetched = false
 
 /**
  * Module-level overlay ref read by `useEulerAccount` so the portfolio is
@@ -2188,11 +2184,8 @@ export const useTxBatch = () => {
   if (!scope) {
     scope = effectScope(true)
     scope.run(() => {
-      // Any edit to the cart invalidates a prior Tenderly run (it simulated a
-      // different fixed plan list), so drop the stale URL before re-simulating.
       watch(entries, () => {
         logBatchDiag('watch:entries-changed')
-        tenderly.clearSimulation()
         void runResimulate()
       })
       watch([activeLayer, layers], syncOverlay)
@@ -2213,7 +2206,6 @@ export const useTxBatch = () => {
         baseAccountSnapshot = null
         batchSlotHints = {}
         resimulatePromise = null
-        tenderly.clearSimulation()
         syncOverlay()
       })
       // Safe classification is part of a bundled ceremony's wallet context.
@@ -2450,7 +2442,6 @@ export const useTxBatch = () => {
       baseAccountSnapshot = null
       batchSlotHints = {}
       resimulatePromise = null
-      tenderly.clearSimulation()
       syncOverlay()
     }
   }
@@ -2470,7 +2461,6 @@ export const useTxBatch = () => {
     baseAccountSnapshot = null
     batchSlotHints = {}
     resimulatePromise = null
-    tenderly.clearSimulation()
     syncOverlay()
   }
 
@@ -2481,51 +2471,6 @@ export const useTxBatch = () => {
 
   const dismissExecutionError = () => {
     execError.value = undefined
-  }
-
-  /** Lazily check (once) whether the server has Tenderly credentials configured,
-   *  so the UI can hide the button when simulation isn't available. */
-  const fetchTenderlyEnabled = async (): Promise<boolean> => {
-    if (tenderlyEnabledFetched) return tenderlyEnabled.value
-    tenderlyEnabledFetched = true
-    tenderlyEnabled.value = await tenderly.fetchEnabled()
-    return tenderlyEnabled.value
-  }
-
-  /**
-   * Run the whole batch through Tenderly using the preview plan and the SDK's
-   * derived state overrides (so approvals/permits don't make it revert). Returns
-   * a dashboard URL surfaced via `tenderlyUrl`. Works in spy mode too — it's a
-   * read-only simulation, no signature required.
-   */
-  const simulateOnTenderly = async (): Promise<void> => {
-    if (!lastMerged) return
-    const o = owner.value
-    const cid = chainId.value
-    if (!o || !cid) return
-    tenderly.clearSimulation()
-    try {
-      const sdk = await getEulerSdkFresh()
-      const extraStateOverrides = mergeStateOverrides(
-        entries.value.flatMap(entry => entry.stateOverrides ?? []),
-      )
-      const payload = await buildTenderlySimulationPayload({
-        plan: lastMerged,
-        owner: getAddress(o),
-        chainId: cid,
-        sdk,
-        extraStateOverrides,
-      })
-      if (!payload) {
-        tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
-        return
-      }
-      await tenderly.simulate(payload)
-    }
-    catch (error) {
-      logWarn('useTxBatch/simulateOnTenderly', error)
-      tenderly.simulationError.value = 'Tenderly simulation failed.'
-    }
   }
 
   /** The latest merged preview plan (null until a successful simulation).
@@ -2653,15 +2598,28 @@ export const useTxBatch = () => {
       const resolvePreparedPlan = planResolvers.some(Boolean)
         ? async (beforeWalletAction: () => void): Promise<TransactionPlanPrepared> => {
           const resolvedPlans: TransactionPlan[] = []
+          const signatureSubstitutions: PreparedPlanSignatureSubstitution[] = []
           for (const [index, plan] of plans.entries()) {
             beforeWalletAction()
             const resolver = planResolvers[index]
-            resolvedPlans.push(resolver ? await resolver(beforeWalletAction) : plan)
+            if (resolver) {
+              const resolved = await resolver(beforeWalletAction)
+              resolvedPlans.push(resolved.plan)
+              signatureSubstitutions.push(...resolved.signatureSubstitutions)
+            }
+            else {
+              resolvedPlans.push(plan)
+            }
             beforeWalletAction()
           }
           const resolvedPlan = sdk.executionService.mergePlans(resolvedPlans)
           const resolvedPrepared = await prepareTransactionPlan(resolvedPlan)
           beforeWalletAction()
+          assertPreparedPlanSignatureParity({
+            reviewed: prepared,
+            resolved: resolvedPrepared,
+            substitutions: signatureSubstitutions,
+          })
           return resolvedPrepared
         }
         : undefined
@@ -2870,6 +2828,29 @@ export const useTxBatch = () => {
     if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
     execError.value = undefined
     isExecuting.value = true
+    const attemptGeneration = batchGeneration.value
+    const attemptOwner = owner.value ? getAddress(owner.value) : undefined
+    const attemptChainId = chainId.value
+    const attemptConnectorKey = connectorKey.value
+    const attemptSafeWallet = isSafeWallet.value
+    const attemptSafeWalletResolved = isSafeWalletResolved.value
+    const isAttemptCurrent = () => {
+      if (
+        attemptGeneration !== batchGeneration.value
+        || attemptChainId !== chainId.value
+        || attemptConnectorKey !== connectorKey.value
+        || attemptSafeWallet !== isSafeWallet.value
+        || attemptSafeWalletResolved !== isSafeWalletResolved.value
+        || !attemptOwner
+        || !owner.value
+      ) return false
+      try {
+        return attemptOwner === getAddress(owner.value)
+      }
+      catch {
+        return false
+      }
+    }
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let execution = reviewedExecution
     try {
@@ -2939,8 +2920,9 @@ export const useTxBatch = () => {
       await revokeAfterAbort(grantedRevokes, {
         shouldNotify: () => !execution || isBatchExecutionWalletCurrent(execution),
       })
-      if (!execution || isBatchExecutionCurrent(execution)) {
-        execError.value = await describeExecError(error)
+      const decodedError = await describeExecError(error)
+      if (execution ? isBatchExecutionCurrent(execution) : isAttemptCurrent()) {
+        execError.value = decodedError
       }
     }
     finally {
@@ -3073,13 +3055,6 @@ export const useTxBatch = () => {
     isBatchExecutionCurrent,
     prepareBundledExecution: prepareBatchExecution,
     isBundledExecutionCurrent: isBatchExecutionCurrent,
-    // Tenderly "Simulate on Tenderly" for the whole batch.
-    tenderlyEnabled,
-    isTenderlySimulating: tenderly.isSimulating,
-    tenderlyUrl: tenderly.simulationUrl,
-    tenderlyError: tenderly.simulationError,
-    fetchTenderlyEnabled,
-    simulateOnTenderly,
     // For the Review batch modal.
     getMergedPlan,
     prepareBatchPlan,

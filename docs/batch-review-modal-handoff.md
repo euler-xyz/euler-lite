@@ -17,8 +17,7 @@ transaction. It must show, in order:
    permit2 signatures the user will be asked to sign.
 2. **Operations** — each queued op as a row that **rolls down** to reveal that op's details.
 3. **Wallet changes** — the net effect of the whole batch on the wallet.
-4. **Simulate on Tenderly** — a link/button (Tenderly lives ONLY here, not in the drawer).
-5. **Execute batch** — one atomic execute, with a disabled reason when it can't run.
+4. **Execute batch** — execute the reviewed ceremony, with a disabled reason when it can't run.
 
 It is opened via `useModal().open(BatchReviewModal)` and dismisses by emitting `close`.
 
@@ -50,7 +49,6 @@ below (never hardcode hex). Values shown are the **dark theme** for reference on
 | `text-content-primary` | `#f7f7f8` | Primary labels (op title, amounts) |
 | `text-content-secondary` | `#ddfbf4` | Secondary text (asset symbol, position tag) |
 | `text-content-tertiary` | `#a1acb8` | Section labels, muted meta, disabled reason |
-| `text-success-500` | `#62ad4f` | Tenderly "view simulation" success link |
 | `text-error-500` / `bg-error-100` | `#c02723` / `rgba(192,39,35,.2)` | Revert chip text / fill |
 | Radius `rounded-8` / `rounded-12` / `rounded-16` | 8 / 12 / 16px | Rows / cards / modal |
 | Type `text-p2` / `text-p3` / `text-h6` | 16/400, 14/400, 14/600 | Body / meta / row title |
@@ -69,7 +67,6 @@ width). Pass `title="Review batch"`. Body content is a single vertical stack:
     [Operations]            always (≥1 entry)
     [Wallet changes]        v-if walletChanges.length
     [Top-level batch error] v-if simError || execError
-    [Tenderly]              v-if tenderlyEnabled
     [Execute + reason]      always
   </div>
 </BaseModalWrapper>
@@ -93,7 +90,6 @@ All data comes from `useTxBatch()`. The composable already exposes everything ne
 | `executeBatch()` | `() => Promise` | Atomic execute (clears batch on success) |
 | `prepareBatchPlan()` | `() => Promise<TransactionPlanPrepared\|null>` | Resolve approvals for the approvals section |
 | `getMergedPlan()` | `() => TransactionPlan\|null` | The exact plan that will execute |
-| `tenderlyEnabled`, `isTenderlySimulating`, `tenderlyUrl`, `tenderlyError`, `fetchTenderlyEnabled()`, `simulateOnTenderly()` | — | Tenderly section |
 
 `BatchEntry` (see `composables/useTxBatch.ts`) carries:
 `label`, `review?` (`{ type, asset:{symbol}, amount, swapToAsset:{symbol} }`), and
@@ -179,13 +175,11 @@ text-content-tertiary mb-6`). One row per token: symbol left (`text-content-seco
 signed amount right (`tabular-nums`), positive `text-accent-500`, negative `text-error-500`.
 Format `−`/`+` + `formatSmartAmount(formatUnits(abs, decimals))` + symbol.
 
-## Tenderly
-Centered. Before run: button "Simulate on Tenderly" (`arrow-top-right` icon, swap to
-spinning `loading` while `isTenderlySimulating`) → `simulateOnTenderly()`. After run: link to
-`tenderlyUrl` (`target=_blank rel=noopener`). If `tenderlyUrl && tenderlyError` →
-"Simulation reverted — view on Tenderly" in `text-error-500` with `warning-circle`; else
-"View simulation on Tenderly" in `text-success-500` with `check-circle` + `arrow-top-right`.
-Call `fetchTenderlyEnabled()` on mount; hide the whole section when `!tenderlyEnabled`.
+## External simulation
+Whole-batch Tenderly simulation is not exposed from this modal. The reviewed ceremony can
+contain sequential authorization transactions, prepared plugin/approval/core calls, and
+restorations. The single-transaction simulation endpoint cannot preserve that complete call
+vector, so presenting its result as a whole-batch simulation would be misleading.
 
 ## States & interactions
 
@@ -216,25 +210,22 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
 - **Long asset symbol / op label** → row title `truncate`; never let it push the chevron.
 - **Fresh-position deposit** → no `subAccount` → no Position tag (by design).
 - **Many operations** → `BaseModalWrapper` handles scroll; do not add a nested scroll.
-- **Spy mode** → everything renders; only Execute is disabled (read-only review still works,
-  including Tenderly which is a read-only simulation).
+- **Spy mode** → everything renders; only Execute is disabled.
 
 ## Accessibility
 - Row header is a real `<button>`; expose `aria-expanded` bound to the open state and
   `aria-controls` pointing at the detail region id.
-- Focus order: close → (approvals are static text) → operation row buttons in order →
-  Tenderly → Execute.
-- Tenderly link: `rel="noopener noreferrer"`, descriptive text (already states pass/fail).
+- Focus order: close → (approvals are static text) → operation row buttons in order → Execute.
 - Revert chips are persistent text (not hover-only) so they're announced.
 - Icon-only controls (close, chevrons) need `aria-label` / `title`.
 
 ## Files
 - `components/BatchReviewModal.vue` — the modal (exists; extend detail fields per the gap).
-- `composables/useTxBatch.ts` — data + `prepareBatchPlan` / `getMergedPlan` / tenderly API.
+- `composables/useTxBatch.ts` — ceremony preparation, review data, and execution.
 - `components/BatchContents.vue` — opens the modal via the "Review batch" button.
 - Reference for tokens/patterns: `components/entities/portfolio/PortfolioBorrowItem.vue`
   (position tag), `components/entities/operation/OperationReviewModal.vue` (approvals
-  decode, Tenderly, `UiButton` usage), `assets/styles/variables.scss` (token values).
+  decode and `UiButton` usage), `assets/styles/variables.scss` (token values).
 
 ## Definition of done
 - Borders/dividers use `*-line-default` (no white borders anywhere).
@@ -242,5 +233,5 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
 - Operation rows roll down; first row open by default; detail includes at least Amount +
   Vault (+ Receive for swaps, + Position when applicable).
 - Approvals appear only when the prepared plan requires them, with resolved token symbols.
-- Wallet changes, Tenderly, and the gated Execute (with reason) all behave per the tables.
+- Wallet changes and the gated Execute (with reason) behave per the tables.
 - Spy-mode, revert, preparing, and success states all verified live in the running app.

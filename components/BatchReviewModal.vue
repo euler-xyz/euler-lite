@@ -10,7 +10,7 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
-import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, getBatchReviewDisplayPlan, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
+import { getAuthorizationStepDisplay, getBatchReviewDisplayPlan, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
@@ -18,8 +18,8 @@ import { formatNumber } from '~/utils/string-utils'
 import { buildBatchReviewCalldata } from '~/utils/batchReviewCalldata'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
-// down to their details, the net wallet changes, a Tenderly simulation link,
-// and one atomic Execute. Opened from the "Review batch" button in the drawer
+// down to their details, the net wallet changes, and one atomic Execute. Opened
+// from the "Review batch" button in the drawer
 // (and mobile page). The per-operation detail is the data captured at add-time;
 // execution is delegated to the composable's executeBatch.
 const emit = defineEmits(['close'])
@@ -39,12 +39,6 @@ const {
   executeBatch,
   entryPlans,
   marketByEntryId,
-  tenderlyEnabled,
-  isTenderlySimulating,
-  tenderlyUrl,
-  tenderlyError,
-  fetchTenderlyEnabled,
-  simulateOnTenderly,
   dismissExecutionError,
   prepareBatchExecution,
   isBatchExecutionCurrent,
@@ -203,15 +197,13 @@ const authorizationSummaryGroups = computed(() => {
 //
 // Rows render in EXECUTION order: restorations unwind in reverse entry order
 // (each entry's own steps are already reversed by the encoder). Identical
-// standalone restorations are consolidated because sequential prerequisite
-// resolution sends them once. Bundled Safe restorations are already collected
-// proposal calls, so every call remains visible. Labels are NOT identity: two
-// different aTokens can share a label while representing distinct transactions.
+// standalone and bundled restorations both remain one row per wallet prompt or
+// proposal call. Labels are NOT identity: two different aTokens can share a
+// label while representing distinct transactions.
 const restorationSummaryRows = computed(() => {
-  const rows = [...entries.value].reverse().flatMap(entry =>
+  return [...entries.value].reverse().flatMap(entry =>
     (postStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
   )
-  return consolidateRestorationSummaryRows(rows)
 })
 
 const restorationSummaryGroups = computed(() => {
@@ -386,7 +378,6 @@ onMounted(async () => {
   nowTimer = setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
-  void fetchTenderlyEnabled()
   isPreparing.value = true
   prepareError.value = ''
   try {
@@ -450,8 +441,6 @@ const copyCalldata = async () => {
     logWarn('BatchReviewModal/copyCalldata', error)
   }
 }
-
-const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
 
 const isConfirmDisabled = computed(() =>
   isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value || !isReviewCurrent.value,
@@ -805,7 +794,9 @@ const onCloseRequested = () => {
         description="Copied calldata contains placeholder authorization signatures. Your wallet requests the reviewed signatures only after you confirm the batch."
       />
 
-      <!-- Secondary actions: copy calldata + Tenderly -->
+      <!-- Secondary action: copy the reviewed call vector. Whole-batch
+           third-party simulation is intentionally unavailable because it
+           cannot preserve the complete reviewed wallet ceremony. -->
       <div class="flex items-center justify-center gap-16">
         <button
           type="button"
@@ -820,40 +811,6 @@ const onCloseRequested = () => {
           />
           {{ copied ? 'Copied!' : isPreparing ? 'Preparing calldata…' : 'Copy calldata' }}
         </button>
-        <template v-if="tenderlyEnabled">
-          <a
-            v-if="tenderlyUrl"
-            :href="tenderlyUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="flex items-center gap-6 text-p3 transition-colors"
-            :class="hasTenderlyFailed ? 'text-error-500' : 'text-success-500 hover:text-success-600'"
-          >
-            <SvgIcon
-              :name="hasTenderlyFailed ? 'warning-circle' : 'check-circle'"
-              class="!w-16 !h-16"
-            />
-            {{ hasTenderlyFailed ? 'Simulation reverted — view on Tenderly' : 'View simulation on Tenderly' }}
-            <SvgIcon
-              name="arrow-top-right"
-              class="!w-14 !h-14"
-            />
-          </a>
-          <button
-            v-else
-            type="button"
-            class="flex items-center gap-6 text-p3 text-content-secondary hover:text-content-primary transition-colors disabled:opacity-50"
-            :disabled="isTenderlySimulating"
-            @click="simulateOnTenderly"
-          >
-            <SvgIcon
-              :name="isTenderlySimulating ? 'loading' : 'arrow-top-right'"
-              class="!w-16 !h-16"
-              :class="{ 'animate-spin': isTenderlySimulating }"
-            />
-            {{ isTenderlySimulating ? 'Simulating…' : 'Simulate on Tenderly' }}
-          </button>
-        </template>
       </div>
 
       <div class="flex flex-col items-center gap-8">

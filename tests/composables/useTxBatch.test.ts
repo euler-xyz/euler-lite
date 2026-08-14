@@ -14,10 +14,23 @@ import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import { buildBatchReviewCalldata } from '~/utils/batchReviewCalldata'
+import { PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE } from '~/utils/migrationAuthorizationSignatures'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
 }))
+
+const txErrorMocks = vi.hoisted(() => ({
+  getTxErrorMessage: vi.fn(async (error: unknown) => error instanceof Error ? error.message : String(error)),
+}))
+
+vi.mock('~/utils/tx-errors', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    getTxErrorMessage: txErrorMocks.getTxErrorMessage,
+  }
+})
 
 const owner = getAddress('0x1000000000000000000000000000000000000000')
 const subAccount = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
@@ -329,6 +342,8 @@ beforeEach(() => {
   eulerTxMocks.estimateGasForPlan.mockReset()
   eulerTxMocks.sendPlainTransactions.mockReset()
   eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
+  txErrorMocks.getTxErrorMessage.mockReset()
+  txErrorMocks.getTxErrorMessage.mockImplementation(async error => error instanceof Error ? error.message : String(error))
   migrationFlowMocks.revokeAfterSuccess.mockReset()
   migrationFlowMocks.revokeAfterAbort.mockReset()
   migrationFlowMocks.restorePendingBeforeRetry.mockReset()
@@ -1455,20 +1470,34 @@ describe('useTxBatch execution prerequisites', () => {
   it('reviews placeholder migration signatures and requests the real signatures only after confirmation', async () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
-    const placeholderPlan = [{
+    const signedAuthorization = `0x${'11'.repeat(65)}` as Hex
+    const buildSignaturePlan = (authorization: Hex) => [{
       type: 'evcBatch',
-      items: [{ type: 'operation', name: 'placeholder-signature', items: [] }],
+      items: [{
+        type: 'operation',
+        name: 'migration-authorization',
+        items: [{
+          targetContract: vault,
+          onBehalfOfAccount: owner,
+          value: 0n,
+          data: `0x1234${authorization.slice(2)}` as Hex,
+        }],
+      }],
     }] as unknown as TransactionPlan
-    const signedPlan = [{
-      type: 'evcBatch',
-      items: [{ type: 'operation', name: 'signed-authorization', items: [] }],
-    }] as unknown as TransactionPlan
+    const placeholderPlan = buildSignaturePlan(PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE)
+    const signedPlan = buildSignaturePlan(signedAuthorization)
     const signatureStep = { index: 1, label: 'Sign migration authorization', isSeparateTx: false }
     const requestWalletSignature = vi.fn()
     const resolveExecutionPlan = vi.fn(async (beforeWalletAction: () => void) => {
       beforeWalletAction()
       requestWalletSignature()
-      return signedPlan
+      return {
+        plan: signedPlan,
+        signatureSubstitutions: [{
+          placeholder: PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE,
+          signature: signedAuthorization,
+        }],
+      }
     })
     eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
     eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
@@ -1511,6 +1540,59 @@ describe('useTxBatch execution prerequisites', () => {
       expect.objectContaining({ plan: signedPlan }),
       { beforeBroadcast: expect.any(Function) },
     )
+  })
+
+  it('rejects a confirm-time migration plan that changes beyond reviewed signature bytes', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const signedAuthorization = `0x${'22'.repeat(65)}` as Hex
+    const placeholderPlan = [{
+      type: 'evcBatch',
+      items: [{
+        targetContract: vault,
+        onBehalfOfAccount: owner,
+        value: 0n,
+        data: `0x1234${PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE.slice(2)}` as Hex,
+      }],
+    }] as unknown as TransactionPlan
+    const changedPlan = [{
+      type: 'evcBatch',
+      items: [{
+        targetContract: targetVault,
+        onBehalfOfAccount: owner,
+        value: 1n,
+        data: `0x1234${signedAuthorization.slice(2)}` as Hex,
+      }],
+    }] as unknown as TransactionPlan
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Signature migration',
+      buildPlan: async () => placeholderPlan,
+      buildExecutionCeremony: async () => ({
+        plan: placeholderPlan,
+        resolveExecutionPlan: async () => ({
+          plan: changedPlan,
+          signatureSubstitutions: [{
+            placeholder: PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE,
+            signature: signedAuthorization,
+          }],
+        }),
+        usesPlaceholderSignatures: true,
+        grantSteps: [],
+        revokeSteps: [],
+      }),
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    const ceremony = await batch.prepareBatchExecution()
+
+    await batch.executeBatch(undefined, ceremony)
+
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('transaction plan changed after review')
   })
 
   it('requires resolved wallet classification and invalidates review on connector changes', async () => {
@@ -1649,6 +1731,46 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.entries.value.map(entry => entry.label)).toEqual(['Successor wallet operation'])
 
     releaseCompletion()
+    await execution
+
+    expect(batch.entries.value.map(entry => entry.label)).toEqual(['Successor wallet operation'])
+    expect(batch.execError.value).toBeUndefined()
+  })
+
+  it('does not publish a decoded execution error after the wallet context changes', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.executePreparedPlan.mockRejectedValue(new Error('old wallet execution failed'))
+    let resolveDecodedError!: (message: string) => void
+    txErrorMocks.getTxErrorMessage.mockReturnValue(new Promise<string>((resolve) => {
+      resolveDecodedError = resolve
+    }))
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Old wallet operation',
+      buildPlan: async () => singleOpBundledPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    const ceremony = await batch.prepareBatchExecution()
+    const execution = batch.executeBatch(undefined, ceremony)
+    await vi.waitFor(() => expect(txErrorMocks.getTxErrorMessage).toHaveBeenCalledTimes(1))
+
+    const successor = getAddress('0x2000000000000000000000000000000000000000')
+    effectiveAddressRef.value = successor
+    walletAddressRef.value = successor
+    await nextTick()
+    await batch.addEntry({
+      label: 'Successor wallet operation',
+      buildPlan: async () => singleOpBundledPlan,
+      requiresPlanningAccount: false,
+    })
+
+    resolveDecodedError('decoded old-wallet revert')
     await execution
 
     expect(batch.entries.value.map(entry => entry.label)).toEqual(['Successor wallet operation'])
@@ -2485,6 +2607,51 @@ describe('useTxBatch execution prerequisites', () => {
     )
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, {
       beforeBroadcast: expect.any(Function),
+    })
+  })
+
+  it('keeps duplicate standalone authorization prompts in parity with execution', async () => {
+    const sdk = createMockSdk()
+    sdk.executionService.simulateTransactionPlan.mockImplementation(async (...args: unknown[]) => ({
+      simulatedAccounts: Array.from(
+        { length: countPlanOperations(args[2] as TransactionPlan) },
+        (_, index) => accountWithPosition(subAccount, subAccount, BigInt(index + 2)),
+      ),
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    }))
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = false
+    const prepared = { kind: 'prepared', plan: singleOpBundledPlan, chainId: 1, account: owner }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await addBundledMigrationEntry(batch)
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(3))
+    const ceremony = await batch.prepareBatchExecution()
+    const entryIds = batch.entries.value.map(entry => entry.id)
+
+    expect(entryIds).toHaveLength(2)
+    expect(entryIds.map(id => ceremony.reviewByEntryId[id]?.revokeSteps)).toEqual([
+      [{ ...bundledRevokeStep, isSeparateTx: true }],
+      [{ ...bundledRevokeStep, isSeparateTx: true }],
+    ])
+
+    await batch.executeBatch(undefined, ceremony)
+
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledTimes(2)
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenNthCalledWith(1, [grantTx], expect.any(Object))
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenNthCalledWith(2, [grantTx], expect.any(Object))
+    expect(migrationFlowMocks.revokeAfterSuccess).toHaveBeenCalledWith([
+      trackedRevoke(revokeTx),
+      trackedRevoke(revokeTx),
+    ], {
+      shouldNotify: expect.any(Function),
     })
   })
 

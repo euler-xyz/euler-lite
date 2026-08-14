@@ -46,6 +46,7 @@ import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
+import { getMigrationAuthorizationSignatureSubstitutions } from '~/utils/migrationAuthorizationSignatures'
 
 type AaveOutgoingMigrationTarget = MigrationTarget<AaveMigrationTargetRaw, AavePositionRef, AaveMigrationTargetExtraData>
 
@@ -1108,7 +1109,10 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
                   ? await signMigrationAuthorization(request, { beforeSignature: beforeWalletAction })
                   : undefined
                 beforeWalletAction()
-                return buildMigrationPlan(input, authorization, migrationPosition, account)
+                return {
+                  plan: await buildMigrationPlan(input, authorization, migrationPosition, account),
+                  signatureSubstitutions: getMigrationAuthorizationSignatureSubstitutions(authorization),
+                }
               },
               usesPlaceholderSignatures: !!request,
               grantSteps: buildSignatureSteps(input.target, request, true, false),

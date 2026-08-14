@@ -70,10 +70,10 @@ import {
   assertWalletExecutionContext,
   type WalletExecutionContext,
 } from '~/utils/walletExecutionContext'
+import { PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE } from '~/utils/migrationAuthorizationSignatures'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
-const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
   populateMarketPrices: false,
@@ -1041,7 +1041,7 @@ export const useEulerTx = () => {
 
     return {
       request,
-      signature: PLACEHOLDER_AUTHORIZATION_SIGNATURE,
+      signature: PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE,
       ...(postMigrationAuthorization ? { postMigrationAuthorization } : {}),
     }
   }

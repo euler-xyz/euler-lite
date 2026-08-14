@@ -85,6 +85,7 @@ import { isOperationBlocked, registerOperationBlocker, unregisterOperationBlocke
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 import type { CollateralOption } from '~/types/collateral-option'
+import { getMigrationAuthorizationSignatureSubstitutions } from '~/utils/migrationAuthorizationSignatures'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -3615,7 +3616,10 @@ const addInboundExternalMigrationToBatch = async () => {
                     ? await signMigrationAuthorization(request, { beforeSignature: beforeWalletAction })
                     : undefined
                   beforeWalletAction()
-                  return buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
+                  return {
+                    plan: await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures),
+                    signatureSubstitutions: getMigrationAuthorizationSignatureSubstitutions(authorization),
+                  }
                 },
                 usesPlaceholderSignatures: !!request,
                 grantSteps: buildInboundExternalMigrationSignatureSteps(request, true, false, input.source.connectorId),

@@ -46,4 +46,19 @@ describe('BatchReviewModal ceremony wiring', () => {
     expect(source).toContain('v-if="hasUnverified"')
     expect(source).toContain('unverifiedVaultNames.join(\', \')')
   })
+
+  it('keeps one restoration summary row per reviewed wallet action', () => {
+    const restorationSection = sectionBetween(
+      'const restorationSummaryRows = computed',
+      'const restorationSummaryGroups = computed',
+    )
+
+    expect(restorationSection).toContain('postStepsByEntryId.value[entry.id]')
+    expect(restorationSection).not.toContain('consolidate')
+  })
+
+  it('does not offer a whole-batch simulation for a different call vector', () => {
+    expect(source).not.toContain('simulateOnTenderly')
+    expect(source).not.toContain('Simulate on Tenderly')
+  })
 })
