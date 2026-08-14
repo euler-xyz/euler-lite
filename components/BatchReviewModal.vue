@@ -97,7 +97,7 @@ const normalizeDisplaySteps = (steps: readonly DisplayStep[] | undefined): Displ
 // Safe detection can resolve later, but it cannot change what this review will
 // execute without a fresh review.
 const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
-  isBundledReviewEntry(executionCeremonyRef.value?.mode === 'safe-bundled', !!entry.buildBundledExecution)
+  isBundledReviewEntry(executionCeremonyRef.value?.mode === 'safe-bundled', entry.bundleExecutionCeremony === true)
 
 const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[number]): DisplayStep[] =>
   isBundledEntry(entry)
@@ -105,11 +105,9 @@ const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[numbe
     : steps
 
 const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
-  // A bundled ceremony carries its own rows, derived from the SAME
-  // authorization resolution the proposal executes — the add-time captures
-  // can be stale (authorization state drifts between add and review).
-  const latchedSteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
-  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.grantSteps)
+  // Ceremony-owned rows and execution calls share one authorization resolution.
+  const ceremonySteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
+  if (ceremonySteps) return normalizeDisplaySteps(ceremonySteps.grantSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? overrideBundled(normalizeDisplaySteps(review?.signatureSteps), entry)
@@ -117,8 +115,8 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
-  const latchedSteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
-  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.revokeSteps)
+  const ceremonySteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
+  if (ceremonySteps) return normalizeDisplaySteps(ceremonySteps.revokeSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? overrideBundled(normalizeDisplaySteps(review?.postSteps), entry)
@@ -228,13 +226,16 @@ const restorationSummaryGroups = computed(() => {
   ]
 })
 
-// Unverified vaults the batch touches — surfaced as a warning. A vault is the
-// target of an op's core action; we read targets off each op's contextual plan
-// and check the registry's verification flag (same source the forms use).
+// Unverified-vault disclosure follows the ceremony plan used by review and
+// execution. The add-time entry plan is only a fallback before preparation.
 const unverifiedVaultNames = computed<string[]>(() => {
   const names = new Set<string>()
   for (const entry of entries.value) {
-    const plan = entryPlans.value[entry.id]
+    const plan = getBatchReviewDisplayPlan(
+      executionCeremonyRef.value?.reviewByEntryId[entry.id]?.plan,
+      (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan,
+      entryPlans.value[entry.id],
+    )
     if (!plan) continue
     for (const item of plan) {
       if (item.type !== 'evcBatch') continue
@@ -421,9 +422,9 @@ onUnmounted(() => {
   }
 })
 
-// Copy the exact batch calldata (one entry per on-chain tx: approvals + the EVC
-// batch), matching the per-operation review modals. This requires the prepared
-// plan so approval txs are included.
+// Copy the reviewed batch calldata (one entry per on-chain tx: approvals + the
+// EVC batch), matching the per-operation review modals. Signature-mode
+// migrations disclose that their copied authorization bytes are placeholders.
 const isCalldataCopyDisabled = computed(() =>
   isPreparing.value || !!prepareError.value || !isReviewCurrent.value || !preparedPlanRef.value?.length,
 )
@@ -435,6 +436,7 @@ const copyCalldata = async () => {
     if (!executionCeremony || !isBatchExecutionCurrent(executionCeremony)) return
     const cid = executionCeremony.chainId
     const sdk = await getEulerSdkForChain(cid)
+    if (!isBatchExecutionCurrent(executionCeremony)) return
     const out = buildBatchReviewCalldata({
       plan,
       before: executionCeremony.grants,
@@ -442,7 +444,7 @@ const copyCalldata = async () => {
       sdk,
       chainId: cid,
     })
-    copyToClipboard(JSON.stringify(out, null, 2), 'calldata')
+    await copyToClipboard(JSON.stringify(out, null, 2), 'calldata')
   }
   catch (error) {
     logWarn('BatchReviewModal/copyCalldata', error)
@@ -793,6 +795,14 @@ const onCloseRequested = () => {
         size="compact"
         title="Preparation failed"
         :description="prepareError"
+      />
+
+      <UiAlert
+        v-if="executionCeremonyRef?.usesPlaceholderSignatures"
+        variant="info"
+        size="compact"
+        title="Authorization signatures required"
+        description="Copied calldata contains placeholder authorization signatures. Your wallet requests the reviewed signatures only after you confirm the batch."
       />
 
       <!-- Secondary actions: copy calldata + Tenderly -->

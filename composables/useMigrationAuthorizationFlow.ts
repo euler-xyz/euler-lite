@@ -62,15 +62,23 @@ export const useMigrationAuthorizationFlow = () => {
     return false
   }
 
-  const revokeAfterSuccess = async (revokes: readonly MigrationAuthorizationRevoke[]) => {
+  const revokeAfterSuccess = async (
+    revokes: readonly MigrationAuthorizationRevoke[],
+    options?: { shouldNotify?: () => boolean },
+  ) => {
     queueRevokes(revokes)
     if (await restorePendingRevokes()) return
+    if (options?.shouldNotify?.() === false) return
     showWarning('Migration succeeded, but restoring your previous authorization failed or was cancelled. You can restore it manually later.')
   }
 
-  const revokeAfterAbort = async (revokes: readonly MigrationAuthorizationRevoke[]) => {
+  const revokeAfterAbort = async (
+    revokes: readonly MigrationAuthorizationRevoke[],
+    options?: { shouldNotify?: () => boolean },
+  ) => {
     queueRevokes(revokes)
     if (await restorePendingRevokes()) return
+    if (options?.shouldNotify?.() === false) return
     showWarning('The temporary authorization granted for this migration is still standing. Retry the migration or restore your previous authorization manually.')
   }
 

@@ -90,25 +90,29 @@ export interface BatchEntryExecutionPrerequisites {
   postTxsByPreTx?: Array<BatchEntryExternalTx | undefined>
 }
 
-export interface BatchEntryBundledExecution {
+export interface BatchEntryExecutionCeremony {
   /**
-   * Execution payload built WITHOUT live authorization reads (the
-   * simulation-variant plan) — the grants ride in the same Safe proposal
-   * and are not mined when this plan is built.
+   * Execution payload built from the same authorization resolution as the
+   * prerequisite calls and review rows.
    */
   plan: TransactionPlan
-  /** Grant calls to prepend to the proposal, in dependency order. */
-  grants: BatchEntryExternalTx[]
-  /** Revocation calls to append, already in unwind order for this entry. */
-  revokes: BatchEntryExternalTx[]
+  /** One authorization resolution shared by standard and Safe execution. */
+  prerequisites?: BatchEntryExecutionPrerequisites
   /**
-   * Review rows for the grants above, derived from the SAME authorization
-   * resolution — the modal renders these, never the add-time captures, so
-   * the displayed ceremony cannot drift from the executed one.
+   * Review rows for the prerequisite grants, derived from this ceremony's
+   * authorization resolution.
    */
   grantSteps: DisplayStep[]
-  /** Review rows for the revocations above, same resolution. */
+  /** Review rows for the prerequisite revocations, from the same resolution. */
   revokeSteps: DisplayStep[]
+  /**
+   * Resolve wallet signatures only after the user confirms this reviewed
+   * ceremony. The callback receives the ceremony freshness guard and returns
+   * the same plan with real signature bytes.
+   */
+  resolveExecutionPlan?: (beforeWalletAction: () => void) => Promise<TransactionPlan>
+  /** The review/copy plan contains placeholder authorization signatures. */
+  usesPlaceholderSignatures?: boolean
 }
 
 /** One immutable batch review ceremony used for display, export, and execution. */
@@ -117,8 +121,12 @@ export interface PreparedBatchExecution {
   readonly owner: Address
   readonly chainId: number
   readonly safeWallet: boolean
+  readonly safeWalletResolved: boolean
+  readonly connectorKey?: string
   readonly mode: 'standard' | 'safe-bundled'
   readonly prepared: TransactionPlanPrepared
+  readonly resolvePreparedPlan?: (beforeWalletAction: () => void) => Promise<TransactionPlanPrepared>
+  readonly usesPlaceholderSignatures: boolean
   readonly grants: readonly BatchEntryExternalTx[]
   readonly revokes: readonly BatchEntryExternalTx[]
   readonly prerequisites: readonly Readonly<BatchEntryExecutionPrerequisites>[]
@@ -136,21 +144,14 @@ export interface BatchEntry {
   plan: TransactionPlan
   /** Optional real execution payload builder for entries whose preview plan uses simulation-only state. */
   buildExecutionPlan?: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
-  /** Standalone transactions this entry needs around the merged batch, resolved
-   *  when the review ceremony is prepared. Migrations without message signatures
-   *  use this to grant their authorization before the batch and revoke it after:
-   *  the grants cannot
-   *  be plan items (`mergePlans` rejects contractCall, and the EVC would be the
-   *  msg.sender), and must be mined before the plan is built. */
-  buildExecutionPrerequisites?: (
+  /** Resolve the execution plan, authorization calls, and review rows together.
+   *  Standard wallets broadcast the prerequisite calls around the prepared core;
+   *  Safe wallets include the same calls in one atomic proposal. */
+  buildExecutionCeremony?: (
     account: Account<IHasVaultAddress>,
-  ) => Promise<BatchEntryExecutionPrerequisites | undefined>
-  /** Bundled-mode counterpart of the two builders above: plan + grant/revoke
-   *  calls for ONE atomic Safe proposal. Entries providing this let the cart
-   *  skip the standalone grant broadcasts entirely when a Safe executes. */
-  buildBundledExecution?: (
-    account: Account<IHasVaultAddress>,
-  ) => Promise<BatchEntryBundledExecution>
+  ) => Promise<BatchEntryExecutionCeremony>
+  /** This entry's prerequisite calls belong inside one atomic Safe proposal. */
+  bundleExecutionCeremony?: boolean
   /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
   stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
@@ -1776,7 +1777,7 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 }
 
 export const useTxBatch = () => {
-  const { chainId: wagmiChainId } = useWagmi()
+  const { chainId: wagmiChainId, connector } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
   const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
@@ -1786,7 +1787,11 @@ export const useTxBatch = () => {
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
   const { prepareTransactionPlan, executePreparedPlan, executePreparedPlanWithPlainCalls, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
-  const { isSafeWallet } = useSafeWallet()
+  const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
+  const connectorKey = computed(() => {
+    const current = connector.value
+    return current ? `${current.id}:${current.uid}` : undefined
+  })
   const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
@@ -2213,7 +2218,7 @@ export const useTxBatch = () => {
       })
       // Safe classification is part of a bundled ceremony's wallet context.
       // Connector detection can change without changing the owner or chain.
-      watch(isSafeWallet, () => {
+      watch([isSafeWallet, isSafeWalletResolved, connectorKey], () => {
         invalidateBatchReview()
       })
     })
@@ -2569,25 +2574,32 @@ export const useTxBatch = () => {
   }
 
   /**
-   * A Safe executes the cart's prerequisites inside the batch proposal when
-   * every prerequisite-bearing entry provides a bundled builder.
+   * A Safe executes ceremony prerequisites inside the batch proposal.
    */
   const willBundlePrerequisites = computed(() =>
     isSafeWallet.value
-    && entries.value.some(entry => entry.buildBundledExecution)
-    && entries.value.every(entry => !entry.buildExecutionPrerequisites || entry.buildBundledExecution),
+    && entries.value.some(entry => entry.bundleExecutionCeremony),
   )
 
   const isBatchExecutionCurrent = (ceremony: PreparedBatchExecution): boolean => {
     if (
       pendingAddCount.value > 0
       || ceremony.generation !== batchGeneration.value
-      || ceremony.chainId !== chainId.value
-      || ceremony.safeWallet !== isSafeWallet.value
-      || !owner.value
     ) {
       return false
     }
+    return isBatchExecutionWalletCurrent(ceremony)
+  }
+
+  const isBatchExecutionWalletCurrent = (ceremony: PreparedBatchExecution): boolean => {
+    if (
+      ceremony.chainId !== chainId.value
+      || ceremony.safeWallet !== isSafeWallet.value
+      || !isSafeWalletResolved.value
+      || ceremony.safeWalletResolved !== isSafeWalletResolved.value
+      || ceremony.connectorKey !== connectorKey.value
+      || !owner.value
+    ) return false
     try {
       return getAddress(owner.value) === ceremony.owner
     }
@@ -2615,6 +2627,9 @@ export const useTxBatch = () => {
     if (!lastMerged || entries.value.length === 0) {
       return Promise.reject(new Error('Batch simulation not loaded'))
     }
+    if (!isSafeWalletResolved.value) {
+      return Promise.reject(new Error('Wallet type is still loading — wait before reviewing the batch.'))
+    }
 
     const generation = batchGeneration.value
     if (batchPreparation?.generation === generation) return batchPreparation.promise
@@ -2624,15 +2639,32 @@ export const useTxBatch = () => {
     if (!currentOwner || !currentChainId) return Promise.reject(new Error('Account not loaded'))
     const reviewOwner = getAddress(currentOwner)
     const reviewSafeWallet = isSafeWallet.value
+    const reviewSafeWalletResolved = isSafeWalletResolved.value
+    const reviewConnectorKey = connectorKey.value
     const mode = willBundlePrerequisites.value ? 'safe-bundled' : 'standard'
 
     const preparationPromise = (async (): Promise<PreparedBatchExecution> => {
-      const { plans, grants, revokes, prerequisites, reviewByEntryId } = mode === 'safe-bundled'
+      const { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, reviewByEntryId } = mode === 'safe-bundled'
         ? await collectBundledExecution()
         : await collectStandardExecution()
       const sdk = await getEulerSdkFresh()
       const executionPlan = sdk.executionService.mergePlans(plans)
       const prepared = await prepareTransactionPlan(executionPlan)
+      const resolvePreparedPlan = planResolvers.some(Boolean)
+        ? async (beforeWalletAction: () => void): Promise<TransactionPlanPrepared> => {
+          const resolvedPlans: TransactionPlan[] = []
+          for (const [index, plan] of plans.entries()) {
+            beforeWalletAction()
+            const resolver = planResolvers[index]
+            resolvedPlans.push(resolver ? await resolver(beforeWalletAction) : plan)
+            beforeWalletAction()
+          }
+          const resolvedPlan = sdk.executionService.mergePlans(resolvedPlans)
+          const resolvedPrepared = await prepareTransactionPlan(resolvedPlan)
+          beforeWalletAction()
+          return resolvedPrepared
+        }
+        : undefined
       const frozenReview = Object.freeze(Object.fromEntries(
         Object.entries(reviewByEntryId).map(([entryId, review]) => [entryId, Object.freeze({
           plan: review.plan,
@@ -2654,8 +2686,12 @@ export const useTxBatch = () => {
         owner: reviewOwner,
         chainId: currentChainId,
         safeWallet: reviewSafeWallet,
+        safeWalletResolved: reviewSafeWalletResolved,
+        connectorKey: reviewConnectorKey,
         mode,
         prepared,
+        resolvePreparedPlan,
+        usesPlaceholderSignatures,
         grants: Object.freeze(grants.map(tx => Object.freeze({ ...tx }))),
         revokes: Object.freeze(revokes.map(tx => Object.freeze({ ...tx }))),
         prerequisites: frozenPrerequisites,
@@ -2681,6 +2717,8 @@ export const useTxBatch = () => {
    */
   const collectStandardExecution = async () => {
     const plans: TransactionPlan[] = []
+    const planResolvers: Array<BatchEntryExecutionCeremony['resolveExecutionPlan']> = []
+    let usesPlaceholderSignatures = false
     const grants: BatchEntryExternalTx[] = []
     const revokes: BatchEntryExternalTx[] = []
     const prerequisites: BatchEntryExecutionPrerequisites[] = []
@@ -2691,14 +2729,12 @@ export const useTxBatch = () => {
     }> = {}
 
     for (const [index, entry] of entries.value.entries()) {
-      if (entry.buildExecutionPrerequisites) {
-        if (!entry.buildBundledExecution) {
-          throw new Error('This operation cannot produce an exact reviewable execution plan.')
-        }
-        const account = await getExecutionPlanningAccount(index)
-        const prerequisite = await entry.buildExecutionPrerequisites(account)
-        const execution = await entry.buildBundledExecution(account)
+      if (entry.buildExecutionCeremony) {
+        const execution = await entry.buildExecutionCeremony(await getExecutionPlanningAccount(index))
+        const prerequisite = execution.prerequisites
         plans.push(execution.plan)
+        planResolvers.push(execution.resolveExecutionPlan)
+        usesPlaceholderSignatures ||= execution.usesPlaceholderSignatures === true
         if (prerequisite) {
           prerequisites.push(prerequisite)
           grants.push(...prerequisite.preTxs)
@@ -2713,8 +2749,12 @@ export const useTxBatch = () => {
         }
         reviewByEntryId[entry.id] = {
           plan: execution.plan,
-          grantSteps: execution.grantSteps.map(step => ({ ...step, isSeparateTx: true })),
-          revokeSteps: execution.revokeSteps.map(step => ({ ...step, isSeparateTx: true })),
+          grantSteps: prerequisite
+            ? execution.grantSteps.map(step => ({ ...step, isSeparateTx: true }))
+            : execution.grantSteps,
+          revokeSteps: prerequisite
+            ? execution.revokeSteps.map(step => ({ ...step, isSeparateTx: true }))
+            : execution.revokeSteps,
         }
         continue
       }
@@ -2723,10 +2763,11 @@ export const useTxBatch = () => {
         ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
         : entry.plan
       plans.push(plan)
+      planResolvers.push(undefined)
       reviewByEntryId[entry.id] = { plan, grantSteps: [], revokeSteps: [] }
     }
 
-    return { plans, grants, revokes, prerequisites, reviewByEntryId }
+    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, reviewByEntryId }
   }
 
   /**
@@ -2736,6 +2777,8 @@ export const useTxBatch = () => {
    */
   const collectBundledExecution = async () => {
     const plans: TransactionPlan[] = []
+    const planResolvers: Array<BatchEntryExecutionCeremony['resolveExecutionPlan']> = []
+    let usesPlaceholderSignatures = false
     const grants: BatchEntryExternalTx[] = []
     const revokesByEntry: BatchEntryExternalTx[][] = []
     const reviewByEntryId: Record<string, {
@@ -2744,11 +2787,14 @@ export const useTxBatch = () => {
       revokeSteps: DisplayStep[]
     }> = {}
     for (const [index, entry] of entries.value.entries()) {
-      if (entry.buildBundledExecution) {
-        const bundled = await entry.buildBundledExecution(await getExecutionPlanningAccount(index))
+      if (entry.buildExecutionCeremony) {
+        const bundled = await entry.buildExecutionCeremony(await getExecutionPlanningAccount(index))
+        const prerequisite = bundled.prerequisites
         plans.push(bundled.plan)
-        grants.push(...bundled.grants)
-        revokesByEntry.push(bundled.revokes)
+        planResolvers.push(bundled.resolveExecutionPlan)
+        usesPlaceholderSignatures ||= bundled.usesPlaceholderSignatures === true
+        grants.push(...(prerequisite?.preTxs ?? []))
+        revokesByEntry.push(prerequisite?.postTxs ?? [])
         reviewByEntryId[entry.id] = {
           plan: bundled.plan,
           grantSteps: bundled.grantSteps,
@@ -2760,10 +2806,11 @@ export const useTxBatch = () => {
         ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
         : entry.plan
       plans.push(plan)
+      planResolvers.push(undefined)
       revokesByEntry.push([])
       reviewByEntryId[entry.id] = { plan, grantSteps: [], revokeSteps: [] }
     }
-    return { plans, grants, revokes: revokesByEntry.reverse().flat(), prerequisites: [], reviewByEntryId }
+    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes: revokesByEntry.reverse().flat(), prerequisites: [], reviewByEntryId }
   }
 
   /**
@@ -2781,6 +2828,7 @@ export const useTxBatch = () => {
         assertBatchExecutionCurrent(ceremony)
         await sendPlainTransactions([preTx], {
           walletContext: prerequisites.walletContext,
+          beforeBroadcast: () => assertBatchExecutionCurrent(ceremony),
           onBroadcast: (_index, walletContext) => {
             grantWalletContext = walletContext
             const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
@@ -2823,11 +2871,16 @@ export const useTxBatch = () => {
     execError.value = undefined
     isExecuting.value = true
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
+    let execution = reviewedExecution
     try {
       if (!await restorePendingBeforeRetry()) return
-      const execution = reviewedExecution ?? await prepareBatchExecution()
+      execution ??= await prepareBatchExecution()
       assertBatchExecutionCurrent(execution)
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
+      const prepared = execution.resolvePreparedPlan
+        ? await execution.resolvePreparedPlan(() => assertBatchExecutionCurrent(execution!))
+        : execution.prepared
+      assertBatchExecutionCurrent(execution)
 
       if (execution.mode === 'safe-bundled') {
         // No standalone gas estimate — grants are unmined until the
@@ -2836,14 +2889,21 @@ export const useTxBatch = () => {
         // pre-flight validation. Atomicity also removes the unwind
         // bookkeeping: a failed proposal reverts its grants with it.
         assertBatchExecutionCurrent(execution)
-        const result = await executePreparedPlanWithPlainCalls(execution.prepared, {
+        const result = await executePreparedPlanWithPlainCalls(prepared, {
           before: execution.grants,
           after: execution.revokes,
-        }, { allowSingleCall: true })
+        }, {
+          allowSingleCall: true,
+          beforeBroadcast: () => assertBatchExecutionCurrent(execution),
+        })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
           // the sequential multi-proposal ceremony.
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
+        }
+        if (!isBatchExecutionCurrent(execution)) {
+          scope?.markSucceeded()
+          return
         }
         clearBatch()
         if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
@@ -2856,20 +2916,32 @@ export const useTxBatch = () => {
       // Final on-chain gas estimate before the irreversible core broadcast. If
       // chain state moved since review, surface the decoded reason and retain
       // the cart. A pending edit during this await invalidates the ceremony.
-      await estimateGasForPlan(execution.prepared.plan)
+      await estimateGasForPlan(prepared.plan)
       assertBatchExecutionCurrent(execution)
-      await executePreparedPlan(execution.prepared)
+      await executePreparedPlan(prepared, {
+        beforeBroadcast: () => assertBatchExecutionCurrent(execution),
+      })
+      await revokeAfterSuccess(grantedRevokes, {
+        shouldNotify: () => isBatchExecutionWalletCurrent(execution!),
+      })
+      if (!isBatchExecutionCurrent(execution)) {
+        scope?.markSucceeded()
+        return
+      }
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
-      await revokeAfterSuccess(grantedRevokes)
       await redirectAfterBatchExecution(scope)
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
       // The batch never landed, so no granted authorization should be left
       // standing. Entries stay in the cart for a retry, which re-grants.
-      await revokeAfterAbort(grantedRevokes)
-      execError.value = await describeExecError(error)
+      await revokeAfterAbort(grantedRevokes, {
+        shouldNotify: () => !execution || isBatchExecutionWalletCurrent(execution),
+      })
+      if (!execution || isBatchExecutionCurrent(execution)) {
+        execError.value = await describeExecError(error)
+      }
     }
     finally {
       isExecuting.value = false

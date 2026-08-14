@@ -29,7 +29,7 @@ describe('isBundledReviewEntry', () => {
 })
 
 describe('getBatchReviewDisplayPlan', () => {
-  it('shows the ceremony plan instead of a stale captured preview', () => {
+  it('uses the ceremony plan for display and disclosure instead of a stale captured preview', () => {
     const freshCeremonyPlan = [{ type: 'evcBatch', items: [{ name: 'fresh-execution' }] }] as unknown as TransactionPlan
     const stalePreviewPlan = [{ type: 'evcBatch', items: [{ name: 'stale-preview' }] }] as unknown as TransactionPlan
     const entryPlan = [{ type: 'evcBatch', items: [{ name: 'entry-plan' }] }] as unknown as TransactionPlan

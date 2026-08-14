@@ -1005,6 +1005,7 @@ export const useEulerTx = () => {
 
   const signMigrationAuthorization = async (
     request: MigrationAuthorizationRequest,
+    options?: { beforeSignature?: () => void },
   ): Promise<SignedMigrationAuthorization> => {
     if (isSpyMode.value) {
       throw new Error('Authorization signatures are disabled in spy mode')
@@ -1019,9 +1020,10 @@ export const useEulerTx = () => {
       currentAccount: currentAccount.address,
       currentChainId: currentAccount.chainId,
     })
+    options?.beforeSignature?.()
     const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
     const postMigrationAuthorization = request.postMigrationAuthorization
-      ? await signMigrationAuthorization(request.postMigrationAuthorization)
+      ? await signMigrationAuthorization(request.postMigrationAuthorization, options)
       : undefined
     return {
       request,
@@ -1208,6 +1210,7 @@ export const useEulerTx = () => {
     expectedChainId,
     connector,
     resolveHash,
+    beforeBroadcast,
   }: {
     isOkx: boolean
     expectedAccount: Address
@@ -1220,6 +1223,8 @@ export const useEulerTx = () => {
      */
     connector?: ReturnType<typeof getAccount>['connector']
     resolveHash?: (hash: Hash) => Promise<Hash>
+    /** Final caller-owned freshness check at the wallet submission boundary. */
+    beforeBroadcast?: () => void
   }) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
@@ -1234,6 +1239,7 @@ export const useEulerTx = () => {
         currentAccount: currentAccount.address,
         currentChainId: currentAccount.chainId,
       })
+      beforeBroadcast?.()
       const hash = await sendTransactionAsync({
         account: expectedAccount,
         chainId: expectedChainId,
@@ -1264,6 +1270,7 @@ export const useEulerTx = () => {
     options?: {
       onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
       walletContext?: WalletExecutionContext
+      beforeBroadcast?: () => void
     },
   ): Promise<TransactionReceipt[]> => {
     if (isSpyMode.value) {
@@ -1293,6 +1300,7 @@ export const useEulerTx = () => {
       expectedAccount: owner,
       expectedChainId: cid,
       connector,
+      beforeBroadcast: options?.beforeBroadcast,
     })
 
     const receipts: TransactionReceipt[] = []
@@ -1421,7 +1429,7 @@ export const useEulerTx = () => {
    * bundling brings no benefit (fewer than two calls) — callers fall back to
    * sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, beforeBroadcast }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
@@ -1440,6 +1448,8 @@ export const useEulerTx = () => {
      * "no Safe context" — with it set, undefined strictly means the latter.
      */
     allowSingleCall?: boolean
+    /** Final caller-owned freshness check at the Safe submission boundary. */
+    beforeBroadcast?: () => void
   }) => {
     let planCalls
     try {
@@ -1474,6 +1484,7 @@ export const useEulerTx = () => {
       currentAccount: currentAccount.address,
       currentChainId: currentAccount.chainId,
     })
+    beforeBroadcast?.()
 
     // Pin submission to the connector whose provider was identified as Safe.
     // Without it, wagmi resolves the currently-active connector, and a
@@ -1587,7 +1598,10 @@ export const useEulerTx = () => {
     return result
   }
 
-  const executePreparedPlan = async (prepared: TransactionPlanPrepared) => {
+  const executePreparedPlan = async (
+    prepared: TransactionPlanPrepared,
+    options?: { beforeBroadcast?: () => void },
+  ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
@@ -1641,6 +1655,7 @@ export const useEulerTx = () => {
         connector,
         safeWalletProvider,
         sdk,
+        beforeBroadcast: options?.beforeBroadcast,
       })
       if (bundled) {
         finalizeExecution(bundled)
@@ -1653,6 +1668,7 @@ export const useEulerTx = () => {
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
       connector,
+      beforeBroadcast: options?.beforeBroadcast,
       resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
@@ -1666,6 +1682,7 @@ export const useEulerTx = () => {
       prepared: effectivePrepared,
       sendTransaction,
       signTypedData: async (typedData) => {
+        options?.beforeBroadcast?.()
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
         return signature as Hex
       },
@@ -1694,7 +1711,7 @@ export const useEulerTx = () => {
       before?: readonly PlainTxRequest[]
       after?: readonly PlainTxRequest[]
     },
-    options?: { allowSingleCall?: boolean },
+    options?: { allowSingleCall?: boolean, beforeBroadcast?: () => void },
   ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1738,6 +1755,7 @@ export const useEulerTx = () => {
       sdk,
       extraCalls,
       allowSingleCall: options?.allowSingleCall,
+      beforeBroadcast: options?.beforeBroadcast,
     })
     if (!bundled) return undefined
     finalizeExecution(bundled)

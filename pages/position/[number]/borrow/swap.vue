@@ -3601,47 +3601,48 @@ const addInboundExternalMigrationToBatch = async () => {
     const batchEntry = {
       label: `Migrate ${positionLabel} to Euler`,
       nameOverride: `Migrate ${positionLabel}`,
-      buildExecutionPlan: async () => {
-        const authorizationRequest = useSignatures
-          ? await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-          : undefined
-        const authorization = authorizationRequest
-          ? await signMigrationAuthorization(authorizationRequest)
-          : undefined
-        // Without signatures the grant was already mined by the batch's
-        // pre-phase, so the connector omits the authorization item.
-        return buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
-      },
       ...(useSignatures
-        ? {}
-        : {
-            buildExecutionPrerequisites: async () => {
+        ? {
+            // Review uses placeholder signature bytes. Real wallet signatures
+            // are requested only after confirmation.
+            buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
               const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-              if (!request) return undefined
-              const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+              const simulation = await buildInboundExternalMigrationSimulationResult(input, request, account, useSignatures)
               return {
-                preTxs: grants,
-                walletContext: { account: request.owner, chainId: request.chainId },
-                postTxs: revokes,
-                postTxsByPreTx: revokesByGrant,
+                plan: simulation.previewPlan,
+                resolveExecutionPlan: async (beforeWalletAction: () => void) => {
+                  const authorization = request
+                    ? await signMigrationAuthorization(request, { beforeSignature: beforeWalletAction })
+                    : undefined
+                  beforeWalletAction()
+                  return buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
+                },
+                usesPlaceholderSignatures: !!request,
+                grantSteps: buildInboundExternalMigrationSignatureSteps(request, true, false, input.source.connectorId),
+                revokeSteps: [],
               }
             },
-            // Bundled counterpart for Safe execution: the simulation-variant
-            // plan validates the grant instead of reading the live
-            // allowance, so nothing needs to mine before the proposal is
-            // assembled. The review rows come from the SAME resolution so
-            // the modal cannot display a ceremony other than the one that
-            // executes.
-            buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
+          }
+        : {
+            bundleExecutionCeremony: true,
+            // Resolve authorization once so the reviewed rows, exported calls,
+            // standalone flow, and Safe proposal all describe one ceremony.
+            buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
               const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-              const { grants, revokes } = request
+              const { grants, revokes, revokesByGrant } = request
                 ? encodeMigrationAuthorizationTxs(request)
-                : { grants: [], revokes: [] }
+                : { grants: [], revokes: [], revokesByGrant: [] }
               const simulation = await buildInboundExternalMigrationSimulationResult(input, request, account, useSignatures)
               return {
                 plan: simulation.plan,
-                grants,
-                revokes,
+                prerequisites: request
+                  ? {
+                      preTxs: grants,
+                      walletContext: { account: request.owner, chainId: request.chainId },
+                      postTxs: revokes,
+                      postTxsByPreTx: revokesByGrant,
+                    }
+                  : undefined,
                 grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
                 revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
               }
@@ -3654,8 +3655,7 @@ const addInboundExternalMigrationToBatch = async () => {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        // Add-time rows describe the sequential fallback. A latched Safe review
-        // uses rows from the exact bundled resolution instead.
+        // Ceremony-owned rows replace these captured rows during batch review.
         signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures, false),
         postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures, false),
         displayPlan: preview.calldataPrepared.plan,
@@ -4017,13 +4017,14 @@ function buildInboundExternalMigrationSignatureSteps(
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
   bundled: boolean,
+  connectorId = inboundExternalAuthorizationConnector.value,
 ): DisplayStep[] {
   const sourceCollateral = externalCollateralAsset.value
   if (!sourceCollateral) return []
   if (!useSignatures) {
     return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled })
   }
-  if (inboundExternalAuthorizationConnector.value === AAVE_CONNECTOR_ID) {
+  if (connectorId === AAVE_CONNECTOR_ID) {
     const permitValue = getTypedDataAuthorizationValue(authorizationRequest)
     return [{
       index: 1,
@@ -4032,7 +4033,7 @@ function buildInboundExternalMigrationSignatureSteps(
       assetInfo: migrationStepAssetInfo(sourceCollateral, permitValue ?? sourceCollateral.amount),
     }]
   }
-  if (inboundExternalAuthorizationConnector.value === MORPHO_CONNECTOR_ID) {
+  if (connectorId === MORPHO_CONNECTOR_ID) {
     return flattenMigrationAuthorizationRequests(authorizationRequest).map((request, index) => ({
       index: index + 1,
       label: request.kind === 'typedData' && request.typedData.message.isAuthorized === false
@@ -4041,7 +4042,7 @@ function buildInboundExternalMigrationSignatureSteps(
       isSeparateTx: false,
     }))
   }
-  if (inboundExternalAuthorizationConnector.value === METAMORPHO_CONNECTOR_ID) {
+  if (connectorId === METAMORPHO_CONNECTOR_ID) {
     // The permit value is denominated in vault shares, so display the
     // underlying position amount as an estimate instead.
     return [{

@@ -1094,46 +1094,48 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
   const batchEntry = {
     label: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetProtocolDisplay(input.target)}`,
     nameOverride: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
-    buildExecutionPlan: async (account: Account<IHasVaultAddress>) => {
-      const executionAuthorizationRequest = useSignatures
-        ? await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-        : undefined
-      const authorization = executionAuthorizationRequest
-        ? await signMigrationAuthorization(executionAuthorizationRequest)
-        : undefined
-      // Without signatures the grant was already mined by the batch's pre-phase,
-      // so the connector omits the authorization item from the plan.
-      return buildMigrationPlan(input, authorization, migrationPosition, account)
-    },
     ...(useSignatures
-      ? {}
-      : {
-          buildExecutionPrerequisites: async (account: Account<IHasVaultAddress>) => {
+      ? {
+          // Review uses placeholder signature bytes. Real wallet signatures are
+          // requested only after the user confirms this exact authorization.
+          buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
             const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-            if (!request) return undefined
-            const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+            const simulation = await buildMigrationSimulation(input, migrationPosition, request, account)
             return {
-              preTxs: grants,
-              walletContext: { account: request.owner, chainId: request.chainId },
-              postTxs: revokes,
-              postTxsByPreTx: revokesByGrant,
+              plan: simulation.previewPlan,
+              resolveExecutionPlan: async (beforeWalletAction: () => void) => {
+                const authorization = request
+                  ? await signMigrationAuthorization(request, { beforeSignature: beforeWalletAction })
+                  : undefined
+                beforeWalletAction()
+                return buildMigrationPlan(input, authorization, migrationPosition, account)
+              },
+              usesPlaceholderSignatures: !!request,
+              grantSteps: buildSignatureSteps(input.target, request, true, false),
+              revokeSteps: [],
             }
           },
-          // Bundled counterpart for Safe execution: the simulation-variant
-          // plan validates the grant instead of reading the live allowance,
-          // so nothing needs to mine before the proposal is assembled. The
-          // review rows come from the SAME resolution so the modal cannot
-          // display a ceremony other than the one that executes.
-          buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
+        }
+      : {
+          bundleExecutionCeremony: true,
+          // Resolve authorization once so the reviewed rows, exported calls,
+          // standalone flow, and Safe proposal all describe one ceremony.
+          buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
             const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-            const { grants, revokes } = request
+            const { grants, revokes, revokesByGrant } = request
               ? encodeMigrationAuthorizationTxs(request)
-              : { grants: [], revokes: [] }
+              : { grants: [], revokes: [], revokesByGrant: [] }
             const simulation = await buildMigrationSimulation(input, migrationPosition, request, account)
             return {
               plan: simulation.plan,
-              grants,
-              revokes,
+              prerequisites: request
+                ? {
+                    preTxs: grants,
+                    walletContext: { account: request.owner, chainId: request.chainId },
+                    postTxs: revokes,
+                    postTxsByPreTx: revokesByGrant,
+                  }
+                : undefined,
               grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
               revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
             }
@@ -1150,8 +1152,7 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       type: 'migration',
       asset: sourceDebtAsset,
       amount: debtAmount,
-      // Add-time rows describe the sequential fallback. A latched Safe review
-      // uses rows from the exact bundled resolution instead.
+      // Ceremony-owned rows replace these captured rows during batch review.
       signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures, false),
       postSteps: buildRevokeSteps(authorizationRequest, useSignatures, false),
       displayPlan: preview.calldataPrepared.plan,
