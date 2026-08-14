@@ -29,7 +29,7 @@ EulerEarn lens / V3 detail
         └─ else     → asset-denominated display string
 ```
 
-There is **no** Lite-side `balanceOf(address(1))` read and no local netting helper. An earlier coverage-RPC path was removed because the lens already subtracts `convertToAssets(balanceOf(address(1)))` before exposing `lostAssets`; reading coverage again double-counted and understated the shortfall.
+There is **no** Lite-side `balanceOf(address(1))` read and no local netting helper. An earlier coverage-RPC path was removed because the lens already subtracts `convertToAssets(balanceOf(address(1)))` before exposing `lostAssets`; reading coverage again double-counted and understated the shortfall. The V3 API is populated from the same lens, so the value is already net of coverage on both backends.
 
 ## Display path
 

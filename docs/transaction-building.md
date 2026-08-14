@@ -87,7 +87,7 @@ Users choose whether message signatures are enabled via **Settings → Gasless s
 | Storage key | `signatures-enabled` (`SIGNATURES_PREFERENCE_STORAGE_KEY`) |
 | Legacy key | `permit2-enabled` — copied once into the new key by `seedSignaturePreference`, then removed |
 | Default | `true` (gasless / typed-data path) |
-| `useEulerTx` wiring | `usePermit2: options?.usePermit2 ?? signaturesEnabled.value` on plan/prepare/execute helpers |
+| `useEulerTx` wiring | `prepareTransactionPlan` accepts `options?.usePermit2 ?? signaturesEnabled.value`; `executeTransactionPlan` always uses `signaturesEnabled.value` (no per-call override) |
 
 When the toggle is **off**, approval-capable flows fall back to on-chain approval transactions instead of Permit2 (and other) message signatures. That path exists for wallets that cannot sign typed data reliably (for example some Safe / smart-account setups) while still allowing migrations and deposits to proceed.
 
