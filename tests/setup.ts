@@ -7,10 +7,41 @@
  */
 
 import { computed, reactive, readonly, ref, shallowReactive, shallowRef, watch, watchEffect, type Ref } from 'vue'
+import { beforeEach } from 'vitest'
 
 type AnyFn = (...args: unknown[]) => unknown
 
 const g = globalThis as unknown as Record<string, unknown>
+const baseNavigator = globalThis.navigator
+
+beforeEach(() => {
+  let held = false
+  const locks = {
+    request: async (
+      name: string,
+      _options: LockOptions,
+      callback: (lock: Lock | null) => unknown,
+    ) => {
+      if (held) return callback(null)
+      held = true
+      try {
+        return await callback({ name, mode: 'exclusive' } as Lock)
+      }
+      finally {
+        held = false
+      }
+    },
+  }
+  const navigatorWithLocks = Object.create(baseNavigator ?? null)
+  Object.defineProperty(navigatorWithLocks, 'locks', {
+    configurable: true,
+    value: locks,
+  })
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: navigatorWithLocks,
+  })
+})
 
 if (!g.defineEventHandler) {
   g.defineEventHandler = (fn: AnyFn) => fn

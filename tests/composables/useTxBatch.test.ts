@@ -14,7 +14,7 @@ import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import { SafeSubmissionStatusUnknownError, SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
-import { loadPendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
+import { loadPendingSafeBatchSubmissions, savePendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -2158,6 +2158,39 @@ describe('useTxBatch execution prerequisites', () => {
       if (originalWindow === undefined) delete (globalThis as { window?: Window }).window
       else Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
     }
+  })
+
+  it('refreshes stale tab state before preserving another context Safe reservation', async () => {
+    const batch = useTxBatch()
+    savePendingSafeBatchSubmissions(window.localStorage, [{
+      account: subAccount,
+      chainId: 8453,
+      batchFingerprint: '0123456789abcdef',
+      batchPlan: [],
+      errorMessage: 'Other tab Safe submission pending',
+      refreshExternalMigrationPositions: false,
+      grantedRevokes: [],
+    }])
+    let reservationsDuringPreflight: ReturnType<typeof loadPendingSafeBatchSubmissions> = []
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(preparedEnvelope())
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      await options?.onSafePreflight?.()
+      reservationsDuringPreflight = loadPendingSafeBatchSubmissions(window.localStorage)
+      throw new Error('Wallet closed before submission')
+    })
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch(await prepareReviewedBatch(batch))
+
+    expect(reservationsDuringPreflight).toHaveLength(2)
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([
+      expect.objectContaining({
+        account: subAccount,
+        chainId: 8453,
+        batchFingerprint: '0123456789abcdef',
+      }),
+    ])
   })
 
   it('does not misclassify an unresolved approval Safe transaction as the atomic batch', async () => {

@@ -6,7 +6,7 @@ import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { isSuccessfulTransactionReceipt, useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
-import { loadPendingSafeBundleSubmissions } from '~/utils/pending-safe-bundle-submission'
+import { loadPendingSafeBundleSubmissions, reservePendingSafeBundleSubmission } from '~/utils/pending-safe-bundle-submission'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import * as safeWalletTransactions from '~/utils/safeWalletTransactions'
 import { clearLiteTosSignature, setLiteTosSignature } from '~/utils/sdk-tos'
@@ -670,6 +670,44 @@ describe('useEulerTx Safe wallet bundling', () => {
     await executePreparedPlan(buildPrepared(approvedPlan))
 
     expect(loadPendingSafeBundleSubmissions(window.localStorage)).toEqual([])
+  })
+
+  it('preserves another context reservation when this tab writes its Safe lifecycle', async () => {
+    reservePendingSafeBundleSubmission(window.localStorage, {
+      reservationId: 'other-context',
+      account: OTHER_OWNER,
+      chainId: 8453,
+      errorMessage: 'Other Safe submission pending',
+    })
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan(buildPrepared(approvedPlan))
+
+    expect(loadPendingSafeBundleSubmissions(window.localStorage)).toEqual([{
+      reservationId: 'other-context',
+      account: OTHER_OWNER,
+      chainId: 8453,
+      errorMessage: 'Other Safe submission pending',
+    }])
+  })
+
+  it('does not let a second tab enter Safe while the first lifecycle owns the mutex', async () => {
+    let rejectFirst!: (error: unknown) => void
+    wagmiMocks.sendCalls.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectFirst = reject
+    }))
+    const { executePreparedPlan } = useEulerTx()
+
+    const first = executePreparedPlan(buildPrepared(approvedPlan))
+    await vi.waitFor(() => expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1))
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toThrow('Another tab is already managing a Safe submission')
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
+
+    const rejection = Object.assign(new Error('User rejected the request'), { code: 4001 })
+    rejectFirst(rejection)
+    await expect(first).rejects.toBe(rejection)
   })
 
   it('retains the hashless reservation when sendCalls rejects ambiguously', async () => {

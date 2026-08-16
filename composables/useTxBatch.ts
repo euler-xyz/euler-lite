@@ -43,6 +43,7 @@ import {
   savePendingSafeBatchSubmissions,
   type PersistedPendingSafeBatchSubmission,
 } from '~/utils/pending-safe-batch-submission'
+import { acquireSafeSubmissionLock } from '~/utils/safe-submission-lock'
 
 export interface BatchWalletChange {
   token: string
@@ -278,6 +279,8 @@ interface PendingSafeBatchSubmission {
   grantedRevokes: MigrationAuthorizationRevoke[]
   /** Reloaded locks retain serializable reconciliation state, but not cart builders. */
   hydrated?: boolean
+  /** Live-tab mutex; durable storage remains the source of truth after release. */
+  releaseCrossTabLock?: () => void
 }
 
 export const isPendingSafeSubmissionForContext = (
@@ -360,6 +363,39 @@ const hydratePendingSafeSubmissionLocks = () => {
     }],
     hydrated: true,
   }))
+}
+
+const syncPendingSafeSubmissionLocksFromStorage = () => {
+  const storage = getPendingSafeStorage()
+  if (!storage) throw new Error('Durable browser storage is unavailable; Safe submission was blocked')
+  const current = pendingSafeSubmissions.value
+  const persisted = loadPendingSafeBatchSubmissions(storage)
+  const persistedContexts = new Set(persisted.map(pending => `${pending.chainId}:${pending.account.toLowerCase()}`))
+  const terminal = current.filter(pending => pending.terminalStatus
+    && !persistedContexts.has(`${pending.chainId}:${pending.account.toLowerCase()}`))
+  pendingSafeSubmissions.value = [
+    ...terminal,
+    ...persisted.map((pending) => {
+      const existing = current.find(candidate =>
+        !candidate.terminalStatus
+        && isPendingSafeSubmissionForContext(candidate, pending.account, pending.chainId),
+      )
+      return {
+        ...existing,
+        ...pending,
+        entries: existing?.entries ?? [{
+          id: `pending-safe-${pending.submittedHash ?? pending.batchFingerprint}`,
+          label: 'Pending Safe batch',
+          plan: pending.batchPlan,
+        }],
+        // An in-memory record can intentionally have `hydrated` unset: its
+        // full entry snapshot is still available for a safe rebuild. Only a
+        // record discovered solely from storage is hydration-only.
+        hydrated: existing ? existing.hydrated : true,
+        releaseCrossTabLock: existing?.releaseCrossTabLock,
+      }
+    }),
+  ]
 }
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
@@ -1869,6 +1905,10 @@ export const useTxBatch = () => {
   )
   const setPendingSafeSubmission = (pending: PendingSafeBatchSubmission) => {
     const previous = pendingSafeSubmissions.value
+    const replaced = previous.find(existing =>
+      isPendingSafeSubmissionForContext(existing, pending.account, pending.chainId),
+    )
+    pending.releaseCrossTabLock ??= replaced?.releaseCrossTabLock
     pendingSafeSubmissions.value = [
       ...pendingSafeSubmissions.value.filter(existing =>
         !isPendingSafeSubmissionForContext(existing, pending.account, pending.chainId),
@@ -1887,6 +1927,9 @@ export const useTxBatch = () => {
     if (!pending) return
     const previous = pendingSafeSubmissions.value
     pendingSafeSubmissions.value = pendingSafeSubmissions.value.filter(existing => existing !== pending)
+    // Terminal records are memory-only. Clearing one must not rewrite a
+    // potentially newer durable reservation from another tab.
+    if (pending.terminalStatus) return
     try {
       persistPendingSafeSubmissionLocks()
     }
@@ -2769,21 +2812,43 @@ export const useTxBatch = () => {
     let batchPlanSnapshot: TransactionPlan = []
     let submittedSafeLock: PendingSafeBatchSubmission | undefined
     const safeSubmissionLifecycle = {
-      onSafePreflight: () => {
-        const reservation: PendingSafeBatchSubmission = {
-          account: batchExecutionContext!.account,
-          chainId: batchExecutionContext!.chainId,
-          batchFingerprint,
-          batchPlan: batchPlanSnapshot,
-          entries: batchEntriesSnapshot,
-          errorMessage: 'Safe submission is reserved. Verify the Safe account before retrying if this page reloads before a transaction hash is shown.',
-          refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
-          grantedRevokes: [...grantedRevokes],
+      onSafePreflight: async () => {
+        const releaseCrossTabLock = await acquireSafeSubmissionLock()
+        try {
+          // Module state can be stale in a background tab. Refresh it only
+          // after acquiring the browser-wide mutex, then preserve every other
+          // account/chain record when this context is reserved.
+          syncPendingSafeSubmissionLocksFromStorage()
+          if (pendingSafeSubmissions.value.some(pending =>
+            !pending.terminalStatus
+            && isPendingSafeSubmissionForContext(
+              pending,
+              batchExecutionContext!.account,
+              batchExecutionContext!.chainId,
+            ),
+          )) {
+            throw new Error('A previous Safe batch submission is unresolved. Reconcile it before retrying.')
+          }
+          const reservation: PendingSafeBatchSubmission = {
+            account: batchExecutionContext!.account,
+            chainId: batchExecutionContext!.chainId,
+            batchFingerprint,
+            batchPlan: batchPlanSnapshot,
+            entries: batchEntriesSnapshot,
+            errorMessage: 'Safe submission is reserved. Verify the Safe account before retrying if this page reloads before a transaction hash is shown.',
+            refreshExternalMigrationPositions: shouldRefreshExternalMigrationPositions,
+            grantedRevokes: [...grantedRevokes],
+            releaseCrossTabLock,
+          }
+          // Reserve the complete execution context before opening Safe. A
+          // storage failure must abort before the wallet can submit anything.
+          setPendingSafeSubmission(reservation)
+          submittedSafeLock = reservation
         }
-        // Reserve the complete execution context before opening Safe. A
-        // storage failure must abort before the wallet can submit anything.
-        setPendingSafeSubmission(reservation)
-        submittedSafeLock = reservation
+        catch (error) {
+          releaseCrossTabLock()
+          throw error
+        }
       },
       onSafeTerminalSubmissionStart: () => {
         safeSubmissionKind = 'batch'
@@ -3026,19 +3091,29 @@ export const useTxBatch = () => {
       }
     }
     finally {
+      submittedSafeLock?.releaseCrossTabLock?.()
+      if (submittedSafeLock) submittedSafeLock.releaseCrossTabLock = undefined
       isExecuting.value = false
     }
   }
 
   const reconcilePendingSafeSubmission = async () => {
-    const pending = pendingSafeSubmission.value
+    let pending = pendingSafeSubmission.value
     if (!pending || isExecuting.value) return
     if (!pending.submittedHash) {
       execError.value = 'Safe submission is locked before hash capture. Verify the Safe account manually; this batch cannot be retried automatically.'
       return
     }
     isExecuting.value = true
+    let releaseCrossTabLock: (() => void) | undefined
     try {
+      releaseCrossTabLock = await acquireSafeSubmissionLock()
+      syncPendingSafeSubmissionLocksFromStorage()
+      pending = pendingSafeSubmissions.value.find(candidate =>
+        !candidate.terminalStatus
+        && isPendingSafeSubmissionForContext(candidate, pending!.account, pending!.chainId),
+      ) ?? null
+      if (!pending) return
       const result = await reconcileSafeTransaction({
         submittedHash: pending.submittedHash,
         account: pending.account,
@@ -3118,12 +3193,13 @@ export const useTxBatch = () => {
     catch (error) {
       logWarn('useTxBatch/reconcileSafe', error)
       const errorMessage = await describeExecError(error)
-      setPendingSafeSubmission({ ...pending, errorMessage })
+      if (releaseCrossTabLock && pending) setPendingSafeSubmission({ ...pending, errorMessage })
       if (isPendingSafeSubmissionForContext(pending, owner.value, chainId.value)) {
         execError.value = errorMessage
       }
     }
     finally {
+      releaseCrossTabLock?.()
       isExecuting.value = false
     }
   }

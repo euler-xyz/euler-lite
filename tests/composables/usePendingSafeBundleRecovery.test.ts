@@ -29,7 +29,7 @@ describe('usePendingSafeBundleRecovery', () => {
     vi.stubGlobal('onMounted', (callback: () => void) => callback())
   })
 
-  it('requires confirmation for the exact displayed account and chain', () => {
+  it('requires confirmation for the exact displayed account and chain', async () => {
     reservePendingSafeBundleSubmission(storage, {
       reservationId: 'hashless',
       account: ACCOUNT,
@@ -39,14 +39,14 @@ describe('usePendingSafeBundleRecovery', () => {
     const recovery = usePendingSafeBundleRecovery()
 
     expect(recovery.pendingHashlessBundles.value).toHaveLength(1)
-    expect(() => recovery.clearVerifiedHashlessBundle({
+    await expect(recovery.clearVerifiedHashlessBundle({
       reservationId: 'hashless',
       account: ACCOUNT,
       chainId: 1,
       confirmedAbsent: false,
-    })).toThrow('Confirm that Safe contains no proposal')
+    })).rejects.toThrow('Confirm that Safe contains no proposal')
 
-    recovery.clearVerifiedHashlessBundle({
+    await recovery.clearVerifiedHashlessBundle({
       reservationId: 'hashless',
       account: ACCOUNT,
       chainId: 1,

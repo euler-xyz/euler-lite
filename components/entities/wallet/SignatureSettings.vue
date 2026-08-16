@@ -16,11 +16,11 @@ const onToggle = (value: boolean | undefined) => {
   setSignaturesEnabled(value ?? false)
 }
 
-const clearPendingBundle = (reservationId: string) => {
+const clearPendingBundle = async (reservationId: string) => {
   const pending = pendingHashlessBundles.value.find(item => item.reservationId === reservationId)
   if (!pending) return
   try {
-    clearVerifiedHashlessBundle({
+    await clearVerifiedHashlessBundle({
       reservationId,
       account: pending.account,
       chainId: pending.chainId,

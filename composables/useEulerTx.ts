@@ -85,6 +85,7 @@ import {
   bindLiteTosContextToPreparedPlan,
   getLiteTosContextVersion,
 } from '~/utils/sdk-tos'
+import { acquireSafeSubmissionLock } from '~/utils/safe-submission-lock'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -1536,29 +1537,46 @@ export const useEulerTx = () => {
   }) => {
     let storage: Storage | undefined
     let reservation: PendingSafeBundleSubmission | undefined
+    let releaseCrossTabLock: (() => void) | undefined
 
     const clear = () => {
       if (storage && reservation) clearPendingSafeBundleSubmission(storage, reservation.reservationId)
+      releaseCrossTabLock?.()
+      releaseCrossTabLock = undefined
+    }
+    const retain = () => {
+      // The durable record remains authoritative. Release the live mutex so a
+      // later tab or this tab's reconciliation flow can read it and proceed.
+      releaseCrossTabLock?.()
+      releaseCrossTabLock = undefined
     }
 
     const lifecycle: Required<SafeSubmissionLifecycle> = {
       onSafePreflight: async () => {
-        storage = getSafeBundleStorage()
-        await reconcileIntrinsicSafeBundleReservation({
-          storage,
-          account,
-          chainId,
-          safeWalletProvider,
-          provider,
-        })
-        reservation = {
-          reservationId: `${Date.now().toString(36)}-${nextSafeBundleReservationId++}`,
-          account,
-          chainId,
-          errorMessage: 'Safe bundle submission was armed without a verifiable hash. Verify this account in Safe before retrying.',
+        releaseCrossTabLock = await acquireSafeSubmissionLock()
+        try {
+          storage = getSafeBundleStorage()
+          await reconcileIntrinsicSafeBundleReservation({
+            storage,
+            account,
+            chainId,
+            safeWalletProvider,
+            provider,
+          })
+          reservation = {
+            reservationId: `${Date.now().toString(36)}-${nextSafeBundleReservationId++}`,
+            account,
+            chainId,
+            errorMessage: 'Safe bundle submission was armed without a verifiable hash. Verify this account in Safe before retrying.',
+          }
+          // Reserve while the cross-tab mutex is held, before opening Safe.
+          reservePendingSafeBundleSubmission(storage, reservation)
         }
-        // Reserve before the wallet opens. A write failure aborts submission.
-        reservePendingSafeBundleSubmission(storage, reservation)
+        catch (error) {
+          releaseCrossTabLock?.()
+          releaseCrossTabLock = undefined
+          throw error
+        }
       },
       onSafeTerminalSubmissionStart: () => {
         if (!storage || !reservation) {
@@ -1578,7 +1596,7 @@ export const useEulerTx = () => {
       },
     }
 
-    return { lifecycle, clear }
+    return { lifecycle, clear, retain }
   }
 
   /**
@@ -1681,6 +1699,7 @@ export const useEulerTx = () => {
         intrinsicLifecycle?.clear()
         throw error
       }
+      intrinsicLifecycle?.retain()
       throw new SafeSubmissionStatusUnknownError(
         'Safe wallet request failed after submission was armed. Its status is unknown; verify it in Safe before retrying.',
         error,
@@ -1689,6 +1708,7 @@ export const useEulerTx = () => {
     // Safe returns the safeTxHash as the bundle id; the status poller needs
     // a hash-shaped id to resolve it to the executed transaction.
     if (typeof id !== 'string' || !/^0x[0-9a-f]{64}$/i.test(id)) {
+      intrinsicLifecycle?.retain()
       throw new SafeSubmissionStatusUnknownError(
         'Safe wallet returned no verifiable call bundle id after submission was armed. Verify it in Safe before retrying.',
       )
@@ -1697,6 +1717,7 @@ export const useEulerTx = () => {
       lifecycle.onSafeSubmission(id as Hash)
     }
     catch (error) {
+      intrinsicLifecycle?.retain()
       if (error instanceof SafeTransactionStatusUnknownError || error instanceof SafeSubmissionStatusUnknownError) throw error
       throw new SafeSubmissionStatusUnknownError(
         'Safe returned a bundle hash, but its durable submission record could not be updated. Verify it in Safe before retrying.',
@@ -1717,6 +1738,7 @@ export const useEulerTx = () => {
         intrinsicLifecycle?.clear()
         throw error
       }
+      intrinsicLifecycle?.retain()
       if (error instanceof SafeTransactionStatusUnknownError) throw error
       throw new SafeTransactionStatusUnknownError(id as Hash, 'aborted')
     }

@@ -4,6 +4,7 @@ import {
   loadPendingSafeBundleSubmissions,
   type PendingSafeBundleSubmission,
 } from '~/utils/pending-safe-bundle-submission'
+import { acquireSafeSubmissionLock } from '~/utils/safe-submission-lock'
 
 const getStorage = (): Storage | undefined => {
   try {
@@ -24,7 +25,7 @@ export const usePendingSafeBundleRecovery = () => {
       : []
   }
 
-  const clearVerifiedHashlessBundle = (args: {
+  const clearVerifiedHashlessBundle = async (args: {
     reservationId: string
     account: Address
     chainId: number
@@ -33,15 +34,21 @@ export const usePendingSafeBundleRecovery = () => {
     if (!args.confirmedAbsent) {
       throw new Error('Confirm that Safe contains no proposal before clearing this lock.')
     }
-    const storage = getStorage()
-    if (!storage) throw new Error('Durable Safe submission storage is unavailable.')
-    const pending = loadPendingSafeBundleSubmissions(storage)
-      .find(submission => submission.reservationId === args.reservationId)
-    if (!pending || pending.account !== args.account || pending.chainId !== args.chainId) {
-      throw new Error('The pending Safe bundle context changed. Review it again before clearing.')
+    const release = await acquireSafeSubmissionLock()
+    try {
+      const storage = getStorage()
+      if (!storage) throw new Error('Durable Safe submission storage is unavailable.')
+      const pending = loadPendingSafeBundleSubmissions(storage)
+        .find(submission => submission.reservationId === args.reservationId)
+      if (!pending || pending.account !== args.account || pending.chainId !== args.chainId) {
+        throw new Error('The pending Safe bundle context changed. Review it again before clearing.')
+      }
+      clearHashlessPendingSafeBundleSubmission(storage, args.reservationId)
+      refresh()
     }
-    clearHashlessPendingSafeBundleSubmission(storage, args.reservationId)
-    refresh()
+    finally {
+      release()
+    }
   }
 
   onMounted(refresh)
