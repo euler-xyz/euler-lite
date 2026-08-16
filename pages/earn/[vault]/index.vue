@@ -8,7 +8,12 @@ import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBl
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
 import { isNativeCurrencyAddress } from '~/utils/native-currency'
-import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
+import {
+  assertOperationPolicyChecks,
+  captureOperationPolicyChecks,
+  isOperationBlocked,
+  operationBlockReason,
+} from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -220,13 +225,16 @@ const send = async (execution: TrackedExecutionScope) => {
     if (!asset.value?.address) {
       return
     }
+    const policyChecks = captureOperationPolicyChecks()
     const txPlan = plan.value ?? await planDeposit({
       vaultAddress: vaultAddress as Address,
       assetAddress: asset.value.address as Address,
       amount: valueToNano(amount.value || '0', asset.value.decimals),
       account: planAccount.value,
     })
-    await executePlan(txPlan)
+    await executePlan(txPlan, {
+      beforeSend: () => assertOperationPolicyChecks(policyChecks),
+    })
 
     // Success signal for a detached Safe completion toast; a proposal that
     // confirmed after its modal was closed must not redirect mid-flow.

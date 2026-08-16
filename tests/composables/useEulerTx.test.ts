@@ -156,6 +156,94 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
   })
 
+  it('revalidates plain transactions after the OKX post-approve delay', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(getAccount).mockImplementation(() => ({
+        address: currentAccount,
+        chainId: currentChainId,
+        connector: { id: 'okx', name: 'OKX Wallet' },
+      }) as never)
+      const beforeSend = vi.fn()
+      const { sendPlainTransactions } = useEulerTx()
+
+      const execution = sendPlainTransactions([
+        { to: TOKEN, data: '0x095ea7b3' },
+        { to: TOKEN, data: '0x1234' },
+      ], { beforeSend })
+
+      await vi.advanceTimersByTimeAsync(0)
+      expect(beforeSend).toHaveBeenCalledTimes(1)
+      expect(beforeSend).toHaveBeenLastCalledWith(0)
+      expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(2999)
+      expect(beforeSend).toHaveBeenCalledTimes(1)
+      expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(1)
+      await execution
+      expect(beforeSend).toHaveBeenCalledTimes(2)
+      expect(beforeSend).toHaveBeenLastCalledWith(1)
+      expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(2)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not repeat a consumed OKX delay when the final policy check aborts', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(getAccount).mockImplementation(() => ({
+        address: currentAccount,
+        chainId: currentChainId,
+        connector: { id: 'okx', name: 'OKX Wallet' },
+      }) as never)
+      const beforeSend = vi.fn((index: number) => {
+        if (index === 1) throw new Error('Operation policy changed')
+      })
+      const { sendPlainTransactions } = useEulerTx()
+
+      const execution = sendPlainTransactions([
+        { to: TOKEN, data: '0x095ea7b3' },
+        { to: TOKEN, data: '0x1234' },
+      ], { beforeSend })
+      const rejection = expect(execution).rejects.toThrow('Operation policy changed')
+
+      await vi.advanceTimersByTimeAsync(3000)
+      await rejection
+      expect(vi.getTimerCount()).toBe(0)
+      expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(1)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('revalidates ordinary direct plans at the final wallet-write boundary', async () => {
+    const executeTransactionPlan = vi.fn(async ({ sendTransaction }: {
+      sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
+    }) => {
+      await sendTransaction({ to: TOKEN, data: '0x1234' })
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executeTransactionPlan },
+    } as never)
+    const beforeSend = vi.fn(() => {
+      throw new Error('Operation policy changed')
+    })
+    const { executePlan } = useEulerTx()
+
+    await expect(executePlan([] as TransactionPlan, { beforeSend }))
+      .rejects.toThrow('Operation policy changed')
+
+    expect(beforeSend).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
   it('does not broadcast a reviewed migration after account drift', async () => {
     const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction }: {
       sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
@@ -575,6 +663,33 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
     expect(executeTransactionPlan).not.toHaveBeenCalled()
     expect(result.hashes).toEqual([SAFE_TX_HASH])
+  })
+
+  it('revalidates ordinary Safe plans at the final wallet-write boundary', async () => {
+    const processPlanPlugins = vi.fn(async (plan: TransactionPlan) => plan)
+    const resolveRequiredApprovals = vi.fn(async () => approvedPlan)
+    const executeTransactionPlan = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ getTransactionReceipt: vi.fn() })) },
+      deploymentService: { getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: EVC } } })) },
+      executionService: {
+        encodeBatch: vi.fn(() => BATCH_DATA),
+        processPlanPlugins,
+        resolveRequiredApprovals,
+        executeTransactionPlan,
+      },
+    } as never)
+    const beforeSend = vi.fn(() => {
+      throw new Error('Operation policy changed')
+    })
+    const { executePlan } = useEulerTx()
+
+    await expect(executePlan([approvedPlan[0]] as TransactionPlan, { beforeSend }))
+      .rejects.toThrow('Operation policy changed')
+
+    expect(beforeSend).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executeTransactionPlan).not.toHaveBeenCalled()
   })
 
   const GRANT_CALL = { to: TOKEN, data: '0x11ff' as Hex, value: 0n }

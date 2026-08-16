@@ -233,6 +233,7 @@ export const GEO_POLICY_BLOCKED_REASON = 'This operation is not available in you
 export const getVaultOperationGeoBlockReason = (addresses: string[]): string | undefined => {
   if (country.value === undefined) return GEO_POLICY_PENDING_REASON
   if (country.value === null) return GEO_POLICY_BLOCKED_REASON
+  if (isCountryInList(SANCTIONED_COUNTRIES)) return GEO_POLICY_BLOCKED_REASON
   if (addresses.some(address => isVaultBlockedByCountry(address))) return GEO_POLICY_BLOCKED_REASON
   return undefined
 }

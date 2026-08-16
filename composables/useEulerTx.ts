@@ -1208,6 +1208,7 @@ export const useEulerTx = () => {
     expectedChainId,
     connector,
     resolveHash,
+    beforeSend,
   }: {
     isOkx: boolean
     expectedAccount: Address
@@ -1220,6 +1221,8 @@ export const useEulerTx = () => {
      */
     connector?: ReturnType<typeof getAccount>['connector']
     resolveHash?: (hash: Hash) => Promise<Hash>
+    /** Revalidate caller-owned policy at the final wallet-write boundary. */
+    beforeSend?: () => void
   }) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
@@ -1234,6 +1237,7 @@ export const useEulerTx = () => {
         currentAccount: currentAccount.address,
         currentChainId: currentAccount.chainId,
       })
+      beforeSend?.()
       const hash = await sendTransactionAsync({
         account: expectedAccount,
         chainId: expectedChainId,
@@ -1289,18 +1293,25 @@ export const useEulerTx = () => {
       isOkxWallet(connector),
       getSafeWalletProvider(connector),
     ])
+    let nextTxIndex = 0
+    let lastBroadcastData: Hex | undefined
     const send = buildSendTransaction({
       isOkx,
       expectedAccount: owner,
       expectedChainId: cid,
       connector,
+      beforeSend: () => {
+        // Reaching this boundary consumes any delay owed by the prior approve,
+        // even when the policy callback aborts the next wallet request.
+        lastBroadcastData = undefined
+        options?.beforeSend?.(nextTxIndex)
+      },
     })
 
     const receipts: TransactionReceipt[] = []
-    let lastBroadcastData: Hex | undefined
     try {
       for (const [index, tx] of txs.entries()) {
-        options?.beforeSend?.(index)
+        nextTxIndex = index
         const hash = await send(tx)
         lastBroadcastData = tx.data
         // Once a hash exists the transaction may land even if receipt polling
@@ -1508,7 +1519,10 @@ export const useEulerTx = () => {
     return { plan, hashes: [execution.hash], receipts: [execution.receipt] }
   }
 
-  const executePlan = async (plan: TransactionPlan) => {
+  const executePlan = async (
+    plan: TransactionPlan,
+    options?: { beforeSend?: () => void },
+  ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
@@ -1552,6 +1566,7 @@ export const useEulerTx = () => {
         connector,
         safeWalletProvider,
         sdk,
+        beforeSend: options?.beforeSend,
       })
       if (bundled) {
         finalizeExecution(bundled)
@@ -1571,6 +1586,7 @@ export const useEulerTx = () => {
           publicClient: provider as ReceiptClientLike,
         })).hash
         : undefined,
+      beforeSend: options?.beforeSend,
     })
 
     const result = await sdk.executionService.executeTransactionPlan({
