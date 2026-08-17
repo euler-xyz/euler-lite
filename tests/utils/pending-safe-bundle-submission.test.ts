@@ -3,6 +3,7 @@ import { getAddress } from 'viem'
 import {
   clearHashlessPendingSafeBundleSubmission,
   loadPendingSafeBundleSubmissions,
+  PENDING_SAFE_BUNDLE_STORAGE_KEY,
   reservePendingSafeBundleSubmission,
 } from '~/utils/pending-safe-bundle-submission'
 
@@ -19,6 +20,14 @@ const memoryStorage = () => {
 }
 
 describe('pending Safe bundle recovery', () => {
+  it('fails closed when the durable registry exists but is empty', () => {
+    const storage = memoryStorage()
+    storage.setItem(PENDING_SAFE_BUNDLE_STORAGE_KEY, '')
+
+    expect(() => loadPendingSafeBundleSubmissions(storage))
+      .toThrow('Pending Safe bundle storage is unreadable')
+  })
+
   it('clears only a hashless reservation after manual verification', () => {
     const storage = memoryStorage()
     reservePendingSafeBundleSubmission(storage, {

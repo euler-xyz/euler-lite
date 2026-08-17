@@ -53,7 +53,7 @@ export const loadPendingSafeBundleSubmissions = (
   storage: StorageLike,
 ): PendingSafeBundleSubmission[] => {
   const raw = storage.getItem(PENDING_SAFE_BUNDLE_STORAGE_KEY)
-  if (!raw) return []
+  if (raw === null) return []
 
   let parsed: unknown
   try {

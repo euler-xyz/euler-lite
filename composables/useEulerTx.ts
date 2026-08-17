@@ -91,6 +91,8 @@ import { acquireSafeSubmissionLock } from '~/utils/safe-submission-lock'
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
 const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
+export const SAFE_DURABLE_EXECUTION_REQUIRED_ERROR
+  = 'Safe transaction cannot be submitted through the required durable lifecycle. Reconnect the Safe wallet and review the transaction again.'
 let nextSafeBundleReservationId = 1
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
@@ -1660,9 +1662,10 @@ export const useEulerTx = () => {
    * instead of once per transaction (approve + EVC batch collapse into one
    * proposal). `extraCalls` wrap the plan inside the same bundle (migration
    * authorization grants before it, revocations after it). Returns undefined
-   * when the plan cannot be bundled (permit2 / CoW swap items) or when
-   * bundling brings no benefit (fewer than two calls) — callers fall back to
-   * sequential execution.
+   * when the plan cannot be bundled (permit2 / CoW swap items), when the plan
+   * is empty, or when a one-call bundle was not explicitly requested. Safe
+   * execution entry points request one-call bundles and fail closed on an
+   * undefined result.
    */
   const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, submissionLifecycle }: {
     plan: TransactionPlan
@@ -1697,7 +1700,8 @@ export const useEulerTx = () => {
       // Wrapper calls must never satisfy the bundle on their own: submitting
       // [grant, revoke] around an empty plan would finalize a no-op
       // migration as success. Without wrappers an empty plan simply has
-      // nothing to bundle and falls back to sequential execution.
+      // nothing to bundle, so the caller decides whether another execution
+      // path is appropriate.
       if (extraCalls?.before?.length || extraCalls?.after?.length) {
         throw new Error('Transaction plan produced no calls to bundle')
       }
@@ -1825,8 +1829,11 @@ export const useEulerTx = () => {
       getSafeWalletProvider(connector),
     ])
     // Known Safe even when provider acquisition failed — degraded execution
-    // must still never take the permit2 path.
+    // must never fall through to the non-durable sequential path.
     const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
+    if (isKnownSafe && (!safeWalletProvider || !connector)) {
+      throw new Error(SAFE_DURABLE_EXECUTION_REQUIRED_ERROR)
+    }
 
     if (safeWalletProvider && connector) {
       // Mirror what executeTransactionPlan would do to the plan (plugins,
@@ -1848,11 +1855,13 @@ export const useEulerTx = () => {
         connector,
         safeWalletProvider,
         sdk,
+        allowSingleCall: true,
       })
       if (bundled) {
         finalizeExecution(bundled)
         return bundled
       }
+      throw new Error(SAFE_DURABLE_EXECUTION_REQUIRED_ERROR)
     }
 
     const sendTransaction = buildSendTransaction({
@@ -1873,9 +1882,9 @@ export const useEulerTx = () => {
       plan,
       chainId: cid,
       account: owner,
-      // A known Safe never uses permit2, even on the sequential fallback
-      // and even when its provider could not be acquired.
-      usePermit2: isKnownSafe ? false : signaturesEnabled.value,
+      // Safe execution returned above or failed closed. Ordinary wallets use
+      // the user's configured signature preference here.
+      usePermit2: signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
         const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
@@ -1920,16 +1929,19 @@ export const useEulerTx = () => {
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
 
-    // Known Safe even when provider acquisition failed — the degraded
-    // sequential path must still never sign permit2 messages.
+    // Known Safe even when provider acquisition failed — it must never fall
+    // through to the non-durable sequential path.
     const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
+    if (isKnownSafe && (!safeWalletProvider || !connector)) {
+      throw new Error(SAFE_DURABLE_EXECUTION_REQUIRED_ERROR)
+    }
 
     let effectivePrepared = prepared
     if (isKnownSafe) {
       // A Safe never signs permit2 messages. If the envelope was prepared
       // before Safe detection resolved, re-resolve its approvals with
       // permit2 off — resolution overwrites `resolved` on each item, so the
-      // repaired plan is used for both the bundle and the fallback.
+      // repaired plan is the exact plan submitted through the Safe bundle.
       if (hasPermit2Signature(prepared.plan)) {
         const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
           plan: prepared.plan,
@@ -1956,6 +1968,7 @@ export const useEulerTx = () => {
         connector,
         safeWalletProvider,
         sdk,
+        allowSingleCall: true,
         submissionLifecycle: {
           onSafePreflight: options?.onSafePreflight,
           onSafeTerminalSubmissionStart: options?.onSafeTerminalSubmissionStart,
@@ -1966,6 +1979,7 @@ export const useEulerTx = () => {
         finalizeExecution(bundled)
         return bundled
       }
+      throw new Error(SAFE_DURABLE_EXECUTION_REQUIRED_ERROR)
     }
 
     if (safeWalletProvider) await options?.onSafePreflight?.()

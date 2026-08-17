@@ -512,9 +512,57 @@ describe('useMultiplyForm cap validation', () => {
     const scope = { markSucceeded: vi.fn() }
     await modalOptions.props.onConfirm(scope)
 
-    expect(mocks.prepareTransactionPlan).toHaveBeenLastCalledWith(plan, { account: planAccount })
+    expect(mocks.prepareTransactionPlan).toHaveBeenLastCalledWith(plan, { account: USER })
     expect(mocks.executePreparedPlan).toHaveBeenCalledWith(refreshed)
     expect(mocks.executePlan).not.toHaveBeenCalled()
+    expect(mocks.finalizeTxAndRedirect).toHaveBeenCalledWith({ scope })
+  })
+
+  it('keeps each open review modal bound to the plan and account it displayed', async () => {
+    const planA = [{ type: 'evcBatch', items: [] }] as TransactionPlan
+    const planB = [{ type: 'evcBatch', items: [{
+      targetContract: USER,
+      onBehalfOfAccount: USER,
+      value: 0n,
+      data: '0x12345678',
+    }] }] as TransactionPlan
+    const reviewedA = {
+      __prepared: true,
+      chainId: 1,
+      account: USER,
+      usePermit2: false,
+      unlimitedApproval: false,
+      plan: planA,
+    } as TransactionPlanPrepared
+    const reviewedB = { ...reviewedA, plan: planB } as TransactionPlanPrepared
+    const refreshedA = { ...reviewedA, plan: [...planA] } as TransactionPlanPrepared
+    mocks.planMultiply
+      .mockResolvedValueOnce(planA)
+      .mockResolvedValueOnce(planB)
+    mocks.prepareTransactionPlan
+      .mockResolvedValueOnce(reviewedA)
+      .mockResolvedValueOnce(reviewedB)
+      .mockResolvedValueOnce(refreshedA)
+    mocks.runPreparedSimulation.mockResolvedValue(true)
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await form.submitMultiply()
+    const firstModal = mocks.modalOpen.mock.calls[0]?.[1] as {
+      props: { onConfirm: (scope: { markSucceeded: () => void }) => Promise<void> }
+    }
+    await form.submitMultiply()
+    expect(mocks.modalOpen).toHaveBeenCalledTimes(2)
+
+    const scope = { markSucceeded: vi.fn() }
+    await firstModal.props.onConfirm(scope)
+
+    expect(mocks.prepareTransactionPlan).toHaveBeenLastCalledWith(planA, { account: USER })
+    expect(mocks.executePreparedPlan).toHaveBeenCalledWith(refreshedA)
+    expect(mocks.executePreparedPlan).not.toHaveBeenCalledWith(reviewedB)
     expect(mocks.finalizeTxAndRedirect).toHaveBeenCalledWith({ scope })
   })
 

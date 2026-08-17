@@ -996,6 +996,65 @@ describe('useTxBatch execution errors', () => {
     items: [{ type: 'operation', name, items: [] }],
   }] as unknown as TransactionPlan
 
+  it.each([
+    ['account', () => { activeOwner.value = getAddress('0x2000000000000000000000000000000000000002') }],
+    ['chain', () => { activeChainId.value = 8453 }],
+  ] as const)('discards an async add when the %s context changes before its plan resolves', async (_kind, changeContext) => {
+    let resolvePlan!: (plan: TransactionPlan) => void
+    const buildPlan = vi.fn(() => new Promise<TransactionPlan>((resolve) => {
+      resolvePlan = resolve
+    }))
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const batch = useTxBatch()
+
+    const adding = batch.addEntry({
+      label: 'Supply USDC',
+      requiresPlanningAccount: false,
+      buildPlan,
+      subAccount,
+    })
+    await vi.waitFor(() => expect(buildPlan).toHaveBeenCalledTimes(1))
+
+    changeContext()
+    await nextTick()
+    resolvePlan(singleOperationPlan('stale-supply'))
+    await adding
+    await nextTick()
+
+    expect(batch.entries.value).toEqual([])
+    expect(batch.simError.value).toBeUndefined()
+    expect(sdk.executionService.simulateTransactionPlan).not.toHaveBeenCalled()
+  })
+
+  it('discards an async add across a same-tick account A to B to A transition', async () => {
+    let resolvePlan!: (plan: TransactionPlan) => void
+    const buildPlan = vi.fn(() => new Promise<TransactionPlan>((resolve) => {
+      resolvePlan = resolve
+    }))
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const batch = useTxBatch()
+
+    const adding = batch.addEntry({
+      label: 'Supply USDC',
+      requiresPlanningAccount: false,
+      buildPlan,
+      subAccount,
+    })
+    await vi.waitFor(() => expect(buildPlan).toHaveBeenCalledTimes(1))
+
+    activeOwner.value = getAddress('0x2000000000000000000000000000000000000002')
+    activeOwner.value = owner
+    resolvePlan(singleOperationPlan('stale-supply'))
+    await adding
+    await nextTick()
+
+    expect(batch.entries.value).toEqual([])
+    expect(batch.simError.value).toBeUndefined()
+    expect(sdk.executionService.simulateTransactionPlan).not.toHaveBeenCalled()
+  })
+
   it('folds plugin-prepended simulation layers into the base layer (ToS registration)', async () => {
     const sdk = createMockSdk()
     // Base + the loose ToS-registration item's layer + the entry's layer: the

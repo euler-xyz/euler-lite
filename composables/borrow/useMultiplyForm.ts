@@ -76,6 +76,11 @@ export interface UseMultiplyFormOptions {
   isMultiplyRestricted: ComputedRef<boolean>
 }
 
+interface MultiplyReviewSession {
+  plan: TransactionPlan
+  prepared: TransactionPlanPrepared
+}
+
 const normalizeAddress = normalizeAddressOrEmpty
 
 export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
@@ -1309,8 +1314,14 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         preparedMultiplyPlan.value = null
       }
 
-      if (preparedMultiplyPlan.value) {
-        const ok = await profAsync('review', 'runPreparedSimulation', () => runMultiplySimulation(preparedMultiplyPlan.value!, buildMultiplyStateOverrideOptions()))
+      const reviewedPlan = multiplyPlan.value
+      const reviewedPrepared = preparedMultiplyPlan.value
+      const reviewSession: MultiplyReviewSession | undefined = reviewedPlan && reviewedPrepared
+        ? { plan: reviewedPlan, prepared: reviewedPrepared }
+        : undefined
+
+      if (reviewSession) {
+        const ok = await profAsync('review', 'runPreparedSimulation', () => runMultiplySimulation(reviewSession.prepared, buildMultiplyStateOverrideOptions()))
         if (!ok) return
       }
 
@@ -1320,7 +1331,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-          prepared: preparedMultiplyPlan.value || undefined,
+          prepared: reviewSession?.prepared,
           quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           supplyingAssetForBorrow: multiplySupplyVault.value.asset,
           supplyingAmount: multiplyInputAmount.value,
@@ -1330,7 +1341,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           subAccount,
           submittingLabel: 'Submitting...',
           onConfirm: async (execution) => {
-            await sendMultiply(execution)
+            if (reviewSession) await sendMultiply(execution, reviewSession)
           },
         },
       })
@@ -1340,15 +1351,14 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
   }
 
-  const sendMultiply = async (execution: TrackedExecutionScope) => {
-    if (!multiplyPlan.value || !preparedMultiplyPlan.value) return
+  const sendMultiply = async (execution: TrackedExecutionScope, reviewSession: MultiplyReviewSession) => {
     isMultiplySubmitting.value = true
     try {
       // Refresh time-sensitive plugin data (notably Pyth), then require the
       // final prepared envelope to match what the modal reviewed apart from
       // that explicitly canonicalized freshness delta.
-      const candidatePrepared = await prepareTransactionPlan(multiplyPlan.value, { account: planAccount.value })
-      const prepared = requireReviewedBatchPreparedExecution(preparedMultiplyPlan.value, candidatePrepared)
+      const candidatePrepared = await prepareTransactionPlan(reviewSession.plan, { account: reviewSession.prepared.account })
+      const prepared = requireReviewedBatchPreparedExecution(reviewSession.prepared, candidatePrepared)
       await executePreparedPlan(prepared)
       await finalizeTxAndRedirect({ scope: execution })
     }
