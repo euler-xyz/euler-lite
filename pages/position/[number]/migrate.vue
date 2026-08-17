@@ -42,7 +42,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
-import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import { assertWalletExecutionContext, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
 import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -983,23 +983,15 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
           invalidateOutgoingMigrationPreview(preview.key)
           throw new Error('Authorization requirements changed since review — please review the migration again.')
         }
-        // The wallet/Safe checks above ran at confirm entry; authorization
-        // lookup, planning, preparation, and simulation all await in between,
-        // so re-assert the full reviewed context (including the connector —
-        // a same-account Safe connector switch changes who submits) right
-        // before the irreversible proposal broadcast.
-        const confirmedConnectorKey = walletConnectorContextKey()
-        const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount, preview.authorizationDeadline, () => {
-          assertWalletExecutionContext({
-            expectedAccount: reviewedInput.owner,
-            expectedChainId: target.chainId,
-            currentAccount: address.value as Address | undefined,
-            currentChainId: walletChainId.value,
-          })
-          if (!isSafeWallet.value || walletConnectorContextKey() !== confirmedConnectorKey) {
-            throw new Error('Wallet changed since review — please review the migration again.')
-          }
+        const beforeBroadcast = createSafeBundleBroadcastGuard({
+          expectedAccount: reviewedInput.owner,
+          expectedChainId: target.chainId,
+          currentAccount: () => address.value as Address | undefined,
+          currentChainId: () => walletChainId.value,
+          isSafeWallet: () => isSafeWallet.value,
+          connectorContextKey: walletConnectorContextKey,
         })
+        const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount, preview.authorizationDeadline, beforeBroadcast)
         if (outcome === 'aborted') return
         finishMigrationSuccess(execution)
         return

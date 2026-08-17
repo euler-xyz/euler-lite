@@ -83,7 +83,7 @@ import {
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
-import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import { assertWalletExecutionContext, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getMigrationAuthorizationSignatureSubstitutions } from '~/utils/migrationAuthorizationSignatures'
 import {
@@ -3492,23 +3492,15 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
           inboundExternalMigrationPreview.value = null
           throw new Error('Authorization requirements changed since review — please review the migration again.')
         }
-        // The wallet/Safe checks above ran at confirm entry; authorization
-        // lookup, planning, preparation, and simulation all await in between,
-        // so re-assert the full reviewed context (including the connector —
-        // a same-account Safe connector switch changes who submits) right
-        // before the irreversible proposal broadcast.
-        const confirmedConnectorKey = walletConnectorContextKey()
-        const outcome = await sendInboundExternalMigrationAsSafeBundle(input, authorizationRequest, account, useSignatures, preview.authorizationDeadline, () => {
-          assertWalletExecutionContext({
-            expectedAccount: input.owner,
-            expectedChainId: migrationChainId,
-            currentAccount: address.value as Address | undefined,
-            currentChainId: walletChainId.value,
-          })
-          if (!isSafeWallet.value || walletConnectorContextKey() !== confirmedConnectorKey) {
-            throw new Error('Wallet changed since review — please review the migration again.')
-          }
+        const beforeBroadcast = createSafeBundleBroadcastGuard({
+          expectedAccount: input.owner,
+          expectedChainId: migrationChainId,
+          currentAccount: () => address.value as Address | undefined,
+          currentChainId: () => walletChainId.value,
+          isSafeWallet: () => isSafeWallet.value,
+          connectorContextKey: walletConnectorContextKey,
         })
+        const outcome = await sendInboundExternalMigrationAsSafeBundle(input, authorizationRequest, account, useSignatures, preview.authorizationDeadline, beforeBroadcast)
         if (outcome === 'aborted') return
         finishInboundExternalMigrationSuccess(execution, input)
         return
