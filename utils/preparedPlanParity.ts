@@ -15,11 +15,6 @@ type SignaturePattern = {
   resolved: string
 }
 
-type SignatureSubstitutionGroup = {
-  expected: number
-  patterns: readonly SignaturePattern[]
-}
-
 const signatureWord = (value: number): string => value.toString(16).padStart(64, '0')
 
 const splitSignature = (signature: Hex): { r: string, s: string, v: number } => {
@@ -51,33 +46,85 @@ const buildSignaturePatterns = (placeholder: Hex, signature: Hex): SignaturePatt
   ]
 }
 
+type OrderedSubstitution = {
+  patterns: readonly SignaturePattern[]
+}
+
+/**
+ * Consumption cursor into the ordered substitution list. Each reviewed
+ * placeholder occurrence, in deterministic traversal order, must be replaced
+ * by exactly the next substitution — two identical placeholders can never
+ * swap their signatures between call locations.
+ */
+type SubstitutionCursor = {
+  next: number
+}
+
+/**
+ * Find the queued substitution's pattern covering the first differing
+ * character. The window must reproduce the reviewed placeholder bytes on the
+ * reviewed side and the resolved signature bytes on the resolved side.
+ */
+const matchSubstitutionAt = (
+  reviewed: string,
+  resolved: string,
+  patterns: readonly SignaturePattern[],
+  diffIndex: number,
+): number | undefined => {
+  for (const pattern of patterns) {
+    const length = pattern.resolved.length
+    let from = Math.max(2, diffIndex - length + 1)
+    while (from <= diffIndex) {
+      const start = resolved.indexOf(pattern.resolved, from)
+      if (start < 0 || start > diffIndex) break
+      if (reviewed.startsWith(pattern.reviewed, start)) return start + length
+      from = start + 1
+    }
+  }
+  return undefined
+}
+
+const assertStringParity = (
+  reviewed: string,
+  resolved: string,
+  substitutions: readonly OrderedSubstitution[],
+  cursor: SubstitutionCursor,
+): void => {
+  const normalizedReviewed = reviewed.startsWith('0x') ? reviewed.toLowerCase() : reviewed
+  const normalizedResolved = resolved.startsWith('0x') ? resolved.toLowerCase() : resolved
+  if (normalizedReviewed === normalizedResolved) return
+  if (
+    !normalizedReviewed.startsWith('0x')
+    || !normalizedResolved.startsWith('0x')
+    // Both permitted representations replace like-for-like byte ranges, so any
+    // legitimate substitution preserves the string length.
+    || normalizedReviewed.length !== normalizedResolved.length
+  ) {
+    throw new Error(PLAN_DRIFT_ERROR)
+  }
+  let index = 2
+  while (index < normalizedReviewed.length) {
+    if (normalizedReviewed[index] === normalizedResolved[index]) {
+      index++
+      continue
+    }
+    const substitution = substitutions[cursor.next]
+    if (!substitution) throw new Error(PLAN_DRIFT_ERROR)
+    const end = matchSubstitutionAt(normalizedReviewed, normalizedResolved, substitution.patterns, index)
+    if (end === undefined) throw new Error(PLAN_DRIFT_ERROR)
+    cursor.next++
+    index = end
+  }
+}
+
 const assertValueParity = (
   reviewed: unknown,
   resolved: unknown,
-  substitutions: ReadonlyMap<string, SignatureSubstitutionGroup>,
-  observed: Map<string, number>,
+  substitutions: readonly OrderedSubstitution[],
+  cursor: SubstitutionCursor,
 ): void => {
   if (typeof reviewed === 'string' && typeof resolved === 'string') {
-    const normalizedReviewed = reviewed.startsWith('0x') ? reviewed.toLowerCase() : reviewed
-    let normalizedResolved = resolved.startsWith('0x') ? resolved.toLowerCase() : resolved
-    if (normalizedReviewed === normalizedResolved) return
-    if (normalizedReviewed.startsWith('0x') && normalizedResolved.startsWith('0x')) {
-      for (const [signature, substitution] of substitutions) {
-        for (const pattern of substitution.patterns) {
-          let searchFrom = 2
-          while (true) {
-            const index = normalizedResolved.indexOf(pattern.resolved, searchFrom)
-            if (index < 0) break
-            if (normalizedReviewed.slice(index, index + pattern.reviewed.length) === pattern.reviewed) {
-              normalizedResolved = `${normalizedResolved.slice(0, index)}${pattern.reviewed}${normalizedResolved.slice(index + pattern.resolved.length)}`
-              observed.set(signature, (observed.get(signature) ?? 0) + 1)
-            }
-            searchFrom = index + pattern.resolved.length
-          }
-        }
-      }
-    }
-    if (normalizedReviewed !== normalizedResolved) throw new Error(PLAN_DRIFT_ERROR)
+    assertStringParity(reviewed, resolved, substitutions, cursor)
     return
   }
   if (
@@ -94,7 +141,7 @@ const assertValueParity = (
       throw new Error(PLAN_DRIFT_ERROR)
     }
     reviewed.forEach((item, index) => {
-      assertValueParity(item, resolved[index], substitutions, observed)
+      assertValueParity(item, resolved[index], substitutions, cursor)
     })
     return
   }
@@ -106,7 +153,7 @@ const assertValueParity = (
     throw new Error(PLAN_DRIFT_ERROR)
   }
   for (const key of reviewedKeys) {
-    assertValueParity(reviewedRecord[key], resolvedRecord[key], substitutions, observed)
+    assertValueParity(reviewedRecord[key], resolvedRecord[key], substitutions, cursor)
   }
 }
 
@@ -122,6 +169,13 @@ const preparedAccountKey = (prepared: TransactionPlanPrepared): string => {
  * signature representation, either raw bytes or ABI-encoded v/r/s words. The
  * complete prepared envelope remains unchanged, including targets, values,
  * call order, plugins, and resolved approvals.
+ *
+ * `substitutions` is positional: its order must match the order in which the
+ * reviewed plan carries the placeholder occurrences (entry order, then each
+ * entry's primary authorization before its post-migration one). The k-th
+ * occurrence is only ever replaced by the k-th signature — signatures
+ * authorizing different typed-data messages cannot be transposed between
+ * structurally identical placeholder sites.
  */
 export const assertPreparedPlanSignatureParity = ({
   reviewed,
@@ -141,25 +195,13 @@ export const assertPreparedPlanSignatureParity = ({
     throw new Error(PLAN_DRIFT_ERROR)
   }
 
-  const bySignature = new Map<string, SignatureSubstitutionGroup>()
-  for (const { placeholder, signature } of substitutions) {
+  const ordered: OrderedSubstitution[] = substitutions.map(({ placeholder, signature }) => {
     const signatureBytes = stripHexPrefix(signature)
-    const placeholderBytes = stripHexPrefix(placeholder)
-    if (!signatureBytes || signatureBytes === placeholderBytes) throw new Error(PLAN_DRIFT_ERROR)
-    const existing = bySignature.get(signatureBytes)
-    const patterns = buildSignaturePatterns(placeholder, signature)
-    if (existing && existing.patterns.some((pattern, index) => pattern.reviewed !== patterns[index]?.reviewed)) {
-      throw new Error(PLAN_DRIFT_ERROR)
-    }
-    bySignature.set(signatureBytes, {
-      expected: (existing?.expected ?? 0) + 1,
-      patterns,
-    })
-  }
+    if (!signatureBytes || signatureBytes === stripHexPrefix(placeholder)) throw new Error(PLAN_DRIFT_ERROR)
+    return { patterns: buildSignaturePatterns(placeholder, signature) }
+  })
 
-  const observed = new Map<string, number>()
-  assertValueParity(reviewed.plan, resolved.plan, bySignature, observed)
-  for (const [signature, substitution] of bySignature) {
-    if ((observed.get(signature) ?? 0) !== substitution.expected) throw new Error(PLAN_DRIFT_ERROR)
-  }
+  const cursor: SubstitutionCursor = { next: 0 }
+  assertValueParity(reviewed.plan, resolved.plan, ordered, cursor)
+  if (cursor.next !== ordered.length) throw new Error(PLAN_DRIFT_ERROR)
 }

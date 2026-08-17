@@ -1738,6 +1738,89 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.execError.value).toBeUndefined()
   })
 
+  it('retires executed entries but keeps a same-wallet entry added during the broadcast', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
+    eulerTxMocks.estimateGasForPreparedPlan.mockResolvedValue(undefined)
+    let releaseCompletion!: () => void
+    const completionGate = new Promise<void>((resolve) => {
+      releaseCompletion = resolve
+    })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (_prepared, options) => {
+      options.beforeBroadcast()
+      await completionGate
+      return { receipts: [] }
+    })
+
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Executed operation',
+      buildPlan: async () => singleOpBundledPlan,
+      requiresPlanningAccount: false,
+    })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    const executedId = batch.entries.value[0]!.id
+    const ceremony = await batch.prepareBatchExecution()
+    const execution = batch.executeBatch(undefined, ceremony)
+    await vi.waitFor(() => expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1))
+
+    // Same wallet, cart edited while the broadcast is in flight: the ceremony
+    // goes stale, but the executed entry still lands on-chain.
+    await batch.addEntry({
+      label: 'Added during broadcast',
+      buildPlan: async () => singleOpBundledPlan,
+      requiresPlanningAccount: false,
+    })
+    expect(batch.entries.value.map(entry => entry.label)).toEqual(['Executed operation', 'Added during broadcast'])
+
+    releaseCompletion()
+    await execution
+
+    // Only the executed entry retires — leaving it queued would re-execute it
+    // on the next send; clearing everything would discard the new entry.
+    expect(batch.entries.value.map(entry => entry.label)).toEqual(['Added during broadcast'])
+    expect(batch.entries.value.some(entry => entry.id === executedId)).toBe(false)
+    expect(batch.execError.value).toBeUndefined()
+  })
+
+  it('retires executed entries after a stale safe-bundled proposal lands', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    eulerTxMocks.prepareTransactionPlan.mockImplementation(async plan => ({ plan, chainId: 1, account: owner }))
+    let releaseCompletion!: () => void
+    const completionGate = new Promise<void>((resolve) => {
+      releaseCompletion = resolve
+    })
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (_prepared, _wrappers, options) => {
+      options?.beforeBroadcast?.()
+      await completionGate
+      return { receipts: [] }
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    const executedId = batch.entries.value[0]!.id
+    const ceremony = await batch.prepareBatchExecution()
+    const execution = batch.executeBatch(undefined, ceremony)
+    await vi.waitFor(() => expect(eulerTxMocks.executePreparedPlanWithPlainCalls).toHaveBeenCalledTimes(1))
+
+    await batch.addEntry({
+      label: 'Added during proposal',
+      buildPlan: async () => singleOpBundledPlan,
+      requiresPlanningAccount: false,
+    })
+    expect(batch.entries.value).toHaveLength(2)
+
+    releaseCompletion()
+    await execution
+
+    expect(batch.entries.value.map(entry => entry.label)).toEqual(['Added during proposal'])
+    expect(batch.entries.value.some(entry => entry.id === executedId)).toBe(false)
+    expect(batch.execError.value).toBeUndefined()
+  })
+
   it('does not publish a decoded execution error after the wallet context changes', async () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)

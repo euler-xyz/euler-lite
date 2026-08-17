@@ -2464,6 +2464,40 @@ export const useTxBatch = () => {
     syncOverlay()
   }
 
+  /**
+   * Remove exactly the entries a landed execution covered, keeping any the
+   * user added while the broadcast was in flight. Runs when execution
+   * succeeded but the cart is no longer the reviewed generation for the same
+   * wallet: clearing everything would discard unexecuted work, while keeping
+   * everything would leave already-executed entries queued to run again. The
+   * ceremony's review index carries the executed entry ids. A wallet-context
+   * change is already handled by the owner/chain watcher emptying the cart, so
+   * this only ever filters same-wallet successors, and the surviving entries
+   * resimulate through the entries watcher.
+   */
+  const retireExecutedEntries = (ceremony: PreparedBatchExecution) => {
+    const executedIds = new Set(Object.keys(ceremony.reviewByEntryId))
+    const nextEntries = entries.value.filter(entry => !executedIds.has(entry.id))
+    if (nextEntries.length === entries.value.length) return
+    execError.value = undefined
+    invalidatePendingAddContext()
+    invalidateBatchReview()
+    entries.value = nextEntries
+    if (nextEntries.length === 0) {
+      resimToken++
+      layers.value = []
+      activeLayer.value = 0
+      isSimulating.value = false
+      simError.value = undefined
+      walletShortfalls.value = []
+      lastMerged = null
+      baseAccountSnapshot = null
+      batchSlotHints = {}
+      resimulatePromise = null
+      syncOverlay()
+    }
+  }
+
   const setActiveLayer = (layer: number) => {
     activeLayer.value = Math.max(0, Math.min(layer, layers.value.length - 1))
     syncOverlay()
@@ -2883,6 +2917,7 @@ export const useTxBatch = () => {
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
         }
         if (!isBatchExecutionCurrent(execution)) {
+          retireExecutedEntries(execution)
           scope?.markSucceeded()
           return
         }
@@ -2906,6 +2941,7 @@ export const useTxBatch = () => {
         shouldNotify: () => isBatchExecutionWalletCurrent(execution!),
       })
       if (!isBatchExecutionCurrent(execution)) {
+        retireExecutedEntries(execution)
         scope?.markSucceeded()
         return
       }

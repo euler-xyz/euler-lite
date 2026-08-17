@@ -211,6 +211,9 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
 - **Fresh-position deposit** → no `subAccount` → no Position tag (by design).
 - **Many operations** → `BaseModalWrapper` handles scroll; do not add a nested scroll.
 - **Spy mode** → everything renders; only Execute is disabled.
+- **Cart edited during broadcast** → a same-wallet add while the execution is in flight
+  makes the ceremony stale; on success only the executed entries are removed from the
+  cart (the mid-flight addition survives and resimulates), instead of clearing everything.
 
 ## Accessibility
 - Row header is a real `<button>`; expose `aria-expanded` bound to the open state and

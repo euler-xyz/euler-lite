@@ -87,6 +87,11 @@ import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getMigrationAuthorizationSignatureSubstitutions } from '~/utils/migrationAuthorizationSignatures'
 import {
+  isMigrationCeremonyDeadlineExpired,
+  mintMigrationCeremonyDeadline,
+  pinInboundMigrationCeremonyDeadline,
+} from '~/utils/migrationCeremonyDeadline'
+import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
   type ProjectedYieldCampaignInput,
@@ -100,7 +105,7 @@ const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error: showError } = useToast()
-const { isConnected, address, chainId: walletChainId } = useWagmi()
+const { isConnected, address, chainId: walletChainId, connector: walletConnector } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
 const { chainId: currentChainId, eulerPeripheryAddresses } = useEulerAddresses()
@@ -2639,6 +2644,13 @@ type InboundExternalMigrationPreview = {
   bundledReview: boolean
   input: InboundExternalMigrationInput
   account: Account<IHasVaultAddress>
+  /**
+   * The verifier/authorization deadline every build of this preview pinned.
+   * Confirmation must reuse it: the deadline is embedded in the EIP-712
+   * payload (so a re-mint always fails the payload-equality gate) and in the
+   * plan's verifier calldata (so a re-mint diverges from the reviewed plan).
+   */
+  authorizationDeadline: bigint
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
   authorizationRequest?: MigrationAuthorizationRequest
@@ -2750,23 +2762,19 @@ const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigr
 const shouldRemoveInboundExternalAuthorization = (connectorId: string, useSignatures: boolean) =>
   connectorId === MORPHO_CONNECTOR_ID && useSignatures
 
-const mintInboundMigrationDeadline = (): bigint => BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
-
-// A supplied plan deadline replaces the quote-derived verifier deadlines the
-// connectors would otherwise use, so clamp it to the quotes' own bounds —
-// pinning a ceremony deadline must never extend how long a reviewed swap
-// stays executable on-chain.
-const pinInboundMigrationCeremonyDeadline = (input: InboundExternalMigrationInput): bigint =>
-  [input.collateralSwapQuote, input.debtSwapQuote]
-    .map(quote => quote?.verify.deadline)
-    .filter((deadline): deadline is number => typeof deadline === 'number' && deadline > 0)
-    .map(deadline => BigInt(deadline))
-    .reduce((earliest, deadline) => (deadline < earliest ? deadline : earliest), mintInboundMigrationDeadline())
+// Identity of the wallet connector a Safe proposal would submit through.
+// Account and chain checks cannot see a same-account connector switch, so the
+// direct Safe-bundle flow captures this at confirmation and re-asserts it
+// immediately before the irreversible proposal broadcast.
+const walletConnectorContextKey = (): string | undefined => {
+  const current = walletConnector.value
+  return current ? `${current.id}:${current.uid}` : undefined
+}
 
 const getInboundExternalMigrationAuthorizationRequest = async (
   input: InboundExternalMigrationInput,
   useSignatures = signaturesEnabled.value,
-  deadline: bigint = mintInboundMigrationDeadline(),
+  deadline: bigint = mintMigrationCeremonyDeadline(),
 ): Promise<MigrationAuthorizationRequest | undefined> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2827,6 +2835,7 @@ const buildInboundExternalMigrationCalldataPreview = async (
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   useSignatures: boolean,
   prefetch?: PluginPrefetchData,
+  deadline?: bigint,
 ): Promise<TransactionPlanPrepared> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2848,6 +2857,7 @@ const buildInboundExternalMigrationCalldataPreview = async (
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
     operationName: `${input.source.connectorId}ToEulerMigration`,
+    deadline,
   })
   return prepareTransactionPlan(plan, {
     account,
@@ -2940,8 +2950,12 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
     const input = await buildInboundExternalMigrationInput()
     const account = currentPlanAccount()
     if (!account) throw new Error('Migration inputs are incomplete')
-    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-    const simulationResult = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures)
+    // Pinned once for the preview's whole lifetime: every build here and the
+    // confirm-time rebuild must embed this same deadline, or the payload and
+    // plan gates reject the confirmation as drift.
+    const authorizationDeadline = pinInboundMigrationCeremonyDeadline(input)
+    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures, authorizationDeadline)
+    const simulationResult = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures, authorizationDeadline)
     const prefetch = await prefetchInboundExternalMigrationPlugins(simulationResult.plan, account)
     // Without signatures the authorization is granted by a standalone tx, so the
     // simulation plan (authorization item filtered out) is already the exact
@@ -2954,7 +2968,7 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
         usePermit2: useSignatures,
       }),
       useSignatures
-        ? buildInboundExternalMigrationCalldataPreview(input, account, authorizationRequest, useSignatures, prefetch)
+        ? buildInboundExternalMigrationCalldataPreview(input, account, authorizationRequest, useSignatures, prefetch, authorizationDeadline)
         : Promise.resolve(undefined),
     ])
     const calldataPrepared = previewPrepared ?? tenderlyPrepared
@@ -2969,6 +2983,7 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
       bundledReview: !useSignatures && isSafeWallet.value && !!authorizationRequest,
       input,
       account,
+      authorizationDeadline,
       tenderlySimulation: {
         plan: simulationResult.plan,
         prepared: tenderlyPrepared,
@@ -3438,7 +3453,14 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
     })
     if (!await restorePendingBeforeRetry()) return
     inboundExternalPreparedPlan.value = null
-    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+    // The reviewed deadline is embedded in the displayed payload and plan, so
+    // an expired one can only produce an on-chain revert — force a re-review
+    // that mints a fresh ceremony instead.
+    if (isMigrationCeremonyDeadlineExpired(preview.authorizationDeadline)) {
+      inboundExternalMigrationPreview.value = null
+      throw new Error('The reviewed authorization expired — please review the migration again.')
+    }
+    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures, preview.authorizationDeadline)
     inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
 
     // The reviewed ceremony is defined by the authorization payload the modal
@@ -3470,14 +3492,30 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
           inboundExternalMigrationPreview.value = null
           throw new Error('Authorization requirements changed since review — please review the migration again.')
         }
-        const outcome = await sendInboundExternalMigrationAsSafeBundle(input, authorizationRequest, account, useSignatures)
+        // The wallet/Safe checks above ran at confirm entry; authorization
+        // lookup, planning, preparation, and simulation all await in between,
+        // so re-assert the full reviewed context (including the connector —
+        // a same-account Safe connector switch changes who submits) right
+        // before the irreversible proposal broadcast.
+        const confirmedConnectorKey = walletConnectorContextKey()
+        const outcome = await sendInboundExternalMigrationAsSafeBundle(input, authorizationRequest, account, useSignatures, preview.authorizationDeadline, () => {
+          assertWalletExecutionContext({
+            expectedAccount: input.owner,
+            expectedChainId: migrationChainId,
+            currentAccount: address.value as Address | undefined,
+            currentChainId: walletChainId.value,
+          })
+          if (!isSafeWallet.value || walletConnectorContextKey() !== confirmedConnectorKey) {
+            throw new Error('Wallet changed since review — please review the migration again.')
+          }
+        })
         if (outcome === 'aborted') return
         finishInboundExternalMigrationSuccess(execution, input)
         return
       }
 
       const authorization = await resolveInboundExternalMigrationAuthorization(authorizationRequest, revokeTxs, useSignatures)
-      inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures)
+      inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures, preview.authorizationDeadline)
       inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, {
         account,
         chainId: migrationChainId,
@@ -3565,9 +3603,11 @@ const sendInboundExternalMigrationAsSafeBundle = async (
   authorizationRequest: MigrationAuthorizationRequest,
   account: Account<IHasVaultAddress> | undefined,
   useSignatures: boolean,
+  deadline: bigint,
+  beforeBroadcast: () => void,
 ): Promise<'executed' | 'aborted'> => {
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
-  const simulation = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures)
+  const simulation = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures, deadline)
   const prepared = await prepareTransactionPlan(simulation.plan, {
     account,
     chainId: input.position.chainId,
@@ -3582,7 +3622,8 @@ const sendInboundExternalMigrationAsSafeBundle = async (
   )
   if (!ok) return 'aborted'
 
-  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true })
+  beforeBroadcast()
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true, beforeBroadcast })
   if (!result) {
     // The review showed ONE atomic proposal. A Safe whose provider cannot be
     // acquired at confirm time must abort loudly, never silently degrade
@@ -3710,6 +3751,7 @@ const addInboundExternalMigrationToBatch = async () => {
           preview.authorizationRequest,
           account,
           useSignatures,
+          preview.authorizationDeadline,
         )
         return {
           plan: simulationResult.plan,

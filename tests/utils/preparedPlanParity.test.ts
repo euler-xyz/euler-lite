@@ -8,6 +8,7 @@ const target = '0x2000000000000000000000000000000000000000' as Address
 const otherTarget = '0x3000000000000000000000000000000000000000' as Address
 const placeholder = `0x${'00'.repeat(65)}` as Hex
 const signature = `0x${'11'.repeat(32)}${'22'.repeat(32)}01` as Hex
+const secondSignature = `0x${'33'.repeat(32)}${'44'.repeat(32)}1c` as Hex
 
 const permitAbi = [{
   type: 'function',
@@ -46,6 +47,30 @@ const planWithSignature = (authorization: Hex): TransactionPlan => [{
       value: 7n,
       data: `0x1234${authorization.slice(2)}abcd` as Hex,
     }],
+  }],
+}]
+
+// Two structurally identical placeholder sites: only the signature bytes can
+// tell the resolved items apart.
+const planWithTwoSignatures = (first: Hex, second: Hex): TransactionPlan => [{
+  type: 'evcBatch',
+  items: [{
+    type: 'operation',
+    name: 'migration',
+    items: [
+      {
+        targetContract: target,
+        onBehalfOfAccount: owner,
+        value: 7n,
+        data: `0x1234${first.slice(2)}abcd` as Hex,
+      },
+      {
+        targetContract: target,
+        onBehalfOfAccount: owner,
+        value: 7n,
+        data: `0x1234${second.slice(2)}abcd` as Hex,
+      },
+    ],
   }],
 }]
 
@@ -155,6 +180,58 @@ describe('assertPreparedPlanSignatureParity', () => {
     }, ...planWithSignature(signature)] as TransactionPlan],
   ])('rejects a confirm-time %s change', (_label, mutate) => {
     expect(() => assertParity(mutate())).toThrow('transaction plan changed after review')
+  })
+
+  it('accepts two ordered substitutions across identical placeholder sites', () => {
+    expect(() => assertPreparedPlanSignatureParity({
+      reviewed: prepared(planWithTwoSignatures(placeholder, placeholder)),
+      resolved: prepared(planWithTwoSignatures(signature, secondSignature)),
+      substitutions: [
+        { placeholder, signature },
+        { placeholder, signature: secondSignature },
+      ],
+    })).not.toThrow()
+  })
+
+  it('rejects signatures transposed between identical placeholder sites', () => {
+    expect(() => assertPreparedPlanSignatureParity({
+      reviewed: prepared(planWithTwoSignatures(placeholder, placeholder)),
+      resolved: prepared(planWithTwoSignatures(secondSignature, signature)),
+      substitutions: [
+        { placeholder, signature },
+        { placeholder, signature: secondSignature },
+      ],
+    })).toThrow('transaction plan changed after review')
+  })
+
+  it('binds substitution order within a single calldata string', () => {
+    const dataWith = (first: Hex, second: Hex): TransactionPlan => [{
+      type: 'evcBatch',
+      items: [{
+        type: 'operation',
+        name: 'migration',
+        items: [{
+          targetContract: target,
+          onBehalfOfAccount: owner,
+          value: 7n,
+          data: `0x${first.slice(2)}${second.slice(2)}` as Hex,
+        }],
+      }],
+    }]
+    const substitutions = [
+      { placeholder, signature },
+      { placeholder, signature: secondSignature },
+    ]
+    expect(() => assertPreparedPlanSignatureParity({
+      reviewed: prepared(dataWith(placeholder, placeholder)),
+      resolved: prepared(dataWith(signature, secondSignature)),
+      substitutions,
+    })).not.toThrow()
+    expect(() => assertPreparedPlanSignatureParity({
+      reviewed: prepared(dataWith(placeholder, placeholder)),
+      resolved: prepared(dataWith(secondSignature, signature)),
+      substitutions,
+    })).toThrow('transaction plan changed after review')
   })
 
   it('rejects a missing or extra signature occurrence', () => {
