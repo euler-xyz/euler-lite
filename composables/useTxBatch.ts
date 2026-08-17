@@ -42,13 +42,16 @@ import {
   type ReviewedSignaturePlaceholderCall,
 } from '~/utils/reviewed-execution'
 import {
+  acquirePendingSafeSubmission as acquireStoredSafeSubmission,
+  clearPendingSafeSubmission as clearStoredSafeSubmission,
   getPreparedBatchFingerprint,
   getPendingSafeSubmissionKind,
   isDefinitiveWalletRejection,
   loadPendingSafeBatchSubmissions,
+  SAFE_SUBMISSION_STORAGE_INVALID_ERROR,
   SAFE_SUBMISSION_UNRESOLVED_ERROR,
   SAFE_SUBMISSION_WITHOUT_HASH_ERROR,
-  savePendingSafeBatchSubmissions,
+  updatePendingSafeSubmission as updateStoredSafeSubmission,
   type PersistedPendingSafeBatchSubmission,
 } from '~/utils/pending-safe-batch-submission'
 
@@ -282,9 +285,15 @@ const getPendingSafeStorage = (): Storage | undefined => {
   try {
     return window.localStorage
   }
-  catch {
-    return undefined
+  catch (cause) {
+    throw new Error(SAFE_SUBMISSION_STORAGE_INVALID_ERROR, { cause })
   }
+}
+
+const requirePendingSafeStorage = (): Storage => {
+  const storage = getPendingSafeStorage()
+  if (!storage) throw new Error(SAFE_SUBMISSION_STORAGE_INVALID_ERROR)
+  return storage
 }
 
 const refreshPendingSafeSubmissions = () => {
@@ -296,28 +305,13 @@ const refreshPendingSafeSubmissions = () => {
 
 const hydratePendingSafeSubmissions = () => {
   if (pendingSafeSubmissionsHydrated) return
-  refreshPendingSafeSubmissions()
-}
-
-const canonicalizeStoredValue = (value: unknown): unknown => {
-  if (typeof value === 'bigint') return `${value}n`
-  if (Array.isArray(value)) return value.map(canonicalizeStoredValue)
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => [key, canonicalizeStoredValue(item)]),
-  )
-}
-
-const persistPendingSafeSubmissions = () => {
-  const storage = getPendingSafeStorage()
-  if (!storage) throw new Error('Durable browser storage is unavailable; Safe submission was blocked')
-  savePendingSafeBatchSubmissions(storage, pendingSafeSubmissions.value)
-  const restored = loadPendingSafeBatchSubmissions(storage)
-  if (JSON.stringify(canonicalizeStoredValue(restored))
-    !== JSON.stringify(canonicalizeStoredValue(pendingSafeSubmissions.value))) {
-    throw new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked')
+  try {
+    refreshPendingSafeSubmissions()
+  }
+  catch (error) {
+    pendingSafeSubmissionsHydrated = true
+    pendingSafeSubmissions.value = []
+    logWarn('useTxBatch/hydratePendingSafeSubmissions', error)
   }
 }
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
@@ -1827,39 +1821,24 @@ export const useTxBatch = () => {
       return null
     }
   })
-  const setPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
+  const acquirePendingSafeSubmission = async (
+    pending: Omit<PersistedPendingSafeBatchSubmission, 'reservationId'>,
+  ) => {
+    const acquired = await acquireStoredSafeSubmission(requirePendingSafeStorage(), pending)
     refreshPendingSafeSubmissions()
-    const previous = pendingSafeSubmissions.value
-    pendingSafeSubmissions.value = [
-      ...previous.filter(existing =>
-        existing.account !== pending.account || existing.chainId !== pending.chainId,
-      ),
-      pending,
-    ]
-    try {
-      persistPendingSafeSubmissions()
-    }
-    catch (error) {
-      pendingSafeSubmissions.value = previous
-      throw error
-    }
+    return acquired
   }
-  const clearPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
+  const updatePendingSafeSubmission = async (
+    current: PersistedPendingSafeBatchSubmission,
+    next: PersistedPendingSafeBatchSubmission,
+  ) => {
+    const updated = await updateStoredSafeSubmission(requirePendingSafeStorage(), current, next)
     refreshPendingSafeSubmissions()
-    const previous = pendingSafeSubmissions.value
-    pendingSafeSubmissions.value = previous.filter(existing => !(
-      existing.account.toLowerCase() === pending.account.toLowerCase()
-      && existing.chainId === pending.chainId
-      && existing.batchFingerprint === pending.batchFingerprint
-      && getPendingSafeSubmissionKind(existing) === getPendingSafeSubmissionKind(pending)
-    ))
-    try {
-      persistPendingSafeSubmissions()
-    }
-    catch (error) {
-      pendingSafeSubmissions.value = previous
-      throw error
-    }
+    return updated
+  }
+  const clearPendingSafeSubmission = async (pending: PersistedPendingSafeBatchSubmission) => {
+    await clearStoredSafeSubmission(requirePendingSafeStorage(), pending)
+    refreshPendingSafeSubmissions()
   }
   const {
     prepareTransactionPlan,
@@ -2477,6 +2456,36 @@ export const useTxBatch = () => {
     syncOverlay()
   }
 
+  const clearExecutedEntries = (executedEntryIds?: readonly string[]) => {
+    if (!executedEntryIds?.length) {
+      clearBatch()
+      return
+    }
+    const executed = new Set(executedEntryIds)
+    const remaining = entries.value.filter(entry => !executed.has(entry.id))
+    if (!remaining.length) {
+      clearBatch()
+      return
+    }
+    // The executed transaction changed live account state. Preserve entries
+    // added after its terminal wallet boundary, but rebuild their simulation
+    // from a fresh base instead of retaining the pre-execution layers.
+    resimToken++
+    layers.value = []
+    activeLayer.value = 0
+    isSimulating.value = false
+    simError.value = undefined
+    execError.value = undefined
+    walletShortfalls.value = []
+    lastMerged = null
+    baseAccountSnapshot = null
+    batchSlotHints = {}
+    resimulatePromise = null
+    tenderly.clearSimulation()
+    entries.value = remaining
+    syncOverlay()
+  }
+
   const setActiveLayer = (layer: number) => {
     activeLayer.value = Math.max(0, Math.min(layer, layers.value.length - 1))
     syncOverlay()
@@ -2704,7 +2713,16 @@ export const useTxBatch = () => {
   }
 
   const reconcilePendingSafeSubmission = async (): Promise<boolean> => {
-    refreshPendingSafeSubmissions()
+    try {
+      refreshPendingSafeSubmissions()
+    }
+    catch (error) {
+      logWarn('useTxBatch/readPendingSafeSubmission', error)
+      execError.value = error instanceof Error
+        ? error.message
+        : SAFE_SUBMISSION_STORAGE_INVALID_ERROR
+      return false
+    }
     const pending = pendingSafeSubmission.value
     if (!pending) return true
     if (!pending.submittedHash) {
@@ -2721,11 +2739,11 @@ export const useTxBatch = () => {
         execError.value = pending.errorMessage
         return false
       }
-      clearPendingSafeSubmission(pending)
+      await clearPendingSafeSubmission(pending)
       if (result.status === 'executed') {
         if (getPendingSafeSubmissionKind(pending) === 'batch') {
           await revokeAfterSuccess(pending.grantedRevokes)
-          clearBatch()
+          clearExecutedEntries(pending.batchEntryIds)
           execError.value = undefined
         }
         else {
@@ -2761,6 +2779,10 @@ export const useTxBatch = () => {
       execError.value = BATCH_REVIEW_INVALIDATED_ERROR
       return
     }
+    const reviewedEntryIds = entries.value.map(entry => entry.id)
+    const assertReviewedRevision = () => {
+      if (batchRevision.value !== reviewedRevision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
+    }
     if (!await reconcilePendingSafeSubmission()) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
@@ -2771,6 +2793,33 @@ export const useTxBatch = () => {
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let safeReservation: PersistedPendingSafeBatchSubmission | undefined
     let safeSubmissionStarted = false
+    let safeWalletRequestMayHaveStarted = false
+    const reserveSafeSubmission = async (
+      pending: Omit<PersistedPendingSafeBatchSubmission, 'reservationId'>,
+    ) => {
+      safeWalletRequestMayHaveStarted = false
+      safeSubmissionStarted = false
+      if (!safeReservation) {
+        safeReservation = await acquirePendingSafeSubmission(pending)
+        return
+      }
+      safeReservation = await updatePendingSafeSubmission(safeReservation, {
+        ...pending,
+        reservationId: safeReservation.reservationId,
+      })
+    }
+    const recordSafeSubmission = async (submittedHash: Hash) => {
+      if (!safeReservation) throw new Error('Safe submission was not durably reserved')
+      safeReservation = await updatePendingSafeSubmission(safeReservation, {
+        ...safeReservation,
+        submittedHash,
+      })
+      safeSubmissionStarted = true
+    }
+    const authorizeWalletBoundary = () => {
+      assertReviewedRevision()
+      safeWalletRequestMayHaveStarted = true
+    }
     try {
       if (!await restorePendingBeforeRetry()) return
       // Final on-chain gas estimate before asking the user to sign. If the batch
@@ -2801,46 +2850,40 @@ export const useTxBatch = () => {
         const preparedAccount = typeof prepared.account === 'string'
           ? getAddress(prepared.account)
           : getAddress(prepared.account.owner)
-        if (batchRevision.value !== reviewedRevision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
+        assertReviewedRevision()
         const result = await executePreparedPlanWithPlainCalls(prepared, {
           before: collected.grants,
           after: collected.revokes,
         }, {
           allowSingleCall: true,
-          onSafePreflight: () => {
-            const reservation: PersistedPendingSafeBatchSubmission = {
+          beforeSend: authorizeWalletBoundary,
+          onSafePreflight: async () => {
+            await reserveSafeSubmission({
               account: preparedAccount,
               chainId: prepared.chainId,
               batchFingerprint: getPreparedBatchFingerprint(prepared),
               errorMessage: SAFE_SUBMISSION_UNRESOLVED_ERROR,
               grantedRevokes: [],
               submissionKind: 'batch',
-            }
-            setPendingSafeSubmission(reservation)
-            safeReservation = reservation
+              batchEntryIds: reviewedEntryIds,
+            })
           },
-          onSafeSubmission: (submittedHash: Hash) => {
-            if (!safeReservation) throw new Error('Safe submission was not durably reserved')
-            const submittedReservation = { ...safeReservation, submittedHash }
-            setPendingSafeSubmission(submittedReservation)
-            safeReservation = submittedReservation
-            safeSubmissionStarted = true
-          },
+          onSafeSubmission: recordSafeSubmission,
         })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
           // the sequential multi-proposal ceremony.
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
         }
-        if (safeReservation) clearPendingSafeSubmission(safeReservation)
+        if (safeReservation) await clearPendingSafeSubmission(safeReservation)
         latchedBundledExecution.value = null
-        clearBatch()
+        clearExecutedEntries(reviewedEntryIds)
         if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
         await redirectAfterBatchExecution(scope)
         return
       }
 
-      if (batchRevision.value !== reviewedRevision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
+      assertReviewedRevision()
       await sendExecutionPrerequisites(grantedRevokes, reviewedRevision)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
@@ -2852,35 +2895,29 @@ export const useTxBatch = () => {
         ? getAddress(prepared.account)
         : getAddress(prepared.account.owner)
       await executePreparedPlan(prepared, {
-        onSafePreflight: () => {
-          const reservation: PersistedPendingSafeBatchSubmission = {
+        beforeSend: authorizeWalletBoundary,
+        onSafePreflight: async () => {
+          await reserveSafeSubmission({
             account: preparedAccount,
             chainId: prepared.chainId,
             batchFingerprint: getPreparedBatchFingerprint(prepared),
             errorMessage: SAFE_SUBMISSION_UNRESOLVED_ERROR,
             grantedRevokes: [...grantedRevokes],
             submissionKind: 'batch',
-          }
-          setPendingSafeSubmission(reservation)
-          safeReservation = reservation
+            batchEntryIds: reviewedEntryIds,
+          })
         },
-        onSafeSubmission: (submittedHash: Hash) => {
-          if (!safeReservation) throw new Error('Safe submission was not durably reserved')
-          const submittedReservation = { ...safeReservation, submittedHash }
-          setPendingSafeSubmission(submittedReservation)
-          safeReservation = submittedReservation
-          safeSubmissionStarted = true
-        },
+        onSafeSubmission: recordSafeSubmission,
       })
-      if (safeReservation) clearPendingSafeSubmission(safeReservation)
-      clearBatch()
+      if (safeReservation) await clearPendingSafeSubmission(safeReservation)
+      clearExecutedEntries(reviewedEntryIds)
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
       await revokeAfterSuccess(grantedRevokes)
       await redirectAfterBatchExecution(scope)
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      if (safeReservation && (safeSubmissionStarted || !isDefinitiveWalletRejection(error))) {
+      if (safeReservation && safeWalletRequestMayHaveStarted && !isDefinitiveWalletRejection(error)) {
         // Once the durable preflight lock exists, a provider/bridge failure may
         // have happened after the Safe accepted the request but before its hash
         // reached the app. Only a structured wallet-rejection code proves the
@@ -2893,10 +2930,14 @@ export const useTxBatch = () => {
       }
       if (safeReservation) {
         try {
-          clearPendingSafeSubmission(safeReservation)
+          await clearPendingSafeSubmission(safeReservation)
         }
         catch (storageError) {
           logWarn('useTxBatch/clearSafeReservation', storageError)
+          execError.value = storageError instanceof Error
+            ? storageError.message
+            : SAFE_SUBMISSION_STORAGE_INVALID_ERROR
+          return
         }
       }
       // The batch never landed, so no granted authorization should be left

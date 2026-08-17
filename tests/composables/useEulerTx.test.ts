@@ -4,10 +4,10 @@ import type { MigrationAuthorizationRequest, TransactionMigrationAuthorizationRe
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { useEulerTx } from '~/composables/useEulerTx'
+import { SAFE_REVIEW_APPROVALS_CHANGED_ERROR, useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
-import { getPendingSafeSubmissionKind, getPreparedBatchFingerprint, loadPendingSafeBatchSubmissions, savePendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
+import { getPendingSafeSubmissionKind, getPreparedBatchFingerprint, loadPendingSafeBatchSubmissions, PENDING_SAFE_BATCH_STORAGE_KEY, SAFE_SUBMISSION_STORAGE_INVALID_ERROR, savePendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
 import { markReviewedSafeExecutionRequired } from '~/utils/reviewed-execution'
 
 const wagmiMocks = vi.hoisted(() => ({
@@ -33,6 +33,17 @@ vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkForChain: vi.fn(),
   getEulerSdkFresh: vi.fn(),
 }))
+
+const serializedLocks = () => {
+  let tail = Promise.resolve()
+  return {
+    request: vi.fn(<T>(_name: string, _options: LockOptions, callback: () => T | Promise<T>) => {
+      const result = tail.then(callback, callback)
+      tail = result.then(() => undefined, () => undefined)
+      return result
+    }),
+  }
+}
 
 const OWNER = getAddress('0x1000000000000000000000000000000000000000')
 const OTHER_OWNER = getAddress('0x2000000000000000000000000000000000000000')
@@ -92,8 +103,10 @@ describe('useEulerTx migration authorization cleanup', () => {
     vi.stubGlobal('useWagmi', () => ({ address: walletAddress, chainId: walletChainId }))
     vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
     vi.stubGlobal('useSignaturePreference', () => ({ signaturesEnabled: ref(true) }))
+    vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet: ref(false), isSafeWalletResolved: ref(true) }))
     vi.stubGlobal('usePortfolioRefresh', () => ({ triggerPortfolioRefresh: vi.fn() }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: addressesChainId }))
+    vi.stubGlobal('navigator', { locks: serializedLocks() })
 
     vi.mocked(getAccount).mockImplementation(() => ({
       address: currentAccount,
@@ -166,6 +179,19 @@ describe('useEulerTx migration authorization cleanup', () => {
     const { prepareTransactionPlan } = useEulerTx()
 
     await prepareTransactionPlan([] as TransactionPlan, { usePermit2: false })
+
+    expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
+  })
+
+  it('prepares without Permit2 while Safe classification is unresolved', async () => {
+    vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet: ref(false), isSafeWalletResolved: ref(false) }))
+    const prepare = vi.fn().mockResolvedValue({ kind: 'prepared' })
+    vi.mocked(getEulerSdkForChain).mockResolvedValue({
+      executionService: { prepareTransactionPlan: prepare },
+    } as never)
+    const { prepareTransactionPlan } = useEulerTx()
+
+    await prepareTransactionPlan([] as TransactionPlan, { usePermit2: true })
 
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
   })
@@ -387,8 +413,10 @@ describe('useEulerTx Safe wallet bundling', () => {
     vi.stubGlobal('useWagmi', () => ({ address: ref(OWNER), chainId: ref(1) }))
     vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
     vi.stubGlobal('useSignaturePreference', () => ({ signaturesEnabled: ref(false) }))
+    vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet: ref(true), isSafeWalletResolved: ref(true) }))
     vi.stubGlobal('usePortfolioRefresh', () => ({ triggerPortfolioRefresh: vi.fn() }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
+    vi.stubGlobal('navigator', { locks: serializedLocks() })
     vi.stubGlobal('window', {
       localStorage: {
         getItem: (key: string) => safeStorageValues.get(key) ?? null,
@@ -485,6 +513,64 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
   })
 
+  it('does not overwrite a direct Safe reservation acquired by another tab after reconciliation', async () => {
+    const otherReservation = {
+      account: OWNER,
+      chainId: 1,
+      batchFingerprint: 'fedcba9876543210',
+      errorMessage: 'other tab pending',
+      grantedRevokes: [],
+      submissionKind: 'operation' as const,
+    }
+    const provider = {
+      getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hash }) => ({
+        transactionHash: hash,
+        status: 'success',
+        blockNumber: 123n,
+      }) as TransactionReceipt),
+    }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => provider) },
+      deploymentService: { getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: EVC } } })) },
+      executionService: {
+        encodeBatch: vi.fn(() => {
+          savePendingSafeBatchSubmissions(window.localStorage, [otherReservation])
+          return BATCH_DATA
+        }),
+        executePreparedTransactionPlan,
+      },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toThrow('hash was not retained')
+
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([otherReservation])
+  })
+
+  it.each([
+    ['malformed state', () => safeStorageValues.set(PENDING_SAFE_BATCH_STORAGE_KEY, '{')],
+    ['unreadable state', () => {
+      vi.stubGlobal('window', {
+        localStorage: {
+          getItem: () => { throw new Error('denied') },
+          setItem: vi.fn(),
+          removeItem: vi.fn(),
+        },
+      })
+    }],
+  ])('blocks direct Safe submission for %s', async (_label, corruptStorage) => {
+    corruptStorage()
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toThrow(SAFE_SUBMISSION_STORAGE_INVALID_ERROR)
+
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
   it('does not trust a terminal-looking pre-hash provider error', async () => {
     wagmiMocks.sendCalls.mockRejectedValue(new Error('Safe transaction was cancelled'))
     const { executePreparedPlan } = useEulerTx()
@@ -554,16 +640,17 @@ describe('useEulerTx Safe wallet bundling', () => {
     const { executePreparedPlan } = useEulerTx()
     const batchOnly = [approvedPlan[1]] as TransactionPlan
 
-    // usePermit2: true with no permit2 items — the envelope must still be
-    // normalized before the sequential fallback runs it for a Safe.
-    await executePreparedPlan(buildPrepared(batchOnly, true))
+    const reviewed = buildPrepared(batchOnly, true)
+    await executePreparedPlan(reviewed)
 
     expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
     expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
-    expect(executePreparedTransactionPlan.mock.calls[0][0].prepared.usePermit2).toBe(false)
+    // The consent-bearing envelope is never rewritten inside execution. With
+    // no Permit2 item in the prepared plan, the option bit is inert.
+    expect(executePreparedTransactionPlan.mock.calls[0][0].prepared).toBe(reviewed)
   })
 
-  it('executes the repaired envelope sequentially when the repair leaves one call', async () => {
+  it('invalidates a late-classified Safe review instead of repairing it to one call', async () => {
     const permitPrepared = buildPrepared([
       {
         ...approvedPlan[0],
@@ -571,13 +658,7 @@ describe('useEulerTx Safe wallet bundling', () => {
       },
       approvedPlan[1],
     ] as unknown as TransactionPlan)
-    // Allowance turned out sufficient: the repair resolves to no approve
-    // calls, leaving only the EVC batch — nothing to bundle.
-    const repairedPlan = [
-      { ...approvedPlan[0], resolved: [] },
-      approvedPlan[1],
-    ] as unknown as TransactionPlan
-    const resolveRequiredApprovals = vi.fn(async () => repairedPlan)
+    const resolveRequiredApprovals = vi.fn(async () => approvedPlan)
     const provider = { getTransactionReceipt: vi.fn() }
     vi.mocked(getEulerSdkFresh).mockResolvedValue({
       providerService: { getProvider: vi.fn(() => provider) },
@@ -590,14 +671,12 @@ describe('useEulerTx Safe wallet bundling', () => {
     } as never)
     const { executePreparedPlan } = useEulerTx()
 
-    await executePreparedPlan(permitPrepared)
+    await expect(executePreparedPlan(permitPrepared))
+      .rejects.toThrow(SAFE_REVIEW_APPROVALS_CHANGED_ERROR)
 
     expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
-    expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
-    // The sequential fallback runs the REPAIRED envelope, not the permit2 one.
-    const executedPrepared = executePreparedTransactionPlan.mock.calls[0][0].prepared
-    expect(executedPrepared.plan).toBe(repairedPlan)
-    expect(executedPrepared.usePermit2).toBe(false)
+    expect(resolveRequiredApprovals).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
   })
 
   it('does not submit a bundle after account drift', async () => {
@@ -644,7 +723,7 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
   })
 
-  it('repairs permit2-resolved prepared envelopes before bundling', async () => {
+  it('does not replace reviewed Permit2 rows with approval writes during Safe execution', async () => {
     const permitPrepared = buildPrepared([
       {
         ...approvedPlan[0],
@@ -671,14 +750,12 @@ describe('useEulerTx Safe wallet bundling', () => {
     } as never)
     const { executePreparedPlan } = useEulerTx()
 
-    const result = await executePreparedPlan(permitPrepared)
+    await expect(executePreparedPlan(permitPrepared))
+      .rejects.toThrow(SAFE_REVIEW_APPROVALS_CHANGED_ERROR)
 
-    // The stale permit2 resolution was re-resolved with permit2 off and the
-    // repaired plan bundled — no permit2 signature ceremony on a Safe.
-    expect(resolveRequiredApprovals).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
-    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
+    expect(resolveRequiredApprovals).not.toHaveBeenCalled()
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
     expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
-    expect(result.hashes).toEqual([SAFE_TX_HASH])
   })
 
   it('fails closed for a reviewed WalletConnect Safe bundle when its provider is unavailable', async () => {
@@ -764,11 +841,9 @@ describe('useEulerTx Safe wallet bundling', () => {
     const { executePreparedPlan } = useEulerTx()
 
     await expect(executePreparedPlan(permitPrepared))
-      .rejects.toThrow('Safe connection unavailable')
+      .rejects.toThrow(SAFE_REVIEW_APPROVALS_CHANGED_ERROR)
 
-    // Approval resolution may normalize the in-memory envelope, but no wallet
-    // boundary is crossed after the provider needed for Safe reconciliation is lost.
-    expect(resolveRequiredApprovals).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
+    expect(resolveRequiredApprovals).not.toHaveBeenCalled()
     expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
     expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()

@@ -11,11 +11,12 @@ import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingCo
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
 import { getAuthorizationStepDisplay } from '~/utils/batchReviewDisplay'
-import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { formatNumber } from '~/utils/string-utils'
 import { markReviewedSafeExecutionRequired } from '~/utils/reviewed-execution'
+import { SAFE_REVIEW_APPROVALS_CHANGED_ERROR } from '~/composables/useEulerTx'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -374,7 +375,12 @@ watch(batchRevision, (currentRevision) => {
 const preparedPlanRef = ref<TransactionPlan | undefined>()
 const preparedExecutionRef = ref<TransactionPlanPrepared | undefined>()
 watch([isSafeWallet, preparedExecutionRef], ([safe, envelope]) => {
-  if (safe && envelope) markReviewedSafeExecutionRequired(envelope)
+  if (safe && envelope) {
+    markReviewedSafeExecutionRequired(envelope)
+    if (hasPermit2Signature(envelope.plan)) {
+      prepareError.value = SAFE_REVIEW_APPROVALS_CHANGED_ERROR
+    }
+  }
 }, { flush: 'sync' })
 const hasPermit2Approval = computed(() =>
   hasPermit2TokenApproval(preparedPlanRef.value, eulerCoreAddresses.value?.permit2),

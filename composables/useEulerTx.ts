@@ -73,13 +73,16 @@ import {
   type WalletExecutionContext,
 } from '~/utils/walletExecutionContext'
 import {
+  acquirePendingSafeSubmission,
+  clearPendingSafeSubmission,
   getPendingSafeSubmissionKind,
   getPreparedBatchFingerprint,
   isDefinitiveWalletRejection,
   loadPendingSafeBatchSubmissions,
+  SAFE_SUBMISSION_STORAGE_INVALID_ERROR,
   SAFE_SUBMISSION_UNRESOLVED_ERROR,
   SAFE_SUBMISSION_WITHOUT_HASH_ERROR,
-  savePendingSafeBatchSubmissions,
+  updatePendingSafeSubmission,
   type PersistedPendingSafeBatchSubmission,
 } from '~/utils/pending-safe-batch-submission'
 import { isReviewedSafeExecutionRequired } from '~/utils/reviewed-execution'
@@ -87,6 +90,7 @@ import { isReviewedSafeExecutionRequired } from '~/utils/reviewed-execution'
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
 const SAFE_CONNECTION_UNAVAILABLE_ERROR = 'Safe connection unavailable — reconnect and review the transaction again.'
+export const SAFE_REVIEW_APPROVALS_CHANGED_ERROR = 'Safe wallet detection changed the required approval steps. Close this review and review the transaction again.'
 const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
@@ -100,18 +104,16 @@ const getPendingSafeStorage = (): Storage | undefined => {
   try {
     return window.localStorage
   }
-  catch {
-    return undefined
+  catch (cause) {
+    throw new Error(SAFE_SUBMISSION_STORAGE_INVALID_ERROR, { cause })
   }
 }
 
-const samePendingSafeSubmission = (
-  left: PersistedPendingSafeBatchSubmission,
-  right: PersistedPendingSafeBatchSubmission,
-) => left.account.toLowerCase() === right.account.toLowerCase()
-  && left.chainId === right.chainId
-  && left.batchFingerprint === right.batchFingerprint
-  && getPendingSafeSubmissionKind(left) === getPendingSafeSubmissionKind(right)
+const requirePendingSafeStorage = (): Storage => {
+  const storage = getPendingSafeStorage()
+  if (!storage) throw new Error(SAFE_SUBMISSION_STORAGE_INVALID_ERROR)
+  return storage
+}
 
 const getPendingSafeSubmission = (
   account: Address,
@@ -124,34 +126,6 @@ const getPendingSafeSubmission = (
   )
 }
 
-const setPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
-  const storage = getPendingSafeStorage()
-  if (!storage) throw new Error('Durable browser storage is unavailable; Safe submission was blocked')
-  const previous = loadPendingSafeBatchSubmissions(storage)
-  const next = [
-    ...previous.filter(existing =>
-      existing.account.toLowerCase() !== pending.account.toLowerCase() || existing.chainId !== pending.chainId,
-    ),
-    pending,
-  ]
-  savePendingSafeBatchSubmissions(storage, next)
-  const restored = loadPendingSafeBatchSubmissions(storage)
-  const retained = restored.find(existing => samePendingSafeSubmission(existing, pending))
-  if (!retained || retained.submittedHash !== pending.submittedHash) {
-    throw new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked')
-  }
-}
-
-const clearPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
-  const storage = getPendingSafeStorage()
-  if (!storage) throw new Error('Durable browser storage is unavailable; the Safe submission lock was retained')
-  const previous = loadPendingSafeBatchSubmissions(storage)
-  savePendingSafeBatchSubmissions(storage, previous.filter(existing => !samePendingSafeSubmission(existing, pending)))
-  if (loadPendingSafeBatchSubmissions(storage).some(existing => samePendingSafeSubmission(existing, pending))) {
-    throw new Error('Durable browser storage could not clear the reconciled Safe submission lock')
-  }
-}
-
 const isTerminalSafeSubmissionError = (error: unknown): boolean =>
   error instanceof Error
   && (error.message === 'Safe transaction reverted' || error.message === 'Safe transaction was cancelled')
@@ -162,38 +136,35 @@ const createDirectSafeSubmissionLifecycle = (prepared: TransactionPlanPrepared) 
     : getAddress(prepared.account.owner)
   let reservation: PersistedPendingSafeBatchSubmission | undefined
 
-  const preflight = () => {
+  const preflight = async () => {
     if (!reservation) {
-      const existing = getPendingSafeSubmission(account, prepared.chainId)
-      if (existing) {
-        throw new Error(existing.submittedHash
-          ? existing.errorMessage
-          : SAFE_SUBMISSION_WITHOUT_HASH_ERROR)
-      }
+      reservation = await acquirePendingSafeSubmission(requirePendingSafeStorage(), {
+        account,
+        chainId: prepared.chainId,
+        batchFingerprint: getPreparedBatchFingerprint(prepared),
+        errorMessage: SAFE_SUBMISSION_UNRESOLVED_ERROR,
+        grantedRevokes: [],
+        submissionKind: 'operation',
+      })
+      return
     }
-    const next: PersistedPendingSafeBatchSubmission = {
-      account,
-      chainId: prepared.chainId,
-      batchFingerprint: getPreparedBatchFingerprint(prepared),
-      errorMessage: SAFE_SUBMISSION_UNRESOLVED_ERROR,
-      grantedRevokes: [],
-      submissionKind: 'operation',
-    }
-    setPendingSafeSubmission(next)
-    reservation = next
+    // A non-bundleable Safe plan may require more than one proposal. The
+    // previous hash has reached a terminal receipt before the SDK asks for the
+    // next send, so reset the same owned record to a pre-hash reservation.
+    const { submittedHash: _submittedHash, ...reset } = reservation
+    reservation = await updatePendingSafeSubmission(requirePendingSafeStorage(), reservation, reset)
   }
-  const submitted = (submittedHash: Hash) => {
+  const submitted = async (submittedHash: Hash) => {
     if (!reservation) throw new Error('Safe submission was not durably reserved')
     const next = { ...reservation, submittedHash }
-    setPendingSafeSubmission(next)
-    reservation = next
+    reservation = await updatePendingSafeSubmission(requirePendingSafeStorage(), reservation, next)
   }
-  const settled = () => {
+  const settled = async () => {
     if (!reservation) return
-    clearPendingSafeSubmission(reservation)
+    await clearPendingSafeSubmission(requirePendingSafeStorage(), reservation)
     reservation = undefined
   }
-  const failed = (error: unknown): boolean => {
+  const failed = async (error: unknown): Promise<boolean> => {
     if (!reservation) return false
     // Once Safe returned a hash, even a later wallet-style rejection code is
     // not proof that the accepted proposal stopped. Only the trusted terminal
@@ -202,7 +173,7 @@ const createDirectSafeSubmissionLifecycle = (prepared: TransactionPlanPrepared) 
       ? isTerminalSafeSubmissionError(error)
       : isDefinitiveWalletRejection(error)
     if (canRelease) {
-      clearPendingSafeSubmission(reservation)
+      await clearPendingSafeSubmission(requirePendingSafeStorage(), reservation)
       reservation = undefined
       return false
     }
@@ -585,6 +556,7 @@ export const useEulerTx = () => {
   const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
   const { signaturesEnabled } = useSignaturePreference()
+  const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
   const { sendTransactionAsync } = useSendTransaction()
   const { signTypedDataAsync } = useSignTypedData()
   const config = useConfig()
@@ -1288,7 +1260,12 @@ export const useEulerTx = () => {
         plan,
         chainId: cid,
         account: options?.account ?? owner,
-        usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
+        // Safe detection is asynchronous for WalletConnect. Until it resolves,
+        // prepare the conservative approval ceremony so a late Safe answer
+        // cannot turn reviewed Permit2 signatures into unreviewed writes.
+        usePermit2: isSafeWalletResolved.value && !isSafeWallet.value
+          ? (options?.usePermit2 ?? signaturesEnabled.value)
+          : false,
         prefetch: options?.prefetch,
       })
     })
@@ -1364,7 +1341,7 @@ export const useEulerTx = () => {
     connector?: ReturnType<typeof getAccount>['connector']
     resolveHash?: (hash: Hash) => Promise<Hash>
     beforeSend?: () => void | Promise<void>
-    onSubmitted?: (hash: Hash) => void
+    onSubmitted?: (hash: Hash) => void | Promise<void>
   }) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
@@ -1392,7 +1369,7 @@ export const useEulerTx = () => {
         okxDelayPending = true
       }
       const submittedHash = hash as Hash
-      onSubmitted?.(submittedHash)
+      await onSubmitted?.(submittedHash)
       return resolveHash ? await resolveHash(submittedHash) : submittedHash
     }
     return send
@@ -1586,7 +1563,7 @@ export const useEulerTx = () => {
         publicClient: provider as ReceiptClientLike,
         timeoutMs: 15_000,
       })
-      clearPendingSafeSubmission(existingPending)
+      await clearPendingSafeSubmission(requirePendingSafeStorage(), existingPending)
       if (isSuccessfulTransactionReceipt(execution.receipt)) {
         finalizeExecution({ receipts: [execution.receipt] }, pendingChainId)
         throw new Error('The prior Safe operation executed. Refresh and review current state before sending another operation.')
@@ -1598,7 +1575,7 @@ export const useEulerTx = () => {
         throw new Error(existingPending.errorMessage, { cause: error })
       }
       if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
-        clearPendingSafeSubmission(existingPending)
+        await clearPendingSafeSubmission(requirePendingSafeStorage(), existingPending)
         throw new Error('The prior Safe operation was cancelled. Review the operation again before retrying.', { cause: error })
       }
       throw error
@@ -1627,6 +1604,7 @@ export const useEulerTx = () => {
     allowSingleCall,
     onSafePreflight,
     onSafeSubmission,
+    beforeWalletSend,
   }: {
     plan: TransactionPlan
     chainId: number
@@ -1649,7 +1627,9 @@ export const useEulerTx = () => {
     /** Must complete before a Safe wallet receives any transaction request. */
     onSafePreflight?: () => void | Promise<void>
     /** Fires after Safe returns its submitted hash and before polling. */
-    onSafeSubmission?: (submittedHash: Hash) => void
+    onSafeSubmission?: (submittedHash: Hash) => void | Promise<void>
+    /** Final reviewed-state assertion, after preflight and immediately before sendCalls. */
+    beforeWalletSend?: () => void | Promise<void>
   }) => {
     let planCalls
     try {
@@ -1685,6 +1665,7 @@ export const useEulerTx = () => {
       currentChainId: currentAccount.chainId,
     })
     await onSafePreflight?.()
+    await beforeWalletSend?.()
 
     // Pin submission to the connector whose provider was identified as Safe.
     // Without it, wagmi resolves the currently-active connector, and a
@@ -1702,7 +1683,7 @@ export const useEulerTx = () => {
     if (!/^0x[0-9a-f]{64}$/i.test(id)) {
       throw new Error('Safe wallet returned an unexpected call bundle id')
     }
-    onSafeSubmission?.(id as Hash)
+    await onSafeSubmission?.(id as Hash)
 
     const execution = await waitForSafeTransactionExecution({
       submittedHash: id as Hash,
@@ -1825,10 +1806,12 @@ export const useEulerTx = () => {
     prepared: TransactionPlanPrepared,
     options?: {
       onProgress?: (progress: TransactionPlanExecutionProgress) => void
+      /** Runs at every terminal transaction or signature wallet boundary. */
+      beforeSend?: () => void | Promise<void>
       /** Must complete before a Safe wallet receives any transaction request. */
       onSafePreflight?: () => void | Promise<void>
       /** Fires after Safe returns its submitted hash and before polling. */
-      onSafeSubmission?: (submittedHash: Hash) => void
+      onSafeSubmission?: (submittedHash: Hash) => void | Promise<void>
     },
   ) => {
     if (isSpyMode.value) {
@@ -1853,27 +1836,13 @@ export const useEulerTx = () => {
     const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
     const requiresSafeLifecycle = isKnownSafe || isReviewedSafeExecutionRequired(prepared)
 
-    let effectivePrepared = prepared
-    if (requiresSafeLifecycle) {
-      // A Safe never signs permit2 messages. If the envelope was prepared
-      // before Safe detection resolved, re-resolve its approvals with
-      // permit2 off — resolution overwrites `resolved` on each item, so the
-      // repaired plan is used for both the bundle and the fallback.
-      if (hasPermit2Signature(prepared.plan)) {
-        const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
-          plan: prepared.plan,
-          chainId: prepared.chainId,
-          account: preparedOwner,
-          usePermit2: false,
-        })
-        effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
-      }
-      else if (prepared.usePermit2) {
-        // Invariant: an envelope executed for a Safe never carries
-        // usePermit2, even when no permit2 items happened to resolve.
-        effectivePrepared = { ...prepared, usePermit2: false }
-      }
+    if (requiresSafeLifecycle && hasPermit2Signature(prepared.plan)) {
+      // Re-resolving here would replace consent-bearing signature rows with
+      // ERC-20 writes after review. Safe-aware preparation prevents this in
+      // the normal path; a late classification must invalidate the review.
+      throw new Error(SAFE_REVIEW_APPROVALS_CHANGED_ERROR)
     }
+    const effectivePrepared = prepared
 
     await reconcilePendingDirectSafeSubmission({
       account: preparedOwner,
@@ -1916,15 +1885,16 @@ export const useEulerTx = () => {
           sdk,
           onSafePreflight,
           onSafeSubmission,
+          beforeWalletSend: options?.beforeSend,
         })
         if (bundled) {
-          directSafeLifecycle?.settled()
+          await directSafeLifecycle?.settled()
           finalizeExecution(bundled)
           return bundled
         }
       }
       catch (error) {
-        if (directSafeLifecycle?.failed(error)) {
+        if (await directSafeLifecycle?.failed(error)) {
           throw new Error(directSafeLifecycle.retainedError(), { cause: error })
         }
         throw error
@@ -1936,7 +1906,10 @@ export const useEulerTx = () => {
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
       connector,
-      beforeSend: safeWalletProvider ? onSafePreflight : undefined,
+      beforeSend: async () => {
+        if (safeWalletProvider) await onSafePreflight?.()
+        await options?.beforeSend?.()
+      },
       onSubmitted: safeWalletProvider ? onSafeSubmission : undefined,
       resolveHash: safeWalletProvider
         ? async (submittedHash) => {
@@ -1961,6 +1934,7 @@ export const useEulerTx = () => {
             currentAccount: currentAccount.address,
             currentChainId: currentAccount.chainId,
           })
+          await options?.beforeSend?.()
           const signature = await signTypedDataAsync({
             ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
             account: preparedOwner,
@@ -1970,12 +1944,12 @@ export const useEulerTx = () => {
         onProgress: options?.onProgress,
       })
 
-      directSafeLifecycle?.settled()
+      await directSafeLifecycle?.settled()
       finalizeExecution(result, prepared.chainId)
       return result
     }
     catch (error) {
-      if (directSafeLifecycle?.failed(error)) {
+      if (await directSafeLifecycle?.failed(error)) {
         throw new Error(directSafeLifecycle.retainedError(), { cause: error })
       }
       throw error
@@ -2054,10 +2028,12 @@ export const useEulerTx = () => {
     },
     options?: {
       allowSingleCall?: boolean
+      /** Runs after durable preflight and immediately before sendCalls. */
+      beforeSend?: () => void | Promise<void>
       /** Must complete before a Safe wallet receives any transaction request. */
       onSafePreflight?: () => void | Promise<void>
       /** Fires after Safe returns its submitted hash and before polling. */
-      onSafeSubmission?: (submittedHash: Hash) => void
+      onSafeSubmission?: (submittedHash: Hash) => void | Promise<void>
     },
   ) => {
     if (isSpyMode.value) {
@@ -2089,21 +2065,10 @@ export const useEulerTx = () => {
       throw new Error('Safe submission lifecycle callbacks must be provided together')
     }
 
-    // Same invariant as executePreparedPlan: an envelope executed for a Safe
-    // never carries permit2.
-    let effectivePrepared = prepared
     if (hasPermit2Signature(prepared.plan)) {
-      const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
-        plan: prepared.plan,
-        chainId: prepared.chainId,
-        account: preparedOwner,
-        usePermit2: false,
-      })
-      effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+      throw new Error(SAFE_REVIEW_APPROVALS_CHANGED_ERROR)
     }
-    else if (prepared.usePermit2) {
-      effectivePrepared = { ...prepared, usePermit2: false }
-    }
+    const effectivePrepared = prepared
 
     const callerManagesSafeSubmission = hasCallerPreflight && hasCallerSubmission
     const directSafeLifecycle = callerManagesSafeSubmission
@@ -2123,14 +2088,15 @@ export const useEulerTx = () => {
         allowSingleCall: options?.allowSingleCall,
         onSafePreflight: options?.onSafePreflight ?? directSafeLifecycle?.preflight,
         onSafeSubmission: options?.onSafeSubmission ?? directSafeLifecycle?.submitted,
+        beforeWalletSend: options?.beforeSend,
       })
       if (!bundled) return undefined
-      directSafeLifecycle?.settled()
+      await directSafeLifecycle?.settled()
       finalizeExecution(bundled)
       return bundled
     }
     catch (error) {
-      if (directSafeLifecycle?.failed(error)) {
+      if (await directSafeLifecycle?.failed(error)) {
         throw new Error(directSafeLifecycle.retainedError(), { cause: error })
       }
       throw error

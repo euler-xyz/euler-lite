@@ -14,6 +14,7 @@ import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import { SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
+import { loadPendingSafeBatchSubmissions, PENDING_SAFE_BATCH_STORAGE_KEY, SAFE_SUBMISSION_STORAGE_INVALID_ERROR, savePendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -53,6 +54,16 @@ const broadcastAllTransactions = async (
     options?.onBroadcast?.(index, options?.walletContext ?? grantWalletContext)
   }
   return []
+}
+const serializedLocks = () => {
+  let tail = Promise.resolve()
+  return {
+    request: vi.fn(<T>(_name: string, _options: LockOptions, callback: () => T | Promise<T>) => {
+      const result = tail.then(callback, callback)
+      tail = result.then(() => undefined, () => undefined)
+      return result
+    }),
+  }
 }
 const migrationFlowMocks = {
   restorePendingBeforeRetry: vi.fn(),
@@ -279,6 +290,7 @@ const stubBatchComposableGlobals = () => {
     effectiveAddress: ref(owner),
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
+  vi.stubGlobal('navigator', { locks: serializedLocks() })
   vi.stubGlobal('useEulerTx', () => eulerTxMocks)
   isSafeWalletRef.value = false
   vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet: isSafeWalletRef, isSafeWalletResolved: ref(true) }))
@@ -1278,11 +1290,13 @@ describe('useTxBatch execution errors', () => {
       _prepared: unknown,
       options?: {
         onSafePreflight?: () => void | Promise<void>
-        onSafeSubmission?: (hash: Hash) => void
+        beforeSend?: () => void | Promise<void>
+        onSafeSubmission?: (hash: Hash) => void | Promise<void>
       },
     ) => {
       await options?.onSafePreflight?.()
-      options?.onSafeSubmission?.(submittedHash)
+      await options?.beforeSend?.()
+      await options?.onSafeSubmission?.(submittedHash)
       throw new SafeTransactionStatusUnknownError(submittedHash, 'timeout')
     })
 
@@ -1363,9 +1377,13 @@ describe('useTxBatch execution errors', () => {
     eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
     eulerTxMocks.executePreparedPlan.mockImplementation(async (
       _prepared: unknown,
-      options?: { onSafePreflight?: () => void | Promise<void> },
+      options?: {
+        onSafePreflight?: () => void | Promise<void>
+        beforeSend?: () => void | Promise<void>
+      },
     ) => {
       await options?.onSafePreflight?.()
+      await options?.beforeSend?.()
       throw new Error('Safe provider response was lost')
     })
     const batch = useTxBatch()
@@ -1387,6 +1405,138 @@ describe('useTxBatch execution errors', () => {
 
     await batch.executeBatch(reviewed)
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not overwrite a Safe reservation acquired by another tab during execution setup', async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+        removeItem: (key: string) => stored.delete(key),
+      },
+    })
+    const otherReservation = {
+      account: owner,
+      chainId: 1,
+      batchFingerprint: 'fedcba9876543210',
+      errorMessage: 'other tab pending',
+      grantedRevokes: [],
+      submissionKind: 'operation' as const,
+    }
+    const walletBoundary = vi.fn()
+    migrationFlowMocks.restorePendingBeforeRetry.mockImplementation(async () => {
+      savePendingSafeBatchSubmissions(window.localStorage, [otherReservation])
+      return true
+    })
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (
+      _prepared: unknown,
+      options?: {
+        beforeSend?: () => void | Promise<void>
+        onSafePreflight?: () => void | Promise<void>
+      },
+    ) => {
+      await options?.onSafePreflight?.()
+      await options?.beforeSend?.()
+      walletBoundary()
+    })
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Borrow USDC',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    await batch.executeBatch(await prepareReviewedBatch(batch))
+
+    expect(walletBoundary).not.toHaveBeenCalled()
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([otherReservation])
+    expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('blocks batch execution when durable Safe state is malformed', async () => {
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => key === PENDING_SAFE_BATCH_STORAGE_KEY ? '{' : null,
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+      },
+    })
+    const batch = useTxBatch()
+    await batch.addEntry({
+      label: 'Supply USDC',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+
+    await batch.executeBatch(await prepareReviewedBatch(batch))
+
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toBe(SAFE_SUBMISSION_STORAGE_INVALID_ERROR)
+    expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('rechecks the reviewed revision inside the final EOA wallet helper', async () => {
+    const batch = useTxBatch()
+    let releaseHelper: (() => void) | undefined
+    let helperStarted: (() => void) | undefined
+    const helperGate = new Promise<void>((resolve) => {
+      releaseHelper = resolve
+    })
+    const helperEntered = new Promise<void>((resolve) => {
+      helperStarted = resolve
+    })
+    const walletBoundary = vi.fn()
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (
+      _prepared: unknown,
+      options?: { beforeSend?: () => void | Promise<void> },
+    ) => {
+      helperStarted?.()
+      await helperGate
+      await options?.beforeSend?.()
+      walletBoundary()
+    })
+
+    await batch.addEntry({
+      label: 'Reviewed entry',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    const execution = batch.executeBatch(await prepareReviewedBatch(batch))
+    await helperEntered
+
+    await batch.addEntry({
+      label: 'Late entry',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    releaseHelper?.()
+    await execution
+
+    expect(walletBoundary).not.toHaveBeenCalled()
+    expect(batch.execError.value).toBe(BATCH_REVIEW_INVALIDATED_ERROR)
+    expect(batch.entryCount.value).toBe(2)
+  })
+
+  it('preserves entries added after the reviewed wallet boundary succeeds', async () => {
+    const batch = useTxBatch()
+    const walletBoundary = vi.fn()
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (
+      _prepared: unknown,
+      options?: { beforeSend?: () => void | Promise<void> },
+    ) => {
+      await options?.beforeSend?.()
+      walletBoundary()
+      await batch.addEntry({
+        label: 'Post-submit entry',
+        buildPlan: async () => [] as TransactionPlan,
+      })
+    })
+
+    await batch.addEntry({
+      label: 'Reviewed entry',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    await batch.executeBatch(await prepareReviewedBatch(batch))
+
+    expect(walletBoundary).toHaveBeenCalledOnce()
+    expect(batch.entries.value.map(entry => entry.label)).toEqual(['Post-submit entry'])
   })
 
   it('passes the pre-entry simulated account to execution plan builders', async () => {
@@ -1557,6 +1707,63 @@ describe('useTxBatch execution prerequisites', () => {
     // Revokes rode in the proposal — nothing standalone to send afterwards.
     expect(migrationFlowMocks.revokeAfterSuccess).not.toHaveBeenCalled()
     expect(batch.entryCount.value).toBe(0)
+  })
+
+  it('rechecks the reviewed revision at the final Safe bundle boundary', async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+        removeItem: (key: string) => stored.delete(key),
+      },
+    })
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(bundledPrepared())
+    let releaseHelper: (() => void) | undefined
+    let helperStarted: (() => void) | undefined
+    const helperGate = new Promise<void>((resolve) => {
+      releaseHelper = resolve
+    })
+    const helperEntered = new Promise<void>((resolve) => {
+      helperStarted = resolve
+    })
+    const walletBoundary = vi.fn()
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared: unknown,
+      _extraCalls: unknown,
+      options?: {
+        beforeSend?: () => void | Promise<void>
+        onSafePreflight?: () => void | Promise<void>
+      },
+    ) => {
+      helperStarted?.()
+      await helperGate
+      await options?.onSafePreflight?.()
+      await options?.beforeSend?.()
+      walletBoundary()
+      return { receipts: [] }
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    const execution = batch.executeBatch(await prepareReviewedBatch(batch))
+    await helperEntered
+
+    await batch.addEntry({
+      label: 'Late entry',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    releaseHelper?.()
+    await execution
+
+    expect(walletBoundary).not.toHaveBeenCalled()
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toEqual([])
+    expect(batch.execError.value).toBe(BATCH_REVIEW_INVALIDATED_ERROR)
+    expect(batch.entryCount.value).toBe(2)
   })
 
   it('throws instead of degrading when the safe bundle context is unavailable', async () => {

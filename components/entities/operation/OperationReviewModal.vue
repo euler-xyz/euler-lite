@@ -16,6 +16,7 @@ import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle, TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { markReviewedSafeExecutionRequired, refreshReviewedPythExecution, REVIEWED_EXECUTION_UNAVAILABLE_ERROR } from '~/utils/reviewed-execution'
+import { SAFE_REVIEW_APPROVALS_CHANGED_ERROR } from '~/composables/useEulerTx'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -132,6 +133,9 @@ let prepareRequestId = 0
 const latchReviewedSafeExecution = (candidate: TransactionPlan | undefined) => {
   if (isSafeWallet.value && candidate?.length) {
     reviewedSafeExecutionRequired.value = true
+    if (hasPermit2Signature(candidate)) {
+      prepareError.value = SAFE_REVIEW_APPROVALS_CHANGED_ERROR
+    }
   }
 }
 
@@ -191,7 +195,6 @@ watch(
       if (requestId === prepareRequestId) {
         reviewedExecution.value = envelope
         latchReviewedSafeExecution(envelope.plan)
-        prepareError.value = ''
       }
     }
     catch (err) {
