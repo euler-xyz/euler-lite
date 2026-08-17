@@ -85,13 +85,14 @@ All data comes from `useTxBatch()`. The composable already exposes everything ne
 | Binding | Type | Use |
 |---|---|---|
 | `entries` | `BatchEntry[]` | The operation rows |
+| `batchRevision` | `Ref<number>` | Monotonic cart version captured when review opens; any later cart edit invalidates that review |
 | `layers` | `BatchLayer[]` | `layers[i+1].failed` / `.error` → per-entry revert state |
 | `walletChanges` | `{token,symbol,decimals,delta}[]` | Wallet changes block (already computed from the final layer, so it shows in both eye-toggle states) |
 | `simError` / `execError` | `string?` | Top-level batch error row |
 | `isExecuting` / `isSimulating` | `boolean` | Button loading / disabled |
 | `canExecuteBatch` / `hasFailedOps` / `hasInsufficientBalance` | `boolean` | Execute gating + reason |
-| `executeBatch(reviewedPrepared)` | `(TransactionPlanPrepared) => Promise` | Executes only when the final prepared envelope matches the one shown in review; clears on success |
-| `prepareBatchPlan()` | `() => Promise<TransactionPlanPrepared\|null>` | Resolve approvals for the approvals section |
+| `executeBatch(reviewedPrepared)` | `(TransactionPlanPrepared) => Promise` | Executes only when the cart revision and final prepared envelope still match the review; clears on success |
+| `prepareBatchPlan()` | `() => Promise<TransactionPlanPrepared\|null>` | Resolves approvals and binds the prepared envelope to the current cart revision |
 | `getMergedPlan()` | `() => TransactionPlan\|null` | The exact plan that will execute |
 | `tenderlyEnabled`, `isTenderlySimulating`, `tenderlyUrl`, `tenderlyError`, `fetchTenderlyEnabled()`, `simulateOnTenderly()` | — | Tenderly section |
 
@@ -195,6 +196,7 @@ Call `fetchTenderlyEnabled()` on mount; hide the whole section when `!tenderlyEn
 | Operation row | open | `border-accent-600`, chevron rotated 180°, detail visible; `transition-colors` |
 | Operation row | failed | number node red + warning icon; persistent revert chip in detail |
 | Modal | preparing (`prepareBatchPlan` in flight) | Execute button `:loading`; approvals fill in when resolved |
+| Modal | cart edited after opening | Disable confirmation synchronously and close the idle review; execution also rejects the stale revision before any prerequisite write |
 | Execute | enabled | `canExecuteBatch && !isSpyMode && !isExecuting && !isPreparing && !isSimulating` |
 | Execute | disabled | show reason line below (see below) |
 | Execute | executing | label "Executing…", `:loading`, modal not closeable (`@close` guarded by `isExecuting`) |

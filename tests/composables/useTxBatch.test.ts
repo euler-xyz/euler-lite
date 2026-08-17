@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type Hash, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { awaitFinalPlanningLayer, buildOperationEntryMap, buildWalletBalanceLayers, buildWalletChanges, countPlanOperations, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
+import { BATCH_REVIEW_INVALIDATED_ERROR, awaitFinalPlanningLayer, buildOperationEntryMap, buildWalletBalanceLayers, buildWalletChanges, countPlanOperations, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
   mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
@@ -40,6 +40,7 @@ const eulerTxMocks = {
 const isSafeWalletRef = ref(false)
 const grantWalletContext: WalletExecutionContext = { account: owner, chainId: 1 }
 type PlainTxSendOptions = {
+  beforeSend?: () => void | Promise<void>
   onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
   walletContext?: WalletExecutionContext
 }
@@ -47,7 +48,10 @@ const broadcastAllTransactions = async (
   txs: Array<{ data: Hex }>,
   options?: PlainTxSendOptions,
 ) => {
-  txs.forEach((_tx, index) => options?.onBroadcast?.(index, options?.walletContext ?? grantWalletContext))
+  for (const [index] of txs.entries()) {
+    await options?.beforeSend?.()
+    options?.onBroadcast?.(index, options?.walletContext ?? grantWalletContext)
+  }
   return []
 }
 const migrationFlowMocks = {
@@ -1778,6 +1782,115 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.execError.value).toBeDefined()
     // Nothing landed, so there is nothing of ours to revoke.
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([])
+  })
+
+  it('blocks every send boundary when the cart changes after review', async () => {
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Reviewed entry A',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    const reviewed = await prepareReviewedBatch(batch)
+
+    await addGrantingMigrationEntry(batch)
+    await vi.waitFor(() => expect(batch.isSimulating.value).toBe(false))
+    await batch.executeBatch(reviewed)
+
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlanWithPlainCalls).not.toHaveBeenCalled()
+    expect(batch.execError.value).toBe(BATCH_REVIEW_INVALIDATED_ERROR)
+    expect(batch.entryCount.value).toBe(2)
+  })
+
+  it('rechecks the cart revision after an asynchronous prerequisite build', async () => {
+    const batch = useTxBatch()
+    let releasePrerequisiteBuild: (() => void) | undefined
+    let prerequisiteBuildStarted: (() => void) | undefined
+    const prerequisiteBuildGate = new Promise<void>((resolve) => {
+      releasePrerequisiteBuild = resolve
+    })
+    const prerequisiteBuildEntered = new Promise<void>((resolve) => {
+      prerequisiteBuildStarted = resolve
+    })
+    const prerequisites = {
+      preTxs: [grantTx],
+      walletContext: grantWalletContext,
+      postTxs: [revokeTx],
+      postTxsByPreTx: [revokeTx],
+    }
+
+    await batch.addEntry({
+      label: 'Reviewed migration',
+      buildPlan: async () => [] as TransactionPlan,
+      buildExecutionPrerequisites: async () => {
+        prerequisiteBuildStarted?.()
+        await prerequisiteBuildGate
+        return prerequisites
+      },
+      review: {
+        reviewedExecutionPrerequisites: {
+          preTxs: prerequisites.preTxs,
+          postTxs: prerequisites.postTxs,
+          walletContext: prerequisites.walletContext,
+        },
+      },
+    })
+    const reviewed = await prepareReviewedBatch(batch)
+    const execution = batch.executeBatch(reviewed)
+    await prerequisiteBuildEntered
+
+    await batch.addEntry({
+      label: 'Unreviewed entry',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    releasePrerequisiteBuild?.()
+    await execution
+
+    expect(eulerTxMocks.sendPlainTransactions).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toBe(BATCH_REVIEW_INVALIDATED_ERROR)
+  })
+
+  it('rechecks the cart revision at the prerequisite wallet boundary', async () => {
+    const batch = useTxBatch()
+    let releaseWalletBoundary: (() => void) | undefined
+    let sendStarted: (() => void) | undefined
+    const walletBoundaryGate = new Promise<void>((resolve) => {
+      releaseWalletBoundary = resolve
+    })
+    const sendEntered = new Promise<void>((resolve) => {
+      sendStarted = resolve
+    })
+    const walletBoundary = vi.fn()
+    eulerTxMocks.sendPlainTransactions.mockImplementation(async (
+      _txs: { data: Hex }[],
+      options?: PlainTxSendOptions,
+    ) => {
+      sendStarted?.()
+      await walletBoundaryGate
+      await options?.beforeSend?.()
+      walletBoundary()
+      return []
+    })
+
+    await addGrantingMigrationEntry(batch)
+    const reviewed = await prepareReviewedBatch(batch)
+    const execution = batch.executeBatch(reviewed)
+    await sendEntered
+
+    await batch.addEntry({
+      label: 'Unreviewed entry',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    releaseWalletBoundary?.()
+    await execution
+
+    expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledTimes(1)
+    expect(walletBoundary).not.toHaveBeenCalled()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toBe(BATCH_REVIEW_INVALIDATED_ERROR)
   })
 
   it('revokes a broadcast grant when receipt confirmation fails before later grants', async () => {

@@ -3,6 +3,10 @@ import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 
 export const PENDING_SAFE_BATCH_STORAGE_KEY = 'euler-lite:pending-safe-review-executions:v1'
+export const SAFE_SUBMISSION_WITHOUT_HASH_ERROR = 'A Safe submission may already be in progress, but its hash was not retained. Verify the Safe transaction before retrying.'
+export const SAFE_SUBMISSION_UNRESOLVED_ERROR = 'The Safe transaction status is still unresolved. Reconcile it before retrying.'
+
+export type PendingSafeSubmissionKind = 'batch' | 'operation'
 
 export interface PersistedPendingSafeBatchSubmission {
   /** Missing only for the durable reservation written before Safe is opened. */
@@ -12,6 +16,8 @@ export interface PersistedPendingSafeBatchSubmission {
   batchFingerprint: string
   errorMessage: string
   grantedRevokes: MigrationAuthorizationRevoke[]
+  /** Omitted records are interpreted as batch submissions for storage compatibility. */
+  submissionKind?: PendingSafeSubmissionKind
 }
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
@@ -30,6 +36,23 @@ const parse = (value: string): unknown => JSON.parse(
 
 const isHash = (value: unknown): value is Hash =>
   typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)
+
+export const getPendingSafeSubmissionKind = (
+  pending: PersistedPendingSafeBatchSubmission,
+): PendingSafeSubmissionKind => pending.submissionKind ?? 'batch'
+
+export const isDefinitiveWalletRejection = (error: unknown): boolean => {
+  let current = error
+  const seen = new WeakSet<object>()
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    if (seen.has(current)) return false
+    seen.add(current)
+    const code = (current as { code?: unknown }).code
+    if (code === 4001 || code === '4001' || code === 'ACTION_REJECTED') return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
 
 const normalizeRevoke = (value: unknown): MigrationAuthorizationRevoke | undefined => {
   if (!value || typeof value !== 'object') return undefined
@@ -74,6 +97,9 @@ const normalizeRecord = (value: unknown): PersistedPendingSafeBatchSubmission | 
     || candidate.batchFingerprint.length !== 16
     || typeof candidate.errorMessage !== 'string'
     || !Array.isArray(candidate.grantedRevokes)
+    || (candidate.submissionKind !== undefined
+      && candidate.submissionKind !== 'batch'
+      && candidate.submissionKind !== 'operation')
   ) return undefined
   const grantedRevokes = candidate.grantedRevokes.map(normalizeRevoke)
   if (grantedRevokes.some(revoke => !revoke)) return undefined
@@ -85,6 +111,7 @@ const normalizeRecord = (value: unknown): PersistedPendingSafeBatchSubmission | 
       batchFingerprint: candidate.batchFingerprint,
       errorMessage: candidate.errorMessage,
       grantedRevokes: grantedRevokes as MigrationAuthorizationRevoke[],
+      ...(candidate.submissionKind === undefined ? {} : { submissionKind: candidate.submissionKind }),
     }
   }
   catch {

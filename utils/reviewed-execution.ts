@@ -2,6 +2,20 @@ import { flattenBatchEntries, isEVCBatchOperation, type EVCBatchItem, type Migra
 import { decodeFunctionData, encodeFunctionData, getAddress, isHex, parseAbi, zeroHash, type Address, type Hex } from 'viem'
 import { PYTH_ABI } from '~/abis/pyth'
 
+const reviewedSafeExecutions = new WeakSet<TransactionPlanPrepared>()
+
+/** Bind the review's Safe submission ceremony to this exact envelope. */
+export const markReviewedSafeExecutionRequired = (
+  prepared: TransactionPlanPrepared,
+): TransactionPlanPrepared => {
+  reviewedSafeExecutions.add(prepared)
+  return prepared
+}
+
+export const isReviewedSafeExecutionRequired = (
+  prepared: TransactionPlanPrepared,
+): boolean => reviewedSafeExecutions.has(prepared)
+
 export const REVIEWED_EXECUTION_UNAVAILABLE_ERROR
   = 'The reviewed transaction is unavailable. Close this review and try again.'
 
@@ -396,6 +410,9 @@ export const requireReviewedBatchPreparedExecution = (
   if (reviewedCanonical !== candidateCanonical) {
     throw new Error(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
   }
+  if (isReviewedSafeExecutionRequired(reviewed)) {
+    markReviewedSafeExecutionRequired(candidate)
+  }
   return candidate
 }
 
@@ -485,6 +502,9 @@ export const requirePythOnlyPreparedRefresh = (
 ): TransactionPlanPrepared => {
   if (canonicalizeReviewedPlan(reviewed) !== canonicalizeReviewedPlan(refreshed)) {
     throw new Error(REVIEWED_EXECUTION_CHANGED_ERROR)
+  }
+  if (isReviewedSafeExecutionRequired(reviewed)) {
+    markReviewedSafeExecutionRequired(refreshed)
   }
   return refreshed
 }

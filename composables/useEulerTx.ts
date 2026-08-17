@@ -62,6 +62,7 @@ import {
   type WalletProviderLike,
 } from '~/utils/safeWalletTransactions'
 import {
+  isPlanBundleable,
   PlanNotBundleableError,
   transactionPlanToCalls,
   type PlanEncodingSdk,
@@ -71,9 +72,21 @@ import {
   assertWalletExecutionContext,
   type WalletExecutionContext,
 } from '~/utils/walletExecutionContext'
+import {
+  getPendingSafeSubmissionKind,
+  getPreparedBatchFingerprint,
+  isDefinitiveWalletRejection,
+  loadPendingSafeBatchSubmissions,
+  SAFE_SUBMISSION_UNRESOLVED_ERROR,
+  SAFE_SUBMISSION_WITHOUT_HASH_ERROR,
+  savePendingSafeBatchSubmissions,
+  type PersistedPendingSafeBatchSubmission,
+} from '~/utils/pending-safe-batch-submission'
+import { isReviewedSafeExecutionRequired } from '~/utils/reviewed-execution'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
+const SAFE_CONNECTION_UNAVAILABLE_ERROR = 'Safe connection unavailable — reconnect and review the transaction again.'
 const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
@@ -81,6 +94,126 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateUserRewards: false,
 } as const
 type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
+
+const getPendingSafeStorage = (): Storage | undefined => {
+  if (typeof window === 'undefined') return undefined
+  try {
+    return window.localStorage
+  }
+  catch {
+    return undefined
+  }
+}
+
+const samePendingSafeSubmission = (
+  left: PersistedPendingSafeBatchSubmission,
+  right: PersistedPendingSafeBatchSubmission,
+) => left.account.toLowerCase() === right.account.toLowerCase()
+  && left.chainId === right.chainId
+  && left.batchFingerprint === right.batchFingerprint
+  && getPendingSafeSubmissionKind(left) === getPendingSafeSubmissionKind(right)
+
+const getPendingSafeSubmission = (
+  account: Address,
+  chainId: number,
+): PersistedPendingSafeBatchSubmission | undefined => {
+  const storage = getPendingSafeStorage()
+  if (!storage) return undefined
+  return loadPendingSafeBatchSubmissions(storage).find(pending =>
+    pending.account.toLowerCase() === account.toLowerCase() && pending.chainId === chainId,
+  )
+}
+
+const setPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
+  const storage = getPendingSafeStorage()
+  if (!storage) throw new Error('Durable browser storage is unavailable; Safe submission was blocked')
+  const previous = loadPendingSafeBatchSubmissions(storage)
+  const next = [
+    ...previous.filter(existing =>
+      existing.account.toLowerCase() !== pending.account.toLowerCase() || existing.chainId !== pending.chainId,
+    ),
+    pending,
+  ]
+  savePendingSafeBatchSubmissions(storage, next)
+  const restored = loadPendingSafeBatchSubmissions(storage)
+  const retained = restored.find(existing => samePendingSafeSubmission(existing, pending))
+  if (!retained || retained.submittedHash !== pending.submittedHash) {
+    throw new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked')
+  }
+}
+
+const clearPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
+  const storage = getPendingSafeStorage()
+  if (!storage) throw new Error('Durable browser storage is unavailable; the Safe submission lock was retained')
+  const previous = loadPendingSafeBatchSubmissions(storage)
+  savePendingSafeBatchSubmissions(storage, previous.filter(existing => !samePendingSafeSubmission(existing, pending)))
+  if (loadPendingSafeBatchSubmissions(storage).some(existing => samePendingSafeSubmission(existing, pending))) {
+    throw new Error('Durable browser storage could not clear the reconciled Safe submission lock')
+  }
+}
+
+const isTerminalSafeSubmissionError = (error: unknown): boolean =>
+  error instanceof Error
+  && (error.message === 'Safe transaction reverted' || error.message === 'Safe transaction was cancelled')
+
+const createDirectSafeSubmissionLifecycle = (prepared: TransactionPlanPrepared) => {
+  const account = typeof prepared.account === 'string'
+    ? getAddress(prepared.account)
+    : getAddress(prepared.account.owner)
+  let reservation: PersistedPendingSafeBatchSubmission | undefined
+
+  const preflight = () => {
+    if (!reservation) {
+      const existing = getPendingSafeSubmission(account, prepared.chainId)
+      if (existing) {
+        throw new Error(existing.submittedHash
+          ? existing.errorMessage
+          : SAFE_SUBMISSION_WITHOUT_HASH_ERROR)
+      }
+    }
+    const next: PersistedPendingSafeBatchSubmission = {
+      account,
+      chainId: prepared.chainId,
+      batchFingerprint: getPreparedBatchFingerprint(prepared),
+      errorMessage: SAFE_SUBMISSION_UNRESOLVED_ERROR,
+      grantedRevokes: [],
+      submissionKind: 'operation',
+    }
+    setPendingSafeSubmission(next)
+    reservation = next
+  }
+  const submitted = (submittedHash: Hash) => {
+    if (!reservation) throw new Error('Safe submission was not durably reserved')
+    const next = { ...reservation, submittedHash }
+    setPendingSafeSubmission(next)
+    reservation = next
+  }
+  const settled = () => {
+    if (!reservation) return
+    clearPendingSafeSubmission(reservation)
+    reservation = undefined
+  }
+  const failed = (error: unknown): boolean => {
+    if (!reservation) return false
+    // Once Safe returned a hash, even a later wallet-style rejection code is
+    // not proof that the accepted proposal stopped. Only the trusted terminal
+    // result from Safe reconciliation may release that durable lock.
+    const canRelease = reservation.submittedHash
+      ? isTerminalSafeSubmissionError(error)
+      : isDefinitiveWalletRejection(error)
+    if (canRelease) {
+      clearPendingSafeSubmission(reservation)
+      reservation = undefined
+      return false
+    }
+    return true
+  }
+  const retainedError = () => reservation?.submittedHash
+    ? SAFE_SUBMISSION_UNRESOLVED_ERROR
+    : SAFE_SUBMISSION_WITHOUT_HASH_ERROR
+
+  return { preflight, submitted, settled, failed, retainedError }
+}
 
 export const isSuccessfulTransactionReceipt = (
   receipt: Pick<TransactionReceipt, 'status'>,
@@ -1216,6 +1349,8 @@ export const useEulerTx = () => {
     expectedChainId,
     connector,
     resolveHash,
+    beforeSend,
+    onSubmitted,
   }: {
     isOkx: boolean
     expectedAccount: Address
@@ -1228,6 +1363,8 @@ export const useEulerTx = () => {
      */
     connector?: ReturnType<typeof getAccount>['connector']
     resolveHash?: (hash: Hash) => Promise<Hash>
+    beforeSend?: () => void | Promise<void>
+    onSubmitted?: (hash: Hash) => void
   }) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
@@ -1242,6 +1379,7 @@ export const useEulerTx = () => {
         currentAccount: currentAccount.address,
         currentChainId: currentAccount.chainId,
       })
+      await beforeSend?.()
       const hash = await sendTransactionAsync({
         account: expectedAccount,
         chainId: expectedChainId,
@@ -1254,7 +1392,8 @@ export const useEulerTx = () => {
         okxDelayPending = true
       }
       const submittedHash = hash as Hash
-      return resolveHash ? resolveHash(submittedHash) : submittedHash
+      onSubmitted?.(submittedHash)
+      return resolveHash ? await resolveHash(submittedHash) : submittedHash
     }
     return send
   }
@@ -1270,6 +1409,7 @@ export const useEulerTx = () => {
   const sendPlainTransactions = async (
     txs: readonly PlainTxRequest[],
     options?: {
+      beforeSend?: () => void | Promise<void>
       onBroadcast?: (index: number, walletContext: WalletExecutionContext) => void
       walletContext?: WalletExecutionContext
     },
@@ -1301,6 +1441,7 @@ export const useEulerTx = () => {
       expectedAccount: owner,
       expectedChainId: cid,
       connector,
+      beforeSend: options?.beforeSend,
     })
 
     const receipts: TransactionReceipt[] = []
@@ -1416,6 +1557,51 @@ export const useEulerTx = () => {
     if (lastReceipt && cid) {
       void runPostTxSubgraphSync(cid, lastReceipt.blockNumber)
         .catch(err => logWarn('useEulerTx/subgraphPoll', err))
+    }
+  }
+
+  const reconcilePendingDirectSafeSubmission = async ({
+    account,
+    chainId: pendingChainId,
+    provider,
+    safeWalletProvider,
+  }: {
+    account: Address
+    chainId: number
+    provider: unknown
+    safeWalletProvider?: WalletProviderLike
+  }) => {
+    const existingPending = getPendingSafeSubmission(account, pendingChainId)
+    if (!existingPending) return
+    if (getPendingSafeSubmissionKind(existingPending) === 'batch') {
+      throw new Error('A Safe batch submission is still unresolved. Reconcile it from the batch before sending another operation.')
+    }
+    if (!existingPending.submittedHash) throw new Error(SAFE_SUBMISSION_WITHOUT_HASH_ERROR)
+    if (!safeWalletProvider) throw new Error(SAFE_CONNECTION_UNAVAILABLE_ERROR)
+
+    try {
+      const execution = await waitForSafeTransactionExecution({
+        submittedHash: existingPending.submittedHash,
+        walletProvider: safeWalletProvider,
+        publicClient: provider as ReceiptClientLike,
+        timeoutMs: 15_000,
+      })
+      clearPendingSafeSubmission(existingPending)
+      if (isSuccessfulTransactionReceipt(execution.receipt)) {
+        finalizeExecution({ receipts: [execution.receipt] }, pendingChainId)
+        throw new Error('The prior Safe operation executed. Refresh and review current state before sending another operation.')
+      }
+      throw new Error('The prior Safe operation reverted. Refresh and review current state before retrying.')
+    }
+    catch (error) {
+      if (error instanceof SafeTransactionStatusUnknownError) {
+        throw new Error(existingPending.errorMessage, { cause: error })
+      }
+      if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
+        clearPendingSafeSubmission(existingPending)
+        throw new Error('The prior Safe operation was cancelled. Review the operation again before retrying.', { cause: error })
+      }
+      throw error
     }
   }
 
@@ -1662,12 +1848,13 @@ export const useEulerTx = () => {
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
 
-    // Known Safe even when provider acquisition failed — the degraded
-    // sequential path must still never sign permit2 messages.
+    // Direct Safe connectors remain identifiable when provider acquisition
+    // fails; the reviewed-envelope marker covers WalletConnect Safe sessions.
     const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
+    const requiresSafeLifecycle = isKnownSafe || isReviewedSafeExecutionRequired(prepared)
 
     let effectivePrepared = prepared
-    if (isKnownSafe) {
+    if (requiresSafeLifecycle) {
       // A Safe never signs permit2 messages. If the envelope was prepared
       // before Safe detection resolved, re-resolve its approvals with
       // permit2 off — resolution overwrites `resolved` on each item, so the
@@ -1688,35 +1875,71 @@ export const useEulerTx = () => {
       }
     }
 
-    if (safeWalletProvider && connector) {
-      // Prepared plans already ran plugins and approval resolution.
-      const bundled = await executePlanAsSafeBundle({
-        plan: effectivePrepared.plan,
-        chainId: prepared.chainId,
-        owner: preparedOwner,
-        provider,
-        connector,
-        safeWalletProvider,
-        sdk,
-        onSafePreflight: options?.onSafePreflight,
-        onSafeSubmission: options?.onSafeSubmission,
-      })
-      if (bundled) {
-        finalizeExecution(bundled)
-        return bundled
-      }
+    await reconcilePendingDirectSafeSubmission({
+      account: preparedOwner,
+      chainId: prepared.chainId,
+      provider,
+      safeWalletProvider,
+    })
+
+    if (requiresSafeLifecycle && (!safeWalletProvider || !connector)) {
+      // Every direct Safe submission needs its provider both to preserve the
+      // reviewed proposal ceremony and to reconcile an indeterminate result.
+      // Without it, no wallet request is safe to issue.
+      throw new Error(SAFE_CONNECTION_UNAVAILABLE_ERROR)
     }
 
-    if (safeWalletProvider) await options?.onSafePreflight?.()
+    const hasCallerPreflight = Boolean(options?.onSafePreflight)
+    const hasCallerSubmission = Boolean(options?.onSafeSubmission)
+    if (hasCallerPreflight !== hasCallerSubmission) {
+      throw new Error('Safe submission lifecycle callbacks must be provided together')
+    }
+    const callerManagesSafeSubmission = hasCallerPreflight && hasCallerSubmission
+    const directSafeLifecycle = requiresSafeLifecycle && !callerManagesSafeSubmission
+      ? createDirectSafeSubmissionLifecycle(effectivePrepared)
+      : undefined
+    const onSafePreflight = options?.onSafePreflight ?? directSafeLifecycle?.preflight
+    const onSafeSubmission = options?.onSafeSubmission ?? directSafeLifecycle?.submitted
+
+    if (safeWalletProvider && connector && isPlanBundleable(effectivePrepared.plan)) {
+      try {
+        // Multi-call bundleable plans reviewed for a Safe are submitted as the
+        // one atomic proposal the modal described. A single call may continue
+        // through the equivalent one-proposal sequential executor below.
+        const bundled = await executePlanAsSafeBundle({
+          plan: effectivePrepared.plan,
+          chainId: prepared.chainId,
+          owner: preparedOwner,
+          provider,
+          connector,
+          safeWalletProvider,
+          sdk,
+          onSafePreflight,
+          onSafeSubmission,
+        })
+        if (bundled) {
+          directSafeLifecycle?.settled()
+          finalizeExecution(bundled)
+          return bundled
+        }
+      }
+      catch (error) {
+        if (directSafeLifecycle?.failed(error)) {
+          throw new Error(directSafeLifecycle.retainedError(), { cause: error })
+        }
+        throw error
+      }
+    }
 
     const sendTransaction = buildSendTransaction({
       isOkx,
       expectedAccount: preparedOwner,
       expectedChainId: prepared.chainId,
       connector,
+      beforeSend: safeWalletProvider ? onSafePreflight : undefined,
+      onSubmitted: safeWalletProvider ? onSafeSubmission : undefined,
       resolveHash: safeWalletProvider
         ? async (submittedHash) => {
-          options?.onSafeSubmission?.(submittedHash)
           return (await waitForSafeTransactionExecution({
             submittedHash,
             walletProvider: safeWalletProvider,
@@ -1726,28 +1949,37 @@ export const useEulerTx = () => {
         : undefined,
     })
 
-    const result = await sdk.executionService.executePreparedTransactionPlan({
-      prepared: effectivePrepared,
-      sendTransaction,
-      signTypedData: async (typedData) => {
-        const currentAccount = getAccount(config)
-        assertWalletExecutionContext({
-          expectedAccount: preparedOwner,
-          expectedChainId: prepared.chainId,
-          currentAccount: currentAccount.address,
-          currentChainId: currentAccount.chainId,
-        })
-        const signature = await signTypedDataAsync({
-          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
-          account: preparedOwner,
-        })
-        return signature as Hex
-      },
-      onProgress: options?.onProgress,
-    })
+    try {
+      const result = await sdk.executionService.executePreparedTransactionPlan({
+        prepared: effectivePrepared,
+        sendTransaction,
+        signTypedData: async (typedData) => {
+          const currentAccount = getAccount(config)
+          assertWalletExecutionContext({
+            expectedAccount: preparedOwner,
+            expectedChainId: prepared.chainId,
+            currentAccount: currentAccount.address,
+            currentChainId: currentAccount.chainId,
+          })
+          const signature = await signTypedDataAsync({
+            ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+            account: preparedOwner,
+          })
+          return signature as Hex
+        },
+        onProgress: options?.onProgress,
+      })
 
-    finalizeExecution(result, prepared.chainId)
-    return result
+      directSafeLifecycle?.settled()
+      finalizeExecution(result, prepared.chainId)
+      return result
+    }
+    catch (error) {
+      if (directSafeLifecycle?.failed(error)) {
+        throw new Error(directSafeLifecycle.retainedError(), { cause: error })
+      }
+      throw error
+    }
   }
 
   const reconcileSafeTransaction = async ({
@@ -1810,10 +2042,9 @@ export const useEulerTx = () => {
    * it, and the revocations land in the same proposal, so no standing
    * authorization ever needs unwind bookkeeping.
    *
-   * Returns undefined when no Safe bundle context is available (regular
-   * wallet, or a Safe whose provider could not be acquired) — the caller
-   * owns the sequential fallback, which must broadcast the grants and wait
-   * for them to mine before the migration plan is rebuilt.
+   * Returns undefined when no Safe bundle context is available. The caller
+   * may use a regular-wallet path; a review that promised Safe bundling must
+   * instead fail closed before broadcasting any prerequisite.
    */
   const executePreparedPlanWithPlainCalls = async (
     prepared: TransactionPlanPrepared,
@@ -1845,6 +2076,19 @@ export const useEulerTx = () => {
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
 
+    await reconcilePendingDirectSafeSubmission({
+      account: preparedOwner,
+      chainId: prepared.chainId,
+      provider,
+      safeWalletProvider,
+    })
+
+    const hasCallerPreflight = Boolean(options?.onSafePreflight)
+    const hasCallerSubmission = Boolean(options?.onSafeSubmission)
+    if (hasCallerPreflight !== hasCallerSubmission) {
+      throw new Error('Safe submission lifecycle callbacks must be provided together')
+    }
+
     // Same invariant as executePreparedPlan: an envelope executed for a Safe
     // never carries permit2.
     let effectivePrepared = prepared
@@ -1861,22 +2105,36 @@ export const useEulerTx = () => {
       effectivePrepared = { ...prepared, usePermit2: false }
     }
 
-    const bundled = await executePlanAsSafeBundle({
-      plan: effectivePrepared.plan,
-      chainId: prepared.chainId,
-      owner: preparedOwner,
-      provider,
-      connector,
-      safeWalletProvider,
-      sdk,
-      extraCalls,
-      allowSingleCall: options?.allowSingleCall,
-      onSafePreflight: options?.onSafePreflight,
-      onSafeSubmission: options?.onSafeSubmission,
-    })
-    if (!bundled) return undefined
-    finalizeExecution(bundled)
-    return bundled
+    const callerManagesSafeSubmission = hasCallerPreflight && hasCallerSubmission
+    const directSafeLifecycle = callerManagesSafeSubmission
+      ? undefined
+      : createDirectSafeSubmissionLifecycle(effectivePrepared)
+
+    try {
+      const bundled = await executePlanAsSafeBundle({
+        plan: effectivePrepared.plan,
+        chainId: prepared.chainId,
+        owner: preparedOwner,
+        provider,
+        connector,
+        safeWalletProvider,
+        sdk,
+        extraCalls,
+        allowSingleCall: options?.allowSingleCall,
+        onSafePreflight: options?.onSafePreflight ?? directSafeLifecycle?.preflight,
+        onSafeSubmission: options?.onSafeSubmission ?? directSafeLifecycle?.submitted,
+      })
+      if (!bundled) return undefined
+      directSafeLifecycle?.settled()
+      finalizeExecution(bundled)
+      return bundled
+    }
+    catch (error) {
+      if (directSafeLifecycle?.failed(error)) {
+        throw new Error(directSafeLifecycle.retainedError(), { cause: error })
+      }
+      throw error
+    }
   }
 
   /**

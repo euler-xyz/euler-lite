@@ -43,10 +43,16 @@ import {
 } from '~/utils/reviewed-execution'
 import {
   getPreparedBatchFingerprint,
+  getPendingSafeSubmissionKind,
+  isDefinitiveWalletRejection,
   loadPendingSafeBatchSubmissions,
+  SAFE_SUBMISSION_UNRESOLVED_ERROR,
+  SAFE_SUBMISSION_WITHOUT_HASH_ERROR,
   savePendingSafeBatchSubmissions,
   type PersistedPendingSafeBatchSubmission,
 } from '~/utils/pending-safe-batch-submission'
+
+export const BATCH_REVIEW_INVALIDATED_ERROR = 'The batch changed after this review opened. Close it and review the updated batch before executing.'
 
 export interface BatchWalletChange {
   token: string
@@ -238,6 +244,8 @@ export interface WalletShortfall {
 
 // --- module-scoped state (single shared cart for the session) ---
 const entries: Ref<BatchEntry[]> = ref([])
+const batchRevision = ref(0)
+const reviewedBatchRevisions = new WeakMap<TransactionPlanPrepared, number>()
 const layers = shallowRef<BatchLayer[]>([])
 /**
  * Bundled ceremony resolved ONCE when the review modal opens, displayed,
@@ -268,20 +276,6 @@ const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
 const pendingSafeSubmissions = shallowRef<PersistedPendingSafeBatchSubmission[]>([])
 let pendingSafeSubmissionsHydrated = false
-const SAFE_SUBMISSION_WITHOUT_HASH_ERROR = 'A Safe submission may already be in progress, but its hash was not retained. Verify the Safe transaction before retrying.'
-
-const isDefinitiveWalletRejection = (error: unknown): boolean => {
-  let current = error
-  const seen = new WeakSet<object>()
-  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
-    if (seen.has(current)) return false
-    seen.add(current)
-    const code = (current as { code?: unknown }).code
-    if (code === 4001 || code === '4001' || code === 'ACTION_REJECTED') return true
-    current = (current as { cause?: unknown }).cause
-  }
-  return false
-}
 
 const getPendingSafeStorage = (): Storage | undefined => {
   if (typeof window === 'undefined') return undefined
@@ -293,12 +287,16 @@ const getPendingSafeStorage = (): Storage | undefined => {
   }
 }
 
-const hydratePendingSafeSubmissions = () => {
-  if (pendingSafeSubmissionsHydrated) return
+const refreshPendingSafeSubmissions = () => {
   const storage = getPendingSafeStorage()
   if (!storage) return
   pendingSafeSubmissionsHydrated = true
   pendingSafeSubmissions.value = loadPendingSafeBatchSubmissions(storage)
+}
+
+const hydratePendingSafeSubmissions = () => {
+  if (pendingSafeSubmissionsHydrated) return
+  refreshPendingSafeSubmissions()
 }
 
 const canonicalizeStoredValue = (value: unknown): unknown => {
@@ -1830,6 +1828,7 @@ export const useTxBatch = () => {
     }
   })
   const setPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
+    refreshPendingSafeSubmissions()
     const previous = pendingSafeSubmissions.value
     pendingSafeSubmissions.value = [
       ...previous.filter(existing =>
@@ -1846,8 +1845,14 @@ export const useTxBatch = () => {
     }
   }
   const clearPendingSafeSubmission = (pending: PersistedPendingSafeBatchSubmission) => {
+    refreshPendingSafeSubmissions()
     const previous = pendingSafeSubmissions.value
-    pendingSafeSubmissions.value = previous.filter(existing => existing !== pending)
+    pendingSafeSubmissions.value = previous.filter(existing => !(
+      existing.account.toLowerCase() === pending.account.toLowerCase()
+      && existing.chainId === pending.chainId
+      && existing.batchFingerprint === pending.batchFingerprint
+      && getPendingSafeSubmissionKind(existing) === getPendingSafeSubmissionKind(pending)
+    ))
     try {
       persistPendingSafeSubmissions()
     }
@@ -2251,12 +2256,13 @@ export const useTxBatch = () => {
       // different fixed plan list), so drop the stale URL before re-simulating.
       watch(entries, () => {
         logBatchDiag('watch:entries-changed')
+        batchRevision.value++
         tenderly.clearSimulation()
         // A cart edit invalidates the latched bundled ceremony — the modal
         // re-latches on next open.
         latchedBundledExecution.value = null
         void runResimulate()
-      })
+      }, { flush: 'sync' })
       watch([activeLayer, layers], syncOverlay)
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
@@ -2533,11 +2539,15 @@ export const useTxBatch = () => {
    *  modal can list the approvals the user will be asked to sign. */
   const prepareBatchPlan = async () => {
     if (!lastMerged) return null
+    const revision = batchRevision.value
     const sdk = await getEulerSdkFresh()
     const reviewPlans = entries.value.map(entry =>
       (entry.review?.displayPlan as TransactionPlan | undefined) ?? entry.plan,
     )
-    return prepareTransactionPlan(sdk.executionService.mergePlans(reviewPlans))
+    const prepared = await prepareTransactionPlan(sdk.executionService.mergePlans(reviewPlans))
+    if (batchRevision.value !== revision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
+    reviewedBatchRevisions.set(prepared, revision)
+    return prepared
   }
 
   const getExecutionPlanningAccount = async (entryIndex: number): Promise<Account<IHasVaultAddress>> => {
@@ -2647,10 +2657,13 @@ export const useTxBatch = () => {
    */
   const sendExecutionPrerequisites = async (
     grantedRevokes: MigrationAuthorizationRevoke[],
+    reviewedRevision: number,
   ): Promise<void> => {
     for (const [index, entry] of entries.value.entries()) {
+      if (batchRevision.value !== reviewedRevision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
       if (!entry.buildExecutionPrerequisites) continue
       const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
+      if (batchRevision.value !== reviewedRevision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
       requireReviewedPrerequisiteEnvelope(
         entry.review?.reviewedExecutionPrerequisites as ReviewedPrerequisiteEnvelope | undefined,
         prerequisites,
@@ -2661,6 +2674,11 @@ export const useTxBatch = () => {
       if (prerequisites.preTxs.length) {
         await sendPlainTransactions(prerequisites.preTxs, {
           walletContext: prerequisites.walletContext,
+          beforeSend: () => {
+            if (batchRevision.value !== reviewedRevision) {
+              throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
+            }
+          },
           onBroadcast: (preTxIndex, walletContext) => {
             grantWalletContext = walletContext
             const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
@@ -2686,6 +2704,7 @@ export const useTxBatch = () => {
   }
 
   const reconcilePendingSafeSubmission = async (): Promise<boolean> => {
+    refreshPendingSafeSubmissions()
     const pending = pendingSafeSubmission.value
     if (!pending) return true
     if (!pending.submittedHash) {
@@ -2704,9 +2723,14 @@ export const useTxBatch = () => {
       }
       clearPendingSafeSubmission(pending)
       if (result.status === 'executed') {
-        await revokeAfterSuccess(pending.grantedRevokes)
-        clearBatch()
-        execError.value = undefined
+        if (getPendingSafeSubmissionKind(pending) === 'batch') {
+          await revokeAfterSuccess(pending.grantedRevokes)
+          clearBatch()
+          execError.value = undefined
+        }
+        else {
+          execError.value = 'The prior Safe operation executed. Close this review and rebuild the batch from current state.'
+        }
         return false
       }
       await revokeAfterAbort(pending.grantedRevokes)
@@ -2732,6 +2756,11 @@ export const useTxBatch = () => {
     scope?: TrackedExecutionScope,
   ) => {
     if (isExecuting.value || entries.value.length === 0 || !lastMerged || !reviewedPrepared) return
+    const reviewedRevision = reviewedBatchRevisions.get(reviewedPrepared)
+    if (reviewedRevision === undefined || reviewedRevision !== batchRevision.value) {
+      execError.value = BATCH_REVIEW_INVALIDATED_ERROR
+      return
+    }
     if (!await reconcilePendingSafeSubmission()) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
@@ -2772,27 +2801,30 @@ export const useTxBatch = () => {
         const preparedAccount = typeof prepared.account === 'string'
           ? getAddress(prepared.account)
           : getAddress(prepared.account.owner)
+        if (batchRevision.value !== reviewedRevision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
         const result = await executePreparedPlanWithPlainCalls(prepared, {
           before: collected.grants,
           after: collected.revokes,
         }, {
           allowSingleCall: true,
           onSafePreflight: () => {
-            const reservation = {
+            const reservation: PersistedPendingSafeBatchSubmission = {
               account: preparedAccount,
               chainId: prepared.chainId,
               batchFingerprint: getPreparedBatchFingerprint(prepared),
-              errorMessage: 'The Safe transaction status is still unresolved. Reconcile it before retrying this batch.',
+              errorMessage: SAFE_SUBMISSION_UNRESOLVED_ERROR,
               grantedRevokes: [],
+              submissionKind: 'batch',
             }
             setPendingSafeSubmission(reservation)
             safeReservation = reservation
           },
           onSafeSubmission: (submittedHash: Hash) => {
-            safeSubmissionStarted = true
             if (!safeReservation) throw new Error('Safe submission was not durably reserved')
-            safeReservation = { ...safeReservation, submittedHash }
-            setPendingSafeSubmission(safeReservation)
+            const submittedReservation = { ...safeReservation, submittedHash }
+            setPendingSafeSubmission(submittedReservation)
+            safeReservation = submittedReservation
+            safeSubmissionStarted = true
           },
         })
         if (!result) {
@@ -2808,7 +2840,8 @@ export const useTxBatch = () => {
         return
       }
 
-      await sendExecutionPrerequisites(grantedRevokes)
+      if (batchRevision.value !== reviewedRevision) throw new Error(BATCH_REVIEW_INVALIDATED_ERROR)
+      await sendExecutionPrerequisites(grantedRevokes, reviewedRevision)
       const executionPlan = await buildMergedExecutionPlan()
       await estimateGasForPlan(executionPlan)
       const candidatePrepared = await prepareTransactionPlan(executionPlan)
@@ -2820,21 +2853,23 @@ export const useTxBatch = () => {
         : getAddress(prepared.account.owner)
       await executePreparedPlan(prepared, {
         onSafePreflight: () => {
-          const reservation = {
+          const reservation: PersistedPendingSafeBatchSubmission = {
             account: preparedAccount,
             chainId: prepared.chainId,
             batchFingerprint: getPreparedBatchFingerprint(prepared),
-            errorMessage: 'The Safe transaction status is still unresolved. Reconcile it before retrying this batch.',
+            errorMessage: SAFE_SUBMISSION_UNRESOLVED_ERROR,
             grantedRevokes: [...grantedRevokes],
+            submissionKind: 'batch',
           }
           setPendingSafeSubmission(reservation)
           safeReservation = reservation
         },
         onSafeSubmission: (submittedHash: Hash) => {
-          safeSubmissionStarted = true
           if (!safeReservation) throw new Error('Safe submission was not durably reserved')
-          safeReservation = { ...safeReservation, submittedHash }
-          setPendingSafeSubmission(safeReservation)
+          const submittedReservation = { ...safeReservation, submittedHash }
+          setPendingSafeSubmission(submittedReservation)
+          safeReservation = submittedReservation
+          safeSubmissionStarted = true
         },
       })
       if (safeReservation) clearPendingSafeSubmission(safeReservation)
@@ -2867,7 +2902,9 @@ export const useTxBatch = () => {
       // The batch never landed, so no granted authorization should be left
       // standing. Entries stay in the cart for a retry, which re-grants.
       await revokeAfterAbort(grantedRevokes)
-      execError.value = await describeExecError(error)
+      execError.value = error instanceof Error && error.message === BATCH_REVIEW_INVALIDATED_ERROR
+        ? BATCH_REVIEW_INVALIDATED_ERROR
+        : await describeExecError(error)
     }
     finally {
       isExecuting.value = false
@@ -2962,6 +2999,7 @@ export const useTxBatch = () => {
 
   return {
     entries,
+    batchRevision,
     layers,
     activeLayer,
     activeLayerData,

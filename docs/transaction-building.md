@@ -64,10 +64,18 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain 
 3. The review modal prepares the plan with `preparePlanForReview(plan)`.
 4. `preparePlanForReview` applies operation guards and calls `sdk.executionService.resolveRequiredApprovals(...)`.
 5. The review modal renders the prepared plan via `utils/stepDecoding.ts`.
-6. Confirming calls the workflow callback, which executes the plan through `executePlan(plan)`.
-7. `executePlan` applies operation guards, calls `sdk.executionService.executeTransactionPlan(...)`, forwards wagmi `sendTransaction` / `signTypedData` callbacks, and refreshes portfolio state after receipts.
+6. Confirming passes the exact reviewed `TransactionPlanPrepared` envelope to the workflow callback.
+7. The callback executes that envelope through `executePreparedPlan(...)`, which forwards the pinned wagmi transaction/signature callbacks and refreshes portfolio state after receipts.
 
 The review modal is fail-closed: if preparation does not produce a plan, it shows an error and disables confirmation.
+
+### Reviewed Safe execution
+
+When a review is displayed for a Safe, the prepared envelope carries that Safe execution requirement through approved Pyth refreshes and migration-signature replacement. Execution does not fall back to regular sequential wallet writes if the Safe provider later becomes unavailable.
+
+Before a direct or wrapped Safe request reaches the wallet, Lite stores a durable account/chain/envelope lock in `localStorage`; after the wallet returns, it stores the Safe hash before polling. A retry reconciles that record first. Ambiguous provider, bridge, and polling failures retain the lock, while a structured wallet rejection or a terminal executed, reverted, or cancelled result clears it. The batch cart uses the same storage record with its prerequisite-revoke context.
+
+Batch reviews also bind the prepared envelope to a monotonic cart revision. A cart edit invalidates the open review synchronously, and execution rechecks the revision before resolving or broadcasting each prerequisite.
 
 ## Approvals and Permit2
 

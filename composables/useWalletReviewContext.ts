@@ -15,13 +15,15 @@ export const useWalletReviewContext = ({
   const expectedAccount = account.value
   const expectedChainId = chainId.value
   const isInvalidated = ref(false)
+  let pendingChange: WalletExecutionContextChange | undefined
+  let invalidationNotified = false
 
   watch(
     [account, chainId, isSubmitting],
     ([currentAccount, currentChainId, submitting]) => {
-      if (isInvalidated.value || submitting) return
+      if (invalidationNotified) return
 
-      const change = getWalletExecutionContextChange({
+      const change = pendingChange ?? getWalletExecutionContextChange({
         expectedAccount,
         expectedChainId,
         currentAccount,
@@ -29,9 +31,19 @@ export const useWalletReviewContext = ({
       })
       if (!change) return
 
-      // Disable synchronously while the modal starts its leave transition, so
-      // the stale review cannot be submitted during the closing animation.
-      isInvalidated.value = true
+      if (!isInvalidated.value) {
+        // Latch the first drift even during submission. The wallet may return
+        // to the reviewed account/network before the promise settles, but the
+        // review still crossed an unreviewed execution context and must never
+        // become confirmable again.
+        pendingChange = change
+        isInvalidated.value = true
+      }
+      if (submitting) return
+
+      // Closing is deferred while a submission is active, but disabling is
+      // synchronous so a round-trip cannot revive the stale review.
+      invalidationNotified = true
       onInvalidated(change)
     },
     { flush: 'sync' },

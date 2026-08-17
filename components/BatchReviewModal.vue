@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { encodeFunctionData, getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
-import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
+import { BATCH_REVIEW_INVALIDATED_ERROR, buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -15,6 +15,7 @@ import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { formatNumber } from '~/utils/string-utils'
+import { markReviewedSafeExecutionRequired } from '~/utils/reviewed-execution'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -25,6 +26,7 @@ const emit = defineEmits(['close'])
 
 const {
   entries,
+  batchRevision,
   layers,
   walletChanges,
   simError,
@@ -356,9 +358,24 @@ interface ResolvedApproval { type: string, token: string }
 const approvals = ref<Array<{ kind: 'approve' | 'permit', symbol: string }>>([])
 const isPreparing = ref(false)
 const prepareError = ref('')
+const reviewedBatchRevision = batchRevision.value
+const isReviewBatchInvalidated = ref(false)
+
+watch(batchRevision, (currentRevision) => {
+  if (currentRevision === reviewedBatchRevision || isReviewBatchInvalidated.value) return
+  // The rows and prepared envelope belong to the cart revision captured when
+  // this modal opened. Disable immediately, then close any idle review so a
+  // later resimulation cannot revive confirmation for the stale envelope.
+  isReviewBatchInvalidated.value = true
+  prepareError.value = BATCH_REVIEW_INVALIDATED_ERROR
+  if (!isExecuting.value) emit('close')
+}, { flush: 'sync' })
 // The prepared plan (with approvals resolved) backs "Copy calldata".
 const preparedPlanRef = ref<TransactionPlan | undefined>()
 const preparedExecutionRef = ref<TransactionPlanPrepared | undefined>()
+watch([isSafeWallet, preparedExecutionRef], ([safe, envelope]) => {
+  if (safe && envelope) markReviewedSafeExecutionRequired(envelope)
+}, { flush: 'sync' })
 const hasPermit2Approval = computed(() =>
   hasPermit2TokenApproval(preparedPlanRef.value, eulerCoreAddresses.value?.permit2),
 )
@@ -395,7 +412,9 @@ onMounted(async () => {
   }
   catch (error) {
     logWarn('BatchReviewModal/prepare', error)
-    prepareError.value = 'Unable to prepare this batch. Resolve the preparation error before copying calldata or executing.'
+    prepareError.value = error instanceof Error
+      ? error.message
+      : 'Unable to prepare this batch. Resolve the preparation error before copying calldata or executing.'
   }
   finally {
     isPreparing.value = false
@@ -463,7 +482,7 @@ const copyCalldata = async () => {
 const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
 
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
+  isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || isReviewBatchInvalidated.value || !canExecuteBatch.value || !!prepareError.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'

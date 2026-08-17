@@ -15,7 +15,7 @@ import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle, TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import { refreshReviewedPythExecution, REVIEWED_EXECUTION_UNAVAILABLE_ERROR } from '~/utils/reviewed-execution'
+import { markReviewedSafeExecutionRequired, refreshReviewedPythExecution, REVIEWED_EXECUTION_UNAVAILABLE_ERROR } from '~/utils/reviewed-execution'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -114,6 +114,7 @@ let nowTimer: ReturnType<typeof setInterval> | undefined
 // Confirmation receives this same object, so callers cannot rebuild from live
 // form state and execute different calldata.
 const reviewedExecution = shallowRef<TransactionPlanPrepared | undefined>()
+const reviewedSafeExecutionRequired = ref(false)
 const prepareError = ref('')
 const tenderlyLocalError = ref('')
 const isPreparingPlan = ref(false)
@@ -127,6 +128,16 @@ const calldataChainId = computed(() => calldataPrepared?.chainId ?? prepared?.ch
 const displayReviewPlan = computed(() => displayPlan ?? reviewPlan.value ?? calldataPrepared?.plan ?? tenderlyPrepared?.plan ?? tenderlyPlan)
 const canCopyCalldata = computed(() => !!calldataPlan.value?.length)
 let prepareRequestId = 0
+
+const latchReviewedSafeExecution = (candidate: TransactionPlan | undefined) => {
+  if (isSafeWallet.value && candidate?.length) {
+    reviewedSafeExecutionRequired.value = true
+  }
+}
+
+watch([isSafeWallet, reviewPlan, () => calldataPrepared?.plan], () => {
+  latchReviewedSafeExecution(reviewPlan.value ?? calldataPrepared?.plan)
+}, { flush: 'sync' })
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
@@ -151,18 +162,24 @@ watch(
     hasCopiedCalldata.value = false
     prepareError.value = ''
     reviewedExecution.value = undefined
+    reviewedSafeExecutionRequired.value = false
+    latchReviewedSafeExecution(prepared?.plan ?? plan ?? calldataPrepared?.plan)
 
     // Preferred path: caller pre-prepared the envelope. No async work — modal
     // renders the prepared plan synchronously.
     if (prepared?.plan?.length) {
       reviewedExecution.value = prepared
+      latchReviewedSafeExecution(prepared.plan)
       isPreparingPlan.value = false
       return
     }
 
     if (!plan?.length) {
       isPreparingPlan.value = false
-      if (allowConfirmWithoutPlan) return
+      if (allowConfirmWithoutPlan) {
+        latchReviewedSafeExecution(calldataPrepared?.plan)
+        return
+      }
       prepareError.value = 'Transaction plan is unavailable. Close this review and try again.'
       return
     }
@@ -173,6 +190,7 @@ watch(
       const envelope = await prepareTransactionPlan(plan)
       if (requestId === prepareRequestId) {
         reviewedExecution.value = envelope
+        latchReviewedSafeExecution(envelope.plan)
         prepareError.value = ''
       }
     }
@@ -269,6 +287,14 @@ const handleConfirm = async () => {
       handle.release()
       return
     }
+    if (reviewedSafeExecutionRequired.value) {
+      confirmedExecution = markReviewedSafeExecutionRequired(confirmedExecution)
+    }
+  }
+  if (isReviewWalletContextInvalidated.value) {
+    internalSubmitting.value = false
+    handle.release()
+    return
   }
   const result = onConfirm(handle.scope, confirmedExecution)
   if (result && typeof (result as Promise<void>).then === 'function') {

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Address, Hash, Hex } from 'viem'
 import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import {
+  getPendingSafeSubmissionKind,
   getPreparedBatchFingerprint,
+  isDefinitiveWalletRejection,
   loadPendingSafeBatchSubmissions,
   PENDING_SAFE_BATCH_STORAGE_KEY,
   savePendingSafeBatchSubmissions,
@@ -55,6 +57,31 @@ describe('pending Safe batch submissions', () => {
       errorMessage: 'reserved',
       grantedRevokes: [],
     }])).toThrow('quota')
+  })
+
+  it('preserves direct-operation locks while treating records without a kind as batch locks', () => {
+    const storage = memoryStorage()
+    const operation = {
+      account,
+      chainId: 1,
+      batchFingerprint: '0123456789abcdef',
+      errorMessage: 'reserved',
+      grantedRevokes: [],
+      submissionKind: 'operation' as const,
+    }
+
+    savePendingSafeBatchSubmissions(storage, [operation])
+
+    expect(getPendingSafeSubmissionKind(loadPendingSafeBatchSubmissions(storage)[0]!)).toBe('operation')
+    expect(getPendingSafeSubmissionKind({ ...operation, submissionKind: undefined })).toBe('batch')
+  })
+
+  it('only classifies structured rejection codes, including nested causes, as definitive', () => {
+    expect(isDefinitiveWalletRejection(Object.assign(new Error('rejected'), { code: 4001 }))).toBe(true)
+    expect(isDefinitiveWalletRejection(new Error('wrapped', {
+      cause: Object.assign(new Error('rejected'), { code: 'ACTION_REJECTED' }),
+    }))).toBe(true)
+    expect(isDefinitiveWalletRejection(new Error('User rejected the request.'))).toBe(false)
   })
 
   it('fingerprints the prepared account, chain, options, and exact plan', () => {

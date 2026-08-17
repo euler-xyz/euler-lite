@@ -27,7 +27,18 @@ describe('useWalletReviewContext', () => {
     scope.stop()
   })
 
-  it('defers closing during submission and invalidates when submission settles', () => {
+  it.each([
+    {
+      label: 'account',
+      expectedChange: 'account',
+      drift: (account: { value: Address | undefined }, _chainId: { value: number | undefined }) => { account.value = OTHER_OWNER },
+    },
+    {
+      label: 'network',
+      expectedChange: 'chain',
+      drift: (_account: { value: Address | undefined }, chainId: { value: number | undefined }) => { chainId.value = 8453 },
+    },
+  ])('latches a $label round-trip during submission and closes when submission settles', ({ drift, expectedChange }) => {
     const scope = effectScope()
     const account = ref<Address | undefined>(OWNER)
     const chainId = ref<number | undefined>(1)
@@ -35,13 +46,19 @@ describe('useWalletReviewContext', () => {
     const onInvalidated = vi.fn()
     const result = scope.run(() => useWalletReviewContext({ account, chainId, isSubmitting, onInvalidated }))!
 
-    account.value = OTHER_OWNER
-    expect(result.isReviewWalletContextInvalidated.value).toBe(false)
+    drift(account, chainId)
+    expect(result.isReviewWalletContextInvalidated.value).toBe(true)
+    expect(onInvalidated).not.toHaveBeenCalled()
+
+    account.value = OWNER
+    chainId.value = 1
+    expect(result.isReviewWalletContextInvalidated.value).toBe(true)
     expect(onInvalidated).not.toHaveBeenCalled()
 
     isSubmitting.value = false
     expect(result.isReviewWalletContextInvalidated.value).toBe(true)
-    expect(onInvalidated).toHaveBeenCalledWith('account')
+    expect(onInvalidated).toHaveBeenCalledOnce()
+    expect(onInvalidated).toHaveBeenCalledWith(expectedChange)
     scope.stop()
   })
 })

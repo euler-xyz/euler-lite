@@ -12,6 +12,8 @@ import {
   REVIEWED_BATCH_EXECUTION_CHANGED_ERROR,
   requireReviewedPrerequisiteEnvelope,
   REVIEWED_PREREQUISITES_CHANGED_ERROR,
+  isReviewedSafeExecutionRequired,
+  markReviewedSafeExecutionRequired,
 } from '~/utils/reviewed-execution'
 
 const pyth = '0x4305FB66699C3B2702D4d05CF36551390A4c69C6' as Address
@@ -166,6 +168,14 @@ describe('requireReviewedBatchPreparedExecution', () => {
       .toThrow(REVIEWED_BATCH_EXECUTION_CHANGED_ERROR)
   })
 
+  it('carries the reviewed Safe bundle requirement to a canonical refreshed envelope', () => {
+    const reviewed = markReviewedSafeExecutionRequired(prepared('0x01'))
+    const candidate = prepared('0x01')
+
+    expect(requireReviewedBatchPreparedExecution(reviewed, candidate)).toBe(candidate)
+    expect(isReviewedSafeExecutionRequired(candidate)).toBe(true)
+  })
+
   it('rejects a changed operation outside the signature slot', () => {
     const reviewed = prepared('0x01', authData('aave-delegation', false))
     const changed = prepared('0x01', authData('aave-delegation', true))
@@ -293,6 +303,14 @@ describe('requirePythOnlyPreparedRefresh', () => {
     if (batch?.type === 'evcBatch' && !('type' in batch.items[0]!)) batch.items[0]!.value = 2n
 
     expect(requirePythOnlyPreparedRefresh(reviewed, refreshed)).toBe(refreshed)
+  })
+
+  it('carries the reviewed Safe bundle requirement through a Pyth refresh', () => {
+    const reviewed = markReviewedSafeExecutionRequired(prepared('0x01'))
+    const refreshed = prepared('0x02')
+
+    expect(requirePythOnlyPreparedRefresh(reviewed, refreshed)).toBe(refreshed)
+    expect(isReviewedSafeExecutionRequired(refreshed)).toBe(true)
   })
 
   it('rejects a changed non-Pyth operation', () => {
