@@ -63,8 +63,25 @@ export const useTosGuard = () => {
   const sessionAccepted = useState<boolean>('tosGuardSessionAccepted', () => false)
   const tosLoadFailed = useState<boolean>('tosGuardLoadFailed', () => false)
   const checkGeneration = useState<number>('tosGuardCheckGeneration', () => 0)
+  const acceptanceContext = useState<string>('tosGuardAcceptanceContext', () => '')
   const tosData = ref<TosData | null>(null)
   const blockerKey = `tos:${++tosGuardInstanceSequence}`
+
+  const syncAcceptanceContext = () => {
+    const nextContext = `${chainId.value ?? 'none'}:${address.value?.toLowerCase() ?? 'none'}`
+    if (acceptanceContext.value === nextContext) return
+    acceptanceContext.value = nextContext
+    checkGeneration.value += 1
+    hasSigned.value = null
+    sessionAccepted.value = false
+    tosLoadFailed.value = false
+  }
+
+  // These values outlive an individual guard so acceptance can survive normal
+  // navigation. Rebind them synchronously on every mount, including a wallet
+  // switch that happened while no operation page (and therefore no watcher)
+  // was mounted.
+  syncAcceptanceContext()
 
   const getCurrentTosRequirementState = (): TosRequirementState => ({
     hasWalletAddress: !!address.value,
@@ -83,6 +100,7 @@ export const useTosGuard = () => {
   )
 
   const checkHasSigned = async () => {
+    syncAcceptanceContext()
     const generation = ++checkGeneration.value
     const checkedAddress = address.value
     const checkedChainId = chainId.value
@@ -193,19 +211,11 @@ export const useTosGuard = () => {
     else unregisterOperationBlocker(blockerKey)
   }, { immediate: true })
 
-  watch(address, (next, prev) => {
-    hasSigned.value = null
-    sessionAccepted.value = false
-    if (prev && chainId.value) clearLiteTosSignature({ chainId: chainId.value, account: prev as Address })
-    if (enableTosSignature) {
-      void checkHasSigned()
+  watch([address, chainId], (_next, [previousAddress, previousChainId]) => {
+    syncAcceptanceContext()
+    if (previousAddress && previousChainId) {
+      clearLiteTosSignature({ chainId: previousChainId, account: previousAddress as Address })
     }
-  })
-
-  watch(chainId, (next, prev) => {
-    hasSigned.value = null
-    sessionAccepted.value = false
-    if (prev && address.value) clearLiteTosSignature({ chainId: prev, account: address.value as Address })
     if (enableTosSignature) {
       void checkHasSigned()
     }

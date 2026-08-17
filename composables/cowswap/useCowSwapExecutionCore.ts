@@ -158,7 +158,11 @@ export const useCowSwapExecutionCore = () => {
         onProgress: (progress) => {
           // The SDK emits before each CoW phase, including submitOrder. This
           // closes the interval after signing but before the order is posted.
-          assertCurrentExecutionPolicy()
+          // `completed` is different: the SDK emits it only after the orderbook
+          // has accepted the order and includes the resulting UID. Never throw
+          // after that irreversible boundary or the live order becomes
+          // indistinguishable from a failed submission and can be duplicated.
+          if (progress.status !== 'completed') assertCurrentExecutionPolicy()
           onProgress(progress)
         },
       })

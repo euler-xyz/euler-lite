@@ -142,4 +142,50 @@ describe('useTosGuard account-switch checks', () => {
     await flush()
     expect(operationBlockReason.value).toBe('Terms of Use acceptance required')
   })
+
+  it('invalidates shared acceptance when a different context mounts after an unobserved switch', async () => {
+    const address = ref<string | undefined>(ACCOUNT_B)
+    const chainId = ref(1)
+    const states = new Map<string, Ref<unknown>>([
+      ['tosGuardHasSigned', ref(true)],
+      ['tosGuardSessionAccepted', ref(true)],
+      ['tosGuardLoadFailed', ref(false)],
+      ['tosGuardCheckGeneration', ref(0)],
+      ['tosGuardAcceptanceContext', ref(`1:${ACCOUNT_A.toLowerCase()}`)],
+    ])
+    const client = {
+      readContract: vi.fn(async () => 0n),
+    }
+
+    vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
+      if (!states.has(key)) states.set(key, ref(init()))
+      return states.get(key) as Ref<T>
+    })
+    vi.stubGlobal('useWagmi', () => ({ address }))
+    vi.stubGlobal('useEulerAddresses', () => ({
+      eulerPeripheryAddresses: ref({ termsOfUseSigner: SIGNER }),
+      isReady: ref(true),
+      loadEulerConfig: vi.fn(),
+      chainId,
+    }))
+    vi.stubGlobal('useRpcClient', () => ({ client: ref(client) }))
+    vi.stubGlobal('useDeployConfig', () => ({
+      enableTosSignature: true,
+      tosUrl: 'https://example.invalid/terms',
+    }))
+    vi.stubGlobal('onMounted', (callback: () => void) => callback())
+    vi.stubGlobal('onUnmounted', () => undefined)
+
+    const { useTosGuard } = await import('~/composables/guards/useTosGuard')
+    const { operationBlockReason } = await import('~/utils/operationGuardRegistry')
+
+    useTosGuard()
+    expect(operationBlockReason.value).toBe('Checking Terms of Use acceptance')
+    await flush()
+
+    expect(client.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      args: [ACCOUNT_B, `0x${'11'.repeat(32)}`],
+    }))
+    expect(operationBlockReason.value).toBe('Terms of Use acceptance required')
+  })
 })

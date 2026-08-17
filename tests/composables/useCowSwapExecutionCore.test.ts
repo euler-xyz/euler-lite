@@ -58,6 +58,34 @@ describe('useCowSwapExecutionCore policy freshness', () => {
     expect(submitOrder).not.toHaveBeenCalled()
   })
 
+  it('records an accepted order when policy changes before completed progress', async () => {
+    const policyBlocked = ref(false)
+    const acceptedUid = `0x${'11'.repeat(56)}` as const
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      executionService: {
+        executeCowSwapTransactionPlan: vi.fn(async ({ onProgress }) => {
+          onProgress?.({ completed: 0, total: 1, status: 'submitOrder' })
+          policyBlocked.value = true
+          onProgress?.({ completed: 1, total: 1, status: 'completed', orderUid: acceptedUid })
+          return { results: [], orderUids: [acceptedUid], hashes: [], plan: [] }
+        }),
+      },
+    } as never)
+
+    const core = useCowSwapExecutionCore()
+    await expect(core.executePlan({
+      plan: [],
+      account: owner,
+      chainId: 1,
+      cancellationMode: 'cow-api',
+    }, [() => policyBlocked.value ? 'CoW operation policy changed' : undefined]))
+      .resolves.toBe(acceptedUid)
+
+    expect(core.orderUid.value).toBe(acceptedUid)
+    expect(core.status.value).toBe('submitted')
+    expect(core.error.value).toBeNull()
+  })
+
   it.each([
     ['account', () => { currentAddress.value = otherOwner }],
     ['chain', () => { currentChainId.value = 10 }],
