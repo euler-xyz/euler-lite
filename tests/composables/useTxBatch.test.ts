@@ -1301,6 +1301,90 @@ describe('useTxBatch execution errors', () => {
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([])
   })
 
+  it('clears a no-hash Safe reservation after a definitive wallet rejection', async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+        removeItem: (key: string) => stored.delete(key),
+      },
+    })
+    const batch = useTxBatch()
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (
+      _prepared: unknown,
+      options?: { onSafePreflight?: () => void | Promise<void> },
+    ) => {
+      await options?.onSafePreflight?.()
+      throw Object.assign(new Error('User rejected the request.'), { code: 4001 })
+    })
+
+    await batch.addEntry({
+      label: 'Supply USDC',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    await batch.executeBatch(await prepareReviewedBatch(batch))
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([])
+    expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('keeps a no-hash Safe reservation when the submission response is ambiguous', async () => {
+    const ambiguousOwner = getAddress('0x9000000000000000000000000000000000000000')
+    const stored = new Map<string, string>()
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+        removeItem: (key: string) => stored.delete(key),
+      },
+    })
+    vi.stubGlobal('useWagmi', () => ({ address: ref(ambiguousOwner), chainId: ref(1) }))
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(ambiguousOwner),
+      isConnected: ref(true),
+      isSpyMode: ref(false),
+      spyAddress: ref(undefined),
+      effectiveAddress: ref(ambiguousOwner),
+    }))
+    const prepared = {
+      __prepared: true,
+      plan: [] as TransactionPlan,
+      chainId: 1,
+      account: ambiguousOwner,
+      usePermit2: true,
+      unlimitedApproval: false,
+    }
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (
+      _prepared: unknown,
+      options?: { onSafePreflight?: () => void | Promise<void> },
+    ) => {
+      await options?.onSafePreflight?.()
+      throw new Error('Safe provider response was lost')
+    })
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      label: 'Borrow USDC',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    const reviewed = await prepareReviewedBatch(batch)
+    await batch.executeBatch(reviewed)
+
+    expect(batch.pendingSafeSubmission.value).toMatchObject({
+      account: ambiguousOwner,
+      chainId: 1,
+    })
+    expect(batch.pendingSafeSubmission.value).not.toHaveProperty('submittedHash')
+    expect(migrationFlowMocks.revokeAfterAbort).not.toHaveBeenCalled()
+    expect(stored.size).toBeGreaterThan(0)
+
+    await batch.executeBatch(reviewed)
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+  })
+
   it('passes the pre-entry simulated account to execution plan builders', async () => {
     const sdk = createMockSdk()
     const preMigrationAccount = accountWithPosition(subAccount, subAccount, 42n)
@@ -1767,6 +1851,31 @@ describe('useTxBatch execution prerequisites', () => {
     expect(migrationFlowMocks.restorePendingBeforeRetry).toHaveBeenCalledTimes(2)
     expect(eulerTxMocks.sendPlainTransactions).toHaveBeenCalledTimes(1)
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+    expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
+    expect(batch.entryCount.value).toBe(1)
+  })
+
+  it('restores prerequisite grants when durable Safe preflight storage fails', async () => {
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => { throw new Error('storage unavailable') },
+        removeItem: vi.fn(),
+      },
+    })
+    const batch = useTxBatch()
+    eulerTxMocks.sendPlainTransactions.mockImplementation(broadcastAllTransactions)
+    eulerTxMocks.executePreparedPlan.mockImplementation(async (
+      _prepared: unknown,
+      options?: { onSafePreflight?: () => void | Promise<void> },
+    ) => {
+      await options?.onSafePreflight?.()
+    })
+
+    await addGrantingMigrationEntry(batch)
+    await batch.executeBatch(await prepareReviewedBatch(batch))
+
+    expect(batch.pendingSafeSubmission.value).toBeNull()
     expect(migrationFlowMocks.revokeAfterAbort).toHaveBeenCalledWith([trackedRevoke(revokeTx)])
     expect(batch.entryCount.value).toBe(1)
   })

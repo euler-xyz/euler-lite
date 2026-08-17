@@ -268,6 +268,20 @@ const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
 const pendingSafeSubmissions = shallowRef<PersistedPendingSafeBatchSubmission[]>([])
 let pendingSafeSubmissionsHydrated = false
+const SAFE_SUBMISSION_WITHOUT_HASH_ERROR = 'A Safe submission may already be in progress, but its hash was not retained. Verify the Safe transaction before retrying.'
+
+const isDefinitiveWalletRejection = (error: unknown): boolean => {
+  let current = error
+  const seen = new WeakSet<object>()
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    if (seen.has(current)) return false
+    seen.add(current)
+    const code = (current as { code?: unknown }).code
+    if (code === 4001 || code === '4001' || code === 'ACTION_REJECTED') return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
 
 const getPendingSafeStorage = (): Storage | undefined => {
   if (typeof window === 'undefined') return undefined
@@ -2675,7 +2689,7 @@ export const useTxBatch = () => {
     const pending = pendingSafeSubmission.value
     if (!pending) return true
     if (!pending.submittedHash) {
-      execError.value = 'A Safe submission may already be in progress, but its hash was not retained. Verify the Safe transaction before retrying.'
+      execError.value = SAFE_SUBMISSION_WITHOUT_HASH_ERROR
       return false
     }
     try {
@@ -2764,14 +2778,15 @@ export const useTxBatch = () => {
         }, {
           allowSingleCall: true,
           onSafePreflight: () => {
-            safeReservation = {
+            const reservation = {
               account: preparedAccount,
               chainId: prepared.chainId,
               batchFingerprint: getPreparedBatchFingerprint(prepared),
               errorMessage: 'The Safe transaction status is still unresolved. Reconcile it before retrying this batch.',
               grantedRevokes: [],
             }
-            setPendingSafeSubmission(safeReservation)
+            setPendingSafeSubmission(reservation)
+            safeReservation = reservation
           },
           onSafeSubmission: (submittedHash: Hash) => {
             safeSubmissionStarted = true
@@ -2805,14 +2820,15 @@ export const useTxBatch = () => {
         : getAddress(prepared.account.owner)
       await executePreparedPlan(prepared, {
         onSafePreflight: () => {
-          safeReservation = {
+          const reservation = {
             account: preparedAccount,
             chainId: prepared.chainId,
             batchFingerprint: getPreparedBatchFingerprint(prepared),
             errorMessage: 'The Safe transaction status is still unresolved. Reconcile it before retrying this batch.',
             grantedRevokes: [...grantedRevokes],
           }
-          setPendingSafeSubmission(safeReservation)
+          setPendingSafeSubmission(reservation)
+          safeReservation = reservation
         },
         onSafeSubmission: (submittedHash: Hash) => {
           safeSubmissionStarted = true
@@ -2829,12 +2845,15 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      if (safeSubmissionStarted) {
-        // A Safe hash was returned. Any subsequent provider/polling failure is
-        // indeterminate until reconciliation; do not revoke prerequisites or
-        // leave the cart retryable while that transaction may still execute.
-        execError.value = safeReservation?.errorMessage
-          ?? 'The Safe transaction status is unresolved. Verify it before retrying.'
+      if (safeReservation && (safeSubmissionStarted || !isDefinitiveWalletRejection(error))) {
+        // Once the durable preflight lock exists, a provider/bridge failure may
+        // have happened after the Safe accepted the request but before its hash
+        // reached the app. Only a structured wallet-rejection code proves the
+        // request stopped before submission. Preserve every other reservation
+        // and skip prerequisite revocation/retry until it is reconciled.
+        execError.value = safeSubmissionStarted
+          ? safeReservation.errorMessage
+          : SAFE_SUBMISSION_WITHOUT_HASH_ERROR
         return
       }
       if (safeReservation) {
