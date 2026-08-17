@@ -1,7 +1,7 @@
 /**
  * Routes every server-side SDK build's deployment-manifest fetch through
  * the /api/internal/euler-chains resolution chain (fresh cache → upstream →
- * stale → build-time snapshot) instead of the SDK's default direct
+ * stale cache) instead of the SDK's default direct
  * raw.githubusercontent.com fetch.
  *
  * `setQueryDeployments` is a static hook, so one installation at boot

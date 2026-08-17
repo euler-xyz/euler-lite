@@ -18,7 +18,6 @@
     "parity:overlay": "node scripts/parity-overlay.mjs",
     "execution:record": "node scripts/execution-record.mjs",
     "execution:suite": "node scripts/execution-suite.mjs",
-    "snapshots:update": "node scripts/update-manifest-snapshots.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:golden": "vitest run tests/golden",

@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import eulerChainsSnapshot from '~/server/assets/manifests/EulerChains.json'
 
 const mocks = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
@@ -99,23 +98,23 @@ describe('/api/internal/euler-chains resolution chain', () => {
     vi.useRealTimers()
   })
 
-  it('serves the build-time snapshot when upstream fails and no cache exists', async () => {
+  it('throws when upstream fails and no cache exists', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('upstream down'))
 
     const { loadEulerChains } = await importRoute()
 
-    await expect(loadEulerChains()).resolves.toEqual(eulerChainsSnapshot)
+    await expect(loadEulerChains()).rejects.toThrow('upstream down')
   })
 
-  it('serves the snapshot on a non-ok upstream response with no cache', async () => {
+  it('throws on a non-ok upstream response with no cache', async () => {
     mocks.fetchWithTimeout.mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
 
     const { loadEulerChains } = await importRoute()
 
-    await expect(loadEulerChains()).resolves.toEqual(eulerChainsSnapshot)
+    await expect(loadEulerChains()).rejects.toThrow('Upstream returned 429')
   })
 
-  it('serves stale cache over the snapshot during a prolonged outage', async () => {
+  it('serves stale cache during a prolonged outage, up to the manifest window', async () => {
     vi.useFakeTimers()
     const upstreamData = [{ chainId: 1 }]
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(upstreamData))
@@ -128,10 +127,10 @@ describe('/api/internal/euler-chains resolution chain', () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('upstream down'))
     await expect(loadEulerChains()).resolves.toEqual(upstreamData)
 
-    // Past the 7-day stale window the snapshot takes over.
+    // Past the 7-day stale window nothing is left to serve.
     vi.advanceTimersByTime(8 * 24 * 60 * 60_000)
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('upstream down'))
-    await expect(loadEulerChains()).resolves.toEqual(eulerChainsSnapshot)
+    await expect(loadEulerChains()).rejects.toThrow('upstream down')
   })
 
   it('returns fresh cache without refetching', async () => {

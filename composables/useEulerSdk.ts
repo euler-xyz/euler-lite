@@ -275,7 +275,7 @@ const configureAppProxies = (sdk: EulerSDK, buildQuery: BuildQueryFn) => {
 
   // Runtime ABI fetches (AccountLens for account reads/simulate/rewards,
   // VaultLens/UtilsLens for projected rates and the IRM overview) go through
-  // /api/internal/abis/<Contract> — same cache + stale + snapshot chain as
+  // /api/internal/abis/<Contract> — same cache + stale-fallback chain as
   // the deployments manifest. The browser CSP no longer allows
   // raw.githubusercontent.com, so a missing setter is a real breakage, not
   // a degradation — log it loudly instead of optional-chaining past it.

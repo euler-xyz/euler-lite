@@ -1,4 +1,4 @@
-import { setResponseHeader } from 'h3'
+import { createError, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
@@ -8,7 +8,6 @@ import {
   eulerInterfacesRawUrl,
 } from '~/server/utils/euler-interfaces'
 import { logger } from '~/server/utils/logger'
-import eulerChainsSnapshot from '~/server/assets/manifests/EulerChains.json'
 
 const CACHE_TTL_MS = 300_000
 
@@ -58,12 +57,12 @@ export function refreshEulerChains(): Promise<unknown[]> {
 }
 
 /**
- * Full resolution chain: fresh cache → upstream → stale cache → build-time
- * snapshot (refreshed via `npm run snapshots:update`). The snapshot is the
- * cold-start last resort: a process that boots during an upstream outage
- * still serves a working, if dated, deployment manifest instead of taking
- * every SDK build down with it. Also installed as the deployments source
- * for server-side SDK builds (see server/plugins/sdk-deployments.ts).
+ * Full resolution chain: fresh cache → upstream → stale cache (long
+ * manifest window). Throws only when upstream is down and no copy has been
+ * cached within the stale window — i.e. a process cold-started mid-outage;
+ * repoint via NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL in that case. Also
+ * installed as the deployments source for every server-side SDK build (see
+ * server/plugins/sdk-deployments.ts).
  */
 export async function loadEulerChains(): Promise<unknown[]> {
   const cached = cache.get(CACHE_KEY)
@@ -80,9 +79,9 @@ export async function loadEulerChains(): Promise<unknown[]> {
 
     logger.error(
       { ctx: 'euler-chains' },
-      'no cached deployment manifest; serving build-time snapshot',
+      'upstream unavailable and no cached deployment manifest to serve',
     )
-    return eulerChainsSnapshot
+    throw err
   }
 }
 
@@ -91,5 +90,10 @@ export default defineEventHandler(async (event) => {
 
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
 
-  return loadEulerChains()
+  try {
+    return await loadEulerChains()
+  }
+  catch {
+    throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
+  }
 })

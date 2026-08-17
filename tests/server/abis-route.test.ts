@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import vaultLensSnapshot from '~/server/assets/manifests/abis/VaultLens.json'
 
 const mocks = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
@@ -84,12 +83,31 @@ describe('/api/internal/abis/[contract]', () => {
     await expect(refreshAbi('VaultLens')).rejects.toThrow('non-array payload')
   })
 
-  it('serves the build-time snapshot when upstream fails and no cache exists', async () => {
+  it('throws when upstream fails and no cache exists', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('upstream down'))
 
     const { loadAbi } = await importRoute()
 
-    await expect(loadAbi('VaultLens')).resolves.toEqual(vaultLensSnapshot)
+    await expect(loadAbi('VaultLens')).rejects.toThrow('upstream down')
+  })
+
+  it('serves stale cache during a prolonged outage, up to the manifest window', async () => {
+    vi.useFakeTimers()
+    const abi = [{ type: 'function', name: 'getVaultInfoFull' }]
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(abi))
+
+    const { loadAbi } = await importRoute()
+    await expect(loadAbi('VaultLens')).resolves.toEqual(abi)
+
+    vi.advanceTimersByTime(60 * 60_000)
+    mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('upstream down'))
+    await expect(loadAbi('VaultLens')).resolves.toEqual(abi)
+
+    vi.advanceTimersByTime(8 * 24 * 60 * 60_000)
+    mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('upstream down'))
+    await expect(loadAbi('VaultLens')).rejects.toThrow('upstream down')
+
+    vi.useRealTimers()
   })
 
   it('serves fresh cache without refetching', async () => {
