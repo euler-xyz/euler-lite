@@ -2750,15 +2750,28 @@ const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigr
 const shouldRemoveInboundExternalAuthorization = (connectorId: string, useSignatures: boolean) =>
   connectorId === MORPHO_CONNECTOR_ID && useSignatures
 
+const mintInboundMigrationDeadline = (): bigint => BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
+
+// A supplied plan deadline replaces the quote-derived verifier deadlines the
+// connectors would otherwise use, so clamp it to the quotes' own bounds —
+// pinning a ceremony deadline must never extend how long a reviewed swap
+// stays executable on-chain.
+const pinInboundMigrationCeremonyDeadline = (input: InboundExternalMigrationInput): bigint =>
+  [input.collateralSwapQuote, input.debtSwapQuote]
+    .map(quote => quote?.verify.deadline)
+    .filter((deadline): deadline is number => typeof deadline === 'number' && deadline > 0)
+    .map(deadline => BigInt(deadline))
+    .reduce((earliest, deadline) => (deadline < earliest ? deadline : earliest), mintInboundMigrationDeadline())
+
 const getInboundExternalMigrationAuthorizationRequest = async (
   input: InboundExternalMigrationInput,
   useSignatures = signaturesEnabled.value,
+  deadline: bigint = mintInboundMigrationDeadline(),
 ): Promise<MigrationAuthorizationRequest | undefined> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
   }
   const migrationChainId = input.position.chainId
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'external-to-euler',
     connectorId: input.source.connectorId,
@@ -2784,6 +2797,7 @@ const buildInboundExternalMigrationExecutionPlan = async (
   input: InboundExternalMigrationInput,
   authorization?: SignedMigrationAuthorization,
   useSignatures = signaturesEnabled.value,
+  deadline?: bigint,
 ): Promise<TransactionPlan> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2803,6 +2817,7 @@ const buildInboundExternalMigrationExecutionPlan = async (
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
     operationName: `${input.source.connectorId}ToEulerMigration`,
+    deadline,
   })
 }
 
@@ -2871,6 +2886,7 @@ const buildInboundExternalMigrationSimulationResult = async (
   authorizationRequest?: MigrationAuthorizationRequest,
   account?: Account<IHasVaultAddress>,
   useSignatures = signaturesEnabled.value,
+  deadline?: bigint,
 ) => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2890,6 +2906,7 @@ const buildInboundExternalMigrationSimulationResult = async (
     debtSwapQuote: input.debtSwapQuote,
     account,
     operationName: `${input.source.connectorId}ToEulerMigration`,
+    deadline,
   })
 }
 
@@ -3607,8 +3624,13 @@ const addInboundExternalMigrationToBatch = async () => {
             // Review uses placeholder signature bytes. Real wallet signatures
             // are requested only after confirmation.
             buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
-              const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
-              const simulation = await buildInboundExternalMigrationSimulationResult(input, request, account, useSignatures)
+              // The confirm-time rebuild must differ from the reviewed preview
+              // plan only in the signature bytes. Connectors mint a wall-clock
+              // verifier deadline on every build unless one is supplied, so the
+              // ceremony pins a single deadline across both builds.
+              const ceremonyDeadline = pinInboundMigrationCeremonyDeadline(input)
+              const request = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures, ceremonyDeadline)
+              const simulation = await buildInboundExternalMigrationSimulationResult(input, request, account, useSignatures, ceremonyDeadline)
               return {
                 plan: simulation.previewPlan,
                 resolveExecutionPlan: async (beforeWalletAction: () => void) => {
@@ -3617,7 +3639,7 @@ const addInboundExternalMigrationToBatch = async () => {
                     : undefined
                   beforeWalletAction()
                   return {
-                    plan: await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures),
+                    plan: await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures, ceremonyDeadline),
                     signatureSubstitutions: getMigrationAuthorizationSignatureSubstitutions(authorization),
                   }
                 },

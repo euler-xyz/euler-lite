@@ -610,13 +610,17 @@ function buildMigrationInput(
   }
 }
 
+function mintMigrationDeadline(): bigint {
+  return BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
+}
+
 async function getAuthorizationRequest(
   input: OutgoingMigrationInput,
   migrationPosition?: MigrationPosition,
   account?: Account<IHasVaultAddress>,
   useSignatures = signaturesEnabled.value,
+  deadline: bigint = mintMigrationDeadline(),
 ): Promise<MigrationAuthorizationRequest | undefined> {
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'euler-to-external',
     connectorId: input.target.connectorId,
@@ -640,6 +644,7 @@ async function buildMigrationPlan(
   authorization?: SignedMigrationAuthorization,
   migrationPosition?: MigrationPosition,
   account: Account<IHasVaultAddress> | undefined = planAccount.value,
+  deadline?: bigint,
 ): Promise<TransactionPlan> {
   return planCrossProtocolMigration({
     direction: 'euler-to-external',
@@ -655,6 +660,7 @@ async function buildMigrationPlan(
     account,
     cleanupEulerPosition: input.cleanupEulerPosition,
     operationName: `${input.target.connectorId}OutgoingMigration`,
+    deadline,
   })
 }
 
@@ -663,6 +669,7 @@ async function buildMigrationSimulation(
   migrationPosition: MigrationPosition,
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   account?: Account<IHasVaultAddress>,
+  deadline?: bigint,
 ) {
   return planCrossProtocolMigrationSimulation({
     direction: 'euler-to-external',
@@ -678,6 +685,7 @@ async function buildMigrationSimulation(
     account,
     cleanupEulerPosition: input.cleanupEulerPosition,
     operationName: `${input.target.connectorId}OutgoingMigration`,
+    deadline,
   })
 }
 
@@ -1100,8 +1108,13 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
           // Review uses placeholder signature bytes. Real wallet signatures are
           // requested only after the user confirms this exact authorization.
           buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
-            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-            const simulation = await buildMigrationSimulation(input, migrationPosition, request, account)
+            // The confirm-time rebuild must differ from the reviewed preview
+            // plan only in the signature bytes. Connectors mint a wall-clock
+            // verifier deadline on every build unless one is supplied, so the
+            // ceremony pins a single deadline across both builds.
+            const ceremonyDeadline = mintMigrationDeadline()
+            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures, ceremonyDeadline)
+            const simulation = await buildMigrationSimulation(input, migrationPosition, request, account, ceremonyDeadline)
             return {
               plan: simulation.previewPlan,
               resolveExecutionPlan: async (beforeWalletAction: () => void) => {
@@ -1110,7 +1123,7 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
                   : undefined
                 beforeWalletAction()
                 return {
-                  plan: await buildMigrationPlan(input, authorization, migrationPosition, account),
+                  plan: await buildMigrationPlan(input, authorization, migrationPosition, account, ceremonyDeadline),
                   signatureSubstitutions: getMigrationAuthorizationSignatureSubstitutions(authorization),
                 }
               },
