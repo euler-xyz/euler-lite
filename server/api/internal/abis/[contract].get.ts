@@ -46,6 +46,18 @@ const inFlight = createInFlightDedup<string, unknown[]>()
 const isAbiContract = (value: string): value is AbiContract =>
   (ABI_CONTRACTS as readonly string[]).includes(value)
 
+// Admission check guarding the long stale window: only a structurally
+// usable ABI may overwrite the last-known-good entry. Every viem ABI item
+// carries a string `type`; an empty or malformed array must throw so
+// loadAbi() keeps serving the previous stale value instead of preserving
+// poison for up to MANIFEST_MAX_STALE_MS.
+const isValidAbiItem = (item: unknown): boolean =>
+  item !== null && typeof item === 'object'
+  && typeof (item as { type?: unknown }).type === 'string'
+
+const isValidAbi = (data: unknown): data is unknown[] =>
+  Array.isArray(data) && data.length > 0 && data.every(isValidAbiItem)
+
 function getUpstreamUrl(contract: AbiContract): string {
   // An explicit base URL wins over the branch env vars — the same emergency
   // repoint lever as NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL. Must serve
@@ -65,8 +77,8 @@ export function refreshAbi(contract: AbiContract): Promise<unknown[]> {
     }
 
     const data: unknown = await resp.json()
-    if (!Array.isArray(data)) {
-      throw new Error('Upstream returned a non-array payload')
+    if (!isValidAbi(data)) {
+      throw new Error('Upstream returned an invalid ABI payload')
     }
     cache.set(contract, data)
     return data

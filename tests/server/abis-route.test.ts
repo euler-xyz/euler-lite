@@ -64,7 +64,7 @@ describe('/api/internal/abis/[contract]', () => {
   it('prioritizes the explicit ABIs base URL over a configured interfaces branch', async () => {
     process.env.EULER_SDK_EULER_INTERFACES_BRANCH = 'account-lens-update'
     process.env.NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL = 'https://abis.example/mirror/'
-    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([{ type: 'function', name: 'getEVCAccountInfo' }]))
 
     const { refreshAbi } = await importRoute()
     await refreshAbi('AccountLens')
@@ -74,13 +74,34 @@ describe('/api/internal/abis/[contract]', () => {
     )
   })
 
-  it('rejects a non-array upstream payload', async () => {
+  it.each([
+    ['non-array payload', { error: 'nope' }],
+    ['empty ABI', []],
+    ['entries without a type', [{ name: 'getVaultInfoFull' }]],
+  ])('rejects an unusable 200 payload (%s)', async (_label, payload) => {
     for (const key of BRANCH_ENV_KEYS) Reflect.deleteProperty(process.env, key)
-    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json({ error: 'nope' }))
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(payload))
 
     const { refreshAbi } = await importRoute()
 
-    await expect(refreshAbi('VaultLens')).rejects.toThrow('non-array payload')
+    await expect(refreshAbi('VaultLens')).rejects.toThrow('invalid ABI payload')
+  })
+
+  it('keeps serving the last-known-good ABI when a later 200 is unusable', async () => {
+    vi.useFakeTimers()
+    const abi = [{ type: 'function', name: 'getVaultInfoFull' }]
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(abi))
+
+    const { loadAbi } = await importRoute()
+    await expect(loadAbi('VaultLens')).resolves.toEqual(abi)
+
+    // Past the TTL an array-shaped but empty 200 must not overwrite the
+    // valid entry — the stale value wins.
+    vi.advanceTimersByTime(6 * 60_000)
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    await expect(loadAbi('VaultLens')).resolves.toEqual(abi)
+
+    vi.useRealTimers()
   })
 
   it('throws when upstream fails and no cache exists', async () => {

@@ -30,6 +30,8 @@ const ENV_KEYS = [
 
 const originalEnv = Object.fromEntries(ENV_KEYS.map(key => [key, process.env[key]]))
 
+const validManifest = () => [{ chainId: 1, addresses: { coreAddrs: {} } }]
+
 // The module holds cache state, so every test imports a fresh copy.
 const importRoute = async () => {
   vi.resetModules()
@@ -53,7 +55,7 @@ describe('/api/internal/euler-chains upstream selection', () => {
   it('prioritizes the direct EulerChains URL over a configured interfaces branch', async () => {
     process.env.EULER_SDK_EULER_INTERFACES_BRANCH = 'account-lens-update'
     process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL = 'https://deployments.example/EulerChains.json'
-    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(validManifest()))
 
     const { refreshEulerChains } = await importRoute()
     await refreshEulerChains()
@@ -65,7 +67,7 @@ describe('/api/internal/euler-chains upstream selection', () => {
 
   it('uses the configured interfaces branch when no direct URL is set', async () => {
     process.env.EULER_SDK_EULER_INTERFACES_BRANCH = 'account-lens-update'
-    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(validManifest()))
 
     const { refreshEulerChains } = await importRoute()
     await refreshEulerChains()
@@ -76,7 +78,7 @@ describe('/api/internal/euler-chains upstream selection', () => {
   })
 
   it('falls back to the master branch when nothing is configured', async () => {
-    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(validManifest()))
 
     const { refreshEulerChains } = await importRoute()
     await refreshEulerChains()
@@ -116,7 +118,7 @@ describe('/api/internal/euler-chains resolution chain', () => {
 
   it('serves stale cache during a prolonged outage, up to the manifest window', async () => {
     vi.useFakeTimers()
-    const upstreamData = [{ chainId: 1 }]
+    const upstreamData = validManifest()
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(upstreamData))
 
     const { loadEulerChains } = await importRoute()
@@ -134,7 +136,7 @@ describe('/api/internal/euler-chains resolution chain', () => {
   })
 
   it('returns fresh cache without refetching', async () => {
-    const upstreamData = [{ chainId: 1 }]
+    const upstreamData = validManifest()
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(upstreamData))
 
     const { loadEulerChains } = await importRoute()
@@ -142,5 +144,38 @@ describe('/api/internal/euler-chains resolution chain', () => {
     await expect(loadEulerChains()).resolves.toEqual(upstreamData)
 
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['non-array payload', { error: 'nope' }],
+    ['empty manifest', []],
+    ['entries without chainId/addresses', [{}]],
+    ['non-object addresses', [{ chainId: 1, addresses: 'x' }]],
+  ])('rejects an unusable 200 payload with no cache (%s)', async (_label, payload) => {
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(payload))
+
+    const { loadEulerChains } = await importRoute()
+
+    await expect(loadEulerChains()).rejects.toThrow('invalid deployment manifest')
+  })
+
+  it('keeps serving the last-known-good manifest when a later 200 is unusable', async () => {
+    vi.useFakeTimers()
+    const upstreamData = validManifest()
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(upstreamData))
+
+    const { loadEulerChains } = await importRoute()
+    await expect(loadEulerChains()).resolves.toEqual(upstreamData)
+
+    // Past the TTL an array-shaped but empty 200 must not overwrite the
+    // valid entry — the stale value wins.
+    vi.advanceTimersByTime(6 * 60_000)
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    await expect(loadEulerChains()).resolves.toEqual(upstreamData)
+
+    // And the valid entry's timestamp was not reset by the poison response.
+    vi.advanceTimersByTime(6 * 60_000)
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([{ chainId: 0 }]))
+    await expect(loadEulerChains()).resolves.toEqual(upstreamData)
   })
 })

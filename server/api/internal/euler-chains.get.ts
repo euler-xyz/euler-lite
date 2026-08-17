@@ -34,6 +34,21 @@ function getUpstreamUrl(): string {
   return eulerInterfacesRawUrl('EulerChains.json')
 }
 
+// Admission check guarding the long stale window: only a structurally
+// usable manifest may overwrite the last-known-good entry. An array-shaped
+// but unusable 200 (`[]`, entries missing chainId/addresses) must throw so
+// loadEulerChains() keeps serving the previous stale value instead of
+// preserving poison for up to MANIFEST_MAX_STALE_MS.
+const isValidDeployment = (entry: unknown): boolean => {
+  if (entry === null || typeof entry !== 'object') return false
+  const { chainId, addresses } = entry as { chainId?: unknown, addresses?: unknown }
+  return Number.isInteger(chainId) && (chainId as number) > 0
+    && addresses !== null && typeof addresses === 'object'
+}
+
+const isValidDeploymentManifest = (data: unknown): data is unknown[] =>
+  Array.isArray(data) && data.length > 0 && data.every(isValidDeployment)
+
 /**
  * Forces an upstream fetch, bypassing the fresh-cache check. Used by the
  * warm-cache plugin so every cycle actually refreshes the entry instead
@@ -48,8 +63,8 @@ export function refreshEulerChains(): Promise<unknown[]> {
     }
 
     const data: unknown = await resp.json()
-    if (!Array.isArray(data)) {
-      throw new Error('Upstream returned a non-array payload')
+    if (!isValidDeploymentManifest(data)) {
+      throw new Error('Upstream returned an invalid deployment manifest')
     }
     cache.set(CACHE_KEY, data)
     return data
