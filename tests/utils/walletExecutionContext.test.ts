@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
-import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import { assertWalletExecutionContext, getWalletExecutionContextChange } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 
 const OWNER = '0x1111111111111111111111111111111111111111' as Address
@@ -38,5 +38,25 @@ describe('assertWalletExecutionContext', () => {
       name: 'WalletExecutionContextChangedError',
       kind: 'chain',
     }))
+  })
+})
+
+describe('getWalletExecutionContextChange', () => {
+  it('treats an account disconnect as account drift', () => {
+    expect(getWalletExecutionContextChange({
+      expectedAccount: OWNER,
+      expectedChainId: 1,
+      currentAccount: undefined,
+      currentChainId: 1,
+    })).toBe('account')
+  })
+
+  it('accepts an unchanged disconnected context', () => {
+    expect(getWalletExecutionContextChange({
+      expectedAccount: undefined,
+      expectedChainId: 1,
+      currentAccount: undefined,
+      currentChainId: 1,
+    })).toBeUndefined()
   })
 })

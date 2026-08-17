@@ -106,6 +106,7 @@ const {
 const tenderlyEnabled = ref(false)
 const { copied, copyToClipboard } = useClipboardCopy()
 const hasCopiedCalldata = ref(false)
+const internalSubmitting = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
@@ -224,8 +225,13 @@ const handleTenderlySimulate = async () => {
   }
 }
 
-const internalSubmitting = ref(false)
 const { beginTrackedExecution, hasPendingDetachedExecution } = useSafeExecutionDetachment()
+const { isReviewWalletContextInvalidated } = useWalletReviewContext({
+  account: walletAddress,
+  chainId: currentChainId,
+  isSubmitting: internalSubmitting,
+  onInvalidated: () => emits('close'),
+})
 
 let pendingExecution: Promise<void> | null = null
 let executionHandle: TrackedExecutionHandle | null = null
@@ -467,7 +473,7 @@ const isSwapQuoteStale = computed(() => {
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
-const isConfirmDisabled = computed(() => isSpyMode.value || isOperationBlocked.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
+const isConfirmDisabled = computed(() => isSpyMode.value || isOperationBlocked.value || isReviewWalletContextInvalidated.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
