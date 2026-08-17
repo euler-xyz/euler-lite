@@ -39,17 +39,20 @@ export const assertWalletExecutionContext = ({
 /**
  * Guard for the irreversible broadcast boundary of a direct Safe-bundle flow.
  *
- * Account and chain checks cannot see a same-account connector switch, and the
- * confirm-entry checks run before authorization lookup, planning, preparation,
- * and simulation all await. The factory captures the connector identity when
- * the user confirms; the returned callback re-asserts the full reviewed
- * context — account, chain, Safe classification, and connector — immediately
- * before the proposal broadcast, so a wallet swapped during those awaits can
- * never submit the reviewed ceremony.
+ * Account and chain checks cannot see a same-account connector switch, and
+ * confirmation awaits (pending restoration, authorization lookup, planning,
+ * preparation, simulation) all yield before the proposal broadcast. Snapshotting
+ * the connector inside the confirmation flow would accept a connector swapped
+ * during an earlier await as the baseline, so `expectedConnectorKey` must be
+ * the key the reviewed preview captured when it was built. The returned
+ * callback re-asserts the full reviewed context — account, chain, Safe
+ * classification, and connector — immediately before the broadcast, and fails
+ * closed when the review captured no connector at all.
  */
 export const createSafeBundleBroadcastGuard = ({
   expectedAccount,
   expectedChainId,
+  expectedConnectorKey,
   currentAccount,
   currentChainId,
   isSafeWallet,
@@ -57,12 +60,12 @@ export const createSafeBundleBroadcastGuard = ({
 }: {
   expectedAccount: Address
   expectedChainId: number
+  expectedConnectorKey: string | undefined
   currentAccount: () => Address | undefined
   currentChainId: () => number | undefined
   isSafeWallet: () => boolean
   connectorContextKey: () => string | undefined
 }): (() => void) => {
-  const confirmedConnectorKey = connectorContextKey()
   return () => {
     assertWalletExecutionContext({
       expectedAccount,
@@ -70,7 +73,7 @@ export const createSafeBundleBroadcastGuard = ({
       currentAccount: currentAccount(),
       currentChainId: currentChainId(),
     })
-    if (!isSafeWallet() || connectorContextKey() !== confirmedConnectorKey) {
+    if (!isSafeWallet() || !expectedConnectorKey || connectorContextKey() !== expectedConnectorKey) {
       throw new Error('Wallet changed since review — please review the migration again.')
     }
   }

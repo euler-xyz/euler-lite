@@ -42,19 +42,27 @@ describe('assertWalletExecutionContext', () => {
 })
 
 describe('createSafeBundleBroadcastGuard', () => {
-  // Mutable wallet state standing in for the reactive refs the pages read;
-  // the guard is created at confirmation and invoked after the flow's
-  // authorization/planning/preparation/simulation awaits.
+  const REVIEWED_CONNECTOR_KEY = 'safe:uid-1'
+  const WALLET_CHANGED = 'Wallet changed since review — please review the migration again.'
+
+  // Mutable wallet state standing in for the reactive refs the pages read.
+  // The reviewed connector key is captured when the preview is built; the
+  // guard is constructed inside the confirmation flow — after awaits the
+  // wallet can change under — and invoked at the broadcast boundary.
   const walletState = () => ({
     account: OWNER as Address | undefined,
     chainId: 1 as number | undefined,
     safeWallet: true,
-    connectorKey: 'safe:uid-1' as string | undefined,
+    connectorKey: REVIEWED_CONNECTOR_KEY as string | undefined,
   })
 
-  const guardFor = (state: ReturnType<typeof walletState>) => createSafeBundleBroadcastGuard({
+  const guardFor = (
+    state: ReturnType<typeof walletState>,
+    expectedConnectorKey: string | undefined = REVIEWED_CONNECTOR_KEY,
+  ) => createSafeBundleBroadcastGuard({
     expectedAccount: OWNER,
     expectedChainId: 1,
+    expectedConnectorKey,
     currentAccount: () => state.account,
     currentChainId: () => state.chainId,
     isSafeWallet: () => state.safeWallet,
@@ -67,27 +75,45 @@ describe('createSafeBundleBroadcastGuard', () => {
     expect(() => guard()).not.toThrow()
   })
 
+  it('rejects a connector switch completed before guard construction (delayed authorization lookup)', () => {
+    const state = walletState()
+    // The switch lands while confirmation awaits pending restoration or the
+    // fresh authorization lookup — BEFORE the guard exists. Because the
+    // expected key comes from the reviewed preview, the replacement connector
+    // can never become the guard's accepted baseline.
+    state.connectorKey = 'safe:uid-2'
+    const guard = guardFor(state)
+    expect(() => guard()).toThrow(WALLET_CHANGED)
+  })
+
   it('rejects a same-account connector switch during delayed preparation', () => {
     const state = walletState()
     const guard = guardFor(state)
     // Same owner, same chain, still classified as a Safe — only the connector
     // submitting the proposal changed while preparation was in flight.
     state.connectorKey = 'safe:uid-2'
-    expect(() => guard()).toThrow('Wallet changed since review — please review the migration again.')
+    expect(() => guard()).toThrow(WALLET_CHANGED)
   })
 
   it('rejects a wallet that lost its Safe classification during the awaits', () => {
     const state = walletState()
     const guard = guardFor(state)
     state.safeWallet = false
-    expect(() => guard()).toThrow('Wallet changed since review — please review the migration again.')
+    expect(() => guard()).toThrow(WALLET_CHANGED)
   })
 
   it('rejects a disconnected connector during delayed preparation', () => {
     const state = walletState()
     const guard = guardFor(state)
     state.connectorKey = undefined
-    expect(() => guard()).toThrow('Wallet changed since review — please review the migration again.')
+    expect(() => guard()).toThrow(WALLET_CHANGED)
+  })
+
+  it('fails closed when the review captured no connector key', () => {
+    const state = walletState()
+    state.connectorKey = undefined
+    const guard = guardFor(state, undefined)
+    expect(() => guard()).toThrow(WALLET_CHANGED)
   })
 
   it('still rejects account and chain drift through the wallet context assertion', () => {

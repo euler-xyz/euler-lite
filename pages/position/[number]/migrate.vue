@@ -92,6 +92,13 @@ type OutgoingMigrationPreview = {
    * plan's verifier calldata (so a re-mint diverges from the reviewed plan).
    */
   authorizationDeadline: bigint
+  /**
+   * The connector identity (`id:uid`) the review was built under. The direct
+   * Safe-bundle broadcast guard validates against this reviewed key — never a
+   * snapshot taken inside the confirmation flow, which would accept a
+   * connector swapped during an earlier confirmation await as its baseline.
+   */
+  connectorContextKey: string | undefined
   authorizationRequest?: MigrationAuthorizationRequest
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
@@ -841,6 +848,7 @@ async function prepareOutgoingMigrationPreview(
       account,
       position: migrationPosition,
       authorizationDeadline,
+      connectorContextKey: walletConnectorContextKey(),
       tenderlySimulation: {
         plan: simulationResult.plan,
         prepared: tenderlyPrepared,
@@ -986,6 +994,7 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
         const beforeBroadcast = createSafeBundleBroadcastGuard({
           expectedAccount: reviewedInput.owner,
           expectedChainId: target.chainId,
+          expectedConnectorKey: preview.connectorContextKey,
           currentAccount: () => address.value as Address | undefined,
           currentChainId: () => walletChainId.value,
           isSafeWallet: () => isSafeWallet.value,
