@@ -1,6 +1,6 @@
 import { createRenderer, h, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { captureOperationPolicyChecks, getOperationPolicyBlockReason, operationBlockerEntries, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import { captureOperationPolicyChecks, captureRetainedOperationPolicyChecks, getOperationPolicyBlockReason, operationBlockerEntries, retainOperationPolicyChecks, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { useOperationGuard } from '~/composables/useOperationGuard'
 
 const labelsVersion = ref(0)
@@ -98,6 +98,24 @@ describe('useOperationGuard geo reactivity', () => {
     vi.setSystemTime(new Date('2026-08-13T08:02:00Z'))
 
     expect(getOperationPolicyBlockReason(checks)).toBe('Identity verification required')
+  })
+
+  it('keeps a direct review policy alive after its source page unmounts', () => {
+    const app = mountGuard()
+    const retained = retainOperationPolicyChecks()
+
+    app.unmount()
+    try {
+      geoBlocked = true
+
+      expect(retained.getBlockReason()).toBe('This operation is not available in your region')
+      expect(getOperationPolicyBlockReason(captureRetainedOperationPolicyChecks()))
+        .toBe('This operation is not available in your region')
+    }
+    finally {
+      retained.release()
+    }
+    expect(captureRetainedOperationPolicyChecks()).toEqual([])
   })
 
   it('re-evaluates cached geo policy after labels or vault metadata refreshes', async () => {

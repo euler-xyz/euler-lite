@@ -2630,8 +2630,11 @@ export const useTxBatch = () => {
       const prepared = await prepareTransactionPlan(executionPlan)
       // The final gate runs after every asynchronous prerequisite and planning
       // step, immediately before the wallet-facing execution call.
-      assertOperationPolicyChecks(entries.value.flatMap(entry => entry.policyChecks))
-      await executePreparedPlan(prepared)
+      const policyChecks = entries.value.flatMap(entry => entry.policyChecks)
+      assertOperationPolicyChecks(policyChecks)
+      await executePreparedPlan(prepared, {
+        beforeSend: () => assertOperationPolicyChecks(policyChecks),
+      })
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
       await revokeAfterSuccess(grantedRevokes)

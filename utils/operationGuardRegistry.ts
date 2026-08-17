@@ -12,6 +12,8 @@ const metadata = shallowRef<Map<string, Record<string, unknown>>>(new Map())
 export type OperationPolicyCheck = () => string | undefined
 
 const policyChecks = shallowRef<Map<string, OperationPolicyCheck>>(new Map())
+const retainedReviewPolicyChecks = shallowRef<Map<string, OperationPolicyCheck>>(new Map())
+let retainedReviewSequence = 0
 
 export const registerOperationBlocker = (key: string, reason: string) => {
   const next = new Map(blockers.value)
@@ -43,6 +45,38 @@ export const unregisterOperationPolicyCheck = (key: string) => {
  */
 export const captureOperationPolicyChecks = (): OperationPolicyCheck[] =>
   Array.from(policyChecks.value.values())
+
+/**
+ * Keep the policy callbacks owned by an operation review alive after its
+ * source page unmounts. The returned release function belongs to the review
+ * modal, whose lifetime is independent from NuxtPage.
+ */
+export const retainOperationPolicyChecks = () => {
+  const checks = captureOperationPolicyChecks()
+  const key = `review:${++retainedReviewSequence}`
+  const check = () => getOperationPolicyBlockReason(checks)
+  const next = new Map(retainedReviewPolicyChecks.value)
+  next.set(key, check)
+  retainedReviewPolicyChecks.value = next
+  let released = false
+
+  return {
+    checks,
+    getBlockReason: check,
+    assertCurrent: () => assertOperationPolicyChecks(checks),
+    release: () => {
+      if (released) return
+      released = true
+      const current = new Map(retainedReviewPolicyChecks.value)
+      current.delete(key)
+      retainedReviewPolicyChecks.value = current
+    },
+  }
+}
+
+/** Policy callbacks owned by currently mounted direct-review modals. */
+export const captureRetainedOperationPolicyChecks = (): OperationPolicyCheck[] =>
+  Array.from(retainedReviewPolicyChecks.value.values())
 
 export const getOperationPolicyBlockReason = (
   checks: readonly OperationPolicyCheck[],

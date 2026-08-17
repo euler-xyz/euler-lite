@@ -70,6 +70,10 @@ import {
   assertWalletExecutionContext,
   type WalletExecutionContext,
 } from '~/utils/walletExecutionContext'
+import {
+  assertOperationPolicyChecks,
+  captureRetainedOperationPolicyChecks,
+} from '~/utils/operationGuardRegistry'
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -80,6 +84,15 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateUserRewards: false,
 } as const
 type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
+
+const resolveBeforeWalletWrite = (provided?: () => void): (() => void) | undefined => {
+  const retainedChecks = captureRetainedOperationPolicyChecks()
+  if (!provided && !retainedChecks.length) return undefined
+  return () => {
+    provided?.()
+    assertOperationPolicyChecks(retainedChecks)
+  }
+}
 
 const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
   if (!connector) return false
@@ -1019,7 +1032,11 @@ export const useEulerTx = () => {
       currentAccount: currentAccount.address,
       currentChainId: currentAccount.chainId,
     })
-    const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    resolveBeforeWalletWrite()?.()
+    const signature = await signTypedDataAsync({
+      ...(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+      account: request.owner,
+    })
     const postMigrationAuthorization = request.postMigrationAuthorization
       ? await signMigrationAuthorization(request.postMigrationAuthorization)
       : undefined
@@ -1355,10 +1372,12 @@ export const useEulerTx = () => {
     broadcastRevokes: MigrationAuthorizationRevoke[] = [],
   ): Promise<MigrationAuthorizationRevoke[]> => {
     const { grants, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+    const beforeSend = resolveBeforeWalletWrite()
     await sendPlainTransactions(grants, {
       // The request was prepared for this exact owner/network. Do not let a
       // wallet switch during the preceding SDK reads retarget the grant.
       walletContext: { account: request.owner, chainId: request.chainId },
+      ...(beforeSend ? { beforeSend } : {}),
       onBroadcast: (index, walletContext) => {
         const revoke = revokesByGrant[index]
         if (revoke) {
@@ -1528,6 +1547,7 @@ export const useEulerTx = () => {
     }
     const owner = requireOwner()
     const cid = requireChainId()
+    const beforeSend = resolveBeforeWalletWrite(options?.beforeSend)
     // Execute via the fresh SDK so the in-flight allowance / Permit2 reads
     // and post-tx wait-for-receipts use the on-chain path.
     // executeTransactionPlan runs processPlanPlugins internally for TOS/Keyring.
@@ -1566,7 +1586,7 @@ export const useEulerTx = () => {
         connector,
         safeWalletProvider,
         sdk,
-        beforeSend: options?.beforeSend,
+        beforeSend,
       })
       if (bundled) {
         finalizeExecution(bundled)
@@ -1586,7 +1606,7 @@ export const useEulerTx = () => {
           publicClient: provider as ReceiptClientLike,
         })).hash
         : undefined,
-      beforeSend: options?.beforeSend,
+      beforeSend,
     })
 
     const result = await sdk.executionService.executeTransactionPlan({
@@ -1598,7 +1618,18 @@ export const useEulerTx = () => {
       usePermit2: isKnownSafe ? false : signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        const currentAccount = getAccount(config)
+        assertWalletExecutionContext({
+          expectedAccount: owner,
+          expectedChainId: cid,
+          currentAccount: currentAccount.address,
+          currentChainId: currentAccount.chainId,
+        })
+        beforeSend?.()
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          account: owner,
+        })
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
@@ -1608,7 +1639,10 @@ export const useEulerTx = () => {
     return result
   }
 
-  const executePreparedPlan = async (prepared: TransactionPlanPrepared) => {
+  const executePreparedPlan = async (
+    prepared: TransactionPlanPrepared,
+    options?: { beforeSend?: () => void },
+  ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
     }
@@ -1625,6 +1659,7 @@ export const useEulerTx = () => {
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
+    const beforeSend = resolveBeforeWalletWrite(options?.beforeSend)
 
     // Known Safe even when provider acquisition failed — the degraded
     // sequential path must still never sign permit2 messages.
@@ -1662,6 +1697,7 @@ export const useEulerTx = () => {
         connector,
         safeWalletProvider,
         sdk,
+        beforeSend,
       })
       if (bundled) {
         finalizeExecution(bundled)
@@ -1681,13 +1717,25 @@ export const useEulerTx = () => {
           publicClient: provider as ReceiptClientLike,
         })).hash
         : undefined,
+      beforeSend,
     })
 
     const result = await sdk.executionService.executePreparedTransactionPlan({
       prepared: effectivePrepared,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        const currentAccount = getAccount(config)
+        assertWalletExecutionContext({
+          expectedAccount: preparedOwner,
+          expectedChainId: prepared.chainId,
+          currentAccount: currentAccount.address,
+          currentChainId: currentAccount.chainId,
+        })
+        beforeSend?.()
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          account: preparedOwner,
+        })
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
@@ -1735,6 +1783,7 @@ export const useEulerTx = () => {
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
+    const beforeSend = resolveBeforeWalletWrite(options?.beforeSend)
 
     // Same invariant as executePreparedPlan: an envelope executed for a Safe
     // never carries permit2.
@@ -1762,7 +1811,7 @@ export const useEulerTx = () => {
       sdk,
       extraCalls,
       allowSingleCall: options?.allowSingleCall,
-      beforeSend: options?.beforeSend,
+      beforeSend,
     })
     if (!bundled) return undefined
     finalizeExecution(bundled)

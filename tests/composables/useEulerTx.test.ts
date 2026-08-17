@@ -7,6 +7,11 @@ import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk
 import { useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
+import {
+  registerOperationPolicyCheck,
+  retainOperationPolicyChecks,
+  unregisterOperationPolicyCheck,
+} from '~/utils/operationGuardRegistry'
 
 const wagmiMocks = vi.hoisted(() => ({
   sendTransactionAsync: vi.fn(),
@@ -242,6 +247,166 @@ describe('useEulerTx migration authorization cleanup', () => {
 
     expect(beforeSend).toHaveBeenCalledTimes(1)
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('revalidates prepared direct plans at the final wallet-write boundary', async () => {
+    const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction }: {
+      sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
+    }) => {
+      await sendTransaction({ to: TOKEN, data: '0x1234' })
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const beforeSend = vi.fn(() => {
+      throw new Error('Operation policy changed')
+    })
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+
+    await expect(executePreparedPlan(prepared, { beforeSend }))
+      .rejects.toThrow('Operation policy changed')
+
+    expect(beforeSend).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('revalidates policy before prepared typed-data signing', async () => {
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (typedData: Record<string, unknown>) => Promise<Hex>
+    }) => {
+      await signTypedData({ domain: {}, types: {}, primaryType: 'Permit', message: {} })
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const beforeSend = vi.fn(() => {
+      throw new Error('Operation policy changed')
+    })
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+
+    await expect(executePreparedPlan(prepared, { beforeSend }))
+      .rejects.toThrow('Operation policy changed')
+
+    expect(beforeSend).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
+  })
+
+  it('combines a caller assertion with the policy retained by the review modal', async () => {
+    let policyBlocked = false
+    registerOperationPolicyCheck(
+      'test-retained-direct-policy',
+      () => policyBlocked ? 'Retained operation policy changed' : undefined,
+    )
+    const retained = retainOperationPolicyChecks()
+    unregisterOperationPolicyCheck('test-retained-direct-policy')
+    const callerAssertion = vi.fn()
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (typedData: Record<string, unknown>) => Promise<Hex>
+    }) => {
+      policyBlocked = true
+      await signTypedData({ domain: {}, types: {}, primaryType: 'Permit', message: {} })
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+
+    try {
+      await expect(executePreparedPlan(prepared, { beforeSend: callerAssertion }))
+        .rejects.toThrow('Retained operation policy changed')
+      expect(callerAssertion).toHaveBeenCalledTimes(1)
+      expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
+    }
+    finally {
+      retained.release()
+    }
+  })
+
+  it.each([
+    ['account', () => { currentAccount = OTHER_OWNER }],
+    ['chain', () => { currentChainId = 8453 }],
+  ] as const)('does not sign prepared typed data after %s drift', async (kind, driftWallet) => {
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (typedData: Record<string, unknown>) => Promise<Hex>
+    }) => {
+      driftWallet()
+      await signTypedData({ domain: {}, types: {}, primaryType: 'Permit', message: {} })
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+
+    await expect(executePreparedPlan(prepared))
+      .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind })
+    expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
+  })
+
+  it('pins prepared typed-data signing to the reviewed owner', async () => {
+    const signature = `0x${'22'.repeat(65)}` as Hex
+    wagmiMocks.signTypedDataAsync.mockResolvedValue(signature)
+    const typedData = { domain: {}, types: {}, primaryType: 'Permit', message: {} }
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (value: typeof typedData) => Promise<Hex>
+    }) => {
+      await signTypedData(typedData)
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+
+    await executePreparedPlan(prepared)
+
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith({
+      ...typedData,
+      account: OWNER,
+    })
   })
 
   it('does not broadcast a reviewed migration after account drift', async () => {

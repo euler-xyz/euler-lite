@@ -15,7 +15,7 @@ import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle, TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockReason, retainOperationPolicyChecks } from '~/utils/operationGuardRegistry'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -116,6 +116,11 @@ const preparedPlan = shallowRef<TransactionPlan | undefined>()
 const prepareError = ref('')
 const tenderlyLocalError = ref('')
 const isPreparingPlan = ref(false)
+// UiModals lives outside NuxtPage, so this component can outlive the form that
+// registered its policy guards. Retain the exact callbacks active at review
+// open until this modal itself is destroyed.
+const retainedPolicy = retainOperationPolicyChecks()
+const retainedPolicyBlockReason = computed(() => retainedPolicy.getBlockReason())
 const reviewPlan = computed(() => preparedPlan.value)
 const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
 const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
@@ -138,6 +143,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  retainedPolicy.release()
   if (nowTimer) {
     clearInterval(nowTimer)
   }
@@ -238,6 +244,8 @@ let executionHandle: TrackedExecutionHandle | null = null
 
 const handleConfirm = async () => {
   if (isConfirmDisabled.value || !onConfirm) return
+  // Close the click-to-handler race before any asynchronous execution work.
+  retainedPolicy.assertCurrent()
   // Latch the wallet classification at submission time — detachability must
   // not follow a mid-flight connector switch.
   const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
@@ -473,11 +481,11 @@ const isSwapQuoteStale = computed(() => {
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
-const isConfirmDisabled = computed(() => isSpyMode.value || isOperationBlocked.value || isReviewWalletContextInvalidated.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
+const isConfirmDisabled = computed(() => isSpyMode.value || isOperationBlocked.value || !!retainedPolicyBlockReason.value || isReviewWalletContextInvalidated.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
-  if (isOperationBlocked.value) return 'Action required'
+  if (isOperationBlocked.value || retainedPolicyBlockReason.value) return 'Action required'
   if (hasPendingDetachedExecution.value && !internalSubmitting.value) return 'Awaiting Safe signatures…'
   if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
   return internalSubmitting.value && submittingLabel ? submittingLabel : (providedConfirmLabel || btnLabel.value)

@@ -1220,7 +1220,9 @@ describe('useTxBatch execution errors', () => {
     })
     await batch.executeBatch()
 
-    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared)
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, {
+      beforeSend: expect.any(Function),
+    })
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
     expect(batch.entryCount.value).toBe(0)
     expect(routerReplace).toHaveBeenCalledWith({
@@ -1253,6 +1255,32 @@ describe('useTxBatch execution errors', () => {
     await batch.executeBatch()
     expect(eulerTxMocks.prepareTransactionPlan).not.toHaveBeenCalled()
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+  })
+
+  it('carries retained policy to the ordinary batch wallet boundary', async () => {
+    const batch = useTxBatch()
+    const policyBlocked = ref(false)
+    const prepared = { kind: 'prepared' }
+    eulerTxMocks.estimateGasForPlan.mockResolvedValue(undefined)
+    eulerTxMocks.prepareTransactionPlan.mockResolvedValue(prepared)
+    eulerTxMocks.executePreparedPlan.mockResolvedValue(undefined)
+
+    registerOperationPolicyCheck(
+      'test-ordinary-wallet-boundary',
+      () => policyBlocked.value ? 'Operation policy changed' : undefined,
+    )
+    await batch.addEntry({
+      label: 'Supply collateral',
+      buildPlan: async () => [] as TransactionPlan,
+    })
+    unregisterOperationPolicyCheck('test-ordinary-wallet-boundary')
+
+    await batch.executeBatch()
+
+    const options = eulerTxMocks.executePreparedPlan.mock.calls[0]?.[1]
+    expect(options?.beforeSend).toEqual(expect.any(Function))
+    policyBlocked.value = true
+    expect(() => options?.beforeSend()).toThrow('Operation policy changed')
   })
 
   it('passes the pre-entry simulated account to execution plan builders', async () => {
