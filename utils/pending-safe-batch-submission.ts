@@ -106,17 +106,38 @@ const normalizeRecord = (value: unknown): PersistedPendingSafeBatchSubmission | 
 export const loadPendingSafeBatchSubmissions = (
   storage: StorageLike,
 ): PersistedPendingSafeBatchSubmission[] => {
+  let raw: string | null
   try {
-    const raw = storage.getItem(PENDING_SAFE_BATCH_STORAGE_KEY)
-    if (!raw) return []
-    const values = parse(raw)
-    if (!Array.isArray(values)) return []
-    return values.map(normalizeRecord).filter((value): value is PersistedPendingSafeBatchSubmission => Boolean(value))
+    raw = storage.getItem(PENDING_SAFE_BATCH_STORAGE_KEY)
   }
-  catch {
-    return []
+  catch (cause) {
+    throw new Error('Pending Safe batch storage is unreadable. Verify the saved Safe submission before retrying.', { cause })
   }
+  if (raw === null) return []
+
+  let values: unknown
+  try {
+    values = parse(raw)
+  }
+  catch (cause) {
+    throw new Error('Pending Safe batch storage is unreadable. Verify the saved Safe submission before retrying.', { cause })
+  }
+  if (!Array.isArray(values)) {
+    throw new Error('Pending Safe batch storage is invalid. Verify the saved Safe submission before retrying.')
+  }
+  const normalized = values.map(normalizeRecord)
+  if (normalized.some(value => !value)) {
+    throw new Error('Pending Safe batch storage is invalid. Verify the saved Safe submission before retrying.')
+  }
+  return normalized as PersistedPendingSafeBatchSubmission[]
 }
+
+export const findPendingSafeBatchSubmission = (
+  storage: StorageLike,
+  account: Address,
+  chainId: number,
+): PersistedPendingSafeBatchSubmission | undefined => loadPendingSafeBatchSubmissions(storage)
+  .find(submission => submission.account.toLowerCase() === account.toLowerCase() && submission.chainId === chainId)
 
 export const savePendingSafeBatchSubmissions = (
   storage: StorageLike,

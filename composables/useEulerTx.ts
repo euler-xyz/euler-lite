@@ -70,6 +70,7 @@ import {
   updatePendingSafeBundleSubmission,
   type PendingSafeBundleSubmission,
 } from '~/utils/pending-safe-bundle-submission'
+import { findPendingSafeBatchSubmission } from '~/utils/pending-safe-batch-submission'
 import {
   PlanNotBundleableError,
   transactionPlanToCalls,
@@ -549,30 +550,47 @@ export const useEulerTx = () => {
     }
   }
 
-  const planDeposit = async (input: PlanDepositInput): Promise<TransactionPlan> => {
-    const owner = requireOwner()
-    const { sdk, account } = await freshPlanContext(input.account)
-    const vaultAddress = getAddress(input.vaultAddress)
-    const assetAddress = getAddress(input.assetAddress)
-    const fetchedVault = await profAsync('sdk', 'fetchDepositVault', () => sdk.vaultMetaService.fetchVault(
-      account.chainId,
+  const resolveVerifiedVaultAsset = async (
+    sdk: Awaited<ReturnType<typeof getEulerSdkFresh>>,
+    chainId: number,
+    vault: Address,
+    asset: Address,
+    operation: 'Deposit' | 'Collateral',
+  ): Promise<{ vault: Address, asset: Address }> => {
+    const vaultAddress = getAddress(vault)
+    const assetAddress = getAddress(asset)
+    const fetchedVault = await profAsync('sdk', 'fetchVerifiedVaultAsset', () => sdk.vaultMetaService.fetchVault(
+      chainId,
       vaultAddress,
     ))
     const currentVault = fetchedVault.result
     if (!currentVault) {
-      throw new Error(`Unable to verify deposit vault ${vaultAddress} on chain ${account.chainId}`)
+      throw new Error(`Unable to verify ${operation.toLowerCase()} vault ${vaultAddress} on chain ${chainId}`)
     }
     if (
-      currentVault.chainId !== account.chainId
+      currentVault.chainId !== chainId
       || getAddress(currentVault.address) !== vaultAddress
       || getAddress(currentVault.asset.address) !== assetAddress
     ) {
-      throw new Error(`Deposit vault metadata changed on chain ${account.chainId}; reload and review the transaction again`)
+      throw new Error(`${operation} vault metadata changed on chain ${chainId}; reload and review the transaction again`)
     }
+    return { vault: vaultAddress, asset: assetAddress }
+  }
+
+  const planDeposit = async (input: PlanDepositInput): Promise<TransactionPlan> => {
+    const owner = requireOwner()
+    const { sdk, account } = await freshPlanContext(input.account)
+    const verified = await resolveVerifiedVaultAsset(
+      sdk,
+      account.chainId,
+      input.vaultAddress,
+      input.assetAddress,
+      'Deposit',
+    )
     const args: PlanDepositArgs = {
       account,
-      vault: vaultAddress,
-      asset: assetAddress,
+      vault: verified.vault,
+      asset: verified.asset,
       amount: input.amount,
       receiver: input.receiver ?? owner,
       enableCollateral: input.enableCollateral,
@@ -617,13 +635,25 @@ export const useEulerTx = () => {
     if (!input.subAccountSnapshotApplied) {
       await attachSubAccountSnapshot(sdk, account, input.borrowAccount)
     }
+    const collateral = input.collateral && 'asset' in input.collateral
+      ? {
+          ...input.collateral,
+          ...await resolveVerifiedVaultAsset(
+            sdk,
+            account.chainId,
+            input.collateral.vault,
+            input.collateral.asset,
+            'Collateral',
+          ),
+        }
+      : input.collateral
     const args: PlanBorrowArgs = {
       account,
       vault: input.vaultAddress,
       amount: input.amount,
       borrowAccount: input.borrowAccount,
       receiver: input.receiver ?? owner,
-      collateral: input.collateral,
+      collateral,
       skipCleanup: input.skipCleanup,
     }
     return sdk.executionService.planBorrow(args)
@@ -813,11 +843,20 @@ export const useEulerTx = () => {
       if (!input.subAccountSnapshotApplied) {
         await profAsync('sdk', 'planMultiplyWithSwap.attachSubAccount', () => attachSubAccountSnapshot(sdk, account, input.swapQuote.accountIn))
       }
+      const verifiedCollateral = input.collateralShareSource
+        ? undefined
+        : await resolveVerifiedVaultAsset(
+            sdk,
+            account.chainId,
+            input.collateralVault,
+            input.collateralAsset,
+            'Collateral',
+          )
       const args: PlanMultiplyWithSwapArgs = {
         account,
-        collateralVault: input.collateralVault,
+        collateralVault: verifiedCollateral?.vault ?? input.collateralVault,
         collateralAmount: input.collateralAmount,
-        collateralAsset: input.collateralAsset,
+        collateralAsset: verifiedCollateral?.asset ?? input.collateralAsset,
         collateralShareSource: input.collateralShareSource,
         collateralWrappedNativeInfo: input.collateralWrappedNativeInfo,
         swapQuote: input.swapQuote,
@@ -833,11 +872,20 @@ export const useEulerTx = () => {
     if (!input.subAccountSnapshotApplied) {
       await attachSubAccountSnapshot(sdk, account, input.receiver)
     }
+    const verifiedCollateral = input.collateralShareSource
+      ? undefined
+      : await resolveVerifiedVaultAsset(
+          sdk,
+          account.chainId,
+          input.collateralVault,
+          input.collateralAsset,
+          'Collateral',
+        )
     const args: PlanMultiplySameAssetArgs = {
       account,
-      collateralVault: input.collateralVault,
+      collateralVault: verifiedCollateral?.vault ?? input.collateralVault,
       collateralAmount: input.collateralAmount,
-      collateralAsset: input.collateralAsset,
+      collateralAsset: verifiedCollateral?.asset ?? input.collateralAsset,
       collateralShareSource: input.collateralShareSource,
       collateralWrappedNativeInfo: input.collateralWrappedNativeInfo,
       longVault: input.longVault,
@@ -1540,9 +1588,13 @@ export const useEulerTx = () => {
     let releaseCrossTabLock: (() => void) | undefined
 
     const clear = () => {
-      if (storage && reservation) clearPendingSafeBundleSubmission(storage, reservation.reservationId)
-      releaseCrossTabLock?.()
-      releaseCrossTabLock = undefined
+      try {
+        if (storage && reservation) clearPendingSafeBundleSubmission(storage, reservation.reservationId)
+      }
+      finally {
+        releaseCrossTabLock?.()
+        releaseCrossTabLock = undefined
+      }
     }
     const retain = () => {
       // The durable record remains authoritative. Release the live mutex so a
@@ -1563,6 +1615,9 @@ export const useEulerTx = () => {
             safeWalletProvider,
             provider,
           })
+          if (findPendingSafeBatchSubmission(storage, account, chainId)) {
+            throw new Error('A previous Safe batch submission is unresolved. Reconcile it before submitting another transaction.')
+          }
           reservation = {
             reservationId: `${Date.now().toString(36)}-${nextSafeBundleReservationId++}`,
             account,

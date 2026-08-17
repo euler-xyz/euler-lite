@@ -7,6 +7,7 @@ import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk
 import { isSuccessfulTransactionReceipt, useEulerTx } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import { loadPendingSafeBundleSubmissions, reservePendingSafeBundleSubmission } from '~/utils/pending-safe-bundle-submission'
+import { loadPendingSafeBatchSubmissions, savePendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 import * as safeWalletTransactions from '~/utils/safeWalletTransactions'
 import { clearLiteTosSignature, setLiteTosSignature } from '~/utils/sdk-tos'
@@ -262,6 +263,67 @@ describe('useEulerTx migration authorization cleanup', () => {
       asset: TOKEN,
       amount: 1n,
     }))
+  })
+
+  it('rejects a mismatched wallet collateral asset before planning a borrow', async () => {
+    const account = new Account({ chainId: 1, owner: OWNER, subAccounts: {} })
+    const fetchVault = vi.fn().mockResolvedValue({
+      result: { chainId: 1, address: VAULT, asset: { address: OTHER_TOKEN } },
+      errors: [],
+    })
+    const sdkPlanBorrow = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      vaultMetaService: { fetchVault },
+      executionService: { planBorrow: sdkPlanBorrow },
+    } as never)
+    const { planBorrow } = useEulerTx()
+
+    await expect(planBorrow({
+      vaultAddress: VAULT,
+      amount: 1n,
+      borrowAccount: OWNER,
+      collateral: { vault: VAULT, asset: TOKEN, amount: 1n },
+      account,
+      subAccountSnapshotApplied: true,
+    })).rejects.toThrow('Collateral vault metadata changed')
+    expect(sdkPlanBorrow).not.toHaveBeenCalled()
+  })
+
+  it('rejects a mismatched wallet collateral asset in both multiply planners', async () => {
+    const account = new Account({ chainId: 1, owner: OWNER, subAccounts: {} })
+    const fetchVault = vi.fn().mockResolvedValue({
+      result: { chainId: 1, address: VAULT, asset: { address: OTHER_TOKEN } },
+      errors: [],
+    })
+    const planMultiplyWithSwap = vi.fn()
+    const planMultiplySameAsset = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      vaultMetaService: { fetchVault },
+      executionService: { planMultiplyWithSwap, planMultiplySameAsset },
+    } as never)
+    const tx = useEulerTx()
+
+    await expect(tx.planMultiplyWithSwap({
+      collateralVault: VAULT,
+      collateralAsset: TOKEN,
+      collateralAmount: 1n,
+      swapQuote: { accountIn: OWNER } as never,
+      account,
+      subAccountSnapshotApplied: true,
+    })).rejects.toThrow('Collateral vault metadata changed')
+    await expect(tx.planMultiplySameAsset({
+      collateralVault: VAULT,
+      collateralAsset: TOKEN,
+      collateralAmount: 1n,
+      longVault: VAULT,
+      liabilityVault: VAULT,
+      liabilityAmount: 1n,
+      receiver: OWNER,
+      account,
+      subAccountSnapshotApplied: true,
+    })).rejects.toThrow('Collateral vault metadata changed')
+    expect(planMultiplyWithSwap).not.toHaveBeenCalled()
+    expect(planMultiplySameAsset).not.toHaveBeenCalled()
   })
 
   it('does not broadcast a reviewed migration after account drift', async () => {
@@ -670,6 +732,50 @@ describe('useEulerTx Safe wallet bundling', () => {
     await executePreparedPlan(buildPrepared(approvedPlan))
 
     expect(loadPendingSafeBundleSubmissions(window.localStorage)).toEqual([])
+  })
+
+  it('blocks an ordinary Safe bundle while the same context has a pending batch', async () => {
+    savePendingSafeBatchSubmissions(window.localStorage, [{
+      account: OWNER,
+      chainId: 1,
+      batchFingerprint: '0123456789abcdef',
+      batchPlan: approvedPlan,
+      errorMessage: 'Pending batch',
+      refreshExternalMigrationPositions: false,
+      grantedRevokes: [],
+    }])
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toThrow('previous Safe batch submission is unresolved')
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(loadPendingSafeBatchSubmissions(window.localStorage)).toHaveLength(1)
+  })
+
+  it('releases the browser lock when durable cleanup throws', async () => {
+    const backing = memoryStorage()
+    let failCleanup = true
+    const storage = {
+      ...backing,
+      removeItem: (key: string) => {
+        if (failCleanup) {
+          failCleanup = false
+          throw new Error('localStorage cleanup failed')
+        }
+        backing.removeItem(key)
+      },
+    }
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { localStorage: storage },
+    })
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toThrow('localStorage cleanup failed')
+    await expect(executePreparedPlan(buildPrepared(approvedPlan)))
+      .rejects.toThrow('previous Safe bundle already executed')
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
   })
 
   it('preserves another context reservation when this tab writes its Safe lifecycle', async () => {

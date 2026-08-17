@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EVault, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVault, IHasVaultAddress, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 
@@ -48,11 +48,13 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
       planMultiply: vi.fn(),
       prepareTransactionPlan: vi.fn(),
       executePlan: vi.fn(),
+      executePreparedPlan: vi.fn(),
       prefetchPluginData: vi.fn(),
       preloadSubAccountSnapshot: vi.fn(),
       fetchSingleBalance: vi.fn(async () => 100n),
       runPreparedSimulation: vi.fn(),
       modalOpen: vi.fn(),
+      finalizeTxAndRedirect: vi.fn(),
       getSupplyCapWarning: vi.fn(() => ({
         level: 'info',
         title: 'Supply cap reached',
@@ -245,6 +247,7 @@ describe('useMultiplyForm cap validation', () => {
       planMultiply: mocks.planMultiply,
       prepareTransactionPlan: mocks.prepareTransactionPlan,
       executePlan: mocks.executePlan,
+      executePreparedPlan: mocks.executePreparedPlan,
       prefetchPluginData: mocks.prefetchPluginData,
       preloadSubAccountSnapshot: mocks.preloadSubAccountSnapshot,
     }))
@@ -281,7 +284,7 @@ describe('useMultiplyForm cap validation', () => {
     }))
     vi.stubGlobal('useCowSwapEligibility', () => ({ cowSwapForcedOff: ref(false) }))
     vi.stubGlobal('useTxFinalization', () => ({
-      finalizeTxAndRedirect: vi.fn(),
+      finalizeTxAndRedirect: mocks.finalizeTxAndRedirect,
     }))
     vi.stubGlobal('useRewardsApy', () => ({
       version: rewardsVersion,
@@ -478,5 +481,73 @@ describe('useMultiplyForm cap validation', () => {
       { symbol: 'LOOP', icon: '/loop.png', afterApr: 4 },
       { symbol: 'SUP', icon: '/sup.png', afterApr: 2 },
     ])
+  })
+
+  it('re-prepares and executes only a multiply envelope matching the review', async () => {
+    const plan = [{ type: 'evcBatch', items: [] }] as TransactionPlan
+    const reviewed = {
+      __prepared: true,
+      chainId: 1,
+      account: USER,
+      usePermit2: false,
+      unlimitedApproval: false,
+      plan,
+    } as TransactionPlanPrepared
+    const refreshed = { ...reviewed, plan: [...plan] } as TransactionPlanPrepared
+    mocks.planMultiply.mockResolvedValue(plan)
+    mocks.prepareTransactionPlan
+      .mockResolvedValueOnce(reviewed)
+      .mockResolvedValueOnce(refreshed)
+    mocks.runPreparedSimulation.mockResolvedValue(true)
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await form.submitMultiply()
+    const modalOptions = mocks.modalOpen.mock.calls[0]?.[1] as {
+      props: { onConfirm: (scope: { markSucceeded: () => void }) => Promise<void> }
+    }
+    const scope = { markSucceeded: vi.fn() }
+    await modalOptions.props.onConfirm(scope)
+
+    expect(mocks.prepareTransactionPlan).toHaveBeenLastCalledWith(plan, { account: planAccount })
+    expect(mocks.executePreparedPlan).toHaveBeenCalledWith(refreshed)
+    expect(mocks.executePlan).not.toHaveBeenCalled()
+    expect(mocks.finalizeTxAndRedirect).toHaveBeenCalledWith({ scope })
+  })
+
+  it('rejects a materially changed multiply envelope after review', async () => {
+    const plan = [{ type: 'evcBatch', items: [] }] as TransactionPlan
+    const reviewed = {
+      __prepared: true,
+      chainId: 1,
+      account: USER,
+      usePermit2: false,
+      unlimitedApproval: false,
+      plan,
+    } as TransactionPlanPrepared
+    const changed = { ...reviewed, unlimitedApproval: true } as TransactionPlanPrepared
+    mocks.planMultiply.mockResolvedValue(plan)
+    mocks.prepareTransactionPlan
+      .mockResolvedValueOnce(reviewed)
+      .mockResolvedValueOnce(changed)
+    mocks.runPreparedSimulation.mockResolvedValue(true)
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+
+    await form.submitMultiply()
+    const modalOptions = mocks.modalOpen.mock.calls[0]?.[1] as {
+      props: { onConfirm: (scope: { markSucceeded: () => void }) => Promise<void> }
+    }
+    await modalOptions.props.onConfirm({ markSucceeded: vi.fn() })
+
+    expect(mocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(mocks.executePlan).not.toHaveBeenCalled()
+    expect(mocks.finalizeTxAndRedirect).not.toHaveBeenCalled()
   })
 })

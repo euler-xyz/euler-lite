@@ -44,6 +44,7 @@ import {
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
 import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
+import { requireReviewedBatchPreparedExecution } from '~/utils/reviewed-batch-execution'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -91,7 +92,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePlan, preloadSubAccountSnapshot } = useEulerTx()
+  const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePreparedPlan, preloadSubAccountSnapshot } = useEulerTx()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   // State-override knobs: skip balance probing (form validates "Not enough
   // balance"), pass current wallet snapshot, and pre-prime slot hints when the
@@ -1340,13 +1341,15 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   const sendMultiply = async (execution: TrackedExecutionScope) => {
-    // Use the unprepared plan and let executeTransactionPlan re-run plugins
-    // at submit time — keeps the on-chain Pyth update payload fresh so the
-    // staleness check can't bite us between Review-click and broadcast.
-    if (!multiplyPlan.value) return
+    if (!multiplyPlan.value || !preparedMultiplyPlan.value) return
     isMultiplySubmitting.value = true
     try {
-      await executePlan(multiplyPlan.value)
+      // Refresh time-sensitive plugin data (notably Pyth), then require the
+      // final prepared envelope to match what the modal reviewed apart from
+      // that explicitly canonicalized freshness delta.
+      const candidatePrepared = await prepareTransactionPlan(multiplyPlan.value, { account: planAccount.value })
+      const prepared = requireReviewedBatchPreparedExecution(preparedMultiplyPlan.value, candidatePrepared)
+      await executePreparedPlan(prepared)
       await finalizeTxAndRedirect({ scope: execution })
     }
     catch (e) {

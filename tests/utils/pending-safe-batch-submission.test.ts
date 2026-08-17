@@ -3,6 +3,7 @@ import type { Address, Hash, Hex } from 'viem'
 import {
   getPreparedBatchFingerprint,
   loadPendingSafeBatchSubmissions,
+  PENDING_SAFE_BATCH_STORAGE_KEY,
   savePendingSafeBatchSubmissions,
 } from '~/utils/pending-safe-batch-submission'
 
@@ -89,6 +90,28 @@ describe('pending Safe batch persistence', () => {
     }])
 
     expect(loadPendingSafeBatchSubmissions(storage)[0]?.submissionKind).toBeUndefined()
+  })
+
+  it.each([
+    ['malformed JSON', '{'],
+    ['a non-array value', '{}'],
+    ['an invalid record in the array', '[{"account":"bad"}]'],
+    ['an empty stored value', ''],
+  ])('fails closed for %s', (_label, stored) => {
+    const storage = memoryStorage()
+    storage.setItem(PENDING_SAFE_BATCH_STORAGE_KEY, stored)
+
+    expect(() => loadPendingSafeBatchSubmissions(storage)).toThrow(/storage is (unreadable|invalid)/)
+  })
+
+  it('fails closed when the storage read throws', () => {
+    const storage = {
+      getItem: () => { throw new Error('storage temporarily unavailable') },
+      setItem: () => {},
+      removeItem: () => {},
+    }
+
+    expect(() => loadPendingSafeBatchSubmissions(storage)).toThrow('storage is unreadable')
   })
 
   it('fingerprints the full prepared batch envelope', () => {

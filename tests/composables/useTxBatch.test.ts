@@ -15,6 +15,7 @@ import { WalletExecutionContextChangedError } from '~/utils/walletExecutionConte
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import { SafeSubmissionStatusUnknownError, SafeTransactionStatusUnknownError } from '~/utils/safeWalletTransactions'
 import { loadPendingSafeBatchSubmissions, savePendingSafeBatchSubmissions } from '~/utils/pending-safe-batch-submission'
+import { loadPendingSafeBundleSubmissions, reservePendingSafeBundleSubmission } from '~/utils/pending-safe-bundle-submission'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -1463,6 +1464,92 @@ describe('useTxBatch execution prerequisites', () => {
     expect(batch.entryCount.value).toBe(0)
   })
 
+  it('blocks a batch Safe submission while the same context has a pending ordinary bundle', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    reservePendingSafeBundleSubmission(window.localStorage, {
+      reservationId: 'ordinary-safe-bundle',
+      account: owner,
+      chainId: 1,
+      errorMessage: 'Pending ordinary bundle',
+    })
+    const walletBoundary = vi.fn()
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared,
+      _extraCalls,
+      options: { onSafePreflight?: () => void | Promise<void> },
+    ) => {
+      await options.onSafePreflight?.()
+      walletBoundary()
+      return { receipts: [] }
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    await batch.executeBatch()
+
+    expect(walletBoundary).not.toHaveBeenCalled()
+    expect(loadPendingSafeBundleSubmissions(window.localStorage)).toHaveLength(1)
+    expect(batch.execError.value).toContain('previous Safe bundle submission is unresolved')
+  })
+
+  it('does not overwrite a pending batch when the durable registry read fails', async () => {
+    const sdk = createMockSdk()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    isSafeWalletRef.value = true
+    const backing = memoryStorage()
+    let failNextRead = false
+    const storage: Storage = {
+      get length() { return backing.length },
+      clear: () => backing.clear(),
+      getItem: (key) => {
+        if (failNextRead) {
+          failNextRead = false
+          throw new Error('localStorage read failed')
+        }
+        return backing.getItem(key)
+      },
+      key: index => backing.key(index),
+      removeItem: key => backing.removeItem(key),
+      setItem: (key, value) => backing.setItem(key, value),
+    }
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { localStorage: storage },
+    })
+    savePendingSafeBatchSubmissions(backing, [{
+      account: owner,
+      chainId: 1,
+      batchFingerprint: '0123456789abcdef',
+      batchPlan: singleOpBundledPlan,
+      errorMessage: 'Existing unresolved batch',
+      refreshExternalMigrationPositions: false,
+      grantedRevokes: [],
+    }])
+    const walletBoundary = vi.fn()
+    eulerTxMocks.executePreparedPlanWithPlainCalls.mockImplementation(async (
+      _prepared,
+      _extraCalls,
+      options: { onSafePreflight?: () => void | Promise<void> },
+    ) => {
+      await options.onSafePreflight?.()
+      walletBoundary()
+      return { receipts: [] }
+    })
+
+    const batch = useTxBatch()
+    await addBundledMigrationEntry(batch)
+    await batch.prepareBundledExecution()
+    failNextRead = true
+    await batch.executeBatch()
+
+    expect(walletBoundary).not.toHaveBeenCalled()
+    expect(loadPendingSafeBatchSubmissions(storage)).toHaveLength(1)
+    expect(batch.execError.value).toContain('storage is unreadable')
+  })
+
   it('preserves the active wallet cart when an earlier Safe bundle confirms', async () => {
     const sdk = createMockSdk()
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
@@ -2239,8 +2326,8 @@ describe('useTxBatch execution prerequisites', () => {
       setItem: (key, value) => {
         writeCount += 1
         // 1: preflight reservation; 2: prerequisite hash; 3: terminal
-        // reservation before the wallet request. Reject the terminal hash and
-        // the outer catch-path retry after Safe has already returned it.
+        // reservation before the wallet request. Reject the terminal hash;
+        // once storage is known unhealthy, the catch path must not write again.
         if (rejectTerminalHashWrites && writeCount >= 4) {
           throw new Error('localStorage degraded before terminal hash capture')
         }
@@ -2272,7 +2359,7 @@ describe('useTxBatch execution prerequisites', () => {
       await batch.executeBatch(await prepareReviewedBatch(batch))
 
       expect(terminalSafeSend).toHaveBeenCalledTimes(1)
-      expect(writeCount).toBe(5)
+      expect(writeCount).toBe(4)
       expect(batch.pendingSafeSubmission.value?.submissionKind).toBe('batch')
       expect(batch.pendingSafeSubmission.value?.submittedHash).toBeUndefined()
       expect(batch.entryCount.value).toBe(1)

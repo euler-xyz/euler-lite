@@ -43,6 +43,7 @@ import {
   savePendingSafeBatchSubmissions,
   type PersistedPendingSafeBatchSubmission,
 } from '~/utils/pending-safe-batch-submission'
+import { findPendingSafeBundleSubmission } from '~/utils/pending-safe-bundle-submission'
 import { acquireSafeSubmissionLock } from '~/utils/safe-submission-lock'
 
 export interface BatchWalletChange {
@@ -298,6 +299,7 @@ export const isPendingSafeSubmissionForContext = (
 }
 const pendingSafeSubmissions = shallowRef<PendingSafeBatchSubmission[]>([])
 let pendingSafeSubmissionsHydrated = false
+let pendingSafeSubmissionsStorageError: Error | undefined
 
 const getPendingSafeStorage = (): Storage | undefined => {
   if (typeof window === 'undefined') return undefined
@@ -312,6 +314,7 @@ const getPendingSafeStorage = (): Storage | undefined => {
 const persistPendingSafeSubmissionLocks = () => {
   const storage = getPendingSafeStorage()
   if (!storage) throw new Error('Durable browser storage is unavailable; Safe submission was blocked')
+  if (pendingSafeSubmissionsStorageError) throw pendingSafeSubmissionsStorageError
   const persisted: PersistedPendingSafeBatchSubmission[] = pendingSafeSubmissions.value
     .filter(pending => !pending.terminalStatus)
     .map(pending => ({
@@ -325,14 +328,17 @@ const persistPendingSafeSubmissionLocks = () => {
       refreshExternalMigrationPositions: pending.refreshExternalMigrationPositions,
       grantedRevokes: pending.grantedRevokes,
     }))
+  let restored: PersistedPendingSafeBatchSubmission[]
   try {
     savePendingSafeBatchSubmissions(storage, persisted)
+    restored = loadPendingSafeBatchSubmissions(storage)
   }
   catch (error) {
     logWarn('useTxBatch/persistPendingSafe', error)
+    pendingSafeSubmissionsStorageError = error instanceof Error ? error : new Error(String(error))
     throw new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked', { cause: error })
   }
-  const restored = loadPendingSafeBatchSubmissions(storage)
+  pendingSafeSubmissionsStorageError = undefined
   const isSameLock = (
     expected: PersistedPendingSafeBatchSubmission,
     actual: PersistedPendingSafeBatchSubmission,
@@ -345,7 +351,8 @@ const persistPendingSafeSubmissionLocks = () => {
     restored.length !== persisted.length
     || persisted.some(expected => !restored.some(actual => isSameLock(expected, actual)))
   ) {
-    throw new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked')
+    pendingSafeSubmissionsStorageError = new Error('Durable browser storage could not retain the Safe submission lock; Safe submission was blocked')
+    throw pendingSafeSubmissionsStorageError
   }
 }
 
@@ -354,22 +361,37 @@ const hydratePendingSafeSubmissionLocks = () => {
   const storage = getPendingSafeStorage()
   if (!storage) return
   pendingSafeSubmissionsHydrated = true
-  pendingSafeSubmissions.value = loadPendingSafeBatchSubmissions(storage).map(pending => ({
-    ...pending,
-    entries: [{
-      id: `pending-safe-${pending.submittedHash ?? pending.batchFingerprint}`,
-      label: 'Pending Safe batch',
-      plan: pending.batchPlan,
-    }],
-    hydrated: true,
-  }))
+  try {
+    pendingSafeSubmissions.value = loadPendingSafeBatchSubmissions(storage).map(pending => ({
+      ...pending,
+      entries: [{
+        id: `pending-safe-${pending.submittedHash ?? pending.batchFingerprint}`,
+        label: 'Pending Safe batch',
+        plan: pending.batchPlan,
+      }],
+      hydrated: true,
+    }))
+    pendingSafeSubmissionsStorageError = undefined
+  }
+  catch (error) {
+    pendingSafeSubmissionsStorageError = error instanceof Error ? error : new Error(String(error))
+    logWarn('useTxBatch/hydratePendingSafe', pendingSafeSubmissionsStorageError)
+  }
 }
 
-const syncPendingSafeSubmissionLocksFromStorage = () => {
+const syncPendingSafeSubmissionLocksFromStorage = (): Storage => {
   const storage = getPendingSafeStorage()
   if (!storage) throw new Error('Durable browser storage is unavailable; Safe submission was blocked')
   const current = pendingSafeSubmissions.value
-  const persisted = loadPendingSafeBatchSubmissions(storage)
+  let persisted: PersistedPendingSafeBatchSubmission[]
+  try {
+    persisted = loadPendingSafeBatchSubmissions(storage)
+    pendingSafeSubmissionsStorageError = undefined
+  }
+  catch (error) {
+    pendingSafeSubmissionsStorageError = error instanceof Error ? error : new Error(String(error))
+    throw pendingSafeSubmissionsStorageError
+  }
   const persistedContexts = new Set(persisted.map(pending => `${pending.chainId}:${pending.account.toLowerCase()}`))
   const terminal = current.filter(pending => pending.terminalStatus
     && !persistedContexts.has(`${pending.chainId}:${pending.account.toLowerCase()}`))
@@ -396,6 +418,7 @@ const syncPendingSafeSubmissionLocksFromStorage = () => {
       }
     }),
   ]
+  return storage
 }
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
@@ -2818,7 +2841,14 @@ export const useTxBatch = () => {
           // Module state can be stale in a background tab. Refresh it only
           // after acquiring the browser-wide mutex, then preserve every other
           // account/chain record when this context is reserved.
-          syncPendingSafeSubmissionLocksFromStorage()
+          const storage = syncPendingSafeSubmissionLocksFromStorage()
+          if (findPendingSafeBundleSubmission(
+            storage,
+            batchExecutionContext!.account,
+            batchExecutionContext!.chainId,
+          )) {
+            throw new Error('A previous Safe bundle submission is unresolved. Reconcile it before submitting this batch.')
+          }
           if (pendingSafeSubmissions.value.some(pending =>
             !pending.terminalStatus
             && isPendingSafeSubmissionForContext(

@@ -8,6 +8,11 @@ const PYTH_UPDATE_SELECTOR = toFunctionSelector('function updatePriceFeeds(bytes
 const DYNAMIC_SIGNATURE_LENGTH_WORD = `${'0'.repeat(62)}41`
 const PLACEHOLDER_SIGNATURE_DATA = '0'.repeat(65 * 2)
 const SIGNATURE_MARKER = '__reviewed_signature__'
+const STATIC_SIGNATURE_WORD_COUNTS = new Map([
+  [toFunctionSelector('function permit(address,address,uint256,uint256,uint8,bytes32,bytes32)').toLowerCase(), 7],
+  [toFunctionSelector('function delegationWithSig(address,address,uint256,uint256,uint8,bytes32,bytes32)').toLowerCase(), 7],
+  [toFunctionSelector('function setAuthorizationWithSig((address,address,bool,uint256,uint256),(uint8,bytes32,bytes32))').toLowerCase(), 8],
+])
 
 export type ReviewedSignaturePlaceholderCall = Pick<
   EVCBatchItem,
@@ -27,8 +32,19 @@ const canonicalizePythUpdate = (item: Record<string, unknown>): Record<string, u
   return { ...item, data: '__fresh_pyth_update__', value: '__fresh_pyth_fee__' }
 }
 
+const getStaticPlaceholderSignatureStart = (data: string): number | undefined => {
+  const wordCount = STATIC_SIGNATURE_WORD_COUNTS.get(data.slice(0, 10))
+  if (!wordCount || data.length !== 10 + wordCount * 64) return undefined
+  const signatureStart = data.length - 3 * 64
+  return /^0+$/.test(data.slice(signatureStart)) ? signatureStart : undefined
+}
+
 const canonicalizeReviewedSignatures = (data: string): string => {
   let result = data.toLowerCase()
+  const staticSignatureStart = getStaticPlaceholderSignatureStart(result)
+  if (staticSignatureStart !== undefined) {
+    return `${result.slice(0, staticSignatureStart)}${SIGNATURE_MARKER}`
+  }
   let searchFrom = 0
   while (searchFrom < result.length) {
     const lengthWordIndex = result.indexOf(DYNAMIC_SIGNATURE_LENGTH_WORD, searchFrom)
@@ -50,6 +66,13 @@ const canonicalizeCandidateSignatures = (reviewedData: string, candidateData: st
   const reviewed = reviewedData.toLowerCase()
   let candidate = candidateData.toLowerCase()
   if (reviewed.length !== candidate.length) return candidate
+  const staticSignatureStart = getStaticPlaceholderSignatureStart(reviewed)
+  if (
+    staticSignatureStart !== undefined
+    && reviewed.slice(0, 10) === candidate.slice(0, 10)
+  ) {
+    return `${candidate.slice(0, staticSignatureStart)}${SIGNATURE_MARKER}`
+  }
   let searchFrom = 0
   while (searchFrom < reviewed.length) {
     const lengthWordIndex = reviewed.indexOf(DYNAMIC_SIGNATURE_LENGTH_WORD, searchFrom)
