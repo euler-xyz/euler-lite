@@ -55,10 +55,20 @@ const inFlight = createInFlightDedup<string, unknown[]>()
 const isAbiContract = (value: string): value is AbiContract =>
   Object.prototype.hasOwnProperty.call(ABI_SNAPSHOTS, value)
 
+function getUpstreamUrl(contract: AbiContract): string {
+  // An explicit base URL wins over the branch env vars — the same emergency
+  // repoint lever as NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL. Must serve
+  // `${baseUrl}/${contract}.json`.
+  const baseUrl = (process.env.NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL || '').trim().replace(/\/+$/, '')
+  if (baseUrl) return `${baseUrl}/${contract}.json`
+
+  return eulerInterfacesRawUrl(`abis/${contract}.json`)
+}
+
 /** Forced upstream refresh used by the warm-cache plugin; see euler-chains. */
 export function refreshAbi(contract: AbiContract): Promise<unknown[]> {
   return inFlight.run(contract, async () => {
-    const resp = await fetchWithTimeout(eulerInterfacesRawUrl(`abis/${contract}.json`))
+    const resp = await fetchWithTimeout(getUpstreamUrl(contract))
     if (!resp.ok) {
       throw new Error(`Upstream returned ${resp.status}`)
     }

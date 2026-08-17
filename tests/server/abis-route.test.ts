@@ -28,6 +28,7 @@ const BRANCH_ENV_KEYS = [
   'EULER_SDK_EULER_INTERFACES_BRANCH',
   'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
   'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
+  'NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL',
 ] as const
 
 const originalEnv = Object.fromEntries(BRANCH_ENV_KEYS.map(key => [key, process.env[key]]))
@@ -58,6 +59,19 @@ describe('/api/internal/abis/[contract]', () => {
     await expect(refreshAbi('VaultLens')).resolves.toEqual(abi)
     expect(mocks.fetchWithTimeout).toHaveBeenCalledWith(
       'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/account-lens-update/abis/VaultLens.json',
+    )
+  })
+
+  it('prioritizes the explicit ABIs base URL over a configured interfaces branch', async () => {
+    process.env.EULER_SDK_EULER_INTERFACES_BRANCH = 'account-lens-update'
+    process.env.NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL = 'https://abis.example/mirror/'
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+
+    const { refreshAbi } = await importRoute()
+    await refreshAbi('AccountLens')
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledWith(
+      'https://abis.example/mirror/AccountLens.json',
     )
   })
 
