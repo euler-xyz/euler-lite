@@ -143,9 +143,12 @@ describe('useTosGuard account-switch checks', () => {
     expect(operationBlockReason.value).toBe('Terms of Use acceptance required')
   })
 
-  it('invalidates shared acceptance when a different context mounts after an unobserved switch', async () => {
-    const address = ref<string | undefined>(ACCOUNT_B)
-    const chainId = ref(1)
+  it.each([
+    ['account', ACCOUNT_B, 1],
+    ['chain', ACCOUNT_A, 10],
+  ] as const)('invalidates shared acceptance when a different context mounts after an unobserved %s switch', async (_kind, currentAddress, currentChainId) => {
+    const address = ref<string | undefined>(currentAddress)
+    const chainId = ref(currentChainId)
     const states = new Map<string, Ref<unknown>>([
       ['tosGuardHasSigned', ref(true)],
       ['tosGuardSessionAccepted', ref(true)],
@@ -184,7 +187,7 @@ describe('useTosGuard account-switch checks', () => {
     await flush()
 
     expect(client.readContract).toHaveBeenCalledWith(expect.objectContaining({
-      args: [ACCOUNT_B, `0x${'11'.repeat(32)}`],
+      args: [currentAddress, `0x${'11'.repeat(32)}`],
     }))
     expect(operationBlockReason.value).toBe('Terms of Use acceptance required')
   })
