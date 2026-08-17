@@ -1,12 +1,16 @@
-import { createError, setResponseHeader } from 'h3'
+import { setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
+import {
+  MANIFEST_MAX_STALE_MS,
+  eulerInterfacesRawUrl,
+} from '~/server/utils/euler-interfaces'
 import { logger } from '~/server/utils/logger'
+import eulerChainsSnapshot from '~/server/assets/manifests/EulerChains.json'
 
 const CACHE_TTL_MS = 300_000
-const DEFAULT_BRANCH = 'master'
 
 const rateLimiter = createRateLimiter({
   max: 1000,
@@ -14,25 +18,21 @@ const rateLimiter = createRateLimiter({
   label: 'euler-chains',
 })
 
-const cache = createTtlCache<unknown[]>({ ttlMs: CACHE_TTL_MS })
+const cache = createTtlCache<unknown[]>({
+  ttlMs: CACHE_TTL_MS,
+  maxStaleMs: MANIFEST_MAX_STALE_MS,
+})
 const CACHE_KEY = 'euler-chains'
 const inFlight = createInFlightDedup<string, unknown[]>()
 
 function getUpstreamUrl(): string {
-  const configuredBranch = (
-    process.env.EULER_SDK_EULER_INTERFACES_BRANCH
-    || process.env.NUXT_PUBLIC_EULER_INTERFACES_BRANCH
-    || process.env.NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH
-    || ''
-  ).trim()
-  if (configuredBranch) {
-    return `https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/${configuredBranch}/EulerChains.json`
-  }
-
+  // An explicit full URL is the most specific override (and the emergency
+  // repoint lever during an upstream outage), so it wins over the branch
+  // env vars, which merely select a branch of the default GitHub source.
   const explicitUrl = (process.env.NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL || '').trim()
   if (explicitUrl) return explicitUrl
 
-  return `https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/${DEFAULT_BRANCH}/EulerChains.json`
+  return eulerInterfacesRawUrl('EulerChains.json')
 }
 
 /**
@@ -57,11 +57,15 @@ export function refreshEulerChains(): Promise<unknown[]> {
   })
 }
 
-export default defineEventHandler(async (event) => {
-  rateLimiter.consume(event)
-
-  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
-
+/**
+ * Full resolution chain: fresh cache → upstream → stale cache → build-time
+ * snapshot (refreshed via `npm run snapshots:update`). The snapshot is the
+ * cold-start last resort: a process that boots during an upstream outage
+ * still serves a working, if dated, deployment manifest instead of taking
+ * every SDK build down with it. Also installed as the deployments source
+ * for server-side SDK builds (see server/plugins/sdk-deployments.ts).
+ */
+export async function loadEulerChains(): Promise<unknown[]> {
   const cached = cache.get(CACHE_KEY)
   if (cached) return cached
 
@@ -74,6 +78,18 @@ export default defineEventHandler(async (event) => {
     const stale = cache.getStale(CACHE_KEY)
     if (stale) return stale
 
-    throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
+    logger.error(
+      { ctx: 'euler-chains' },
+      'no cached deployment manifest; serving build-time snapshot',
+    )
+    return eulerChainsSnapshot
   }
+}
+
+export default defineEventHandler(async (event) => {
+  rateLimiter.consume(event)
+
+  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+
+  return loadEulerChains()
 })

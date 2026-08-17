@@ -324,6 +324,12 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
+      '/api/internal/abis/**': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+        },
+      },
       '/api/internal/proxy/merkl/opportunities': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=60',
