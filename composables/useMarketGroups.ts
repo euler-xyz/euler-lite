@@ -9,6 +9,7 @@ import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProdu
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
+import { groupHasExplorableMarket } from '~/utils/vault/market-group-visibility'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
@@ -60,6 +61,7 @@ const buildProductGroups = (
   allVaults: AnyVault[],
   products: Record<string, EulerLabelProduct>,
   entities: Record<string, EulerLabelEntity>,
+  listNonMarketGroups: boolean,
 ): { groups: MarketGroup[], assignedAddresses: Set<string> } => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
@@ -82,6 +84,13 @@ const buildProductGroups = (
     }
 
     if (memberVaults.length === 0) continue
+
+    // Collateral-only products (every member hidden on both the lend and
+    // borrow side) get no discovery card. Their addresses stay assigned so
+    // the members don't fall into orphan clustering, they still resolve as
+    // externalCollateral in other groups' graphs, and a direct market URL
+    // still loads via fetchMarketGroupOnDemand.
+    if (!listNonMarketGroups && !groupHasExplorableMarket(memberVaults)) continue
 
     // Resolve curator entity
     const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
@@ -399,7 +408,7 @@ export const useMarketGroups = () => {
     if (vaults.length === 0) return []
 
     // Step 1: Product-label groups
-    const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, products, entities)
+    const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, products, entities, showAllLabelEntries.value)
 
     // Step 2: Augment with collateral graph — pass the full registry so active
     // LTVs targeting non-explorable vaults still resolve as externalCollateral
