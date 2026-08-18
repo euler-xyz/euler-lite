@@ -89,13 +89,16 @@ Safe provider is present:
    was identified as Safe.
 5. Poll `waitForSafeTransactionExecution` — Safe returns `safeTxHash` as the
    bundle id; the poller resolves the executed on-chain hash. Polling stops
-   after five minutes (`SAFE_STATUS_POLL_TIMEOUT_MS`) and throws
-   `SafeTransactionStatusUnknownError`; Lite does not keep watching after that.
+   after five minutes — the default `timeoutMs` of
+   `waitForSafeTransactionExecution` — and throws
+   `SafeTransactionStatusUnknownError`; passing an already-aborted or later
+   aborted `signal` stops it early with the same error. Lite does not keep
+   watching after that.
 
-### Bundleability rules (`utils/transaction-plan-calls.ts`)
+### Bundleability rules
 
-Throws `PlanNotBundleableError` (caller falls back to sequential sends) when the
-plan contains:
+`utils/transaction-plan-calls.ts` throws `PlanNotBundleableError` (caller falls
+back to sequential sends) when the plan contains:
 
 - unresolved `requiredApproval` items
 - Permit2 signature resolutions (nothing to encode before signing)
@@ -103,8 +106,10 @@ plan contains:
 - `contractCall` items whose `chainId` differs from the bundle chain (hard error
   — sequential path would misroute identically)
 
-Empty plan + non-empty wrapper calls throws (never submit `[grant, revoke]`
-around a no-op migration). Single-call bundles normally return `undefined`
+`executePlanAsSafeBundle` in `composables/useEulerTx.ts` layers the shape rules
+on top of that: an empty plan with non-empty wrapper calls throws (never submit
+`[grant, revoke]` around a no-op migration), an empty plan with no wrappers
+returns `undefined`, and single-call bundles also return `undefined`
 ("no benefit") unless the caller sets `allowSingleCall: true` — latched batch /
 migration ceremonies use that so "no Safe context" is never confused with
 "single call".
@@ -168,7 +173,7 @@ execution:
 
 - Review modals may close while a Safe proposal awaits co-signers (`detach`).
 - Tracking continues until confirmation or the five-minute polling timeout
-  (`SAFE_STATUS_POLL_TIMEOUT_MS` in `waitForSafeTransactionExecution`). After
+  (`waitForSafeTransactionExecution`'s default `timeoutMs`). After
   timeout Lite reports unknown status, releases the tracking slot, and a later
   on-chain execution will **not** produce a success toast — verify in Safe.
 - Completion surfaces as a toast: success only if the flow called
@@ -187,7 +192,9 @@ thread the scope through finalize / redirect helpers.
 
 ## Related UI
 
-- `components/entities/safe/SafeAccountBadge.vue` — governance address Safe badge
+- `components/entities/safe/SafeAccountBadge.vue` — Safe badge on vault overview
+  address rows (asset, vault, governor, Earn management), rendered through
+  `VaultOverviewAddressValue.vue`
 - `composables/useSafeAddressInfo.ts` + `utils/safe-account.ts` — on-chain Safe
   owner/threshold lookup for address rows
 - `components/BatchReviewModal.vue` — batch ceremony presentation
