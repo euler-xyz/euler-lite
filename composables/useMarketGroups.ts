@@ -8,12 +8,15 @@ import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
 import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
+import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
 
 // -- Helpers --
 
 const hasGovernorAdmin = (vault: AnyVault): vault is EVault =>
-  isEVault(vault) && 'governorAdmin' in vault
+  hasResolvedGovernorAdmin(vault)
 
 const isBorrowableVault = (vault: AnyVault): boolean =>
   isEVault(vault) && isVaultBorrowable(vault)
@@ -518,7 +521,17 @@ export const useMarketGroups = () => {
         liteVaultFetchOptions,
       )
       result.errors.forEach(issue => logWarn('useMarketGroups/fetchMarketGroupOnDemand', issue))
-      memberVaults.push(...(result.result.filter(Boolean) as EVault[]))
+      const fetchedVaults = result.result.filter(Boolean) as EVault[]
+      await resolveEulerRouterGovernors(fetchedVaults, (router) => {
+        const provider = sdk.providerService.getProvider(targetChainId)
+        return provider.readContract({
+          address: router,
+          abi: governableGovernorAbi,
+          functionName: 'governor',
+          authorizationList: undefined,
+        })
+      })
+      memberVaults.push(...fetchedVaults)
     }
     catch (e) {
       logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)

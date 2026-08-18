@@ -66,6 +66,18 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed(`/v3/activity/vaults/1/not-an-address/events`)).toBe(false)
   })
 
+  it('rejects percent-encoded path bytes before attaching the upstream API key', () => {
+    for (const path of [
+      `/api/internal/v3/accounts/${ACCOUNT}%2Fadmin/positions`,
+      `/api/internal/v3/accounts/${ACCOUNT}%5Cadmin/positions`,
+      `/api/internal/v3/accounts/${ACCOUNT}%2e%2e/positions`,
+      `/api/internal/v3/accounts/${ACCOUNT}%00/positions`,
+    ]) {
+      expect(validateV3ProxyUrl('GET', new URL(`https://app.example${path}`)))
+        .toMatchObject({ ok: false, statusCode: 400 })
+    }
+  })
+
   it('allows query strings on SDK-owned endpoints for V3 to validate', () => {
     expect(validateV3ProxyUrl(
       'GET',

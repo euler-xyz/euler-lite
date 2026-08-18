@@ -24,6 +24,7 @@ import {
   StandardEVaultPerspectives,
   VaultType,
   type EulerSDK,
+  type EVault,
   type VaultFetchOptions,
 } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
@@ -51,6 +52,8 @@ import type {
   SerialisedVault,
   SerialisedVaultKind,
 } from '~/utils/snapshot-types'
+import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
 
 // With V3 configured the SDK falls back through V3's batched endpoints —
 // each refresh is cheap, so we can afford a tighter cache TTL and rewarm
@@ -271,6 +274,19 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
         }
       }
     }
+
+    await resolveEulerRouterGovernors(
+      [...evk.result, ...escrow.result].filter(Boolean) as EVault[],
+      (router) => {
+        const provider = sdk.providerService.getProvider(chainId)
+        return provider.readContract({
+          address: router,
+          abi: governableGovernorAbi,
+          functionName: 'governor',
+          authorizationList: undefined,
+        })
+      },
+    )
 
     const payload: SerialisedSnapshot = encodeBigints({
       chainId,

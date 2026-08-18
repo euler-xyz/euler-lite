@@ -4,29 +4,33 @@ import { OperationReviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { REULLock } from '~/entities/reul'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { logWarn } from '~/utils/errorHandling'
+import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
+import {
+  prepareREULUnlockPlan,
+  refreshREULLockReview,
+  runWithFreshREULLockReview,
+  type REULLockReviewValidation,
+} from '~/components/entities/reward/reulUnlockReview'
 
 const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
-const { addEntry: addBatchEntry } = useTxBatch()
+const { entryCount, clearBatch } = useTxBatch()
 const { executePlan } = useEulerTx()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
-const { settings } = useUserSettings()
 const { item } = defineProps<{ item: REULLock }>()
 const itemKey = computed(() => item.timestamp.toString())
 
 const isUnlocking = ref(false)
 const isPreparing = ref(false)
-const isAddingToBatch = ref(false)
-const plan = ref<TransactionPlan | null>(null)
 
 // rEUL address is read from chain contract config (reulTokenContractAddress) —
 // the authoritative source. Its metadata (symbol, decimals, logo) is looked
@@ -40,7 +44,7 @@ const walletChangeTokenSymbol = computed(() =>
   walletChangeToken.value?.symbol ?? (eulTokenContractAddress.value ? 'EUL' : 'rEUL'),
 )
 const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
-const canAddToBatch = computed(() => settings.value.enableAdvancedMode)
+const isBatchActive = computed(() => entryCount.value > 0)
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)
@@ -50,17 +54,13 @@ const amount = computed(() => {
   return nanoToValue(item.amount, reulToken.value?.decimals)
 })
 
-const amountToBeBurned = computed(() => {
-  return nanoToValue(item.amountToBeBurned, reulToken.value?.decimals)
-})
+const getFormattedDate = (lock: REULLock) =>
+  DateTime.fromSeconds(Number(lock.timestamp)).plus({ days: 180 }).toFormat('MMMM dd, yyyy')
+const formattedDate = computed(() => getFormattedDate(item))
 
-const formattedDate = computed(() => {
-  return DateTime.fromSeconds(Number(item.timestamp)).plus({ days: 180 }).toFormat('MMMM dd, yyyy')
-})
-
-const daysUntilMaturity = computed(() => {
-  return Math.max(0, Math.floor(DateTime.fromSeconds(Number(item.timestamp)).plus({ days: 180 }).diffNow('days').days))
-})
+const getDaysUntilMaturity = (lock: REULLock) =>
+  Math.max(0, Math.floor(DateTime.fromSeconds(Number(lock.timestamp)).plus({ days: 180 }).diffNow('days').days))
+const daysUntilMaturity = computed(() => getDaysUntilMaturity(item))
 
 const ensureWalletOnSiteChain = async () => {
   const targetChainId = siteChainId.value
@@ -76,14 +76,82 @@ const ensureWalletOnSiteChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const unlock = async () => {
+const showReviewRefreshError = (status: Exclude<REULLockReviewValidation['status'], 'fresh'>) => {
+  if (status === 'changed') {
+    error('The rEUL unlock amount changed. Review the updated values and try again.')
+  }
+  else if (status === 'missing') {
+    error('This rEUL lock is no longer available.')
+  }
+  else {
+    error('Unable to refresh the rEUL lock. Try again.')
+  }
+}
+
+const showPreparationError = async (cause: unknown) => {
+  let description = 'Unable to prepare this rEUL unlock.'
+  try {
+    description = await getTxErrorMessage(cause)
+  }
+  catch (messageError) {
+    logWarn('RewardUnlockItem/getTxErrorMessage', messageError)
+  }
+  error('Unable to prepare rEUL unlock', { description })
+}
+
+const unlock = async (execution: TrackedExecutionScope, reviewedLock: REULLock) => {
+  if (isBatchActive.value) {
+    error('Clear the current batch before unlocking rEUL')
+    return
+  }
+
   try {
     isUnlocking.value = true
 
-    const unlockPlan = await buildUnlockREULPlan([item.timestamp])
-    await executePlan(unlockPlan)
-    modal.close()
-    await refreshLocks(false)
+    const result = await runWithFreshREULLockReview(
+      reviewedLock,
+      () => refreshLocks(true),
+      async (currentLock) => {
+        if (isBatchActive.value) {
+          // Unscoped close pops the top of the modal stack; if the review
+          // submission was detached the user may be in a different modal.
+          if (!execution.suppressPostTxUi()) {
+            modal.close()
+          }
+          error('Clear the current batch before unlocking rEUL')
+          return false
+        }
+
+        const unlockPlan = await buildUnlockREULPlan([currentLock.timestamp])
+        if (isBatchActive.value) {
+          // Unscoped close pops the top of the modal stack; if the review
+          // submission was detached the user may be in a different modal.
+          if (!execution.suppressPostTxUi()) {
+            modal.close()
+          }
+          error('Clear the current batch before unlocking rEUL')
+          return false
+        }
+
+        await executePlan(unlockPlan)
+        // Success signal for a detached Safe completion toast — always mark.
+        execution.markSucceeded()
+        // Unscoped modal.close() pops the top of the modal stack; after
+        // detachment the user may have opened a different modal, so global
+        // UI teardown is suppressed like navigation.
+        if (!execution.suppressPostTxUi()) {
+          modal.close()
+        }
+        await refreshLocks(true)
+        return true
+      },
+    )
+    if (result.status === 'changed' || result.status === 'missing' || result.status === 'unavailable') {
+      if (!execution.suppressPostTxUi()) {
+        modal.close()
+      }
+      showReviewRefreshError(result.status)
+    }
   }
   catch (e) {
     error('Transaction failed')
@@ -94,79 +162,79 @@ const unlock = async () => {
   }
 }
 
-const getReviewProps = () => ({
+const getReviewProps = (reviewedLock: REULLock) => ({
   type: 'reul-unlock',
   asset: {
     symbol: walletChangeTokenSymbol.value,
     address: walletChangeTokenAddress.value,
     decimals: walletChangeTokenDecimals.value,
   },
-  amount: unlockableAmount.value,
+  amount: nanoToValue(reviewedLock.unlockableAmount, reulToken.value?.decimals),
   reulUnlockInfo: {
-    unlockableAmount: unlockableAmount.value,
-    amountToBeBurned: amountToBeBurned.value,
-    maturityDate: formattedDate.value,
-    daysUntilMaturity: daysUntilMaturity.value,
+    unlockableAmount: nanoToValue(reviewedLock.unlockableAmount, reulToken.value?.decimals),
+    amountToBeBurned: nanoToValue(reviewedLock.amountToBeBurned, reulToken.value?.decimals),
+    maturityDate: getFormattedDate(reviewedLock),
+    daysUntilMaturity: getDaysUntilMaturity(reviewedLock),
   },
   submittingLabel: 'Unlocking...',
 })
 
-const onAddToBatchClick = async () => {
-  if (!canAddToBatch.value || isPreparing.value || isUnlocking.value || isAddingToBatch.value) return
-  isAddingToBatch.value = true
-  try {
-    await ensureWalletOnSiteChain()
-    await addBatchEntry({
-      label: 'Unlock rEUL',
-      requiresPlanningAccount: false,
-      buildPlan: async () => buildUnlockREULPlan([item.timestamp]),
-      review: getReviewProps(),
-    })
-  }
-  catch (e) {
-    error('Failed to add to batch')
-    logWarn('RewardUnlockItem/onAddToBatchClick', e)
-  }
-  finally {
-    isAddingToBatch.value = false
-  }
-}
-
 const onUnlockClick = async () => {
-  if (isPreparing.value || isAddingToBatch.value) return
+  if (isBatchActive.value) {
+    error('Clear the current batch before unlocking rEUL')
+    return
+  }
+
+  if (isPreparing.value) return
   isPreparing.value = true
   try {
     await ensureWalletOnSiteChain()
 
-    // Build the transaction plan
-    try {
-      plan.value = await buildUnlockREULPlan([item.timestamp])
+    const validation = await refreshREULLockReview(item, () => refreshLocks(true))
+    if (validation.status !== 'fresh') {
+      showReviewRefreshError(validation.status)
+      return
     }
-    catch (e) {
-      logWarn('RewardUnlockItem/buildPlan', e)
-      plan.value = null
+    if (isBatchActive.value) {
+      error('Clear the current batch before unlocking rEUL')
+      return
     }
+    const reviewedLock = validation.lock
 
-    if (plan.value) {
-      const ok = await runSimulation(plan.value)
-      if (!ok) {
-        return
-      }
+    const preparation = await prepareREULUnlockPlan(
+      reviewedLock,
+      lock => buildUnlockREULPlan([lock.timestamp]),
+      runSimulation,
+    )
+    if (preparation.status === 'build-failed') {
+      logWarn('RewardUnlockItem/buildPlan', preparation.error)
+      await showPreparationError(preparation.error)
+      return
+    }
+    if (preparation.status === 'simulation-failed') {
+      error('Simulation failed', {
+        description: simulationError.value || 'Unable to simulate this rEUL unlock. Try again.',
+      })
+      return
+    }
+    if (isBatchActive.value) {
+      error('Clear the current batch before unlocking rEUL')
+      return
     }
 
     // Open the operation review modal (same pattern as reward claims)
     modal.open(OperationReviewModal, {
       props: {
-        ...getReviewProps(),
-        amount: unlockableAmount.value,
-        plan: plan.value || undefined,
-        onConfirm: async () => {
-          await unlock()
+        ...getReviewProps(reviewedLock),
+        plan: preparation.plan,
+        onConfirm: async (execution) => {
+          await unlock(execution, reviewedLock)
         },
       },
     })
   }
   catch (e) {
+    await showPreparationError(e)
     logWarn('RewardUnlockItem/onUnlockClick', e)
   }
   finally {
@@ -239,34 +307,31 @@ const onUnlockClick = async () => {
           </div>
         </div>
       </div>
-      <div :class="canAddToBatch ? 'grid grid-cols-2 gap-8' : 'grid grid-cols-1'">
+      <div class="grid grid-cols-1">
         <UiButton
           rounded
           :loading="isUnlocking || isPreparing"
-          :disabled="isSpyMode || isAddingToBatch"
+          :disabled="isSpyMode || isBatchActive"
           @click="onUnlockClick"
         >
           Unlock
         </UiButton>
-        <UiButton
-          v-if="canAddToBatch"
-          rounded
-          variant="primary-stroke"
-          :loading="isAddingToBatch"
-          :disabled="isSpyMode || isUnlocking || isPreparing"
-          @click="onAddToBatchClick"
-        >
-          Add to batch
-        </UiButton>
       </div>
-      <UiAlert
-        v-if="simulationError"
-        class="mt-12"
-        title="Error"
-        variant="error"
-        :description="simulationError"
-        size="compact"
-      />
+      <p
+        v-if="isBatchActive"
+        class="mt-8 text-center text-p3 text-content-tertiary"
+        data-testid="reul-unlock-batch-blocked"
+      >
+        Clear the current batch before unlocking rEUL ·
+        <button
+          type="button"
+          class="text-accent-500 hover:text-accent-600"
+          data-testid="reul-unlock-clear-batch"
+          @click="clearBatch"
+        >
+          Clear batch
+        </button>
+      </p>
     </div>
   </div>
 </template>
