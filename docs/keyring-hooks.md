@@ -80,7 +80,7 @@ The SDK's [`createKeyringPlugin`](https://github.com/euler-xyz/euler-sdks/blob/m
 - `hookTargets` from `buildSdkKeyringHookTargets()` — hook-target addresses derived from keyring-tagged vaults in the registry
 - `getCredentialData` from `getSdkKeyringCredential()` — serves credentials published by `useOperationGuard`, returning `null` for expired credentials or when the hook target's keyring contract address no longer matches the cached one
 
-When a plan touches a keyring hook target and a credential is available, the plugin:
+When a plan touches a keyring hook target, the plugin first re-checks `checkKeyringCredentialOrWildCard(sender)` on-chain (even when prefetched — validity can flip between prefetch and submit) and skips injection if the sender already has a valid credential. Otherwise, when the store returns a current credential, the plugin:
 1. Creates a `createCredential` `EVCBatchItem` targeting the Keyring credentials contract
 2. Includes the ETH/native currency fee as the call's `value`
 3. Prepends it to every `evcBatch` item in the SDK `TransactionPlan`
