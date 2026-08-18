@@ -147,8 +147,6 @@ const CONNECT_SRC_BASE = [
   // CoW Protocol orderbook
   'https://barn.api.cow.fi',
   'https://api.cow.fi',
-  // SDK default deployments source
-  'https://raw.githubusercontent.com',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)

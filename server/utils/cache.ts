@@ -15,21 +15,26 @@ interface TtlCacheOptions {
    * age. The former behavior (serve stale forever) meant a week-long
    * upstream outage would keep serving week-old data silently.
    *
-   * Default: `2 × ttlMs`, capped at the hard staleness ceiling.
+   * Default: `2 × ttlMs`, capped at the hard staleness ceiling. Passing an
+   * explicit value is a deliberate per-cache policy choice and is honored
+   * as-is, above the ceiling included — low-churn manifests (deployment
+   * addresses, ABIs) are strictly better served days-stale than not at all,
+   * while the capped default remains right for market/account data.
    */
   maxStaleMs?: number
 }
 
 /**
- * Hard ceiling on how long any cache entry can be served after its TTL
- * elapses. 30 minutes bounds the worst-case user-visible data age across
- * every cache in the system (uniform policy from the user's perspective).
+ * Ceiling on how long an entry is served past its TTL when the cache does
+ * not set an explicit `maxStaleMs`. 30 minutes bounds the worst-case
+ * user-visible data age for every cache that has not made a deliberate
+ * staleness decision of its own.
  */
-const STALENESS_CEILING_MS = 30 * 60_000
+const DEFAULT_STALENESS_CEILING_MS = 30 * 60_000
 
 export function createTtlCache<T>(options: TtlCacheOptions) {
   const { ttlMs, maxEntries = 500 } = options
-  const maxStaleMs = Math.min(options.maxStaleMs ?? 2 * ttlMs, STALENESS_CEILING_MS)
+  const maxStaleMs = options.maxStaleMs ?? Math.min(2 * ttlMs, DEFAULT_STALENESS_CEILING_MS)
   const map = new Map<string, CacheEntry<T>>()
 
   const evictOldest = () => {

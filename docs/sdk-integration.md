@@ -69,7 +69,7 @@ The runtime config fields include:
 
 - **`enableV3Backend: boolean`** — set to `!!readV3ApiUrl()` on the server and emitted via `window.__APP_CONFIG__`. The client falls back to `useRuntimeConfig().public.enableV3Backend` (`isTruthy`) for static deploys. When `false` *and* `browserVaultSource === 'fallback'`, the SDK is built with `disableV3: true`.
 - **`browserVaultSource: 'fallback' | 'onchain' | 'v3'`** — pinned by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`). Selects which adapter block (`fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig`) the fast SDK uses. The plan-time SDK ignores this — it's always `onchain`.
-- **`eulerInterfacesBranch: string`** — pinned by `EULER_SDK_EULER_INTERFACES_BRANCH` (default `master`). Lite passes it to the SDK ABI service, and `/api/internal/euler-chains` uses the same branch. A configured branch takes precedence over the direct deployments URL.
+- **`eulerInterfacesBranch: string`** — pinned by `EULER_SDK_EULER_INTERFACES_BRANCH` (default `master`). `/api/internal/euler-chains` and `/api/internal/abis` resolve their upstreams from the same branch. Explicit URL overrides (`NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`, `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL`) take precedence over the branch — they are the emergency repoint levers when the default GitHub source is unavailable.
 
 Chain-aware browsing calls also read `useChainConfig().onchainSdkChainIds`, injected from `ONCHAIN_SDK_CHAINS`. Listed chains use the onchain backend; all other chains use `browserVaultSource`. The list is independent of `DEPRECATED_CHAINS`, which only controls chain-selector collapsing and warm-cache skipping.
 
@@ -88,8 +88,9 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | SDK field | Value | Backing endpoint |
 |-----------|-------|-----------------|
 | `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/internal` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/internal/v3/[...path].ts`) |
-| `eulerInterfacesBranch` | `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | Runtime Euler Interfaces ABI source |
+| `eulerInterfacesBranch` | `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | Branch selection for the euler-interfaces manifests (browser ABI fetches themselves go through the proxy below) |
 | `deploymentsUrl` | `/api/internal/euler-chains` | Local proxy |
+| ABI fetches (`setQueryABI` in `configureAppProxies`) | `/api/internal/abis/{contract}` | Runtime ABI proxy (`AccountLens`/`VaultLens`/`UtilsLens` allowlist) |
 | `eulerLabelsBaseUrl` | `/api/internal/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
 | `rewardsMerklApiUrl` | `/api/internal/proxy/merkl` | Merkl proxy |
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |

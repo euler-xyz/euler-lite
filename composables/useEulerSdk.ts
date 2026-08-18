@@ -1,6 +1,7 @@
 import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { INTERNAL_API_BASE } from '~/utils/api-url-env'
+import { logWarn } from '~/utils/errorHandling'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
@@ -20,6 +21,16 @@ type QueryOracleAdapters = (chainId: number) => Promise<unknown>
 type ConfigurableOracleAdapterService = EulerSDK['oracleAdapterService'] & {
   setQueryOracleAdapters?: (fn: QueryOracleAdapters) => void
 }
+
+type QueryABI = (url: string) => Promise<unknown>
+type ConfigurableAbiService = EulerSDK['abiService'] & {
+  setQueryABI?: (fn: QueryABI) => void
+}
+
+// The SDK's ABIService computes raw.githubusercontent.com URLs of the shape
+// `.../abis/<Contract>.json` and hands them to its query function. The
+// proxied query below only needs the contract name back out of that URL.
+const ABI_URL_CONTRACT_RE = /\/abis\/([A-Za-z0-9_.-]+)\.json(?:[?#]|$)/
 
 // Browser CSP blocks hermes.pyth.network. The SDK's Pyth plugin issues
 // `GET <hermesUrl>/v2/updates/price/latest?ids[]=…` — rewrite that request to
@@ -261,6 +272,34 @@ const configureAppProxies = (sdk: EulerSDK, buildQuery: BuildQueryFn) => {
     },
     oracleAdapterService,
   ))
+
+  // Runtime ABI fetches (AccountLens for account reads/simulate/rewards,
+  // VaultLens/UtilsLens for projected rates and the IRM overview) go through
+  // /api/internal/abis/<Contract> — same cache + stale-fallback chain as
+  // the deployments manifest. The browser CSP no longer allows
+  // raw.githubusercontent.com, so a missing setter is a real breakage, not
+  // a degradation — log it loudly instead of optional-chaining past it.
+  const abiService = sdk.abiService as ConfigurableAbiService | undefined
+  if (abiService?.setQueryABI) {
+    abiService.setQueryABI(buildQuery(
+      'queryABI',
+      async (url: string) => {
+        const contract = ABI_URL_CONTRACT_RE.exec(url)?.[1]
+        if (!contract) {
+          throw new Error(`Unexpected ABI URL shape: ${url}`)
+        }
+        const response = await fetch(`${buildAppApiPath('/api/internal/abis')}/${encodeURIComponent(contract)}`)
+        if (!response.ok) {
+          throw new Error(`ABI request failed: ${response.status} ${response.statusText}`)
+        }
+        return response.json()
+      },
+      abiService,
+    ))
+  }
+  else {
+    logWarn('useEulerSdk', 'abiService.setQueryABI is missing; browser ABI fetches will bypass the proxy and be CSP-blocked', { severity: 'error' })
+  }
 }
 
 interface InstanceBuildArgs {
