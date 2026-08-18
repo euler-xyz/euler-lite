@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
+  getEnabledChainIds: vi.fn(() => [1]),
+}))
+
+vi.mock('~/utils/chain-env', () => ({
+  getEnabledChainIds: mocks.getEnabledChainIds,
 }))
 
 vi.mock('h3', () => ({
@@ -49,6 +54,7 @@ const importRoute = async () => {
 describe('/api/internal/euler-chains upstream selection', () => {
   beforeEach(() => {
     for (const key of ENV_KEYS) Reflect.deleteProperty(process.env, key)
+    mocks.getEnabledChainIds.mockReturnValue([1])
   })
 
   afterEach(() => {
@@ -98,6 +104,10 @@ describe('/api/internal/euler-chains upstream selection', () => {
 })
 
 describe('/api/internal/euler-chains resolution chain', () => {
+  beforeEach(() => {
+    mocks.getEnabledChainIds.mockReturnValue([1])
+  })
+
   afterEach(() => {
     for (const key of ENV_KEYS) {
       const original = originalEnv[key]
@@ -155,33 +165,64 @@ describe('/api/internal/euler-chains resolution chain', () => {
   })
 
   it.each([
-    ['non-array payload', { error: 'nope' }],
-    ['empty manifest', []],
-    ['entries without chainId/addresses', [{}]],
-    ['non-object addresses', [{ chainId: 1, addresses: 'x' }]],
-    ['array addresses', [{ chainId: 1, addresses: [ADDR] }]],
-    ['empty addresses object', [{ chainId: 1, addresses: {} }]],
+    ['non-array payload', { error: 'nope' }, 'invalid deployment manifest'],
+    ['empty manifest', [], 'invalid deployment manifest'],
+    ['entries without chainId/addresses', [{}], 'missing or invalid for enabled chains: 1'],
+    ['non-object addresses', [{ chainId: 1, addresses: 'x' }], 'missing or invalid for enabled chains: 1'],
+    ['array addresses', [{ chainId: 1, addresses: [ADDR] }], 'missing or invalid for enabled chains: 1'],
+    ['empty addresses object', [{ chainId: 1, addresses: {} }], 'missing or invalid for enabled chains: 1'],
     ['missing coreAddrs keys', [{
       chainId: 1,
       addresses: {
         coreAddrs: { eVaultFactory: ADDR, permit2: ADDR },
         lensAddrs: { accountLens: ADDR, oracleLens: ADDR, utilsLens: ADDR, vaultLens: ADDR },
       },
-    }]],
+    }], 'missing or invalid for enabled chains: 1'],
     ['non-address lens value', [{
       chainId: 1,
       addresses: {
         coreAddrs: { eVaultFactory: ADDR, evc: ADDR, permit2: ADDR },
         lensAddrs: { accountLens: ADDR, oracleLens: ADDR, utilsLens: ADDR, vaultLens: 'not-an-address' },
       },
-    }]],
-    ['one bad entry among valid ones', [...validManifest(), { chainId: 2, addresses: {} }]],
-  ])('rejects an unusable 200 payload with no cache (%s)', async (_label, payload) => {
+    }], 'missing or invalid for enabled chains: 1'],
+  ])('rejects an unusable 200 payload with no cache (%s)', async (_label, payload, message) => {
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(payload))
 
     const { loadEulerChains } = await importRoute()
 
-    await expect(loadEulerChains()).rejects.toThrow('invalid deployment manifest')
+    await expect(loadEulerChains()).rejects.toThrow(message)
+  })
+
+  it('admits valid entries while dropping invalid ones for non-enabled chains', async () => {
+    // A routine sparse addition to euler-interfaces (a new chain this
+    // deployment does not enable) must not freeze the whole manifest.
+    mocks.fetchWithTimeout.mockResolvedValueOnce(
+      Response.json([...validManifest(), { chainId: 2, addresses: {} }]),
+    )
+
+    const { loadEulerChains } = await importRoute()
+
+    await expect(loadEulerChains()).resolves.toEqual(validManifest())
+  })
+
+  it('rejects when an enabled chain has an invalid entry', async () => {
+    mocks.getEnabledChainIds.mockReturnValue([1, 2])
+    mocks.fetchWithTimeout.mockResolvedValueOnce(
+      Response.json([...validManifest(), { chainId: 2, addresses: {} }]),
+    )
+
+    const { loadEulerChains } = await importRoute()
+
+    await expect(loadEulerChains()).rejects.toThrow('missing or invalid for enabled chains: 2')
+  })
+
+  it('rejects when an enabled chain is missing from the manifest', async () => {
+    mocks.getEnabledChainIds.mockReturnValue([1, 2])
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(validManifest()))
+
+    const { loadEulerChains } = await importRoute()
+
+    await expect(loadEulerChains()).rejects.toThrow('missing or invalid for enabled chains: 2')
   })
 
   it('keeps serving the last-known-good manifest when a later 200 is unusable', async () => {

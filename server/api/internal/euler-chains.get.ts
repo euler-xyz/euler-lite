@@ -7,6 +7,7 @@ import {
   MANIFEST_MAX_STALE_MS,
   eulerInterfacesRawUrl,
 } from '~/server/utils/euler-interfaces'
+import { getEnabledChainIds } from '~/utils/chain-env'
 import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
@@ -41,10 +42,17 @@ function getUpstreamUrl(): string {
 // the previous stale value instead of preserving poison for up to
 // MANIFEST_MAX_STALE_MS.
 //
+// Admission is per entry: an invalid entry for a chain this deployment does
+// not enable is dropped with a warning (a routine euler-interfaces commit
+// adding a sparse new chain must not freeze the manifest and time-bomb a
+// total 502 when the stale window expires), while every enabled chain must
+// be present and valid — an unusable payload for a chain users are actually
+// on is exactly the poison the stale window exists to outlive.
+//
 // Required keys are the ones whose absence breaks SDK builds or the core
 // lend/borrow surfaces on every chain (all current manifest entries carry
 // the full key set; peripheral keys are deliberately not required so a
-// sparse future entry degrades a feature, not the whole manifest).
+// sparse entry degrades a feature, not the chain).
 const REQUIRED_CORE_ADDRS = ['eVaultFactory', 'evc', 'permit2'] as const
 const REQUIRED_LENS_ADDRS = ['accountLens', 'oracleLens', 'utilsLens', 'vaultLens'] as const
 
@@ -54,10 +62,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isEvmAddress = (value: unknown): boolean =>
   typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
 
+const readChainId = (entry: unknown): number | undefined => {
+  if (!isRecord(entry)) return undefined
+  const { chainId } = entry
+  return Number.isInteger(chainId) && (chainId as number) > 0 ? chainId as number : undefined
+}
+
 const isValidDeployment = (entry: unknown): boolean => {
   if (!isRecord(entry)) return false
-  const { chainId, addresses } = entry
-  if (!Number.isInteger(chainId) || (chainId as number) <= 0) return false
+  if (readChainId(entry) === undefined) return false
+  const { addresses } = entry
   if (!isRecord(addresses)) return false
 
   const { coreAddrs, lensAddrs } = addresses
@@ -67,8 +81,38 @@ const isValidDeployment = (entry: unknown): boolean => {
     && REQUIRED_LENS_ADDRS.every(key => isEvmAddress(lensAddrs[key]))
 }
 
-const isValidDeploymentManifest = (data: unknown): data is unknown[] =>
-  Array.isArray(data) && data.length > 0 && data.every(isValidDeployment)
+/** Returns the admitted (valid) entries, or throws when the payload is unusable. */
+function admitDeploymentManifest(data: unknown): unknown[] {
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error('Upstream returned an invalid deployment manifest')
+  }
+
+  const valid: unknown[] = []
+  const dropped: (number | 'unknown')[] = []
+  for (const entry of data) {
+    if (isValidDeployment(entry)) valid.push(entry)
+    else dropped.push(readChainId(entry) ?? 'unknown')
+  }
+
+  const validChainIds = new Set(valid.map(entry => readChainId(entry)))
+  const unusableEnabledChains = getEnabledChainIds().filter(id => !validChainIds.has(id))
+  if (unusableEnabledChains.length > 0) {
+    throw new Error(
+      `Upstream manifest is missing or invalid for enabled chains: ${unusableEnabledChains.join(', ')}`,
+    )
+  }
+  if (valid.length === 0) {
+    throw new Error('Upstream returned an invalid deployment manifest')
+  }
+
+  if (dropped.length > 0) {
+    logger.warn(
+      { ctx: 'euler-chains', dropped },
+      'dropped invalid manifest entries for non-enabled chains',
+    )
+  }
+  return valid
+}
 
 /**
  * Forces an upstream fetch, bypassing the fresh-cache check. Used by the
@@ -84,11 +128,9 @@ export function refreshEulerChains(): Promise<unknown[]> {
     }
 
     const data: unknown = await resp.json()
-    if (!isValidDeploymentManifest(data)) {
-      throw new Error('Upstream returned an invalid deployment manifest')
-    }
-    cache.set(CACHE_KEY, data)
-    return data
+    const admitted = admitDeploymentManifest(data)
+    cache.set(CACHE_KEY, admitted)
+    return admitted
   })
 }
 
