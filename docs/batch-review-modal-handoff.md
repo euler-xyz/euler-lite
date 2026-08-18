@@ -218,11 +218,19 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
   requirement immediately before anything irreversible is sent; if the grant/revoke set no
   longer matches what was reviewed (an allowance granted or revoked elsewhere), execution
   aborts, the review is invalidated, and the error asks the user to reopen review.
-- **Submitted but unconfirmed** → once the wallet accepts the core submission (the batch
-  transaction or the Safe proposal), a confirmation failure no longer offers a blind
-  replay. The cart is quarantined with the submitted hash; the next Execute press first
-  verifies it on-chain — a landed submission retires its entries, a reverted/cancelled one
-  releases the retry, an unverifiable one keeps the quarantine and explains why.
+- **Submitted but unconfirmed** → every wallet acceptance during execution is classified
+  by the plan step that produced it (prerequisite approval/plugin call vs. the value-moving
+  batch transaction or Safe proposal). A failure after an accepted *prerequisite* retries
+  plainly — those steps are idempotent. A failure after the accepted *core* submission
+  quarantines the cart with the submitted hash, durably in `localStorage`: clearing the
+  cart, switching wallets, or reloading does not drop it. The next Execute press for that
+  wallet/chain first verifies the submission on-chain — a landed submission retires its
+  entries (or resets the cart when it landed mid-plan or the ceremony did not survive a
+  reload), a reverted/cancelled one releases the retry, an unverifiable one keeps the
+  quarantine and explains why. Once the core submission's receipt confirmed, a later
+  failure (for example a revoke) retires the covered entries instead of quarantining.
+  The direct migration pages (`migrate.vue`, `borrow/swap.vue`) apply the same quarantine
+  per flow via `utils/directSubmissionQuarantine.ts`.
 
 ## Accessibility
 - Row header is a real `<button>`; expose `aria-expanded` bound to the open state and

@@ -1,5 +1,5 @@
-import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
+import { computed, effectScope, nextTick, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
+import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -34,12 +34,14 @@ import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFi
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import type { PreparedPlanBroadcast } from '~/composables/useEulerTx'
+import { getSafeWalletProvider, type ReceiptClientLike } from '~/utils/safeWalletTransactions'
 import {
-  getSafeWalletProvider,
-  SafeTransactionStatusUnknownError,
-  waitForSafeTransactionExecution,
-  type ReceiptClientLike,
-} from '~/utils/safeWalletTransactions'
+  clearPendingSubmission,
+  readPendingSubmission,
+  resolvePendingSubmissionOutcome,
+  writePendingSubmission,
+  type PendingSubmissionRecord,
+} from '~/utils/pendingSubmissions'
 import {
   assertPreparedPlanSignatureParity,
   type PreparedPlanSignatureSubstitution,
@@ -313,18 +315,34 @@ const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
 /**
  * A core batch submission the wallet accepted but whose confirmation failed —
- * it may still land. While set, the cart is quarantined against blind replays
- * (re-executing could duplicate every entry the submission covered): the next
- * execute attempt first reconciles this submission on-chain, and proceeds only
- * when it definitively did not land. Landed submissions retire their entries.
+ * it may still land. While set, execution for the record's wallet/chain is
+ * quarantined against blind replays (re-executing could duplicate every entry
+ * the submission covered): the next execute attempt first reconciles this
+ * submission on-chain, and proceeds only when it definitively did not land.
+ * Landed submissions retire their entries.
+ *
+ * The record itself is durable (localStorage) so cart clearing, account
+ * switches, and page reloads cannot erase the unknown outcome — only a
+ * terminal reconcile verdict releases it. The ceremony context exists only
+ * while the submitting session is alive; a record hydrated after a reload has
+ * no ceremony, so a landed verdict then resets the cart instead of retiring
+ * the exact covered entries.
  */
 const pendingCoreSubmission = shallowRef<{
-  kind: PreparedPlanBroadcast['kind']
-  hash: Hash
-  chainId: number
-  ceremony: PreparedBatchExecution
-  shouldRefreshExternalMigrationPositions: boolean
+  record: PendingSubmissionRecord
+  context?: { ceremony: PreparedBatchExecution }
 } | null>(null)
+
+/**
+ * Rehydrate the quarantine mirror from its durable record. Runs once at
+ * module init (covering reloads and reconnects); tests re-run it after
+ * seeding or clearing storage to simulate those lifecycles.
+ */
+export const hydratePendingBatchSubmissionFromStorage = () => {
+  const record = readPendingSubmission('batch')
+  pendingCoreSubmission.value = record ? { record } : null
+}
+hydratePendingBatchSubmissionFromStorage()
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
@@ -2481,9 +2499,10 @@ export const useTxBatch = () => {
   const clearBatch = () => {
     invalidatePendingAddContext()
     invalidateBatchReview()
-    // Emptying the cart discards the entries a quarantined submission covered,
-    // so a replay can no longer duplicate them — the quarantine is moot.
-    pendingCoreSubmission.value = null
+    // A quarantined core submission deliberately survives cart clearing: the
+    // on-chain outcome of what was already sent does not change because the
+    // local cart emptied, and the next execute attempt for that wallet/chain
+    // must still reconcile it before anything new is sent.
     resimToken++
     entries.value = []
     layers.value = []
@@ -2888,21 +2907,29 @@ export const useTxBatch = () => {
 
   /**
    * Resolve a quarantined core submission before anything new is sent.
-   * Returns true only when the submission definitively did not land (or none
-   * exists). A landed submission retires its entries here instead; an
-   * unverifiable one keeps the quarantine — replaying while the original may
-   * still confirm would duplicate every entry it covered.
+   * Returns true when this attempt may proceed: no quarantine exists, the
+   * record belongs to a different wallet/chain (nothing this attempt sends
+   * can duplicate it, so the record is kept for the wallet that owns it), or
+   * the submission definitively did not land. A landed submission retires the
+   * entries it covered and stops the attempt; an unverifiable one keeps the
+   * quarantine — replaying while the original may still confirm would
+   * duplicate every entry it covered.
    */
-  const reconcilePendingCoreSubmission = async (scope?: TrackedExecutionScope): Promise<boolean> => {
+  const reconcilePendingCoreSubmission = async (
+    scope: TrackedExecutionScope | undefined,
+    attempt: { owner?: Address, chainId?: number },
+  ): Promise<boolean> => {
     const submission = pendingCoreSubmission.value
     if (!submission) return true
+    const { record, context } = submission
 
-    const finalizeLandedSubmission = () => {
+    const matchesAttempt = !!attempt.owner
+      && attempt.owner === record.owner
+      && attempt.chainId === record.chainId
+
+    const releaseQuarantine = () => {
       pendingCoreSubmission.value = null
-      execError.value = undefined
-      retireExecutedEntries(submission.ceremony)
-      if (submission.shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
-      scope?.markSucceeded()
+      clearPendingSubmission('batch')
     }
     const keepQuarantined = () => {
       execError.value = 'A previous batch submission may still confirm on-chain and could not be verified yet. Wait a moment and execute again — the submission is re-checked before anything is re-sent.'
@@ -2910,53 +2937,56 @@ export const useTxBatch = () => {
     }
 
     const sdk = await getEulerSdkFresh()
-    const provider = sdk.providerService?.getProvider(submission.chainId) as ReceiptClientLike | undefined
-    if (!provider) return keepQuarantined()
+    const provider = sdk.providerService?.getProvider(record.chainId) as ReceiptClientLike | undefined
+    const outcome = await resolvePendingSubmissionOutcome(record, {
+      provider,
+      getSafeWalletProvider,
+      connector: connector.value,
+      safeStatusTimeoutMs: 8_000,
+    })
 
-    if (submission.kind === 'transaction') {
-      const receipt = await provider.getTransactionReceipt({ hash: submission.hash }).catch(() => undefined)
-      if (!receipt) return keepQuarantined()
-      if (receipt.status === 'success') {
-        finalizeLandedSubmission()
-        return false
-      }
-      // Definitively reverted on-chain — the retry cannot duplicate anything.
-      pendingCoreSubmission.value = null
+    if (outcome === 'unknown') {
+      // Fail closed only for the wallet/chain that owns the record — a
+      // different wallet's attempt cannot duplicate it and may proceed.
+      return matchesAttempt ? keepQuarantined() : true
+    }
+    if (outcome === 'not-landed') {
+      // Definitively cancelled/reverted — a retry cannot duplicate anything.
+      releaseQuarantine()
       return true
     }
 
-    // Safe proposal: only the Safe app knows whether the proposal executed
-    // and under which final transaction hash.
-    const walletProvider = await getSafeWalletProvider(connector.value)
-    if (!walletProvider) return keepQuarantined()
-    try {
-      const { receipt } = await waitForSafeTransactionExecution({
-        submittedHash: submission.hash,
-        walletProvider,
-        publicClient: provider,
-        timeoutMs: 8_000,
-      })
-      if (receipt.status === 'success') {
-        finalizeLandedSubmission()
-        return false
-      }
-      pendingCoreSubmission.value = null
-      return true
+    // Landed: on-chain state moved under any standing review.
+    releaseQuarantine()
+    invalidateBatchReview()
+    if (!record.completesPlan) {
+      // Defensive: a landed intermediate submission means part of the plan
+      // executed and part did not. The layered cart cannot represent that
+      // split — reset it and require rebuilding what remains.
+      clearBatch()
+      // The entries watcher runs an empty-batch resimulate reset on the next
+      // flush that wipes execError — let it settle so the explanation stays.
+      await nextTick()
+      execError.value = 'A previous batch submission confirmed on-chain but did not complete the reviewed batch. The cart was reset — review your positions and rebuild the remaining operations.'
+      return false
     }
-    catch (error) {
-      if (error instanceof SafeTransactionStatusUnknownError) return keepQuarantined()
-      if (error instanceof Error && (
-        error.message === 'Safe transaction was cancelled'
-        || error.message === 'Safe transaction failed'
-      )) {
-        pendingCoreSubmission.value = null
-        return true
-      }
-      // Anything else is not a definitive verdict — fail closed and keep the
-      // quarantine rather than risk a duplicate submission.
-      logWarn('useTxBatch/reconcilePendingCoreSubmission', error)
-      return keepQuarantined()
+    execError.value = undefined
+    if (context) {
+      retireExecutedEntries(context.ceremony)
     }
+    else if (matchesAttempt) {
+      // No ceremony survives a reload, so the exact covered entries are
+      // unknown — reset the cart rather than leave already-executed entries
+      // queued to run again.
+      clearBatch()
+    }
+    if (record.refreshExternalPositions) scheduleExternalMigrationRefreshes()
+    if (!matchesAttempt) return true
+    scope?.markSucceeded()
+    if (entries.value.length > 0) {
+      execError.value = 'The previous batch submission confirmed on-chain. The operations it covered were removed — review the remaining ones before executing again.'
+    }
+    return false
   }
 
   /** Execute the immutable ceremony produced for the current batch review. */
@@ -3000,16 +3030,32 @@ export const useTxBatch = () => {
     }
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let execution = reviewedExecution
-    // Set once the wallet accepts the core submission — from that point a
-    // failure no longer means "nothing was sent".
-    let coreBroadcast: PreparedPlanBroadcast | undefined
+    // Ordered execution tracking. The executor waits for each submission's
+    // receipt before the next send and re-fires the broadcast as 'confirmed'
+    // once that receipt lands, so at most the single latest 'submitted'
+    // broadcast has an unknown outcome at any failure.
+    let unconfirmedBroadcast: PreparedPlanBroadcast | undefined
+    // The value-moving submission (Safe bundle or EVC batch) whose receipt
+    // definitively confirmed — a failure after this point must not allow the
+    // covered entries to be executed again.
+    let confirmedValueMovingBroadcast: PreparedPlanBroadcast | undefined
+    const trackBroadcast = (broadcast: PreparedPlanBroadcast) => {
+      if (broadcast.status === 'submitted') {
+        unconfirmedBroadcast = broadcast
+        return
+      }
+      unconfirmedBroadcast = undefined
+      if (broadcast.item === 'bundle' || broadcast.item === 'evcBatch') {
+        confirmedValueMovingBroadcast = broadcast
+      }
+    }
     // Set when this attempt itself invalidated the review (quarantine or
     // prerequisite drift): the error must still surface even though the
     // ceremony's generation check now fails.
     let ceremonyInvalidatedForRetry = false
     try {
       if (!await restorePendingBeforeRetry()) return
-      if (!await reconcilePendingCoreSubmission(scope)) return
+      if (!await reconcilePendingCoreSubmission(scope, { owner: attemptOwner, chainId: attemptChainId })) return
       execution ??= await prepareBatchExecution()
       assertBatchExecutionCurrent(execution)
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
@@ -3050,9 +3096,7 @@ export const useTxBatch = () => {
         }, {
           allowSingleCall: true,
           beforeBroadcast: () => assertBatchExecutionCurrent(execution),
-          onBroadcast: (broadcast) => {
-            coreBroadcast = broadcast
-          },
+          onBroadcast: trackBroadcast,
         })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
@@ -3080,9 +3124,7 @@ export const useTxBatch = () => {
       assertBatchExecutionCurrent(execution)
       await executePreparedPlan(prepared, {
         beforeBroadcast: () => assertBatchExecutionCurrent(execution),
-        onBroadcast: (broadcast) => {
-          coreBroadcast = broadcast
-        },
+        onBroadcast: trackBroadcast,
       })
       await revokeAfterSuccess(grantedRevokes, {
         shouldNotify: () => isBatchExecutionWalletCurrent(execution!),
@@ -3098,19 +3140,37 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      if (coreBroadcast && execution) {
-        // The wallet accepted the core submission but confirmation failed —
-        // it may still land. Quarantine the cart against a blind replay (it
-        // would duplicate every covered entry) and force reconciliation on
-        // the next execute attempt.
-        pendingCoreSubmission.value = {
-          kind: coreBroadcast.kind,
-          hash: coreBroadcast.hash,
+      const ambiguousValueMoving = unconfirmedBroadcast && execution
+        && (unconfirmedBroadcast.item === 'bundle' || unconfirmedBroadcast.item === 'evcBatch')
+        ? unconfirmedBroadcast
+        : undefined
+      if (ambiguousValueMoving && execution) {
+        // The wallet accepted a value-moving submission but its confirmation
+        // failed — it may still land. Quarantine durably (the record survives
+        // cart clearing, account switches, and reloads) and force on-chain
+        // reconciliation before anything is re-sent. Ambiguous approval or
+        // plugin submissions are idempotent prerequisites and need none of
+        // this — an ordinary retry re-runs them safely.
+        const record: PendingSubmissionRecord = {
+          kind: ambiguousValueMoving.kind,
+          hash: ambiguousValueMoving.hash,
           chainId: execution.chainId,
-          ceremony: execution,
-          shouldRefreshExternalMigrationPositions: entries.value.some(entry =>
+          owner: getAddress(execution.owner),
+          completesPlan: ambiguousValueMoving.completesPlan,
+          refreshExternalPositions: entries.value.some(entry =>
             entry.refreshExternalMigrationPositions && entry.id in execution!.reviewByEntryId),
+          submittedAt: Date.now(),
         }
+        pendingCoreSubmission.value = { record, context: { ceremony: execution } }
+        writePendingSubmission('batch', record)
+        ceremonyInvalidatedForRetry = true
+        invalidateBatchReview()
+      }
+      else if (confirmedValueMovingBroadcast && execution) {
+        // The value-moving submission definitively landed and a later step
+        // (revoke, cleanup) failed. Retire the covered entries so a retry
+        // cannot execute them a second time.
+        retireExecutedEntries(execution)
         ceremonyInvalidatedForRetry = true
         invalidateBatchReview()
       }
@@ -3122,8 +3182,11 @@ export const useTxBatch = () => {
         shouldNotify: () => !execution || isBatchExecutionWalletCurrent(execution),
       })
       let decodedError = await describeExecError(error)
-      if (coreBroadcast && execution) {
+      if (ambiguousValueMoving) {
         decodedError = `${decodedError} The submission may still confirm — executing again first verifies it on-chain before anything is re-sent.`
+      }
+      else if (confirmedValueMovingBroadcast && execution) {
+        decodedError = `${decodedError} The batch itself confirmed on-chain; the operations it covered were removed from the cart.`
       }
       const shouldSurfaceError = execution
         ? isBatchExecutionCurrent(execution)

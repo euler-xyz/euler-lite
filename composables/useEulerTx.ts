@@ -100,13 +100,29 @@ const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider
 }
 
 /**
- * A plan submission the wallet has accepted but whose confirmation is still
- * pending: an on-chain transaction hash for standard wallets, or a safeTxHash
- * proposal id for Safes (resolvable only through the Safe wallet provider).
+ * A plan submission the wallet has accepted: an on-chain transaction hash for
+ * standard wallets, or a safeTxHash proposal id for Safes (resolvable only
+ * through the Safe wallet provider).
+ *
+ * The executor waits for each submission's receipt before sending the next,
+ * so it re-fires the same broadcast with status 'confirmed' once the receipt
+ * succeeded — at any failure, at most the single latest 'submitted' broadcast
+ * without a matching 'confirmed' has an unknown outcome.
  */
 export interface PreparedPlanBroadcast {
   kind: 'transaction' | 'proposal'
   hash: Hash
+  /**
+   * Which plan step produced the submission. 'bundle' (one Safe proposal for
+   * the whole plan) and 'evcBatch' move value; 'approval' and 'pluginCall'
+   * (TOS/oracle prerequisites) are idempotent and safe to re-run.
+   */
+  item: 'bundle' | 'evcBatch' | 'approval' | 'pluginCall'
+  /** Zero-based position in this attempt's send order. */
+  index: number
+  /** True when no value-moving submission follows this one in the plan. */
+  completesPlan: boolean
+  status: 'submitted' | 'confirmed'
 }
 
 export interface PlanDepositInput {
@@ -1031,7 +1047,14 @@ export const useEulerTx = () => {
       currentChainId: currentAccount.chainId,
     })
     options?.beforeSignature?.()
-    const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    // Pin the signature request to the connector that just passed the wallet
+    // context check. Without it wagmi resolves the currently-active connector
+    // at request time, so a connector switched during the check-to-sign gap
+    // would receive the request despite never being validated.
+    const signature = await signTypedDataAsync({
+      ...(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+      ...(currentAccount.connector ? { connector: currentAccount.connector } : {}),
+    })
     const postMigrationAuthorization = request.postMigrationAuthorization
       ? await signMigrationAuthorization(request.postMigrationAuthorization, options)
       : undefined
@@ -1623,7 +1646,12 @@ export const useEulerTx = () => {
       usePermit2: isKnownSafe ? false : signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        // Same pinning as sendTransaction: sign through the captured
+        // connector, never the currently-active one.
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          ...(connector ? { connector } : {}),
+        })
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
@@ -1692,6 +1720,7 @@ export const useEulerTx = () => {
 
     if (safeWalletProvider && connector) {
       // Prepared plans already ran plugins and approval resolution.
+      let bundleBroadcast: PreparedPlanBroadcast | undefined
       const bundled = await executePlanAsSafeBundle({
         plan: effectivePrepared.plan,
         chainId: prepared.chainId,
@@ -1701,13 +1730,40 @@ export const useEulerTx = () => {
         safeWalletProvider,
         sdk,
         beforeBroadcast: options?.beforeBroadcast,
-        onBroadcast: hash => options?.onBroadcast?.({ kind: 'proposal', hash }),
+        onBroadcast: (hash) => {
+          bundleBroadcast = {
+            kind: 'proposal',
+            hash,
+            item: 'bundle',
+            index: 0,
+            completesPlan: true,
+            status: 'submitted',
+          }
+          options?.onBroadcast?.(bundleBroadcast)
+        },
       })
       if (bundled) {
+        // A truthy bundle result means the proposal executed with a
+        // successful receipt — the submission's outcome is no longer unknown.
+        if (bundleBroadcast) {
+          options?.onBroadcast?.({ ...bundleBroadcast, status: 'confirmed' })
+        }
         finalizeExecution(bundled)
         return bundled
       }
     }
+
+    // Ordered execution tracking for the sequential path. The executor emits
+    // a pre-send progress event (no hash) naming the item about to be sent,
+    // then waits for the receipt and re-emits with the confirmed hash — so
+    // the item announced by the latest pre-send event classifies the next
+    // wallet submission, and a hash-bearing event confirms it.
+    const planItems = effectivePrepared.plan
+    const lastValueMovingItem = [...planItems].reverse().find(item =>
+      item.type !== 'requiredApproval' && item.type !== 'cowSwap')
+    let pendingSend: { item: PreparedPlanBroadcast['item'], completesPlan: boolean } | undefined
+    let lastSubmitted: PreparedPlanBroadcast | undefined
+    let sendIndex = 0
 
     const sendTransaction = buildSendTransaction({
       isOkx,
@@ -1717,10 +1773,19 @@ export const useEulerTx = () => {
       beforeBroadcast: options?.beforeBroadcast,
       // A Safe's sequential fallback submits through the Safe app, so the
       // wallet returns a safeTxHash proposal id, not an on-chain hash.
-      onBroadcast: hash => options?.onBroadcast?.({
-        kind: safeWalletProvider ? 'proposal' : 'transaction',
-        hash,
-      }),
+      onBroadcast: (hash) => {
+        lastSubmitted = {
+          kind: safeWalletProvider ? 'proposal' : 'transaction',
+          hash,
+          // Fail toward the strict classification: an unattributed send is
+          // treated as the value-moving batch, never as a re-runnable step.
+          item: pendingSend?.item ?? 'evcBatch',
+          index: sendIndex++,
+          completesPlan: pendingSend?.completesPlan ?? true,
+          status: 'submitted',
+        }
+        options?.onBroadcast?.(lastSubmitted)
+      },
       resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
@@ -1735,10 +1800,33 @@ export const useEulerTx = () => {
       sendTransaction,
       signTypedData: async (typedData) => {
         options?.beforeBroadcast?.()
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        // Same pinning as sendTransaction: sign through the captured
+        // connector, never the currently-active one.
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          ...(connector ? { connector } : {}),
+        })
         return signature as Hex
       },
-      onProgress: (_progress: TransactionPlanExecutionProgress) => {},
+      onProgress: (progress: TransactionPlanExecutionProgress) => {
+        if (progress.hash) {
+          // Receipt confirmed for the outstanding submission.
+          if (lastSubmitted) {
+            options?.onBroadcast?.({ ...lastSubmitted, status: 'confirmed' })
+            lastSubmitted = undefined
+          }
+          return
+        }
+        if (progress.status === 'approval') {
+          pendingSend = { item: 'approval', completesPlan: false }
+        }
+        else if (progress.status === 'evcBatch' || progress.status === 'contractCall') {
+          pendingSend = {
+            item: progress.status === 'evcBatch' ? 'evcBatch' : 'pluginCall',
+            completesPlan: !!progress.item && progress.item === lastValueMovingItem,
+          }
+        }
+      },
     })
 
     finalizeExecution(result)
@@ -1802,6 +1890,7 @@ export const useEulerTx = () => {
       effectivePrepared = { ...prepared, usePermit2: false }
     }
 
+    let bundleBroadcast: PreparedPlanBroadcast | undefined
     const bundled = await executePlanAsSafeBundle({
       plan: effectivePrepared.plan,
       chainId: prepared.chainId,
@@ -1813,9 +1902,24 @@ export const useEulerTx = () => {
       extraCalls,
       allowSingleCall: options?.allowSingleCall,
       beforeBroadcast: options?.beforeBroadcast,
-      onBroadcast: hash => options?.onBroadcast?.({ kind: 'proposal', hash }),
+      onBroadcast: (hash) => {
+        bundleBroadcast = {
+          kind: 'proposal',
+          hash,
+          item: 'bundle',
+          index: 0,
+          completesPlan: true,
+          status: 'submitted',
+        }
+        options?.onBroadcast?.(bundleBroadcast)
+      },
     })
     if (!bundled) return undefined
+    // A truthy bundle result means the proposal executed with a successful
+    // receipt — the submission's outcome is no longer unknown.
+    if (bundleBroadcast) {
+      options?.onBroadcast?.({ ...bundleBroadcast, status: 'confirmed' })
+    }
     finalizeExecution(bundled)
     return bundled
   }

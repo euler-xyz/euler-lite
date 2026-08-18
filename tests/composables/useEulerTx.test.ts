@@ -4,7 +4,7 @@ import type { MigrationAuthorizationRequest, TransactionPlan, TransactionPlanPre
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { useEulerTx } from '~/composables/useEulerTx'
+import { useEulerTx, type PreparedPlanBroadcast } from '~/composables/useEulerTx'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 
@@ -144,6 +144,32 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
   })
 
+  it('signs through the connector that passed the context check, not the live one', async () => {
+    const reviewedConnector = { id: 'io.metamask', name: 'MetaMask' }
+    const swappedConnector = { id: 'io.rabby', name: 'Rabby' }
+    let activeConnector: unknown = reviewedConnector
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: activeConnector,
+    }) as never)
+    wagmiMocks.signTypedDataAsync.mockResolvedValue(`0x${'ab'.repeat(65)}`)
+    const { signMigrationAuthorization } = useEulerTx()
+
+    await signMigrationAuthorization(typedAuthorizationRequest, {
+      // A connector switch in the check-to-sign gap: the swapped connector
+      // was never validated and must not receive the signature request.
+      beforeSignature: () => {
+        activeConnector = swappedConnector
+      },
+    })
+
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ connector: reviewedConnector }),
+    )
+  })
+
   it('prepares the transaction plan with the caller-pinned signature mode', async () => {
     const prepare = vi.fn().mockResolvedValue({ kind: 'prepared' })
     vi.mocked(getEulerSdkForChain).mockResolvedValue({
@@ -204,6 +230,91 @@ describe('useEulerTx migration authorization cleanup', () => {
     await expect(executePreparedPlan(prepared))
       .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind: 'account' })
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('pins mid-plan typed-data signatures to the connector captured at execution start', async () => {
+    const reviewedConnector = { id: 'io.metamask', name: 'MetaMask' }
+    const swappedConnector = { id: 'io.rabby', name: 'Rabby' }
+    let activeConnector: unknown = reviewedConnector
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: activeConnector,
+    }) as never)
+    wagmiMocks.signTypedDataAsync.mockResolvedValue(`0x${'ab'.repeat(65)}`)
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (typedData: unknown) => Promise<Hex>
+    }) => {
+      // The wallet switches connectors while the executor is mid-plan; the
+      // permit signature must still go to the connector that was validated.
+      activeConnector = swappedConnector
+      await signTypedData({ domain: {}, types: {}, primaryType: 'PermitSingle', message: {} })
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan({
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared)
+
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ connector: reviewedConnector }),
+    )
+  })
+
+  it('classifies ordered broadcasts so only the last submission stays unconfirmed on failure', async () => {
+    const approvalItem = { type: 'requiredApproval', resolved: [] }
+    const evcBatchItem = { type: 'evcBatch', items: [] }
+    const plan = [approvalItem, evcBatchItem] as unknown as TransactionPlan
+    const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction, onProgress }: {
+      sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
+      onProgress: (progress: { status: string, item?: unknown, hash?: Hash }) => void
+    }) => {
+      // Mirrors the SDK executor contract: a pre-send progress event names
+      // the item about to be sent, the receipt is awaited, and the same
+      // event re-fires with the confirmed hash before the next send.
+      onProgress({ status: 'approval', item: approvalItem })
+      const approvalHash = await sendTransaction({ to: TOKEN, data: '0x01' })
+      onProgress({ status: 'approval', item: approvalItem, hash: approvalHash })
+      onProgress({ status: 'evcBatch', item: evcBatchItem })
+      await sendTransaction({ to: TOKEN, data: '0x02' })
+      throw new Error('Receipt polling failed.')
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const broadcasts: PreparedPlanBroadcast[] = []
+
+    await expect(executePreparedPlan({
+      __prepared: true,
+      plan,
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared, {
+      onBroadcast: b => broadcasts.push(b),
+    })).rejects.toThrow('Receipt polling failed.')
+
+    // The confirmed approval is retryable history; only the accepted-but-
+    // unconfirmed value-moving batch is left ambiguous for quarantine.
+    expect(broadcasts).toEqual([
+      expect.objectContaining({ kind: 'transaction', item: 'approval', index: 0, completesPlan: false, status: 'submitted' }),
+      expect.objectContaining({ item: 'approval', index: 0, status: 'confirmed' }),
+      expect.objectContaining({ kind: 'transaction', item: 'evcBatch', index: 1, completesPlan: true, status: 'submitted' }),
+    ])
   })
 
   it('runs the caller freshness guard after async setup and before a plain broadcast', async () => {
@@ -394,6 +505,20 @@ describe('useEulerTx Safe wallet bundling', () => {
     // The sequential path never runs: no per-transaction sends.
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('reports the Safe bundle as submitted on acceptance and confirmed after its receipt', async () => {
+    const { executePreparedPlan } = useEulerTx()
+    const broadcasts: PreparedPlanBroadcast[] = []
+
+    await executePreparedPlan(buildPrepared(approvedPlan), {
+      onBroadcast: b => broadcasts.push(b),
+    })
+
+    expect(broadcasts).toEqual([
+      expect.objectContaining({ kind: 'proposal', hash: SAFE_TX_HASH, item: 'bundle', completesPlan: true, status: 'submitted' }),
+      expect.objectContaining({ kind: 'proposal', hash: SAFE_TX_HASH, item: 'bundle', status: 'confirmed' }),
+    ])
   })
 
   it('falls back to sequential execution for single-call plans', async () => {

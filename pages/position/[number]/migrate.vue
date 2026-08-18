@@ -43,6 +43,9 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
 import { assertPreparedPlanSignatureParity } from '~/utils/preparedPlanParity'
+import { createDirectSubmissionQuarantine } from '~/utils/directSubmissionQuarantine'
+import { getSafeWalletProvider, type ReceiptClientLike } from '~/utils/safeWalletTransactions'
+import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { assertWalletExecutionContext, createReviewedWalletContextGuard, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
 import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -964,6 +967,42 @@ function assertMigrationPreparedParity(
   }
 }
 
+/**
+ * Replay protection for the direct outgoing flow: once the wallet accepts the
+ * migration submission, a confirmation failure must not degrade into an
+ * ordinary retry — the accepted hash/proposal id is retained durably and
+ * verified on-chain before another attempt may send anything.
+ */
+const migrationQuarantine = createDirectSubmissionQuarantine({
+  flow: 'outgoing-migration',
+  getSafeWalletProvider,
+})
+
+/**
+ * Returns false (after surfacing what happened) when the attempt must stop:
+ * a previously accepted submission confirmed on-chain, so the position state
+ * the review was built on is gone. It may have been this migration or an
+ * earlier one for the same wallet — never finalize the current attempt on it.
+ * An unresolved outcome throws and blocks the retry.
+ */
+async function reconcileMigrationQuarantine(preview: OutgoingMigrationPreview): Promise<boolean> {
+  const sdk = await getEulerSdkFresh()
+  const targetChainId = preview.input.target.chainId
+  const verdict = await migrationQuarantine.reconcileBeforeAttempt({
+    owner: preview.input.owner,
+    chainId: targetChainId,
+    provider: sdk.providerService?.getProvider(targetChainId) as ReceiptClientLike | undefined,
+    connector: walletConnector.value,
+  })
+  if (verdict === 'clear') return true
+  invalidateOutgoingMigrationPreview(preview.key)
+  schedulePostMigrationRefreshes()
+  showError(verdict === 'landed'
+    ? 'A previous migration submission confirmed on-chain. Positions were refreshed — review the migration again before retrying.'
+    : 'A previous migration submission confirmed on-chain but may not have completed its plan. Positions were refreshed — review the migration again before retrying.')
+  return false
+}
+
 async function sendMigration(execution: TrackedExecutionScope, preview: OutgoingMigrationPreview) {
   const { input: reviewedInput, account: reviewedAccount, position: migrationPosition, useSignatures } = preview
   const { target } = reviewedInput
@@ -981,6 +1020,7 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
       currentChainId: walletChainId.value,
     })
     if (!await restorePendingBeforeRetry()) return
+    if (!await reconcileMigrationQuarantine(preview)) return
     const input = reviewedInput
     // The reviewed deadline is embedded in the displayed payload and plan, so
     // an expired one can only produce an on-chain revert — force a re-review
@@ -1006,6 +1046,7 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
     // sign, nothing to grant, and nothing of ours to revoke afterwards.
     let authorization: SignedMigrationAuthorization | undefined
     const revokeTxs: MigrationAuthorizationRevoke[] = []
+    migrationQuarantine.begin({ owner: reviewedInput.owner, chainId: target.chainId })
     try {
       if (preview.bundledReview) {
         // The review promised ONE atomic Safe proposal. Revalidate that mode
@@ -1072,12 +1113,23 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
         await revokeAfterAbort(revokeTxs)
         return
       }
-      await executePreparedPlan(prepared, { beforeBroadcast: assertReviewedWalletContext })
+      await executePreparedPlan(prepared, {
+        beforeBroadcast: assertReviewedWalletContext,
+        onBroadcast: migrationQuarantine.track,
+      })
     }
     catch (err) {
+      // A wallet-accepted submission whose confirmation failed may still land
+      // — retain it durably so the next attempt reconciles it on-chain before
+      // sending anything.
+      const quarantined = migrationQuarantine.sealFailure()
       // Covers a rejected batch, a failed prepare, and a stale grant.
       await revokeAfterAbort(revokeTxs)
-      throw toMigrationExecutionError(err)
+      const executionError = toMigrationExecutionError(err)
+      if (quarantined && executionError instanceof Error) {
+        throw new Error(`${executionError.message} The submission may still confirm — retrying first verifies it on-chain before anything is re-sent.`, { cause: err })
+      }
+      throw executionError
     }
 
     await revokeAfterSuccess(revokeTxs)
@@ -1162,7 +1214,11 @@ async function sendMigrationAsSafeBundle(
   if (!ok) return 'aborted'
 
   beforeBroadcast()
-  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true, beforeBroadcast })
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, {
+    allowSingleCall: true,
+    beforeBroadcast,
+    onBroadcast: migrationQuarantine.track,
+  })
   if (!result) {
     throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
   }
