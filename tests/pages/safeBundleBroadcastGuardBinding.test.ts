@@ -33,4 +33,11 @@ describe('direct Safe-bundle broadcast guard binding', () => {
     // an invoked form here would reintroduce the confirmation-time snapshot.
     expect(source).not.toContain('expectedConnectorKey: walletConnectorContextKey()')
   })
+
+  it.each(FLOWS)('$direction: the standard direct flow binds the reviewed-context guard', ({ path }) => {
+    const source = readFileSync(join(process.cwd(), path), 'utf8')
+    // The standard (non-bundled) confirmation must also guard its signature
+    // requests, grant broadcasts, and plan broadcast against the reviewed key.
+    expect(source).toContain('createReviewedWalletContextGuard({')
+  })
 })

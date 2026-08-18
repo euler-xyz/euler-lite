@@ -99,6 +99,16 @@ const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider
   return false
 }
 
+/**
+ * A plan submission the wallet has accepted but whose confirmation is still
+ * pending: an on-chain transaction hash for standard wallets, or a safeTxHash
+ * proposal id for Safes (resolvable only through the Safe wallet provider).
+ */
+export interface PreparedPlanBroadcast {
+  kind: 'transaction' | 'proposal'
+  hash: Hash
+}
+
 export interface PlanDepositInput {
   vaultAddress: Address
   assetAddress: Address
@@ -1217,6 +1227,7 @@ export const useEulerTx = () => {
     connector,
     resolveHash,
     beforeBroadcast,
+    onBroadcast,
   }: {
     isOkx: boolean
     expectedAccount: Address
@@ -1231,6 +1242,13 @@ export const useEulerTx = () => {
     resolveHash?: (hash: Hash) => Promise<Hash>
     /** Final caller-owned freshness check at the wallet submission boundary. */
     beforeBroadcast?: () => void
+    /**
+     * Fires as soon as the wallet accepted the submission, before any
+     * confirmation wait — from here on the transaction may land even if
+     * everything after this point fails, so callers use it to stop treating
+     * a later error as "never sent".
+     */
+    onBroadcast?: (hash: Hash) => void
   }) => {
     let okxDelayPending = false
     const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
@@ -1258,6 +1276,7 @@ export const useEulerTx = () => {
         okxDelayPending = true
       }
       const submittedHash = hash as Hash
+      onBroadcast?.(submittedHash)
       return resolveHash ? resolveHash(submittedHash) : submittedHash
     }
     return send
@@ -1354,12 +1373,14 @@ export const useEulerTx = () => {
   const executeMigrationAuthorizationGrants = async (
     request: MigrationAuthorizationRequest,
     broadcastRevokes: MigrationAuthorizationRevoke[] = [],
+    options?: { beforeBroadcast?: () => void },
   ): Promise<MigrationAuthorizationRevoke[]> => {
     const { grants, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
     await sendPlainTransactions(grants, {
       // The request was prepared for this exact owner/network. Do not let a
       // wallet switch during the preceding SDK reads retarget the grant.
       walletContext: { account: request.owner, chainId: request.chainId },
+      beforeBroadcast: options?.beforeBroadcast,
       onBroadcast: (index, walletContext) => {
         const revoke = revokesByGrant[index]
         if (revoke) {
@@ -1435,7 +1456,7 @@ export const useEulerTx = () => {
    * bundling brings no benefit (fewer than two calls) — callers fall back to
    * sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, beforeBroadcast }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, beforeBroadcast, onBroadcast }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
@@ -1456,6 +1477,13 @@ export const useEulerTx = () => {
     allowSingleCall?: boolean
     /** Final caller-owned freshness check at the Safe submission boundary. */
     beforeBroadcast?: () => void
+    /**
+     * Fires once the Safe accepted the proposal (safeTxHash exists), before
+     * the execution wait — from here on the proposal may execute even if
+     * status polling fails, so callers use it to stop treating a later error
+     * as "never submitted".
+     */
+    onBroadcast?: (safeTxHash: Hash) => void
   }) => {
     let planCalls
     try {
@@ -1508,6 +1536,7 @@ export const useEulerTx = () => {
     if (!/^0x[0-9a-f]{64}$/i.test(id)) {
       throw new Error('Safe wallet returned an unexpected call bundle id')
     }
+    onBroadcast?.(id as Hash)
 
     const execution = await waitForSafeTransactionExecution({
       submittedHash: id as Hash,
@@ -1606,7 +1635,17 @@ export const useEulerTx = () => {
 
   const executePreparedPlan = async (
     prepared: TransactionPlanPrepared,
-    options?: { beforeBroadcast?: () => void },
+    options?: {
+      beforeBroadcast?: () => void
+      /**
+       * Fires as soon as the wallet accepted a plan submission (a transaction
+       * hash for standard wallets, a safeTxHash proposal id for Safes),
+       * before any confirmation wait. From that point the submission may land
+       * even when a later step throws, so callers use it to distinguish
+       * "never sent" from "sent but unconfirmed".
+       */
+      onBroadcast?: (broadcast: PreparedPlanBroadcast) => void
+    },
   ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1662,6 +1701,7 @@ export const useEulerTx = () => {
         safeWalletProvider,
         sdk,
         beforeBroadcast: options?.beforeBroadcast,
+        onBroadcast: hash => options?.onBroadcast?.({ kind: 'proposal', hash }),
       })
       if (bundled) {
         finalizeExecution(bundled)
@@ -1675,6 +1715,12 @@ export const useEulerTx = () => {
       expectedChainId: prepared.chainId,
       connector,
       beforeBroadcast: options?.beforeBroadcast,
+      // A Safe's sequential fallback submits through the Safe app, so the
+      // wallet returns a safeTxHash proposal id, not an on-chain hash.
+      onBroadcast: hash => options?.onBroadcast?.({
+        kind: safeWalletProvider ? 'proposal' : 'transaction',
+        hash,
+      }),
       resolveHash: safeWalletProvider
         ? async submittedHash => (await waitForSafeTransactionExecution({
           submittedHash,
@@ -1717,7 +1763,12 @@ export const useEulerTx = () => {
       before?: readonly PlainTxRequest[]
       after?: readonly PlainTxRequest[]
     },
-    options?: { allowSingleCall?: boolean, beforeBroadcast?: () => void },
+    options?: {
+      allowSingleCall?: boolean
+      beforeBroadcast?: () => void
+      /** See executePreparedPlan — fires with the safeTxHash proposal id. */
+      onBroadcast?: (broadcast: PreparedPlanBroadcast) => void
+    },
   ) => {
     if (isSpyMode.value) {
       throw new Error('Transactions are disabled in spy mode')
@@ -1762,6 +1813,7 @@ export const useEulerTx = () => {
       extraCalls,
       allowSingleCall: options?.allowSingleCall,
       beforeBroadcast: options?.beforeBroadcast,
+      onBroadcast: hash => options?.onBroadcast?.({ kind: 'proposal', hash }),
     })
     if (!bundled) return undefined
     finalizeExecution(bundled)

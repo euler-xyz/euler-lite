@@ -214,6 +214,15 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
 - **Cart edited during broadcast** → a same-wallet add while the execution is in flight
   makes the ceremony stale; on success only the executed entries are removed from the
   cart (the mid-flight addition survives and resimulates), instead of clearing everything.
+- **Prerequisite drift** → non-signature migration entries re-derive their authorization
+  requirement immediately before anything irreversible is sent; if the grant/revoke set no
+  longer matches what was reviewed (an allowance granted or revoked elsewhere), execution
+  aborts, the review is invalidated, and the error asks the user to reopen review.
+- **Submitted but unconfirmed** → once the wallet accepts the core submission (the batch
+  transaction or the Safe proposal), a confirmation failure no longer offers a blind
+  replay. The cart is quarantined with the submitted hash; the next Execute press first
+  verifies it on-chain — a landed submission retires its entries, a reverted/cancelled one
+  releases the retry, an unverifiable one keeps the quarantine and explains why.
 
 ## Accessibility
 - Row header is a real `<button>`; expose `aria-expanded` bound to the open state and

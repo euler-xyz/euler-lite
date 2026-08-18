@@ -83,7 +83,8 @@ import {
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
-import { assertWalletExecutionContext, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
+import { assertPreparedPlanSignatureParity } from '~/utils/preparedPlanParity'
+import { assertWalletExecutionContext, createReviewedWalletContextGuard, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
 import type { CollateralOption } from '~/types/collateral-option'
 import { getMigrationAuthorizationSignatureSubstitutions } from '~/utils/migrationAuthorizationSignatures'
 import {
@@ -2885,16 +2886,17 @@ const resolveInboundExternalMigrationAuthorization = async (
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   revokeTxs: MigrationAuthorizationRevoke[],
   useSignatures: boolean,
+  beforeWalletAction?: () => void,
 ): Promise<SignedMigrationAuthorization | undefined> => {
   // No request means the grant is already live on-chain: nothing to sign, and
   // nothing of ours to revoke afterwards.
   if (!authorizationRequest) return undefined
   if (useSignatures) {
-    return signMigrationAuthorization(authorizationRequest)
+    return signMigrationAuthorization(authorizationRequest, { beforeSignature: beforeWalletAction })
   }
   // Must be mined before the plan is built: the connector reads the live
   // allowance to decide whether the batch still needs an authorization.
-  await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs)
+  await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs, { beforeBroadcast: beforeWalletAction })
   return undefined
 }
 
@@ -3447,6 +3449,30 @@ const reviewInboundExternalMigration = async () => {
   }
 }
 
+/**
+ * Prove the confirm-time prepared plan is byte-identical to the reviewed
+ * calldata outside the authorized signature substitutions. Any other
+ * divergence drops the cached preview and forces a re-review — the wallet
+ * must never receive calldata the modal did not display.
+ */
+const assertInboundMigrationPreparedParity = (
+  preview: InboundExternalMigrationPreview,
+  resolved: TransactionPlanPrepared,
+  authorization: SignedMigrationAuthorization | undefined,
+) => {
+  try {
+    assertPreparedPlanSignatureParity({
+      reviewed: preview.calldataPrepared,
+      resolved,
+      substitutions: getMigrationAuthorizationSignatureSubstitutions(authorization),
+    })
+  }
+  catch (err) {
+    inboundExternalMigrationPreview.value = null
+    throw err
+  }
+}
+
 const sendInboundExternalMigration = async (execution: TrackedExecutionScope, preview: InboundExternalMigrationPreview) => {
   isSubmitting.value = true
   clearSimulationError()
@@ -3509,19 +3535,32 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
           isSafeWallet: () => isSafeWallet.value,
           connectorContextKey: walletConnectorContextKey,
         })
-        const outcome = await sendInboundExternalMigrationAsSafeBundle(input, authorizationRequest, account, useSignatures, preview.authorizationDeadline, beforeBroadcast)
+        const outcome = await sendInboundExternalMigrationAsSafeBundle(preview, authorizationRequest, account, beforeBroadcast)
         if (outcome === 'aborted') return
         finishInboundExternalMigrationSuccess(execution, input)
         return
       }
 
-      const authorization = await resolveInboundExternalMigrationAuthorization(authorizationRequest, revokeTxs, useSignatures)
+      // Every wallet action below (signature request, grant broadcasts, plan
+      // broadcast) re-asserts the reviewed account/chain/connector — the
+      // awaits between them are where a delayed wallet switch can land.
+      const assertReviewedWalletContext = createReviewedWalletContextGuard({
+        expectedAccount: input.owner,
+        expectedChainId: migrationChainId,
+        expectedConnectorKey: preview.connectorContextKey,
+        currentAccount: () => address.value as Address | undefined,
+        currentChainId: () => walletChainId.value,
+        connectorContextKey: walletConnectorContextKey,
+      })
+      const authorization = await resolveInboundExternalMigrationAuthorization(authorizationRequest, revokeTxs, useSignatures, assertReviewedWalletContext)
       inboundExternalPlan.value = await buildInboundExternalMigrationExecutionPlan(input, authorization, useSignatures, preview.authorizationDeadline)
       inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, {
         account,
         chainId: migrationChainId,
+        prefetch: preview.prefetch,
         usePermit2: useSignatures,
       })
+      assertInboundMigrationPreparedParity(preview, inboundExternalPreparedPlan.value, authorization)
       const ok = await runPreparedSimulation(inboundExternalPreparedPlan.value, buildRefinanceStateOverrideOptions())
       if (!ok) {
         await revokeAfterAbort(revokeTxs)
@@ -3529,7 +3568,7 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
       }
       // executePreparedPlan resolves once the migration tx is mined (it returns
       // receipts), so everything below runs after on-chain confirmation.
-      await executePreparedPlan(inboundExternalPreparedPlan.value)
+      await executePreparedPlan(inboundExternalPreparedPlan.value, { beforeBroadcast: assertReviewedWalletContext })
     }
     catch (err) {
       // Covers a rejected batch, a failed prepare, and a stale grant.
@@ -3600,20 +3639,23 @@ function finishInboundExternalMigrationSuccess(execution: TrackedExecutionScope,
  * is no Safe bundle context — the caller falls back to sequential grants.
  */
 const sendInboundExternalMigrationAsSafeBundle = async (
-  input: InboundExternalMigrationInput,
+  preview: InboundExternalMigrationPreview,
   authorizationRequest: MigrationAuthorizationRequest,
   account: Account<IHasVaultAddress> | undefined,
-  useSignatures: boolean,
-  deadline: bigint,
   beforeBroadcast: () => void,
 ): Promise<'executed' | 'aborted'> => {
+  const { input, useSignatures, authorizationDeadline: deadline } = preview
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
   const simulation = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures, deadline)
   const prepared = await prepareTransactionPlan(simulation.plan, {
     account,
     chainId: input.position.chainId,
+    prefetch: preview.prefetch,
     usePermit2: false,
   })
+  // Bundled reviews are always no-signature, so the reviewed calldata is the
+  // simulation-variant plan itself: parity holds with zero substitutions.
+  assertInboundMigrationPreparedParity(preview, prepared, undefined)
   inboundExternalPlan.value = simulation.plan
   inboundExternalPreparedPlan.value = prepared
   const ok = await runPreparedSimulation(
@@ -3711,6 +3753,15 @@ const addInboundExternalMigrationToBatch = async () => {
                       postTxsByPreTx: revokesByGrant,
                     }
                   : undefined,
+                // Authorization state can drift between review and execution
+                // (an allowance granted or revoked elsewhere) — the reviewed
+                // grant/revoke set would no longer match what should run.
+                revalidatePrerequisites: async () => {
+                  const fresh = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+                  if (migrationAuthorizationPayloadKey(fresh) !== migrationAuthorizationPayloadKey(request)) {
+                    throw new Error('Authorization requirements changed since review — reopen review and try again.')
+                  }
+                },
                 grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
                 revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
               }

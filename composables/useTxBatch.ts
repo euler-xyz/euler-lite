@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -33,6 +33,13 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import type { PreparedPlanBroadcast } from '~/composables/useEulerTx'
+import {
+  getSafeWalletProvider,
+  SafeTransactionStatusUnknownError,
+  waitForSafeTransactionExecution,
+  type ReceiptClientLike,
+} from '~/utils/safeWalletTransactions'
 import {
   assertPreparedPlanSignatureParity,
   type PreparedPlanSignatureSubstitution,
@@ -118,6 +125,15 @@ export interface BatchEntryExecutionCeremony {
   }>
   /** The review/copy plan contains placeholder authorization signatures. */
   usesPlaceholderSignatures?: boolean
+  /**
+   * Re-resolve this entry's prerequisite authorization against current chain
+   * state and throw when it no longer matches what the review displayed.
+   * The ceremony's prerequisites are frozen at review time, so on-chain drift
+   * (an allowance granted or revoked elsewhere) would otherwise broadcast
+   * grant/revoke calls the user never reviewed. Invoked at the last
+   * pre-broadcast boundary of the batch execution.
+   */
+  revalidatePrerequisites?: () => Promise<void>
 }
 
 /** One immutable batch review ceremony used for display, export, and execution. */
@@ -135,6 +151,8 @@ export interface PreparedBatchExecution {
   readonly grants: readonly BatchEntryExternalTx[]
   readonly revokes: readonly BatchEntryExternalTx[]
   readonly prerequisites: readonly Readonly<BatchEntryExecutionPrerequisites>[]
+  /** Per-entry prerequisite drift checks, run before anything irreversible. */
+  readonly prerequisiteRevalidations: readonly (() => Promise<void>)[]
   readonly reviewByEntryId: Readonly<Record<string, {
     readonly plan: TransactionPlan
     readonly grantSteps: readonly DisplayStep[]
@@ -293,6 +311,20 @@ const isSimulating = ref(false)
 const simError = ref<string | undefined>(undefined)
 const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
+/**
+ * A core batch submission the wallet accepted but whose confirmation failed —
+ * it may still land. While set, the cart is quarantined against blind replays
+ * (re-executing could duplicate every entry the submission covered): the next
+ * execute attempt first reconciles this submission on-chain, and proceeds only
+ * when it definitively did not land. Landed submissions retire their entries.
+ */
+const pendingCoreSubmission = shallowRef<{
+  kind: PreparedPlanBroadcast['kind']
+  hash: Hash
+  chainId: number
+  ceremony: PreparedBatchExecution
+  shouldRefreshExternalMigrationPositions: boolean
+} | null>(null)
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
@@ -2449,6 +2481,9 @@ export const useTxBatch = () => {
   const clearBatch = () => {
     invalidatePendingAddContext()
     invalidateBatchReview()
+    // Emptying the cart discards the entries a quarantined submission covered,
+    // so a replay can no longer duplicate them — the quarantine is moot.
+    pendingCoreSubmission.value = null
     resimToken++
     entries.value = []
     layers.value = []
@@ -2623,7 +2658,7 @@ export const useTxBatch = () => {
     const mode = willBundlePrerequisites.value ? 'safe-bundled' : 'standard'
 
     const preparationPromise = (async (): Promise<PreparedBatchExecution> => {
-      const { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, reviewByEntryId } = mode === 'safe-bundled'
+      const { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, prerequisiteRevalidations, reviewByEntryId } = mode === 'safe-bundled'
         ? await collectBundledExecution()
         : await collectStandardExecution()
       const sdk = await getEulerSdkFresh()
@@ -2687,6 +2722,7 @@ export const useTxBatch = () => {
         grants: Object.freeze(grants.map(tx => Object.freeze({ ...tx }))),
         revokes: Object.freeze(revokes.map(tx => Object.freeze({ ...tx }))),
         prerequisites: frozenPrerequisites,
+        prerequisiteRevalidations: Object.freeze([...prerequisiteRevalidations]),
         reviewByEntryId: frozenReview,
       })
       assertBatchExecutionCurrent(ceremony)
@@ -2714,6 +2750,7 @@ export const useTxBatch = () => {
     const grants: BatchEntryExternalTx[] = []
     const revokes: BatchEntryExternalTx[] = []
     const prerequisites: BatchEntryExecutionPrerequisites[] = []
+    const prerequisiteRevalidations: Array<() => Promise<void>> = []
     const reviewByEntryId: Record<string, {
       plan: TransactionPlan
       grantSteps: DisplayStep[]
@@ -2727,6 +2764,7 @@ export const useTxBatch = () => {
         plans.push(execution.plan)
         planResolvers.push(execution.resolveExecutionPlan)
         usesPlaceholderSignatures ||= execution.usesPlaceholderSignatures === true
+        if (execution.revalidatePrerequisites) prerequisiteRevalidations.push(execution.revalidatePrerequisites)
         if (prerequisite) {
           prerequisites.push(prerequisite)
           grants.push(...prerequisite.preTxs)
@@ -2759,7 +2797,7 @@ export const useTxBatch = () => {
       reviewByEntryId[entry.id] = { plan, grantSteps: [], revokeSteps: [] }
     }
 
-    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, reviewByEntryId }
+    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, prerequisiteRevalidations, reviewByEntryId }
   }
 
   /**
@@ -2773,6 +2811,7 @@ export const useTxBatch = () => {
     let usesPlaceholderSignatures = false
     const grants: BatchEntryExternalTx[] = []
     const revokesByEntry: BatchEntryExternalTx[][] = []
+    const prerequisiteRevalidations: Array<() => Promise<void>> = []
     const reviewByEntryId: Record<string, {
       plan: TransactionPlan
       grantSteps: DisplayStep[]
@@ -2785,6 +2824,7 @@ export const useTxBatch = () => {
         plans.push(bundled.plan)
         planResolvers.push(bundled.resolveExecutionPlan)
         usesPlaceholderSignatures ||= bundled.usesPlaceholderSignatures === true
+        if (bundled.revalidatePrerequisites) prerequisiteRevalidations.push(bundled.revalidatePrerequisites)
         grants.push(...(prerequisite?.preTxs ?? []))
         revokesByEntry.push(prerequisite?.postTxs ?? [])
         reviewByEntryId[entry.id] = {
@@ -2802,7 +2842,7 @@ export const useTxBatch = () => {
       revokesByEntry.push([])
       reviewByEntryId[entry.id] = { plan, grantSteps: [], revokeSteps: [] }
     }
-    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes: revokesByEntry.reverse().flat(), prerequisites: [], reviewByEntryId }
+    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes: revokesByEntry.reverse().flat(), prerequisites: [], prerequisiteRevalidations, reviewByEntryId }
   }
 
   /**
@@ -2843,6 +2883,79 @@ export const useTxBatch = () => {
           walletContext: grantWalletContext,
         })))
       }
+    }
+  }
+
+  /**
+   * Resolve a quarantined core submission before anything new is sent.
+   * Returns true only when the submission definitively did not land (or none
+   * exists). A landed submission retires its entries here instead; an
+   * unverifiable one keeps the quarantine — replaying while the original may
+   * still confirm would duplicate every entry it covered.
+   */
+  const reconcilePendingCoreSubmission = async (scope?: TrackedExecutionScope): Promise<boolean> => {
+    const submission = pendingCoreSubmission.value
+    if (!submission) return true
+
+    const finalizeLandedSubmission = () => {
+      pendingCoreSubmission.value = null
+      execError.value = undefined
+      retireExecutedEntries(submission.ceremony)
+      if (submission.shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+      scope?.markSucceeded()
+    }
+    const keepQuarantined = () => {
+      execError.value = 'A previous batch submission may still confirm on-chain and could not be verified yet. Wait a moment and execute again — the submission is re-checked before anything is re-sent.'
+      return false
+    }
+
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(submission.chainId) as ReceiptClientLike | undefined
+    if (!provider) return keepQuarantined()
+
+    if (submission.kind === 'transaction') {
+      const receipt = await provider.getTransactionReceipt({ hash: submission.hash }).catch(() => undefined)
+      if (!receipt) return keepQuarantined()
+      if (receipt.status === 'success') {
+        finalizeLandedSubmission()
+        return false
+      }
+      // Definitively reverted on-chain — the retry cannot duplicate anything.
+      pendingCoreSubmission.value = null
+      return true
+    }
+
+    // Safe proposal: only the Safe app knows whether the proposal executed
+    // and under which final transaction hash.
+    const walletProvider = await getSafeWalletProvider(connector.value)
+    if (!walletProvider) return keepQuarantined()
+    try {
+      const { receipt } = await waitForSafeTransactionExecution({
+        submittedHash: submission.hash,
+        walletProvider,
+        publicClient: provider,
+        timeoutMs: 8_000,
+      })
+      if (receipt.status === 'success') {
+        finalizeLandedSubmission()
+        return false
+      }
+      pendingCoreSubmission.value = null
+      return true
+    }
+    catch (error) {
+      if (error instanceof SafeTransactionStatusUnknownError) return keepQuarantined()
+      if (error instanceof Error && (
+        error.message === 'Safe transaction was cancelled'
+        || error.message === 'Safe transaction failed'
+      )) {
+        pendingCoreSubmission.value = null
+        return true
+      }
+      // Anything else is not a definitive verdict — fail closed and keep the
+      // quarantine rather than risk a duplicate submission.
+      logWarn('useTxBatch/reconcilePendingCoreSubmission', error)
+      return keepQuarantined()
     }
   }
 
@@ -2887,11 +3000,37 @@ export const useTxBatch = () => {
     }
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let execution = reviewedExecution
+    // Set once the wallet accepts the core submission — from that point a
+    // failure no longer means "nothing was sent".
+    let coreBroadcast: PreparedPlanBroadcast | undefined
+    // Set when this attempt itself invalidated the review (quarantine or
+    // prerequisite drift): the error must still surface even though the
+    // ceremony's generation check now fails.
+    let ceremonyInvalidatedForRetry = false
     try {
       if (!await restorePendingBeforeRetry()) return
+      if (!await reconcilePendingCoreSubmission(scope)) return
       execution ??= await prepareBatchExecution()
       assertBatchExecutionCurrent(execution)
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
+      // Prerequisite requirements were captured at review time; on-chain state
+      // (granted operators, existing approvals) can drift during the wallet
+      // waits above. Re-derive them immediately before anything irreversible
+      // and force a fresh review on any mismatch.
+      const revalidateCeremonyPrerequisites = async () => {
+        for (const revalidate of execution!.prerequisiteRevalidations) {
+          assertBatchExecutionCurrent(execution!)
+          try {
+            await revalidate()
+          }
+          catch (error) {
+            ceremonyInvalidatedForRetry = true
+            invalidateBatchReview()
+            throw error
+          }
+          assertBatchExecutionCurrent(execution!)
+        }
+      }
       const prepared = execution.resolvePreparedPlan
         ? await execution.resolvePreparedPlan(() => assertBatchExecutionCurrent(execution!))
         : execution.prepared
@@ -2904,12 +3043,16 @@ export const useTxBatch = () => {
         // pre-flight validation. Atomicity also removes the unwind
         // bookkeeping: a failed proposal reverts its grants with it.
         assertBatchExecutionCurrent(execution)
+        await revalidateCeremonyPrerequisites()
         const result = await executePreparedPlanWithPlainCalls(prepared, {
           before: execution.grants,
           after: execution.revokes,
         }, {
           allowSingleCall: true,
           beforeBroadcast: () => assertBatchExecutionCurrent(execution),
+          onBroadcast: (broadcast) => {
+            coreBroadcast = broadcast
+          },
         })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
@@ -2927,6 +3070,7 @@ export const useTxBatch = () => {
         return
       }
 
+      await revalidateCeremonyPrerequisites()
       await sendExecutionPrerequisites(execution, grantedRevokes)
       assertBatchExecutionCurrent(execution)
       // Final on-chain gas estimate before the irreversible core broadcast. If
@@ -2936,6 +3080,9 @@ export const useTxBatch = () => {
       assertBatchExecutionCurrent(execution)
       await executePreparedPlan(prepared, {
         beforeBroadcast: () => assertBatchExecutionCurrent(execution),
+        onBroadcast: (broadcast) => {
+          coreBroadcast = broadcast
+        },
       })
       await revokeAfterSuccess(grantedRevokes, {
         shouldNotify: () => isBatchExecutionWalletCurrent(execution!),
@@ -2951,13 +3098,38 @@ export const useTxBatch = () => {
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      // The batch never landed, so no granted authorization should be left
-      // standing. Entries stay in the cart for a retry, which re-grants.
+      if (coreBroadcast && execution) {
+        // The wallet accepted the core submission but confirmation failed —
+        // it may still land. Quarantine the cart against a blind replay (it
+        // would duplicate every covered entry) and force reconciliation on
+        // the next execute attempt.
+        pendingCoreSubmission.value = {
+          kind: coreBroadcast.kind,
+          hash: coreBroadcast.hash,
+          chainId: execution.chainId,
+          ceremony: execution,
+          shouldRefreshExternalMigrationPositions: entries.value.some(entry =>
+            entry.refreshExternalMigrationPositions && entry.id in execution!.reviewByEntryId),
+        }
+        ceremonyInvalidatedForRetry = true
+        invalidateBatchReview()
+      }
+      // Unwinding granted authorizations is safe regardless of whether the
+      // core landed: after a landed core it is the normal success-order
+      // cleanup, and before a still-pending core it cleanly reverts that
+      // core, resolving the ambiguity in the safe direction.
       await revokeAfterAbort(grantedRevokes, {
         shouldNotify: () => !execution || isBatchExecutionWalletCurrent(execution),
       })
-      const decodedError = await describeExecError(error)
-      if (execution ? isBatchExecutionCurrent(execution) : isAttemptCurrent()) {
+      let decodedError = await describeExecError(error)
+      if (coreBroadcast && execution) {
+        decodedError = `${decodedError} The submission may still confirm — executing again first verifies it on-chain before anything is re-sent.`
+      }
+      const shouldSurfaceError = execution
+        ? isBatchExecutionCurrent(execution)
+        || (ceremonyInvalidatedForRetry && isBatchExecutionWalletCurrent(execution))
+        : isAttemptCurrent()
+      if (shouldSurfaceError) {
         execError.value = decodedError
       }
     }
@@ -3064,6 +3236,7 @@ export const useTxBatch = () => {
     simError,
     isExecuting,
     execError,
+    hasPendingCoreSubmission: computed(() => !!pendingCoreSubmission.value),
     hasFailedOps,
     canExecuteBatch,
     hasInsufficientBalance,

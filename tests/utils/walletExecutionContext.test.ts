@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
-import { assertWalletExecutionContext, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
+import { assertWalletExecutionContext, createReviewedWalletContextGuard, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
 import type { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 
 const OWNER = '0x1111111111111111111111111111111111111111' as Address
@@ -35,6 +35,88 @@ describe('assertWalletExecutionContext', () => {
       currentAccount: OWNER,
       currentChainId: 8453,
     })).toThrow(expect.objectContaining<Partial<WalletExecutionContextChangedError>>({
+      name: 'WalletExecutionContextChangedError',
+      kind: 'chain',
+    }))
+  })
+})
+
+describe('createReviewedWalletContextGuard', () => {
+  const REVIEWED_CONNECTOR_KEY = 'metamask:uid-1'
+  const WALLET_CHANGED = 'Wallet changed since review — please review the migration again.'
+
+  const walletState = () => ({
+    account: OWNER as Address | undefined,
+    chainId: 1 as number | undefined,
+    connectorKey: REVIEWED_CONNECTOR_KEY as string | undefined,
+  })
+
+  const guardFor = (
+    state: ReturnType<typeof walletState>,
+    expectedConnectorKey: string | undefined = REVIEWED_CONNECTOR_KEY,
+  ) => createReviewedWalletContextGuard({
+    expectedAccount: OWNER,
+    expectedChainId: 1,
+    expectedConnectorKey,
+    currentAccount: () => state.account,
+    currentChainId: () => state.chainId,
+    connectorContextKey: () => state.connectorKey,
+  })
+
+  it('passes when the reviewed context is intact at the wallet-action boundary', () => {
+    const state = walletState()
+    const guard = guardFor(state)
+    expect(() => guard()).not.toThrow()
+  })
+
+  it('rejects a connector switch completed before guard construction (delayed authorization lookup)', () => {
+    const state = walletState()
+    // The switch lands while confirmation awaits pending restoration or the
+    // fresh authorization lookup — BEFORE the guard exists. Because the
+    // expected key comes from the reviewed preview, the replacement connector
+    // can never become the guard's accepted baseline.
+    state.connectorKey = 'walletconnect:uid-2'
+    const guard = guardFor(state)
+    expect(() => guard()).toThrow(WALLET_CHANGED)
+  })
+
+  it('rejects a same-account connector switch between wallet actions', () => {
+    const state = walletState()
+    const guard = guardFor(state)
+    expect(() => guard()).not.toThrow()
+    // Same owner, same chain — only the connector changed while a signature
+    // request or grant broadcast was in flight.
+    state.connectorKey = 'walletconnect:uid-2'
+    expect(() => guard()).toThrow(WALLET_CHANGED)
+  })
+
+  it('rejects a disconnected connector during delayed planning', () => {
+    const state = walletState()
+    const guard = guardFor(state)
+    state.connectorKey = undefined
+    expect(() => guard()).toThrow(WALLET_CHANGED)
+  })
+
+  it('fails closed when the review captured no connector key', () => {
+    const state = walletState()
+    state.connectorKey = undefined
+    const guard = guardFor(state, undefined)
+    expect(() => guard()).toThrow(WALLET_CHANGED)
+  })
+
+  it('still rejects account and chain drift through the wallet context assertion', () => {
+    const accountState = walletState()
+    const accountGuard = guardFor(accountState)
+    accountState.account = OTHER_OWNER
+    expect(() => accountGuard()).toThrow(expect.objectContaining<Partial<WalletExecutionContextChangedError>>({
+      name: 'WalletExecutionContextChangedError',
+      kind: 'account',
+    }))
+
+    const chainState = walletState()
+    const chainGuard = guardFor(chainState)
+    chainState.chainId = 8453
+    expect(() => chainGuard()).toThrow(expect.objectContaining<Partial<WalletExecutionContextChangedError>>({
       name: 'WalletExecutionContextChangedError',
       kind: 'chain',
     }))

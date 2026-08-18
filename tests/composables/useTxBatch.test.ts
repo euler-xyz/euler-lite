@@ -1291,6 +1291,7 @@ describe('useTxBatch execution errors', () => {
     expect(eulerTxMocks.estimateGasForPreparedPlan).toHaveBeenCalledWith(prepared)
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, {
       beforeBroadcast: expect.any(Function),
+      onBroadcast: expect.any(Function),
     })
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
     expect(batch.entryCount.value).toBe(0)
@@ -1539,7 +1540,7 @@ describe('useTxBatch execution prerequisites', () => {
     expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenNthCalledWith(2, signedPlan)
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(
       expect.objectContaining({ plan: signedPlan }),
-      { beforeBroadcast: expect.any(Function) },
+      { beforeBroadcast: expect.any(Function), onBroadcast: expect.any(Function) },
     )
   })
 
@@ -1884,6 +1885,7 @@ describe('useTxBatch execution prerequisites', () => {
     }, {
       allowSingleCall: true,
       beforeBroadcast: expect.any(Function),
+      onBroadcast: expect.any(Function),
     })
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     // Revokes rode in the proposal — nothing standalone to send afterwards.
@@ -2360,6 +2362,7 @@ describe('useTxBatch execution prerequisites', () => {
     expect(eulerTxMocks.prepareTransactionPlan).toHaveBeenCalledTimes(1)
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(reviewedPrepared, {
       beforeBroadcast: expect.any(Function),
+      onBroadcast: expect.any(Function),
     })
   })
 
@@ -2411,6 +2414,7 @@ describe('useTxBatch execution prerequisites', () => {
     }, {
       allowSingleCall: true,
       beforeBroadcast: expect.any(Function),
+      onBroadcast: expect.any(Function),
     })
   })
 
@@ -2534,6 +2538,7 @@ describe('useTxBatch execution prerequisites', () => {
     }, {
       allowSingleCall: true,
       beforeBroadcast: expect.any(Function),
+      onBroadcast: expect.any(Function),
     })
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
   })
@@ -2638,6 +2643,7 @@ describe('useTxBatch execution prerequisites', () => {
     }, {
       allowSingleCall: true,
       beforeBroadcast: expect.any(Function),
+      onBroadcast: expect.any(Function),
     })
   })
 
@@ -2691,6 +2697,7 @@ describe('useTxBatch execution prerequisites', () => {
     )
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledWith(prepared, {
       beforeBroadcast: expect.any(Function),
+      onBroadcast: expect.any(Function),
     })
   })
 
