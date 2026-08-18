@@ -49,6 +49,8 @@ import {
   type PlainTxRequest,
 } from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
+import { assertNoConflictingPendingSubmission } from '~/utils/pendingSubmissionGate'
+import { walletNeverAcceptedSubmission } from '~/utils/pendingSubmissions'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
@@ -100,18 +102,24 @@ const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider
 }
 
 /**
- * A plan submission the wallet has accepted: an on-chain transaction hash for
- * standard wallets, or a safeTxHash proposal id for Safes (resolvable only
- * through the Safe wallet provider).
+ * One plan step's lifecycle at the wallet boundary.
+ *
+ * 'armed' fires immediately before the wallet is invoked for the step — the
+ * wallet call is itself an external side-effect: it may accept and submit the
+ * request, then disconnect or fail to return an id. From 'armed' on, the step
+ * must be treated as possibly-sent until a terminal signal. 'submitted' fires
+ * once the wallet returned an id (an on-chain transaction hash for standard
+ * wallets, or a safeTxHash proposal id for Safes, resolvable only through the
+ * Safe wallet provider). 'rejected' fires only when the wallet provably never
+ * accepted the armed request (explicit user rejection or a pre-dispatch
+ * connector failure). 'confirmed' re-fires the submitted broadcast once its
+ * receipt succeeded.
  *
  * The executor waits for each submission's receipt before sending the next,
- * so it re-fires the same broadcast with status 'confirmed' once the receipt
- * succeeded — at any failure, at most the single latest 'submitted' broadcast
- * without a matching 'confirmed' has an unknown outcome.
+ * so at any failure at most the single latest armed/submitted broadcast
+ * without a terminal signal has an unknown outcome.
  */
-export interface PreparedPlanBroadcast {
-  kind: 'transaction' | 'proposal'
-  hash: Hash
+export type PreparedPlanBroadcast = {
   /**
    * Which plan step produced the submission. 'bundle' (one Safe proposal for
    * the whole plan) and 'evcBatch' move value; 'approval' and 'pluginCall'
@@ -122,8 +130,10 @@ export interface PreparedPlanBroadcast {
   index: number
   /** True when no value-moving submission follows this one in the plan. */
   completesPlan: boolean
-  status: 'submitted' | 'confirmed'
-}
+} & (
+  | { status: 'armed' | 'rejected', kind?: undefined, hash?: undefined }
+  | { status: 'submitted' | 'confirmed', kind: 'transaction' | 'proposal', hash: Hash }
+)
 
 export interface PlanDepositInput {
   vaultAddress: Address
@@ -1250,6 +1260,8 @@ export const useEulerTx = () => {
     connector,
     resolveHash,
     beforeBroadcast,
+    onArm,
+    onSubmitError,
     onBroadcast,
   }: {
     isOkx: boolean
@@ -1265,6 +1277,19 @@ export const useEulerTx = () => {
     resolveHash?: (hash: Hash) => Promise<Hash>
     /** Final caller-owned freshness check at the wallet submission boundary. */
     beforeBroadcast?: () => void
+    /**
+     * Fires immediately before the wallet is invoked. The wallet call is
+     * itself an external side-effect — it may accept and dispatch the
+     * request, then fail before returning its id — so callers persist replay
+     * protection here, with no hash yet.
+     */
+    onArm?: () => void
+    /**
+     * Fires when the wallet invocation threw, before the error propagates —
+     * so callers can release the armed state when the error proves the
+     * wallet never accepted the request.
+     */
+    onSubmitError?: (error: unknown) => void
     /**
      * Fires as soon as the wallet accepted the submission, before any
      * confirmation wait — from here on the transaction may land even if
@@ -1287,14 +1312,22 @@ export const useEulerTx = () => {
         currentChainId: currentAccount.chainId,
       })
       beforeBroadcast?.()
-      const hash = await sendTransactionAsync({
-        account: expectedAccount,
-        chainId: expectedChainId,
-        ...(connector ? { connector } : {}),
-        to,
-        data: data as Hex,
-        value: value ?? 0n,
-      })
+      onArm?.()
+      let hash: Hash
+      try {
+        hash = await sendTransactionAsync({
+          account: expectedAccount,
+          chainId: expectedChainId,
+          ...(connector ? { connector } : {}),
+          to,
+          data: data as Hex,
+          value: value ?? 0n,
+        }) as Hash
+      }
+      catch (error) {
+        onSubmitError?.(error)
+        throw error
+      }
       if (isOkx && (data as Hex).toLowerCase().startsWith(ERC20_APPROVE_SELECTOR)) {
         okxDelayPending = true
       }
@@ -1479,7 +1512,7 @@ export const useEulerTx = () => {
    * bundling brings no benefit (fewer than two calls) — callers fall back to
    * sequential execution.
    */
-  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, beforeBroadcast, onBroadcast }: {
+  const executePlanAsSafeBundle = async ({ plan, chainId, owner, provider, connector, safeWalletProvider, sdk, extraCalls, allowSingleCall, beforeBroadcast, onArm, onSubmitError, onBroadcast }: {
     plan: TransactionPlan
     chainId: number
     owner: Address
@@ -1500,6 +1533,14 @@ export const useEulerTx = () => {
     allowSingleCall?: boolean
     /** Final caller-owned freshness check at the Safe submission boundary. */
     beforeBroadcast?: () => void
+    /**
+     * Fires immediately before the bundle is handed to the wallet — the
+     * wallet may accept the proposal and then fail to return its id, so
+     * callers persist replay protection here, with no id yet.
+     */
+    onArm?: () => void
+    /** Fires when the wallet invocation threw, before the error propagates. */
+    onSubmitError?: (error: unknown) => void
     /**
      * Fires once the Safe accepted the proposal (safeTxHash exists), before
      * the execution wait — from here on the proposal may execute even if
@@ -1542,20 +1583,30 @@ export const useEulerTx = () => {
       currentChainId: currentAccount.chainId,
     })
     beforeBroadcast?.()
+    onArm?.()
 
     // Pin submission to the connector whose provider was identified as Safe.
     // Without it, wagmi resolves the currently-active connector, and a
     // same-account connector switch would submit through one provider while
     // status polling watches another.
-    const { id } = await sendCalls(config, {
-      account: owner,
-      chainId,
-      connector,
-      forceAtomic: true,
-      calls,
-    })
+    let id: string
+    try {
+      ({ id } = await sendCalls(config, {
+        account: owner,
+        chainId,
+        connector,
+        forceAtomic: true,
+        calls,
+      }))
+    }
+    catch (error) {
+      onSubmitError?.(error)
+      throw error
+    }
     // Safe returns the safeTxHash as the bundle id; the status poller needs
-    // a hash-shaped id to resolve it to the executed transaction.
+    // a hash-shaped id to resolve it to the executed transaction. The wallet
+    // DID respond here, so acceptance cannot be ruled out — the armed state
+    // must survive this failure (no onSubmitError).
     if (!/^0x[0-9a-f]{64}$/i.test(id)) {
       throw new Error('Safe wallet returned an unexpected call bundle id')
     }
@@ -1595,6 +1646,18 @@ export const useEulerTx = () => {
     // Known Safe even when provider acquisition failed — degraded execution
     // must still never take the permit2 path.
     const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
+
+    // Cross-surface quarantine: an unresolved value-moving submission from
+    // any flow (batch cart or a direct migration) for this wallet/chain
+    // blocks new sends until it reconciles — switching execution surfaces
+    // must not walk around a flow's own retry gate.
+    await assertNoConflictingPendingSubmission({
+      owner,
+      chainId: cid,
+      provider: provider as ReceiptClientLike,
+      connector,
+      getSafeWalletProvider,
+    })
 
     if (safeWalletProvider && connector) {
       // Mirror what executeTransactionPlan would do to the plan (plugins,
@@ -1696,6 +1759,18 @@ export const useEulerTx = () => {
     // sequential path must still never sign permit2 messages.
     const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
 
+    // Cross-surface quarantine: an unresolved value-moving submission from
+    // any flow (batch cart or a direct migration) for this wallet/chain
+    // blocks new sends until it reconciles — switching execution surfaces
+    // must not walk around a flow's own retry gate.
+    await assertNoConflictingPendingSubmission({
+      owner: preparedOwner,
+      chainId: prepared.chainId,
+      provider: provider as ReceiptClientLike,
+      connector,
+      getSafeWalletProvider,
+    })
+
     let effectivePrepared = prepared
     if (isKnownSafe) {
       // A Safe never signs permit2 messages. If the envelope was prepared
@@ -1720,7 +1795,8 @@ export const useEulerTx = () => {
 
     if (safeWalletProvider && connector) {
       // Prepared plans already ran plugins and approval resolution.
-      let bundleBroadcast: PreparedPlanBroadcast | undefined
+      let bundleBroadcast: (PreparedPlanBroadcast & { status: 'submitted' }) | undefined
+      let bundleArmed = false
       const bundled = await executePlanAsSafeBundle({
         plan: effectivePrepared.plan,
         chainId: prepared.chainId,
@@ -1730,6 +1806,18 @@ export const useEulerTx = () => {
         safeWalletProvider,
         sdk,
         beforeBroadcast: options?.beforeBroadcast,
+        onArm: () => {
+          bundleArmed = true
+          options?.onBroadcast?.({ item: 'bundle', index: 0, completesPlan: true, status: 'armed' })
+        },
+        onSubmitError: (error) => {
+          // Only a provable non-acceptance releases the armed state — any
+          // other wallet-boundary failure leaves acceptance possible.
+          if (bundleArmed && walletNeverAcceptedSubmission(error)) {
+            bundleArmed = false
+            options?.onBroadcast?.({ item: 'bundle', index: 0, completesPlan: true, status: 'rejected' })
+          }
+        },
         onBroadcast: (hash) => {
           bundleBroadcast = {
             kind: 'proposal',
@@ -1762,7 +1850,8 @@ export const useEulerTx = () => {
     const lastValueMovingItem = [...planItems].reverse().find(item =>
       item.type !== 'requiredApproval' && item.type !== 'cowSwap')
     let pendingSend: { item: PreparedPlanBroadcast['item'], completesPlan: boolean } | undefined
-    let lastSubmitted: PreparedPlanBroadcast | undefined
+    let lastSubmitted: (PreparedPlanBroadcast & { status: 'submitted' }) | undefined
+    let armedSend: PreparedPlanBroadcast | undefined
     let sendIndex = 0
 
     const sendTransaction = buildSendTransaction({
@@ -1771,14 +1860,40 @@ export const useEulerTx = () => {
       expectedChainId: prepared.chainId,
       connector,
       beforeBroadcast: options?.beforeBroadcast,
+      // Announce the step before crossing the wallet boundary: the wallet
+      // may accept the request and then fail to return its id, and trackers
+      // must already hold replay protection when that happens.
+      onArm: () => {
+        armedSend = {
+          // Fail toward the strict classification: an unattributed send is
+          // treated as the value-moving batch, never as a re-runnable step.
+          item: pendingSend?.item ?? 'evcBatch',
+          index: sendIndex,
+          completesPlan: pendingSend?.completesPlan ?? true,
+          status: 'armed',
+        }
+        options?.onBroadcast?.(armedSend)
+      },
+      onSubmitError: (error) => {
+        // Only a provable non-acceptance releases the armed state — any
+        // other wallet-boundary failure leaves acceptance possible.
+        if (armedSend && walletNeverAcceptedSubmission(error)) {
+          options?.onBroadcast?.({
+            item: armedSend.item,
+            index: armedSend.index,
+            completesPlan: armedSend.completesPlan,
+            status: 'rejected',
+          })
+          armedSend = undefined
+        }
+      },
       // A Safe's sequential fallback submits through the Safe app, so the
       // wallet returns a safeTxHash proposal id, not an on-chain hash.
       onBroadcast: (hash) => {
+        armedSend = undefined
         lastSubmitted = {
           kind: safeWalletProvider ? 'proposal' : 'transaction',
           hash,
-          // Fail toward the strict classification: an unattributed send is
-          // treated as the value-moving batch, never as a re-runnable step.
           item: pendingSend?.item ?? 'evcBatch',
           index: sendIndex++,
           completesPlan: pendingSend?.completesPlan ?? true,
@@ -1874,6 +1989,15 @@ export const useEulerTx = () => {
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
 
+    // Cross-surface quarantine — see executePreparedPlan.
+    await assertNoConflictingPendingSubmission({
+      owner: preparedOwner,
+      chainId: prepared.chainId,
+      provider: provider as ReceiptClientLike,
+      connector,
+      getSafeWalletProvider,
+    })
+
     // Same invariant as executePreparedPlan: an envelope executed for a Safe
     // never carries permit2.
     let effectivePrepared = prepared
@@ -1890,7 +2014,8 @@ export const useEulerTx = () => {
       effectivePrepared = { ...prepared, usePermit2: false }
     }
 
-    let bundleBroadcast: PreparedPlanBroadcast | undefined
+    let bundleBroadcast: (PreparedPlanBroadcast & { status: 'submitted' }) | undefined
+    let bundleArmed = false
     const bundled = await executePlanAsSafeBundle({
       plan: effectivePrepared.plan,
       chainId: prepared.chainId,
@@ -1902,6 +2027,18 @@ export const useEulerTx = () => {
       extraCalls,
       allowSingleCall: options?.allowSingleCall,
       beforeBroadcast: options?.beforeBroadcast,
+      onArm: () => {
+        bundleArmed = true
+        options?.onBroadcast?.({ item: 'bundle', index: 0, completesPlan: true, status: 'armed' })
+      },
+      onSubmitError: (error) => {
+        // Only a provable non-acceptance releases the armed state — any
+        // other wallet-boundary failure leaves acceptance possible.
+        if (bundleArmed && walletNeverAcceptedSubmission(error)) {
+          bundleArmed = false
+          options?.onBroadcast?.({ item: 'bundle', index: 0, completesPlan: true, status: 'rejected' })
+        }
+      },
       onBroadcast: (hash) => {
         bundleBroadcast = {
           kind: 'proposal',

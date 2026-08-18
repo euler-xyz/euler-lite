@@ -5,7 +5,7 @@ import { getAddress, type Address, type Hash, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildOperationEntryMap, buildWalletBalanceLayers, buildWalletChanges, countPlanOperations, fetchBaseAccountSnapshot, hydratePendingBatchSubmissionFromStorage, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import type { PreparedPlanBroadcast } from '~/composables/useEulerTx'
-import { readPendingSubmission, writePendingSubmission } from '~/utils/pendingSubmissions'
+import { readPendingSubmission, resetPendingSubmissionMemoryFallback, writePendingSubmission } from '~/utils/pendingSubmissions'
 import {
   mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
@@ -381,6 +381,7 @@ beforeEach(() => {
   // Fresh storage plus a hydrate resets the module-level submission
   // quarantine, which deliberately survives clearBatch().
   vi.stubGlobal('localStorage', createMemoryStorage())
+  resetPendingSubmissionMemoryFallback()
   hydratePendingBatchSubmissionFromStorage()
   useTxBatch().clearBatch()
 })
@@ -1387,14 +1388,44 @@ describe('useTxBatch submission quarantine', () => {
   const CORE_HASH = `0x${'ab'.repeat(32)}` as Hash
   const APPROVAL_HASH = `0x${'cd'.repeat(32)}` as Hash
 
-  const coreBroadcast = (overrides: Partial<PreparedPlanBroadcast> = {}): PreparedPlanBroadcast => ({
-    kind: 'transaction',
-    hash: CORE_HASH,
-    item: 'evcBatch',
-    index: 0,
-    completesPlan: true,
+  interface BroadcastOverrides {
+    kind?: 'transaction' | 'proposal'
+    hash?: Hash
+    item?: PreparedPlanBroadcast['item']
+    index?: number
+    completesPlan?: boolean
+  }
+
+  const coreSubmitted = (overrides: BroadcastOverrides = {}): PreparedPlanBroadcast => ({
+    kind: overrides.kind ?? 'transaction',
+    hash: overrides.hash ?? CORE_HASH,
+    item: overrides.item ?? 'evcBatch',
+    index: overrides.index ?? 0,
+    completesPlan: overrides.completesPlan ?? true,
     status: 'submitted',
-    ...overrides,
+  })
+
+  const coreConfirmed = (overrides: BroadcastOverrides = {}): PreparedPlanBroadcast => ({
+    kind: overrides.kind ?? 'transaction',
+    hash: overrides.hash ?? CORE_HASH,
+    item: overrides.item ?? 'evcBatch',
+    index: overrides.index ?? 0,
+    completesPlan: overrides.completesPlan ?? true,
+    status: 'confirmed',
+  })
+
+  const coreArmed = (overrides: Pick<BroadcastOverrides, 'item' | 'index' | 'completesPlan'> = {}): PreparedPlanBroadcast => ({
+    item: overrides.item ?? 'evcBatch',
+    index: overrides.index ?? 0,
+    completesPlan: overrides.completesPlan ?? true,
+    status: 'armed',
+  })
+
+  const coreRejected = (overrides: Pick<BroadcastOverrides, 'item' | 'index' | 'completesPlan'> = {}): PreparedPlanBroadcast => ({
+    item: overrides.item ?? 'evcBatch',
+    index: overrides.index ?? 0,
+    completesPlan: overrides.completesPlan ?? true,
+    status: 'rejected',
   })
 
   /** SDK whose provider resolves the quarantined hash to a receipt verdict. */
@@ -1425,12 +1456,12 @@ describe('useTxBatch submission quarantine', () => {
   /** Run one attempt whose accepted core submission never confirmed. */
   const quarantineOneSubmission = async (
     batch: Awaited<ReturnType<typeof setupExecutableBatch>>,
-    broadcast: PreparedPlanBroadcast = coreBroadcast(),
+    broadcasts: PreparedPlanBroadcast[] = [coreArmed(), coreSubmitted()],
   ) => {
     eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
       onBroadcast?: (b: PreparedPlanBroadcast) => void
     }) => {
-      options?.onBroadcast?.(broadcast)
+      for (const broadcast of broadcasts) options?.onBroadcast?.(broadcast)
       throw new Error('Receipt polling failed.')
     })
     await batch.executeBatch()
@@ -1445,9 +1476,11 @@ describe('useTxBatch submission quarantine', () => {
       }) => {
         // The approval submission confirmed (the executor re-fires with
         // status 'confirmed' once its receipt landed) — then the wallet
-        // rejected the core submission before accepting it.
-        options?.onBroadcast?.(coreBroadcast({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false }))
-        options?.onBroadcast?.(coreBroadcast({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false, status: 'confirmed' }))
+        // provably rejected the armed core submission before accepting it.
+        options?.onBroadcast?.(coreSubmitted({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false }))
+        options?.onBroadcast?.(coreConfirmed({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false }))
+        options?.onBroadcast?.(coreArmed({ index: 1 }))
+        options?.onBroadcast?.(coreRejected({ index: 1 }))
         throw new Error('User rejected the request.')
       })
       .mockResolvedValueOnce(undefined)
@@ -1457,7 +1490,7 @@ describe('useTxBatch submission quarantine', () => {
     // Nothing value-moving is outstanding: no quarantine, plain error.
     expect(batch.execError.value).toBe('User rejected the request.')
     expect(batch.hasPendingCoreSubmission.value).toBe(false)
-    expect(readPendingSubmission('batch')).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
     expect(batch.entryCount.value).toBe(1)
 
     // An ordinary retry proceeds without any on-chain reconciliation gate.
@@ -1467,13 +1500,91 @@ describe('useTxBatch submission quarantine', () => {
     expect(batch.entryCount.value).toBe(0)
   })
 
+  it('persists the quarantine the moment the wallet accepts, before the executor settles', async () => {
+    const batch = await setupExecutableBatch()
+    let recordAtBroadcastTime: unknown
+    eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
+      onBroadcast?: (b: PreparedPlanBroadcast) => void
+    }) => {
+      options?.onBroadcast?.(coreSubmitted())
+      // A reload between the wallet's acceptance and the executor settling
+      // (receipt polling, later steps) must already find the durable record.
+      recordAtBroadcastTime = readPendingSubmission('batch', owner, 1)
+      throw new Error('Receipt polling failed.')
+    })
+
+    await batch.executeBatch()
+
+    expect(recordAtBroadcastTime).toMatchObject({
+      phase: 'submitted',
+      hash: CORE_HASH,
+      owner,
+      chainId: 1,
+    })
+  })
+
+  it('quarantines an armed submission whose id never came back', async () => {
+    const batch = await setupExecutableBatch()
+    let recordAtArmTime: unknown
+    eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
+      onBroadcast?: (b: PreparedPlanBroadcast) => void
+    }) => {
+      options?.onBroadcast?.(coreArmed())
+      recordAtArmTime = readPendingSubmission('batch', owner, 1)
+      // The wallet boundary failed without returning an id and without a
+      // provable rejection — acceptance cannot be ruled out.
+      throw new Error('Wallet request failed.')
+    })
+
+    await batch.executeBatch()
+
+    // The record was durable before the wallet was even invoked.
+    expect(recordAtArmTime).toMatchObject({ phase: 'armed', owner, chainId: 1 })
+    expect(batch.hasPendingCoreSubmission.value).toBe(true)
+    expect(batch.execError.value).toBe('Wallet request failed. The wallet may have accepted the submission without returning its id — it stays treated as pending until it can be ruled out.')
+    expect(readPendingSubmission('batch', owner, 1)).toMatchObject({ phase: 'armed' })
+
+    // With no id there is nothing to verify on-chain: the retry stays
+    // blocked even though a provider could resolve receipts.
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdkWithReceipt('success') as never)
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+    expect(batch.execError.value).toBe('A previous batch submission was handed to the wallet but no transaction id came back, so it cannot be verified automatically. Check the wallet\'s pending activity and let it resolve before executing again.')
+    expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
+  })
+
+  it('releases an armed submission the wallet provably never accepted', async () => {
+    const batch = await setupExecutableBatch()
+    eulerTxMocks.executePreparedPlan
+      .mockImplementationOnce(async (_prepared, options?: {
+        onBroadcast?: (b: PreparedPlanBroadcast) => void
+      }) => {
+        options?.onBroadcast?.(coreArmed())
+        options?.onBroadcast?.(coreRejected())
+        throw new Error('User rejected the request.')
+      })
+      .mockResolvedValueOnce(undefined)
+
+    await batch.executeBatch()
+
+    expect(batch.hasPendingCoreSubmission.value).toBe(false)
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
+    expect(batch.execError.value).toBe('User rejected the request.')
+
+    // The rejection is terminal — an ordinary retry proceeds.
+    await batch.executeBatch()
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(2)
+  })
+
   it('quarantines an accepted core submission durably across cart clearing', async () => {
     const batch = await setupExecutableBatch()
 
     await quarantineOneSubmission(batch)
 
     expect(batch.execError.value).toBe('Receipt polling failed. The submission may still confirm — executing again first verifies it on-chain before anything is re-sent.')
-    expect(readPendingSubmission('batch')).toMatchObject({
+    expect(readPendingSubmission('batch', owner, 1)).toMatchObject({
+      phase: 'submitted',
       kind: 'transaction',
       hash: CORE_HASH,
       chainId: 1,
@@ -1484,7 +1595,7 @@ describe('useTxBatch submission quarantine', () => {
     // Clearing the cart and rebuilding it must not drop the quarantine.
     batch.clearBatch()
     expect(batch.hasPendingCoreSubmission.value).toBe(true)
-    expect(readPendingSubmission('batch')).toBeDefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
     await batch.addEntry({ label: 'Rebuilt operation', buildPlan: async () => [] })
 
     // The default SDK mock has no provider — the outcome is unverifiable, so
@@ -1493,7 +1604,27 @@ describe('useTxBatch submission quarantine', () => {
 
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
     expect(batch.execError.value).toBe('A previous batch submission may still confirm on-chain and could not be verified yet. Wait a moment and execute again — the submission is re-checked before anything is re-sent.')
-    expect(readPendingSubmission('batch')).toBeDefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
+  })
+
+  it('keeps the quarantine fail-closed when durable storage rejects the write', async () => {
+    vi.stubGlobal('localStorage', {
+      ...createMemoryStorage(),
+      setItem: () => {
+        throw new Error('quota exceeded')
+      },
+    })
+    const batch = await setupExecutableBatch()
+
+    await quarantineOneSubmission(batch)
+
+    // Nothing durable was written, but the in-memory fallback must still
+    // block this session's retry while the outcome is unknown.
+    expect(readPendingSubmission('batch', owner, 1)).toMatchObject({ phase: 'submitted', hash: CORE_HASH })
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+    expect(batch.execError.value).toContain('could not be verified yet')
   })
 
   it('releases the quarantine and retries once the submission definitively did not land', async () => {
@@ -1507,7 +1638,7 @@ describe('useTxBatch submission quarantine', () => {
 
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(2)
     expect(batch.hasPendingCoreSubmission.value).toBe(false)
-    expect(readPendingSubmission('batch')).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
     expect(batch.entryCount.value).toBe(0)
   })
 
@@ -1523,13 +1654,13 @@ describe('useTxBatch submission quarantine', () => {
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
     expect(batch.entryCount.value).toBe(0)
     expect(batch.hasPendingCoreSubmission.value).toBe(false)
-    expect(readPendingSubmission('batch')).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
     expect(batch.execError.value).toBeUndefined()
   })
 
   it('resets the cart when a landed submission did not complete the reviewed batch', async () => {
     const batch = await setupExecutableBatch()
-    await quarantineOneSubmission(batch, coreBroadcast({ completesPlan: false }))
+    await quarantineOneSubmission(batch, [coreArmed({ completesPlan: false }), coreSubmitted({ completesPlan: false })])
 
     vi.mocked(getEulerSdkFresh).mockResolvedValue(sdkWithReceipt('success') as never)
 
@@ -1538,7 +1669,7 @@ describe('useTxBatch submission quarantine', () => {
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
     expect(batch.entryCount.value).toBe(0)
     expect(batch.execError.value).toBe('A previous batch submission confirmed on-chain but did not complete the reviewed batch. The cart was reset — review your positions and rebuild the remaining operations.')
-    expect(readPendingSubmission('batch')).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
   })
 
   it('blocks execution after a reload while the hydrated submission is unverifiable', async () => {
@@ -1546,6 +1677,7 @@ describe('useTxBatch submission quarantine', () => {
     // Simulated reload: only the durable record survives — no ceremony
     // context, no in-memory tracking.
     writePendingSubmission('batch', {
+      phase: 'submitted',
       kind: 'transaction',
       hash: CORE_HASH,
       chainId: 1,
@@ -1560,12 +1692,32 @@ describe('useTxBatch submission quarantine', () => {
 
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     expect(batch.execError.value).toContain('could not be verified yet')
-    expect(readPendingSubmission('batch')).toBeDefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
+  })
+
+  it('blocks execution after a reload while the hydrated record is still armed', async () => {
+    const batch = await setupExecutableBatch()
+    writePendingSubmission('batch', {
+      phase: 'armed',
+      chainId: 1,
+      owner,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    hydratePendingBatchSubmissionFromStorage()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdkWithReceipt('success') as never)
+
+    await batch.executeBatch()
+
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('no transaction id came back')
+    expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
   })
 
   it('resets the cart when a hydrated post-reload submission landed without ceremony context', async () => {
     const batch = await setupExecutableBatch()
     writePendingSubmission('batch', {
+      phase: 'submitted',
       kind: 'transaction',
       hash: CORE_HASH,
       chainId: 1,
@@ -1583,7 +1735,7 @@ describe('useTxBatch submission quarantine', () => {
     // cart resets rather than leaving executed entries queued to run again.
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     expect(batch.entryCount.value).toBe(0)
-    expect(readPendingSubmission('batch')).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
   })
 
@@ -1591,6 +1743,7 @@ describe('useTxBatch submission quarantine', () => {
     const batch = await setupExecutableBatch()
     const otherOwner = getAddress('0x9999999999999999999999999999999999999999')
     writePendingSubmission('batch', {
+      phase: 'submitted',
       kind: 'transaction',
       hash: CORE_HASH,
       chainId: 1,
@@ -1607,7 +1760,70 @@ describe('useTxBatch submission quarantine', () => {
     // it executes normally; the record stays for the wallet that owns it.
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
     expect(batch.entryCount.value).toBe(0)
-    expect(readPendingSubmission('batch')).toMatchObject({ owner: otherOwner })
+    expect(readPendingSubmission('batch', otherOwner, 1)).toMatchObject({ owner: otherOwner })
+  })
+
+  it('reconciles both wallets\' coexisting records independently', async () => {
+    const batch = await setupExecutableBatch()
+    const otherOwner = getAddress('0x9999999999999999999999999999999999999999')
+    // Wallet A quarantined a submission, then the user switched to wallet B
+    // whose earlier submission is also unresolved — B's record must not have
+    // been overwritten by A's.
+    await quarantineOneSubmission(batch)
+    writePendingSubmission('batch', {
+      phase: 'submitted',
+      kind: 'transaction',
+      hash: APPROVAL_HASH,
+      chainId: 1,
+      owner: otherOwner,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    hydratePendingBatchSubmissionFromStorage()
+
+    expect(readPendingSubmission('batch', owner, 1)).toMatchObject({ hash: CORE_HASH })
+    expect(readPendingSubmission('batch', otherOwner, 1)).toMatchObject({ hash: APPROVAL_HASH })
+
+    // Wallet A's record resolves as reverted and is released — wallet B's
+    // record must survive that reconciliation untouched.
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdkWithReceipt('reverted') as never)
+    eulerTxMocks.executePreparedPlan.mockResolvedValueOnce(undefined)
+    await batch.executeBatch()
+
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
+    expect(readPendingSubmission('batch', otherOwner, 1)).toMatchObject({ hash: APPROVAL_HASH })
+  })
+
+  it('blocks a second tab whose in-memory mirror predates another tab\'s quarantine', async () => {
+    // Tab B: a fresh module instance initialized over the same storage
+    // BEFORE anything is quarantined — its hydrated mirror is empty and no
+    // storage event fires in this environment to refresh it.
+    vi.resetModules()
+    vi.doMock('~/composables/useEulerSdk', () => ({
+      getEulerSdkFresh: vi.fn(async () => createMockSdk()),
+    }))
+    try {
+      const moduleB = await import('~/composables/useTxBatch')
+      const tabB = moduleB.useTxBatch()
+      tabB.clearBatch()
+      await tabB.addEntry({ label: 'Tab B operation', buildPlan: async () => [] })
+
+      // Tab A quarantines an accepted, unresolved submission.
+      const tabA = await setupExecutableBatch()
+      await quarantineOneSubmission(tabA)
+      const callsAfterTabA = eulerTxMocks.executePreparedPlan.mock.calls.length
+
+      // Tab B re-reads durable records at the attempt boundary, so its stale
+      // mirror must not let it broadcast anything.
+      await tabB.executeBatch()
+
+      expect(eulerTxMocks.executePreparedPlan.mock.calls.length).toBe(callsAfterTabA)
+      expect(tabB.execError.value).toContain('could not be verified yet')
+      expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
+    }
+    finally {
+      vi.doUnmock('~/composables/useEulerSdk')
+    }
   })
 
   it('retires entries when the core submission confirmed but a later step failed', async () => {
@@ -1615,8 +1831,9 @@ describe('useTxBatch submission quarantine', () => {
     eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
       onBroadcast?: (b: PreparedPlanBroadcast) => void
     }) => {
-      options?.onBroadcast?.(coreBroadcast())
-      options?.onBroadcast?.(coreBroadcast({ status: 'confirmed' }))
+      options?.onBroadcast?.(coreArmed())
+      options?.onBroadcast?.(coreSubmitted())
+      options?.onBroadcast?.(coreConfirmed())
       return undefined
     })
     migrationFlowMocks.revokeAfterSuccess.mockRejectedValueOnce(new Error('Revoke failed.'))
@@ -1627,7 +1844,7 @@ describe('useTxBatch submission quarantine', () => {
     // must not stay queued for a duplicate replay.
     expect(batch.entryCount.value).toBe(0)
     expect(batch.hasPendingCoreSubmission.value).toBe(false)
-    expect(readPendingSubmission('batch')).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
     expect(batch.execError.value).toBe('Revoke failed. The batch itself confirmed on-chain; the operations it covered were removed from the cart.')
   })
 })

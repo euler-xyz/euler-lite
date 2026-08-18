@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { useEulerTx, type PreparedPlanBroadcast } from '~/composables/useEulerTx'
+import { createDirectSubmissionQuarantine } from '~/utils/directSubmissionQuarantine'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
+import { registerLandedBatchSubmissionHandler } from '~/utils/pendingSubmissionGate'
+import { readPendingSubmission, resetPendingSubmissionMemoryFallback, writePendingSubmission } from '~/utils/pendingSubmissions'
 import { WalletExecutionContextChangedError } from '~/utils/walletExecutionContext'
 
 const wagmiMocks = vi.hoisted(() => ({
@@ -105,10 +108,15 @@ describe('useEulerTx migration authorization cleanup', () => {
         transactionHash: hash,
         status: 'success',
       }) as TransactionReceipt),
+      getTransactionReceipt: vi.fn(async () => {
+        throw new Error('receipt not found')
+      }),
     }
     vi.mocked(getEulerSdkFresh).mockResolvedValue({
       providerService: { getProvider: vi.fn(() => provider) },
     } as never)
+    // The pending-submission quarantine is module state shared across tests.
+    resetPendingSubmissionMemoryFallback()
   })
 
   it.each([
@@ -310,11 +318,230 @@ describe('useEulerTx migration authorization cleanup', () => {
 
     // The confirmed approval is retryable history; only the accepted-but-
     // unconfirmed value-moving batch is left ambiguous for quarantine.
+    // Every send arms replay protection before crossing the wallet boundary.
     expect(broadcasts).toEqual([
+      expect.objectContaining({ item: 'approval', index: 0, completesPlan: false, status: 'armed' }),
       expect.objectContaining({ kind: 'transaction', item: 'approval', index: 0, completesPlan: false, status: 'submitted' }),
       expect.objectContaining({ item: 'approval', index: 0, status: 'confirmed' }),
+      expect.objectContaining({ item: 'evcBatch', index: 1, completesPlan: true, status: 'armed' }),
       expect.objectContaining({ kind: 'transaction', item: 'evcBatch', index: 1, completesPlan: true, status: 'submitted' }),
     ])
+  })
+
+  it('fires only an armed broadcast when the wallet fails without disproving acceptance', async () => {
+    const evcBatchItem = { type: 'evcBatch', items: [] }
+    const plan = [evcBatchItem] as unknown as TransactionPlan
+    wagmiMocks.sendTransactionAsync.mockRejectedValue(new Error('wallet connection dropped mid-request'))
+    const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction, onProgress }: {
+      sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
+      onProgress: (progress: { status: string, item?: unknown }) => void
+    }) => {
+      onProgress({ status: 'evcBatch', item: evcBatchItem })
+      await sendTransaction({ to: TOKEN, data: '0x02' })
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({
+        waitForTransactionReceipt: vi.fn(),
+        getTransactionReceipt: vi.fn(async () => {
+          throw new Error('receipt not found')
+        }),
+      })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const quarantine = createDirectSubmissionQuarantine({
+      flow: 'outgoing-migration',
+      getSafeWalletProvider: async () => undefined,
+    })
+    quarantine.begin({ owner: OWNER, chainId: 1 })
+    const { executePreparedPlan } = useEulerTx()
+    const broadcasts: PreparedPlanBroadcast[] = []
+    const prepared = {
+      __prepared: true,
+      plan,
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+
+    await expect(executePreparedPlan(prepared, {
+      onBroadcast: (b) => {
+        broadcasts.push(b)
+        quarantine.track(b)
+      },
+    })).rejects.toThrow('wallet connection dropped mid-request')
+
+    // No id ever reached onBroadcast and the failure does not prove the
+    // wallet rejected the request, so the armed reservation must stand.
+    expect(broadcasts).toEqual([
+      expect.objectContaining({ item: 'evcBatch', index: 0, completesPlan: true, status: 'armed' }),
+    ])
+    expect(readPendingSubmission('outgoing-migration', OWNER, 1)).toMatchObject({ phase: 'armed' })
+
+    // A retry — including one from a fresh session after a reload — is
+    // blocked at the executor gate before the wallet is invoked again.
+    wagmiMocks.sendTransactionAsync.mockClear()
+    await expect(executePreparedPlan(prepared)).rejects.toThrow(
+      'handed to the wallet but no transaction id came back',
+    )
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases the armed reservation when the wallet provably rejected the request', async () => {
+    const evcBatchItem = { type: 'evcBatch', items: [] }
+    const plan = [evcBatchItem] as unknown as TransactionPlan
+    wagmiMocks.sendTransactionAsync.mockRejectedValue(
+      Object.assign(new Error('User rejected the request.'), { code: 4001 }),
+    )
+    const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction, onProgress }: {
+      sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
+      onProgress: (progress: { status: string, item?: unknown }) => void
+    }) => {
+      onProgress({ status: 'evcBatch', item: evcBatchItem })
+      await sendTransaction({ to: TOKEN, data: '0x02' })
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const quarantine = createDirectSubmissionQuarantine({
+      flow: 'outgoing-migration',
+      getSafeWalletProvider: async () => undefined,
+    })
+    quarantine.begin({ owner: OWNER, chainId: 1 })
+    const { executePreparedPlan } = useEulerTx()
+    const broadcasts: PreparedPlanBroadcast[] = []
+    const prepared = {
+      __prepared: true,
+      plan,
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+
+    await expect(executePreparedPlan(prepared, {
+      onBroadcast: (b) => {
+        broadcasts.push(b)
+        quarantine.track(b)
+      },
+    })).rejects.toThrow('User rejected the request.')
+
+    expect(broadcasts).toEqual([
+      expect.objectContaining({ item: 'evcBatch', index: 0, status: 'armed' }),
+      expect.objectContaining({ item: 'evcBatch', index: 0, status: 'rejected' }),
+    ])
+    expect(readPendingSubmission('outgoing-migration', OWNER, 1)).toBeUndefined()
+
+    // With the reservation released, a retry reaches the wallet again.
+    await expect(executePreparedPlan(prepared, {
+      onBroadcast: b => quarantine.track(b),
+    })).rejects.toThrow('User rejected the request.')
+    expect(wagmiMocks.sendTransactionAsync).toHaveBeenCalledTimes(2)
+  })
+
+  it('blocks a direct plan while an ambiguous batch submission from this wallet is unresolved', async () => {
+    writePendingSubmission('batch', {
+      phase: 'armed',
+      chainId: 1,
+      owner: OWNER,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    const executePreparedTransactionPlan = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({
+        waitForTransactionReceipt: vi.fn(),
+        getTransactionReceipt: vi.fn(async () => {
+          throw new Error('receipt not found')
+        }),
+      })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan({
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared)).rejects.toThrow(
+      'A previous batch submission was handed to the wallet but no transaction id came back',
+    )
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+    // The record must survive the refusal so the conflict stays enforced.
+    expect(readPendingSubmission('batch', OWNER, 1)).toBeDefined()
+  })
+
+  it('blocks a direct plan while a submitted batch record cannot be verified on-chain', async () => {
+    writePendingSubmission('batch', {
+      phase: 'submitted',
+      kind: 'transaction',
+      hash: GRANT_HASH,
+      chainId: 1,
+      owner: OWNER,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    const executePreparedTransactionPlan = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({
+        waitForTransactionReceipt: vi.fn(),
+        getTransactionReceipt: vi.fn(async () => {
+          throw new Error('receipt not found')
+        }),
+      })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan({
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared)).rejects.toThrow('could not be verified yet')
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+    expect(readPendingSubmission('batch', OWNER, 1)).toBeDefined()
+  })
+
+  it('does not block a direct plan over another wallet\'s pending submission', async () => {
+    writePendingSubmission('batch', {
+      phase: 'armed',
+      chainId: 1,
+      owner: OTHER_OWNER,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    const executePreparedTransactionPlan = vi.fn(async () => ({ receipts: [] }))
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({
+        waitForTransactionReceipt: vi.fn(),
+        getTransactionReceipt: vi.fn(async () => {
+          throw new Error('receipt not found')
+        }),
+      })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan({
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared)
+
+    expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
+    expect(readPendingSubmission('batch', OTHER_OWNER, 1)).toBeDefined()
   })
 
   it('runs the caller freshness guard after async setup and before a plain broadcast', async () => {
@@ -480,6 +707,8 @@ describe('useEulerTx Safe wallet bundling', () => {
         executePreparedTransactionPlan,
       },
     } as never)
+    // The pending-submission quarantine is module state shared across tests.
+    resetPendingSubmissionMemoryFallback()
   })
 
   it('submits approve + EVC batch as one Safe call bundle', async () => {
@@ -516,6 +745,8 @@ describe('useEulerTx Safe wallet bundling', () => {
     })
 
     expect(broadcasts).toEqual([
+      // Replay protection arms before the bundle crosses the wallet boundary.
+      expect.objectContaining({ item: 'bundle', index: 0, completesPlan: true, status: 'armed' }),
       expect.objectContaining({ kind: 'proposal', hash: SAFE_TX_HASH, item: 'bundle', completesPlan: true, status: 'submitted' }),
       expect.objectContaining({ kind: 'proposal', hash: SAFE_TX_HASH, item: 'bundle', status: 'confirmed' }),
     ])
@@ -586,6 +817,133 @@ describe('useEulerTx Safe wallet bundling', () => {
 
     await expect(executePreparedPlan(buildPrepared(approvedPlan)))
       .rejects.toThrow('unexpected call bundle id')
+  })
+
+  it('keeps the armed reservation when the Safe returns a malformed bundle id', async () => {
+    wagmiMocks.sendCalls.mockResolvedValue({ id: 'bundle-1' })
+    const quarantine = createDirectSubmissionQuarantine({
+      flow: 'outgoing-migration',
+      getSafeWalletProvider: async () => undefined,
+    })
+    quarantine.begin({ owner: OWNER, chainId: 1 })
+    const { executePreparedPlan } = useEulerTx()
+    const broadcasts: PreparedPlanBroadcast[] = []
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan), {
+      onBroadcast: (b) => {
+        broadcasts.push(b)
+        quarantine.track(b)
+      },
+    })).rejects.toThrow('unexpected call bundle id')
+
+    // The wallet DID respond, so acceptance cannot be ruled out: only the
+    // armed event fires (no 'rejected') and the durable reservation stands.
+    expect(broadcasts).toEqual([
+      expect.objectContaining({ item: 'bundle', index: 0, completesPlan: true, status: 'armed' }),
+    ])
+    expect(readPendingSubmission('outgoing-migration', OWNER, 1)).toMatchObject({ phase: 'armed' })
+
+    // A retry — including from a fresh session after a reload — is blocked
+    // at the executor gate before the wallet is invoked again.
+    wagmiMocks.sendCalls.mockClear()
+    await expect(executePreparedPlan(buildPrepared(approvedPlan))).rejects.toThrow(
+      'handed to the wallet but no transaction id came back',
+    )
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+  })
+
+  it('releases the armed bundle when the Safe wallet provably rejected it', async () => {
+    wagmiMocks.sendCalls.mockRejectedValue(
+      Object.assign(new Error('User rejected the request.'), { name: 'UserRejectedRequestError' }),
+    )
+    const quarantine = createDirectSubmissionQuarantine({
+      flow: 'outgoing-migration',
+      getSafeWalletProvider: async () => undefined,
+    })
+    quarantine.begin({ owner: OWNER, chainId: 1 })
+    const { executePreparedPlan } = useEulerTx()
+    const broadcasts: PreparedPlanBroadcast[] = []
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan), {
+      onBroadcast: (b) => {
+        broadcasts.push(b)
+        quarantine.track(b)
+      },
+    })).rejects.toThrow('User rejected the request.')
+
+    expect(broadcasts).toEqual([
+      expect.objectContaining({ item: 'bundle', index: 0, status: 'armed' }),
+      expect.objectContaining({ item: 'bundle', index: 0, status: 'rejected' }),
+    ])
+    expect(readPendingSubmission('outgoing-migration', OWNER, 1)).toBeUndefined()
+
+    // With the reservation released, a retry reaches the wallet again.
+    await expect(executePreparedPlan(buildPrepared(approvedPlan), {
+      onBroadcast: b => quarantine.track(b),
+    })).rejects.toThrow('User rejected the request.')
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(2)
+  })
+
+  it('blocks a Safe bundle while a landed batch record awaits cart reconciliation', async () => {
+    // No cart handler is registered yet: the record must be kept so the cart
+    // can reconcile it when it next runs.
+    writePendingSubmission('batch', {
+      phase: 'submitted',
+      kind: 'transaction',
+      hash: SAFE_TX_HASH,
+      chainId: 1,
+      owner: OWNER,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan))).rejects.toThrow(
+      'Open the batch cart to reconcile',
+    )
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(readPendingSubmission('batch', OWNER, 1)).toBeDefined()
+  })
+
+  it('retires a landed batch record through the registered cart handler before executing', async () => {
+    const handler = vi.fn()
+    registerLandedBatchSubmissionHandler(handler)
+    writePendingSubmission('batch', {
+      phase: 'submitted',
+      kind: 'transaction',
+      hash: SAFE_TX_HASH,
+      chainId: 1,
+      owner: OWNER,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan))).rejects.toThrow(
+      'the batch cart was reconciled',
+    )
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ hash: SAFE_TX_HASH }))
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+  })
+
+  it('clears a landed migration record and demands re-review before executing', async () => {
+    writePendingSubmission('outgoing-migration', {
+      phase: 'submitted',
+      kind: 'transaction',
+      hash: SAFE_TX_HASH,
+      chainId: 1,
+      owner: OWNER,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(buildPrepared(approvedPlan))).rejects.toThrow(
+      'confirmed on-chain. Review your positions',
+    )
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    // Landed migrations are terminal: the record is released after refusal.
+    expect(readPendingSubmission('outgoing-migration', OWNER, 1)).toBeUndefined()
   })
 
   it('throws on a mined-but-reverted Safe bundle instead of finalizing it', async () => {
@@ -776,6 +1134,24 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(result?.hashes).toEqual([SAFE_TX_HASH])
     expect(result?.receipts[0].transactionHash).toBe(SAFE_TX_HASH)
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
+  it('gates the plain-calls bundle on a conflicting pending submission', async () => {
+    writePendingSubmission('batch', {
+      phase: 'armed',
+      chainId: 1,
+      owner: OWNER,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+
+    await expect(executePreparedPlanWithPlainCalls(buildPrepared(approvedPlan), {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    })).rejects.toThrow('handed to the wallet but no transaction id came back')
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(readPendingSubmission('batch', OWNER, 1)).toBeDefined()
   })
 
   it('runs the caller freshness guard after Safe provider setup and before submission', async () => {

@@ -13,6 +13,9 @@ import {
 export const PENDING_SUBMISSION_UNRESOLVED_ERROR
   = 'A previous migration submission may still confirm on-chain and could not be verified yet. Wait a moment and try again — it is re-checked before anything is re-sent.'
 
+export const PENDING_SUBMISSION_ARMED_ERROR
+  = 'A previous attempt handed a submission to the wallet but no transaction id came back, so it cannot be verified automatically. Check the wallet\'s pending activity and let it resolve before trying again.'
+
 /**
  * 'clear'          — no unresolved submission for this wallet/chain; proceed.
  * 'landed'         — a quarantined submission confirmed on-chain. It may be
@@ -24,14 +27,24 @@ export const PENDING_SUBMISSION_UNRESOLVED_ERROR
  */
 export type DirectQuarantineVerdict = 'clear' | 'landed' | 'landed-partial'
 
+const isValueMoving = (broadcast: PreparedPlanBroadcast) =>
+  broadcast.item === 'bundle' || broadcast.item === 'evcBatch'
+
 /**
- * Replay protection for the direct (non-cart) migration flows. Once a wallet
- * accepts a value-moving submission (an EOA transaction or a Safe proposal),
- * a receipt or Safe-status failure no longer means "nothing happened" — the
- * submission can still confirm later. `sealFailure` retains its hash/proposal
- * id durably, keyed by wallet and chain, and `reconcileBeforeAttempt`
- * resolves that record on-chain before the next attempt is allowed to send
- * anything: an unresolved outcome throws and blocks the retry.
+ * Replay protection for the direct (non-cart) migration flows. The record is
+ * persisted at the wallet boundary, not after the failure:
+ *
+ * - 'armed' is written before the wallet is invoked for a value-moving send —
+ *   the wallet may accept the request and then fail to return its id, and a
+ *   reload in that window must still find the quarantine.
+ * - the record upgrades to 'submitted' the moment an id exists, and is
+ *   released only on a terminal signal: the receipt confirmed, or the wallet
+ *   definitively rejected the request before dispatching it.
+ *
+ * `reconcileBeforeAttempt` resolves the durable record on-chain before the
+ * next attempt is allowed to send anything: an unresolved outcome throws and
+ * blocks the retry. `sealFailure` merely reports whether the failed attempt
+ * left a quarantined submission behind — persistence already happened.
  */
 export const createDirectSubmissionQuarantine = (options: {
   flow: PendingSubmissionFlow
@@ -40,7 +53,8 @@ export const createDirectSubmissionQuarantine = (options: {
 }) => {
   let attempt: { owner: Address, chainId: number } | undefined
   // The executor re-fires each broadcast as 'confirmed' once its receipt
-  // landed, so at most the single latest 'submitted' broadcast is ambiguous.
+  // landed (and as 'rejected' when the wallet provably never accepted it),
+  // so at most the single latest armed/submitted broadcast is ambiguous.
   let unconfirmed: PreparedPlanBroadcast | undefined
 
   const reconcileBeforeAttempt = async (input: {
@@ -49,13 +63,10 @@ export const createDirectSubmissionQuarantine = (options: {
     provider: ReceiptClientLike | undefined
     connector?: WalletConnectorLike
   }): Promise<DirectQuarantineVerdict> => {
-    const record = readPendingSubmission(options.flow)
+    // Records are keyed by wallet and chain — a different wallet's record is
+    // invisible here and stays quarantined for the wallet that owns it.
+    const record = readPendingSubmission(options.flow, input.owner, input.chainId)
     if (!record) return 'clear'
-    if (record.owner !== getAddress(input.owner) || record.chainId !== input.chainId) {
-      // A different wallet/chain owns the record — nothing this attempt sends
-      // can duplicate it. The record stays for the wallet that owns it.
-      return 'clear'
-    }
     const outcome = await resolvePendingSubmissionOutcome(record, {
       provider: input.provider,
       getSafeWalletProvider: options.getSafeWalletProvider,
@@ -63,9 +74,9 @@ export const createDirectSubmissionQuarantine = (options: {
       safeStatusTimeoutMs: options.safeStatusTimeoutMs ?? 8_000,
     })
     if (outcome === 'unknown') {
-      throw new Error(PENDING_SUBMISSION_UNRESOLVED_ERROR)
+      throw new Error(record.phase === 'armed' ? PENDING_SUBMISSION_ARMED_ERROR : PENDING_SUBMISSION_UNRESOLVED_ERROR)
     }
-    clearPendingSubmission(options.flow)
+    clearPendingSubmission(options.flow, record.owner, record.chainId)
     if (outcome === 'not-landed') return 'clear'
     return record.completesPlan ? 'landed' : 'landed-partial'
   }
@@ -76,29 +87,44 @@ export const createDirectSubmissionQuarantine = (options: {
     unconfirmed = undefined
   }
 
-  /** onBroadcast sink for executePreparedPlan / …WithPlainCalls. */
+  /**
+   * onBroadcast sink for executePreparedPlan / …WithPlainCalls. Persists the
+   * quarantine synchronously at the wallet boundary; only value-moving items
+   * (the Safe bundle or the EVC batch) quarantine — ambiguous approvals and
+   * plugin prerequisites are idempotent and safe to re-run.
+   */
   const track = (broadcast: PreparedPlanBroadcast) => {
-    unconfirmed = broadcast.status === 'submitted' ? broadcast : undefined
+    if (broadcast.status === 'armed' || broadcast.status === 'submitted') {
+      unconfirmed = broadcast
+      if (attempt && isValueMoving(broadcast)) {
+        writePendingSubmission(options.flow, {
+          ...(broadcast.status === 'armed'
+            ? { phase: 'armed' as const }
+            : { phase: 'submitted' as const, kind: broadcast.kind, hash: broadcast.hash }),
+          chainId: attempt.chainId,
+          owner: attempt.owner,
+          completesPlan: broadcast.completesPlan,
+          submittedAt: Date.now(),
+        })
+      }
+      return
+    }
+    // 'rejected' (the wallet provably never accepted the armed request) and
+    // 'confirmed' (the receipt landed) are both terminal for the record.
+    if (attempt && isValueMoving(broadcast)) {
+      clearPendingSubmission(options.flow, attempt.owner, attempt.chainId)
+    }
+    unconfirmed = undefined
   }
 
   /**
-   * Persist the ambiguous submission after a failed attempt. Returns true
-   * when something was quarantined — only a value-moving submission (the
-   * Safe bundle or the EVC batch) qualifies; ambiguous approvals and plugin
-   * prerequisites are idempotent and safe to re-run.
+   * Report whether the failed attempt left a quarantined submission behind.
+   * The durable record was already written when the broadcast fired — this
+   * only tells the caller which error message applies.
    */
   const sealFailure = (): boolean => {
     if (!attempt || !unconfirmed) return false
-    if (unconfirmed.item !== 'bundle' && unconfirmed.item !== 'evcBatch') return false
-    writePendingSubmission(options.flow, {
-      kind: unconfirmed.kind,
-      hash: unconfirmed.hash,
-      chainId: attempt.chainId,
-      owner: attempt.owner,
-      completesPlan: unconfirmed.completesPlan,
-      submittedAt: Date.now(),
-    })
-    return true
+    return isValueMoving(unconfirmed)
   }
 
   return { reconcileBeforeAttempt, begin, track, sealFailure }

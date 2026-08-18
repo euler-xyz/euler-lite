@@ -218,19 +218,33 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
   requirement immediately before anything irreversible is sent; if the grant/revoke set no
   longer matches what was reviewed (an allowance granted or revoked elsewhere), execution
   aborts, the review is invalidated, and the error asks the user to reopen review.
-- **Submitted but unconfirmed** → every wallet acceptance during execution is classified
+- **Submitted but unconfirmed** → every wallet interaction during execution is classified
   by the plan step that produced it (prerequisite approval/plugin call vs. the value-moving
-  batch transaction or Safe proposal). A failure after an accepted *prerequisite* retries
-  plainly — those steps are idempotent. A failure after the accepted *core* submission
-  quarantines the cart with the submitted hash, durably in `localStorage`: clearing the
-  cart, switching wallets, or reloading does not drop it. The next Execute press for that
-  wallet/chain first verifies the submission on-chain — a landed submission retires its
-  entries (or resets the cart when it landed mid-plan or the ceremony did not survive a
-  reload), a reverted/cancelled one releases the retry, an unverifiable one keeps the
-  quarantine and explains why. Once the core submission's receipt confirmed, a later
-  failure (for example a revoke) retires the covered entries instead of quarantining.
-  The direct migration pages (`migrate.vue`, `borrow/swap.vue`) apply the same quarantine
-  per flow via `utils/directSubmissionQuarantine.ts`.
+  batch transaction or Safe proposal). Replay protection *arms* before the value-moving
+  step crosses the wallet boundary: an `armed` record is persisted durably before the
+  wallet is invoked, upgraded to `submitted` when a transaction hash or Safe proposal id
+  comes back, and released only when the wallet provably rejected the request (user
+  rejection / connector error). A wallet failure that returns no id — or a malformed
+  bundle id — leaves the armed record standing, because acceptance cannot be disproved.
+  A failure after an accepted *prerequisite* retries plainly — those steps are idempotent.
+  Records live in `localStorage` keyed per flow, wallet, and chain
+  (`utils/pendingSubmissions.ts`), so one wallet's quarantine never blocks or overwrites
+  another's; when durable storage is unavailable or lies about writes, an in-memory
+  fail-closed fallback keeps the quarantine for the session. Clearing the cart, switching
+  wallets, or reloading does not drop a record. Before every Execute press the durable
+  record is re-read (so a quarantine placed by another tab is enforced, and a `storage`
+  event listener syncs already-open tabs), then verified on-chain — a landed submission
+  retires its entries (or resets the cart when it landed mid-plan or the ceremony did not
+  survive a reload), a reverted/cancelled one releases the retry, an unverifiable or
+  still-armed one keeps the quarantine and explains why. Once the core submission's
+  receipt confirmed, a later failure (for example a revoke) retires the covered entries
+  instead of quarantining. The direct migration pages (`migrate.vue`, `borrow/swap.vue`)
+  apply the same arming and quarantine per flow via `utils/directSubmissionQuarantine.ts`.
+  The quarantine is also enforced *across surfaces*: every plan executor in
+  `useEulerTx.ts` runs `utils/pendingSubmissionGate.ts` before anything reaches a wallet,
+  so an unresolved batch submission blocks an equivalent direct operation for that
+  wallet/chain (and vice versa); a landed batch record discovered from another surface is
+  retired through a handler the cart registers.
 
 ## Accessibility
 - Row header is a real `<button>`; expose `aria-expanded` bound to the open state and

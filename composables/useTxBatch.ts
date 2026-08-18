@@ -37,11 +37,14 @@ import type { PreparedPlanBroadcast } from '~/composables/useEulerTx'
 import { getSafeWalletProvider, type ReceiptClientLike } from '~/utils/safeWalletTransactions'
 import {
   clearPendingSubmission,
+  listPendingSubmissions,
+  pendingSubmissionStorageKeyPrefix,
   readPendingSubmission,
   resolvePendingSubmissionOutcome,
   writePendingSubmission,
   type PendingSubmissionRecord,
 } from '~/utils/pendingSubmissions'
+import { registerLandedBatchSubmissionHandler } from '~/utils/pendingSubmissionGate'
 import {
   assertPreparedPlanSignatureParity,
   type PreparedPlanSignatureSubstitution,
@@ -314,35 +317,78 @@ const simError = ref<string | undefined>(undefined)
 const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
 /**
- * A core batch submission the wallet accepted but whose confirmation failed —
- * it may still land. While set, execution for the record's wallet/chain is
- * quarantined against blind replays (re-executing could duplicate every entry
- * the submission covered): the next execute attempt first reconciles this
- * submission on-chain, and proceeds only when it definitively did not land.
- * Landed submissions retire their entries.
+ * Core batch submissions the wallet was invoked for but whose outcome is
+ * unknown — armed (no id returned yet) or submitted but unconfirmed. While a
+ * record exists, execution for its wallet/chain is quarantined against blind
+ * replays (re-executing could duplicate every entry the submission covered):
+ * the next execute attempt first reconciles the submission on-chain, and
+ * proceeds only when it definitively did not land. Landed submissions retire
+ * their entries.
  *
- * The record itself is durable (localStorage) so cart clearing, account
- * switches, and page reloads cannot erase the unknown outcome — only a
- * terminal reconcile verdict releases it. The ceremony context exists only
- * while the submitting session is alive; a record hydrated after a reload has
- * no ceremony, so a landed verdict then resets the cart instead of retiring
- * the exact covered entries.
+ * The records are durable (localStorage, keyed per wallet and chain) so cart
+ * clearing, account switches, and page reloads cannot erase the unknown
+ * outcome — only a terminal verdict releases one. This map is a same-session
+ * mirror; durable storage stays the source of truth and is re-read before
+ * every attempt, because another tab can add a record long after this one
+ * hydrated. The ceremony context exists only while the submitting session is
+ * alive; a record hydrated after a reload has no ceremony, so a landed
+ * verdict then resets the cart instead of retiring the exact covered entries.
  */
-const pendingCoreSubmission = shallowRef<{
+const pendingCoreSubmissions = shallowRef<ReadonlyMap<string, {
   record: PendingSubmissionRecord
   context?: { ceremony: PreparedBatchExecution }
-} | null>(null)
+}>>(new Map())
+
+const pendingSubmissionMirrorKey = (owner: Address, chainId: number) =>
+  `${chainId}:${getAddress(owner)}`
+
+const setPendingCoreSubmission = (record: PendingSubmissionRecord, context?: { ceremony: PreparedBatchExecution }) => {
+  const next = new Map(pendingCoreSubmissions.value)
+  next.set(pendingSubmissionMirrorKey(record.owner, record.chainId), { record, context })
+  pendingCoreSubmissions.value = next
+}
+
+/** Remove the wallet's record from the mirror AND its durable storage. */
+const removePendingCoreSubmission = (owner: Address, chainId: number) => {
+  clearPendingSubmission('batch', owner, chainId)
+  const key = pendingSubmissionMirrorKey(owner, chainId)
+  if (!pendingCoreSubmissions.value.has(key)) return
+  const next = new Map(pendingCoreSubmissions.value)
+  next.delete(key)
+  pendingCoreSubmissions.value = next
+}
 
 /**
- * Rehydrate the quarantine mirror from its durable record. Runs once at
- * module init (covering reloads and reconnects); tests re-run it after
- * seeding or clearing storage to simulate those lifecycles.
+ * Rebuild the quarantine mirror from its durable records. Runs at module
+ * init (covering reloads and reconnects), on cross-tab storage events, and
+ * before every execute attempt — an already-open tab must see a quarantine
+ * another tab stored after this one initialized. Ceremony contexts are
+ * preserved only while they still describe the stored submission (same
+ * attempt: an armed record upgrading to its submitted hash keeps its
+ * ceremony; a different hash means a different submission).
  */
 export const hydratePendingBatchSubmissionFromStorage = () => {
-  const record = readPendingSubmission('batch')
-  pendingCoreSubmission.value = record ? { record } : null
+  const previous = pendingCoreSubmissions.value
+  const next = new Map<string, { record: PendingSubmissionRecord, context?: { ceremony: PreparedBatchExecution } }>()
+  for (const record of listPendingSubmissions('batch')) {
+    const key = pendingSubmissionMirrorKey(record.owner, record.chainId)
+    const prior = previous.get(key)
+    const sameAttempt = !!prior
+      && (prior.record.phase === 'armed' || prior.record.hash === record.hash)
+    next.set(key, { record, context: sameAttempt ? prior.context : undefined })
+  }
+  pendingCoreSubmissions.value = next
 }
 hydratePendingBatchSubmissionFromStorage()
+if (typeof window !== 'undefined') {
+  // Storage events only fire in OTHER tabs, which is exactly the gap: a tab
+  // that hydrated before another tab quarantined a submission.
+  window.addEventListener('storage', (event) => {
+    if (event.key === null || event.key.startsWith(pendingSubmissionStorageKeyPrefix('batch'))) {
+      hydratePendingBatchSubmissionFromStorage()
+    }
+  })
+}
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
@@ -2907,32 +2953,36 @@ export const useTxBatch = () => {
 
   /**
    * Resolve a quarantined core submission before anything new is sent.
-   * Returns true when this attempt may proceed: no quarantine exists, the
-   * record belongs to a different wallet/chain (nothing this attempt sends
-   * can duplicate it, so the record is kept for the wallet that owns it), or
-   * the submission definitively did not land. A landed submission retires the
-   * entries it covered and stops the attempt; an unverifiable one keeps the
-   * quarantine — replaying while the original may still confirm would
-   * duplicate every entry it covered.
+   * Returns true when this attempt may proceed: no quarantine exists for the
+   * attempting wallet/chain (records are keyed per wallet, so another
+   * wallet's record stays quarantined for the wallet that owns it without
+   * blocking this one), or the submission definitively did not land. A landed
+   * submission retires the entries it covered and stops the attempt; an
+   * unverifiable one keeps the quarantine — replaying while the original may
+   * still confirm would duplicate every entry it covered.
+   *
+   * The durable record is re-read here, never trusted from the in-memory
+   * mirror: another tab may have quarantined a submission long after this
+   * tab hydrated.
    */
   const reconcilePendingCoreSubmission = async (
     scope: TrackedExecutionScope | undefined,
     attempt: { owner?: Address, chainId?: number },
   ): Promise<boolean> => {
-    const submission = pendingCoreSubmission.value
-    if (!submission) return true
-    const { record, context } = submission
-
-    const matchesAttempt = !!attempt.owner
-      && attempt.owner === record.owner
-      && attempt.chainId === record.chainId
+    hydratePendingBatchSubmissionFromStorage()
+    if (!attempt.owner || !attempt.chainId) return true
+    const record = readPendingSubmission('batch', attempt.owner, attempt.chainId)
+    if (!record) return true
+    const context = pendingCoreSubmissions.value
+      .get(pendingSubmissionMirrorKey(record.owner, record.chainId))?.context
 
     const releaseQuarantine = () => {
-      pendingCoreSubmission.value = null
-      clearPendingSubmission('batch')
+      removePendingCoreSubmission(record.owner, record.chainId)
     }
     const keepQuarantined = () => {
-      execError.value = 'A previous batch submission may still confirm on-chain and could not be verified yet. Wait a moment and execute again — the submission is re-checked before anything is re-sent.'
+      execError.value = record.phase === 'armed'
+        ? 'A previous batch submission was handed to the wallet but no transaction id came back, so it cannot be verified automatically. Check the wallet\'s pending activity and let it resolve before executing again.'
+        : 'A previous batch submission may still confirm on-chain and could not be verified yet. Wait a moment and execute again — the submission is re-checked before anything is re-sent.'
       return false
     }
 
@@ -2946,9 +2996,7 @@ export const useTxBatch = () => {
     })
 
     if (outcome === 'unknown') {
-      // Fail closed only for the wallet/chain that owns the record — a
-      // different wallet's attempt cannot duplicate it and may proceed.
-      return matchesAttempt ? keepQuarantined() : true
+      return keepQuarantined()
     }
     if (outcome === 'not-landed') {
       // Definitively cancelled/reverted — a retry cannot duplicate anything.
@@ -2974,14 +3022,13 @@ export const useTxBatch = () => {
     if (context) {
       retireExecutedEntries(context.ceremony)
     }
-    else if (matchesAttempt) {
-      // No ceremony survives a reload, so the exact covered entries are
-      // unknown — reset the cart rather than leave already-executed entries
-      // queued to run again.
+    else {
+      // No ceremony survives a reload (or the record came from another tab),
+      // so the exact covered entries are unknown — reset the cart rather
+      // than leave already-executed entries queued to run again.
       clearBatch()
     }
     if (record.refreshExternalPositions) scheduleExternalMigrationRefreshes()
-    if (!matchesAttempt) return true
     scope?.markSucceeded()
     if (entries.value.length > 0) {
       execError.value = 'The previous batch submission confirmed on-chain. The operations it covered were removed — review the remaining ones before executing again.'
@@ -3030,22 +3077,49 @@ export const useTxBatch = () => {
     }
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
     let execution = reviewedExecution
-    // Ordered execution tracking. The executor waits for each submission's
-    // receipt before the next send and re-fires the broadcast as 'confirmed'
-    // once that receipt lands, so at most the single latest 'submitted'
-    // broadcast has an unknown outcome at any failure.
+    // Ordered execution tracking. The executor announces each step before
+    // crossing the wallet boundary ('armed'), re-fires with the id the wallet
+    // returned ('submitted'), and terminally with 'confirmed' (receipt landed)
+    // or 'rejected' (the wallet provably never accepted the request) — so at
+    // most the single latest armed/submitted broadcast has an unknown outcome
+    // at any failure.
     let unconfirmedBroadcast: PreparedPlanBroadcast | undefined
     // The value-moving submission (Safe bundle or EVC batch) whose receipt
     // definitively confirmed — a failure after this point must not allow the
     // covered entries to be executed again.
     let confirmedValueMovingBroadcast: PreparedPlanBroadcast | undefined
     const trackBroadcast = (broadcast: PreparedPlanBroadcast) => {
-      if (broadcast.status === 'submitted') {
+      const valueMoving = broadcast.item === 'bundle' || broadcast.item === 'evcBatch'
+      if (broadcast.status === 'armed' || broadcast.status === 'submitted') {
         unconfirmedBroadcast = broadcast
+        if (valueMoving && execution) {
+          // Persist the quarantine synchronously at the wallet boundary — a
+          // reload or crash between here and the receipt must still find the
+          // record, and the wallet may accept a request yet never return its
+          // id. The armed record upgrades to the submitted hash in place.
+          const owner = getAddress(execution.owner)
+          const record: PendingSubmissionRecord = {
+            ...(broadcast.status === 'armed'
+              ? { phase: 'armed' as const }
+              : { phase: 'submitted' as const, kind: broadcast.kind, hash: broadcast.hash }),
+            chainId: execution.chainId,
+            owner,
+            completesPlan: broadcast.completesPlan,
+            refreshExternalPositions: entries.value.some(entry =>
+              entry.refreshExternalMigrationPositions && entry.id in execution!.reviewByEntryId),
+            submittedAt: Date.now(),
+          }
+          writePendingSubmission('batch', record)
+          setPendingCoreSubmission(record, { ceremony: execution })
+        }
         return
       }
+      // 'rejected' and 'confirmed' are both terminal for the record.
       unconfirmedBroadcast = undefined
-      if (broadcast.item === 'bundle' || broadcast.item === 'evcBatch') {
+      if (valueMoving && execution) {
+        removePendingCoreSubmission(getAddress(execution.owner), execution.chainId)
+      }
+      if (broadcast.status === 'confirmed' && valueMoving) {
         confirmedValueMovingBroadcast = broadcast
       }
     }
@@ -3145,24 +3219,13 @@ export const useTxBatch = () => {
         ? unconfirmedBroadcast
         : undefined
       if (ambiguousValueMoving && execution) {
-        // The wallet accepted a value-moving submission but its confirmation
-        // failed — it may still land. Quarantine durably (the record survives
-        // cart clearing, account switches, and reloads) and force on-chain
-        // reconciliation before anything is re-sent. Ambiguous approval or
+        // A value-moving submission is armed or accepted with an unknown
+        // outcome — it may still land. The durable quarantine record was
+        // already written when the broadcast fired (persistence must not
+        // wait for this catch: a reload in between would lose it); here only
+        // force a fresh review before any retry. Ambiguous approval or
         // plugin submissions are idempotent prerequisites and need none of
         // this — an ordinary retry re-runs them safely.
-        const record: PendingSubmissionRecord = {
-          kind: ambiguousValueMoving.kind,
-          hash: ambiguousValueMoving.hash,
-          chainId: execution.chainId,
-          owner: getAddress(execution.owner),
-          completesPlan: ambiguousValueMoving.completesPlan,
-          refreshExternalPositions: entries.value.some(entry =>
-            entry.refreshExternalMigrationPositions && entry.id in execution!.reviewByEntryId),
-          submittedAt: Date.now(),
-        }
-        pendingCoreSubmission.value = { record, context: { ceremony: execution } }
-        writePendingSubmission('batch', record)
         ceremonyInvalidatedForRetry = true
         invalidateBatchReview()
       }
@@ -3183,7 +3246,9 @@ export const useTxBatch = () => {
       })
       let decodedError = await describeExecError(error)
       if (ambiguousValueMoving) {
-        decodedError = `${decodedError} The submission may still confirm — executing again first verifies it on-chain before anything is re-sent.`
+        decodedError = ambiguousValueMoving.status === 'armed'
+          ? `${decodedError} The wallet may have accepted the submission without returning its id — it stays treated as pending until it can be ruled out.`
+          : `${decodedError} The submission may still confirm — executing again first verifies it on-chain before anything is re-sent.`
       }
       else if (confirmedValueMovingBroadcast && execution) {
         decodedError = `${decodedError} The batch itself confirmed on-chain; the operations it covered were removed from the cart.`
@@ -3288,6 +3353,29 @@ export const useTxBatch = () => {
   const modifiedBalanceKeys = computed(() => modifiedPositionKeySets.value.balance)
   const modifiedDebtKeys = computed(() => modifiedPositionKeySets.value.debt)
 
+  // When another execution surface (a direct form or migration page)
+  // discovers that a quarantined batch submission LANDED, the cart must
+  // reconcile it exactly like its own pre-attempt check would — the cart's
+  // own reconcile can never run for an emptied cart (executeBatch
+  // early-returns on zero entries), so without this a landed record would
+  // block every surface forever. State is module-level, so re-registering on
+  // each composable call is idempotent.
+  registerLandedBatchSubmissionHandler((record) => {
+    const context = pendingCoreSubmissions.value
+      .get(pendingSubmissionMirrorKey(record.owner, record.chainId))?.context
+    removePendingCoreSubmission(record.owner, record.chainId)
+    invalidateBatchReview()
+    if (record.completesPlan && context) {
+      retireExecutedEntries(context.ceremony)
+    }
+    else {
+      // No ceremony (reload/another tab) or a partial landing — the exact
+      // covered entries are unknown; reset the cart.
+      clearBatch()
+    }
+    if (record.refreshExternalPositions) scheduleExternalMigrationRefreshes()
+  })
+
   return {
     entries,
     layers,
@@ -3299,7 +3387,7 @@ export const useTxBatch = () => {
     simError,
     isExecuting,
     execError,
-    hasPendingCoreSubmission: computed(() => !!pendingCoreSubmission.value),
+    hasPendingCoreSubmission: computed(() => pendingCoreSubmissions.value.size > 0),
     hasFailedOps,
     canExecuteBatch,
     hasInsufficientBalance,
