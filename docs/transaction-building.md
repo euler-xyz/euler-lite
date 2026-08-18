@@ -55,17 +55,18 @@ Combined helpers keep page code simpler where a workflow can use either a same-a
 - `planDebtChange`
 - `planWithdrawOrRedeem`
 
-The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain id, the effective gasless-signature flag (`usePermit2` from `signaturesEnabled`, with an extra Safe pin at execute time), and wallet callbacks. The quote and vault inputs stay explicit at the page/composable boundary.
+The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and chain id. The quote and vault inputs stay explicit at the page/composable boundary. Planning takes no gasless-signature flag: `usePermit2` enters later, at `prepareTransactionPlan` and `executePlan`, which also add the Safe pin and the wallet callbacks.
 
 ## Execution Flow
 
 1. A page or workflow composable builds a `TransactionPlan` with `useEulerTx()`.
-2. `useTransactionPlanSimulation().runSimulation(plan)` applies operation guards and calls `sdk.executionService.simulateTransactionPlan(...)`.
-3. The review modal prepares the plan with `preparePlanForReview(plan)`.
-4. `preparePlanForReview` applies operation guards and calls `sdk.executionService.resolveRequiredApprovals(...)`.
-5. The review modal renders the prepared plan via `utils/stepDecoding.ts`.
-6. Confirming calls the workflow callback, which executes the plan through `executePlan(plan)`.
-7. `executePlan` applies operation guards, calls `sdk.executionService.executeTransactionPlan(...)`, forwards wagmi `sendTransaction` / `signTypedData` callbacks, and refreshes portfolio state after receipts.
+2. `useTransactionPlanSimulation().runSimulation(plan)` calls `sdk.executionService.simulateTransactionPlan(...)`.
+3. The review modal prepares the plan with `prepareTransactionPlan(plan)` (unless the caller passes a pre-prepared envelope), which calls `sdk.executionService.prepareTransactionPlan(...)`.
+4. The review modal renders the prepared plan via `utils/stepDecoding.ts`.
+5. Confirming calls the workflow callback, which executes the plan through `executePlan(plan)`.
+6. `executePlan` calls `sdk.executionService.executeTransactionPlan(...)`, forwards wagmi `sendTransaction` / `signTypedData` callbacks, and refreshes portfolio state after receipts.
+
+Plan transformation (terms-of-use signing, Keyring credential injection) runs inside the SDK plugin pipeline on each of these paths — see Operation Guards below.
 
 The review modal is fail-closed: if preparation does not produce a plan, it shows an error and disables confirmation.
 
@@ -97,7 +98,7 @@ Do not treat the stored preference as the value that reaches planning or executi
 
 When the **effective** flag is **off**, approval-capable flows fall back to on-chain approval transactions instead of Permit2 (and other) message signatures. Users can still turn the setting off on regular wallets that cannot sign typed data reliably. Safe wallets do not use that toggle: they are forced onto the approval / batched-transaction path.
 
-Do not treat this as an Incentra- or rewards-specific switch — it is a global Lite setting for every message signature the app collects, then narrowed by the Safe override above.
+Do not treat this as an Incentra- or rewards-specific switch — it covers every message signature on Lite's approval and migration-authorization paths (Permit2 approvals and migration typed-data grants), then narrows by the Safe override above. It is not a kill switch for all signing: CoW order and CoW EVC-permit signatures ignore it and are gated separately by `cowSwapForcedOff` (`composables/useCowSwapEligibility.ts`), so a user with the toggle off still signs those.
 
 ### Cross-protocol migrations
 
@@ -110,25 +111,26 @@ Outgoing migrate (`pages/position/[number]/migrate.vue`) threads the same **effe
 
 Inbound external migrate (`pages/position/[number]/borrow/swap.vue`) uses the same `bundledReview` latch and sequential-vs-atomic split.
 
-`composables/useMigrationAuthorizationFlow.ts` owns restore/revoke queuing after success or abort **only on the sequential (non-bundled) fallback**, where a temporary authorization can remain standing. Failed restorations stay queued and must complete before another migration retry. The atomic Safe bundle includes the revokes in the same proposal, so that flow does not leave a standing grant for the sequential restorer to unwind.
+`composables/useMigrationAuthorizationFlow.ts` **queues** restore/revokes after success or abort only on the sequential (non-bundled) fallback, where a temporary authorization can remain standing. The atomic Safe bundle includes the revokes in the same proposal, so that flow never adds to the queue. The retry **gate** is not scoped that way: `restorePendingBeforeRetry()` runs before the bundled branch, so a failed restoration left by an earlier sequential migration blocks every later attempt, bundled Safe migrations included.
 
 ## Operation Guards
 
-`utils/operationGuardRegistry.ts` stores plan transformers and blockers. Guards are applied before simulation, review preparation, and execution.
+`utils/operationGuardRegistry.ts` stores reactive submit blockers and per-concern metadata. Blockers gate the submit button (pending Keyring verification, unverified-vault acknowledgement); metadata annotates failures (e.g. keyring credential cost in `tx-errors`).
 
-Current guard families include:
+Plan transformation runs as SDK `EulerPlugin`s registered in `composables/useEulerSdk.ts`, so simulation, review preparation, and execution all pass through the same pipeline:
 
-- Terms of use signing
-- Keyring credential injection for private vaults
-- Unverified-vault acknowledgement
+- Terms-of-use signing — `createLiteTosPlugin()` (`utils/sdk-tos.ts`) prepends a signed terms-of-use `EVCBatchItem` to every `evcBatch` item. Injection only happens when `useTosGuard` has published a signed message for the owner and the chain's deployment has a `termsOfUseSigner` address.
+- Keyring credential injection for private vaults — the SDK's [`createKeyringPlugin`](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/src/plugins/keyring/keyringPlugin.ts), configured with hook targets and a credential store from `utils/sdk-keyring.ts`. `composables/useOperationGuard.ts` publishes verified credentials into that store; the plugin prepends a Keyring `createCredential` `EVCBatchItem` when a plan touches a keyring hook target, the sender has no valid on-chain credential, and the store returns a current credential.
 
-Transformers receive and return SDK `TransactionPlan` values. For example, `utils/keyring-injection.ts` prepends a Keyring `createCredential` `EVCBatchItem` to every `evcBatch` item.
+The plugins fail open: when their data is missing they pass the plan through unchanged. Enforcement — making the user sign the TOS or complete Keyring verification before submitting — is the blockers' job, not the plugins'.
+
+See the SDK side: [plugins.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/plugins.md).
 
 ## Review Display
 
 `components/entities/operation/OperationReviewModal.vue` displays a prepared SDK plan. It uses:
 
-- `preparePlanForReview` for guard application and approval resolution
+- `prepareTransactionPlan` for SDK plan preparation (plugin pipeline and approval resolution)
 - `buildTransactionPlanDisplaySteps` for human-readable step labels and asset amounts
 - `flattenBatchEntries` and `encodeBatch` for calldata copy and Tenderly simulation
 - `deriveStateOverrides` for Tenderly state overrides
@@ -165,7 +167,7 @@ Pass `background: true` for speculative page-load priming (lend/earn vault forms
 
 Chain switches clear the local `slotHints` ref synchronously. Late probes for an old chain must not restore into the new chain’s local ref (they may still update that chain’s registry bucket). Concurrent primes re-merge after each await so an in-flight probe cannot clobber hints that landed meanwhile.
 
-See the SDK side: `packages/euler-v2-sdk/docs/simulations-and-state-overrides.md` (performance tuning section) and `packages/euler-v2-sdk/docs/execution-service.md` (prefetching plugin data).
+See the SDK side: [simulations-and-state-overrides.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/simulations-and-state-overrides.md) (performance tuning section) and [execution-service.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/execution-service.md) (prefetching plugin data).
 
 ## Batch cart prefetch
 
@@ -242,7 +244,7 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `utils/transaction-plan-calls.ts` | Resolved plan → EIP-5792 call list for Safe bundles |
 | `components/entities/operation/OperationReviewModal.vue` | Prepared-plan review, calldata copy, and Tenderly simulation |
 | `utils/stepDecoding.ts` | SDK plan item decoding for review display |
-| `utils/operationGuardRegistry.ts` | Guard transformer and blocker registry |
-| `utils/keyring-injection.ts` | Keyring credential batch-item injection |
-| `utils/tos-injection.ts` | Terms-of-use batch-item injection |
+| `utils/operationGuardRegistry.ts` | Submit blocker and operation metadata registry |
+| `utils/sdk-keyring.ts` | Credential store and hook-target config for the SDK keyring plugin |
+| `utils/sdk-tos.ts` | Terms-of-use SDK plugin (batch-item injection) |
 | `composables/useSwapApi.ts` | Swap API request building and quote normalization |

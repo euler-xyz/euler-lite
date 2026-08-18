@@ -139,6 +139,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - `CONFIG_ANNOUNCEMENT_*` and `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` setup
 - Dismissal token lifecycle, URL safety rules, and rollout troubleshooting
 
+### 📉 [Earn Uncovered Losses](./earn-uncovered-losses.md)
+
+- EulerEarn Statistics row for still-unbacked shortfalls
+- Why `vault.lostAssets` is already coverage-normalized (do not re-net `address(1)`)
+- Off-chain USD formatting, race-guarded display, and scraper `data-field` hooks
+
 ## 🎯 Project Overview
 
 **Euler Lite** is a lightweight multi-chain DeFi application that provides lending and borrowing services through the Euler Finance protocol. It supports multiple EVM chains and connects via standard EVM wallets. The application allows users to:
