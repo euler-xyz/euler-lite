@@ -14,9 +14,9 @@
  *
  * Two timers, each with its own cadence:
  *
- *   • Global cycle (5 min): /api/internal/euler-chains once, cross-chain
- *     `all/assets.json` once, then per-chain labels + token-list,
- *     serialized across chains.
+ *   • Global cycle (5 min): /api/internal/euler-chains once, runtime ABIs
+ *     once, cross-chain `all/assets.json` once, then per-chain labels +
+ *     token-list, serialized across chains.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
  *     /api/internal/vaults per chain, serialized.
  *
@@ -37,6 +37,7 @@
  */
 import { LABEL_FILES, refreshLabelFile } from '../api/internal/labels/[file].get'
 import { refreshEulerChains } from '../api/internal/euler-chains.get'
+import { ABI_CONTRACTS, refreshAbi } from '../api/internal/abis/[contract].get'
 import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import {
@@ -97,6 +98,14 @@ const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined
 
 const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
+
+// Runtime ABI documents are chain-agnostic (one file per contract), so a
+// single warm per cycle keeps the manifest caches hot for the browser SDK's
+// /api/internal/abis reads.
+const warmAbis = (): Promise<unknown>[] =>
+  ABI_CONTRACTS.map(contract =>
+    reportWarm(`abis/${contract}`, refreshAbi(contract)),
+  )
 
 // Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
 // upstream. The /api/internal/labels/assets.json handler unions this with the
@@ -160,6 +169,7 @@ export default defineNitroPlugin(() => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
+        ...warmAbis(),
         warmGlobalAssets(),
         warmChainsSequentially(),
       ])
