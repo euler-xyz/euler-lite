@@ -8,6 +8,8 @@
  * stale-fallback resilience chain as /api/internal/euler-chains.
  */
 import { createError, getRouterParam, setResponseHeader } from 'h3'
+import { toFunctionSignature } from 'viem'
+import type { AbiFunction } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
@@ -46,17 +48,60 @@ const inFlight = createInFlightDedup<string, unknown[]>()
 const isAbiContract = (value: string): value is AbiContract =>
   (ABI_CONTRACTS as readonly string[]).includes(value)
 
-// Admission check guarding the long stale window: only a structurally
-// usable ABI may overwrite the last-known-good entry. Every viem ABI item
-// carries a string `type`; an empty or malformed array must throw so
-// loadAbi() keeps serving the previous stale value instead of preserving
-// poison for up to MANIFEST_MAX_STALE_MS.
-const isValidAbiItem = (item: unknown): boolean =>
-  item !== null && typeof item === 'object'
-  && typeof (item as { type?: unknown }).type === 'string'
+// Admission check guarding the long stale window: only an ABI the runtime
+// consumers can actually encode against may overwrite the last-known-good
+// entry. Item shape alone is not enough — a function fragment carrying the
+// right name but missing `inputs` makes viem derive a wrong selector and
+// emit garbage calldata — so each contract pins the canonical signatures
+// (name + inputs, exactly what selector encoding depends on) its consumers
+// call. Outputs are deliberately unpinned: return-tuple drift is the reason
+// ABIs are resolved at runtime instead of compiled in.
+const REQUIRED_ABI_SIGNATURES: Record<AbiContract, readonly string[]> = {
+  // SDK account adapter / simulate / rewards (resolveAccountLensAbi)
+  AccountLens: [
+    'getEVCAccountInfo(address,address)',
+    'getVaultAccountInfo(address,address)',
+  ],
+  // VaultOverviewBlockIRM computeAPYs read
+  UtilsLens: ['computeAPYs(uint256,uint256,uint256,uint256)'],
+  // Projected rates (utils/vault/apy.ts) and IRM overview
+  VaultLens: ['getVaultInterestRateModelInfo(address,uint256[],uint256[])'],
+}
 
-const isValidAbi = (data: unknown): data is unknown[] =>
-  Array.isArray(data) && data.length > 0 && data.every(isValidAbiItem)
+const isValidAbiItem = (item: unknown): boolean => {
+  if (item === null || typeof item !== 'object') return false
+  const { type, name, inputs, outputs, stateMutability } = item as Record<string, unknown>
+  if (typeof type !== 'string') return false
+  if (type !== 'function') return true
+
+  return typeof name === 'string'
+    && Array.isArray(inputs)
+    && Array.isArray(outputs)
+    && typeof stateMutability === 'string'
+}
+
+const abiSignatures = (data: unknown[]): Set<string> => {
+  const signatures = new Set<string>()
+  for (const item of data) {
+    if ((item as { type?: unknown }).type !== 'function') continue
+    try {
+      signatures.add(toFunctionSignature(item as AbiFunction))
+    }
+    catch {
+      // A fragment viem cannot canonicalize cannot be encoded against
+      // either — skip it; the required-signature check below decides.
+    }
+  }
+  return signatures
+}
+
+const isValidAbi = (contract: AbiContract, data: unknown): data is unknown[] => {
+  if (!Array.isArray(data) || data.length === 0) return false
+  if (!data.every(isValidAbiItem)) return false
+
+  const signatures = abiSignatures(data)
+  return REQUIRED_ABI_SIGNATURES[contract].every(signature => signatures.has(signature))
+}
 
 function getUpstreamUrl(contract: AbiContract): string {
   // An explicit base URL wins over the branch env vars — the same emergency
@@ -77,7 +122,7 @@ export function refreshAbi(contract: AbiContract): Promise<unknown[]> {
     }
 
     const data: unknown = await resp.json()
-    if (!isValidAbi(data)) {
+    if (!isValidAbi(contract, data)) {
       throw new Error('Upstream returned an invalid ABI payload')
     }
     cache.set(contract, data)

@@ -30,7 +30,15 @@ const ENV_KEYS = [
 
 const originalEnv = Object.fromEntries(ENV_KEYS.map(key => [key, process.env[key]]))
 
-const validManifest = () => [{ chainId: 1, addresses: { coreAddrs: {} } }]
+const ADDR = `0x${'11'.repeat(20)}`
+
+const validManifest = () => [{
+  chainId: 1,
+  addresses: {
+    coreAddrs: { eVaultFactory: ADDR, evc: ADDR, permit2: ADDR },
+    lensAddrs: { accountLens: ADDR, oracleLens: ADDR, utilsLens: ADDR, vaultLens: ADDR },
+  },
+}]
 
 // The module holds cache state, so every test imports a fresh copy.
 const importRoute = async () => {
@@ -151,6 +159,23 @@ describe('/api/internal/euler-chains resolution chain', () => {
     ['empty manifest', []],
     ['entries without chainId/addresses', [{}]],
     ['non-object addresses', [{ chainId: 1, addresses: 'x' }]],
+    ['array addresses', [{ chainId: 1, addresses: [ADDR] }]],
+    ['empty addresses object', [{ chainId: 1, addresses: {} }]],
+    ['missing coreAddrs keys', [{
+      chainId: 1,
+      addresses: {
+        coreAddrs: { eVaultFactory: ADDR, permit2: ADDR },
+        lensAddrs: { accountLens: ADDR, oracleLens: ADDR, utilsLens: ADDR, vaultLens: ADDR },
+      },
+    }]],
+    ['non-address lens value', [{
+      chainId: 1,
+      addresses: {
+        coreAddrs: { eVaultFactory: ADDR, evc: ADDR, permit2: ADDR },
+        lensAddrs: { accountLens: ADDR, oracleLens: ADDR, utilsLens: ADDR, vaultLens: 'not-an-address' },
+      },
+    }]],
+    ['one bad entry among valid ones', [...validManifest(), { chainId: 2, addresses: {} }]],
   ])('rejects an unusable 200 payload with no cache (%s)', async (_label, payload) => {
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(payload))
 
@@ -173,7 +198,13 @@ describe('/api/internal/euler-chains resolution chain', () => {
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
     await expect(loadEulerChains()).resolves.toEqual(upstreamData)
 
-    // And the valid entry's timestamp was not reset by the poison response.
+    // A non-empty but semantically unusable manifest must not overwrite
+    // the valid entry either.
+    vi.advanceTimersByTime(6 * 60_000)
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([{ chainId: 1, addresses: {} }]))
+    await expect(loadEulerChains()).resolves.toEqual(upstreamData)
+
+    // And the valid entry's timestamp was not reset by the poison responses.
     vi.advanceTimersByTime(6 * 60_000)
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([{ chainId: 0 }]))
     await expect(loadEulerChains()).resolves.toEqual(upstreamData)

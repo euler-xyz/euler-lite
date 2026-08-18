@@ -34,16 +34,37 @@ function getUpstreamUrl(): string {
   return eulerInterfacesRawUrl('EulerChains.json')
 }
 
-// Admission check guarding the long stale window: only a structurally
-// usable manifest may overwrite the last-known-good entry. An array-shaped
-// but unusable 200 (`[]`, entries missing chainId/addresses) must throw so
-// loadEulerChains() keeps serving the previous stale value instead of
-// preserving poison for up to MANIFEST_MAX_STALE_MS.
+// Admission check guarding the long stale window: only a manifest the SDK
+// and useEulerAddresses can actually consume may overwrite the last-known-
+// good entry. An array-shaped but unusable 200 (`[]`, `[{ chainId, addresses:
+// {} }]`, non-address values) must throw so loadEulerChains() keeps serving
+// the previous stale value instead of preserving poison for up to
+// MANIFEST_MAX_STALE_MS.
+//
+// Required keys are the ones whose absence breaks SDK builds or the core
+// lend/borrow surfaces on every chain (all current manifest entries carry
+// the full key set; peripheral keys are deliberately not required so a
+// sparse future entry degrades a feature, not the whole manifest).
+const REQUIRED_CORE_ADDRS = ['eVaultFactory', 'evc', 'permit2'] as const
+const REQUIRED_LENS_ADDRS = ['accountLens', 'oracleLens', 'utilsLens', 'vaultLens'] as const
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+
+const isEvmAddress = (value: unknown): boolean =>
+  typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
+
 const isValidDeployment = (entry: unknown): boolean => {
-  if (entry === null || typeof entry !== 'object') return false
-  const { chainId, addresses } = entry as { chainId?: unknown, addresses?: unknown }
-  return Number.isInteger(chainId) && (chainId as number) > 0
-    && addresses !== null && typeof addresses === 'object'
+  if (!isRecord(entry)) return false
+  const { chainId, addresses } = entry
+  if (!Number.isInteger(chainId) || (chainId as number) <= 0) return false
+  if (!isRecord(addresses)) return false
+
+  const { coreAddrs, lensAddrs } = addresses
+  if (!isRecord(coreAddrs) || !isRecord(lensAddrs)) return false
+
+  return REQUIRED_CORE_ADDRS.every(key => isEvmAddress(coreAddrs[key]))
+    && REQUIRED_LENS_ADDRS.every(key => isEvmAddress(lensAddrs[key]))
 }
 
 const isValidDeploymentManifest = (data: unknown): data is unknown[] =>
