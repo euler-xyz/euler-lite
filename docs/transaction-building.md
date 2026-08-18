@@ -60,12 +60,13 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain 
 ## Execution Flow
 
 1. A page or workflow composable builds a `TransactionPlan` with `useEulerTx()`.
-2. `useTransactionPlanSimulation().runSimulation(plan)` applies operation guards and calls `sdk.executionService.simulateTransactionPlan(...)`.
-3. The review modal prepares the plan with `preparePlanForReview(plan)`.
-4. `preparePlanForReview` applies operation guards and calls `sdk.executionService.resolveRequiredApprovals(...)`.
-5. The review modal renders the prepared plan via `utils/stepDecoding.ts`.
-6. Confirming calls the workflow callback, which executes the plan through `executePlan(plan)`.
-7. `executePlan` applies operation guards, calls `sdk.executionService.executeTransactionPlan(...)`, forwards wagmi `sendTransaction` / `signTypedData` callbacks, and refreshes portfolio state after receipts.
+2. `useTransactionPlanSimulation().runSimulation(plan)` calls `sdk.executionService.simulateTransactionPlan(...)`.
+3. The review modal prepares the plan with `prepareTransactionPlan(plan)` (unless the caller passes a pre-prepared envelope), which calls `sdk.executionService.prepareTransactionPlan(...)`.
+4. The review modal renders the prepared plan via `utils/stepDecoding.ts`.
+5. Confirming calls the workflow callback, which executes the plan through `executePlan(plan)`.
+6. `executePlan` calls `sdk.executionService.executeTransactionPlan(...)`, forwards wagmi `sendTransaction` / `signTypedData` callbacks, and refreshes portfolio state after receipts.
+
+Plan transformation (terms-of-use signing, Keyring credential injection) runs inside the SDK plugin pipeline on each of these paths — see Operation Guards below.
 
 The review modal is fail-closed: if preparation does not produce a plan, it shows an error and disables confirmation.
 
@@ -80,21 +81,18 @@ Plans may include `requiredApproval` items. During review and execution, `resolv
 
 ## Operation Guards
 
-`utils/operationGuardRegistry.ts` stores plan transformers and blockers. Guards are applied before simulation, review preparation, and execution.
+`utils/operationGuardRegistry.ts` stores reactive submit blockers and per-concern metadata. Blockers gate the submit button (pending Keyring verification, unverified-vault acknowledgement); metadata annotates failures (e.g. keyring credential cost in `tx-errors`).
 
-Current guard families include:
+Plan transformation runs as SDK `EulerPlugin`s registered in `composables/useEulerSdk.ts`, so simulation, review preparation, and execution all pass through the same pipeline:
 
-- Terms of use signing
-- Keyring credential injection for private vaults
-- Unverified-vault acknowledgement
-
-Transformers receive and return SDK `TransactionPlan` values. For example, `utils/keyring-injection.ts` prepends a Keyring `createCredential` `EVCBatchItem` to every `evcBatch` item.
+- Terms-of-use signing — `createLiteTosPlugin()` (`utils/sdk-tos.ts`) prepends a signed terms-of-use `EVCBatchItem` to every `evcBatch` item.
+- Keyring credential injection for private vaults — the SDK's `createKeyringPlugin`, configured with hook targets and a credential store from `utils/sdk-keyring.ts`. `composables/useOperationGuard.ts` publishes verified credentials into that store; the plugin prepends a Keyring `createCredential` `EVCBatchItem` when a plan touches a keyring hook target.
 
 ## Review Display
 
 `components/entities/operation/OperationReviewModal.vue` displays a prepared SDK plan. It uses:
 
-- `preparePlanForReview` for guard application and approval resolution
+- `prepareTransactionPlan` for SDK plan preparation (plugin pipeline and approval resolution)
 - `buildTransactionPlanDisplaySteps` for human-readable step labels and asset amounts
 - `flattenBatchEntries` and `encodeBatch` for calldata copy and Tenderly simulation
 - `deriveStateOverrides` for Tenderly state overrides
@@ -189,7 +187,7 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/useTxBatch.ts` | Multi-tx cart: plan merge, resimulate, slot-hint reuse, execution |
 | `components/entities/operation/OperationReviewModal.vue` | Prepared-plan review, calldata copy, and Tenderly simulation |
 | `utils/stepDecoding.ts` | SDK plan item decoding for review display |
-| `utils/operationGuardRegistry.ts` | Guard transformer and blocker registry |
-| `utils/keyring-injection.ts` | Keyring credential batch-item injection |
-| `utils/tos-injection.ts` | Terms-of-use batch-item injection |
+| `utils/operationGuardRegistry.ts` | Submit blocker and operation metadata registry |
+| `utils/sdk-keyring.ts` | Credential store and hook-target config for the SDK keyring plugin |
+| `utils/sdk-tos.ts` | Terms-of-use SDK plugin (batch-item injection) |
 | `composables/useSwapApi.ts` | Swap API request building and quote normalization |

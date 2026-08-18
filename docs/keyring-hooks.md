@@ -50,23 +50,24 @@ The Keyring credentials contract (`entityExp(policyId, address)`) is used to che
 - Manages the Keyring Connect SDK browser extension flow
 - Returns reactive state: `isVerificationRequired`, `flowState`, `credentialData`, etc.
 
-**`composables/useOperationGuard.ts`** — wires keyring to the guard system:
+**`composables/useOperationGuard.ts`** — wires keyring to the SDK plugin and the guard registry:
 - Calls `useKeyring` for the first keyring-flagged vault address
 - Provides keyring state to `VaultFormSubmit` via `provide('keyring-guard', ...)`
-- Registers/unregisters plan transformers and blockers in the guard registry
+- Publishes verified credentials to the SDK keyring plugin store via `setSdkKeyringCredential()` (`utils/sdk-keyring.ts`) and sets credential-cost metadata
+- Registers/unregisters submit blockers in the guard registry while verification is pending
 
-### Operation Guard Registry
+### Guard registry and SDK plugin
 
-`utils/operationGuardRegistry.ts` provides a reactive system for automatic SDK `TransactionPlan` transformation:
+`utils/operationGuardRegistry.ts` holds reactive submit blockers and per-concern metadata. Plan transformation itself runs inside the SDK's keyring plugin (`createKeyringPlugin`, registered in `composables/useEulerSdk.ts`):
 
 ```text
 Page calls useOperationGuard([vaultAddresses])
   → useKeyring detects keyring vault
   → credential obtained from extension
-  → registerOperationGuard('keyring', transformFn)
+  → setSdkKeyringCredential(...) publishes it to the SDK plugin store
 
 Page calls executePlan(plan) as normal
-  → applyOperationGuards(plan) automatically prepends createCredential
+  → the SDK keyring plugin automatically prepends createCredential
   → transaction executes with credential registration + vault operation atomically
 ```
 
@@ -74,7 +75,12 @@ This means **pages need zero changes to their submit handlers** — they just ca
 
 ### Transaction injection
 
-`utils/keyring-injection.ts` contains the `injectKeyringCredential()` pure function that:
+The SDK's `createKeyringPlugin` performs the injection. It is registered in `composables/useEulerSdk.ts` with two inputs from `utils/sdk-keyring.ts`:
+
+- `hookTargets` from `buildSdkKeyringHookTargets()` — hook-target addresses derived from keyring-tagged vaults in the registry
+- `getCredentialData` from `getSdkKeyringCredential()` — serves credentials published by `useOperationGuard`, returning `null` for expired credentials or when the hook target's keyring contract address no longer matches the cached one
+
+When a plan touches a keyring hook target and a credential is available, the plugin:
 1. Creates a `createCredential` `EVCBatchItem` targeting the Keyring credentials contract
 2. Includes the ETH/native currency fee as the call's `value`
 3. Prepends it to every `evcBatch` item in the SDK `TransactionPlan`
@@ -120,8 +126,8 @@ useOperationGuard(computed(() => [fromVault?.address, toVault?.address].filter(B
 |------|------|
 | `abis/keyring.ts` | Hook target + credentials contract ABIs |
 | `composables/useKeyring/index.ts` | Main keyring composable |
-| `composables/useOperationGuard.ts` | Wires keyring to guard registry + provide/inject |
-| `utils/operationGuardRegistry.ts` | Reactive guard registry (register/unregister/apply) |
-| `utils/keyring-injection.ts` | SDK `TransactionPlan` transformer (prepend createCredential to EVC batch) |
+| `composables/useOperationGuard.ts` | Publishes credentials to the SDK plugin store, registers blockers, provide/inject |
+| `utils/operationGuardRegistry.ts` | Reactive submit blocker and metadata registry |
+| `utils/sdk-keyring.ts` | Credential store and hook-target config for the SDK `createKeyringPlugin` |
 | `components/keyring/*` | UI components (badge, alert, flow, modal) |
 | `components/entities/vault/VaultTypeBadges.vue` | Unified vault type + private badge display |
