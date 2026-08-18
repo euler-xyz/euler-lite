@@ -1033,9 +1033,10 @@ function finishMigrationSuccess(execution: TrackedExecutionScope) {
  * before the bundle is built. The pre-bundle simulation runs with the SDK's
  * authorization state overrides for the same reason.
  *
- * Returns 'executed' when the bundle confirmed, 'aborted' when the simulation
- * rejected (nothing on-chain, nothing to unwind), or 'unavailable' when there
- * is no Safe bundle context — the caller falls back to sequential grants.
+ * Returns 'executed' when the bundle confirmed and 'aborted' when the
+ * simulation rejected (nothing on-chain, nothing to unwind). There is no
+ * sequential fallback: the review promised one proposal, so an unavailable
+ * Safe bundle context throws instead of silently splitting the ceremony.
  */
 async function sendMigrationAsSafeBundle(
   input: OutgoingMigrationInput,

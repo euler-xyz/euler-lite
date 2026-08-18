@@ -52,6 +52,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - SDK TransactionPlan architecture and composite operations
 - EVC batching and Permit2 integration
+- Gasless-signature preference (`useSignaturePreference`), Safe forced-off override, and sequential vs atomic Safe migration authorization paths
 - Sub-accounts and position isolation
 - Simulation performance tuning and batch-cart slot-hint / account prefetch
 
@@ -124,6 +125,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Deployment-controlled one-time modal for operational notices
 - `CONFIG_ANNOUNCEMENT_*` and `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` setup
 - Dismissal token lifecycle, URL safety rules, and rollout troubleshooting
+
+### 📉 [Earn Uncovered Losses](./earn-uncovered-losses.md)
+
+- EulerEarn Statistics row for still-unbacked shortfalls
+- Why `vault.lostAssets` is already coverage-normalized (do not re-net `address(1)`)
+- Off-chain USD formatting, race-guarded display, and scraper `data-field` hooks
 
 ## 🎯 Project Overview
 
