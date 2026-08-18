@@ -86,7 +86,9 @@ Plans may include `requiredApproval` items. During review and execution, `resolv
 Plan transformation runs as SDK `EulerPlugin`s registered in `composables/useEulerSdk.ts`, so simulation, review preparation, and execution all pass through the same pipeline:
 
 - Terms-of-use signing — `createLiteTosPlugin()` (`utils/sdk-tos.ts`) prepends a signed terms-of-use `EVCBatchItem` to every `evcBatch` item.
-- Keyring credential injection for private vaults — the SDK's `createKeyringPlugin`, configured with hook targets and a credential store from `utils/sdk-keyring.ts`. `composables/useOperationGuard.ts` publishes verified credentials into that store; the plugin prepends a Keyring `createCredential` `EVCBatchItem` when a plan touches a keyring hook target.
+- Keyring credential injection for private vaults — the SDK's [`createKeyringPlugin`](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/src/plugins/keyring/keyringPlugin.ts), configured with hook targets and a credential store from `utils/sdk-keyring.ts`. `composables/useOperationGuard.ts` publishes verified credentials into that store; the plugin prepends a Keyring `createCredential` `EVCBatchItem` when a plan touches a keyring hook target.
+
+See the SDK side: [plugins.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/plugins.md).
 
 ## Review Display
 
@@ -129,7 +131,7 @@ Pass `background: true` for speculative page-load priming (lend/earn vault forms
 
 Chain switches clear the local `slotHints` ref synchronously. Late probes for an old chain must not restore into the new chain’s local ref (they may still update that chain’s registry bucket). Concurrent primes re-merge after each await so an in-flight probe cannot clobber hints that landed meanwhile.
 
-See the SDK side: `packages/euler-v2-sdk/docs/simulations-and-state-overrides.md` (performance tuning section) and `packages/euler-v2-sdk/docs/execution-service.md` (prefetching plugin data).
+See the SDK side: [simulations-and-state-overrides.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/simulations-and-state-overrides.md) (performance tuning section) and [execution-service.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/execution-service.md) (prefetching plugin data).
 
 ## Batch cart prefetch
 

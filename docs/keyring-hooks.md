@@ -75,7 +75,7 @@ This means **pages need zero changes to their submit handlers** — they just ca
 
 ### Transaction injection
 
-The SDK's `createKeyringPlugin` performs the injection. It is registered in `composables/useEulerSdk.ts` with two inputs from `utils/sdk-keyring.ts`:
+The SDK's [`createKeyringPlugin`](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/src/plugins/keyring/keyringPlugin.ts) performs the injection. It is registered in `composables/useEulerSdk.ts` with two inputs from `utils/sdk-keyring.ts`:
 
 - `hookTargets` from `buildSdkKeyringHookTargets()` — hook-target addresses derived from keyring-tagged vaults in the registry
 - `getCredentialData` from `getSdkKeyringCredential()` — serves credentials published by `useOperationGuard`, returning `null` for expired credentials or when the hook target's keyring contract address no longer matches the cached one
