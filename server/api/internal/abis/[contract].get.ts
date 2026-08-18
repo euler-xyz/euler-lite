@@ -54,8 +54,8 @@ const isAbiContract = (value: string): value is AbiContract =>
 // right name but missing `inputs` makes viem derive a wrong selector and
 // emit garbage calldata — so each contract pins the canonical signatures
 // (name + inputs, exactly what selector encoding depends on) its consumers
-// call. Outputs are deliberately unpinned: return-tuple drift is the reason
-// ABIs are resolved at runtime instead of compiled in.
+// call, and requires those fragments to carry a non-empty outputs tuple
+// (see decodableAbiSignatures below).
 const REQUIRED_ABI_SIGNATURES: Record<AbiContract, readonly string[]> = {
   // SDK account adapter / simulate / rewards (resolveAccountLensAbi)
   AccountLens: [
@@ -68,6 +68,10 @@ const REQUIRED_ABI_SIGNATURES: Record<AbiContract, readonly string[]> = {
   VaultLens: ['getVaultInterestRateModelInfo(address,uint256[],uint256[])'],
 }
 
+const isAbiParameter = (value: unknown): boolean =>
+  value !== null && typeof value === 'object'
+  && typeof (value as { type?: unknown }).type === 'string'
+
 const isValidAbiItem = (item: unknown): boolean => {
   if (item === null || typeof item !== 'object') return false
   const { type, name, inputs, outputs, stateMutability } = item as Record<string, unknown>
@@ -75,17 +79,28 @@ const isValidAbiItem = (item: unknown): boolean => {
   if (type !== 'function') return true
 
   return typeof name === 'string'
-    && Array.isArray(inputs)
-    && Array.isArray(outputs)
+    && Array.isArray(inputs) && inputs.every(isAbiParameter)
+    && Array.isArray(outputs) && outputs.every(isAbiParameter)
     && typeof stateMutability === 'string'
 }
 
-const abiSignatures = (data: unknown[]): Set<string> => {
+/**
+ * Signatures of fragments the consumers can both encode against AND decode
+ * from: the canonical signature pins name + inputs (what the selector
+ * depends on), and a non-empty outputs tuple is required because the lens
+ * reads all decode return data — a stripped `outputs: []` fragment makes
+ * viem decode to undefined, which is poison with a valid selector. The
+ * *shape* of the outputs stays unpinned: return-tuple drift is the reason
+ * ABIs are resolved at runtime.
+ */
+const decodableAbiSignatures = (data: unknown[]): Set<string> => {
   const signatures = new Set<string>()
   for (const item of data) {
-    if ((item as { type?: unknown }).type !== 'function') continue
+    const fragment = item as AbiFunction
+    if (fragment.type !== 'function') continue
+    if (!Array.isArray(fragment.outputs) || fragment.outputs.length === 0) continue
     try {
-      signatures.add(toFunctionSignature(item as AbiFunction))
+      signatures.add(toFunctionSignature(fragment))
     }
     catch {
       // A fragment viem cannot canonicalize cannot be encoded against
@@ -99,7 +114,7 @@ const isValidAbi = (contract: AbiContract, data: unknown): data is unknown[] => 
   if (!Array.isArray(data) || data.length === 0) return false
   if (!data.every(isValidAbiItem)) return false
 
-  const signatures = abiSignatures(data)
+  const signatures = decodableAbiSignatures(data)
   return REQUIRED_ABI_SIGNATURES[contract].every(signature => signatures.has(signature))
 }
 

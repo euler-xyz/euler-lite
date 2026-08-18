@@ -104,6 +104,17 @@ describe('/api/internal/abis/[contract]', () => {
     ['wrong required signature', [fn('getVaultInterestRateModelInfo', ['address'])]],
     // Valid fragments, but the contract's required function is absent.
     ['missing required function', [fn('somethingElse', ['address'])]],
+    // Right name and inputs, but a stripped outputs tuple — viem would
+    // decode the lens return data as undefined.
+    ['required function with empty outputs', [{
+      ...fn('getVaultInterestRateModelInfo', ['address', 'uint256[]', 'uint256[]']),
+      outputs: [],
+    }]],
+    // Outputs present but not ABI parameters.
+    ['malformed output entries', [{
+      ...fn('getVaultInterestRateModelInfo', ['address', 'uint256[]', 'uint256[]']),
+      outputs: [42],
+    }]],
   ])('rejects an unusable 200 payload (%s)', async (_label, payload) => {
     for (const key of BRANCH_ENV_KEYS) Reflect.deleteProperty(process.env, key)
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(payload))
@@ -142,6 +153,14 @@ describe('/api/internal/abis/[contract]', () => {
       { type: 'function', name: 'getEVCAccountInfo' },
       { type: 'function', name: 'getVaultAccountInfo' },
     ]))
+    await expect(loadAbi('AccountLens')).resolves.toEqual(VALID_ABIS.AccountLens)
+
+    // Nor one with correct signatures whose outputs tuples were stripped —
+    // encodable but undecodable.
+    vi.advanceTimersByTime(6 * 60_000)
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(
+      VALID_ABIS.AccountLens.map(item => ({ ...item, outputs: [] })),
+    ))
     await expect(loadAbi('AccountLens')).resolves.toEqual(VALID_ABIS.AccountLens)
   })
 
