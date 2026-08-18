@@ -55,7 +55,7 @@ Combined helpers keep page code simpler where a workflow can use either a same-a
 - `planDebtChange`
 - `planWithdrawOrRedeem`
 
-The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain id, the effective gasless-signature flag (`usePermit2` from `signaturesEnabled`, with an extra Safe pin at execute time), and wallet callbacks. The quote and vault inputs stay explicit at the page/composable boundary.
+The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and chain id. The quote and vault inputs stay explicit at the page/composable boundary. Planning takes no gasless-signature flag: `usePermit2` enters later, at `prepareTransactionPlan` and `executePlan`, which also add the Safe pin and the wallet callbacks.
 
 ## Execution Flow
 
@@ -97,7 +97,7 @@ Do not treat the stored preference as the value that reaches planning or executi
 
 When the **effective** flag is **off**, approval-capable flows fall back to on-chain approval transactions instead of Permit2 (and other) message signatures. Users can still turn the setting off on regular wallets that cannot sign typed data reliably. Safe wallets do not use that toggle: they are forced onto the approval / batched-transaction path.
 
-Do not treat this as an Incentra- or rewards-specific switch — it is a global Lite setting for every message signature the app collects, then narrowed by the Safe override above.
+Do not treat this as an Incentra- or rewards-specific switch — it covers every message signature on Lite's approval and migration-authorization paths (Permit2 approvals and migration typed-data grants), then narrows by the Safe override above. It is not a kill switch for all signing: CoW order and CoW EVC-permit signatures ignore it and are gated separately by `cowSwapForcedOff` (`composables/useCowSwapEligibility.ts`), so a user with the toggle off still signs those.
 
 ### Cross-protocol migrations
 
@@ -110,7 +110,7 @@ Outgoing migrate (`pages/position/[number]/migrate.vue`) threads the same **effe
 
 Inbound external migrate (`pages/position/[number]/borrow/swap.vue`) uses the same `bundledReview` latch and sequential-vs-atomic split.
 
-`composables/useMigrationAuthorizationFlow.ts` owns restore/revoke queuing after success or abort **only on the sequential (non-bundled) fallback**, where a temporary authorization can remain standing. Failed restorations stay queued and must complete before another migration retry. The atomic Safe bundle includes the revokes in the same proposal, so that flow does not leave a standing grant for the sequential restorer to unwind.
+`composables/useMigrationAuthorizationFlow.ts` **queues** restore/revokes after success or abort only on the sequential (non-bundled) fallback, where a temporary authorization can remain standing. The atomic Safe bundle includes the revokes in the same proposal, so that flow never adds to the queue. The retry **gate** is not scoped that way: `restorePendingBeforeRetry()` runs before the bundled branch, so a failed restoration left by an earlier sequential migration blocks every later attempt, bundled Safe migrations included.
 
 ## Operation Guards
 

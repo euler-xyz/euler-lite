@@ -29,7 +29,9 @@ EulerEarn lens / V3 detail
         └─ else     → asset-denominated display string
 ```
 
-There is **no** Lite-side `balanceOf(address(1))` read and no local netting helper. An earlier coverage-RPC path was removed because the lens already subtracts `convertToAssets(balanceOf(address(1)))` before exposing `lostAssets`; reading coverage again double-counted and understated the shortfall. The V3 API is populated from the same lens, so the value is already net of coverage on both backends.
+There is **no** Lite-side `balanceOf(address(1))` read and no local netting helper. An earlier coverage-RPC path was removed because reading coverage again double-counted it and understated the shortfall.
+
+That correctness rests on an **upstream on-chain invariant this repo cannot verify**: the EulerEarn lens subtracts `convertToAssets(balanceOf(address(1)))` before exposing `lostAssets`, and the V3 API is populated from the same lens. What is verifiable here is that nothing between the lens and the row nets anything — the SDK `eulerEarnService` adapters pass the value straight through (`eulerEarnInfoConverter` copies `vaultInfo.lostAssets`; the V3 adapter parses `detail.lostAssets`), and Lite formats it unchanged. If that lens behaviour ever changes, this row silently becomes wrong.
 
 ## Display path
 
@@ -37,7 +39,7 @@ There is **no** Lite-side `balanceOf(address(1))` read and no local netting help
 | ----- | ---- |
 | `components/entities/vault/overview/earn/VaultOverviewEarnBlockStats.vue` | Statistics accordion row + tooltip |
 | `utils/sdk-prices.ts` → `formatAssetValue` | Same off-chain USD path as Total supply / Available liquidity |
-| `utils/race-guard.ts` → `runGuarded` | Drops stale async formatter results when the effect re-runs |
+| `utils/race-guard.ts` → `createRaceGuard` + `runGuarded` | The component holds one `createRaceGuard()` instance per row and formats through `runGuarded`, which drops stale async results when the effect re-runs |
 | `data-field="Uncovered losses"` / `:data-value="vault.lostAssets.toString()"` | Parity / scraper hooks |
 
 Initial display is `'-'` until the first guarded format commits. Healthy vaults with `lostAssets === 0n` render as `$0` (or the zero asset amount when unpriced).
