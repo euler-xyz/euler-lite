@@ -46,3 +46,38 @@ if (!g.useState) {
     return entry
   }
 }
+
+// Pending-submission replay protection is durable-or-abort: without a working
+// localStorage every wallet-boundary reservation would throw. Node exposes a
+// `localStorage` accessor that can exist yet return undefined, so install a
+// Map-backed polyfill via defineProperty when no usable storage is present.
+const hasUsableLocalStorage = (() => {
+  try {
+    return typeof globalThis.localStorage?.setItem === 'function'
+  }
+  catch {
+    return false
+  }
+})()
+if (!hasUsableLocalStorage) {
+  const backing = new Map<string, string>()
+  const storagePolyfill: Storage = {
+    get length() {
+      return backing.size
+    },
+    clear: () => backing.clear(),
+    getItem: (key: string) => backing.get(key) ?? null,
+    key: (index: number) => [...backing.keys()][index] ?? null,
+    removeItem: (key: string) => {
+      backing.delete(key)
+    },
+    setItem: (key: string, value: string) => {
+      backing.set(key, String(value))
+    },
+  }
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: storagePolyfill,
+    configurable: true,
+    writable: true,
+  })
+}

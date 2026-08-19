@@ -36,12 +36,16 @@ import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
 import type { PreparedPlanBroadcast } from '~/composables/useEulerTx'
 import { getSafeWalletProvider, type ReceiptClientLike } from '~/utils/safeWalletTransactions'
 import {
+  armPendingSubmission,
   clearPendingSubmission,
+  createPendingSubmissionAttemptId,
   listPendingSubmissions,
   pendingSubmissionStorageKeyPrefix,
   readPendingSubmission,
+  releasePendingSubmission,
+  releaseUnverifiablePendingSubmission,
   resolvePendingSubmissionOutcome,
-  writePendingSubmission,
+  upgradePendingSubmissionToSubmitted,
   type PendingSubmissionRecord,
 } from '~/utils/pendingSubmissions'
 import { registerLandedBatchSubmissionHandler } from '~/utils/pendingSubmissionGate'
@@ -348,14 +352,26 @@ const setPendingCoreSubmission = (record: PendingSubmissionRecord, context?: { c
   pendingCoreSubmissions.value = next
 }
 
-/** Remove the wallet's record from the mirror AND its durable storage. */
-const removePendingCoreSubmission = (owner: Address, chainId: number) => {
-  clearPendingSubmission('batch', owner, chainId)
-  const key = pendingSubmissionMirrorKey(owner, chainId)
-  if (!pendingCoreSubmissions.value.has(key)) return
-  const next = new Map(pendingCoreSubmissions.value)
-  next.delete(key)
-  pendingCoreSubmissions.value = next
+/**
+ * Remove the wallet's record from durable storage and refresh the mirror.
+ * The delete is guarded: with `attemptId` it is ownership-checked (a stale
+ * completion cannot delete a reservation a newer attempt holds), and with
+ * `ifMatches` it is compare-and-delete against the exact reconciled record.
+ * The mirror is rebuilt from storage afterwards, so a refused delete keeps
+ * the surviving record visible.
+ */
+const removePendingCoreSubmission = async (
+  owner: Address,
+  chainId: number,
+  guard: { attemptId: string } | { ifMatches: PendingSubmissionRecord },
+) => {
+  if ('attemptId' in guard) {
+    await releasePendingSubmission('batch', owner, chainId, guard)
+  }
+  else {
+    await clearPendingSubmission('batch', owner, chainId, guard)
+  }
+  hydratePendingBatchSubmissionFromStorage()
 }
 
 /**
@@ -2971,16 +2987,27 @@ export const useTxBatch = () => {
   ): Promise<boolean> => {
     hydratePendingBatchSubmissionFromStorage()
     if (!attempt.owner || !attempt.chainId) return true
-    const record = readPendingSubmission('batch', attempt.owner, attempt.chainId)
-    if (!record) return true
-    const context = pendingCoreSubmissions.value
-      .get(pendingSubmissionMirrorKey(record.owner, record.chainId))?.context
-
-    const releaseQuarantine = () => {
-      removePendingCoreSubmission(record.owner, record.chainId)
+    let record: PendingSubmissionRecord | undefined
+    try {
+      record = readPendingSubmission('batch', attempt.owner, attempt.chainId)
     }
+    catch (error) {
+      // Unreadable or corrupt state: a previous submission cannot be ruled
+      // out, so the attempt is blocked — never treated as "no quarantine".
+      execError.value = error instanceof Error ? error.message : String(error)
+      return false
+    }
+    if (!record) return true
+    const reconciled = record
+    const context = pendingCoreSubmissions.value
+      .get(pendingSubmissionMirrorKey(reconciled.owner, reconciled.chainId))?.context
+
+    // Compare-and-delete: only the exact reconciled record is released — a
+    // record another attempt reserved during the on-chain check survives.
+    const releaseQuarantine = () =>
+      removePendingCoreSubmission(reconciled.owner, reconciled.chainId, { ifMatches: reconciled })
     const keepQuarantined = () => {
-      execError.value = record.phase === 'armed'
+      execError.value = reconciled.phase === 'armed'
         ? 'A previous batch submission was handed to the wallet but no transaction id came back, so it cannot be verified automatically. Check the wallet\'s pending activity and let it resolve before executing again.'
         : 'A previous batch submission may still confirm on-chain and could not be verified yet. Wait a moment and execute again — the submission is re-checked before anything is re-sent.'
       return false
@@ -3000,12 +3027,12 @@ export const useTxBatch = () => {
     }
     if (outcome === 'not-landed') {
       // Definitively cancelled/reverted — a retry cannot duplicate anything.
-      releaseQuarantine()
+      await releaseQuarantine()
       return true
     }
 
     // Landed: on-chain state moved under any standing review.
-    releaseQuarantine()
+    await releaseQuarantine()
     invalidateBatchReview()
     if (!record.completesPlan) {
       // Defensive: a landed intermediate submission means part of the plan
@@ -3088,36 +3115,56 @@ export const useTxBatch = () => {
     // definitively confirmed — a failure after this point must not allow the
     // covered entries to be executed again.
     let confirmedValueMovingBroadcast: PreparedPlanBroadcast | undefined
-    const trackBroadcast = (broadcast: PreparedPlanBroadcast) => {
+    // Identity of this attempt's reservation: upgrades and terminal releases
+    // are ownership-checked against it, so a stale completion from this
+    // attempt can never delete a reservation a newer attempt holds.
+    const attemptId = createPendingSubmissionAttemptId()
+    const trackBroadcast = async (broadcast: PreparedPlanBroadcast) => {
       const valueMoving = broadcast.item === 'bundle' || broadcast.item === 'evcBatch'
       if (broadcast.status === 'armed' || broadcast.status === 'submitted') {
-        unconfirmedBroadcast = broadcast
+        // A submitted broadcast is ambiguous no matter what happens below —
+        // the wallet already returned an id. An armed one becomes ambiguous
+        // only once the reservation succeeded: an arm that throws aborts the
+        // attempt before the wallet is invoked, so nothing is outstanding.
+        if (broadcast.status === 'submitted') unconfirmedBroadcast = broadcast
         if (valueMoving && execution) {
-          // Persist the quarantine synchronously at the wallet boundary — a
-          // reload or crash between here and the receipt must still find the
-          // record, and the wallet may accept a request yet never return its
-          // id. The armed record upgrades to the submitted hash in place.
+          // Persist the quarantine at the wallet boundary — the executor
+          // awaits this emission before invoking the wallet, so a
+          // reservation another attempt holds, or one that cannot be proven
+          // durable, throws here and the wallet is never invoked. A reload
+          // or crash after this point still finds the record; the armed
+          // record upgrades to its submitted hash in place.
           const owner = getAddress(execution.owner)
-          const record: PendingSubmissionRecord = {
-            ...(broadcast.status === 'armed'
-              ? { phase: 'armed' as const }
-              : { phase: 'submitted' as const, kind: broadcast.kind, hash: broadcast.hash }),
-            chainId: execution.chainId,
-            owner,
-            completesPlan: broadcast.completesPlan,
-            refreshExternalPositions: entries.value.some(entry =>
-              entry.refreshExternalMigrationPositions && entry.id in execution!.reviewByEntryId),
-            submittedAt: Date.now(),
-          }
-          writePendingSubmission('batch', record)
-          setPendingCoreSubmission(record, { ceremony: execution })
+          const refreshExternalPositions = entries.value.some(entry =>
+            entry.refreshExternalMigrationPositions && entry.id in execution!.reviewByEntryId)
+          const record = broadcast.status === 'armed'
+            ? await armPendingSubmission('batch', {
+                owner,
+                chainId: execution.chainId,
+                completesPlan: broadcast.completesPlan,
+                refreshExternalPositions,
+                attemptId,
+              })
+            : await upgradePendingSubmissionToSubmitted('batch', {
+                owner,
+                chainId: execution.chainId,
+                attemptId,
+                kind: broadcast.kind,
+                hash: broadcast.hash,
+                completesPlan: broadcast.completesPlan,
+                refreshExternalPositions,
+              })
+          // A refused upgrade (ownership lost, storage failure) leaves the
+          // stored record authoritative; only mirror what actually stuck.
+          if (record) setPendingCoreSubmission(record, { ceremony: execution })
         }
+        if (broadcast.status === 'armed') unconfirmedBroadcast = broadcast
         return
       }
       // 'rejected' and 'confirmed' are both terminal for the record.
       unconfirmedBroadcast = undefined
       if (valueMoving && execution) {
-        removePendingCoreSubmission(getAddress(execution.owner), execution.chainId)
+        await removePendingCoreSubmission(getAddress(execution.owner), execution.chainId, { attemptId })
       }
       if (broadcast.status === 'confirmed' && valueMoving) {
         confirmedValueMovingBroadcast = broadcast
@@ -3363,7 +3410,10 @@ export const useTxBatch = () => {
   registerLandedBatchSubmissionHandler((record) => {
     const context = pendingCoreSubmissions.value
       .get(pendingSubmissionMirrorKey(record.owner, record.chainId))?.context
-    removePendingCoreSubmission(record.owner, record.chainId)
+    // Compare-and-delete of the exact landed record; the handler contract is
+    // synchronous and the gate throws right after, so the lock-serialized
+    // delete completes out of band.
+    void removePendingCoreSubmission(record.owner, record.chainId, { ifMatches: record })
     invalidateBatchReview()
     if (record.completesPlan && context) {
       retireExecutedEntries(context.ceremony)
@@ -3375,6 +3425,51 @@ export const useTxBatch = () => {
     }
     if (record.refreshExternalPositions) scheduleExternalMigrationRefreshes()
   })
+
+  /**
+   * The current wallet/chain holds an armed batch record and no attempt is
+   * running — after a reload the attempt that armed it is gone, no id will
+   * ever arrive, and only a manual wallet check can resolve it. Drives the
+   * visibility of the manual release action.
+   */
+  const hasReleasableArmedSubmission = computed(() => {
+    if (isExecuting.value) return false
+    const currentOwner = owner.value
+    const currentChainId = chainId.value
+    if (!currentOwner || !currentChainId) return false
+    try {
+      const entry = pendingCoreSubmissions.value
+        .get(pendingSubmissionMirrorKey(currentOwner, currentChainId))
+      return entry?.record.phase === 'armed'
+    }
+    catch {
+      return false
+    }
+  })
+
+  /**
+   * Risk-labelled manual recovery for an armed record orphaned by a reload:
+   * call sites must present the user a "the wallet shows nothing pending"
+   * confirmation before invoking this. Submitted records are refused by the
+   * underlying release — they carry an id and are verified on-chain instead.
+   */
+  const releaseArmedQuarantineAfterManualCheck = async (): Promise<boolean> => {
+    const currentOwner = owner.value
+    const currentChainId = chainId.value
+    if (!currentOwner || !currentChainId) return false
+    try {
+      const released = await releaseUnverifiablePendingSubmission('batch', getAddress(currentOwner), currentChainId, {
+        userConfirmedWalletShowsNoPendingSubmission: true,
+      })
+      hydratePendingBatchSubmissionFromStorage()
+      if (released) execError.value = undefined
+      return released
+    }
+    catch (error) {
+      execError.value = error instanceof Error ? error.message : String(error)
+      return false
+    }
+  }
 
   return {
     entries,
@@ -3388,6 +3483,8 @@ export const useTxBatch = () => {
     isExecuting,
     execError,
     hasPendingCoreSubmission: computed(() => pendingCoreSubmissions.value.size > 0),
+    hasReleasableArmedSubmission,
+    releaseArmedQuarantineAfterManualCheck,
     hasFailedOps,
     canExecuteBatch,
     hasInsufficientBalance,

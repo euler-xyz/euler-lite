@@ -23,6 +23,8 @@ const {
   dismissExecutionError,
   setActiveLayer,
   entryPlans,
+  hasReleasableArmedSubmission,
+  releaseArmedQuarantineAfterManualCheck,
 } = useTxBatch()
 
 const modal = useModal()
@@ -148,6 +150,29 @@ const simEyeLabel = computed(() =>
       class="mx-16 mb-4"
       :message="execError || simError || insufficientBalanceMessage"
     />
+
+    <!-- Manual recovery for an armed submission orphaned by a reload: it has
+         no transaction id to verify on-chain, so only the user checking the
+         wallet itself can rule it out. Submitted records never show this —
+         they are verified automatically. -->
+    <div
+      v-if="hasReleasableArmedSubmission"
+      class="mx-16 mb-4 flex flex-col gap-6"
+    >
+      <p class="text-p3 text-content-tertiary">
+        A previous submission was handed to the wallet but no transaction id
+        came back. If your wallet's pending activity shows nothing pending, you
+        can dismiss it.
+      </p>
+      <button
+        type="button"
+        class="self-start text-p3 text-content-tertiary underline hover:text-content-primary"
+        data-testid="batch-release-armed"
+        @click="releaseArmedQuarantineAfterManualCheck"
+      >
+        My wallet shows nothing pending — dismiss it
+      </button>
+    </div>
 
     <!-- Footer -->
     <div class="px-16 pt-8 pb-14">

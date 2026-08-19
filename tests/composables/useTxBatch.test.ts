@@ -1459,9 +1459,9 @@ describe('useTxBatch submission quarantine', () => {
     broadcasts: PreparedPlanBroadcast[] = [coreArmed(), coreSubmitted()],
   ) => {
     eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
-      onBroadcast?: (b: PreparedPlanBroadcast) => void
+      onBroadcast?: (b: PreparedPlanBroadcast) => void | Promise<void>
     }) => {
-      for (const broadcast of broadcasts) options?.onBroadcast?.(broadcast)
+      for (const broadcast of broadcasts) await options?.onBroadcast?.(broadcast)
       throw new Error('Receipt polling failed.')
     })
     await batch.executeBatch()
@@ -1472,15 +1472,15 @@ describe('useTxBatch submission quarantine', () => {
     const batch = await setupExecutableBatch()
     eulerTxMocks.executePreparedPlan
       .mockImplementationOnce(async (_prepared, options?: {
-        onBroadcast?: (b: PreparedPlanBroadcast) => void
+        onBroadcast?: (b: PreparedPlanBroadcast) => void | Promise<void>
       }) => {
         // The approval submission confirmed (the executor re-fires with
         // status 'confirmed' once its receipt landed) — then the wallet
         // provably rejected the armed core submission before accepting it.
-        options?.onBroadcast?.(coreSubmitted({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false }))
-        options?.onBroadcast?.(coreConfirmed({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false }))
-        options?.onBroadcast?.(coreArmed({ index: 1 }))
-        options?.onBroadcast?.(coreRejected({ index: 1 }))
+        await options?.onBroadcast?.(coreSubmitted({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false }))
+        await options?.onBroadcast?.(coreConfirmed({ item: 'approval', hash: APPROVAL_HASH, completesPlan: false }))
+        await options?.onBroadcast?.(coreArmed({ index: 1 }))
+        await options?.onBroadcast?.(coreRejected({ index: 1 }))
         throw new Error('User rejected the request.')
       })
       .mockResolvedValueOnce(undefined)
@@ -1504,9 +1504,10 @@ describe('useTxBatch submission quarantine', () => {
     const batch = await setupExecutableBatch()
     let recordAtBroadcastTime: unknown
     eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
-      onBroadcast?: (b: PreparedPlanBroadcast) => void
+      onBroadcast?: (b: PreparedPlanBroadcast) => void | Promise<void>
     }) => {
-      options?.onBroadcast?.(coreSubmitted())
+      await options?.onBroadcast?.(coreArmed())
+      await options?.onBroadcast?.(coreSubmitted())
       // A reload between the wallet's acceptance and the executor settling
       // (receipt polling, later steps) must already find the durable record.
       recordAtBroadcastTime = readPendingSubmission('batch', owner, 1)
@@ -1527,9 +1528,9 @@ describe('useTxBatch submission quarantine', () => {
     const batch = await setupExecutableBatch()
     let recordAtArmTime: unknown
     eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
-      onBroadcast?: (b: PreparedPlanBroadcast) => void
+      onBroadcast?: (b: PreparedPlanBroadcast) => void | Promise<void>
     }) => {
-      options?.onBroadcast?.(coreArmed())
+      await options?.onBroadcast?.(coreArmed())
       recordAtArmTime = readPendingSubmission('batch', owner, 1)
       // The wallet boundary failed without returning an id and without a
       // provable rejection — acceptance cannot be ruled out.
@@ -1558,10 +1559,10 @@ describe('useTxBatch submission quarantine', () => {
     const batch = await setupExecutableBatch()
     eulerTxMocks.executePreparedPlan
       .mockImplementationOnce(async (_prepared, options?: {
-        onBroadcast?: (b: PreparedPlanBroadcast) => void
+        onBroadcast?: (b: PreparedPlanBroadcast) => void | Promise<void>
       }) => {
-        options?.onBroadcast?.(coreArmed())
-        options?.onBroadcast?.(coreRejected())
+        await options?.onBroadcast?.(coreArmed())
+        await options?.onBroadcast?.(coreRejected())
         throw new Error('User rejected the request.')
       })
       .mockResolvedValueOnce(undefined)
@@ -1607,7 +1608,7 @@ describe('useTxBatch submission quarantine', () => {
     expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
   })
 
-  it('keeps the quarantine fail-closed when durable storage rejects the write', async () => {
+  it('aborts before the wallet when the reservation cannot be proven durable', async () => {
     vi.stubGlobal('localStorage', {
       ...createMemoryStorage(),
       setItem: () => {
@@ -1615,16 +1616,27 @@ describe('useTxBatch submission quarantine', () => {
       },
     })
     const batch = await setupExecutableBatch()
+    let walletInvoked = false
+    eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
+      onBroadcast?: (b: PreparedPlanBroadcast) => void | Promise<void>
+    }) => {
+      // The executor awaits the armed emission before the wallet call — the
+      // reservation write fails, so the throw must land here.
+      await options?.onBroadcast?.(coreArmed())
+      walletInvoked = true
+    })
 
-    await quarantineOneSubmission(batch)
-
-    // Nothing durable was written, but the in-memory fallback must still
-    // block this session's retry while the outcome is unknown.
-    expect(readPendingSubmission('batch', owner, 1)).toMatchObject({ phase: 'submitted', hash: CORE_HASH })
     await batch.executeBatch()
 
+    // Durable-or-abort: nothing reached the wallet without a reservation.
+    expect(walletInvoked).toBe(false)
+    expect(batch.execError.value).toContain('nothing was handed to the wallet')
+
+    // The in-realm copy written on the failure path still blocks retries
+    // while the storage stays broken — the outcome could not be recorded.
+    await batch.executeBatch()
     expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
-    expect(batch.execError.value).toContain('could not be verified yet')
+    expect(batch.execError.value).toContain('no transaction id came back')
   })
 
   it('releases the quarantine and retries once the submission definitively did not land', async () => {
@@ -1712,6 +1724,57 @@ describe('useTxBatch submission quarantine', () => {
     expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
     expect(batch.execError.value).toContain('no transaction id came back')
     expect(readPendingSubmission('batch', owner, 1)).toBeDefined()
+  })
+
+  it('offers manual release for an armed record orphaned by a reload and unblocks execution', async () => {
+    const batch = await setupExecutableBatch()
+    // Simulated reload: the attempt that armed the record is gone, no id
+    // will ever arrive, and no on-chain verification is possible.
+    writePendingSubmission('batch', {
+      phase: 'armed',
+      chainId: 1,
+      owner,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    hydratePendingBatchSubmissionFromStorage()
+
+    await batch.executeBatch()
+    expect(eulerTxMocks.executePreparedPlan).not.toHaveBeenCalled()
+    expect(batch.execError.value).toContain('no transaction id came back')
+    // Only the manual, risk-labelled path can resolve this state.
+    expect(batch.hasReleasableArmedSubmission.value).toBe(true)
+
+    // The user confirmed the wallet shows nothing pending.
+    await expect(batch.releaseArmedQuarantineAfterManualCheck()).resolves.toBe(true)
+    expect(batch.hasReleasableArmedSubmission.value).toBe(false)
+    expect(batch.execError.value).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
+
+    eulerTxMocks.executePreparedPlan.mockResolvedValueOnce(undefined)
+    await batch.executeBatch()
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses manual release for a submitted record and keeps it for on-chain verification', async () => {
+    const batch = await setupExecutableBatch()
+    writePendingSubmission('batch', {
+      phase: 'submitted',
+      kind: 'transaction',
+      hash: CORE_HASH,
+      chainId: 1,
+      owner,
+      completesPlan: true,
+      submittedAt: 1_000,
+    })
+    hydratePendingBatchSubmissionFromStorage()
+
+    // A submitted record has an id and is verified automatically — the
+    // manual release must never be offered for it, nor honor a call.
+    expect(batch.hasReleasableArmedSubmission.value).toBe(false)
+    await expect(batch.releaseArmedQuarantineAfterManualCheck()).resolves.toBe(false)
+    expect(batch.execError.value).toContain('cannot be dismissed')
+    expect(readPendingSubmission('batch', owner, 1)).toMatchObject({ phase: 'submitted' })
   })
 
   it('resets the cart when a hydrated post-reload submission landed without ceremony context', async () => {
@@ -1829,11 +1892,11 @@ describe('useTxBatch submission quarantine', () => {
   it('retires entries when the core submission confirmed but a later step failed', async () => {
     const batch = await setupExecutableBatch()
     eulerTxMocks.executePreparedPlan.mockImplementationOnce(async (_prepared, options?: {
-      onBroadcast?: (b: PreparedPlanBroadcast) => void
+      onBroadcast?: (b: PreparedPlanBroadcast) => void | Promise<void>
     }) => {
-      options?.onBroadcast?.(coreArmed())
-      options?.onBroadcast?.(coreSubmitted())
-      options?.onBroadcast?.(coreConfirmed())
+      await options?.onBroadcast?.(coreArmed())
+      await options?.onBroadcast?.(coreSubmitted())
+      await options?.onBroadcast?.(coreConfirmed())
       return undefined
     })
     migrationFlowMocks.revokeAfterSuccess.mockRejectedValueOnce(new Error('Revoke failed.'))

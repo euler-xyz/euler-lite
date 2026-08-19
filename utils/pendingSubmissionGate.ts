@@ -39,7 +39,7 @@ export const registerLandedBatchSubmissionHandler = (handler: LandedBatchSubmiss
 }
 
 const conflictingSubmissionError = (flow: PendingSubmissionFlow, record: PendingSubmissionRecord) => {
-  const label = flow === 'batch' ? 'batch' : 'migration'
+  const label = flow === 'batch' ? 'batch' : flow === 'direct' ? 'transaction' : 'migration'
   if (record.phase === 'armed') {
     return new Error(`A previous ${label} submission was handed to the wallet but no transaction id came back, so it cannot be verified automatically. Check the wallet's pending activity and let it resolve before sending new transactions.`)
   }
@@ -66,8 +66,9 @@ export const assertNoConflictingPendingSubmission = async (input: {
     })
     if (outcome === 'not-landed') {
       // Definitively cancelled/reverted — nothing this attempt sends can
-      // duplicate it.
-      clearPendingSubmission(flow, record.owner, record.chainId)
+      // duplicate it. Compare-and-delete: only the exact reconciled record
+      // is released, never one another attempt reserved meanwhile.
+      await clearPendingSubmission(flow, record.owner, record.chainId, { ifMatches: record })
       continue
     }
     if (outcome === 'unknown') {
@@ -83,7 +84,7 @@ export const assertNoConflictingPendingSubmission = async (input: {
       // the cart reconciles it when it next runs.
       throw new Error('A previous batch submission confirmed on-chain. Open the batch cart to reconcile it before sending new transactions.')
     }
-    clearPendingSubmission(flow, record.owner, record.chainId)
-    throw new Error('A previous migration submission from this wallet confirmed on-chain. Review your positions before continuing — on-chain state changed since this action was prepared.')
+    await clearPendingSubmission(flow, record.owner, record.chainId, { ifMatches: record })
+    throw new Error(`A previous ${flow === 'direct' ? 'transaction' : 'migration'} submission from this wallet confirmed on-chain. Review your positions before continuing — on-chain state changed since this action was prepared.`)
   }
 }

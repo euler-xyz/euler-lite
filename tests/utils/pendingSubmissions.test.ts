@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAddress, type Hash } from 'viem'
 import {
+  armPendingSubmission,
   clearPendingSubmission,
+  createPendingSubmissionAttemptId,
   listPendingSubmissions,
+  PendingSubmissionConflictError,
+  PendingSubmissionStorageError,
   readPendingSubmission,
+  releasePendingSubmission,
+  releaseUnverifiablePendingSubmission,
   resetPendingSubmissionMemoryFallback,
   resolvePendingSubmissionOutcome,
+  upgradePendingSubmissionToSubmitted,
   walletNeverAcceptedSubmission,
   writePendingSubmission,
   type PendingSubmissionRecord,
@@ -89,7 +96,7 @@ describe('pending submission storage', () => {
     expect(readPendingSubmission('batch', OWNER, 1)).toEqual(armedRecord())
   })
 
-  it('keys records per wallet and chain so one wallet cannot overwrite another', () => {
+  it('keys records per wallet and chain so one wallet cannot overwrite another', async () => {
     writePendingSubmission('batch', record())
     writePendingSubmission('batch', record({ owner: OTHER_OWNER, hash: SAFE_TX_HASH }))
     writePendingSubmission('batch', record({ chainId: 8453 }))
@@ -101,18 +108,34 @@ describe('pending submission storage', () => {
     expect(listPendingSubmissions('batch')).toHaveLength(3)
 
     // Clearing one wallet's record leaves the others quarantined.
-    clearPendingSubmission('batch', OWNER, 1)
+    await clearPendingSubmission('batch', OWNER, 1)
     expect(readPendingSubmission('batch', OWNER, 1)).toBeUndefined()
     expect(readPendingSubmission('batch', OTHER_OWNER, 1)).toBeDefined()
     expect(readPendingSubmission('batch', OWNER, 8453)).toBeDefined()
   })
 
-  it('clears a stored record', () => {
+  it('clears a stored record', async () => {
     writePendingSubmission('outgoing-migration', record())
 
-    clearPendingSubmission('outgoing-migration', OWNER, 1)
+    await clearPendingSubmission('outgoing-migration', OWNER, 1)
 
     expect(readPendingSubmission('outgoing-migration', OWNER, 1)).toBeUndefined()
+  })
+
+  it('compare-and-delete keeps a record another attempt wrote in the meantime', async () => {
+    const reconciled = record({ attemptId: 'attempt-old' })
+    writePendingSubmission('batch', reconciled)
+    // Another attempt replaced the record between reconcile and clear.
+    const replacement = record({ attemptId: 'attempt-new', submittedAt: 2_000 })
+    writePendingSubmission('batch', replacement)
+
+    await clearPendingSubmission('batch', OWNER, 1, { ifMatches: reconciled })
+
+    expect(readPendingSubmission('batch', OWNER, 1)).toEqual(replacement)
+
+    // With the exact record still in place the clear goes through.
+    await clearPendingSubmission('batch', OWNER, 1, { ifMatches: replacement })
+    expect(readPendingSubmission('batch', OWNER, 1)).toBeUndefined()
   })
 
   it('normalizes owners to checksum form for keying and reading', () => {
@@ -140,35 +163,61 @@ describe('pending submission storage', () => {
     ['non-boolean completesPlan', JSON.stringify({ ...record(), completesPlan: 'yes' })],
     ['non-numeric submittedAt', JSON.stringify({ ...record(), submittedAt: 'now' })],
     ['non-positive chainId', JSON.stringify({ ...record(), chainId: 0 })],
-  ])('drops a corrupt record (%s) instead of blocking the flow forever', (_label, raw) => {
+  ])('fails closed on a corrupt record (%s) instead of silently dropping it', (_label, raw) => {
     localStorage.setItem(BATCH_KEY, raw)
 
-    expect(readPendingSubmission('batch', OWNER, 1)).toBeUndefined()
-    // The corrupt payload was removed, not left to fail on every read.
-    expect(localStorage.getItem(BATCH_KEY)).toBeNull()
+    // A corrupt record may still describe a live submission — deleting it
+    // would reopen the exact replay the quarantine exists to block.
+    expect(() => readPendingSubmission('batch', OWNER, 1)).toThrow(PendingSubmissionStorageError)
+    expect(() => readPendingSubmission('batch', OWNER, 1)).toThrow('could not be read')
+    expect(localStorage.getItem(BATCH_KEY)).toBe(raw)
   })
 
-  it('drops a record whose content disagrees with its storage key', () => {
-    localStorage.setItem(BATCH_KEY, JSON.stringify(record({ owner: OTHER_OWNER })))
+  it('fails closed on a record whose content disagrees with its storage key', () => {
+    const raw = JSON.stringify(record({ owner: OTHER_OWNER }))
+    localStorage.setItem(BATCH_KEY, raw)
 
-    expect(readPendingSubmission('batch', OWNER, 1)).toBeUndefined()
-    expect(localStorage.getItem(BATCH_KEY)).toBeNull()
+    expect(() => readPendingSubmission('batch', OWNER, 1)).toThrow(PendingSubmissionStorageError)
+    expect(localStorage.getItem(BATCH_KEY)).toBe(raw)
   })
 
-  it('fails closed to the in-memory fallback without browser storage', () => {
+  it('fails closed when the storage read itself throws', () => {
+    const storage = createMemoryStorage()
+    vi.stubGlobal('localStorage', {
+      ...storage,
+      getItem: () => {
+        throw new Error('storage read failed')
+      },
+    })
+
+    // An existing durable record may be invisible behind the failing read —
+    // that must block the attempt, never fall through to "no quarantine".
+    expect(() => readPendingSubmission('batch', OWNER, 1)).toThrow(PendingSubmissionStorageError)
+    expect(() => readPendingSubmission('batch', OWNER, 1)).toThrow('could not be read to verify')
+  })
+
+  it('skips unreadable entries when listing for display', () => {
+    writePendingSubmission('batch', record({ owner: OTHER_OWNER }))
+    localStorage.setItem(BATCH_KEY, 'not json')
+
+    // Listing is display/mirror only — it must not crash hydration. The
+    // corrupt entry still blocks at attempt time via readPendingSubmission.
+    expect(listPendingSubmissions('batch')).toEqual([record({ owner: OTHER_OWNER })])
+    expect(() => readPendingSubmission('batch', OWNER, 1)).toThrow(PendingSubmissionStorageError)
+  })
+
+  it('aborts the reservation without browser storage while still blocking this realm', () => {
     vi.stubGlobal('localStorage', undefined)
 
-    // No durable storage exists, but the quarantine must still block this
-    // session's retries rather than silently degrade to "no quarantine".
-    writePendingSubmission('batch', record())
+    // No durable storage: the write must throw so nothing reaches the wallet…
+    expect(() => writePendingSubmission('batch', record())).toThrow(PendingSubmissionStorageError)
+    expect(() => writePendingSubmission('batch', record())).toThrow('nothing was handed to the wallet')
+    // …but the in-realm copy still blocks this session's retries.
     expect(readPendingSubmission('batch', OWNER, 1)).toEqual(record())
     expect(listPendingSubmissions('batch')).toEqual([record()])
-
-    clearPendingSubmission('batch', OWNER, 1)
-    expect(readPendingSubmission('batch', OWNER, 1)).toBeUndefined()
   })
 
-  it('fails closed to the in-memory fallback when the storage write throws', () => {
+  it('aborts the reservation when the storage write throws', () => {
     const storage = createMemoryStorage()
     vi.stubGlobal('localStorage', {
       ...storage,
@@ -177,12 +226,11 @@ describe('pending submission storage', () => {
       },
     })
 
-    writePendingSubmission('batch', record())
-
+    expect(() => writePendingSubmission('batch', record())).toThrow(PendingSubmissionStorageError)
     expect(readPendingSubmission('batch', OWNER, 1)).toEqual(record())
   })
 
-  it('fails closed to the in-memory fallback when the storage write does not stick', () => {
+  it('aborts the reservation when the storage write does not stick', () => {
     const storage = createMemoryStorage()
     vi.stubGlobal('localStorage', {
       ...storage,
@@ -194,8 +242,7 @@ describe('pending submission storage', () => {
       },
     })
 
-    writePendingSubmission('batch', record())
-
+    expect(() => writePendingSubmission('batch', record())).toThrow(PendingSubmissionStorageError)
     expect(readPendingSubmission('batch', OWNER, 1)).toEqual(record())
     expect(listPendingSubmissions('batch')).toEqual([record()])
   })
@@ -204,7 +251,9 @@ describe('pending submission storage', () => {
     const storage = globalThis.localStorage
     writePendingSubmission('batch', record())
     vi.stubGlobal('localStorage', undefined)
-    writePendingSubmission('batch', record({ owner: OTHER_OWNER }))
+    // The storage-less write throws (nothing durable), but its in-realm copy
+    // must still show up so the UI mirrors everything that blocks.
+    expect(() => writePendingSubmission('batch', record({ owner: OTHER_OWNER }))).toThrow(PendingSubmissionStorageError)
     vi.stubGlobal('localStorage', storage)
 
     expect(listPendingSubmissions('batch')).toEqual(expect.arrayContaining([
@@ -212,6 +261,228 @@ describe('pending submission storage', () => {
       record({ owner: OTHER_OWNER }),
     ]))
     expect(listPendingSubmissions('batch')).toHaveLength(2)
+  })
+})
+
+describe('armPendingSubmission', () => {
+  const armInput = (attemptId: string, overrides: Partial<Parameters<typeof armPendingSubmission>[1]> = {}) => ({
+    owner: OWNER,
+    chainId: 1,
+    completesPlan: true,
+    attemptId,
+    ...overrides,
+  })
+
+  it('reserves atomically and returns the durable armed record', async () => {
+    const armed = await armPendingSubmission('direct', armInput('attempt-1'))
+
+    expect(armed).toMatchObject({ phase: 'armed', owner: OWNER, chainId: 1, attemptId: 'attempt-1' })
+    expect(readPendingSubmission('direct', OWNER, 1)).toEqual(armed)
+  })
+
+  it('refuses when any flow already holds a reservation for this wallet/chain', async () => {
+    writePendingSubmission('batch', record({ attemptId: 'other-attempt' }))
+
+    await expect(armPendingSubmission('direct', armInput('attempt-1')))
+      .rejects.toThrow(PendingSubmissionConflictError)
+    // The existing reservation is untouched.
+    expect(readPendingSubmission('batch', OWNER, 1)).toEqual(record({ attemptId: 'other-attempt' }))
+    expect(readPendingSubmission('direct', OWNER, 1)).toBeUndefined()
+  })
+
+  it('lets exactly one of two simultaneous arms win from an empty read', async () => {
+    // Both attempts passed the read-only gate on an empty store; the atomic
+    // check+reserve under the per-wallet lock must let only one proceed to
+    // the wallet.
+    const results = await Promise.allSettled([
+      armPendingSubmission('direct', armInput('attempt-a')),
+      armPendingSubmission('batch', armInput('attempt-b')),
+    ])
+
+    const fulfilled = results.filter(r => r.status === 'fulfilled')
+    const rejected = results.filter(r => r.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(PendingSubmissionConflictError)
+  })
+
+  it('does not conflict across different wallets or chains', async () => {
+    await armPendingSubmission('direct', armInput('attempt-1'))
+
+    await expect(armPendingSubmission('direct', armInput('attempt-2', { owner: OTHER_OWNER })))
+      .resolves.toMatchObject({ owner: OTHER_OWNER })
+    await expect(armPendingSubmission('direct', armInput('attempt-3', { chainId: 8453 })))
+      .resolves.toMatchObject({ chainId: 8453 })
+  })
+
+  it('lets the same attempt re-arm its own armed reservation', async () => {
+    await armPendingSubmission('direct', armInput('attempt-1'))
+
+    await expect(armPendingSubmission('direct', armInput('attempt-1', { completesPlan: false })))
+      .resolves.toMatchObject({ attemptId: 'attempt-1', completesPlan: false })
+  })
+
+  it('refuses to re-arm over its own submitted record — the hash must survive', async () => {
+    await armPendingSubmission('direct', armInput('attempt-1'))
+    await upgradePendingSubmissionToSubmitted('direct', {
+      owner: OWNER,
+      chainId: 1,
+      attemptId: 'attempt-1',
+      kind: 'transaction',
+      hash: TX_HASH,
+      completesPlan: true,
+    })
+
+    await expect(armPendingSubmission('direct', armInput('attempt-1')))
+      .rejects.toThrow(PendingSubmissionConflictError)
+    expect(readPendingSubmission('direct', OWNER, 1)).toMatchObject({ phase: 'submitted', hash: TX_HASH })
+  })
+
+  it('refuses a reservation left by a dead attempt (reload) — no silent takeover', async () => {
+    // A record without this attempt's id (e.g. armed before a reload) blocks.
+    writePendingSubmission('direct', { ...armedRecord(), attemptId: 'gone-attempt' })
+
+    await expect(armPendingSubmission('direct', armInput('attempt-new')))
+      .rejects.toThrow(PendingSubmissionConflictError)
+  })
+
+  it('throws before the wallet when the reservation cannot be proven durable', async () => {
+    const storage = createMemoryStorage()
+    vi.stubGlobal('localStorage', {
+      ...storage,
+      setItem: () => {
+        throw new Error('quota exceeded')
+      },
+    })
+
+    await expect(armPendingSubmission('direct', armInput('attempt-1')))
+      .rejects.toThrow(PendingSubmissionStorageError)
+  })
+
+  it('throws before the wallet when existing state cannot be read', async () => {
+    const storage = createMemoryStorage()
+    vi.stubGlobal('localStorage', {
+      ...storage,
+      getItem: () => {
+        throw new Error('storage read failed')
+      },
+    })
+
+    await expect(armPendingSubmission('direct', armInput('attempt-1')))
+      .rejects.toThrow(PendingSubmissionStorageError)
+  })
+})
+
+describe('upgradePendingSubmissionToSubmitted', () => {
+  const upgradeInput = (attemptId: string) => ({
+    owner: OWNER,
+    chainId: 1,
+    attemptId,
+    kind: 'transaction' as const,
+    hash: TX_HASH,
+    completesPlan: true,
+  })
+
+  it('upgrades the attempt\'s own armed reservation', async () => {
+    await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-1' })
+
+    const upgraded = await upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-1'))
+
+    expect(upgraded).toMatchObject({ phase: 'submitted', hash: TX_HASH, attemptId: 'attempt-1' })
+    expect(readPendingSubmission('direct', OWNER, 1)).toEqual(upgraded)
+  })
+
+  it('refuses to upgrade a reservation another attempt owns', async () => {
+    await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-owner' })
+
+    await expect(upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-stale')))
+      .resolves.toBeUndefined()
+    // The owner's armed reservation is untouched.
+    expect(readPendingSubmission('direct', OWNER, 1)).toMatchObject({ phase: 'armed', attemptId: 'attempt-owner' })
+  })
+
+  it('refuses to create a record when none exists', async () => {
+    await expect(upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-1')))
+      .resolves.toBeUndefined()
+    expect(readPendingSubmission('direct', OWNER, 1)).toBeUndefined()
+  })
+
+  it('keeps the armed record when the upgraded write fails', async () => {
+    const armed = await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-1' })
+    const working = globalThis.localStorage
+    vi.stubGlobal('localStorage', {
+      ...createMemoryStorage(),
+      getItem: (key: string) => working.getItem(key),
+      setItem: () => {
+        throw new Error('quota exceeded')
+      },
+    })
+
+    await expect(upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-1')))
+      .resolves.toBeUndefined()
+    vi.stubGlobal('localStorage', working)
+    expect(readPendingSubmission('direct', OWNER, 1)).toEqual(armed)
+  })
+})
+
+describe('releasePendingSubmission', () => {
+  it('releases the attempt\'s own record', async () => {
+    await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-1' })
+
+    await expect(releasePendingSubmission('direct', OWNER, 1, { attemptId: 'attempt-1' })).resolves.toBe(true)
+    expect(readPendingSubmission('direct', OWNER, 1)).toBeUndefined()
+  })
+
+  it('is a no-op for a stale completion after another attempt reserved anew', async () => {
+    // Tab A armed, tab B took over the key with a fresh reservation; tab A's
+    // terminal callback must not delete tab B's record.
+    writePendingSubmission('direct', { ...armedRecord(), attemptId: 'attempt-b' })
+
+    await expect(releasePendingSubmission('direct', OWNER, 1, { attemptId: 'attempt-a' })).resolves.toBe(false)
+    expect(readPendingSubmission('direct', OWNER, 1)).toMatchObject({ attemptId: 'attempt-b' })
+  })
+
+  it('keeps an unreadable record blocking — ownership is unprovable', async () => {
+    localStorage.setItem(`euler_pending_submission:direct:1:${OWNER}`, 'not json')
+
+    await expect(releasePendingSubmission('direct', OWNER, 1, { attemptId: 'attempt-1' })).resolves.toBe(false)
+    expect(localStorage.getItem(`euler_pending_submission:direct:1:${OWNER}`)).toBe('not json')
+  })
+})
+
+describe('releaseUnverifiablePendingSubmission', () => {
+  const acknowledgement = { userConfirmedWalletShowsNoPendingSubmission: true as const }
+
+  it('releases an armed record after the user checked the wallet', async () => {
+    writePendingSubmission('batch', { ...armedRecord(), attemptId: 'gone' })
+
+    await expect(releaseUnverifiablePendingSubmission('batch', OWNER, 1, acknowledgement)).resolves.toBe(true)
+    expect(readPendingSubmission('batch', OWNER, 1)).toBeUndefined()
+  })
+
+  it('releases a corrupt record after the user checked the wallet', async () => {
+    localStorage.setItem(BATCH_KEY, 'not json')
+
+    await expect(releaseUnverifiablePendingSubmission('batch', OWNER, 1, acknowledgement)).resolves.toBe(true)
+    expect(localStorage.getItem(BATCH_KEY)).toBeNull()
+  })
+
+  it('refuses to dismiss a submitted record — it has an id and can still confirm', async () => {
+    writePendingSubmission('batch', record())
+
+    await expect(releaseUnverifiablePendingSubmission('batch', OWNER, 1, acknowledgement))
+      .rejects.toThrow('verified automatically and cannot be dismissed')
+    expect(readPendingSubmission('batch', OWNER, 1)).toEqual(record())
+  })
+
+  it('reports false when nothing is quarantined', async () => {
+    await expect(releaseUnverifiablePendingSubmission('batch', OWNER, 1, acknowledgement)).resolves.toBe(false)
+  })
+})
+
+describe('createPendingSubmissionAttemptId', () => {
+  it('produces a distinct id per attempt', () => {
+    expect(createPendingSubmissionAttemptId()).not.toBe(createPendingSubmissionAttemptId())
   })
 })
 

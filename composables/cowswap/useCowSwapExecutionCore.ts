@@ -18,6 +18,8 @@ import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { usePortfolioRefresh } from '~/composables/usePortfolioRefresh'
 import { logWarn } from '~/utils/errorHandling'
+import { assertNoConflictingPendingSubmission } from '~/utils/pendingSubmissionGate'
+import type { ReceiptClientLike } from '~/utils/safeWalletTransactions'
 
 /** SDK progress status → lite UI status used by the review modal. */
 const SDK_STATUS_TO_LITE: Record<CowSwapTransactionPlanExecutionStatus, CowSwapExecutionStatus> = {
@@ -120,6 +122,19 @@ export const useCowSwapExecutionCore = () => {
 
     try {
       const sdk = await getEulerSdkFresh()
+      // Cross-surface quarantine: the CoW executor sends approval
+      // transactions and signs the order permit directly through the wallet
+      // callbacks below, without passing any plan-executor gate — an
+      // unresolved value-moving submission from any flow must block it here,
+      // before anything reaches the wallet. CoW execution is EOA-only
+      // (assertTransactionsEnabled rejects Safes), so no Safe provider
+      // lookup is needed to resolve proposal records.
+      await assertNoConflictingPendingSubmission({
+        owner: userAddress,
+        chainId: flow.chainId,
+        provider: sdk.providerService?.getProvider(flow.chainId) as ReceiptClientLike | undefined,
+        getSafeWalletProvider: async () => undefined,
+      })
       const result = await sdk.executionService.executeCowSwapTransactionPlan({
         plan: flow.plan,
         chainId: flow.chainId,
@@ -151,6 +166,9 @@ export const useCowSwapExecutionCore = () => {
     }
   }
 
+  // Deliberately not gated on pending submissions: cancellation strictly
+  // reduces exposure (it invalidates a standing order) and must stay
+  // available while an ambiguous submission is quarantined.
   const cancelOrder = async (): Promise<void> => {
     assertTransactionsEnabled()
     const uid = orderUid.value
