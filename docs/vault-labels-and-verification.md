@@ -341,10 +341,12 @@ Labels control which vaults appear on each discovery page:
 | Flag | Lend | Borrow | Explore |
 |------|------|--------|---------|
 | Product `notExplorable: true` | Hidden | Hidden | Hidden |
-| Override `notExplorableLend: true` | Hidden | Visible | Visible |
-| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible |
+| Override `notExplorableLend: true` | Hidden | Visible | Visible* |
+| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible* |
 | `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
 | `recently added` tag | Sorted to top | Sorted to top | Sorted to top |
+
+*Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly).
 
 Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 

@@ -1,10 +1,8 @@
 import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import type { AnyVault } from '~/composables/useVaultRegistry'
+import { getVaultAddress } from '~/utils/discoveryCalculations'
 import { isVaultNotExplorableBorrow, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { isVaultBorrowable } from '~/utils/vault/classification'
-
-const getVaultAddress = (vault: AnyVault): string =>
-  isEVault(vault) ? vault.address : ('address' in vault ? (vault as { address: string }).address : '')
 
 /**
  * Should this product group be listed as a market in discovery?

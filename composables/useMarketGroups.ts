@@ -57,7 +57,8 @@ const getBorrowAPY = (vault: AnyVault): number => {
 
 // -- Step 1: Product-Label Groups --
 
-const buildProductGroups = (
+/** Exported for tests; production callers go through useMarketGroups. */
+export const buildProductGroups = (
   allVaults: AnyVault[],
   products: Record<string, EulerLabelProduct>,
   entities: Record<string, EulerLabelEntity>,
@@ -515,35 +516,51 @@ export const useMarketGroups = () => {
     const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     if (allAddresses.length === 0) return null
 
-    const memberVaults: EVault[] = []
-
-    try {
-      const { chainId } = useEulerAddresses()
-      const { getEulerSdkForChain } = useEulerSdk()
-      // Capture the chain id once so the SDK backend selection and the fetch
-      // can't diverge if the user switches chains mid-await.
-      const targetChainId = chainId.value
-      const sdk = await getEulerSdkForChain(targetChainId)
-      const result = await sdk.eVaultService.fetchVaults(
-        targetChainId,
-        allAddresses.map(addr => getAddress(addr) as Address),
-        liteVaultFetchOptions,
-      )
-      result.errors.forEach(issue => logWarn('useMarketGroups/fetchMarketGroupOnDemand', issue))
-      const fetchedVaults = result.result.filter(Boolean) as EVault[]
-      await resolveEulerRouterGovernors(fetchedVaults, (router) => {
-        const provider = sdk.providerService.getProvider(targetChainId)
-        return provider.readContract({
-          address: router,
-          abi: governableGovernorAbi,
-          functionName: 'governor',
-          authorizationList: undefined,
-        })
-      })
-      memberVaults.push(...fetchedVaults)
+    // Satisfy members from the registry first: non-EVault members (e.g.
+    // Securitize collateral wrappers) are hydrated there at startup and must
+    // never be routed through the EVault lens below. Only the remainder —
+    // typically EVaults of product-level notExplorable products, which are
+    // excluded from the startup load — needs an on-demand fetch.
+    const registryByAddress = new Map(
+      registryVaults.value.map(vault => [getVaultAddress(vault).toLowerCase(), vault]),
+    )
+    const memberVaults: AnyVault[] = []
+    const missingAddresses: string[] = []
+    for (const address of allAddresses) {
+      const known = registryByAddress.get(address.toLowerCase())
+      if (known) memberVaults.push(known)
+      else missingAddresses.push(address)
     }
-    catch (e) {
-      logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)
+
+    if (missingAddresses.length > 0) {
+      try {
+        const { chainId } = useEulerAddresses()
+        const { getEulerSdkForChain } = useEulerSdk()
+        // Capture the chain id once so the SDK backend selection and the fetch
+        // can't diverge if the user switches chains mid-await.
+        const targetChainId = chainId.value
+        const sdk = await getEulerSdkForChain(targetChainId)
+        const result = await sdk.eVaultService.fetchVaults(
+          targetChainId,
+          missingAddresses.map(addr => getAddress(addr) as Address),
+          liteVaultFetchOptions,
+        )
+        result.errors.forEach(issue => logWarn('useMarketGroups/fetchMarketGroupOnDemand', issue))
+        const fetchedVaults = result.result.filter(Boolean) as EVault[]
+        await resolveEulerRouterGovernors(fetchedVaults, (router) => {
+          const provider = sdk.providerService.getProvider(targetChainId)
+          return provider.readContract({
+            address: router,
+            abi: governableGovernorAbi,
+            functionName: 'governor',
+            authorizationList: undefined,
+          })
+        })
+        memberVaults.push(...fetchedVaults)
+      }
+      catch (e) {
+        logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)
+      }
     }
 
     if (memberVaults.length === 0) return null
