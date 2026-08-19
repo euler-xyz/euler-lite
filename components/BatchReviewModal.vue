@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { encodeFunctionData, getAddress } from 'viem'
+import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { getAddress } from 'viem'
 import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
-import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
+import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, type PreparedBatchExecution, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
-import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
+import { getAuthorizationStepDisplay, getBatchReviewDisplayPlan, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { formatNumber } from '~/utils/string-utils'
+import { buildBatchReviewCalldata } from '~/utils/batchReviewCalldata'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
-// down to their details, the net wallet changes, a Tenderly simulation link,
-// and one atomic Execute. Opened from the "Review batch" button in the drawer
+// down to their details, the net wallet changes, and one atomic Execute. Opened
+// from the "Review batch" button in the drawer
 // (and mobile page). The per-operation detail is the data captured at add-time;
 // execution is delegated to the composable's executeBatch.
 const emit = defineEmits(['close'])
@@ -36,29 +37,22 @@ const {
   hasInsufficientBalance,
   insufficientBalanceMessage,
   executeBatch,
-  prepareBatchPlan,
   entryPlans,
   marketByEntryId,
-  tenderlyEnabled,
-  isTenderlySimulating,
-  tenderlyUrl,
-  tenderlyError,
-  fetchTenderlyEnabled,
-  simulateOnTenderly,
   dismissExecutionError,
-  prepareBundledExecution,
-  latchedBundledExecution,
+  prepareBatchExecution,
+  isBatchExecutionCurrent,
 } = useTxBatch()
 
+const executionCeremonyRef = shallowRef<PreparedBatchExecution | null>(null)
+
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
-const { chainId: wagmiChainId } = useWagmi()
 const { isSafeWallet } = useSafeWallet()
-const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
+const { eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
 const { copied, copyToClipboard } = useClipboardCopy()
 const owner = computed(() => effectiveAddress.value || '')
-const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
 const ownerSubAccountKey = computed(() => {
   try {
     return owner.value ? getAddress(owner.value).toLowerCase() : undefined
@@ -90,14 +84,14 @@ type ReviewWithSteps = StepDecodingContext & {
 const isExternalProtocolMigrationReview = (review: ReviewWithSteps | undefined): boolean =>
   review?.type === 'migration'
 
-const normalizeDisplaySteps = (steps: DisplayStep[] | undefined): DisplayStep[] =>
+const normalizeDisplaySteps = (steps: readonly DisplayStep[] | undefined): DisplayStep[] =>
   (steps ?? []).map((step, idx) => ({ ...step, index: idx + 1 }))
 
-// Bundled styling follows the ceremony latched when this modal opened. Live
+// Bundled styling follows the ceremony owned by this modal. Live
 // Safe detection can resolve later, but it cannot change what this review will
 // execute without a fresh review.
 const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
-  isBundledReviewEntry(latchedBundledExecution.value !== null, !!entry.buildBundledExecution)
+  isBundledReviewEntry(executionCeremonyRef.value?.mode === 'safe-bundled', entry.bundleExecutionCeremony === true)
 
 const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[number]): DisplayStep[] =>
   isBundledEntry(entry)
@@ -105,11 +99,9 @@ const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[numbe
     : steps
 
 const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
-  // A latched bundled ceremony carries its own rows, derived from the SAME
-  // authorization resolution the proposal executes — the add-time captures
-  // can be stale (authorization state drifts between add and review).
-  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
-  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.grantSteps)
+  // Ceremony-owned rows and execution calls share one authorization resolution.
+  const ceremonySteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
+  if (ceremonySteps) return normalizeDisplaySteps(ceremonySteps.grantSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? overrideBundled(normalizeDisplaySteps(review?.signatureSteps), entry)
@@ -117,8 +109,8 @@ const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplaySte
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
-  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
-  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.revokeSteps)
+  const ceremonySteps = executionCeremonyRef.value?.reviewByEntryId[entry.id]
+  if (ceremonySteps) return normalizeDisplaySteps(ceremonySteps.revokeSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
     ? overrideBundled(normalizeDisplaySteps(review?.postSteps), entry)
@@ -132,7 +124,11 @@ const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] =
 const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   const out: Record<string, DisplayStep[]> = {}
   for (const entry of entries.value) {
-    const plan = (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan ?? entryPlans.value[entry.id]
+    const plan = getBatchReviewDisplayPlan(
+      executionCeremonyRef.value?.reviewByEntryId[entry.id]?.plan,
+      (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan,
+      entryPlans.value[entry.id],
+    )
     const ctx = entry.review as unknown as StepDecodingContext | undefined
     if (!plan?.length || !ctx) continue
     try {
@@ -201,15 +197,13 @@ const authorizationSummaryGroups = computed(() => {
 //
 // Rows render in EXECUTION order: restorations unwind in reverse entry order
 // (each entry's own steps are already reversed by the encoder). Identical
-// standalone restorations are consolidated because sequential prerequisite
-// resolution sends them once. Bundled Safe restorations are already collected
-// proposal calls, so every call remains visible. Labels are NOT identity: two
-// different aTokens can share a label while representing distinct transactions.
+// standalone and bundled restorations both remain one row per wallet prompt or
+// proposal call. Labels are NOT identity: two different aTokens can share a
+// label while representing distinct transactions.
 const restorationSummaryRows = computed(() => {
-  const rows = [...entries.value].reverse().flatMap(entry =>
+  return [...entries.value].reverse().flatMap(entry =>
     (postStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
   )
-  return consolidateRestorationSummaryRows(rows)
 })
 
 const restorationSummaryGroups = computed(() => {
@@ -224,13 +218,16 @@ const restorationSummaryGroups = computed(() => {
   ]
 })
 
-// Unverified vaults the batch touches — surfaced as a warning. A vault is the
-// target of an op's core action; we read targets off each op's contextual plan
-// and check the registry's verification flag (same source the forms use).
+// Unverified-vault disclosure follows the ceremony plan used by review and
+// execution. The add-time entry plan is only a fallback before preparation.
 const unverifiedVaultNames = computed<string[]>(() => {
   const names = new Set<string>()
   for (const entry of entries.value) {
-    const plan = entryPlans.value[entry.id]
+    const plan = getBatchReviewDisplayPlan(
+      executionCeremonyRef.value?.reviewByEntryId[entry.id]?.plan,
+      (entry.review as unknown as ReviewWithSteps | undefined)?.displayPlan,
+      entryPlans.value[entry.id],
+    )
     if (!plan) continue
     for (const item of plan) {
       if (item.type !== 'evcBatch') continue
@@ -369,21 +366,26 @@ const hasPermit2Approval = computed(() =>
 // Mirrors execution eligibility: only claim bundling when the merged plan
 // would actually submit as one Safe bundle.
 const bundlesApprovals = computed(() =>
-  isSafeWallet.value && !!preparedPlanRef.value && isPlanBundleable(preparedPlanRef.value),
+  (executionCeremonyRef.value?.safeWallet ?? isSafeWallet.value)
+  && !!preparedPlanRef.value
+  && isPlanBundleable(preparedPlanRef.value),
+)
+const isReviewCurrent = computed(() =>
+  !!executionCeremonyRef.value && isBatchExecutionCurrent(executionCeremonyRef.value),
 )
 
 onMounted(async () => {
   nowTimer = setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
-  void fetchTenderlyEnabled()
   isPreparing.value = true
   prepareError.value = ''
   try {
-    // Resolve the bundled ceremony once for this review session: the same
-    // resolution drives the rows, Copy calldata, and execution.
-    await prepareBundledExecution()
-    const prepared = await prepareBatchPlan()
+    // Resolve one ceremony for this review session. Its exact prepared core,
+    // prerequisite calls, rows, calldata export, and execution stay together.
+    const executionCeremony = await prepareBatchExecution()
+    executionCeremonyRef.value = executionCeremony
+    const prepared = executionCeremony.prepared
     preparedPlanRef.value = prepared?.plan
     const known = buildKnownSymbols()
     const out: Array<{ kind: 'approve' | 'permit', symbol: string }> = []
@@ -411,65 +413,41 @@ onUnmounted(() => {
   }
 })
 
-// Copy the exact batch calldata (one entry per on-chain tx: approvals + the EVC
-// batch), matching the per-operation review modals. This requires the prepared
-// plan so approval txs are included.
+// Copy the reviewed batch calldata (one entry per on-chain tx: approvals + the
+// EVC batch), matching the per-operation review modals. Signature-mode
+// migrations disclose that their copied authorization bytes are placeholders.
 const isCalldataCopyDisabled = computed(() =>
-  isPreparing.value || !!prepareError.value || !preparedPlanRef.value?.length,
+  isPreparing.value || !!prepareError.value || !isReviewCurrent.value || !preparedPlanRef.value?.length,
 )
 const copyCalldata = async () => {
-  const plan = preparedPlanRef.value
+  const executionCeremony = executionCeremonyRef.value
+  const plan = executionCeremony?.prepared.plan ?? preparedPlanRef.value
   if (!plan?.length) return
   try {
-    const cid = chainId.value
+    if (!executionCeremony || !isBatchExecutionCurrent(executionCeremony)) return
+    const cid = executionCeremony.chainId
     const sdk = await getEulerSdkForChain(cid)
-    const out: { to: string, data: string, value: string }[] = []
-    // The latched Safe proposal wraps the plan with grants/revocations —
-    // the copied JSON must match the actual submission.
-    const latched = latchedBundledExecution.value
-    for (const call of latched?.grants ?? []) {
-      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
-    }
-    for (const item of plan) {
-      if (item.type === 'requiredApproval') {
-        for (const r of item.resolved ?? []) {
-          if (r.type === 'approve') out.push({ to: r.token, data: r.data, value: '0' })
-        }
-        continue
-      }
-      if (item.type === 'evcBatch' && cid) {
-        const items = flattenBatchEntries(item.items)
-        const evc = sdk.deploymentService.getDeployment(cid).addresses.coreAddrs.evc
-        const data = sdk.executionService.encodeBatch(items)
-        const value = items.reduce((sum, it) => sum + it.value, 0n)
-        out.push({ to: evc, data, value: value.toString() })
-        continue
-      }
-      if (item.type === 'contractCall') {
-        out.push({
-          to: item.to,
-          data: encodeFunctionData({ abi: item.abi, functionName: item.functionName, args: item.args }),
-          value: item.value.toString(),
-        })
-      }
-    }
-    for (const call of latched?.revokes ?? []) {
-      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
-    }
-    copyToClipboard(JSON.stringify(out, null, 2), 'calldata')
+    if (!isBatchExecutionCurrent(executionCeremony)) return
+    const out = buildBatchReviewCalldata({
+      plan,
+      before: executionCeremony.grants,
+      after: executionCeremony.revokes,
+      sdk,
+      chainId: cid,
+    })
+    await copyToClipboard(JSON.stringify(out, null, 2), 'calldata')
   }
   catch (error) {
     logWarn('BatchReviewModal/copyCalldata', error)
   }
 }
 
-const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
-
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
+  isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value || !isReviewCurrent.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
+  if (!isReviewCurrent.value) return 'Batch or wallet changed — reopen review to continue'
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
   if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
   if (simError.value) return 'This batch would revert — resolve the flagged error'
@@ -487,7 +465,7 @@ const handleExecute = async () => {
   // rejects new submissions while a detached proposal is pending.
   const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
   if (!handle) return
-  const run = executeBatch(handle.scope)
+  const run = executeBatch(handle.scope, executionCeremonyRef.value ?? undefined)
   pendingBatchExecution = run
   executionHandle = handle
   try {
@@ -808,7 +786,17 @@ const onCloseRequested = () => {
         :description="prepareError"
       />
 
-      <!-- Secondary actions: copy calldata + Tenderly -->
+      <UiAlert
+        v-if="executionCeremonyRef?.usesPlaceholderSignatures"
+        variant="info"
+        size="compact"
+        title="Authorization signatures required"
+        description="Copied calldata contains placeholder authorization signatures. Your wallet requests the reviewed signatures only after you confirm the batch."
+      />
+
+      <!-- Secondary action: copy the reviewed call vector. Whole-batch
+           third-party simulation is intentionally unavailable because it
+           cannot preserve the complete reviewed wallet ceremony. -->
       <div class="flex items-center justify-center gap-16">
         <button
           type="button"
@@ -823,40 +811,6 @@ const onCloseRequested = () => {
           />
           {{ copied ? 'Copied!' : isPreparing ? 'Preparing calldata…' : 'Copy calldata' }}
         </button>
-        <template v-if="tenderlyEnabled">
-          <a
-            v-if="tenderlyUrl"
-            :href="tenderlyUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="flex items-center gap-6 text-p3 transition-colors"
-            :class="hasTenderlyFailed ? 'text-error-500' : 'text-success-500 hover:text-success-600'"
-          >
-            <SvgIcon
-              :name="hasTenderlyFailed ? 'warning-circle' : 'check-circle'"
-              class="!w-16 !h-16"
-            />
-            {{ hasTenderlyFailed ? 'Simulation reverted — view on Tenderly' : 'View simulation on Tenderly' }}
-            <SvgIcon
-              name="arrow-top-right"
-              class="!w-14 !h-14"
-            />
-          </a>
-          <button
-            v-else
-            type="button"
-            class="flex items-center gap-6 text-p3 text-content-secondary hover:text-content-primary transition-colors disabled:opacity-50"
-            :disabled="isTenderlySimulating"
-            @click="simulateOnTenderly"
-          >
-            <SvgIcon
-              :name="isTenderlySimulating ? 'loading' : 'arrow-top-right'"
-              class="!w-16 !h-16"
-              :class="{ 'animate-spin': isTenderlySimulating }"
-            />
-            {{ isTenderlySimulating ? 'Simulating…' : 'Simulate on Tenderly' }}
-          </button>
-        </template>
       </div>
 
       <div class="flex flex-col items-center gap-8">

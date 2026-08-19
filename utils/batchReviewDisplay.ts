@@ -1,4 +1,5 @@
 import type { DisplayStep } from '~/utils/stepDecoding'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 export interface AuthorizationStepsDisplay {
   detailHeading: 'Authorization transactions' | 'Signatures'
@@ -10,6 +11,13 @@ export const isBundledReviewEntry = (
   hasLatchedBundledExecution: boolean,
   hasBundledExecutionBuilder: boolean,
 ): boolean => hasLatchedBundledExecution && hasBundledExecutionBuilder
+
+/** Prefer the fresh per-entry plan owned by the Safe review ceremony. */
+export const getBatchReviewDisplayPlan = (
+  ceremonyPlan: TransactionPlan | undefined,
+  capturedDisplayPlan: TransactionPlan | undefined,
+  entryPlan: TransactionPlan | undefined,
+): TransactionPlan | undefined => ceremonyPlan ?? capturedDisplayPlan ?? entryPlan
 
 export const groupRestorationSummaryRows = <TRow extends { step: Pick<DisplayStep, 'isSeparateTx'> }>(
   rows: readonly TRow[],
@@ -32,25 +40,4 @@ export const getAuthorizationStepDisplay = (
         summaryHeading: 'Signatures needed',
         itemCountLabel: '1 signature',
       }
-}
-
-type RestorationSummaryRow = {
-  step: Pick<DisplayStep, 'isSeparateTx' | 'txKey'>
-}
-
-/**
- * Standalone prerequisites resolve sequentially, so a repeated restoration
- * transaction is sent only once. Bundled Safe calls are already resolved and
- * every collected call remains in the proposal, so every row stays visible.
- */
-export const consolidateRestorationSummaryRows = <TRow extends RestorationSummaryRow>(
-  rows: readonly TRow[],
-): TRow[] => {
-  const seenStandaloneTransactions = new Set<string>()
-  return rows.filter(({ step }) => {
-    if (!step.isSeparateTx || !step.txKey) return true
-    if (seenStandaloneTransactions.has(step.txKey)) return false
-    seenStandaloneTransactions.add(step.txKey)
-    return true
-  })
 }

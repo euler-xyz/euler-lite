@@ -42,10 +42,13 @@ import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
-import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
+import { assertPreparedPlanSignatureParity } from '~/utils/preparedPlanParity'
+import { assertWalletExecutionContext, createReviewedWalletContextGuard, createSafeBundleBroadcastGuard } from '~/utils/walletExecutionContext'
 import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
+import { getMigrationAuthorizationSignatureSubstitutions } from '~/utils/migrationAuthorizationSignatures'
+import { isMigrationCeremonyDeadlineExpired, mintMigrationCeremonyDeadline } from '~/utils/migrationCeremonyDeadline'
 
 type AaveOutgoingMigrationTarget = MigrationTarget<AaveMigrationTargetRaw, AavePositionRef, AaveMigrationTargetExtraData>
 
@@ -83,9 +86,29 @@ type OutgoingMigrationPreview = {
   input: OutgoingMigrationInput
   account: Account<IHasVaultAddress>
   position: MigrationPosition
+  /**
+   * The verifier/authorization deadline every build of this preview pinned.
+   * Confirmation must reuse it: the deadline is embedded in the EIP-712
+   * payload (so a re-mint always fails the payload-equality gate) and in the
+   * plan's verifier calldata (so a re-mint diverges from the reviewed plan).
+   */
+  authorizationDeadline: bigint
+  /**
+   * The connector identity (`id:uid`) the review was built under. The direct
+   * Safe-bundle broadcast guard validates against this reviewed key — never a
+   * snapshot taken inside the confirmation flow, which would accept a
+   * connector swapped during an earlier confirmation await as its baseline.
+   */
+  connectorContextKey: string | undefined
   authorizationRequest?: MigrationAuthorizationRequest
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
+  /**
+   * The plugin payloads the reviewed calldata was prepared with. Confirm-time
+   * rebuilds must prepare with the same payloads so the parity proof compares
+   * plans that differ only in the authorized signature substitutions.
+   */
+  prefetch?: PluginPrefetchData
 }
 
 type MigrationTargetAssetLike = {
@@ -103,7 +126,7 @@ const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error: showError } = useToast()
-const { isConnected, address, chainId: walletChainId } = useWagmi()
+const { isConnected, address, chainId: walletChainId, connector: walletConnector } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
 const { chainId } = useEulerAddresses()
@@ -609,13 +632,22 @@ function buildMigrationInput(
   }
 }
 
+// Identity of the wallet connector a Safe proposal would submit through.
+// Account and chain checks cannot see a same-account connector switch, so the
+// direct Safe-bundle flow captures this at confirmation and re-asserts it
+// immediately before the irreversible proposal broadcast.
+function walletConnectorContextKey(): string | undefined {
+  const current = walletConnector.value
+  return current ? `${current.id}:${current.uid}` : undefined
+}
+
 async function getAuthorizationRequest(
   input: OutgoingMigrationInput,
   migrationPosition?: MigrationPosition,
   account?: Account<IHasVaultAddress>,
   useSignatures = signaturesEnabled.value,
+  deadline: bigint = mintMigrationCeremonyDeadline(),
 ): Promise<MigrationAuthorizationRequest | undefined> {
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'euler-to-external',
     connectorId: input.target.connectorId,
@@ -639,6 +671,7 @@ async function buildMigrationPlan(
   authorization?: SignedMigrationAuthorization,
   migrationPosition?: MigrationPosition,
   account: Account<IHasVaultAddress> | undefined = planAccount.value,
+  deadline?: bigint,
 ): Promise<TransactionPlan> {
   return planCrossProtocolMigration({
     direction: 'euler-to-external',
@@ -654,6 +687,7 @@ async function buildMigrationPlan(
     account,
     cleanupEulerPosition: input.cleanupEulerPosition,
     operationName: `${input.target.connectorId}OutgoingMigration`,
+    deadline,
   })
 }
 
@@ -662,6 +696,7 @@ async function buildMigrationSimulation(
   migrationPosition: MigrationPosition,
   authorizationRequest: MigrationAuthorizationRequest | undefined,
   account?: Account<IHasVaultAddress>,
+  deadline?: bigint,
 ) {
   return planCrossProtocolMigrationSimulation({
     direction: 'euler-to-external',
@@ -677,6 +712,7 @@ async function buildMigrationSimulation(
     account,
     cleanupEulerPosition: input.cleanupEulerPosition,
     operationName: `${input.target.connectorId}OutgoingMigration`,
+    deadline,
   })
 }
 
@@ -755,6 +791,10 @@ async function prepareOutgoingMigrationPreview(
       positionRef: input.target.ref,
     })
 
+    // Pinned once for the preview's whole lifetime: every build here and the
+    // confirm-time rebuild must embed this same deadline, or the payload and
+    // plan gates reject the confirmation as drift.
+    const authorizationDeadline = mintMigrationCeremonyDeadline()
     // Match the inbound migration flow: resolve the exact authorization form
     // first, then pass it into simulation. In no-signature mode this must be a
     // standalone transaction request so the review can list its grant/revoke
@@ -764,6 +804,7 @@ async function prepareOutgoingMigrationPreview(
       migrationPosition,
       account,
       useSignatures,
+      authorizationDeadline,
     )
     // One batch build returns both plans: the simulation plan (auth item
     // stripped, replaced by state overrides) and the stub-signed preview
@@ -773,6 +814,7 @@ async function prepareOutgoingMigrationPreview(
       migrationPosition,
       authorizationRequest,
       account,
+      authorizationDeadline,
     )
 
     // Resolve plugin payloads (Pyth Hermes pull, Keyring reads, TOS) once,
@@ -812,12 +854,15 @@ async function prepareOutgoingMigrationPreview(
       input,
       account,
       position: migrationPosition,
+      authorizationDeadline,
+      connectorContextKey: walletConnectorContextKey(),
       tenderlySimulation: {
         plan: simulationResult.plan,
         prepared: tenderlyPrepared,
         stateOverrides: simulationResult.stateOverrides,
       },
       calldataPrepared,
+      ...(prefetch ? { prefetch } : {}),
       ...(authorizationRequest
         ? { authorizationRequest }
         : {}),
@@ -895,6 +940,30 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   }
 }
 
+/**
+ * Prove the confirm-time prepared plan is byte-identical to the reviewed
+ * calldata outside the authorized signature substitutions. Any other
+ * divergence evicts the cached preview and forces a re-review — the wallet
+ * must never receive calldata the modal did not display.
+ */
+function assertMigrationPreparedParity(
+  preview: OutgoingMigrationPreview,
+  resolved: TransactionPlanPrepared,
+  authorization: SignedMigrationAuthorization | undefined,
+) {
+  try {
+    assertPreparedPlanSignatureParity({
+      reviewed: preview.calldataPrepared,
+      resolved,
+      substitutions: getMigrationAuthorizationSignatureSubstitutions(authorization),
+    })
+  }
+  catch (err) {
+    invalidateOutgoingMigrationPreview(preview.key)
+    throw err
+  }
+}
+
 async function sendMigration(execution: TrackedExecutionScope, preview: OutgoingMigrationPreview) {
   const { input: reviewedInput, account: reviewedAccount, position: migrationPosition, useSignatures } = preview
   const { target } = reviewedInput
@@ -913,7 +982,14 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
     })
     if (!await restorePendingBeforeRetry()) return
     const input = reviewedInput
-    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, reviewedAccount, useSignatures)
+    // The reviewed deadline is embedded in the displayed payload and plan, so
+    // an expired one can only produce an on-chain revert — force a re-review
+    // that mints a fresh ceremony instead.
+    if (isMigrationCeremonyDeadlineExpired(preview.authorizationDeadline)) {
+      invalidateOutgoingMigrationPreview(preview.key)
+      throw new Error('The reviewed authorization expired — please review the migration again.')
+    }
+    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, reviewedAccount, useSignatures, preview.authorizationDeadline)
 
     // The reviewed ceremony is defined by the authorization payload the modal
     // displayed and copied. Authorization state can drift between review and
@@ -947,34 +1023,56 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
           invalidateOutgoingMigrationPreview(preview.key)
           throw new Error('Authorization requirements changed since review — please review the migration again.')
         }
-        const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
+        const beforeBroadcast = createSafeBundleBroadcastGuard({
+          expectedAccount: reviewedInput.owner,
+          expectedChainId: target.chainId,
+          expectedConnectorKey: preview.connectorContextKey,
+          currentAccount: () => address.value as Address | undefined,
+          currentChainId: () => walletChainId.value,
+          isSafeWallet: () => isSafeWallet.value,
+          connectorContextKey: walletConnectorContextKey,
+        })
+        const outcome = await sendMigrationAsSafeBundle(preview, migrationPosition, authorizationRequest, reviewedAccount, beforeBroadcast)
         if (outcome === 'aborted') return
         finishMigrationSuccess(execution)
         return
       }
 
+      // Every wallet action below (signature request, grant broadcasts, plan
+      // broadcast) re-asserts the reviewed account/chain/connector — the
+      // awaits between them are where a delayed wallet switch can land.
+      const assertReviewedWalletContext = createReviewedWalletContextGuard({
+        expectedAccount: reviewedInput.owner,
+        expectedChainId: target.chainId,
+        expectedConnectorKey: preview.connectorContextKey,
+        currentAccount: () => address.value as Address | undefined,
+        currentChainId: () => walletChainId.value,
+        connectorContextKey: walletConnectorContextKey,
+      })
       if (authorizationRequest) {
         if (useSignatures) {
-          authorization = await signMigrationAuthorization(authorizationRequest)
+          authorization = await signMigrationAuthorization(authorizationRequest, { beforeSignature: assertReviewedWalletContext })
         }
         else {
           // Record each revoke as soon as its grant is broadcast so partial or
           // receipt-ambiguous failures can still unwind what may have landed.
-          await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs)
+          await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs, { beforeBroadcast: assertReviewedWalletContext })
         }
       }
-      const plan = await buildMigrationPlan(input, authorization, migrationPosition, reviewedAccount)
+      const plan = await buildMigrationPlan(input, authorization, migrationPosition, reviewedAccount, preview.authorizationDeadline)
       const prepared = await prepareTransactionPlan(plan, {
         account: reviewedAccount,
         chainId: input.target.chainId,
+        prefetch: preview.prefetch,
         usePermit2: useSignatures,
       })
+      assertMigrationPreparedParity(preview, prepared, authorization)
       const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
       if (!ok) {
         await revokeAfterAbort(revokeTxs)
         return
       }
-      await executePreparedPlan(prepared)
+      await executePreparedPlan(prepared, { beforeBroadcast: assertReviewedWalletContext })
     }
     catch (err) {
       // Covers a rejected batch, a failed prepare, and a stale grant.
@@ -1039,18 +1137,24 @@ function finishMigrationSuccess(execution: TrackedExecutionScope) {
  * Safe bundle context throws instead of silently splitting the ceremony.
  */
 async function sendMigrationAsSafeBundle(
-  input: OutgoingMigrationInput,
+  preview: OutgoingMigrationPreview,
   migrationPosition: MigrationPosition,
   authorizationRequest: MigrationAuthorizationRequest,
-  account?: Account<IHasVaultAddress>,
+  account: Account<IHasVaultAddress> | undefined,
+  beforeBroadcast: () => void,
 ): Promise<'executed' | 'aborted'> {
+  const { input, authorizationDeadline: deadline } = preview
   const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
-  const simulation = await buildMigrationSimulation(input, migrationPosition, authorizationRequest, account)
+  const simulation = await buildMigrationSimulation(input, migrationPosition, authorizationRequest, account, deadline)
   const prepared = await prepareTransactionPlan(simulation.plan, {
     account,
     chainId: input.target.chainId,
+    prefetch: preview.prefetch,
     usePermit2: false,
   })
+  // Bundled reviews are always no-signature, so the reviewed calldata is the
+  // simulation-variant plan itself: parity holds with zero substitutions.
+  assertMigrationPreparedParity(preview, prepared, undefined)
   const ok = await runPreparedSimulation(
     prepared,
     buildStateOverrideOptions({ noBalanceOverride: true }),
@@ -1058,7 +1162,8 @@ async function sendMigrationAsSafeBundle(
   )
   if (!ok) return 'aborted'
 
-  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true })
+  beforeBroadcast()
+  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true, beforeBroadcast })
   if (!result) {
     throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
   }
@@ -1095,46 +1200,65 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
   const batchEntry = {
     label: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetProtocolDisplay(input.target)}`,
     nameOverride: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
-    buildExecutionPlan: async (account: Account<IHasVaultAddress>) => {
-      const executionAuthorizationRequest = useSignatures
-        ? await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-        : undefined
-      const authorization = executionAuthorizationRequest
-        ? await signMigrationAuthorization(executionAuthorizationRequest)
-        : undefined
-      // Without signatures the grant was already mined by the batch's pre-phase,
-      // so the connector omits the authorization item from the plan.
-      return buildMigrationPlan(input, authorization, migrationPosition, account)
-    },
     ...(useSignatures
-      ? {}
-      : {
-          buildExecutionPrerequisites: async (account: Account<IHasVaultAddress>) => {
-            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-            if (!request) return undefined
-            const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
+      ? {
+          // Review uses placeholder signature bytes. Real wallet signatures are
+          // requested only after the user confirms this exact authorization.
+          buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
+            // The confirm-time rebuild must differ from the reviewed preview
+            // plan only in the signature bytes. Connectors mint a wall-clock
+            // verifier deadline on every build unless one is supplied, so the
+            // ceremony pins a single deadline across both builds.
+            const ceremonyDeadline = mintMigrationCeremonyDeadline()
+            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures, ceremonyDeadline)
+            const simulation = await buildMigrationSimulation(input, migrationPosition, request, account, ceremonyDeadline)
             return {
-              preTxs: grants,
-              walletContext: { account: request.owner, chainId: request.chainId },
-              postTxs: revokes,
-              postTxsByPreTx: revokesByGrant,
+              plan: simulation.previewPlan,
+              resolveExecutionPlan: async (beforeWalletAction: () => void) => {
+                const authorization = request
+                  ? await signMigrationAuthorization(request, { beforeSignature: beforeWalletAction })
+                  : undefined
+                beforeWalletAction()
+                return {
+                  plan: await buildMigrationPlan(input, authorization, migrationPosition, account, ceremonyDeadline),
+                  signatureSubstitutions: getMigrationAuthorizationSignatureSubstitutions(authorization),
+                }
+              },
+              usesPlaceholderSignatures: !!request,
+              grantSteps: buildSignatureSteps(input.target, request, true, false),
+              revokeSteps: [],
             }
           },
-          // Bundled counterpart for Safe execution: the simulation-variant
-          // plan validates the grant instead of reading the live allowance,
-          // so nothing needs to mine before the proposal is assembled. The
-          // review rows come from the SAME resolution so the modal cannot
-          // display a ceremony other than the one that executes.
-          buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
+        }
+      : {
+          bundleExecutionCeremony: true,
+          // Resolve authorization once so the reviewed rows, exported calls,
+          // standalone flow, and Safe proposal all describe one ceremony.
+          buildExecutionCeremony: async (account: Account<IHasVaultAddress>) => {
             const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-            const { grants, revokes } = request
+            const { grants, revokes, revokesByGrant } = request
               ? encodeMigrationAuthorizationTxs(request)
-              : { grants: [], revokes: [] }
+              : { grants: [], revokes: [], revokesByGrant: [] }
             const simulation = await buildMigrationSimulation(input, migrationPosition, request, account)
             return {
               plan: simulation.plan,
-              grants,
-              revokes,
+              prerequisites: request
+                ? {
+                    preTxs: grants,
+                    walletContext: { account: request.owner, chainId: request.chainId },
+                    postTxs: revokes,
+                    postTxsByPreTx: revokesByGrant,
+                  }
+                : undefined,
+              // Authorization state can drift between review and execution
+              // (an allowance granted or revoked elsewhere) — the reviewed
+              // grant/revoke set would no longer match what should run.
+              revalidatePrerequisites: async () => {
+                const fresh = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
+                if (migrationAuthorizationPayloadKey(fresh) !== migrationAuthorizationPayloadKey(request)) {
+                  throw new Error('Authorization requirements changed since review — reopen review and try again.')
+                }
+              },
               grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
               revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
             }
@@ -1151,8 +1275,7 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       type: 'migration',
       asset: sourceDebtAsset,
       amount: debtAmount,
-      // Add-time rows describe the sequential fallback. A latched Safe review
-      // uses rows from the exact bundled resolution instead.
+      // Ceremony-owned rows replace these captured rows during batch review.
       signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures, false),
       postSteps: buildRevokeSteps(authorizationRequest, useSignatures, false),
       displayPlan: preview.calldataPrepared.plan,

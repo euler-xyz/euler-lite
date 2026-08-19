@@ -58,4 +58,21 @@ describe('useMigrationAuthorizationFlow pending cleanup', () => {
 
     expect(flow.pendingRevokes.value).toEqual([revoke])
   })
+
+  it.each(['revokeAfterSuccess', 'revokeAfterAbort'] as const)(
+    'keeps failed cleanup queued without notifying a successor wallet from %s',
+    async (method) => {
+      mocks.sendMigrationAuthorizationRevokes.mockResolvedValue({
+        restored: [],
+        failed: [revoke],
+      })
+      const flow = useMigrationAuthorizationFlow()
+
+      await flow[method]([revoke], { shouldNotify: () => false })
+
+      expect(mocks.sendMigrationAuthorizationRevokes).toHaveBeenCalledWith([revoke])
+      expect(flow.pendingRevokes.value).toEqual([revoke])
+      expect(mocks.showWarning).not.toHaveBeenCalled()
+    },
+  )
 })

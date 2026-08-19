@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { getAuthorizationStepDisplay, getBatchReviewDisplayPlan, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 
 describe('getAuthorizationStepDisplay', () => {
   it('describes signature-mode authorization rows as signatures', () => {
@@ -27,6 +28,16 @@ describe('isBundledReviewEntry', () => {
   })
 })
 
+describe('getBatchReviewDisplayPlan', () => {
+  it('uses the ceremony plan for display and disclosure instead of a stale captured preview', () => {
+    const freshCeremonyPlan = [{ type: 'evcBatch', items: [{ name: 'fresh-execution' }] }] as unknown as TransactionPlan
+    const stalePreviewPlan = [{ type: 'evcBatch', items: [{ name: 'stale-preview' }] }] as unknown as TransactionPlan
+    const entryPlan = [{ type: 'evcBatch', items: [{ name: 'entry-plan' }] }] as unknown as TransactionPlan
+
+    expect(getBatchReviewDisplayPlan(freshCeremonyPlan, stalePreviewPlan, entryPlan)).toBe(freshCeremonyPlan)
+  })
+})
+
 describe('groupRestorationSummaryRows', () => {
   it('separates in-proposal restorations from post-execution transactions', () => {
     const bundled = { id: 'bundled', step: { isSeparateTx: false } }
@@ -43,21 +54,5 @@ describe('groupRestorationSummaryRows', () => {
       bundled: [],
       postExecution: [],
     })
-  })
-})
-
-describe('consolidateRestorationSummaryRows', () => {
-  it('keeps every bundled Safe call visible', () => {
-    const first = { id: 'first', step: { isSeparateTx: false, txKey: 'same-transaction' } }
-    const second = { id: 'second', step: { isSeparateTx: false, txKey: 'same-transaction' } }
-
-    expect(consolidateRestorationSummaryRows([first, second])).toEqual([first, second])
-  })
-
-  it('consolidates identical standalone restorations resolved sequentially', () => {
-    const first = { id: 'first', step: { isSeparateTx: true, txKey: 'same-transaction' } }
-    const second = { id: 'second', step: { isSeparateTx: true, txKey: 'same-transaction' } }
-
-    expect(consolidateRestorationSummaryRows([first, second])).toEqual([first])
   })
 })

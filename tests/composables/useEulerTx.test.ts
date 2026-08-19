@@ -156,6 +156,27 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ usePermit2: false }))
   })
 
+  it('estimates a prepared envelope without rerunning the raw plan pipeline', async () => {
+    const estimatePrepared = vi.fn().mockResolvedValue(123n)
+    vi.mocked(getEulerSdkForChain).mockResolvedValue({
+      executionService: { estimateGasForPreparedTransactionPlan: estimatePrepared },
+    } as never)
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 8453,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared
+    const { estimateGasForPreparedPlan } = useEulerTx()
+
+    await expect(estimateGasForPreparedPlan(prepared)).resolves.toBe(123n)
+
+    expect(getEulerSdkForChain).toHaveBeenCalledWith(8453)
+    expect(estimatePrepared).toHaveBeenCalledWith(prepared)
+  })
+
   it('does not broadcast a reviewed migration after account drift', async () => {
     const executePreparedTransactionPlan = vi.fn(async ({ sendTransaction }: {
       sendTransaction: (tx: { to: Address, data: Hex }) => Promise<Hash>
@@ -182,6 +203,31 @@ describe('useEulerTx migration authorization cleanup', () => {
 
     await expect(executePreparedPlan(prepared))
       .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind: 'account' })
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('runs the caller freshness guard after async setup and before a plain broadcast', async () => {
+    const provider = {
+      waitForTransactionReceipt: vi.fn(),
+    }
+    let resolveSdk!: (sdk: unknown) => void
+    const sdkPromise = new Promise<unknown>((resolve) => {
+      resolveSdk = resolve
+    })
+    vi.mocked(getEulerSdkFresh).mockReturnValue(sdkPromise as never)
+    let current = true
+    const { sendPlainTransactions } = useEulerTx()
+    const execution = sendPlainTransactions([{ to: TOKEN, data: '0x1234' }], {
+      beforeBroadcast: () => {
+        if (!current) throw new Error('review became stale')
+      },
+    })
+    await vi.waitFor(() => expect(getEulerSdkFresh).toHaveBeenCalledTimes(1))
+
+    current = false
+    resolveSdk({ providerService: { getProvider: vi.fn(() => provider) } })
+
+    await expect(execution).rejects.toThrow('review became stale')
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
   })
 
@@ -582,9 +628,8 @@ describe('useEulerTx Safe wallet bundling', () => {
 
   it('wraps the plan with plain calls inside one Safe bundle in order', async () => {
     const { executePreparedPlanWithPlainCalls } = useEulerTx()
-    const batchOnly = [approvedPlan[1]] as TransactionPlan
 
-    const result = await executePreparedPlanWithPlainCalls(buildPrepared(batchOnly), {
+    const result = await executePreparedPlanWithPlainCalls(buildPrepared(approvedPlan), {
       before: [GRANT_CALL],
       after: [REVOKE_CALL],
     })
@@ -598,6 +643,7 @@ describe('useEulerTx Safe wallet bundling', () => {
       calls: [
         // Grants before the batch, revocations after — one atomic proposal.
         { to: TOKEN, data: '0x11ff', value: 0n },
+        { to: TOKEN, data: APPROVE_DATA, value: 0n },
         { to: EVC, data: BATCH_DATA, value: 0n },
         { to: TOKEN, data: '0x22ff', value: 0n },
       ],
@@ -605,6 +651,42 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(result?.hashes).toEqual([SAFE_TX_HASH])
     expect(result?.receipts[0].transactionHash).toBe(SAFE_TX_HASH)
     expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
+  it('runs the caller freshness guard after Safe provider setup and before submission', async () => {
+    let resolveSafeProvider!: (provider: { request: ReturnType<typeof vi.fn> }) => void
+    const safeProviderPromise = new Promise<{ request: ReturnType<typeof vi.fn> }>((resolve) => {
+      resolveSafeProvider = resolve
+    })
+    const deferredSafeConnector = {
+      id: 'safe',
+      name: 'Safe',
+      getProvider: vi.fn(() => safeProviderPromise),
+    }
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: deferredSafeConnector,
+    }) as never)
+    let current = true
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+    const execution = executePreparedPlanWithPlainCalls(
+      buildPrepared([approvedPlan[1]] as TransactionPlan),
+      { before: [GRANT_CALL], after: [REVOKE_CALL] },
+      {
+        allowSingleCall: true,
+        beforeBroadcast: () => {
+          if (!current) throw new Error('review became stale')
+        },
+      },
+    )
+    await vi.waitFor(() => expect(deferredSafeConnector.getProvider).toHaveBeenCalledTimes(1))
+
+    current = false
+    resolveSafeProvider({ request: vi.fn() })
+
+    await expect(execution).rejects.toThrow('review became stale')
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
   })
 
   it('rejects wrapper calls around a plan that encodes no calls', async () => {

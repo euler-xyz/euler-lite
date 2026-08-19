@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -8,6 +8,7 @@ import type {
   PortfolioSavingsPosition,
   SlotHints,
   TransactionPlan,
+  TransactionPlanPrepared,
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -19,14 +20,12 @@ import {
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
-import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import {
   activeLayerVaultsRef,
   collectAccountVaults,
   mergeLayeredVaults,
   type LayeredVaultMap,
 } from '~/composables/useLayeredVaults'
-import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
 import { buildPlanMarketLabel, type DisplayStep } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
@@ -34,6 +33,17 @@ import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import type { PreparedPlanBroadcast } from '~/composables/useEulerTx'
+import {
+  getSafeWalletProvider,
+  SafeTransactionStatusUnknownError,
+  waitForSafeTransactionExecution,
+  type ReceiptClientLike,
+} from '~/utils/safeWalletTransactions'
+import {
+  assertPreparedPlanSignatureParity,
+  type PreparedPlanSignatureSubstitution,
+} from '~/utils/preparedPlanParity'
 
 export interface BatchWalletChange {
   token: string
@@ -79,7 +89,7 @@ export interface BatchEntryExternalTx {
 }
 
 export interface BatchEntryExecutionPrerequisites {
-  /** Sent and mined before the merged plan is built. */
+  /** Sent and mined before the reviewed prepared core is executed. */
   preTxs: BatchEntryExternalTx[]
   /** Wallet context used to build the prerequisite request. */
   walletContext: WalletExecutionContext
@@ -89,25 +99,65 @@ export interface BatchEntryExecutionPrerequisites {
   postTxsByPreTx?: Array<BatchEntryExternalTx | undefined>
 }
 
-export interface BatchEntryBundledExecution {
+export interface BatchEntryExecutionCeremony {
   /**
-   * Execution payload built WITHOUT live authorization reads (the
-   * simulation-variant plan) — the grants ride in the same Safe proposal
-   * and are not mined when this plan is built.
+   * Execution payload built from the same authorization resolution as the
+   * prerequisite calls and review rows.
    */
   plan: TransactionPlan
-  /** Grant calls to prepend to the proposal, in dependency order. */
-  grants: BatchEntryExternalTx[]
-  /** Revocation calls to append, already in unwind order for this entry. */
-  revokes: BatchEntryExternalTx[]
+  /** One authorization resolution shared by standard and Safe execution. */
+  prerequisites?: BatchEntryExecutionPrerequisites
   /**
-   * Review rows for the grants above, derived from the SAME authorization
-   * resolution — the modal renders these, never the add-time captures, so
-   * the displayed ceremony cannot drift from the executed one.
+   * Review rows for the prerequisite grants, derived from this ceremony's
+   * authorization resolution.
    */
   grantSteps: DisplayStep[]
-  /** Review rows for the revocations above, same resolution. */
+  /** Review rows for the prerequisite revocations, from the same resolution. */
   revokeSteps: DisplayStep[]
+  /**
+   * Resolve wallet signatures only after the user confirms this reviewed
+   * ceremony. The callback receives the ceremony freshness guard and returns
+   * the same plan with real signature bytes.
+   */
+  resolveExecutionPlan?: (beforeWalletAction: () => void) => Promise<{
+    plan: TransactionPlan
+    signatureSubstitutions: readonly PreparedPlanSignatureSubstitution[]
+  }>
+  /** The review/copy plan contains placeholder authorization signatures. */
+  usesPlaceholderSignatures?: boolean
+  /**
+   * Re-resolve this entry's prerequisite authorization against current chain
+   * state and throw when it no longer matches what the review displayed.
+   * The ceremony's prerequisites are frozen at review time, so on-chain drift
+   * (an allowance granted or revoked elsewhere) would otherwise broadcast
+   * grant/revoke calls the user never reviewed. Invoked at the last
+   * pre-broadcast boundary of the batch execution.
+   */
+  revalidatePrerequisites?: () => Promise<void>
+}
+
+/** One immutable batch review ceremony used for display, export, and execution. */
+export interface PreparedBatchExecution {
+  readonly generation: number
+  readonly owner: Address
+  readonly chainId: number
+  readonly safeWallet: boolean
+  readonly safeWalletResolved: boolean
+  readonly connectorKey?: string
+  readonly mode: 'standard' | 'safe-bundled'
+  readonly prepared: TransactionPlanPrepared
+  readonly resolvePreparedPlan?: (beforeWalletAction: () => void) => Promise<TransactionPlanPrepared>
+  readonly usesPlaceholderSignatures: boolean
+  readonly grants: readonly BatchEntryExternalTx[]
+  readonly revokes: readonly BatchEntryExternalTx[]
+  readonly prerequisites: readonly Readonly<BatchEntryExecutionPrerequisites>[]
+  /** Per-entry prerequisite drift checks, run before anything irreversible. */
+  readonly prerequisiteRevalidations: readonly (() => Promise<void>)[]
+  readonly reviewByEntryId: Readonly<Record<string, {
+    readonly plan: TransactionPlan
+    readonly grantSteps: readonly DisplayStep[]
+    readonly revokeSteps: readonly DisplayStep[]
+  }>>
 }
 
 export interface BatchEntry {
@@ -117,20 +167,14 @@ export interface BatchEntry {
   plan: TransactionPlan
   /** Optional real execution payload builder for entries whose preview plan uses simulation-only state. */
   buildExecutionPlan?: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
-  /** Standalone transactions this entry needs around the merged batch, resolved
-   *  at execution time. Migrations without message signatures use this to grant
-   *  their authorization before the batch and revoke it after: the grants cannot
-   *  be plan items (`mergePlans` rejects contractCall, and the EVC would be the
-   *  msg.sender), and must be mined before the plan is built. */
-  buildExecutionPrerequisites?: (
+  /** Resolve the execution plan, authorization calls, and review rows together.
+   *  Standard wallets broadcast the prerequisite calls around the prepared core;
+   *  Safe wallets include the same calls in one atomic proposal. */
+  buildExecutionCeremony?: (
     account: Account<IHasVaultAddress>,
-  ) => Promise<BatchEntryExecutionPrerequisites | undefined>
-  /** Bundled-mode counterpart of the two builders above: plan + grant/revoke
-   *  calls for ONE atomic Safe proposal. Entries providing this let the cart
-   *  skip the standalone grant broadcasts entirely when a Safe executes. */
-  buildBundledExecution?: (
-    account: Account<IHasVaultAddress>,
-  ) => Promise<BatchEntryBundledExecution>
+  ) => Promise<BatchEntryExecutionCeremony>
+  /** This entry's prerequisite calls belong inside one atomic Safe proposal. */
+  bundleExecutionCeremony?: boolean
   /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
   stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
@@ -226,21 +270,35 @@ export interface WalletShortfall {
 // --- module-scoped state (single shared cart for the session) ---
 const entries: Ref<BatchEntry[]> = ref([])
 const layers = shallowRef<BatchLayer[]>([])
-/**
- * Bundled ceremony resolved ONCE when the review modal opens, displayed,
- * copied, and executed verbatim — the latch that keeps the reviewed
- * ceremony, the copied payload, and the submitted proposal identical. A
- * cart edit or account/chain reset clears it; executeBatch treats its
- * presence as the reviewed promise of ONE proposal. Module-scoped like the
- * rest of the cart state so every component instance shares it.
- */
-const latchedBundledExecution = shallowRef<{
-  plans: TransactionPlan[]
-  grants: BatchEntryExternalTx[]
-  revokes: BatchEntryExternalTx[]
-  /** Per-entry review rows from the same resolution, for the modal to render. */
-  stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }>
-} | null>(null)
+const batchGeneration = ref(0)
+const pendingAddCount = ref(0)
+let addContextGeneration = 0
+let batchPreparation: {
+  generation: number
+  promise: Promise<PreparedBatchExecution>
+} | null = null
+
+const invalidateBatchReview = () => {
+  batchGeneration.value++
+  batchPreparation = null
+}
+
+const invalidatePendingAddContext = () => {
+  addContextGeneration++
+}
+
+interface BatchAddContext {
+  generation: number
+  owner?: Address
+  chainId?: number
+}
+
+class BatchAddContextChangedError extends Error {
+  constructor() {
+    super('Wallet or batch changed while adding this operation — add it again.')
+    this.name = 'BatchAddContextChangedError'
+  }
+}
 // Per-entry fixed plan (keyed by entry id), used by the review modal and by the
 // merged whole-batch plan. These are captured once when the entry is added.
 const entryPlans = computed<Record<string, TransactionPlan>>(() =>
@@ -253,6 +311,20 @@ const isSimulating = ref(false)
 const simError = ref<string | undefined>(undefined)
 const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
+/**
+ * A core batch submission the wallet accepted but whose confirmation failed —
+ * it may still land. While set, the cart is quarantined against blind replays
+ * (re-executing could duplicate every entry the submission covered): the next
+ * execute attempt first reconciles this submission on-chain, and proceeds only
+ * when it definitively did not land. Landed submissions retire their entries.
+ */
+const pendingCoreSubmission = shallowRef<{
+  kind: PreparedPlanBroadcast['kind']
+  hash: Hash
+  chainId: number
+  ceremony: PreparedBatchExecution
+  shouldRefreshExternalMigrationPositions: boolean
+} | null>(null)
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
@@ -261,15 +333,6 @@ const drawerOpen = ref(true)
 // executeBatch so the executed batch is exactly what was simulated.
 let lastMerged: TransactionPlan | null = null
 let baseAccountSnapshot: Account<IHasVaultAddress> | null = null
-
-// "Simulate on Tenderly" for the whole batch — runs the exact merged plan
-// through the server-side Tenderly endpoint and returns a shareable dashboard
-// URL. Shared (module-level) so the result persists across the laptop drawer
-// and the mobile full-page view. Mirrors the per-operation flow in
-// OperationReviewModal, just fed the batch's merged plan instead of one op.
-const tenderly = useTenderlySimulation()
-const tenderlyEnabled = ref(false)
-let tenderlyEnabledFetched = false
 
 /**
  * Module-level overlay ref read by `useEulerAccount` so the portfolio is
@@ -478,7 +541,11 @@ const collectRequiredApprovalTokens = (plan: TransactionPlan): Address[] => {
   return tokens
 }
 
-const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promise<void> => {
+const primeBatchSlotHintsFor = async (
+  chainId: number,
+  tokens: Address[],
+  isCurrent: () => boolean = () => true,
+): Promise<void> => {
   if (!tokens.length) return
   try {
     const sdk = await getEulerSdkFresh()
@@ -496,8 +563,10 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
         logWarn('useTxBatch/primeBatchSlotHintsFor', error)
       }
     }))
-    batchSlotHints = next
-    mergeBatchPrefetchedSlotHints(chainId, next)
+    if (isCurrent()) {
+      batchSlotHints = next
+      mergeBatchPrefetchedSlotHints(chainId, next)
+    }
   }
   catch (error) {
     logWarn('useTxBatch/primeBatchSlotHintsFor', error)
@@ -1736,7 +1805,7 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 }
 
 export const useTxBatch = () => {
-  const { chainId: wagmiChainId } = useWagmi()
+  const { chainId: wagmiChainId, connector } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
   const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
@@ -1745,8 +1814,12 @@ export const useTxBatch = () => {
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
-  const { prepareTransactionPlan, executePreparedPlan, executePreparedPlanWithPlainCalls, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
-  const { isSafeWallet } = useSafeWallet()
+  const { prepareTransactionPlan, executePreparedPlan, executePreparedPlanWithPlainCalls, estimateGasForPreparedPlan, sendPlainTransactions } = useEulerTx()
+  const { isSafeWallet, isSafeWalletResolved } = useSafeWallet()
+  const connectorKey = computed(() => {
+    const current = connector.value
+    return current ? `${current.id}:${current.uid}` : undefined
+  })
   const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
@@ -1781,6 +1854,17 @@ export const useTxBatch = () => {
       return
     }
 
+    const ownerAddr = getAddress(o)
+    const isResimulationContextCurrent = (): boolean => {
+      if (token !== resimToken || chainId.value !== cid || !owner.value) return false
+      try {
+        return getAddress(owner.value) === ownerAddr
+      }
+      catch {
+        return false
+      }
+    }
+
     isSimulating.value = true
     // NOTE: deliberately do NOT clear simError / walletShortfalls here. A new
     // simulation runs on every add/remove/reorder; clearing up-front would make a
@@ -1788,13 +1872,16 @@ export const useTxBatch = () => {
     // atomically on completion below (and cleared on the empty-batch path above).
     try {
       const sdk = await getEulerSdkFresh()
-      const ownerAddr = getAddress(o)
       // Keep the real base state fixed for the lifetime of the cart. Entry plans
       // are immutable add-time payloads; later real-state drift should not cause
       // the whole batch to rebuild around a different base account.
       const baseAccount = baseAccountSnapshot
         ?? resolvePrefetchedAccounts(cid, ownerAddr).baseAccount
         ?? await fetchBaseAccountSnapshot(sdk, cid, ownerAddr)
+      if (!isResimulationContextCurrent()) {
+        logBatchDiag('resimulate:superseded-after-base-fetch', { token, supersededBy: resimToken }, 'error')
+        return
+      }
       baseAccountSnapshot = baseAccount
 
       const plans = entries.value.map(entry => entry.plan)
@@ -1806,7 +1893,6 @@ export const useTxBatch = () => {
       // operation and returns simulatedAccounts = [base, afterOp0, afterOp1, …]
       // plus per-operation revert attribution via failedBatchItems.
       const merged = sdk.executionService.mergePlans(plans)
-      lastMerged = merged
       const sim = await sdk.executionService.simulateTransactionPlan(
         cid,
         ownerAddr,
@@ -1827,7 +1913,7 @@ export const useTxBatch = () => {
         },
       )
 
-      if (token !== resimToken) {
+      if (!isResimulationContextCurrent()) {
         // A newer resimulation superseded this one after the sim resolved, so this
         // run bails before populating layers. When that happens during a plan-time
         // await it's exactly what surfaces as the misleading "Batch simulation not
@@ -1836,6 +1922,7 @@ export const useTxBatch = () => {
         logBatchDiag('resimulate:superseded-after-sim', { token, supersededBy: resimToken }, 'error')
         return
       }
+      lastMerged = merged
 
       // Two distinct failure shapes, both blocking but handled differently:
       //  - simulationError: the EVC call reverted at the top level (couldn't even
@@ -1996,7 +2083,7 @@ export const useTxBatch = () => {
           logWarn('useTxBatch/fetchWallet', error)
         }
       }
-      if (token !== resimToken) {
+      if (!isResimulationContextCurrent()) {
         // Superseded during the post-sim wallet fetch — same race as above, just a
         // later checkpoint. Bails before populating layers.
         logBatchDiag('resimulate:superseded-after-wallet-fetch', { token, supersededBy: resimToken }, 'error')
@@ -2094,7 +2181,7 @@ export const useTxBatch = () => {
       )
     }
     catch (error) {
-      if (token !== resimToken) {
+      if (!isResimulationContextCurrent()) {
         logBatchDiag('resimulate:superseded-in-catch', { token, supersededBy: resimToken }, 'error')
         return
       }
@@ -2104,7 +2191,7 @@ export const useTxBatch = () => {
       simError.value = error instanceof Error ? error.message : String(error)
     }
     finally {
-      if (token === resimToken) isSimulating.value = false
+      if (isResimulationContextCurrent()) isSimulating.value = false
     }
   }
 
@@ -2129,23 +2216,18 @@ export const useTxBatch = () => {
   if (!scope) {
     scope = effectScope(true)
     scope.run(() => {
-      // Any edit to the cart invalidates a prior Tenderly run (it simulated a
-      // different fixed plan list), so drop the stale URL before re-simulating.
       watch(entries, () => {
         logBatchDiag('watch:entries-changed')
-        tenderly.clearSimulation()
-        // A cart edit invalidates the latched bundled ceremony — the modal
-        // re-latches on next open.
-        latchedBundledExecution.value = null
         void runResimulate()
       })
       watch([activeLayer, layers], syncOverlay)
       // Reset the cart when the account or chain changes — layers would be stale.
       watch([owner, chainId], () => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
+        invalidatePendingAddContext()
+        invalidateBatchReview()
         resimToken++
         entries.value = []
-        latchedBundledExecution.value = null
         layers.value = []
         activeLayer.value = 0
         isSimulating.value = false
@@ -2156,13 +2238,19 @@ export const useTxBatch = () => {
         baseAccountSnapshot = null
         batchSlotHints = {}
         resimulatePromise = null
-        tenderly.clearSimulation()
         syncOverlay()
+      })
+      // Safe classification is part of a bundled ceremony's wallet context.
+      // Connector detection can change without changing the owner or chain.
+      watch([isSafeWallet, isSafeWalletResolved, connectorKey], () => {
+        invalidateBatchReview()
       })
     })
   }
 
-  const getEntryPlanningAccount = async (): Promise<Account<IHasVaultAddress>> => {
+  const getEntryPlanningAccount = async (
+    isAddContextCurrent: () => boolean,
+  ): Promise<Account<IHasVaultAddress>> => {
     const getCurrentFinalLayer = () => (
       entries.value.length > 0 && layers.value.length === entries.value.length + 1
         ? layers.value[layers.value.length - 1]?.account
@@ -2232,19 +2320,57 @@ export const useTxBatch = () => {
 
     logBatchDiag('getEntryPlanningAccount:base-snapshot-fetch', { owner: o, chainId: cid })
     const sdk = await getEulerSdkFresh()
-    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, ownerAddress)
-    return baseAccountSnapshot
+    const fetched = await fetchBaseAccountSnapshot(sdk, cid, ownerAddress)
+    if (!isAddContextCurrent()) throw new BatchAddContextChangedError()
+    baseAccountSnapshot = fetched
+    return fetched
+  }
+
+  const captureAddContext = (): BatchAddContext => {
+    let currentOwner: Address | undefined
+    try {
+      currentOwner = owner.value ? getAddress(owner.value) : undefined
+    }
+    catch {
+      currentOwner = undefined
+    }
+    return {
+      generation: addContextGeneration,
+      owner: currentOwner,
+      chainId: chainId.value,
+    }
+  }
+
+  const isAddContextCurrent = (context: BatchAddContext): boolean => {
+    if (context.generation !== addContextGeneration || context.chainId !== chainId.value) return false
+    try {
+      const currentOwner = owner.value ? getAddress(owner.value) : undefined
+      return currentOwner === context.owner
+    }
+    catch {
+      return context.owner === undefined
+    }
+  }
+
+  const assertAddContextCurrent = (context: BatchAddContext) => {
+    if (!isAddContextCurrent(context)) throw new BatchAddContextChangedError()
   }
 
   const addEntry = async (entry: BatchEntryInput) => {
+    const addContext = captureAddContext()
     // Ignore a rapid duplicate click while an identical add is still in flight
     // (same target sub-account + label). Sequential re-adds are unaffected — the
     // signature is released once the add settles.
-    const signature = `${entry.subAccount ?? ''}|${entry.label}`
+    const signature = `${addContext.generation}|${addContext.owner ?? ''}|${addContext.chainId ?? ''}|${entry.subAccount ?? ''}|${entry.label}`
     if (pendingAddSignatures.has(signature)) return
     pendingAddSignatures.add(signature)
+    pendingAddCount.value++
+    // Invalidate synchronously when the edit starts, not after its async plan
+    // build finishes, so an open review cannot execute while an add is pending.
+    invalidateBatchReview()
 
     const add = async () => {
+      assertAddContextCurrent(addContext)
       execError.value = undefined
       logBatchDiag('addEntry:building', {
         label: entry.label,
@@ -2265,9 +2391,15 @@ export const useTxBatch = () => {
           // The simulator will surface the normal account-loading error later.
         }
       }
+      let planningAccount: Account<IHasVaultAddress> | undefined
+      if (entry.requiresPlanningAccount !== false) {
+        planningAccount = await getEntryPlanningAccount(() => isAddContextCurrent(addContext))
+        assertAddContextCurrent(addContext)
+      }
       const buildResult = entry.requiresPlanningAccount === false
         ? await entry.buildPlan()
-        : await entry.buildPlan(await getEntryPlanningAccount())
+        : await entry.buildPlan(planningAccount!)
+      assertAddContextCurrent(addContext)
       const plan = Array.isArray(buildResult) ? buildResult : buildResult.plan
       const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
       const cid = chainId.value
@@ -2279,14 +2411,19 @@ export const useTxBatch = () => {
         // Probe only what no form or earlier batch entry has resolved yet.
         const missingSlotHintTokens = collectRequiredApprovalTokens(plan)
           .filter(token => batchSlotHints[token] === undefined)
-        await primeBatchSlotHintsFor(cid, missingSlotHintTokens)
+        await primeBatchSlotHintsFor(cid, missingSlotHintTokens, () => isAddContextCurrent(addContext))
       }
+      assertAddContextCurrent(addContext)
       const {
         buildPlan: _buildPlan,
         requiresPlanningAccount: _requiresPlanningAccount,
         ...fixedEntry
       } = entry
       registerReviewAssetMeta(fixedEntry.review)
+      // A ceremony can be prepared while this async add is building against
+      // the prior cart. Advance again at the commit edge so that ceremony is
+      // stale before the completed entry becomes visible.
+      invalidateBatchReview()
       entries.value = [...entries.value, {
         ...fixedEntry,
         ...(builtStateOverrides ? { stateOverrides: builtStateOverrides } : {}),
@@ -2308,17 +2445,23 @@ export const useTxBatch = () => {
         error: error instanceof Error ? error.message : String(error),
       }, 'error')
       logWarn('useTxBatch/addEntry', error)
-      simError.value = error instanceof Error ? error.message : String(error)
+      if (!(error instanceof BatchAddContextChangedError)) {
+        simError.value = error instanceof Error ? error.message : String(error)
+      }
       throw error
     }
     finally {
       pendingAddSignatures.delete(signature)
+      pendingAddCount.value = Math.max(0, pendingAddCount.value - 1)
     }
   }
 
   const removeEntry = (id: string) => {
     const nextEntries = entries.value.filter(entry => entry.id !== id)
     execError.value = undefined
+    if (nextEntries.length === entries.value.length) return
+    invalidatePendingAddContext()
+    invalidateBatchReview()
     entries.value = nextEntries
     if (nextEntries.length === 0) {
       resimToken++
@@ -2331,12 +2474,16 @@ export const useTxBatch = () => {
       baseAccountSnapshot = null
       batchSlotHints = {}
       resimulatePromise = null
-      tenderly.clearSimulation()
       syncOverlay()
     }
   }
 
   const clearBatch = () => {
+    invalidatePendingAddContext()
+    invalidateBatchReview()
+    // Emptying the cart discards the entries a quarantined submission covered,
+    // so a replay can no longer duplicate them — the quarantine is moot.
+    pendingCoreSubmission.value = null
     resimToken++
     entries.value = []
     layers.value = []
@@ -2349,8 +2496,41 @@ export const useTxBatch = () => {
     baseAccountSnapshot = null
     batchSlotHints = {}
     resimulatePromise = null
-    tenderly.clearSimulation()
     syncOverlay()
+  }
+
+  /**
+   * Remove exactly the entries a landed execution covered, keeping any the
+   * user added while the broadcast was in flight. Runs when execution
+   * succeeded but the cart is no longer the reviewed generation for the same
+   * wallet: clearing everything would discard unexecuted work, while keeping
+   * everything would leave already-executed entries queued to run again. The
+   * ceremony's review index carries the executed entry ids. A wallet-context
+   * change is already handled by the owner/chain watcher emptying the cart, so
+   * this only ever filters same-wallet successors, and the surviving entries
+   * resimulate through the entries watcher.
+   */
+  const retireExecutedEntries = (ceremony: PreparedBatchExecution) => {
+    const executedIds = new Set(Object.keys(ceremony.reviewByEntryId))
+    const nextEntries = entries.value.filter(entry => !executedIds.has(entry.id))
+    if (nextEntries.length === entries.value.length) return
+    execError.value = undefined
+    invalidatePendingAddContext()
+    invalidateBatchReview()
+    entries.value = nextEntries
+    if (nextEntries.length === 0) {
+      resimToken++
+      layers.value = []
+      activeLayer.value = 0
+      isSimulating.value = false
+      simError.value = undefined
+      walletShortfalls.value = []
+      lastMerged = null
+      baseAccountSnapshot = null
+      batchSlotHints = {}
+      resimulatePromise = null
+      syncOverlay()
+    }
   }
 
   const setActiveLayer = (layer: number) => {
@@ -2362,51 +2542,6 @@ export const useTxBatch = () => {
     execError.value = undefined
   }
 
-  /** Lazily check (once) whether the server has Tenderly credentials configured,
-   *  so the UI can hide the button when simulation isn't available. */
-  const fetchTenderlyEnabled = async (): Promise<boolean> => {
-    if (tenderlyEnabledFetched) return tenderlyEnabled.value
-    tenderlyEnabledFetched = true
-    tenderlyEnabled.value = await tenderly.fetchEnabled()
-    return tenderlyEnabled.value
-  }
-
-  /**
-   * Run the whole batch through Tenderly using the preview plan and the SDK's
-   * derived state overrides (so approvals/permits don't make it revert). Returns
-   * a dashboard URL surfaced via `tenderlyUrl`. Works in spy mode too — it's a
-   * read-only simulation, no signature required.
-   */
-  const simulateOnTenderly = async (): Promise<void> => {
-    if (!lastMerged) return
-    const o = owner.value
-    const cid = chainId.value
-    if (!o || !cid) return
-    tenderly.clearSimulation()
-    try {
-      const sdk = await getEulerSdkFresh()
-      const extraStateOverrides = mergeStateOverrides(
-        entries.value.flatMap(entry => entry.stateOverrides ?? []),
-      )
-      const payload = await buildTenderlySimulationPayload({
-        plan: lastMerged,
-        owner: getAddress(o),
-        chainId: cid,
-        sdk,
-        extraStateOverrides,
-      })
-      if (!payload) {
-        tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
-        return
-      }
-      await tenderly.simulate(payload)
-    }
-    catch (error) {
-      logWarn('useTxBatch/simulateOnTenderly', error)
-      tenderly.simulationError.value = 'Tenderly simulation failed.'
-    }
-  }
-
   /** The latest merged preview plan (null until a successful simulation).
    *  The review modal prepares & decodes this to surface approvals. */
   const getMergedPlan = (): TransactionPlan | null => lastMerged
@@ -2415,7 +2550,7 @@ export const useTxBatch = () => {
    *  modal can list the approvals the user will be asked to sign. */
   const prepareBatchPlan = async () => {
     if (!lastMerged) return null
-    return prepareTransactionPlan(lastMerged)
+    return (await prepareBatchExecution()).prepared
   }
 
   const getExecutionPlanningAccount = async (entryIndex: number): Promise<Account<IHasVaultAddress>> => {
@@ -2436,49 +2571,233 @@ export const useTxBatch = () => {
     const o = owner.value
     const cid = chainId.value
     if (!o || !cid) throw new Error('Account not loaded')
+    const executionOwner = getAddress(o)
+    const executionGeneration = batchGeneration.value
     const sdk = await getEulerSdkFresh()
-    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, getAddress(o))
-    return baseAccountSnapshot
-  }
-
-  const buildMergedExecutionPlan = async (): Promise<TransactionPlan> => {
-    const sdk = await getEulerSdkFresh()
-    const plans: TransactionPlan[] = []
-    for (const [index, entry] of entries.value.entries()) {
-      plans.push(entry.buildExecutionPlan
-        ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
-        : entry.plan)
+    const fetched = await fetchBaseAccountSnapshot(sdk, cid, executionOwner)
+    if (
+      executionGeneration !== batchGeneration.value
+      || chainId.value !== cid
+      || !owner.value
+      || getAddress(owner.value) !== executionOwner
+    ) {
+      throw new Error('Batch or wallet changed since review preparation — reopen review and try again.')
     }
-    return sdk.executionService.mergePlans(plans)
+    baseAccountSnapshot = fetched
+    return fetched
   }
 
   /**
-   * A Safe executes the cart's prerequisites inside the batch proposal when
-   * every prerequisite-bearing entry provides a bundled builder — mixed
-   * carts (a prerequisite entry without bundled support) keep the sequential
-   * ceremony for all entries, so the review never half-describes it.
+   * A Safe executes ceremony prerequisites inside the batch proposal.
    */
   const willBundlePrerequisites = computed(() =>
     isSafeWallet.value
-    && entries.value.some(entry => entry.buildBundledExecution)
-    && entries.value.every(entry => !entry.buildExecutionPrerequisites || entry.buildBundledExecution),
+    && entries.value.some(entry => entry.bundleExecutionCeremony),
   )
 
-  /**
-   * Bundled ceremony resolved ONCE when the review modal opens, displayed,
-   * copied, and executed verbatim — the latch that keeps the reviewed
-   * ceremony, the copied payload, and the submitted proposal identical. A
-   * cart edit or account/chain reset clears it; executeBatch treats its
-   * presence as the reviewed promise of ONE proposal.
-   */
-  const prepareBundledExecution = async () => {
-    if (!willBundlePrerequisites.value) {
-      latchedBundledExecution.value = null
-      return null
+  const isBatchExecutionCurrent = (ceremony: PreparedBatchExecution): boolean => {
+    if (
+      pendingAddCount.value > 0
+      || ceremony.generation !== batchGeneration.value
+    ) {
+      return false
     }
-    const collected = await collectBundledExecution()
-    latchedBundledExecution.value = collected
-    return collected
+    return isBatchExecutionWalletCurrent(ceremony)
+  }
+
+  const isBatchExecutionWalletCurrent = (ceremony: PreparedBatchExecution): boolean => {
+    if (
+      ceremony.chainId !== chainId.value
+      || ceremony.safeWallet !== isSafeWallet.value
+      || !isSafeWalletResolved.value
+      || ceremony.safeWalletResolved !== isSafeWalletResolved.value
+      || ceremony.connectorKey !== connectorKey.value
+      || !owner.value
+    ) return false
+    try {
+      return getAddress(owner.value) === ceremony.owner
+    }
+    catch {
+      return false
+    }
+  }
+
+  const assertBatchExecutionCurrent = (ceremony: PreparedBatchExecution) => {
+    if (!isBatchExecutionCurrent(ceremony)) {
+      throw new Error('Batch or wallet changed since review preparation — reopen review and try again.')
+    }
+  }
+
+  /**
+   * Resolve one ceremony per cart generation for every wallet/execution mode.
+   * Concurrent review modals share the same in-flight promise and immutable
+   * result; stale work can finish but cannot be used after a cart or wallet
+   * context change.
+   */
+  const prepareBatchExecution = (): Promise<PreparedBatchExecution> => {
+    if (pendingAddCount.value > 0) {
+      return Promise.reject(new Error('An operation is still being added — wait for the batch to finish updating.'))
+    }
+    if (!lastMerged || entries.value.length === 0) {
+      return Promise.reject(new Error('Batch simulation not loaded'))
+    }
+    if (!isSafeWalletResolved.value) {
+      return Promise.reject(new Error('Wallet type is still loading — wait before reviewing the batch.'))
+    }
+
+    const generation = batchGeneration.value
+    if (batchPreparation?.generation === generation) return batchPreparation.promise
+
+    const currentOwner = owner.value
+    const currentChainId = chainId.value
+    if (!currentOwner || !currentChainId) return Promise.reject(new Error('Account not loaded'))
+    const reviewOwner = getAddress(currentOwner)
+    const reviewSafeWallet = isSafeWallet.value
+    const reviewSafeWalletResolved = isSafeWalletResolved.value
+    const reviewConnectorKey = connectorKey.value
+    const mode = willBundlePrerequisites.value ? 'safe-bundled' : 'standard'
+
+    const preparationPromise = (async (): Promise<PreparedBatchExecution> => {
+      const { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, prerequisiteRevalidations, reviewByEntryId } = mode === 'safe-bundled'
+        ? await collectBundledExecution()
+        : await collectStandardExecution()
+      const sdk = await getEulerSdkFresh()
+      const executionPlan = sdk.executionService.mergePlans(plans)
+      const prepared = await prepareTransactionPlan(executionPlan)
+      const resolvePreparedPlan = planResolvers.some(Boolean)
+        ? async (beforeWalletAction: () => void): Promise<TransactionPlanPrepared> => {
+          const resolvedPlans: TransactionPlan[] = []
+          const signatureSubstitutions: PreparedPlanSignatureSubstitution[] = []
+          for (const [index, plan] of plans.entries()) {
+            beforeWalletAction()
+            const resolver = planResolvers[index]
+            if (resolver) {
+              const resolved = await resolver(beforeWalletAction)
+              resolvedPlans.push(resolved.plan)
+              signatureSubstitutions.push(...resolved.signatureSubstitutions)
+            }
+            else {
+              resolvedPlans.push(plan)
+            }
+            beforeWalletAction()
+          }
+          const resolvedPlan = sdk.executionService.mergePlans(resolvedPlans)
+          const resolvedPrepared = await prepareTransactionPlan(resolvedPlan)
+          beforeWalletAction()
+          assertPreparedPlanSignatureParity({
+            reviewed: prepared,
+            resolved: resolvedPrepared,
+            substitutions: signatureSubstitutions,
+          })
+          return resolvedPrepared
+        }
+        : undefined
+      const frozenReview = Object.freeze(Object.fromEntries(
+        Object.entries(reviewByEntryId).map(([entryId, review]) => [entryId, Object.freeze({
+          plan: review.plan,
+          grantSteps: Object.freeze([...review.grantSteps]),
+          revokeSteps: Object.freeze([...review.revokeSteps]),
+        })]),
+      ))
+      const frozenPrerequisites = Object.freeze(prerequisites.map(prerequisite => Object.freeze({
+        ...prerequisite,
+        preTxs: Object.freeze(prerequisite.preTxs.map(tx => Object.freeze({ ...tx }))),
+        postTxs: Object.freeze(prerequisite.postTxs.map(tx => Object.freeze({ ...tx }))),
+        postTxsByPreTx: prerequisite.postTxsByPreTx
+          ? Object.freeze(prerequisite.postTxsByPreTx.map(tx => tx ? Object.freeze({ ...tx }) : undefined))
+          : undefined,
+        walletContext: Object.freeze({ ...prerequisite.walletContext }),
+      })))
+      const ceremony: PreparedBatchExecution = Object.freeze({
+        generation,
+        owner: reviewOwner,
+        chainId: currentChainId,
+        safeWallet: reviewSafeWallet,
+        safeWalletResolved: reviewSafeWalletResolved,
+        connectorKey: reviewConnectorKey,
+        mode,
+        prepared,
+        resolvePreparedPlan,
+        usesPlaceholderSignatures,
+        grants: Object.freeze(grants.map(tx => Object.freeze({ ...tx }))),
+        revokes: Object.freeze(revokes.map(tx => Object.freeze({ ...tx }))),
+        prerequisites: frozenPrerequisites,
+        prerequisiteRevalidations: Object.freeze([...prerequisiteRevalidations]),
+        reviewByEntryId: frozenReview,
+      })
+      assertBatchExecutionCurrent(ceremony)
+      return ceremony
+    })()
+
+    const trackedPromise = preparationPromise.catch((error) => {
+      if (batchPreparation?.promise === trackedPromise) batchPreparation = null
+      throw error
+    })
+    batchPreparation = { generation, promise: trackedPromise }
+    return trackedPromise
+  }
+
+  /**
+   * Build the exact standard ceremony. Prerequisite-bearing entries use their
+   * simulation variant for the prepared core and freeze the standalone grants
+   * that make that core executable. Entries without prerequisites resolve their
+   * ordinary execution plan during review.
+   */
+  const collectStandardExecution = async () => {
+    const plans: TransactionPlan[] = []
+    const planResolvers: Array<BatchEntryExecutionCeremony['resolveExecutionPlan']> = []
+    let usesPlaceholderSignatures = false
+    const grants: BatchEntryExternalTx[] = []
+    const revokes: BatchEntryExternalTx[] = []
+    const prerequisites: BatchEntryExecutionPrerequisites[] = []
+    const prerequisiteRevalidations: Array<() => Promise<void>> = []
+    const reviewByEntryId: Record<string, {
+      plan: TransactionPlan
+      grantSteps: DisplayStep[]
+      revokeSteps: DisplayStep[]
+    }> = {}
+
+    for (const [index, entry] of entries.value.entries()) {
+      if (entry.buildExecutionCeremony) {
+        const execution = await entry.buildExecutionCeremony(await getExecutionPlanningAccount(index))
+        const prerequisite = execution.prerequisites
+        plans.push(execution.plan)
+        planResolvers.push(execution.resolveExecutionPlan)
+        usesPlaceholderSignatures ||= execution.usesPlaceholderSignatures === true
+        if (execution.revalidatePrerequisites) prerequisiteRevalidations.push(execution.revalidatePrerequisites)
+        if (prerequisite) {
+          prerequisites.push(prerequisite)
+          grants.push(...prerequisite.preTxs)
+          if (prerequisite.postTxsByPreTx) {
+            for (const revoke of prerequisite.postTxsByPreTx) {
+              if (revoke) revokes.unshift(revoke)
+            }
+          }
+          else {
+            revokes.push(...prerequisite.postTxs)
+          }
+        }
+        reviewByEntryId[entry.id] = {
+          plan: execution.plan,
+          grantSteps: prerequisite
+            ? execution.grantSteps.map(step => ({ ...step, isSeparateTx: true }))
+            : execution.grantSteps,
+          revokeSteps: prerequisite
+            ? execution.revokeSteps.map(step => ({ ...step, isSeparateTx: true }))
+            : execution.revokeSteps,
+        }
+        continue
+      }
+
+      const plan = entry.buildExecutionPlan
+        ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
+        : entry.plan
+      plans.push(plan)
+      planResolvers.push(undefined)
+      reviewByEntryId[entry.id] = { plan, grantSteps: [], revokeSteps: [] }
+    }
+
+    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes, prerequisites, prerequisiteRevalidations, reviewByEntryId }
   }
 
   /**
@@ -2488,46 +2807,61 @@ export const useTxBatch = () => {
    */
   const collectBundledExecution = async () => {
     const plans: TransactionPlan[] = []
+    const planResolvers: Array<BatchEntryExecutionCeremony['resolveExecutionPlan']> = []
+    let usesPlaceholderSignatures = false
     const grants: BatchEntryExternalTx[] = []
     const revokesByEntry: BatchEntryExternalTx[][] = []
-    const stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }> = {}
+    const prerequisiteRevalidations: Array<() => Promise<void>> = []
+    const reviewByEntryId: Record<string, {
+      plan: TransactionPlan
+      grantSteps: DisplayStep[]
+      revokeSteps: DisplayStep[]
+    }> = {}
     for (const [index, entry] of entries.value.entries()) {
-      if (entry.buildBundledExecution) {
-        const bundled = await entry.buildBundledExecution(await getExecutionPlanningAccount(index))
+      if (entry.buildExecutionCeremony) {
+        const bundled = await entry.buildExecutionCeremony(await getExecutionPlanningAccount(index))
+        const prerequisite = bundled.prerequisites
         plans.push(bundled.plan)
-        grants.push(...bundled.grants)
-        revokesByEntry.push(bundled.revokes)
-        stepsByEntryId[entry.id] = { grantSteps: bundled.grantSteps, revokeSteps: bundled.revokeSteps }
+        planResolvers.push(bundled.resolveExecutionPlan)
+        usesPlaceholderSignatures ||= bundled.usesPlaceholderSignatures === true
+        if (bundled.revalidatePrerequisites) prerequisiteRevalidations.push(bundled.revalidatePrerequisites)
+        grants.push(...(prerequisite?.preTxs ?? []))
+        revokesByEntry.push(prerequisite?.postTxs ?? [])
+        reviewByEntryId[entry.id] = {
+          plan: bundled.plan,
+          grantSteps: bundled.grantSteps,
+          revokeSteps: bundled.revokeSteps,
+        }
         continue
       }
-      plans.push(entry.buildExecutionPlan
+      const plan = entry.buildExecutionPlan
         ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
-        : entry.plan)
+        : entry.plan
+      plans.push(plan)
+      planResolvers.push(undefined)
       revokesByEntry.push([])
+      reviewByEntryId[entry.id] = { plan, grantSteps: [], revokeSteps: [] }
     }
-    return { plans, grants, revokes: revokesByEntry.reverse().flat(), stepsByEntryId }
+    return { plans, planResolvers, usesPlaceholderSignatures, grants, revokes: revokesByEntry.reverse().flat(), prerequisites: [], prerequisiteRevalidations, reviewByEntryId }
   }
 
   /**
-   * Send each entry's prerequisite grants, mined, before the merged plan is
-   * built — plan builders read live on-chain allowances to decide whether their
-   * batch still needs an authorization item.
-   *
-   * Sequential on purpose: a later entry needing the same grant sees the earlier
-   * one already on-chain and resolves to no prerequisite at all.
+   * Send the ceremony's frozen prerequisite grants before its prepared core.
+   * Each call is sent separately so ceremony freshness is checked immediately
+   * before and after every irreversible broadcast.
    */
   const sendExecutionPrerequisites = async (
+    ceremony: PreparedBatchExecution,
     grantedRevokes: MigrationAuthorizationRevoke[],
   ): Promise<void> => {
-    for (const [index, entry] of entries.value.entries()) {
-      if (!entry.buildExecutionPrerequisites) continue
-      const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
-      if (!prerequisites) continue
+    for (const prerequisites of ceremony.prerequisites) {
       let grantWalletContext: WalletExecutionContext | undefined
-      if (prerequisites.preTxs.length) {
-        await sendPlainTransactions(prerequisites.preTxs, {
+      for (const [preTxIndex, preTx] of prerequisites.preTxs.entries()) {
+        assertBatchExecutionCurrent(ceremony)
+        await sendPlainTransactions([preTx], {
           walletContext: prerequisites.walletContext,
-          onBroadcast: (preTxIndex, walletContext) => {
+          beforeBroadcast: () => assertBatchExecutionCurrent(ceremony),
+          onBroadcast: (_index, walletContext) => {
             grantWalletContext = walletContext
             const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
             if (revoke) {
@@ -2535,6 +2869,7 @@ export const useTxBatch = () => {
             }
           },
         })
+        assertBatchExecutionCurrent(ceremony)
       }
       // Entries without a one-to-one mapping retain the original all-or-nothing
       // behavior. Migration entries always provide postTxsByPreTx so partial or
@@ -2552,11 +2887,87 @@ export const useTxBatch = () => {
   }
 
   /**
-   * Execute the whole batch as one atomic transaction. Entries normally reuse
-   * the preview plan; entries with simulation-only preview state can rebuild a
-   * signed execution plan before the merged batch is prepared and sent.
+   * Resolve a quarantined core submission before anything new is sent.
+   * Returns true only when the submission definitively did not land (or none
+   * exists). A landed submission retires its entries here instead; an
+   * unverifiable one keeps the quarantine — replaying while the original may
+   * still confirm would duplicate every entry it covered.
    */
-  const executeBatch = async (scope?: TrackedExecutionScope) => {
+  const reconcilePendingCoreSubmission = async (scope?: TrackedExecutionScope): Promise<boolean> => {
+    const submission = pendingCoreSubmission.value
+    if (!submission) return true
+
+    const finalizeLandedSubmission = () => {
+      pendingCoreSubmission.value = null
+      execError.value = undefined
+      retireExecutedEntries(submission.ceremony)
+      if (submission.shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
+      scope?.markSucceeded()
+    }
+    const keepQuarantined = () => {
+      execError.value = 'A previous batch submission may still confirm on-chain and could not be verified yet. Wait a moment and execute again — the submission is re-checked before anything is re-sent.'
+      return false
+    }
+
+    const sdk = await getEulerSdkFresh()
+    const provider = sdk.providerService?.getProvider(submission.chainId) as ReceiptClientLike | undefined
+    if (!provider) return keepQuarantined()
+
+    if (submission.kind === 'transaction') {
+      const receipt = await provider.getTransactionReceipt({ hash: submission.hash }).catch(() => undefined)
+      if (!receipt) return keepQuarantined()
+      if (receipt.status === 'success') {
+        finalizeLandedSubmission()
+        return false
+      }
+      // Definitively reverted on-chain — the retry cannot duplicate anything.
+      pendingCoreSubmission.value = null
+      return true
+    }
+
+    // Safe proposal: only the Safe app knows whether the proposal executed
+    // and under which final transaction hash.
+    const walletProvider = await getSafeWalletProvider(connector.value)
+    if (!walletProvider) return keepQuarantined()
+    try {
+      const { receipt } = await waitForSafeTransactionExecution({
+        submittedHash: submission.hash,
+        walletProvider,
+        publicClient: provider,
+        timeoutMs: 8_000,
+      })
+      if (receipt.status === 'success') {
+        finalizeLandedSubmission()
+        return false
+      }
+      pendingCoreSubmission.value = null
+      return true
+    }
+    catch (error) {
+      if (error instanceof SafeTransactionStatusUnknownError) return keepQuarantined()
+      if (error instanceof Error && (
+        error.message === 'Safe transaction was cancelled'
+        || error.message === 'Safe transaction failed'
+      )) {
+        pendingCoreSubmission.value = null
+        return true
+      }
+      // Anything else is not a definitive verdict — fail closed and keep the
+      // quarantine rather than risk a duplicate submission.
+      logWarn('useTxBatch/reconcilePendingCoreSubmission', error)
+      return keepQuarantined()
+    }
+  }
+
+  /** Execute the immutable ceremony produced for the current batch review. */
+  const executeBatch = async (
+    scope?: TrackedExecutionScope,
+    reviewedExecution?: PreparedBatchExecution,
+  ) => {
+    if (pendingAddCount.value > 0) {
+      execError.value = 'An operation is still being added — wait for the batch to finish updating.'
+      return
+    }
     if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
     // simError covers both a top-level EVC revert and a deferred status-check
     // failure; walletShortfalls covers an under-funded wallet. Either way the
@@ -2564,63 +2975,163 @@ export const useTxBatch = () => {
     if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
     execError.value = undefined
     isExecuting.value = true
+    const attemptGeneration = batchGeneration.value
+    const attemptOwner = owner.value ? getAddress(owner.value) : undefined
+    const attemptChainId = chainId.value
+    const attemptConnectorKey = connectorKey.value
+    const attemptSafeWallet = isSafeWallet.value
+    const attemptSafeWalletResolved = isSafeWalletResolved.value
+    const isAttemptCurrent = () => {
+      if (
+        attemptGeneration !== batchGeneration.value
+        || attemptChainId !== chainId.value
+        || attemptConnectorKey !== connectorKey.value
+        || attemptSafeWallet !== isSafeWallet.value
+        || attemptSafeWalletResolved !== isSafeWalletResolved.value
+        || !attemptOwner
+        || !owner.value
+      ) return false
+      try {
+        return attemptOwner === getAddress(owner.value)
+      }
+      catch {
+        return false
+      }
+    }
     const grantedRevokes: MigrationAuthorizationRevoke[] = []
+    let execution = reviewedExecution
+    // Set once the wallet accepts the core submission — from that point a
+    // failure no longer means "nothing was sent".
+    let coreBroadcast: PreparedPlanBroadcast | undefined
+    // Set when this attempt itself invalidated the review (quarantine or
+    // prerequisite drift): the error must still surface even though the
+    // ceremony's generation check now fails.
+    let ceremonyInvalidatedForRetry = false
     try {
       if (!await restorePendingBeforeRetry()) return
-      // Final on-chain gas estimate before asking the user to sign. If the batch
-      // would revert (against the current chain state, which may have moved since
-      // the last simulation), surface the decoded reason and don't send.
+      if (!await reconcilePendingCoreSubmission(scope)) return
+      execution ??= await prepareBatchExecution()
+      assertBatchExecutionCurrent(execution)
       const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
-
-      if (latchedBundledExecution.value) {
-        // The review modal latched and displayed ONE atomic proposal built
-        // from this exact resolution — execute it verbatim (payload
-        // identity), even when the grants resolved empty: the provider-bound
-        // Safe path must not silently degrade into anything else.
-        if (!isSafeWallet.value) {
-          throw new Error('Wallet changed since review — please review the batch again.')
+      // Prerequisite requirements were captured at review time; on-chain state
+      // (granted operators, existing approvals) can drift during the wallet
+      // waits above. Re-derive them immediately before anything irreversible
+      // and force a fresh review on any mismatch.
+      const revalidateCeremonyPrerequisites = async () => {
+        for (const revalidate of execution!.prerequisiteRevalidations) {
+          assertBatchExecutionCurrent(execution!)
+          try {
+            await revalidate()
+          }
+          catch (error) {
+            ceremonyInvalidatedForRetry = true
+            invalidateBatchReview()
+            throw error
+          }
+          assertBatchExecutionCurrent(execution!)
         }
-        const collected = latchedBundledExecution.value
+      }
+      const prepared = execution.resolvePreparedPlan
+        ? await execution.resolvePreparedPlan(() => assertBatchExecutionCurrent(execution!))
+        : execution.prepared
+      assertBatchExecutionCurrent(execution)
+
+      if (execution.mode === 'safe-bundled') {
         // No standalone gas estimate — grants are unmined until the
         // proposal executes; the cart's continuous simulation (which runs
         // with the entries' authorization state overrides) is the
         // pre-flight validation. Atomicity also removes the unwind
         // bookkeeping: a failed proposal reverts its grants with it.
-        const sdk = await getEulerSdkFresh()
-        const executionPlan = sdk.executionService.mergePlans(collected.plans)
-        const prepared = await prepareTransactionPlan(executionPlan)
+        assertBatchExecutionCurrent(execution)
+        await revalidateCeremonyPrerequisites()
         const result = await executePreparedPlanWithPlainCalls(prepared, {
-          before: collected.grants,
-          after: collected.revokes,
-        }, { allowSingleCall: true })
+          before: execution.grants,
+          after: execution.revokes,
+        }, {
+          allowSingleCall: true,
+          beforeBroadcast: () => assertBatchExecutionCurrent(execution),
+          onBroadcast: (broadcast) => {
+            coreBroadcast = broadcast
+          },
+        })
         if (!result) {
           // The review described ONE proposal; never silently degrade to
           // the sequential multi-proposal ceremony.
           throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
         }
-        latchedBundledExecution.value = null
+        if (!isBatchExecutionCurrent(execution)) {
+          retireExecutedEntries(execution)
+          scope?.markSucceeded()
+          return
+        }
         clearBatch()
         if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
         await redirectAfterBatchExecution(scope)
         return
       }
 
-      await sendExecutionPrerequisites(grantedRevokes)
-      const executionPlan = await buildMergedExecutionPlan()
-      await estimateGasForPlan(executionPlan)
-      const prepared = await prepareTransactionPlan(executionPlan)
-      await executePreparedPlan(prepared)
+      await revalidateCeremonyPrerequisites()
+      await sendExecutionPrerequisites(execution, grantedRevokes)
+      assertBatchExecutionCurrent(execution)
+      // Final on-chain gas estimate before the irreversible core broadcast. If
+      // chain state moved since review, surface the decoded reason and retain
+      // the cart. A pending edit during this await invalidates the ceremony.
+      await estimateGasForPreparedPlan(prepared)
+      assertBatchExecutionCurrent(execution)
+      await executePreparedPlan(prepared, {
+        beforeBroadcast: () => assertBatchExecutionCurrent(execution),
+        onBroadcast: (broadcast) => {
+          coreBroadcast = broadcast
+        },
+      })
+      await revokeAfterSuccess(grantedRevokes, {
+        shouldNotify: () => isBatchExecutionWalletCurrent(execution!),
+      })
+      if (!isBatchExecutionCurrent(execution)) {
+        retireExecutedEntries(execution)
+        scope?.markSucceeded()
+        return
+      }
       clearBatch()
       if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
-      await revokeAfterSuccess(grantedRevokes)
       await redirectAfterBatchExecution(scope)
     }
     catch (error) {
       logWarn('useTxBatch/executeBatch', error)
-      // The batch never landed, so no granted authorization should be left
-      // standing. Entries stay in the cart for a retry, which re-grants.
-      await revokeAfterAbort(grantedRevokes)
-      execError.value = await describeExecError(error)
+      if (coreBroadcast && execution) {
+        // The wallet accepted the core submission but confirmation failed —
+        // it may still land. Quarantine the cart against a blind replay (it
+        // would duplicate every covered entry) and force reconciliation on
+        // the next execute attempt.
+        pendingCoreSubmission.value = {
+          kind: coreBroadcast.kind,
+          hash: coreBroadcast.hash,
+          chainId: execution.chainId,
+          ceremony: execution,
+          shouldRefreshExternalMigrationPositions: entries.value.some(entry =>
+            entry.refreshExternalMigrationPositions && entry.id in execution!.reviewByEntryId),
+        }
+        ceremonyInvalidatedForRetry = true
+        invalidateBatchReview()
+      }
+      // Unwinding granted authorizations is safe regardless of whether the
+      // core landed: after a landed core it is the normal success-order
+      // cleanup, and before a still-pending core it cleanly reverts that
+      // core, resolving the ambiguity in the safe direction.
+      await revokeAfterAbort(grantedRevokes, {
+        shouldNotify: () => !execution || isBatchExecutionWalletCurrent(execution),
+      })
+      let decodedError = await describeExecError(error)
+      if (coreBroadcast && execution) {
+        decodedError = `${decodedError} The submission may still confirm — executing again first verifies it on-chain before anything is re-sent.`
+      }
+      const shouldSurfaceError = execution
+        ? isBatchExecutionCurrent(execution)
+        || (ceremonyInvalidatedForRetry && isBatchExecutionWalletCurrent(execution))
+        : isAttemptCurrent()
+      if (shouldSurfaceError) {
+        execError.value = decodedError
+      }
     }
     finally {
       isExecuting.value = false
@@ -2650,6 +3161,7 @@ export const useTxBatch = () => {
   // when this is false — this only gates the Execute action.
   const canExecuteBatch = computed(() =>
     entries.value.length > 0
+    && pendingAddCount.value === 0
     && !isSimulating.value
     && !isExecuting.value
     && !hasFailedOps.value
@@ -2724,6 +3236,7 @@ export const useTxBatch = () => {
     simError,
     isExecuting,
     execError,
+    hasPendingCoreSubmission: computed(() => !!pendingCoreSubmission.value),
     hasFailedOps,
     canExecuteBatch,
     hasInsufficientBalance,
@@ -2735,6 +3248,7 @@ export const useTxBatch = () => {
     removedKeys: activeLayerRemovedKeysRef,
     walletChanges,
     entryCount,
+    hasPendingAdds: computed(() => pendingAddCount.value > 0),
     marketByEntryId,
     isDrawerOpen: drawerOpen,
     toggleDrawer: () => { drawerOpen.value = !drawerOpen.value },
@@ -2746,15 +3260,10 @@ export const useTxBatch = () => {
     setActiveLayer,
     executeBatch,
     willBundlePrerequisites,
-    prepareBundledExecution,
-    latchedBundledExecution,
-    // Tenderly "Simulate on Tenderly" for the whole batch.
-    tenderlyEnabled,
-    isTenderlySimulating: tenderly.isSimulating,
-    tenderlyUrl: tenderly.simulationUrl,
-    tenderlyError: tenderly.simulationError,
-    fetchTenderlyEnabled,
-    simulateOnTenderly,
+    prepareBatchExecution,
+    isBatchExecutionCurrent,
+    prepareBundledExecution: prepareBatchExecution,
+    isBundledExecutionCurrent: isBatchExecutionCurrent,
     // For the Review batch modal.
     getMergedPlan,
     prepareBatchPlan,
