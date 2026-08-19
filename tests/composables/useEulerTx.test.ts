@@ -4,7 +4,7 @@ import type { MigrationAuthorizationRequest, TransactionPlan, TransactionPlanPre
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccount } from '@wagmi/vue/actions'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { useEulerTx, type PreparedPlanBroadcast } from '~/composables/useEulerTx'
+import { useEulerTx, type PreparedPlanBroadcast, type ReviewedTransactionPlanPrepared } from '~/composables/useEulerTx'
 import { createDirectSubmissionQuarantine } from '~/utils/directSubmissionQuarantine'
 import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
 import { registerLandedBatchSubmissionHandler } from '~/utils/pendingSubmissionGate'
@@ -278,6 +278,113 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith(
       expect.objectContaining({ connector: reviewedConnector }),
     )
+  })
+
+  it('stamps prepared envelopes with the reviewed connector session and wallet classification', async () => {
+    const reviewedConnector = { id: 'io.metamask', uid: 'uid-1', name: 'MetaMask' }
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: reviewedConnector,
+    }) as never)
+    const prepare = vi.fn().mockResolvedValue({ __prepared: true, plan: [] })
+    vi.mocked(getEulerSdkForChain).mockResolvedValue({
+      executionService: { prepareTransactionPlan: prepare },
+    } as never)
+    const { prepareTransactionPlan } = useEulerTx()
+
+    const prepared = await prepareTransactionPlan(
+      [] as TransactionPlan, { usePermit2: false },
+    ) as ReviewedTransactionPlanPrepared
+
+    // The uid distinguishes connector sessions, so a same-address reconnect
+    // through the same wallet extension still invalidates the review.
+    expect(prepared.reviewedWalletContext).toEqual({
+      connectorKey: 'io.metamask:uid-1',
+      isSafeWallet: false,
+    })
+  })
+
+  it('refuses a reviewed envelope when a different connector session is live at execution', async () => {
+    const reconnectedConnector = { id: 'io.metamask', uid: 'uid-2', name: 'MetaMask' }
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: reconnectedConnector,
+    }) as never)
+    const executePreparedTransactionPlan = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+      reviewedWalletContext: { connectorKey: 'io.metamask:uid-1', isSafeWallet: false },
+    } as ReviewedTransactionPlanPrepared
+
+    await expect(executePreparedPlan(prepared)).rejects.toThrow('Wallet changed since review')
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+    // The refusal fires before the executor arms its own quarantine.
+    expect(readPendingSubmission('direct', OWNER, 1)).toBeUndefined()
+  })
+
+  it('refuses a bound envelope whose review captured no connector', async () => {
+    const executePreparedTransactionPlan = vi.fn()
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+      // Review-time connector was missing: continuity is unprovable, so the
+      // binding must fail closed instead of matching "undefined === undefined".
+      reviewedWalletContext: { connectorKey: undefined, isSafeWallet: false },
+    } as ReviewedTransactionPlanPrepared
+
+    await expect(executePreparedPlan(prepared)).rejects.toThrow('Wallet changed since review')
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+    expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('executes a bound envelope when the live connector session matches the review', async () => {
+    const reviewedConnector = { id: 'io.metamask', uid: 'uid-1', name: 'MetaMask' }
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: reviewedConnector,
+    }) as never)
+    const executePreparedTransactionPlan = vi.fn(async () => ({ receipts: [] }))
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+    const prepared = {
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: false,
+      unlimitedApproval: false,
+      reviewedWalletContext: { connectorKey: 'io.metamask:uid-1', isSafeWallet: false },
+    } as ReviewedTransactionPlanPrepared
+
+    await executePreparedPlan(prepared)
+
+    expect(executePreparedTransactionPlan).toHaveBeenCalledTimes(1)
   })
 
   it('classifies ordered broadcasts so only the last submission stays unconfirmed on failure', async () => {
@@ -1223,6 +1330,52 @@ describe('useEulerTx Safe wallet bundling', () => {
     expect(result.hashes).toEqual([SAFE_TX_HASH])
   })
 
+  it('refuses to repair an envelope reviewed on an EOA into a Safe ceremony', async () => {
+    const permitPrepared = {
+      ...buildPrepared([
+        {
+          ...approvedPlan[0],
+          resolved: [{ type: 'permit2', token: TOKEN, amount: 100n, owner: OWNER, spender: SWAP_VERIFIER }],
+        },
+        approvedPlan[1],
+      ] as unknown as TransactionPlan),
+      // The user confirmed a permit2 signature ceremony on an EOA session;
+      // the wallet is now a Safe. Reclassification is a stale review, not a
+      // repairable envelope.
+      reviewedWalletContext: { connectorKey: 'io.metamask:uid-1', isSafeWallet: false },
+    } as ReviewedTransactionPlanPrepared
+    const resolveRequiredApprovals = vi.fn(async () => approvedPlan)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ getTransactionReceipt: vi.fn() })) },
+      deploymentService: { getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: EVC } } })) },
+      executionService: {
+        encodeBatch: vi.fn(() => BATCH_DATA),
+        resolveRequiredApprovals,
+        executePreparedTransactionPlan,
+      },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await expect(executePreparedPlan(permitPrepared)).rejects.toThrow('Wallet changed since review')
+    expect(resolveRequiredApprovals).not.toHaveBeenCalled()
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
+  })
+
+  it('executes a bound envelope reviewed on this Safe connector session', async () => {
+    const prepared = {
+      ...buildPrepared(approvedPlan),
+      reviewedWalletContext: { connectorKey: 'safe:undefined', isSafeWallet: true },
+    } as ReviewedTransactionPlanPrepared
+    const { executePreparedPlan } = useEulerTx()
+
+    const result = await executePreparedPlan(prepared)
+
+    expect(wagmiMocks.sendCalls).toHaveBeenCalledTimes(1)
+    expect(result.hashes).toEqual([SAFE_TX_HASH])
+  })
+
   it('normalizes the envelope in degraded mode when the Safe provider is unavailable', async () => {
     // Connector identifies as Safe, but getProvider() rejects — no bundle
     // and no status polling are possible, yet permit2 must stay off.
@@ -1368,6 +1521,21 @@ describe('useEulerTx Safe wallet bundling', () => {
     })).rejects.toThrow('handed to the wallet but no transaction id came back')
     expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
     expect(readPendingSubmission('batch', OWNER, 1)).toBeDefined()
+  })
+
+  it('refuses the plain-calls bundle when the envelope was reviewed on a different wallet', async () => {
+    const prepared = {
+      ...buildPrepared(approvedPlan),
+      reviewedWalletContext: { connectorKey: 'io.metamask:uid-1', isSafeWallet: false },
+    } as ReviewedTransactionPlanPrepared
+    const { executePreparedPlanWithPlainCalls } = useEulerTx()
+
+    await expect(executePreparedPlanWithPlainCalls(prepared, {
+      before: [GRANT_CALL],
+      after: [REVOKE_CALL],
+    })).rejects.toThrow('Wallet changed since review')
+    expect(wagmiMocks.sendCalls).not.toHaveBeenCalled()
+    expect(executePreparedTransactionPlan).not.toHaveBeenCalled()
   })
 
   it('runs the caller freshness guard after Safe provider setup and before submission', async () => {

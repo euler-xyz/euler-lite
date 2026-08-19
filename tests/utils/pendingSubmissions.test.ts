@@ -5,13 +5,16 @@ import {
   clearPendingSubmission,
   createPendingSubmissionAttemptId,
   listPendingSubmissions,
+  listReleasableArmedSubmissions,
   PendingSubmissionConflictError,
   PendingSubmissionStorageError,
   readPendingSubmission,
+  registerActiveSubmissionAttempt,
   releasePendingSubmission,
   releaseUnverifiablePendingSubmission,
   resetPendingSubmissionMemoryFallback,
   resolvePendingSubmissionOutcome,
+  unregisterActiveSubmissionAttempt,
   upgradePendingSubmissionToSubmitted,
   walletNeverAcceptedSubmission,
   writePendingSubmission,
@@ -407,21 +410,156 @@ describe('upgradePendingSubmissionToSubmitted', () => {
     expect(readPendingSubmission('direct', OWNER, 1)).toBeUndefined()
   })
 
-  it('keeps the armed record when the upgraded write fails', async () => {
-    const armed = await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-1' })
+  /**
+   * Storage stub that accepts every write except a submitted-phase record —
+   * simulating a quota-bound storage that held the armed reservation but
+   * refuses the larger rewrite. Everything else delegates to `working`.
+   */
+  const submittedWriteRefusingStorage = (working: Storage): Storage => ({
+    get length() {
+      return working.length
+    },
+    clear: () => working.clear(),
+    key: (index: number) => working.key(index),
+    getItem: (key: string) => working.getItem(key),
+    removeItem: (key: string) => working.removeItem(key),
+    setItem: (key: string, value: string) => {
+      if (value.includes('"phase":"submitted"')) throw new Error('quota exceeded')
+      working.setItem(key, value)
+    },
+  })
+
+  it('preserves the observed id durably and throws when the submitted rewrite cannot be made durable', async () => {
+    await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-1' })
+    const working = globalThis.localStorage
+    vi.stubGlobal('localStorage', submittedWriteRefusingStorage(working))
+
+    try {
+      // The wallet already returned the hash — silently keeping a hashless
+      // armed record would let a manual release dismiss a mined transaction.
+      await expect(upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-1')))
+        .rejects.toThrow('could not durably record its id')
+    }
+    finally {
+      vi.stubGlobal('localStorage', working)
+    }
+    expect(readPendingSubmission('direct', OWNER, 1)).toMatchObject({
+      phase: 'armed',
+      attemptId: 'attempt-1',
+      observedId: { kind: 'transaction', hash: TX_HASH },
+    })
+  })
+
+  it('after a failed upgrade the preserved id blocks re-arming and manual release, and verifies objectively', async () => {
+    await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-1' })
+    const working = globalThis.localStorage
+    vi.stubGlobal('localStorage', submittedWriteRefusingStorage(working))
+    try {
+      await expect(upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-1')))
+        .rejects.toThrow(PendingSubmissionStorageError)
+    }
+    finally {
+      vi.stubGlobal('localStorage', working)
+    }
+    // The observedId record was written durably, which drops the in-realm
+    // copy — everything below therefore behaves exactly as after a reload.
+
+    // A fresh attempt cannot take over the reservation.
+    await expect(armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-2' }))
+      .rejects.toThrow(PendingSubmissionConflictError)
+    // The hashless manual-release path refuses it, and the recovery listing
+    // never offers it.
+    await expect(releaseUnverifiablePendingSubmission('direct', OWNER, 1, { userConfirmedWalletShowsNoPendingSubmission: true }))
+      .rejects.toThrow('cannot be dismissed')
+    expect(listReleasableArmedSubmissions(['direct'])).toEqual([])
+    // Reconciliation verifies the record through the observed hash like any
+    // submitted record.
+    const stored = readPendingSubmission('direct', OWNER, 1)
+    const provider = {
+      getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    }
+    await expect(resolvePendingSubmissionOutcome(stored as PendingSubmissionRecord, {
+      provider: provider as never,
+      getSafeWalletProvider: vi.fn(),
+    })).resolves.toBe('landed')
+    expect(provider.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH })
+  })
+
+  it('refuses the hashless manual release even when the id could only be kept in memory', async () => {
+    await armPendingSubmission('direct', { owner: OWNER, chainId: 1, completesPlan: true, attemptId: 'attempt-1' })
     const working = globalThis.localStorage
     vi.stubGlobal('localStorage', {
-      ...createMemoryStorage(),
+      get length() {
+        return working.length
+      },
+      clear: () => working.clear(),
+      key: (index: number) => working.key(index),
       getItem: (key: string) => working.getItem(key),
+      removeItem: (key: string) => working.removeItem(key),
       setItem: () => {
         throw new Error('quota exceeded')
       },
     })
 
-    await expect(upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-1')))
-      .resolves.toBeUndefined()
-    vi.stubGlobal('localStorage', working)
-    expect(readPendingSubmission('direct', OWNER, 1)).toEqual(armed)
+    try {
+      await expect(upgradePendingSubmissionToSubmitted('direct', upgradeInput('attempt-1')))
+        .rejects.toThrow('could not durably record its id')
+      // The durable record still looks hashless-armed — only the in-realm
+      // copy carries the observed id — yet the release must still refuse.
+      expect(readPendingSubmission('direct', OWNER, 1)).toMatchObject({ phase: 'armed', attemptId: 'attempt-1' })
+      await expect(releaseUnverifiablePendingSubmission('direct', OWNER, 1, { userConfirmedWalletShowsNoPendingSubmission: true }))
+        .rejects.toThrow('cannot be dismissed')
+      expect(readPendingSubmission('direct', OWNER, 1)).toBeDefined()
+    }
+    finally {
+      vi.stubGlobal('localStorage', working)
+    }
+  })
+})
+
+describe('listReleasableArmedSubmissions', () => {
+  it('lists an armed record whose owning attempt is no longer live', () => {
+    writePendingSubmission('batch', { ...armedRecord(), attemptId: 'gone-attempt' })
+
+    expect(listReleasableArmedSubmissions(['batch'])).toEqual([{
+      flow: 'batch',
+      chainId: 1,
+      owner: OWNER,
+      state: 'armed',
+      record: expect.objectContaining({ phase: 'armed', attemptId: 'gone-attempt' }),
+    }])
+  })
+
+  it('never offers records that are live, submitted, or carry an observed id', () => {
+    registerActiveSubmissionAttempt('live-attempt')
+    try {
+      // Live attempt: its wallet prompt may be open right now.
+      writePendingSubmission('batch', { ...armedRecord(), attemptId: 'live-attempt' })
+      // Submitted: has an id, resolves objectively.
+      writePendingSubmission('direct', record())
+      // Armed with an observed id: the failed-upgrade case, also objective.
+      writePendingSubmission('outgoing-migration', {
+        ...armedRecord(),
+        attemptId: 'gone-attempt',
+        observedId: { kind: 'transaction', hash: TX_HASH },
+      } as PendingSubmissionRecord)
+
+      expect(listReleasableArmedSubmissions(['batch', 'direct', 'outgoing-migration'])).toEqual([])
+    }
+    finally {
+      unregisterActiveSubmissionAttempt('live-attempt')
+    }
+  })
+
+  it('reports an unparseable entry as corrupt so recovery can offer the acknowledged release', () => {
+    localStorage.setItem(BATCH_KEY, 'not json')
+
+    expect(listReleasableArmedSubmissions(['batch'])).toEqual([{
+      flow: 'batch',
+      chainId: 1,
+      owner: OWNER,
+      state: 'corrupt',
+    }])
   })
 })
 

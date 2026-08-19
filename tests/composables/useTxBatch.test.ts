@@ -5,7 +5,7 @@ import { getAddress, type Address, type Hash, type Hex } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildOperationEntryMap, buildWalletBalanceLayers, buildWalletChanges, countPlanOperations, fetchBaseAccountSnapshot, hydratePendingBatchSubmissionFromStorage, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import type { PreparedPlanBroadcast } from '~/composables/useEulerTx'
-import { readPendingSubmission, resetPendingSubmissionMemoryFallback, writePendingSubmission } from '~/utils/pendingSubmissions'
+import { clearPendingSubmission, readPendingSubmission, resetPendingSubmissionMemoryFallback, writePendingSubmission } from '~/utils/pendingSubmissions'
 import {
   mergeBatchPrefetchedSlotHints,
   resetBatchPrefetchState,
@@ -1800,6 +1800,48 @@ describe('useTxBatch submission quarantine', () => {
     expect(batch.entryCount.value).toBe(0)
     expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
     expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not attach this tab\'s ceremony to a record another attempt re-keyed', async () => {
+    const batch = await setupExecutableBatch()
+    // This tab quarantines its own submission — its in-memory mirror retains
+    // the ceremony context for the single entry the submission covered.
+    await quarantineOneSubmission(batch)
+    // The cart grows past what that ceremony covered.
+    await batch.addEntry({
+      label: 'Second operation',
+      buildPlan: async () => [],
+    })
+    expect(batch.entryCount.value).toBe(2)
+
+    // Another tab releases this tab's record and quarantines its OWN
+    // submission — same wallet, same flow, even the same hash. Only the
+    // attemptId distinguishes it from the attempt this tab's ceremony
+    // describes.
+    await clearPendingSubmission('batch', owner, 1)
+    writePendingSubmission('batch', {
+      phase: 'submitted',
+      kind: 'transaction',
+      hash: CORE_HASH,
+      chainId: 1,
+      owner,
+      completesPlan: true,
+      attemptId: 'attempt-tab-b',
+      submittedAt: 2_000,
+    })
+    hydratePendingBatchSubmissionFromStorage()
+
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdkWithReceipt('success') as never)
+    await batch.executeBatch()
+
+    // The foreign submission landed, but this tab's ceremony must not have
+    // been attached to it: the exact covered entries are unknowable, so the
+    // cart resets instead of retiring only the ceremony's entry and leaving
+    // the second one queued behind a stale "covered operations" error.
+    expect(eulerTxMocks.executePreparedPlan).toHaveBeenCalledTimes(1)
+    expect(batch.entryCount.value).toBe(0)
+    expect(batch.execError.value).toBeUndefined()
+    expect(readPendingSubmission('batch', owner, 1)).toBeUndefined()
   })
 
   it('keeps another wallet\'s record without blocking the current wallet', async () => {

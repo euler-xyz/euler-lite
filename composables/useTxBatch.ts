@@ -379,9 +379,11 @@ const removePendingCoreSubmission = async (
  * init (covering reloads and reconnects), on cross-tab storage events, and
  * before every execute attempt — an already-open tab must see a quarantine
  * another tab stored after this one initialized. Ceremony contexts are
- * preserved only while they still describe the stored submission (same
- * attempt: an armed record upgrading to its submitted hash keeps its
- * ceremony; a different hash means a different submission).
+ * preserved only while the stored record still belongs to the exact attempt
+ * the context describes — the same attemptId. Phase or hash alone is not
+ * identity: another tab can release this tab's armed record and arm its own,
+ * and attaching this tab's ceremony to that foreign attempt would let a
+ * landed verdict retire entries the foreign submission never covered.
  */
 export const hydratePendingBatchSubmissionFromStorage = () => {
   const previous = pendingCoreSubmissions.value
@@ -390,7 +392,8 @@ export const hydratePendingBatchSubmissionFromStorage = () => {
     const key = pendingSubmissionMirrorKey(record.owner, record.chainId)
     const prior = previous.get(key)
     const sameAttempt = !!prior
-      && (prior.record.phase === 'armed' || prior.record.hash === record.hash)
+      && prior.record.attemptId !== undefined
+      && prior.record.attemptId === record.attemptId
     next.set(key, { record, context: sameAttempt ? prior.context : undefined })
   }
   pendingCoreSubmissions.value = next

@@ -1131,6 +1131,11 @@ async function sendMigration(execution: TrackedExecutionScope, preview: Outgoing
       }
       throw executionError
     }
+    finally {
+      // The attempt is over either way — any record it left behind is now
+      // orphaned from live execution and becomes visible to manual recovery.
+      migrationQuarantine.end()
+    }
 
     await revokeAfterSuccess(revokeTxs)
     finishMigrationSuccess(execution)

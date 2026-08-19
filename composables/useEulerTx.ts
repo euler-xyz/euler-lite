@@ -70,10 +70,57 @@ import {
 } from '~/utils/transaction-plan-calls'
 import { hasPermit2Signature } from '~/utils/transactionPlanApprovals'
 import {
+  WALLET_CHANGED_SINCE_REVIEW_ERROR,
   assertWalletExecutionContext,
   type WalletExecutionContext,
 } from '~/utils/walletExecutionContext'
 import { PLACEHOLDER_MIGRATION_AUTHORIZATION_SIGNATURE } from '~/utils/migrationAuthorizationSignatures'
+
+/**
+ * Wallet identity a prepared envelope was reviewed against: the exact
+ * connector instance (id + connection uid, so a same-address reconnect still
+ * differs) and its Safe/EOA classification. Captured by
+ * `prepareTransactionPlan` and enforced by the prepared-plan executors — a
+ * confirmation modal reviews the envelope, so whatever executes it must be
+ * the wallet that reviewed it.
+ */
+export interface ReviewedWalletContext {
+  readonly connectorKey: string | undefined
+  readonly isSafeWallet: boolean
+}
+
+export type ReviewedTransactionPlanPrepared = TransactionPlanPrepared & {
+  readonly reviewedWalletContext?: ReviewedWalletContext
+}
+
+const connectorContextKey = (
+  connector: { id: string, uid: string } | undefined,
+): string | undefined => (connector ? `${connector.id}:${connector.uid}` : undefined)
+
+/**
+ * Fail closed when a bound envelope reaches an executor under a different
+ * wallet identity than it was prepared with. This runs before the Safe
+ * permit2 repair, so a reviewed EOA signature ceremony can never be silently
+ * re-shaped into a Safe approval ceremony (or vice versa) after the user
+ * confirmed — reclassification means the review is stale, not repairable.
+ * Envelopes without a binding (hand-built or legacy callers) keep the
+ * executor's own connector pinning as their only guard.
+ */
+const assertPreparedWalletBinding = (
+  prepared: ReviewedTransactionPlanPrepared,
+  connector: { id: string, uid: string } | undefined,
+  isKnownSafe: boolean,
+) => {
+  const binding = prepared.reviewedWalletContext
+  if (!binding) return
+  if (
+    binding.connectorKey === undefined
+    || connectorContextKey(connector) !== binding.connectorKey
+    || binding.isSafeWallet !== isKnownSafe
+  ) {
+    throw new Error(WALLET_CHANGED_SINCE_REVIEW_ERROR)
+  }
+}
 
 const OKX_POST_APPROVE_DELAY_MS = 3000
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -1326,18 +1373,33 @@ export const useEulerTx = () => {
       prefetch?: PluginPrefetchData
       usePermit2?: boolean
     },
-  ): Promise<TransactionPlanPrepared> => {
+  ): Promise<ReviewedTransactionPlanPrepared> => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
       const owner = requireOwner()
       const cid = options?.chainId ?? requireChainId()
+      // Capture the wallet identity under review before any await: the
+      // returned envelope is what confirmation modals show, so it is bound
+      // to the exact connector (and Safe/EOA classification) the review
+      // happens against. The executors refuse the envelope under any other.
+      const connector = getAccount(config).connector
       const sdk = await getEulerSdkForChain(cid)
-      return sdk.executionService.prepareTransactionPlan({
-        plan,
-        chainId: cid,
-        account: options?.account ?? owner,
-        usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
-        prefetch: options?.prefetch,
-      })
+      const [prepared, safeWalletProvider] = await Promise.all([
+        sdk.executionService.prepareTransactionPlan({
+          plan,
+          chainId: cid,
+          account: options?.account ?? owner,
+          usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
+          prefetch: options?.prefetch,
+        }),
+        getSafeWalletProvider(connector),
+      ])
+      return {
+        ...prepared,
+        reviewedWalletContext: {
+          connectorKey: connectorContextKey(connector),
+          isSafeWallet: Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector),
+        },
+      }
     })
   }
 
@@ -1846,91 +1908,97 @@ export const useEulerTx = () => {
     // only on a terminal signal, with no caller wiring required.
     const quarantine = createDirectSubmissionQuarantine({ flow: 'direct', getSafeWalletProvider })
     quarantine.begin({ owner, chainId: cid })
+    // end() in finally: once the attempt is over, any record it left behind
+    // is orphaned from live execution and becomes visible to manual recovery.
+    try {
+      if (safeWalletProvider && connector) {
+        // Mirror what executeTransactionPlan would do to the plan (plugins,
+        // approval resolution), then try to submit it as one Safe proposal.
+        // The provider positively identified a Safe, so permit2 is forced off
+        // here regardless of the (possibly lagging) reactive preference.
+        const processedPlan = await sdk.executionService.processPlanPlugins(plan, owner, cid)
+        const resolvedPlan = await sdk.executionService.resolveRequiredApprovals({
+          plan: processedPlan,
+          chainId: cid,
+          account: owner,
+          usePermit2: false,
+        })
+        const bundleTracker = createBundleBroadcastAdapter(quarantine.track)
+        const bundled = await executePlanAsSafeBundle({
+          plan: resolvedPlan,
+          chainId: cid,
+          owner,
+          provider,
+          connector,
+          safeWalletProvider,
+          sdk,
+          onArm: bundleTracker.onArm,
+          onSubmitError: bundleTracker.onSubmitError,
+          onBroadcast: bundleTracker.onBroadcast,
+        })
+        if (bundled) {
+          await bundleTracker.confirm()
+          finalizeExecution(bundled)
+          return bundled
+        }
+      }
 
-    if (safeWalletProvider && connector) {
-      // Mirror what executeTransactionPlan would do to the plan (plugins,
-      // approval resolution), then try to submit it as one Safe proposal.
-      // The provider positively identified a Safe, so permit2 is forced off
-      // here regardless of the (possibly lagging) reactive preference.
-      const processedPlan = await sdk.executionService.processPlanPlugins(plan, owner, cid)
-      const resolvedPlan = await sdk.executionService.resolveRequiredApprovals({
-        plan: processedPlan,
+      // executeTransactionPlan reprocesses plugins internally, so the progress
+      // items may not be identical to this plan's — completesPlan can then fall
+      // back to its strict default, which is cosmetic for the 'direct' flow
+      // (the gate treats any landed direct record the same way).
+      const tracker = createSequentialBroadcastTracker({
+        plan,
+        isProposal: Boolean(safeWalletProvider),
+        emit: quarantine.track,
+      })
+      const sendTransaction = buildSendTransaction({
+        isOkx,
+        expectedAccount: owner,
+        expectedChainId: cid,
+        connector,
+        onArm: tracker.onArm,
+        onSubmitError: tracker.onSubmitError,
+        onBroadcast: tracker.onBroadcast,
+        resolveHash: safeWalletProvider
+          ? async submittedHash => (await waitForSafeTransactionExecution({
+            submittedHash,
+            walletProvider: safeWalletProvider,
+            publicClient: provider as ReceiptClientLike,
+          })).hash
+          : undefined,
+      })
+
+      const result = await sdk.executionService.executeTransactionPlan({
+        plan,
         chainId: cid,
         account: owner,
-        usePermit2: false,
+        // A known Safe never uses permit2, even on the sequential fallback
+        // and even when its provider could not be acquired.
+        usePermit2: isKnownSafe ? false : signaturesEnabled.value,
+        sendTransaction,
+        signTypedData: async (typedData) => {
+          // Same pinning as sendTransaction: sign through the captured
+          // connector, never the currently-active one.
+          const signature = await signTypedDataAsync({
+            ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+            ...(connector ? { connector } : {}),
+          })
+          return signature as Hex
+        },
+        onProgress: tracker.onProgress,
       })
-      const bundleTracker = createBundleBroadcastAdapter(quarantine.track)
-      const bundled = await executePlanAsSafeBundle({
-        plan: resolvedPlan,
-        chainId: cid,
-        owner,
-        provider,
-        connector,
-        safeWalletProvider,
-        sdk,
-        onArm: bundleTracker.onArm,
-        onSubmitError: bundleTracker.onSubmitError,
-        onBroadcast: bundleTracker.onBroadcast,
-      })
-      if (bundled) {
-        await bundleTracker.confirm()
-        finalizeExecution(bundled)
-        return bundled
-      }
+
+      // Terminal releases fire out of band from the executor's synchronous
+      // progress callback — drain them before this attempt's result is
+      // finalized so the released record cannot lag into the next attempt.
+      await tracker.flush()
+      finalizeExecution(result)
+      return result
     }
-
-    // executeTransactionPlan reprocesses plugins internally, so the progress
-    // items may not be identical to this plan's — completesPlan can then fall
-    // back to its strict default, which is cosmetic for the 'direct' flow
-    // (the gate treats any landed direct record the same way).
-    const tracker = createSequentialBroadcastTracker({
-      plan,
-      isProposal: Boolean(safeWalletProvider),
-      emit: quarantine.track,
-    })
-    const sendTransaction = buildSendTransaction({
-      isOkx,
-      expectedAccount: owner,
-      expectedChainId: cid,
-      connector,
-      onArm: tracker.onArm,
-      onSubmitError: tracker.onSubmitError,
-      onBroadcast: tracker.onBroadcast,
-      resolveHash: safeWalletProvider
-        ? async submittedHash => (await waitForSafeTransactionExecution({
-          submittedHash,
-          walletProvider: safeWalletProvider,
-          publicClient: provider as ReceiptClientLike,
-        })).hash
-        : undefined,
-    })
-
-    const result = await sdk.executionService.executeTransactionPlan({
-      plan,
-      chainId: cid,
-      account: owner,
-      // A known Safe never uses permit2, even on the sequential fallback
-      // and even when its provider could not be acquired.
-      usePermit2: isKnownSafe ? false : signaturesEnabled.value,
-      sendTransaction,
-      signTypedData: async (typedData) => {
-        // Same pinning as sendTransaction: sign through the captured
-        // connector, never the currently-active one.
-        const signature = await signTypedDataAsync({
-          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
-          ...(connector ? { connector } : {}),
-        })
-        return signature as Hex
-      },
-      onProgress: tracker.onProgress,
-    })
-
-    // Terminal releases fire out of band from the executor's synchronous
-    // progress callback — drain them before this attempt's result is
-    // finalized so the released record cannot lag into the next attempt.
-    await tracker.flush()
-    finalizeExecution(result)
-    return result
+    finally {
+      quarantine.end()
+    }
   }
 
   const executePreparedPlan = async (
@@ -1971,6 +2039,11 @@ export const useEulerTx = () => {
     // sequential path must still never sign permit2 messages.
     const isKnownSafe = Boolean(safeWalletProvider) || isSafeConnectorIdentity(connector)
 
+    // Bound envelopes execute only under the wallet identity they were
+    // reviewed with — checked before the quarantine gate and the permit2
+    // repair so nothing observable happens for a stale review.
+    assertPreparedWalletBinding(prepared, connector, isKnownSafe)
+
     // Cross-surface quarantine: an unresolved value-moving submission from
     // any flow (batch cart or a direct migration) for this wallet/chain
     // blocks new sends until it reconciles — switching execution surfaces
@@ -1993,98 +2066,105 @@ export const useEulerTx = () => {
     internalQuarantine?.begin({ owner: preparedOwner, chainId: prepared.chainId })
     const emitBroadcast: PreparedPlanBroadcastEmit = options?.onBroadcast ?? internalQuarantine!.track
 
-    let effectivePrepared = prepared
-    if (isKnownSafe) {
-      // A Safe never signs permit2 messages. If the envelope was prepared
-      // before Safe detection resolved, re-resolve its approvals with
-      // permit2 off — resolution overwrites `resolved` on each item, so the
-      // repaired plan is used for both the bundle and the fallback.
-      if (hasPermit2Signature(prepared.plan)) {
-        const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
-          plan: prepared.plan,
+    // end() in finally: once the attempt is over, any record it left behind
+    // is orphaned from live execution and becomes visible to manual recovery.
+    try {
+      let effectivePrepared = prepared
+      if (isKnownSafe) {
+        // A Safe never signs permit2 messages. If the envelope was prepared
+        // before Safe detection resolved, re-resolve its approvals with
+        // permit2 off — resolution overwrites `resolved` on each item, so the
+        // repaired plan is used for both the bundle and the fallback.
+        if (hasPermit2Signature(prepared.plan)) {
+          const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
+            plan: prepared.plan,
+            chainId: prepared.chainId,
+            account: preparedOwner,
+            usePermit2: false,
+          })
+          effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+        }
+        else if (prepared.usePermit2) {
+          // Invariant: an envelope executed for a Safe never carries
+          // usePermit2, even when no permit2 items happened to resolve.
+          effectivePrepared = { ...prepared, usePermit2: false }
+        }
+      }
+
+      if (safeWalletProvider && connector) {
+        // Prepared plans already ran plugins and approval resolution.
+        const bundleTracker = createBundleBroadcastAdapter(emitBroadcast)
+        const bundled = await executePlanAsSafeBundle({
+          plan: effectivePrepared.plan,
           chainId: prepared.chainId,
-          account: preparedOwner,
-          usePermit2: false,
+          owner: preparedOwner,
+          provider,
+          connector,
+          safeWalletProvider,
+          sdk,
+          beforeBroadcast: options?.beforeBroadcast,
+          onArm: bundleTracker.onArm,
+          onSubmitError: bundleTracker.onSubmitError,
+          onBroadcast: bundleTracker.onBroadcast,
         })
-        effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+        if (bundled) {
+          await bundleTracker.confirm()
+          finalizeExecution(bundled)
+          return bundled
+        }
       }
-      else if (prepared.usePermit2) {
-        // Invariant: an envelope executed for a Safe never carries
-        // usePermit2, even when no permit2 items happened to resolve.
-        effectivePrepared = { ...prepared, usePermit2: false }
-      }
-    }
 
-    if (safeWalletProvider && connector) {
-      // Prepared plans already ran plugins and approval resolution.
-      const bundleTracker = createBundleBroadcastAdapter(emitBroadcast)
-      const bundled = await executePlanAsSafeBundle({
+      // A Safe's sequential fallback submits through the Safe app, so the
+      // wallet returns safeTxHash proposal ids, not on-chain hashes.
+      const tracker = createSequentialBroadcastTracker({
         plan: effectivePrepared.plan,
-        chainId: prepared.chainId,
-        owner: preparedOwner,
-        provider,
-        connector,
-        safeWalletProvider,
-        sdk,
-        beforeBroadcast: options?.beforeBroadcast,
-        onArm: bundleTracker.onArm,
-        onSubmitError: bundleTracker.onSubmitError,
-        onBroadcast: bundleTracker.onBroadcast,
+        isProposal: Boolean(safeWalletProvider),
+        emit: emitBroadcast,
       })
-      if (bundled) {
-        await bundleTracker.confirm()
-        finalizeExecution(bundled)
-        return bundled
-      }
+      const sendTransaction = buildSendTransaction({
+        isOkx,
+        expectedAccount: preparedOwner,
+        expectedChainId: prepared.chainId,
+        connector,
+        beforeBroadcast: options?.beforeBroadcast,
+        onArm: tracker.onArm,
+        onSubmitError: tracker.onSubmitError,
+        onBroadcast: tracker.onBroadcast,
+        resolveHash: safeWalletProvider
+          ? async submittedHash => (await waitForSafeTransactionExecution({
+            submittedHash,
+            walletProvider: safeWalletProvider,
+            publicClient: provider as ReceiptClientLike,
+          })).hash
+          : undefined,
+      })
+
+      const result = await sdk.executionService.executePreparedTransactionPlan({
+        prepared: effectivePrepared,
+        sendTransaction,
+        signTypedData: async (typedData) => {
+          options?.beforeBroadcast?.()
+          // Same pinning as sendTransaction: sign through the captured
+          // connector, never the currently-active one.
+          const signature = await signTypedDataAsync({
+            ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+            ...(connector ? { connector } : {}),
+          })
+          return signature as Hex
+        },
+        onProgress: tracker.onProgress,
+      })
+
+      // Terminal releases fire out of band from the executor's synchronous
+      // progress callback — drain them before this attempt's result is
+      // finalized so the released record cannot lag into the next attempt.
+      await tracker.flush()
+      finalizeExecution(result)
+      return result
     }
-
-    // A Safe's sequential fallback submits through the Safe app, so the
-    // wallet returns safeTxHash proposal ids, not on-chain hashes.
-    const tracker = createSequentialBroadcastTracker({
-      plan: effectivePrepared.plan,
-      isProposal: Boolean(safeWalletProvider),
-      emit: emitBroadcast,
-    })
-    const sendTransaction = buildSendTransaction({
-      isOkx,
-      expectedAccount: preparedOwner,
-      expectedChainId: prepared.chainId,
-      connector,
-      beforeBroadcast: options?.beforeBroadcast,
-      onArm: tracker.onArm,
-      onSubmitError: tracker.onSubmitError,
-      onBroadcast: tracker.onBroadcast,
-      resolveHash: safeWalletProvider
-        ? async submittedHash => (await waitForSafeTransactionExecution({
-          submittedHash,
-          walletProvider: safeWalletProvider,
-          publicClient: provider as ReceiptClientLike,
-        })).hash
-        : undefined,
-    })
-
-    const result = await sdk.executionService.executePreparedTransactionPlan({
-      prepared: effectivePrepared,
-      sendTransaction,
-      signTypedData: async (typedData) => {
-        options?.beforeBroadcast?.()
-        // Same pinning as sendTransaction: sign through the captured
-        // connector, never the currently-active one.
-        const signature = await signTypedDataAsync({
-          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
-          ...(connector ? { connector } : {}),
-        })
-        return signature as Hex
-      },
-      onProgress: tracker.onProgress,
-    })
-
-    // Terminal releases fire out of band from the executor's synchronous
-    // progress callback — drain them before this attempt's result is
-    // finalized so the released record cannot lag into the next attempt.
-    await tracker.flush()
-    finalizeExecution(result)
-    return result
+    finally {
+      internalQuarantine?.end()
+    }
   }
 
   /**
@@ -2124,6 +2204,11 @@ export const useEulerTx = () => {
     const safeWalletProvider = await getSafeWalletProvider(connector)
     if (!safeWalletProvider || !connector) return undefined
 
+    // This path only runs for a live Safe provider, so a bound envelope must
+    // have been reviewed as a Safe under this exact connector — a reviewed
+    // EOA envelope is never repaired into a Safe bundle.
+    assertPreparedWalletBinding(prepared, connector, true)
+
     const preparedOwner = typeof prepared.account === 'string'
       ? getAddress(prepared.account)
       : getAddress(prepared.account.owner)
@@ -2144,42 +2229,49 @@ export const useEulerTx = () => {
     internalQuarantine?.begin({ owner: preparedOwner, chainId: prepared.chainId })
     const emitBroadcast: PreparedPlanBroadcastEmit = options?.onBroadcast ?? internalQuarantine!.track
 
-    // Same invariant as executePreparedPlan: an envelope executed for a Safe
-    // never carries permit2.
-    let effectivePrepared = prepared
-    if (hasPermit2Signature(prepared.plan)) {
-      const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
-        plan: prepared.plan,
-        chainId: prepared.chainId,
-        account: preparedOwner,
-        usePermit2: false,
-      })
-      effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
-    }
-    else if (prepared.usePermit2) {
-      effectivePrepared = { ...prepared, usePermit2: false }
-    }
+    // end() in finally: once the attempt is over, any record it left behind
+    // is orphaned from live execution and becomes visible to manual recovery.
+    try {
+      // Same invariant as executePreparedPlan: an envelope executed for a Safe
+      // never carries permit2.
+      let effectivePrepared = prepared
+      if (hasPermit2Signature(prepared.plan)) {
+        const repairedPlan = await sdk.executionService.resolveRequiredApprovals({
+          plan: prepared.plan,
+          chainId: prepared.chainId,
+          account: preparedOwner,
+          usePermit2: false,
+        })
+        effectivePrepared = { ...prepared, plan: repairedPlan, usePermit2: false }
+      }
+      else if (prepared.usePermit2) {
+        effectivePrepared = { ...prepared, usePermit2: false }
+      }
 
-    const bundleTracker = createBundleBroadcastAdapter(emitBroadcast)
-    const bundled = await executePlanAsSafeBundle({
-      plan: effectivePrepared.plan,
-      chainId: prepared.chainId,
-      owner: preparedOwner,
-      provider,
-      connector,
-      safeWalletProvider,
-      sdk,
-      extraCalls,
-      allowSingleCall: options?.allowSingleCall,
-      beforeBroadcast: options?.beforeBroadcast,
-      onArm: bundleTracker.onArm,
-      onSubmitError: bundleTracker.onSubmitError,
-      onBroadcast: bundleTracker.onBroadcast,
-    })
-    if (!bundled) return undefined
-    await bundleTracker.confirm()
-    finalizeExecution(bundled)
-    return bundled
+      const bundleTracker = createBundleBroadcastAdapter(emitBroadcast)
+      const bundled = await executePlanAsSafeBundle({
+        plan: effectivePrepared.plan,
+        chainId: prepared.chainId,
+        owner: preparedOwner,
+        provider,
+        connector,
+        safeWalletProvider,
+        sdk,
+        extraCalls,
+        allowSingleCall: options?.allowSingleCall,
+        beforeBroadcast: options?.beforeBroadcast,
+        onArm: bundleTracker.onArm,
+        onSubmitError: bundleTracker.onSubmitError,
+        onBroadcast: bundleTracker.onBroadcast,
+      })
+      if (!bundled) return undefined
+      await bundleTracker.confirm()
+      finalizeExecution(bundled)
+      return bundled
+    }
+    finally {
+      internalQuarantine?.end()
+    }
   }
 
   /**

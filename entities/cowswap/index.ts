@@ -17,5 +17,6 @@ export {
   formatCowSwapExecutionErrorMessage,
   getCowSwapOrderExplorerUrl,
   isCowSwapTerminalOrderStatus,
+  pollCowSwapOrderStatus,
   resolveCowSwapOrderStatusType,
 } from '@eulerxyz/euler-v2-sdk'

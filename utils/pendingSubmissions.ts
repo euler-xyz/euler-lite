@@ -32,10 +32,10 @@ import { SafeTransactionStatusUnknownError, waitForSafeTransactionExecution } fr
  * an armed record).
  */
 
-export type PendingSubmissionFlow = 'batch' | 'outgoing-migration' | 'inbound-migration' | 'direct'
+export type PendingSubmissionFlow = 'batch' | 'outgoing-migration' | 'inbound-migration' | 'direct' | 'cow-order'
 
 export const PENDING_SUBMISSION_FLOWS: readonly PendingSubmissionFlow[]
-  = ['batch', 'outgoing-migration', 'inbound-migration', 'direct']
+  = ['batch', 'outgoing-migration', 'inbound-migration', 'direct', 'cow-order']
 
 interface PendingSubmissionBase {
   readonly chainId: number
@@ -56,10 +56,23 @@ interface PendingSubmissionBase {
   readonly attemptId?: string
 }
 
+/**
+ * A verifiable id observed for a record that is still stored as 'armed': the
+ * wallet returned the id, but the armed → submitted durable rewrite failed.
+ * Preserving the id on the armed record keeps the submission objectively
+ * verifiable (receipt / Safe status / orderbook lookup) and makes it
+ * unrecoverable through the hashless manual-release path.
+ */
+export type PendingSubmissionObservedId
+  = | { readonly kind: 'transaction' | 'proposal', readonly hash: Hash }
+    | { readonly kind: 'cow-order', readonly orderUid: string, readonly orderbookUrl?: string }
+
 export interface ArmedPendingSubmission extends PendingSubmissionBase {
   readonly phase: 'armed'
   readonly kind?: undefined
   readonly hash?: undefined
+  readonly orderUid?: undefined
+  readonly observedId?: PendingSubmissionObservedId
 }
 
 export interface SubmittedPendingSubmission extends PendingSubmissionBase {
@@ -67,9 +80,22 @@ export interface SubmittedPendingSubmission extends PendingSubmissionBase {
   /** 'transaction' = EOA send; 'proposal' = Safe proposal / bundle id. */
   readonly kind: 'transaction' | 'proposal'
   readonly hash: Hash
+  readonly orderUid?: undefined
+  readonly observedId?: undefined
 }
 
-export type PendingSubmissionRecord = ArmedPendingSubmission | SubmittedPendingSubmission
+export interface SubmittedCowOrderPendingSubmission extends PendingSubmissionBase {
+  readonly phase: 'submitted'
+  /** A CoW Swap order accepted by the orderbook, identified by its order uid. */
+  readonly kind: 'cow-order'
+  readonly orderUid: string
+  readonly orderbookUrl?: string
+  readonly hash?: undefined
+  readonly observedId?: undefined
+}
+
+export type PendingSubmissionRecord
+  = ArmedPendingSubmission | SubmittedPendingSubmission | SubmittedCowOrderPendingSubmission
 
 export type PendingSubmissionOutcome = 'landed' | 'not-landed' | 'unknown'
 
@@ -112,6 +138,48 @@ const getStorage = (): Storage | undefined => {
  * the read authority when the realm has no storage object at all.
  */
 const memoryFallback = new Map<string, string>()
+
+/**
+ * In-realm change feed so recovery surfaces can react to records being
+ * created, upgraded, or released without polling. Cross-tab changes are
+ * observed separately via the window 'storage' event.
+ */
+const changeListeners = new Set<() => void>()
+
+export const subscribeToPendingSubmissionChanges = (listener: () => void): (() => void) => {
+  changeListeners.add(listener)
+  return () => changeListeners.delete(listener)
+}
+
+const notifyPendingSubmissionChange = () => {
+  for (const listener of [...changeListeners]) {
+    try {
+      listener()
+    }
+    catch (err) {
+      logWarn('pendingSubmissions/change-listener', err)
+    }
+  }
+}
+
+/**
+ * Attempt ids whose execution flow is still live in this realm. Recovery
+ * surfaces use this to distinguish an orphaned armed record (owning attempt
+ * died in a reload/crash) from one whose wallet prompt is open right now.
+ */
+const activeAttemptIds = new Set<string>()
+
+export const registerActiveSubmissionAttempt = (attemptId: string) => {
+  activeAttemptIds.add(attemptId)
+  notifyPendingSubmissionChange()
+}
+
+export const unregisterActiveSubmissionAttempt = (attemptId: string) => {
+  if (activeAttemptIds.delete(attemptId)) notifyPendingSubmissionChange()
+}
+
+export const isSubmissionAttemptActive = (attemptId: string | undefined): boolean =>
+  attemptId !== undefined && activeAttemptIds.has(attemptId)
 
 /** Test-only: clears the in-realm guard AND purges quarantine keys from live
  * storage — module state and the storage polyfill would otherwise leak
@@ -191,6 +259,7 @@ const removeRaw = (key: string) => {
     // stale record keeps blocking until storage recovers.
   }
   memoryFallback.delete(key)
+  notifyPendingSubmissionChange()
 }
 
 const listRawKeys = (prefix: string): string[] => {
@@ -215,6 +284,27 @@ const listRawKeys = (prefix: string): string[] => {
 
 const isHash = (value: unknown): value is Hash =>
   typeof value === 'string' && /^0x[0-9a-f]{64}$/i.test(value)
+
+/** CoW order uids are 56 bytes: order digest + owner + validTo. */
+const isCowOrderUid = (value: unknown): value is string =>
+  typeof value === 'string' && /^0x[0-9a-f]{112}$/i.test(value)
+
+const parseObservedId = (value: unknown): { observedId?: PendingSubmissionObservedId, valid: boolean } => {
+  if (value === undefined) return { valid: true }
+  if (!value || typeof value !== 'object') return { valid: false }
+  const candidate = value as Record<string, unknown>
+  if (candidate.kind === 'transaction' || candidate.kind === 'proposal') {
+    if (!isHash(candidate.hash)) return { valid: false }
+    return { observedId: { kind: candidate.kind, hash: candidate.hash }, valid: true }
+  }
+  if (candidate.kind === 'cow-order') {
+    const orderUid = candidate.orderUid
+    if (!isCowOrderUid(orderUid)) return { valid: false }
+    if (candidate.orderbookUrl !== undefined && typeof candidate.orderbookUrl !== 'string') return { valid: false }
+    return { observedId: { kind: 'cow-order', orderUid, orderbookUrl: candidate.orderbookUrl as string | undefined }, valid: true }
+  }
+  return { valid: false }
+}
 
 const parseRecord = (raw: string): PendingSubmissionRecord | undefined => {
   let parsed: unknown
@@ -248,7 +338,18 @@ const parseRecord = (raw: string): PendingSubmissionRecord | undefined => {
     attemptId: candidate.attemptId as string | undefined,
   }
   if (candidate.phase === 'armed') {
-    return { phase: 'armed', ...base }
+    // An unparseable observedId must corrupt the record (fail closed): it may
+    // name a live submission, so it cannot degrade into a releasable hashless
+    // armed record.
+    const { observedId, valid } = parseObservedId(candidate.observedId)
+    if (!valid) return undefined
+    return { phase: 'armed', observedId, ...base }
+  }
+  if (candidate.kind === 'cow-order') {
+    const orderUid = candidate.orderUid
+    if (!isCowOrderUid(orderUid)) return undefined
+    if (candidate.orderbookUrl !== undefined && typeof candidate.orderbookUrl !== 'string') return undefined
+    return { phase: 'submitted', kind: 'cow-order', orderUid, orderbookUrl: candidate.orderbookUrl as string | undefined, ...base }
   }
   if (candidate.kind !== 'transaction' && candidate.kind !== 'proposal') return undefined
   if (!isHash(candidate.hash)) return undefined
@@ -311,8 +412,25 @@ export const listPendingSubmissions = (flow: PendingSubmissionFlow): PendingSubm
  * retries, but a reservation that would not survive a reload must stop the
  * attempt before the wallet is invoked.
  */
-export const writePendingSubmission = (flow: PendingSubmissionFlow, record: PendingSubmissionRecord) => {
-  const outcome = writeRaw(storageKey(flow, record.owner, record.chainId), JSON.stringify(record))
+/**
+ * Quota headroom reserved by armed-record writes. The later armed → submitted
+ * rewrite happens at the same key with a slightly larger payload (kind + id);
+ * padding the armed record makes that rewrite a same-size-or-smaller
+ * replacement, so a storage that accepted the reservation cannot refuse the
+ * upgrade on quota grounds. `parseRecord` ignores unknown fields.
+ */
+const UPGRADE_HEADROOM_PADDING = 'x'.repeat(512)
+
+export const writePendingSubmission = (
+  flow: PendingSubmissionFlow,
+  record: PendingSubmissionRecord,
+  options?: { reserveUpgradeHeadroom?: boolean },
+) => {
+  const serialized = options?.reserveUpgradeHeadroom
+    ? JSON.stringify({ ...record, padding: UPGRADE_HEADROOM_PADDING })
+    : JSON.stringify(record)
+  const outcome = writeRaw(storageKey(flow, record.owner, record.chainId), serialized)
+  notifyPendingSubmissionChange()
   if (outcome !== 'durable') {
     throw new PendingSubmissionStorageError(
       'Replay protection could not be durably saved, so nothing was handed to the wallet. Check that browser storage is available and try again.',
@@ -323,10 +441,98 @@ export const writePendingSubmission = (flow: PendingSubmissionFlow, record: Pend
 /**
  * Per-owner/chain critical section for check+reserve and ownership-checked
  * mutations. Uses the browser-wide Web Locks API when available (serializing
- * across tabs) and always chains through an in-realm FIFO queue (serializing
- * within this realm, and standing in entirely where Web Locks are absent).
+ * across tabs) and always chains through an in-realm FIFO queue. Where Web
+ * Locks are absent but records share a storage object with other contexts, a
+ * storage-token mutex serializes across those contexts — and when it cannot
+ * be acquired the attempt fails closed rather than running unserialized. Only
+ * a realm with no storage at all relies on the FIFO alone: its records live
+ * exclusively in this realm's memory map, so no other context can race them.
  */
 const realmLockTails = new Map<string, Promise<void>>()
+
+const STORAGE_LOCK_TTL_MS = 5_000
+const STORAGE_LOCK_ACQUIRE_TIMEOUT_MS = 10_000
+const STORAGE_LOCK_CONFIRM_DELAY_MS = 25
+const STORAGE_LOCK_RETRY_DELAY_MS = 40
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
+const storageLockUnavailableError = (cause?: unknown) => new PendingSubmissionStorageError(
+  'Replay protection could not take the cross-tab submission lock, so nothing was handed to the wallet. Close other tabs of this app (or wait a moment) and try again.',
+  cause === undefined ? undefined : { cause },
+)
+
+let storageLockTokenCounter = 0
+const createStorageLockToken = (): string => {
+  const uuid = (globalThis.crypto as Crypto | undefined)?.randomUUID?.()
+  if (uuid) return uuid
+  storageLockTokenCounter += 1
+  return `lock-${Date.now()}-${Math.random()}-${storageLockTokenCounter}`
+}
+
+const readStorageLockHolder = (storage: Storage, key: string): { token?: unknown, expiresAt?: unknown } | undefined => {
+  let raw: string | null
+  try {
+    raw = storage.getItem(key)
+  }
+  catch (err) {
+    throw storageLockUnavailableError(err)
+  }
+  if (raw === null) return undefined
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed as { token?: unknown, expiresAt?: unknown } : undefined
+  }
+  catch {
+    // An unparseable lock value is treated as an expired holder: the token
+    // write below reclaims the slot, and the confirm re-read still arbitrates
+    // against any concurrent claimant.
+    return undefined
+  }
+}
+
+/**
+ * Cross-context mutex over the shared storage object: write a unique token
+ * with a TTL, wait, and confirm the token survived. The TTL bounds how long a
+ * crashed holder can block others; it is safe because every critical section
+ * run under this lock does only synchronous storage work, finishing far
+ * inside the TTL.
+ */
+const acquireStorageLock = async (storage: Storage, key: string): Promise<() => void> => {
+  const token = createStorageLockToken()
+  const deadline = Date.now() + STORAGE_LOCK_ACQUIRE_TIMEOUT_MS
+  for (;;) {
+    const holder = readStorageLockHolder(storage, key)
+    const holderExpired = !holder
+      || typeof holder.expiresAt !== 'number'
+      || holder.expiresAt <= Date.now()
+    if (holderExpired) {
+      try {
+        storage.setItem(key, JSON.stringify({ token, expiresAt: Date.now() + STORAGE_LOCK_TTL_MS }))
+      }
+      catch (err) {
+        throw storageLockUnavailableError(err)
+      }
+      // Two contexts can both observe the slot free and both write; the delay
+      // lets the racing writes settle so exactly one token survives re-read.
+      await sleep(STORAGE_LOCK_CONFIRM_DELAY_MS + Math.floor(Math.random() * 15))
+      const confirmed = readStorageLockHolder(storage, key)
+      if (confirmed?.token === token) {
+        return () => {
+          try {
+            const current = readStorageLockHolder(storage, key)
+            if (current?.token === token) storage.removeItem(key)
+          }
+          catch {
+            // Leave it to TTL expiry.
+          }
+        }
+      }
+    }
+    if (Date.now() >= deadline) throw storageLockUnavailableError()
+    await sleep(STORAGE_LOCK_RETRY_DELAY_MS + Math.floor(Math.random() * 20))
+  }
+}
 
 export const withPendingSubmissionLock = async <T>(
   owner: Address,
@@ -334,11 +540,23 @@ export const withPendingSubmissionLock = async <T>(
   fn: () => Promise<T>,
 ): Promise<T> => {
   const key = `${STORAGE_PREFIX}:lock:${chainId}:${getAddress(owner)}`
-  const runExclusive = (): Promise<T> => {
+  const runExclusive = async (): Promise<T> => {
     const locks = (globalThis.navigator as Navigator | undefined)?.locks
     if (locks?.request) {
       return locks.request(key, () => fn()) as Promise<T>
     }
+    const storage = getStorage()
+    if (storage) {
+      const releaseLock = await acquireStorageLock(storage, key)
+      try {
+        return await fn()
+      }
+      finally {
+        releaseLock()
+      }
+    }
+    // No storage object exists: records are realm-local, so the in-realm FIFO
+    // below already serializes every possible reader/writer.
     return fn()
   }
   const tail = realmLockTails.get(key) ?? Promise.resolve()
@@ -397,17 +615,32 @@ export const armPendingSubmission = async (
       submittedAt: Date.now(),
       attemptId: input.attemptId,
     }
-    writePendingSubmission(flow, record)
+    writePendingSubmission(flow, record, { reserveUpgradeHeadroom: true })
     return record
   })
 }
+
+export type PendingSubmissionUpgradeId
+  = | { kind: 'transaction' | 'proposal', hash: Hash }
+    | { kind: 'cow-order', orderUid: string, orderbookUrl?: string }
+
+const describeUpgradeId = (id: PendingSubmissionUpgradeId): string =>
+  id.kind === 'cow-order' ? `CoW Swap order ${id.orderUid}` : `transaction ${id.hash}`
 
 /**
  * Ownership-checked armed → submitted upgrade. When the stored record is
  * missing, unreadable, or belongs to a different attempt, the upgrade is
  * refused (returning undefined) rather than overwriting state this attempt
  * does not own — whatever record exists keeps blocking, which is the safe
- * direction. A refused durable write likewise leaves the armed record.
+ * direction.
+ *
+ * A failed durable write of the submitted record must NOT degrade silently:
+ * the wallet already accepted the submission and the returned id is the only
+ * verifiable link to it. The id is preserved on the armed record as
+ * `observedId` (best effort, retried) — which blocks the hashless
+ * manual-release path and lets reconciliation verify the outcome objectively
+ * — and the failure is thrown so the attempt surfaces it instead of
+ * continuing as if the id had been recorded.
  */
 export const upgradePendingSubmissionToSubmitted = async (
   flow: PendingSubmissionFlow,
@@ -415,12 +648,10 @@ export const upgradePendingSubmissionToSubmitted = async (
     owner: Address
     chainId: number
     attemptId: string
-    kind: 'transaction' | 'proposal'
-    hash: Hash
     completesPlan: boolean
     refreshExternalPositions?: boolean
-  },
-): Promise<SubmittedPendingSubmission | undefined> => {
+  } & PendingSubmissionUpgradeId,
+): Promise<SubmittedPendingSubmission | SubmittedCowOrderPendingSubmission | undefined> => {
   const owner = getAddress(input.owner)
   return withPendingSubmissionLock(owner, input.chainId, async () => {
     let existing: PendingSubmissionRecord | undefined
@@ -432,13 +663,10 @@ export const upgradePendingSubmissionToSubmitted = async (
       return undefined
     }
     if (!existing || existing.attemptId !== input.attemptId) {
-      logWarn('pendingSubmissions/upgrade', new Error('refused upgrade of a reservation this attempt does not own'))
+      logWarn('pendingSubmissions/upgrade', new Error(`refused upgrade of a reservation this attempt does not own (${describeUpgradeId(input)})`))
       return undefined
     }
-    const record: SubmittedPendingSubmission = {
-      phase: 'submitted',
-      kind: input.kind,
-      hash: input.hash,
+    const base = {
       chainId: input.chainId,
       owner,
       completesPlan: input.completesPlan,
@@ -446,14 +674,42 @@ export const upgradePendingSubmissionToSubmitted = async (
       submittedAt: Date.now(),
       attemptId: input.attemptId,
     }
+    const record: SubmittedPendingSubmission | SubmittedCowOrderPendingSubmission
+      = input.kind === 'cow-order'
+        ? { phase: 'submitted', kind: 'cow-order', orderUid: input.orderUid, orderbookUrl: input.orderbookUrl, ...base }
+        : { phase: 'submitted', kind: input.kind, hash: input.hash, ...base }
+    let writeError: unknown
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        writePendingSubmission(flow, record)
+        return record
+      }
+      catch (err) {
+        writeError = err
+        logWarn('pendingSubmissions/upgrade', err)
+      }
+    }
+    // Preserve the observed id in the most durable form still available. The
+    // armed rewrite is same-size-or-smaller than the padded reservation, so a
+    // quota-bound storage that accepted the arm accepts this; even when it
+    // does not, the in-realm copy written on its failure path keeps blocking
+    // this realm's hashless release.
+    const preservedBase: ArmedPendingSubmission = existing.phase === 'armed'
+      ? existing
+      : { phase: 'armed', ...base }
+    const observedId: PendingSubmissionObservedId = input.kind === 'cow-order'
+      ? { kind: 'cow-order', orderUid: input.orderUid, orderbookUrl: input.orderbookUrl }
+      : { kind: input.kind, hash: input.hash }
     try {
-      writePendingSubmission(flow, record)
+      writePendingSubmission(flow, { ...preservedBase, observedId })
     }
     catch (err) {
       logWarn('pendingSubmissions/upgrade', err)
-      return undefined
     }
-    return record
+    throw new PendingSubmissionStorageError(
+      `The wallet accepted ${describeUpgradeId(input)}, but replay protection could not durably record its id. Do not retry — verify this submission's outcome before sending anything new.`,
+      writeError === undefined ? undefined : { cause: writeError },
+    )
   })
 }
 
@@ -492,6 +748,7 @@ const sameSubmissionRecord = (a: PendingSubmissionRecord, b: PendingSubmissionRe
   && a.submittedAt === b.submittedAt
   && a.attemptId === b.attemptId
   && a.hash === b.hash
+  && a.orderUid === b.orderUid
 
 /**
  * Remove a record after reconciliation reached a terminal verdict. With
@@ -549,15 +806,81 @@ export const releaseUnverifiablePendingSubmission = async (
     const key = storageKey(flow, normalizedOwner, chainId)
     const raw = readRaw(key)
     if (raw === null) return false
-    const record = parseRecord(raw)
-    if (record?.phase === 'submitted') {
+    // A submission id may have been observed even when the durable record
+    // does not show it (the submitted rewrite failed and left the id only on
+    // this realm's in-memory copy) — check both sources before treating the
+    // record as hashless.
+    const identifiedSubmission = [raw, memoryFallback.get(key)].some((source) => {
+      if (source === undefined) return false
+      const record = parseRecord(source)
+      return record?.phase === 'submitted' || record?.observedId !== undefined
+    })
+    if (identifiedSubmission) {
       throw new Error('This submission has a transaction id and may still confirm on-chain — it is verified automatically and cannot be dismissed. Wait a moment and try again.')
     }
-    // Armed or corrupt: no id will ever arrive, so only the user's own wallet
-    // check can rule acceptance out.
+    // Armed or corrupt with no observed id: no id will ever arrive, so only
+    // the user's own wallet check can rule acceptance out.
     removeRaw(key)
     return true
   })
+}
+
+export interface ReleasableArmedSubmission {
+  readonly flow: PendingSubmissionFlow
+  readonly chainId: number
+  readonly owner: Address
+  /** 'corrupt' entries block attempts but cannot be parsed into a record. */
+  readonly state: 'armed' | 'corrupt'
+  readonly record?: ArmedPendingSubmission
+}
+
+/**
+ * Every stuck record that only a user-acknowledged manual release can clear:
+ * armed records whose owning attempt is no longer live in this realm, plus
+ * corrupt entries. Records that carry a verifiable id (submitted, or armed
+ * with an observed id) are excluded — they resolve objectively and must never
+ * be offered for dismissal.
+ */
+export const listReleasableArmedSubmissions = (
+  flows: readonly PendingSubmissionFlow[],
+): ReleasableArmedSubmission[] => {
+  const entries: ReleasableArmedSubmission[] = []
+  for (const flow of flows) {
+    const prefix = pendingSubmissionStorageKeyPrefix(flow)
+    for (const key of listRawKeys(prefix)) {
+      const suffix = key.slice(prefix.length)
+      const separator = suffix.indexOf(':')
+      if (separator <= 0) continue
+      const chainId = Number(suffix.slice(0, separator))
+      if (!Number.isInteger(chainId) || chainId <= 0) continue
+      let owner: Address
+      try {
+        owner = getAddress(suffix.slice(separator + 1))
+      }
+      catch {
+        continue
+      }
+      let raw: string | null
+      try {
+        raw = readRaw(key)
+      }
+      catch {
+        // Storage itself is unreadable — a release could not verify what it
+        // removes, so nothing is offered.
+        continue
+      }
+      if (raw === null) continue
+      const record = parseRecord(raw)
+      if (!record || record.owner !== owner || record.chainId !== chainId) {
+        entries.push({ flow, chainId, owner, state: 'corrupt' })
+        continue
+      }
+      if (record.phase !== 'armed' || record.observedId !== undefined) continue
+      if (isSubmissionAttemptActive(record.attemptId)) continue
+      entries.push({ flow, chainId, owner, state: 'armed', record })
+    }
+  }
+  return entries
 }
 
 /**
@@ -595,11 +918,14 @@ export const walletNeverAcceptedSubmission = (error: unknown): boolean => {
  *
  * Fails toward 'unknown': only a definitive receipt (landed) or a definitive
  * negative signal (transaction unknown to the node / Safe reports cancelled
- * or failed) produces a terminal verdict. 'unknown' must keep the record and
- * block re-execution of the same plan. An 'armed' record has no id to look
+ * or failed / orderbook reports the order cancelled or expired) produces a
+ * terminal verdict. 'unknown' must keep the record and block re-execution of
+ * the same plan. An 'armed' record without an observed id has nothing to look
  * up, so it is always 'unknown' — it is released by the attempt that armed it
  * (rejection or confirmation) or by an explicit user-acknowledged manual
- * release after the wallet was checked.
+ * release after the wallet was checked. An armed record that does carry an
+ * observed id (the submitted rewrite failed after the wallet returned the id)
+ * is verified through that id exactly like a submitted record.
  */
 export const resolvePendingSubmissionOutcome = async (
   record: PendingSubmissionRecord,
@@ -610,13 +936,45 @@ export const resolvePendingSubmissionOutcome = async (
     safeStatusTimeoutMs?: number
   },
 ): Promise<PendingSubmissionOutcome> => {
-  if (record.phase === 'armed') return 'unknown'
+  const verifiable: PendingSubmissionObservedId | undefined = record.phase === 'armed'
+    ? record.observedId
+    : record.kind === 'cow-order'
+      ? { kind: 'cow-order', orderUid: record.orderUid, orderbookUrl: record.orderbookUrl }
+      : { kind: record.kind, hash: record.hash }
+  if (!verifiable) return 'unknown'
+
+  if (verifiable.kind === 'cow-order') {
+    try {
+      // Loaded lazily so quarantine consumers that never touch CoW do not pull
+      // the orderbook client into their module graph.
+      const { fetchCowSwapOrderStatus } = await import('~/entities/cowswap')
+      const status = await fetchCowSwapOrderStatus({
+        orderUid: verifiable.orderUid,
+        chainId: record.chainId,
+        orderbookUrl: verifiable.orderbookUrl,
+      })
+      if (status.terminal) {
+        // Terminal: traded/fulfilled means the swap settled on-chain;
+        // cancelled/expired means it never can.
+        return status.type === 'cancelled' || status.type === 'expired' ? 'not-landed' : 'landed'
+      }
+      // Open/scheduled/executing/…: the signed order is live and can still
+      // settle at any moment (bounded by its deadline) — keep quarantining.
+      return 'unknown'
+    }
+    catch {
+      // Orderbook unreachable or the uid is unknown to it — an order signed
+      // and possibly accepted elsewhere cannot be ruled out.
+      return 'unknown'
+    }
+  }
+
   const { provider } = options
   if (!provider) return 'unknown'
 
-  if (record.kind === 'transaction') {
+  if (verifiable.kind === 'transaction') {
     try {
-      const receipt = await provider.getTransactionReceipt({ hash: record.hash })
+      const receipt = await provider.getTransactionReceipt({ hash: verifiable.hash })
       return receipt.status === 'success' ? 'landed' : 'not-landed'
     }
     catch {
@@ -638,7 +996,7 @@ export const resolvePendingSubmissionOutcome = async (
   if (!walletProvider) return 'unknown'
   try {
     const execution = await waitForSafeTransactionExecution({
-      submittedHash: record.hash,
+      submittedHash: verifiable.hash,
       walletProvider,
       publicClient: provider,
       timeoutMs: options.safeStatusTimeoutMs ?? 15_000,

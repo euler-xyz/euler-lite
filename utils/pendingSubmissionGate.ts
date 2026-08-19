@@ -38,9 +38,18 @@ export const registerLandedBatchSubmissionHandler = (handler: LandedBatchSubmiss
   landedBatchSubmissionHandler = handler
 }
 
+const flowLabel = (flow: PendingSubmissionFlow) =>
+  flow === 'batch'
+    ? 'batch'
+    : flow === 'direct'
+      ? 'transaction'
+      : flow === 'cow-order'
+        ? 'CoW Swap order'
+        : 'migration'
+
 const conflictingSubmissionError = (flow: PendingSubmissionFlow, record: PendingSubmissionRecord) => {
-  const label = flow === 'batch' ? 'batch' : flow === 'direct' ? 'transaction' : 'migration'
-  if (record.phase === 'armed') {
+  const label = flowLabel(flow)
+  if (record.phase === 'armed' && !record.observedId) {
     return new Error(`A previous ${label} submission was handed to the wallet but no transaction id came back, so it cannot be verified automatically. Check the wallet's pending activity and let it resolve before sending new transactions.`)
   }
   return new Error(`A previous ${label} submission from this wallet may still confirm on-chain and could not be verified yet. Wait a moment and try again — it is re-checked before anything new is sent.`)
@@ -83,6 +92,10 @@ export const assertNoConflictingPendingSubmission = async (input: {
       // No cart is alive to retire the covered entries — keep the record so
       // the cart reconciles it when it next runs.
       throw new Error('A previous batch submission confirmed on-chain. Open the batch cart to reconcile it before sending new transactions.')
+    }
+    if (flow === 'cow-order') {
+      await clearPendingSubmission(flow, record.owner, record.chainId, { ifMatches: record })
+      throw new Error('A previous CoW Swap order from this wallet was executed. Review your positions before continuing — on-chain state changed since this action was prepared.')
     }
     await clearPendingSubmission(flow, record.owner, record.chainId, { ifMatches: record })
     throw new Error(`A previous ${flow === 'direct' ? 'transaction' : 'migration'} submission from this wallet confirmed on-chain. Review your positions before continuing — on-chain state changed since this action was prepared.`)

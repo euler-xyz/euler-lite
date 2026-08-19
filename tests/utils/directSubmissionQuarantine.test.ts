@@ -7,6 +7,7 @@ import {
   PENDING_SUBMISSION_UNRESOLVED_ERROR,
 } from '~/utils/directSubmissionQuarantine'
 import {
+  listReleasableArmedSubmissions,
   PendingSubmissionConflictError,
   PendingSubmissionStorageError,
   readPendingSubmission,
@@ -443,6 +444,49 @@ describe('reconcileBeforeAttempt', () => {
       chainId: 1,
       provider: { getTransactionReceipt: vi.fn() } as never,
     })).rejects.toThrow(PENDING_SUBMISSION_ARMED_ERROR)
+  })
+})
+
+describe('attempt liveness registry', () => {
+  it('keeps an armed record off the recovery list while its attempt is live', async () => {
+    const quarantine = createQuarantine()
+    quarantine.begin({ owner: OWNER, chainId: 1 })
+    await quarantine.track(armed())
+
+    // The executor is still mid-flight: its own resolution path owns the
+    // record, and the recovery UI must not offer to dismiss it.
+    expect(listReleasableArmedSubmissions(['outgoing-migration'])).toEqual([])
+  })
+
+  it('surfaces the armed record to the recovery list once the attempt ended', async () => {
+    const quarantine = createQuarantine()
+    quarantine.begin({ owner: OWNER, chainId: 1 })
+    await quarantine.track(armed())
+    quarantine.end()
+
+    // The attempt settled without an id and without a provable rejection —
+    // exactly the orphaned state only the manual, risk-labelled path resolves.
+    expect(listReleasableArmedSubmissions(['outgoing-migration'])).toEqual([
+      expect.objectContaining({
+        flow: 'outgoing-migration',
+        chainId: 1,
+        owner: OWNER,
+        state: 'armed',
+      }),
+    ])
+  })
+
+  it('keeps reporting the sealed failure after end, and end stays idempotent', async () => {
+    const quarantine = createQuarantine()
+    quarantine.begin({ owner: OWNER, chainId: 1 })
+    await quarantine.track(armed())
+    quarantine.end()
+    quarantine.end()
+
+    // Late error handling (sealFailure runs in a catch after the finally
+    // that ended the attempt) still sees the quarantined broadcast.
+    expect(quarantine.sealFailure()).toBe(true)
+    expect(listReleasableArmedSubmissions(['outgoing-migration'])).toHaveLength(1)
   })
 })
 

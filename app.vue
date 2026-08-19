@@ -208,6 +208,10 @@ onUnmounted(() => {
   >
     <SpyModeBanner />
     <TheHeader v-if="isHeaderVisible" />
+    <!-- Manual recovery for armed submission records orphaned by a reload
+         before the wallet answered — they block every send for the wallet
+         until dismissed after the user checked the wallet itself. -->
+    <PendingSubmissionRecovery />
   </div>
   <main>
     <section

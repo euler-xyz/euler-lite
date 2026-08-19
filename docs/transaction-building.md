@@ -69,6 +69,8 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, chain 
 
 The review modal is fail-closed: if preparation does not produce a plan, it shows an error and disables confirmation.
 
+Prepared plans are additionally stamped at preparation time with the reviewing connector session and its Safe/EOA classification. Execution refuses a prepared envelope when the live connector session or wallet classification no longer matches the review (including attempting to execute an EOA-reviewed plan through a Safe ceremony) and asks the user to review again. Replay protection for value-moving submissions — durable armed/submitted records per flow, wallet, and chain, with cross-surface gating — is documented in `docs/batch-review-modal-handoff.md` ("Submitted but unconfirmed").
+
 ## Approvals and Permit2
 
 Plans may include `requiredApproval` items. During review and execution, `resolveRequiredApprovals` resolves each approval to either:

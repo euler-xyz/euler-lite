@@ -7,9 +7,11 @@ import {
   clearPendingSubmission,
   createPendingSubmissionAttemptId,
   readPendingSubmission,
+  registerActiveSubmissionAttempt,
   releasePendingSubmission,
   releaseUnverifiablePendingSubmission,
   resolvePendingSubmissionOutcome,
+  unregisterActiveSubmissionAttempt,
   upgradePendingSubmissionToSubmitted,
   type PendingSubmissionFlow,
 } from '~/utils/pendingSubmissions'
@@ -95,14 +97,31 @@ export const createDirectSubmissionQuarantine = (options: {
     return record.completesPlan ? 'landed' : 'landed-partial'
   }
 
-  /** Arm tracking for one attempt. Must run before any wallet action. */
+  /**
+   * Arm tracking for one attempt. Must run before any wallet action. The
+   * attempt id registers as live so the recovery UI never offers this
+   * attempt's own armed record for dismissal while it is still running —
+   * callers must pair every begin with `end()` in a finally.
+   */
   const begin = (input: { owner: Address, chainId: number }) => {
+    if (attempt) unregisterActiveSubmissionAttempt(attempt.attemptId)
     attempt = {
       owner: getAddress(input.owner),
       chainId: input.chainId,
       attemptId: createPendingSubmissionAttemptId(),
     }
+    registerActiveSubmissionAttempt(attempt.attemptId)
     unconfirmed = undefined
+  }
+
+  /**
+   * The attempt is over (success or failure): whatever record it left behind
+   * is now orphaned from any live execution, so the recovery UI may list it
+   * if it is armed with no observed id. Idempotent; keeps `attempt` so a
+   * late `sealFailure` still reports correctly.
+   */
+  const end = () => {
+    if (attempt) unregisterActiveSubmissionAttempt(attempt.attemptId)
   }
 
   /**
@@ -176,5 +195,5 @@ export const createDirectSubmissionQuarantine = (options: {
       userConfirmedWalletShowsNoPendingSubmission: true,
     })
 
-  return { reconcileBeforeAttempt, begin, track, sealFailure, releaseArmedAfterManualCheck }
+  return { reconcileBeforeAttempt, begin, end, track, sealFailure, releaseArmedAfterManualCheck }
 }

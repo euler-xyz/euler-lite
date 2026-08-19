@@ -3627,6 +3627,11 @@ const sendInboundExternalMigration = async (execution: TrackedExecutionScope, pr
       }
       throw executionError
     }
+    finally {
+      // The attempt is over either way — any record it left behind is now
+      // orphaned from live execution and becomes visible to manual recovery.
+      inboundMigrationQuarantine.end()
+    }
 
     await revokeAfterSuccess(revokeTxs)
     finishInboundExternalMigrationSuccess(execution, input)

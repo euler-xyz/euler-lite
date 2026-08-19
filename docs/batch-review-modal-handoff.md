@@ -222,10 +222,15 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
   by the plan step that produced it (prerequisite approval/plugin call vs. the value-moving
   batch transaction or Safe proposal). Replay protection *arms* before the value-moving
   step crosses the wallet boundary: an `armed` record is reserved atomically (check +
-  reserve serialized per wallet/chain under a Web Lock, stamped with the attempt's id)
-  and persisted durably before the wallet is invoked, upgraded to `submitted` when a
-  transaction hash or Safe proposal id comes back, and released only when the wallet
-  provably rejected the request (user rejection / connector error). Reservation writes
+  reserve serialized per wallet/chain under a Web Lock, falling back to a storage-token
+  mutex — token claimed in `localStorage`, verified after a settle delay — when the Web
+  Locks API is unavailable, so the reservation stays cross-tab-exclusive either way;
+  stamped with the attempt's id) and persisted durably before the wallet is invoked,
+  upgraded to `submitted` when a transaction hash or Safe proposal id comes back, and
+  released only when the wallet provably rejected the request (user rejection /
+  connector error). If the upgrade write fails after an id was observed, the id is
+  preserved on the armed record and the attempt aborts fail-closed — the record then
+  verifies on-chain like a `submitted` one and is never manually dismissable. Reservation writes
   are durable-or-abort: if the `localStorage` write fails or does not read back, the
   attempt aborts *before* the wallet is invoked (an in-realm memory copy still blocks
   same-session retries while storage stays broken), and an unreadable record fails
@@ -242,11 +247,20 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
   tabs), then verified on-chain — a landed submission retires its entries (or resets the
   cart when it landed mid-plan or the ceremony did not survive a reload), a
   reverted/cancelled one releases the retry, an unverifiable or still-armed one keeps
-  the quarantine and explains why. An `armed` record orphaned by a reload has no id and
-  can never verify on its own: the cart offers a risk-labelled manual release
-  (`BatchContents.vue` → `releaseArmedQuarantineAfterManualCheck`) that only applies
-  after the user confirms the wallet itself shows nothing pending, and refuses
-  `submitted` records (those are verified on-chain instead). Once the core submission's
+  the quarantine and explains why. A hydrated record only re-attaches this tab's held
+  ceremony when the record's attempt id matches the one the ceremony was captured for —
+  phase or hash alone is not identity, so a record re-armed by another tab can never
+  retire entries its submission did not cover. An `armed` record orphaned by a reload
+  has no id and can never verify on its own: the cart offers a risk-labelled manual
+  release (`BatchContents.vue` → `releaseArmedQuarantineAfterManualCheck`) that only
+  applies after the user confirms the wallet itself shows nothing pending, and refuses
+  `submitted` records (those are verified on-chain instead). For the non-batch flows
+  (direct, migrations, CoW orders) the app root renders
+  `components/PendingSubmissionRecovery.vue` (backed by
+  `composables/usePendingSubmissionRecovery.ts`), which lists the connected wallet's
+  orphaned armed records and offers the same acknowledged manual release; records whose
+  arming attempt is still live in this realm, and records carrying any verifiable id,
+  are never listed. Once the core submission's
   receipt confirmed, a later failure (for example a revoke) retires the covered entries
   instead of quarantining. The direct migration pages (`migrate.vue`, `borrow/swap.vue`)
   apply the same arming and quarantine per flow via `utils/directSubmissionQuarantine.ts`,
@@ -258,10 +272,19 @@ Execute is `UiButton variant="primary" size="xlarge" rounded` full-width.
   executor (`useCowSwapExecutionCore.ts`) runs `utils/pendingSubmissionGate.ts` before
   anything reaches a wallet, so an unresolved batch submission blocks an equivalent
   direct operation for that wallet/chain (and vice versa); a landed batch record
-  discovered from another surface is retired through a handler the cart registers. Two
-  deliberate, strictly risk-reducing bypasses: migration authorization *revokes* (they
-  run during abort cleanup — blocking them would leave live grants behind) and CoW order
-  *cancellation* (it only invalidates a standing order).
+  discovered from another surface is retired through a handler the cart registers. The
+  CoW executor additionally owns its own quarantine under the `cow-order` flow — order
+  placement arms before the order signature is requested and releases only on a
+  provable wallet refusal — and it resolves the signing account, chain, and connector
+  once at review time and pins every subsequent wallet callback to that snapshot, so a
+  wallet or chain switched mid-ceremony aborts instead of signing from the new context.
+  Prepared plan envelopes are likewise stamped at review with the reviewing connector
+  session and its Safe/EOA classification; execution refuses an envelope whose live
+  connector session or wallet classification differs from the review (including
+  re-shaping an EOA-reviewed plan into a Safe ceremony), asking the user to review
+  again. Two deliberate, strictly risk-reducing bypasses: migration authorization
+  *revokes* (they run during abort cleanup — blocking them would leave live grants
+  behind) and CoW order *cancellation* (it only invalidates a standing order).
 
 ## Accessibility
 - Row header is a real `<button>`; expose `aria-expanded` bound to the open state and
