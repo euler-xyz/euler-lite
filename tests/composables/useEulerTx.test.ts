@@ -144,6 +144,32 @@ describe('useEulerTx migration authorization cleanup', () => {
     expect(wagmiMocks.signTypedDataAsync).not.toHaveBeenCalled()
   })
 
+  it('signs through the connector that passed the context check, not the live one', async () => {
+    const reviewedConnector = { id: 'io.metamask', name: 'MetaMask' }
+    const swappedConnector = { id: 'io.rabby', name: 'Rabby' }
+    let activeConnector: unknown = reviewedConnector
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: activeConnector,
+    }) as never)
+    wagmiMocks.signTypedDataAsync.mockResolvedValue(`0x${'ab'.repeat(65)}`)
+    const { signMigrationAuthorization } = useEulerTx()
+
+    await signMigrationAuthorization(typedAuthorizationRequest, {
+      // A connector switch in the check-to-sign gap: the swapped connector
+      // was never validated and must not receive the signature request.
+      beforeSignature: () => {
+        activeConnector = swappedConnector
+      },
+    })
+
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ connector: reviewedConnector }),
+    )
+  })
+
   it('prepares the transaction plan with the caller-pinned signature mode', async () => {
     const prepare = vi.fn().mockResolvedValue({ kind: 'prepared' })
     vi.mocked(getEulerSdkForChain).mockResolvedValue({
@@ -204,6 +230,46 @@ describe('useEulerTx migration authorization cleanup', () => {
     await expect(executePreparedPlan(prepared))
       .rejects.toMatchObject({ name: WalletExecutionContextChangedError.name, kind: 'account' })
     expect(wagmiMocks.sendTransactionAsync).not.toHaveBeenCalled()
+  })
+
+  it('pins mid-plan typed-data signatures to the connector captured at execution start', async () => {
+    const reviewedConnector = { id: 'io.metamask', name: 'MetaMask' }
+    const swappedConnector = { id: 'io.rabby', name: 'Rabby' }
+    let activeConnector: unknown = reviewedConnector
+    vi.mocked(getAccount).mockImplementation(() => ({
+      address: currentAccount,
+      chainId: currentChainId,
+      connector: activeConnector,
+    }) as never)
+    wagmiMocks.signTypedDataAsync.mockResolvedValue(`0x${'ab'.repeat(65)}`)
+    const executePreparedTransactionPlan = vi.fn(async ({ signTypedData }: {
+      signTypedData: (typedData: unknown) => Promise<Hex>
+    }) => {
+      // The wallet switches connectors while the executor is mid-plan; the
+      // permit signature must still go to the connector that was validated.
+      activeConnector = swappedConnector
+      await signTypedData({ domain: {}, types: {}, primaryType: 'PermitSingle', message: {} })
+      return { receipts: [] }
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({
+      providerService: { getProvider: vi.fn(() => ({ waitForTransactionReceipt: vi.fn() })) },
+      executionService: { executePreparedTransactionPlan },
+    } as never)
+    const { executePreparedPlan } = useEulerTx()
+
+    await executePreparedPlan({
+      __prepared: true,
+      plan: [],
+      chainId: 1,
+      account: OWNER,
+      usePermit2: true,
+      unlimitedApproval: false,
+    } as TransactionPlanPrepared)
+
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledTimes(1)
+    expect(wagmiMocks.signTypedDataAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ connector: reviewedConnector }),
+    )
   })
 
   it('runs the caller freshness guard after async setup and before a plain broadcast', async () => {

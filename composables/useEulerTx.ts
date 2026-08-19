@@ -1040,7 +1040,14 @@ export const useEulerTx = () => {
       currentChainId: currentAccount.chainId,
     })
     options?.beforeSignature?.()
-    const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+    // Pin the signature request to the connector that just passed the wallet
+    // context check. Without it wagmi resolves the currently-active connector
+    // at request time, so a connector switched in the check-to-sign gap would
+    // receive the request despite never being validated.
+    const signature = await signTypedDataAsync({
+      ...(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+      ...(currentAccount.connector ? { connector: currentAccount.connector } : {}),
+    })
     const postMigrationAuthorization = request.postMigrationAuthorization
       ? await signMigrationAuthorization(request.postMigrationAuthorization, options)
       : undefined
@@ -1632,7 +1639,12 @@ export const useEulerTx = () => {
       usePermit2: isKnownSafe ? false : signaturesEnabled.value,
       sendTransaction,
       signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        // Same pinning as sendTransaction: sign through the captured
+        // connector, never the currently-active one.
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          ...(connector ? { connector } : {}),
+        })
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},
@@ -1744,7 +1756,12 @@ export const useEulerTx = () => {
       sendTransaction,
       signTypedData: async (typedData) => {
         options?.beforeBroadcast?.()
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
+        // Same pinning as sendTransaction: sign through the captured
+        // connector, never the currently-active one.
+        const signature = await signTypedDataAsync({
+          ...(typedData as unknown as Parameters<typeof signTypedDataAsync>[0]),
+          ...(connector ? { connector } : {}),
+        })
         return signature as Hex
       },
       onProgress: (_progress: TransactionPlanExecutionProgress) => {},

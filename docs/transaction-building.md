@@ -64,7 +64,7 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and ch
 3. The review modal prepares the plan with `prepareTransactionPlan(plan)` (unless the caller passes a pre-prepared envelope), which calls `sdk.executionService.prepareTransactionPlan(...)`.
 4. The review modal renders the prepared plan via `utils/stepDecoding.ts`.
 5. Confirming calls the workflow callback, which executes the plan through `executePlan(plan)`.
-6. `executePlan` calls `sdk.executionService.executeTransactionPlan(...)`, forwards wagmi `sendTransaction` / `signTypedData` callbacks, and refreshes portfolio state after receipts.
+6. `executePlan` calls `sdk.executionService.executeTransactionPlan(...)`, forwards wagmi `sendTransaction` / `signTypedData` callbacks, and refreshes portfolio state after receipts. Both callbacks are pinned to the connector captured when execution's wallet-context check passed (as is `signMigrationAuthorization`) — a connector switched mid-plan never receives a broadcast or signature request it was not validated for.
 
 Plan transformation (terms-of-use signing, Keyring credential injection) runs inside the SDK plugin pipeline on each of these paths — see Operation Guards below.
 
