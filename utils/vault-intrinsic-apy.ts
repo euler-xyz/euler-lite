@@ -6,6 +6,12 @@ export interface VaultWithIntrinsicApy {
   intrinsicApy?: IntrinsicApyInfo
 }
 
+export function resolveVaultIntrinsicApySource(
+  ...vaults: Array<VaultWithIntrinsicApy | undefined>
+): VaultWithIntrinsicApy | undefined {
+  return vaults.find(vault => vault !== undefined)
+}
+
 export function getVaultIntrinsicApyInfo(
   vault: VaultWithIntrinsicApy | undefined,
   enabled: boolean,
