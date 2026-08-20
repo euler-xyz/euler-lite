@@ -21,10 +21,12 @@ vi.mock('~/server/utils/logger', () => ({
   },
 }))
 
-const handler = (await import('~/server/api/internal/screen-address.post')).default
+const internalHandler = (await import('~/server/api/internal/screen-address.post')).default
+const publicHandler = (await import('~/server/api/public/screen-address.post')).default
 
 const USER = '0x0000000000000000000000000000000000000001'
-const SCREENING_URI = 'https://trm.example/screen'
+const SCREENING_URI = 'https://v3.example/v3/compliance/address-screening'
+const SCREENING_API_KEY = 'test-restricted-key'
 
 function makeEvent(body: unknown, headers: Record<string, string | string[] | undefined> = {}): H3Event {
   return {
@@ -41,56 +43,125 @@ function makeEvent(body: unknown, headers: Record<string, string | string[] | un
   } as unknown as H3Event
 }
 
-describe('POST /api/internal/screen-address', () => {
+function stubScreeningEnv(): void {
+  process.env.ADDRESS_SCREENING_URI = SCREENING_URI
+  process.env.ADDRESS_SCREENING_API_KEY = SCREENING_API_KEY
+}
+
+const handlers = [
+  ['internal', internalHandler],
+  ['public', publicHandler],
+] as const
+
+describe.each(handlers)('POST screen-address (%s route)', (_name, handler) => {
   afterEach(() => {
-    delete process.env.WALLET_SCREENING_URI
+    delete process.env.ADDRESS_SCREENING_URI
+    delete process.env.ADDRESS_SCREENING_API_KEY
     vi.unstubAllGlobals()
     vi.clearAllMocks()
   })
 
   it('allows only an explicit false upstream verdict', async () => {
-    process.env.WALLET_SCREENING_URI = SCREENING_URI
+    stubScreeningEnv()
     vi.stubGlobal('fetch', vi.fn(async () =>
-      new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 }),
+      new Response(JSON.stringify({ data: { addressIsSuspicious: false } }), { status: 200 }),
     ))
 
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
   })
 
   it('fails closed for malformed successful upstream verdicts', async () => {
-    process.env.WALLET_SCREENING_URI = SCREENING_URI
+    stubScreeningEnv()
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ addressIsSuspicious: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { addressIsSuspicious: null } }), { status: 200 }))
+      // Legacy flat shape (pre-data-v3 lambda) must no longer pass.
+      .mockResolvedValueOnce(new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 }))
 
     vi.stubGlobal('fetch', fetchMock)
 
+    for (let i = 0; i < 4; i++) {
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    }
+  })
+
+  it('fails closed when the URI or API key is not configured', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    process.env.ADDRESS_SCREENING_URI = SCREENING_URI
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+
+    delete process.env.ADDRESS_SCREENING_URI
+    process.env.ADDRESS_SCREENING_API_KEY = SCREENING_API_KEY
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed on upstream errors, non-ok statuses, and timeouts', async () => {
+    stubScreeningEnv()
+    const abortError = new DOMException('aborted', 'AbortError')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 401 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 429 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 503 }))
+      .mockRejectedValueOnce(abortError)
+      .mockRejectedValueOnce(new Error('network down'))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    for (let i = 0; i < 5; i++) {
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    }
+  })
+
+  it('sends the API key header and omits chain from the upstream body', async () => {
+    stubScreeningEnv()
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ data: { addressIsSuspicious: false } }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await handler(makeEvent({ address: USER }))
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(SCREENING_URI)
+    expect((init?.headers as Record<string, string>)['X-API-Key']).toBe(SCREENING_API_KEY)
+    expect(JSON.parse(String(init?.body))).toEqual({ address: USER, vpnIsUsed: false })
+  })
+
+  it('rejects invalid addresses without calling upstream', async () => {
+    stubScreeningEnv()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(handler(makeEvent({ address: 'not-an-address' }))).rejects.toMatchObject({ statusCode: 400 })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('hashes suspicious addresses in logs', async () => {
-    process.env.WALLET_SCREENING_URI = SCREENING_URI
+    stubScreeningEnv()
     vi.stubGlobal('fetch', vi.fn(async () =>
-      new Response(JSON.stringify({ addressIsSuspicious: true }), { status: 200 }),
+      new Response(JSON.stringify({ data: { addressIsSuspicious: true } }), { status: 200 }),
     ))
 
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
 
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        ctx: 'screen-address',
         addressHash: expect.any(String),
       }),
-      'flagged, malformed, or ambiguous TRM response — failing closed',
+      'flagged, malformed, or ambiguous screening response — failing closed',
     )
     expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(USER)
   })
 
-  it('derives vpnIsUsed from trusted request headers', async () => {
-    process.env.WALLET_SCREENING_URI = SCREENING_URI
+  it('derives vpnIsUsed from trusted request headers, never the body', async () => {
+    stubScreeningEnv()
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-      new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 }),
+      new Response(JSON.stringify({ data: { addressIsSuspicious: false } }), { status: 200 }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -115,10 +186,9 @@ describe('POST /api/internal/screen-address', () => {
       {},
     ))
 
-    const bodies = fetchMock.mock.calls.map((call) => {
-      const init = call[1]
-      return JSON.parse(String(init?.body)) as { vpnIsUsed: string }
-    })
-    expect(bodies.map(body => body.vpnIsUsed)).toEqual(['true', 'true', 'true', 'true', 'false'])
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      JSON.parse(String(init?.body)) as { vpnIsUsed: boolean },
+    )
+    expect(bodies.map(body => body.vpnIsUsed)).toEqual([true, true, true, true, false])
   })
 })

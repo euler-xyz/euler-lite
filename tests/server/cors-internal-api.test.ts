@@ -85,6 +85,70 @@ describe('cors internal API boundary', () => {
     expect(event.headers['X-API-Stability']).toBeUndefined()
   })
 
+  it('allows the public screening endpoint from *.euler.finance origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+
+    for (const origin of ['https://create.euler.finance', 'https://redemptions.euler.finance', 'https://maglev.euler.finance', 'https://euler.finance']) {
+      const event = makeEvent('/api/public/screen-address', { origin }, 'POST')
+      expect(handler(event)).toBeUndefined()
+      expect(event.headers['Access-Control-Allow-Origin']).toBe(origin)
+      expect(event.headers['Access-Control-Allow-Methods']).toBe('POST, OPTIONS')
+      expect(event.headers['X-API-Stability']).toBeUndefined()
+    }
+  })
+
+  it('allows the public screening endpoint from configured CORS origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('CORS_ALLOWED_ORIGINS', 'https://preview.example')
+    const handler = await loadHandler()
+    const event = makeEvent('/api/public/screen-address', { origin: 'https://preview.example' }, 'POST')
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['Access-Control-Allow-Origin']).toBe('https://preview.example')
+  })
+
+  it('rejects the public screening endpoint for lookalike and non-https origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+
+    for (const origin of [
+      'https://evil-euler.finance',
+      'https://euler.finance.evil.com',
+      'https://xeuler.finance',
+      'http://create.euler.finance',
+      'null',
+    ]) {
+      try {
+        handler(makeEvent('/api/public/screen-address', { origin }, 'POST'))
+        throw new Error(`Expected origin to be rejected: ${origin}`)
+      }
+      catch (err) {
+        expect(err).toMatchObject({ statusCode: 403, statusMessage: 'Origin not allowed' })
+      }
+    }
+  })
+
+  it('allows no-Origin requests to the public screening endpoint', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+    const event = makeEvent('/api/public/screen-address', {}, 'POST')
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['Access-Control-Allow-Origin']).toBeUndefined()
+    expect(event.headers['Access-Control-Allow-Methods']).toBe('POST, OPTIONS')
+  })
+
+  it('keeps wildcard CORS for other public endpoints untouched by the screening exception', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+    const event = makeEvent('/api/public/is-known', { origin: 'https://third-party.example' })
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['Access-Control-Allow-Origin']).toBe('*')
+    expect(event.headers['Access-Control-Allow-Methods']).toBe('GET, OPTIONS')
+  })
+
   it('marks internal API responses as unstable for allowed app origins', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     vi.stubEnv('CORS_ALLOWED_ORIGINS', 'https://app.example')

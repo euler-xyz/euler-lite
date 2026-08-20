@@ -40,6 +40,28 @@ function parseAllowedOrigins(): Set<string> {
 }
 
 let allowedOrigins: Set<string> | null = null
+
+// /api/public/screen-address is browser-callable from first-party Euler
+// origins only. Unlike the rest of /api/public/, every call triggers an
+// upstream request against the quota'd compliance API, so the ACAO echo is
+// limited to *.euler.finance instead of `*`, and disallowed origins are
+// rejected outright. Configured origins (CORS_ALLOWED_ORIGINS / dev
+// localhost) are accepted too so local and preview builds keep working.
+const SCREENING_PUBLIC_PATH = '/api/public/screen-address'
+
+function isEulerFinanceOrigin(origin: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(origin)
+    if (protocol !== 'https:') {
+      return false
+    }
+    return hostname === 'euler.finance' || hostname.endsWith('.euler.finance')
+  }
+  catch {
+    return false
+  }
+}
+
 const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
 
 // The cookie is an advisory first-party marker, not a security boundary:
@@ -153,8 +175,21 @@ export default defineEventHandler((event) => {
 
   // Endpoints under /api/public/ are intentionally public.
   if (url.pathname.startsWith('/api/public/')) {
-    setResponseHeader(event, 'Access-Control-Allow-Origin', '*')
-    setResponseHeader(event, 'Access-Control-Allow-Methods', 'GET, OPTIONS')
+    if (url.pathname === SCREENING_PUBLIC_PATH) {
+      const origin = event.node.req.headers.origin
+      if (origin && (allowedOrigins.has(origin) || isEulerFinanceOrigin(origin))) {
+        setResponseHeader(event, 'Access-Control-Allow-Origin', origin)
+      }
+      else if (origin) {
+        logger.warn({ ctx: 'cors', origin }, 'rejected screening origin outside *.euler.finance')
+        throw createError({ statusCode: 403, statusMessage: 'Origin not allowed' })
+      }
+      setResponseHeader(event, 'Access-Control-Allow-Methods', 'POST, OPTIONS')
+    }
+    else {
+      setResponseHeader(event, 'Access-Control-Allow-Origin', '*')
+      setResponseHeader(event, 'Access-Control-Allow-Methods', 'GET, OPTIONS')
+    }
     setResponseHeader(event, 'Access-Control-Allow-Headers', 'Content-Type')
     if (event.node.req.method === 'OPTIONS') {
       setResponseHeader(event, 'Access-Control-Max-Age', 86400)

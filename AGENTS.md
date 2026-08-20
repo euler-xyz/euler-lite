@@ -104,7 +104,7 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   branches (e.g. the client-error log endpoint has been removed on `development` to keep browser
   diagnostics local) — treat the `server/api/internal/` directory + `docs/architecture.md` as the
   authoritative inventory, especially when auditing CSP / `connect-src`.
-- **Public routes** (`server/api/public/`): `is-known`, `metadata` (documented in `docs/public-api.md`).
+- **Public routes** (`server/api/public/`): `is-known`, `metadata`, `screen-address` (documented in `docs/public-api.md`; `screen-address` is origin-restricted to `*.euler.finance`).
 - **Server middleware:** `geo-gate.ts` (451 for sanctioned countries via Cloudflare `CF-IPCountry`;
   set `DEV_GEO_COUNTRY` locally since there's no CF header), `cors.ts`, `security-headers.ts`,
   `body-limit.ts`, `ensure-vault.ts`.

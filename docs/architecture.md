@@ -357,7 +357,7 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
 
-**Wallet screening fail-closed**: `server/api/internal/screen-address.post.ts` proxies address checks to the TRM API (configured via `WALLET_SCREENING_URI`). If the env var is not set, or the TRM API returns an error or times out, the endpoint returns `addressIsSuspicious: true` — the app fails closed rather than open. Operators must set `WALLET_SCREENING_URI` or all users will be treated as suspicious.
+**Wallet screening fail-closed**: `server/api/internal/screen-address.post.ts` proxies address checks to the data-v3 compliance API (configured via `ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`; the shared upstream logic lives in `server/utils/screening.ts`). If either env var is not set, or the upstream returns an error, times out, or answers anything other than an explicit `data.addressIsSuspicious: false`, the endpoint returns `addressIsSuspicious: true` — the app fails closed rather than open. Operators must set both vars or all users will be treated as suspicious. `server/api/public/screen-address.post.ts` exposes the same check to first-party `*.euler.finance` SPAs that have no server of their own (see `docs/public-api.md`).
 
 **Important**: This is a best-effort safeguard, not a security boundary. It catches accidental abuse (e.g. a client stuck in a retry loop) but will not stop a determined attacker. Known limitations:
 
