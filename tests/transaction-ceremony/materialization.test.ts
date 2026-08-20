@@ -90,14 +90,15 @@ describe('prepared plan materialization', () => {
       ...sdk,
       executionService: {
         ...sdk.executionService,
-        materializeExecution: ({ prepared, inputs }: {
+        materializeExecution({ prepared, inputs }: {
           prepared: { plan: TransactionPlan, chainId: number, account: typeof ACCOUNT }
           inputs: { evcAddress: typeof EVC }
-        }) => {
+        }) {
           calls += 1
+          expect(this.encodeBatch).toBe(sdk.executionService.encodeBatch)
           const item = prepared.plan[0]
           if (item?.type !== 'evcBatch') throw new Error('expected EVC batch')
-          const data = sdk.executionService.encodeBatch(item.items as EVCBatchItem[])
+          const data = this.encodeBatch(item.items as EVCBatchItem[])
           return {
             requests: [{ requestIndex: 0, sourcePlanItemIndex: 0, chainId: prepared.chainId, from: prepared.account, to: inputs.evcAddress, data, value: 0n }],
             signatureSlots: [],

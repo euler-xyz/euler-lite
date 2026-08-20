@@ -109,7 +109,7 @@ const {
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
-const { open: openCeremonyReview, openEagerPlan: openEagerCeremonyReview } = useCeremonyReview()
+const { open: openCeremonyReview } = useCeremonyReview()
 const { create: createIntent } = useOperationIntentFactory()
 const { createMigrationIntent } = useMigrationIntentFactory()
 const { signaturesEnabled } = useSignaturePreference()
@@ -1052,6 +1052,30 @@ const buildRefinancePlan = async (
   return planRefinancePosition(input)
 }
 
+const createRefinanceIntent = (
+  input: Omit<PlanRefinancePositionInput, 'account'>,
+  source: string,
+) => createIntent({
+  kind: 'refinance',
+  planner: 'refinance-position',
+  args: {
+    collateral: input.collateral
+      ? {
+          planner: input.collateral.swapQuote ? 'swap-collateral' : 'migrate-same-asset-collateral',
+          args: input.collateral,
+        }
+      : undefined,
+    debt: input.debt
+      ? {
+          planner: input.debt.swapQuote ? 'swap-debt' : 'migrate-same-asset-debt',
+          args: input.debt,
+        }
+      : undefined,
+  },
+  source,
+  subAccounts: [subAccount.value as Address],
+})
+
 const { cowSwapForcedOff } = useCowSwapEligibility()
 
 const canRequestCollateralCowSwap = computed(() =>
@@ -1109,10 +1133,15 @@ const {
     includeIncomplete: true,
     context,
   }),
+  createIntentsForQuote: quote => [createRefinanceIntent(buildRefinanceInput({
+    collateralQuote: quote,
+    debtQuote: selectedDebtQuote.value,
+    includeIncomplete: true,
+  }), 'position/refinance')],
   getPlanAccount: () => currentPlanAccount(),
   getStateOverrideOptions: () => buildRefinanceStateOverrideOptions(),
-  prefetchPluginData: (candidatePlan, account) => prefetchPluginData(candidatePlan, { account }),
-  prepareTransactionPlan: (candidatePlan, account, prefetch) => prepareTransactionPlan(candidatePlan, { account, prefetch }),
+  prefetchPluginData: (candidatePlan, account, intents) => prefetchPluginData(candidatePlan, { account, intents }),
+  prepareTransactionPlan: (candidatePlan, account, prefetch, intents) => prepareTransactionPlan(candidatePlan, { account, prefetch, intents }),
 })
 
 const {
@@ -1137,10 +1166,15 @@ const {
     includeIncomplete: true,
     context,
   }),
+  createIntentsForQuote: quote => [createRefinanceIntent(buildRefinanceInput({
+    collateralQuote: selectedCollateralQuote.value,
+    debtQuote: quote,
+    includeIncomplete: true,
+  }), 'position/refinance')],
   getPlanAccount: () => currentPlanAccount(),
   getStateOverrideOptions: () => buildRefinanceStateOverrideOptions(),
-  prefetchPluginData: (candidatePlan, account) => prefetchPluginData(candidatePlan, { account }),
-  prepareTransactionPlan: (candidatePlan, account, prefetch) => prepareTransactionPlan(candidatePlan, { account, prefetch }),
+  prefetchPluginData: (candidatePlan, account, intents) => prefetchPluginData(candidatePlan, { account, intents }),
+  prepareTransactionPlan: (candidatePlan, account, prefetch, intents) => prepareTransactionPlan(candidatePlan, { account, prefetch, intents }),
 })
 
 const isSelectedCollateralCowSwapProvider = computed(() =>
@@ -3478,26 +3512,7 @@ const addToBatch = async () => {
       await addBatchEntry({
         label: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetCollateralSymbol}/${targetDebtSymbol}`,
         nameOverride: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
-        intent: createIntent({
-          kind: 'refinance',
-          planner: 'refinance-position',
-          args: {
-            collateral: refinanceInput.collateral
-              ? {
-                  planner: refinanceInput.collateral.swapQuote ? 'swap-collateral' : 'migrate-same-asset-collateral',
-                  args: refinanceInput.collateral,
-                }
-              : undefined,
-            debt: refinanceInput.debt
-              ? {
-                  planner: refinanceInput.debt.swapQuote ? 'swap-debt' : 'migrate-same-asset-debt',
-                  args: refinanceInput.debt,
-                }
-              : undefined,
-          },
-          source: 'position/refinance:add-to-batch',
-          subAccounts: [refinanceAccount],
-        }),
+        intent: createRefinanceIntent(refinanceInput, 'position/refinance'),
         subAccount: refinanceAccount,
         review: {
           type: 'refinance',
@@ -3539,9 +3554,11 @@ const submit = async () => {
 
       preparedPlan.value = null
       plan.value = null
+      const refinanceInput = buildRefinanceInput()
+      const intent = createRefinanceIntent(refinanceInput, 'position/refinance')
       try {
-        plan.value = await buildRefinancePlan()
-        preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount() })
+        plan.value = await planRefinancePosition({ ...refinanceInput, account: currentPlanAccount() })
+        preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount(), intents: [intent] })
       }
       catch (e) {
         logWarn('refinance/buildPlan', e)
@@ -3550,12 +3567,12 @@ const submit = async () => {
       }
 
       const ok = preparedPlan.value
-        ? await runPreparedSimulation(preparedPlan.value, buildRefinanceStateOverrideOptions())
+        ? await runPreparedSimulation(preparedPlan.value, buildRefinanceStateOverrideOptions(), undefined, [intent])
         : await runSimulation(plan.value, buildRefinanceStateOverrideOptions())
       if (!ok) return
 
       if (!plan.value) return
-      await openEagerCeremonyReview(plan.value, {
+      await openCeremonyReview([intent], {
         presentationKind: 'refinance',
         review: {
           type: 'refinance',

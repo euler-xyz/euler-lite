@@ -65,7 +65,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const { error } = useToast()
   const { planRepayFromWallet } = useEulerTx()
-  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { open: openCeremonyReview } = useCeremonyReview()
+  const { create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
   const { primeSlotHintsFor } = useStateOverrideOptions()
   const { isConnected } = useWagmi()
@@ -171,16 +172,23 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const amountNano = valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
       const shouldFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
+      const args = {
+        liabilityVault: borrowVault.value.address as Address,
+        liabilityAsset: borrowVault.value.asset.address as Address,
+        liabilityAmount: shouldFullRepay ? maxUint256 : amountNano,
+        receiver: position.value.subAccount as Address,
+        cleanupOnMax: shouldFullRepay,
+      }
+      const intent = createIntent({
+        kind: 'repay',
+        planner: 'repay-from-wallet',
+        args,
+        source: 'position/repay-wallet:review',
+        subAccounts: [args.receiver],
+      })
 
       try {
-        plan.value = await planRepayFromWallet({
-          liabilityVault: borrowVault.value.address as Address,
-          liabilityAsset: borrowVault.value.asset.address as Address,
-          liabilityAmount: shouldFullRepay ? maxUint256 : amountNano,
-          receiver: position.value.subAccount as Address,
-          cleanupOnMax: shouldFullRepay,
-          account: planAccount.value,
-        })
+        plan.value = await planRepayFromWallet({ ...args, account: planAccount.value })
       }
       catch (e) {
         logWarn('walletRepay/buildPlan', e)
@@ -193,7 +201,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       }
 
       if (!plan.value) return
-      await openCeremonyReview(plan.value, {
+      await openCeremonyReview([intent], {
         presentationKind: 'repay',
         review: {
           type: 'repay',

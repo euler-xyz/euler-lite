@@ -150,11 +150,10 @@ const assertSdkMaterializationMatches = ({
   pendingRequests: readonly PendingRequest[]
   liteSignatureSlots: readonly SignatureSlot[]
 }) => {
-  const materialize = sdk.executionService.materializeExecution
-  if (!materialize) return
+  if (!sdk.executionService.materializeExecution) return
   const evc = sdk.deploymentService.getDeployment(wallet.chainId).addresses.coreAddrs.evc
   if (!evc) throw new Error(`EVC address is unavailable for chain ${wallet.chainId}`)
-  const materialized = materialize({
+  const materialized = sdk.executionService.materializeExecution({
     prepared: {
       __prepared: true,
       plan,

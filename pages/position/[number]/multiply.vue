@@ -43,7 +43,7 @@ const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+const { open: openCeremonyReview } = useCeremonyReview()
 const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
@@ -99,6 +99,7 @@ const {
   sortedQuoteCards: multiplyQuoteCardsSorted,
   selectedProvider: multiplySelectedProvider,
   selectedQuote: multiplySelectedQuote,
+  selectedQuoteCard: multiplySelectedQuoteCard,
   effectiveQuote: multiplyEffectiveQuote,
   effectiveQuoteFetchedAt: multiplyEffectiveQuoteFetchedAt,
   providersCount: multiplyProvidersCount,
@@ -113,8 +114,10 @@ const {
   amountField: 'amountOut',
   compare: 'max',
   buildTxPlanForQuote: (quote, _provider, context) => buildMultiplyPlanFromQuote(quote, context.account),
+  createIntentsForQuote: quote => [createMultiplyIntent(quote)],
   getPlanAccount: () => planAccount.value,
-  prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+  prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
+  prepareTransactionPlan: (plan, account, prefetch, intents) => prepareTransactionPlan(plan, { account, prefetch, intents }),
 })
 const multiplyLongVault = computed<EVault | undefined>(() => {
   const vault = position.value ? position.value.collateralVault : undefined
@@ -122,6 +125,33 @@ const multiplyLongVault = computed<EVault | undefined>(() => {
 })
 const multiplyShortVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const multiplySubAccount = computed(() => position.value?.subAccount || null)
+
+function createMultiplyIntent(quote?: SwapQuote) {
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value || !multiplySubAccount.value) {
+    throw new Error('Multiply position is not loaded')
+  }
+  const common = {
+    collateralVault: multiplySupplyVault.value.address as Address,
+    collateralAmount: 0n,
+    collateralAsset: multiplySupplyVault.value.asset.address as Address,
+  }
+  return createIntent({
+    kind: 'borrow',
+    planner: quote ? 'multiply-with-swap' : 'multiply-same-asset',
+    args: quote
+      ? { ...common, swapQuote: quote, swapperMode: SwapperMode.EXACT_IN }
+      : {
+          ...common,
+          longVault: multiplyLongVault.value.address as Address,
+          liabilityVault: multiplyShortVault.value.address as Address,
+          liabilityAmount: multiplyDebtAmountNano.value,
+          receiver: multiplySubAccount.value as Address,
+        },
+    source: 'position/multiply',
+    subAccounts: [multiplySubAccount.value as Address],
+  })
+}
+
 useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
 const positionRoeCollateralVaults = computed(() =>
   resolvePositionRoeCollateralVaults(position.value, multiplyLongVault.value),
@@ -828,22 +858,11 @@ const addToBatch = async () => {
   await guardWithPriceImpact(async () => {
     const sameAsset = multiplyIsSameAsset.value
     const quote = sameAsset ? undefined : multiplyEffectiveQuote.value ?? undefined
-    const supply = multiplySupplyVault.value!.address as Address
-    const supplyAsset = multiplySupplyVault.value!.asset.address as Address
-    const long = multiplyLongVault.value!.address as Address
-    const short = multiplyShortVault.value!.address as Address
-    const debtAmount = multiplyDebtAmountNano.value
     const receiver = multiplySubAccount.value as Address
-    const common = { collateralVault: supply, collateralAmount: 0n, collateralAsset: supplyAsset }
-    const intent = createIntent({
-      kind: 'borrow',
-      planner: quote ? 'multiply-with-swap' : 'multiply-same-asset',
-      args: quote
-        ? { ...common, swapQuote: quote, swapperMode: SwapperMode.EXACT_IN }
-        : { ...common, longVault: long, liabilityVault: short, liabilityAmount: debtAmount, receiver },
-      source: 'pages/position/[number]/multiply.vue#batch',
-      subAccounts: [receiver],
-    })
+    const quoteIntents = quote
+      ? multiplyQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
+      : undefined
+    const intent = quoteIntents?.[0] ?? createMultiplyIntent(quote)
     await addBatchEntry({
       intent,
       label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
@@ -939,6 +958,11 @@ const submitMultiply = async () => {
         return
       }
 
+      const quoteIntents = multiplySelectedQuoteCard.value?.quote === quote
+        ? multiplySelectedQuoteCard.value.intents
+        : undefined
+      const intents = quoteIntents?.length ? quoteIntents : [createMultiplyIntent(quote ?? undefined)]
+
       try {
         const account = planAccount.value
         const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address)
@@ -955,7 +979,7 @@ const submitMultiply = async () => {
           account,
           subAccountSnapshotApplied,
         })
-        preparedPlan.value = await prepareTransactionPlan(plan.value, { account })
+        preparedPlan.value = await prepareTransactionPlan(plan.value, { account, intents })
       }
       catch (e) {
         console.warn('[Multiply] failed to build plan', e)
@@ -974,7 +998,7 @@ const submitMultiply = async () => {
       }
 
       if (preparedPlan.value) {
-        const ok = await runMultiplySimulation(preparedPlan.value)
+        const ok = await runMultiplySimulation(preparedPlan.value, undefined, undefined, intents)
         if (!ok) {
           return
         }
@@ -986,7 +1010,7 @@ const submitMultiply = async () => {
         : undefined
 
       if (!plan.value) return
-      await openCeremonyReview(plan.value, {
+      await openCeremonyReview(intents, {
         presentationKind: 'borrow',
         review: {
           type: 'borrow',

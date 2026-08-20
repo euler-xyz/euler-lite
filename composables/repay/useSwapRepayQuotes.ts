@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import type { PluginPrefetchData, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
+import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
 
 /**
  * Wraps two useSwapQuotesParallel instances (exact-in + target-debt) and provides
@@ -11,14 +12,19 @@ export const useSwapRepayQuotes = (options: {
   direction: Ref<SwapperMode>
   includeCowSwap?: SwapQuoteIncludeCowSwap
   buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
+  createIntentsForQuote?: (quote: SwapQuote, provider: string) => readonly OperationIntent[]
   buildGasEstimatePlan?: (candidatePlan: TransactionPlan) => Promise<TransactionPlan> | TransactionPlan
-  prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  prefetchPluginData?: (
+    plan: TransactionPlan,
+    account: SwapQuotePlanAccount,
+    intents: readonly OperationIntent[] | undefined,
+  ) => Promise<PluginPrefetchData>
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }) => {
-  const { direction, includeCowSwap, buildTxPlanForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount } = options
+  const { direction, includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount } = options
 
-  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
-  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
+  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
+  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
 
   const isExactIn = computed(() => direction.value === SwapperMode.EXACT_IN)
 
@@ -33,6 +39,10 @@ export const useSwapRepayQuotes = (options: {
   const selectedQuote = computed(() => isExactIn.value
     ? exactInQuotes.selectedQuote.value
     : targetDebtQuotes.selectedQuote.value)
+
+  const selectedQuoteCard = computed(() => isExactIn.value
+    ? exactInQuotes.selectedQuoteCard.value
+    : targetDebtQuotes.selectedQuoteCard.value)
 
   const effectiveQuote = computed(() => isExactIn.value
     ? exactInQuotes.effectiveQuote.value
@@ -84,6 +94,7 @@ export const useSwapRepayQuotes = (options: {
     sortedQuoteCards,
     selectedProvider,
     selectedQuote,
+    selectedQuoteCard,
     effectiveQuote,
     effectiveQuoteFetchedAt,
     providersCount,

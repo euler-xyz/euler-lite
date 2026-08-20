@@ -4,15 +4,12 @@ import { canonicalDigest, deepFreezeSerializable, toCanonicalValue, type Canonic
 import type { OperationIntent } from '../domain/intents'
 import { collectPlanningRequirements, intentSetDigest } from './requirements'
 
-const eagerPlanIntents = new WeakMap<TransactionPlan, readonly OperationIntent[]>()
-const preparedOrigins = new WeakMap<TransactionPlanPrepared, Hash>()
-
-interface EagerPluginEvidence {
+interface PreviewPluginEvidence {
   rawPlanDigest: Hash
   value: CanonicalValue
 }
 
-interface EagerPreparedEvidence {
+interface PreviewPreparedEvidence {
   rawPlanDigest: Hash
   preparedPlanDigest: Hash
   owner: Address
@@ -21,12 +18,12 @@ interface EagerPreparedEvidence {
   unlimitedApproval: boolean
 }
 
-interface EagerSimulationEvidence {
+interface PreviewSimulationEvidence {
   preparedPlanDigest: Hash
   value: CanonicalValue
 }
 
-interface EagerAccelerationRecord {
+interface PreviewEvidenceRecord {
   schemaVersion: 1
   intentSetHash: Hash
   owner: Address
@@ -35,18 +32,18 @@ interface EagerAccelerationRecord {
   rawPlanDigest: Hash
   observedAt: number
   freshUntil: number
-  plugin?: EagerPluginEvidence
-  prepared?: EagerPreparedEvidence
-  simulation?: EagerSimulationEvidence
+  plugin?: PreviewPluginEvidence
+  prepared?: PreviewPreparedEvidence
+  simulation?: PreviewSimulationEvidence
 }
 
-export interface EagerAccelerationMatch {
+export interface PreviewEvidenceMatch {
   pluginPrefetch?: CanonicalValue
   simulationProjection?: CanonicalValue
 }
 
-const accelerations = new Map<Hash, Readonly<EagerAccelerationRecord>>()
-interface EagerMigrationCompilationRecord {
+const previewEvidence = new Map<Hash, Readonly<PreviewEvidenceRecord>>()
+interface PreviewMigrationCompilationRecord {
   schemaVersion: 1
   intentSetHash: Hash
   owner: Address
@@ -58,40 +55,53 @@ interface EagerMigrationCompilationRecord {
   result: CanonicalValue
 }
 
-const migrationCompilations = new Map<Hash, Readonly<EagerMigrationCompilationRecord>>()
-const EAGER_ACCELERATION_TTL_MS = 60_000
+const migrationCompilations = new Map<Hash, Readonly<PreviewMigrationCompilationRecord>>()
+const PREVIEW_EVIDENCE_TTL_MS = 60_000
+const MAX_PREVIEW_EVIDENCE_RECORDS = 256
+
+const pruneRecords = <T extends { freshUntil: number }>(records: Map<Hash, Readonly<T>>, now: number) => {
+  for (const [key, record] of records) {
+    if (record.freshUntil <= now) records.delete(key)
+  }
+  while (records.size >= MAX_PREVIEW_EVIDENCE_RECORDS) {
+    const oldest = records.keys().next().value
+    if (!oldest) break
+    records.delete(oldest)
+  }
+}
 
 const planDigest = (plan: TransactionPlan) =>
-  canonicalDigest('eager-plan-v1', toCanonicalValue(plan))
+  canonicalDigest('preview-plan-v1', toCanonicalValue(plan))
 
 const accountOwner = (account: TransactionPlanPrepared['account']): Address =>
   getAddress(typeof account === 'string' ? account : account.owner)
 
-const updateAcceleration = (
+const updatePreviewEvidence = (
   key: Hash,
-  update: (current: Readonly<EagerAccelerationRecord>) => EagerAccelerationRecord,
+  update: (current: Readonly<PreviewEvidenceRecord>) => PreviewEvidenceRecord,
 ) => {
-  const current = accelerations.get(key)
+  const current = previewEvidence.get(key)
   if (!current) return
-  accelerations.set(key, deepFreezeSerializable(update(current)) as Readonly<EagerAccelerationRecord>)
+  previewEvidence.delete(key)
+  previewEvidence.set(key, deepFreezeSerializable(update(current)) as Readonly<PreviewEvidenceRecord>)
 }
 
 /**
- * Associates a page-owned eager preview with immutable intent DTOs. This is an
- * acceleration bridge only: ceremony preparation recompiles from the DTOs and
- * never adopts the mutable preview as execution authority.
+ * Publishes the digest of a page-owned preview under the explicit intent
+ * set that produced it. This is an acceleration bridge only: ceremony
+ * preparation recompiles from the DTOs and never adopts the mutable preview as
+ * execution authority.
  */
-export const bindEagerPlanIntents = (
-  plan: TransactionPlan,
+export const publishPreviewPlan = (
   intents: readonly OperationIntent[],
-): TransactionPlan => {
-  const frozenIntents = Object.freeze([...intents])
-  eagerPlanIntents.set(plan, frozenIntents)
-  const requirements = collectPlanningRequirements(frozenIntents)
+  plan: TransactionPlan,
+): void => {
+  const requirements = collectPlanningRequirements(intents)
   const rawPlanDigest = planDigest(plan)
-  const previous = accelerations.get(requirements.intentSetHash)
   const now = Date.now()
-  accelerations.set(requirements.intentSetHash, deepFreezeSerializable({
+  const previous = previewEvidence.get(requirements.intentSetHash)
+  pruneRecords(previewEvidence, now)
+  previewEvidence.set(requirements.intentSetHash, deepFreezeSerializable({
     schemaVersion: 1,
     intentSetHash: requirements.intentSetHash,
     owner: requirements.owner,
@@ -99,7 +109,7 @@ export const bindEagerPlanIntents = (
     accounts: requirements.accounts,
     rawPlanDigest,
     observedAt: now,
-    freshUntil: now + EAGER_ACCELERATION_TTL_MS,
+    freshUntil: now + PREVIEW_EVIDENCE_TTL_MS,
     ...(previous?.rawPlanDigest === rawPlanDigest && previous.freshUntil > now
       ? {
           ...(previous.plugin ? { plugin: previous.plugin } : {}),
@@ -108,17 +118,7 @@ export const bindEagerPlanIntents = (
         }
       : {}),
   }))
-  return plan
 }
-
-export const getEagerPlanIntents = (plan: TransactionPlan): readonly OperationIntent[] => {
-  const intents = eagerPlanIntents.get(plan)
-  if (!intents?.length) throw new Error('The eager preview is not bound to an operation intent')
-  return intents
-}
-
-export const collectEagerPlanIntents = (plans: readonly TransactionPlan[]): readonly OperationIntent[] =>
-  plans.flatMap(plan => getEagerPlanIntents(plan))
 
 /**
  * Publish serializable form-time plugin inputs into the untrusted acceleration
@@ -126,18 +126,18 @@ export const collectEagerPlanIntents = (plans: readonly TransactionPlan[]): read
  * digest before importing this value into the context-complete preparation
  * cache. Mutable SDK objects are deliberately never stored here.
  */
-export const publishEagerPluginPrefetch = (
+export const publishPreviewPluginEvidence = (
+  intents: readonly OperationIntent[],
   plan: TransactionPlan,
   value: CanonicalValue,
 ) => {
-  const intents = eagerPlanIntents.get(plan)
-  if (!intents?.length) return
+  publishPreviewPlan(intents, plan)
   const key = intentSetDigest(intents)
   const digest = planDigest(plan)
-  updateAcceleration(key, current => ({
+  updatePreviewEvidence(key, current => ({
     ...current,
     observedAt: Date.now(),
-    freshUntil: Date.now() + EAGER_ACCELERATION_TTL_MS,
+    freshUntil: Date.now() + PREVIEW_EVIDENCE_TTL_MS,
     rawPlanDigest: digest,
     plugin: { rawPlanDigest: digest, value },
     ...(current.rawPlanDigest === digest
@@ -147,56 +147,67 @@ export const publishEagerPluginPrefetch = (
 }
 
 /** Bind only canonical identity to a prepared SDK envelope; the envelope is not cached. */
-export const publishEagerPreparedPlan = (
+export const publishPreviewPreparedEvidence = (
+  intents: readonly OperationIntent[],
   rawPlan: TransactionPlan,
   prepared: TransactionPlanPrepared,
 ) => {
-  const intents = eagerPlanIntents.get(rawPlan)
-  if (!intents?.length) return
+  publishPreviewPlan(intents, rawPlan)
   const key = intentSetDigest(intents)
   const rawPlanDigest = planDigest(rawPlan)
   const preparedPlanDigest = planDigest(prepared.plan)
-  updateAcceleration(key, current => ({
+  const preparedOwner = accountOwner(prepared.account)
+  updatePreviewEvidence(key, current => ({
     ...current,
     observedAt: Date.now(),
-    freshUntil: Date.now() + EAGER_ACCELERATION_TTL_MS,
+    freshUntil: Date.now() + PREVIEW_EVIDENCE_TTL_MS,
     rawPlanDigest,
     prepared: {
       rawPlanDigest,
       preparedPlanDigest,
-      owner: accountOwner(prepared.account),
+      owner: preparedOwner,
       chainId: prepared.chainId,
       usePermit2: prepared.usePermit2,
       unlimitedApproval: prepared.unlimitedApproval,
     },
     simulation: current.prepared?.preparedPlanDigest === preparedPlanDigest
+      && current.prepared.owner === preparedOwner
+      && current.prepared.chainId === prepared.chainId
+      && current.prepared.usePermit2 === prepared.usePermit2
+      && current.prepared.unlimitedApproval === prepared.unlimitedApproval
       ? current.simulation
       : undefined,
   }))
-  preparedOrigins.set(prepared, key)
 }
 
 /** Publish a plain simulation projection, never the mutable prepared envelope/result. */
-export const publishEagerPreparedSimulation = (
+export const publishPreviewSimulationEvidence = (
+  intents: readonly OperationIntent[],
   prepared: TransactionPlanPrepared,
   projection: CanonicalValue,
 ) => {
-  const key = preparedOrigins.get(prepared)
-  if (!key) return
+  const key = intentSetDigest(intents)
   const preparedPlanDigest = planDigest(prepared.plan)
-  updateAcceleration(key, current => ({
-    ...current,
-    observedAt: Date.now(),
-    freshUntil: Date.now() + EAGER_ACCELERATION_TTL_MS,
-    simulation: { preparedPlanDigest, value: projection },
-  }))
+  const preparedOwner = accountOwner(prepared.account)
+  updatePreviewEvidence(key, current => current.prepared?.preparedPlanDigest === preparedPlanDigest
+    && current.prepared.owner === preparedOwner
+    && current.prepared.chainId === prepared.chainId
+    && current.prepared.usePermit2 === prepared.usePermit2
+    && current.prepared.unlimitedApproval === prepared.unlimitedApproval
+    ? {
+        ...current,
+        observedAt: Date.now(),
+        freshUntil: Date.now() + PREVIEW_EVIDENCE_TTL_MS,
+        simulation: { preparedPlanDigest, value: projection },
+      }
+    : { ...current })
 }
 
 /**
  * Return only evidence whose intent, raw plan, wallet, approval mode, prepared
  * plan, and freshness all match the authoritative preparation in progress.
  */
-export const matchEagerAcceleration = ({
+export const matchPreviewEvidence = ({
   intents,
   rawPlan,
   preparedPlan,
@@ -216,9 +227,10 @@ export const matchEagerAcceleration = ({
   unlimitedApproval: boolean
   allowSimulation: boolean
   now?: number
-}): Readonly<EagerAccelerationMatch> => {
+}): Readonly<PreviewEvidenceMatch> => {
   const requirements = collectPlanningRequirements(intents)
-  const record = accelerations.get(requirements.intentSetHash)
+  const record = previewEvidence.get(requirements.intentSetHash)
+  if (record?.freshUntil !== undefined && record.freshUntil <= now) previewEvidence.delete(requirements.intentSetHash)
   if (!record || record.freshUntil <= now
     || record.owner !== getAddress(owner)
     || record.chainId !== chainId
@@ -253,13 +265,14 @@ export const matchEagerAcceleration = ({
  * Publish only a canonical clone of an already-warmed migration compilation.
  * The mutable page result and SDK account never enter the ceremony cache.
  */
-export const publishEagerMigrationCompilation = (
+export const publishPreviewMigrationCompilation = (
   intent: OperationIntent,
   result: PlanMigrationSimulationResult,
   observedBlock: bigint,
   now = Date.now(),
 ) => {
   const requirements = collectPlanningRequirements([intent])
+  pruneRecords(migrationCompilations, now)
   migrationCompilations.set(requirements.intentSetHash, deepFreezeSerializable({
     schemaVersion: 1,
     intentSetHash: requirements.intentSetHash,
@@ -268,19 +281,20 @@ export const publishEagerMigrationCompilation = (
     accounts: requirements.accounts,
     observedBlock,
     observedAt: now,
-    freshUntil: now + EAGER_ACCELERATION_TTL_MS,
+    freshUntil: now + PREVIEW_EVIDENCE_TTL_MS,
     result: toCanonicalValue(result),
-  }) as Readonly<EagerMigrationCompilationRecord>)
+  }) as Readonly<PreviewMigrationCompilationRecord>)
 }
 
 /** Adopt a migration compilation only at its exact intent/account/block identity. */
-export const matchEagerMigrationCompilation = (
+export const matchPreviewMigrationCompilation = (
   intent: OperationIntent,
   observedBlock: bigint,
   now = Date.now(),
 ): PlanMigrationSimulationResult | undefined => {
   const requirements = collectPlanningRequirements([intent])
   const record = migrationCompilations.get(requirements.intentSetHash)
+  if (record?.freshUntil !== undefined && record.freshUntil <= now) migrationCompilations.delete(requirements.intentSetHash)
   if (!record || record.freshUntil <= now
     || record.owner !== requirements.owner
     || record.chainId !== requirements.chainId
@@ -290,7 +304,7 @@ export const matchEagerMigrationCompilation = (
   return record.result as unknown as PlanMigrationSimulationResult
 }
 
-export const clearEagerAccelerationsForTests = () => {
-  accelerations.clear()
+export const clearPreviewEvidenceForTests = () => {
+  previewEvidence.clear()
   migrationCompilations.clear()
 }

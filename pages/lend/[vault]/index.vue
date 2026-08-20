@@ -77,7 +77,7 @@ const reviewSupplyLabel = 'Review Supply'
 useFullBalances()
 const { planDeposit, planDepositWithSwap, prepareTransactionPlan } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+const { open: openCeremonyReview } = useCeremonyReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -151,6 +151,7 @@ const {
   sortedQuoteCards: swapQuoteCardsSorted,
   selectedProvider: swapSelectedProvider,
   selectedQuote: swapSelectedQuote,
+  selectedQuoteCard: swapSelectedQuoteCard,
   effectiveQuote: swapEffectiveQuote,
   effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
   providersCount: _swapProvidersCount,
@@ -165,9 +166,11 @@ const {
   amountField: 'amountOut',
   compare: 'max',
   buildTxPlanForQuote: (quote, _provider, context) => buildSwapSupplyPlanFromQuote(quote, context.account),
+  createIntentsForQuote: quote => [createSupplyIntent(quote)],
   getPlanAccount: () => planAccount.value,
   getStateOverrideOptions: () => buildLendStateOverrideOptions(),
   prefetchPluginData: getLendPluginPrefetch,
+  prepareTransactionPlan: (plan, account, prefetch, intents) => prepareTransactionPlan(plan, { account, prefetch, intents }),
 })
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)
@@ -494,6 +497,46 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAcco
   })
 }
 
+function createSupplyIntent(quote?: SwapQuote) {
+  if (quote) {
+    const inputAsset = selectedAsset.value
+    if (!inputAsset) throw new Error('No selected asset')
+    const inputAmount = valueToNano(amount.value || '0', inputAsset.decimals)
+    const isNative = isNativeCurrencyAddress(inputAsset.address)
+    const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+    if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+    return createIntent({
+      kind: 'deposit',
+      planner: 'deposit-with-swap',
+      args: {
+        swapQuote: quote,
+        amount: inputAmount,
+        tokenIn: (wrappedAddress || inputAsset.address) as Address,
+        enableCollateral: false,
+        wrappedNativeInfo: isNative && wrappedAddress
+          ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
+          : undefined,
+      },
+      source: 'lend',
+    })
+  }
+  const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
+  const wrappedAddress = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
+  return createIntent({
+    kind: 'deposit',
+    planner: 'deposit',
+    args: {
+      vaultAddress: vaultAddress as Address,
+      assetAddress: asset.value.address as Address,
+      amount: supplyAmount,
+      wrappedNativeInfo: isNativeWrap.value && wrappedAddress
+        ? { wrappedTokenAddress: wrappedAddress, nativeAmount: supplyAmount }
+        : undefined,
+    },
+    source: 'lend',
+  })
+}
+
 const submit = async () => {
   if (isOperationBlocked.value) return
   if (isPreparing.value || reviewSupplyDisabled.value) return
@@ -506,22 +549,43 @@ const submit = async () => {
       }
 
       preparedPlan.value = null
+      let intents: readonly ReturnType<typeof createIntent>[] = []
       try {
         if (needsSwap.value && swapEffectiveQuote.value) {
-          plan.value = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value)
+          const inputAsset = selectedAsset.value
+          if (!inputAsset) throw new Error('No selected asset')
+          const inputAmount = valueToNano(amount.value || '0', inputAsset.decimals)
+          const isNative = isNativeCurrencyAddress(inputAsset.address)
+          const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+          if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+          const args = {
+            swapQuote: swapEffectiveQuote.value,
+            amount: inputAmount,
+            tokenIn: (wrappedAddress || inputAsset.address) as Address,
+            enableCollateral: false,
+            wrappedNativeInfo: isNative && wrappedAddress
+              ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
+              : undefined,
+          }
+          const quoteIntents = swapSelectedQuoteCard.value?.quote === swapEffectiveQuote.value
+            ? swapSelectedQuoteCard.value.intents
+            : undefined
+          intents = quoteIntents?.length ? quoteIntents : [createSupplyIntent(swapEffectiveQuote.value)]
+          plan.value = await planDepositWithSwap({ ...args, account: planAccount.value })
         }
         else {
           const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
           const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
-          plan.value = await planDeposit({
+          const args = {
             vaultAddress: vaultAddress as Address,
             assetAddress: asset.value.address as Address,
             amount: supplyAmount,
             wrappedNativeInfo: isNativeWrap.value && wrappedAddr
               ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
               : undefined,
-            account: planAccount.value,
-          })
+          }
+          intents = [createSupplyIntent()]
+          plan.value = await planDeposit({ ...args, account: planAccount.value })
         }
       }
       catch (e) {
@@ -539,11 +603,12 @@ const submit = async () => {
         plan.value = null
       }
 
-      if (plan.value) {
+      if (plan.value && intents.length) {
         try {
           preparedPlan.value = await prepareTransactionPlan(plan.value, {
             account: planAccount.value,
             prefetch: lendPluginPrefetch,
+            intents,
           })
         }
         catch (e) {
@@ -562,7 +627,7 @@ const submit = async () => {
           return
         }
 
-        const ok = await runPreparedSimulation(preparedPlan.value, buildLendStateOverrideOptions())
+        const ok = await runPreparedSimulation(preparedPlan.value, buildLendStateOverrideOptions(), undefined, intents)
         if (!ok) {
           return
         }
@@ -573,8 +638,8 @@ const submit = async () => {
         ? (resolveWrappedNativeAsset(chainId.value!) || selectedAsset.value!)
         : needsSwap.value && selectedAsset.value ? selectedAsset.value : asset.value
       const reviewType = needsSwap.value ? 'swap-supply' as const : 'supply' as const
-      if (!plan.value) return
-      await openCeremonyReview(plan.value, {
+      if (!intents.length) return
+      await openCeremonyReview(intents, {
         presentationKind: reviewType,
         review: {
           type: reviewType,
@@ -638,41 +703,20 @@ const addToBatch = async () => {
       const swapAmount = amount.value
       const swapOutput = swapEstimatedOutput.value
       if (!swapAsset) return
-      const inputAmount = valueToNano(swapAmount, swapAsset.decimals)
-      const isNative = isNativeCurrencyAddress(swapAsset.address)
-      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
-      if (isNative && !wrappedAddress) return
+      const quoteIntents = swapSelectedQuoteCard.value?.quote === quote
+        ? swapSelectedQuoteCard.value.intents
+        : undefined
       await addBatchEntry({
         label: `Deposit ${asset.value.symbol}`,
-        intent: createIntent({
-          kind: 'deposit',
-          planner: 'deposit-with-swap',
-          args: {
-            swapQuote: quote,
-            amount: inputAmount,
-            tokenIn: (wrappedAddress || swapAsset.address) as Address,
-            enableCollateral: false,
-            wrappedNativeInfo: isNative && wrappedAddress
-              ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
-              : undefined,
-          },
-          source: 'lend:add-to-batch',
-        }),
+        intent: quoteIntents?.[0] ?? createSupplyIntent(quote),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {
-      const assetAddr = asset.value.address as Address
-      const supplyAmount = valueToNano(amount.value, asset.value.decimals)
       await addBatchEntry({
         label: `Deposit ${amount.value} ${asset.value.symbol}`,
-        intent: createIntent({
-          kind: 'deposit',
-          planner: 'deposit',
-          args: { vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount },
-          source: 'lend:add-to-batch',
-        }),
+        intent: createSupplyIntent(),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'supply', asset: asset.value, amount: amount.value },
       })

@@ -8,7 +8,8 @@ const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
     planAccount: { chainId: 1 },
     swapOptions: null as null | {
       buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: { account?: unknown }) => Promise<TransactionPlan>
-      prepareTransactionPlan?: (plan: TransactionPlan, account: unknown, prefetch: unknown) => Promise<unknown>
+      createIntentsForQuote?: (quote: SwapQuote, provider: string) => readonly unknown[]
+      prepareTransactionPlan?: (plan: TransactionPlan, account: unknown, prefetch: unknown, intents?: readonly unknown[]) => Promise<unknown>
     },
     selectedQuote: null as unknown as Ref<SwapQuote | null>,
     selectedQuoteCard: null as unknown as Ref<unknown>,
@@ -162,7 +163,7 @@ describe('useSwapPageLogic', () => {
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
     vi.stubGlobal('formatSmartAmount', (value: string) => value)
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useCeremonyReview', () => ({ openEagerPlan: captured.ceremonyOpen }))
+    vi.stubGlobal('useCeremonyReview', () => ({ open: captured.ceremonyOpen }))
   })
 
   afterEach(() => {
@@ -183,6 +184,7 @@ describe('useSwapPageLogic', () => {
     ))
     const toVaultRef = shallowRef<EVault | undefined>(toVault)
     const buildPlan = vi.fn(async (quote?: SwapQuote, context?: { account?: unknown }) => ({ quote, context }) as unknown as TransactionPlan)
+    const intent = { intentId: 'quote-intent' }
 
     useSwapPageLogic({
       amountField: 'amountOut',
@@ -195,6 +197,7 @@ describe('useSwapPageLogic', () => {
       quoteDiffPrefix: '-',
       buildQuoteRequest: () => null,
       buildPlan,
+      createReviewIntent: () => intent as never,
       getBalanceError: () => null,
       getGeoBlockedAddresses: () => [],
       redirectPath: '/portfolio/saving',
@@ -204,13 +207,15 @@ describe('useSwapPageLogic', () => {
     const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
     const context = { account: captured.planAccount }
     const plan = await captured.swapOptions?.buildTxPlanForQuote(quote, 'provider', context)
+    const intents = captured.swapOptions?.createIntentsForQuote?.(quote, 'provider')
     const prefetch = { pyth: { entries: [] } }
-    await captured.swapOptions?.prepareTransactionPlan?.(plan!, '0x0000000000000000000000000000000000000007', prefetch)
+    await captured.swapOptions?.prepareTransactionPlan?.(plan!, '0x0000000000000000000000000000000000000007', prefetch, intents)
 
     expect(buildPlan).toHaveBeenCalledWith(quote, context)
     expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(plan, {
       account: '0x0000000000000000000000000000000000000007',
       prefetch,
+      intents: [intent],
     })
     expect(plan).toEqual({ quote, context })
   })
@@ -229,7 +234,8 @@ describe('useSwapPageLogic', () => {
     const toVaultRef = shallowRef<EVault | undefined>(toVault)
     const buildPlan = vi.fn(async () => ({ type: 'rebuilt' }) as unknown as TransactionPlan)
     const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
-    const eagerPlan = { type: 'quote-plan' } as unknown as TransactionPlan
+    const intent = { intentId: 'quote-card-intent' }
+    const previewPlan = { type: 'quote-plan' } as unknown as TransactionPlan
     const prepared = {
       __prepared: true,
       plan: [{ type: 'evcBatch', items: [] }],
@@ -241,8 +247,9 @@ describe('useSwapPageLogic', () => {
     captured.selectedQuoteCard.value = {
       provider: 'provider',
       quote,
-      plan: eagerPlan,
+      plan: previewPlan,
       preparedPlan: prepared,
+      intents: [intent] as never,
     }
 
     const swap = useSwapPageLogic({
@@ -256,6 +263,7 @@ describe('useSwapPageLogic', () => {
       quoteDiffPrefix: '-',
       buildQuoteRequest: () => null,
       buildPlan,
+      createReviewIntent: () => ({}) as never,
       getBalanceError: () => null,
       getGeoBlockedAddresses: () => [],
       redirectPath: '/portfolio/saving',
@@ -266,8 +274,8 @@ describe('useSwapPageLogic', () => {
 
     expect(buildPlan).not.toHaveBeenCalled()
     expect(captured.prepareTransactionPlan).not.toHaveBeenCalled()
-    expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {})
-    expect(captured.ceremonyOpen).toHaveBeenCalledWith(eagerPlan, expect.objectContaining({ presentationKind: 'swap' }))
+    expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {}, undefined, [intent])
+    expect(captured.ceremonyOpen).toHaveBeenCalledWith([intent], expect.objectContaining({ presentationKind: 'swap' }))
     expect(captured.executePreparedPlan).not.toHaveBeenCalled()
     expect(captured.executePlan).not.toHaveBeenCalled()
   })
@@ -287,6 +295,7 @@ describe('useSwapPageLogic', () => {
     const rawPlan = { type: 'raw-plan' } as unknown as TransactionPlan
     const prepared = { __prepared: true, plan: rawPlan, chainId: 1, account: '0x0000000000000000000000000000000000000007' }
     const buildPlan = vi.fn(async () => rawPlan)
+    const intent = { intentId: 'rebuilt-intent' }
     captured.prepareTransactionPlan.mockResolvedValueOnce(prepared)
     captured.selectedQuote.value = { amountIn: '100', amountOut: '200' } as SwapQuote
     captured.selectedQuoteCard.value = null
@@ -302,6 +311,7 @@ describe('useSwapPageLogic', () => {
       quoteDiffPrefix: '-',
       buildQuoteRequest: () => null,
       buildPlan,
+      createReviewIntent: () => intent as never,
       getBalanceError: () => null,
       getGeoBlockedAddresses: () => [],
       redirectPath: '/portfolio/saving',
@@ -313,9 +323,9 @@ describe('useSwapPageLogic', () => {
     expect(buildPlan).toHaveBeenCalledTimes(1)
     expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(1)
     expect(buildPlan).toHaveBeenCalledWith(undefined, { account: captured.planAccount })
-    expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(rawPlan, { account: captured.planAccount })
-    expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {})
-    expect(captured.ceremonyOpen).toHaveBeenCalledWith(rawPlan, expect.objectContaining({ presentationKind: 'swap' }))
+    expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(rawPlan, { account: captured.planAccount, intents: [intent] })
+    expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {}, undefined, [intent])
+    expect(captured.ceremonyOpen).toHaveBeenCalledWith([intent], expect.objectContaining({ presentationKind: 'swap' }))
     expect(captured.executePreparedPlan).not.toHaveBeenCalled()
     expect(captured.executePlan).not.toHaveBeenCalled()
   })

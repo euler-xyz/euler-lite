@@ -226,9 +226,12 @@ const addToBatchWithoutWarnings = async () => {
       const inSymbol = walletSwap.selectedAsset.value?.symbol ?? ''
       const isClosing = walletSwap.isFullRepay.value
       if (!swapAsset) return
+      const quoteIntents = walletSwap.quotes.selectedQuoteCard.value?.quote === quote
+        ? walletSwap.quotes.selectedQuoteCard.value.intents
+        : undefined
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
-        intent: walletSwap.createRepayIntent(quote, {
+        intent: quoteIntents?.[0] ?? walletSwap.createRepayIntent(quote, {
           selectedAsset: swapAsset,
           direction: swapDirection,
           isFullRepay: isClosing,
@@ -275,9 +278,12 @@ const addToBatchWithoutWarnings = async () => {
     const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = collateral.isFullRepay.value
     if (!sourceVault) return
+    const quoteIntents = quote && collateral.quotes.selectedQuoteCard.value?.quote === quote
+      ? collateral.quotes.selectedQuoteCard.value.intents
+      : undefined
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
-      intent: collateral.createRepayIntent(quote, {
+      intent: quoteIntents?.[0] ?? collateral.createRepayIntent(quote, {
         sourceVault,
         amount: sourceAmount,
         debtAmount: sourceDebtAmount,
@@ -305,9 +311,12 @@ const addToBatchWithoutWarnings = async () => {
     const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = savings.isFullRepay.value
     if (!sourceVault) return
+    const quoteIntents = quote && savings.quotes.selectedQuoteCard.value?.quote === quote
+      ? savings.quotes.selectedQuoteCard.value.intents
+      : undefined
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
-      intent: savings.createRepayIntent(quote, {
+      intent: quoteIntents?.[0] ?? savings.createRepayIntent(quote, {
         sourceVault,
         sourceSubAccount,
         amount: sourceAmount,

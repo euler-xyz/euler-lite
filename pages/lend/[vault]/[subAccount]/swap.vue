@@ -207,6 +207,39 @@ const swap = useSwapPageLogic({
     })
   },
 
+  createReviewIntent(quote?: SwapQuote) {
+    const from = fromVault.value
+    const to = toVault.value
+    const positionAccount = subAccount.value ?? effectiveAddress.value
+    if (!from || !to || !positionAccount) throw new Error('Position is not loaded')
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+    if (quote) {
+      return createIntent({
+        kind: 'collateral',
+        planner: 'swap-collateral',
+        args: { swapQuote: quote, swapperMode: SwapperMode.EXACT_IN },
+        source: 'lend/swap:review',
+        subAccounts: [positionAccount as Address],
+      })
+    }
+    return createIntent({
+      kind: 'refinance',
+      planner: 'migrate-same-asset-collateral',
+      args: {
+        fromVault: from.address as Address,
+        toVault: to.address as Address,
+        amount,
+        positionAccount: positionAccount as Address,
+        toAsset: to.asset.address as Address,
+        isMax,
+        maxShares: isMax ? savingPosition.value?.shares : undefined,
+      },
+      source: 'lend/swap:review',
+      subAccounts: [positionAccount as Address],
+    })
+  },
+
   getBalanceError: (amountNano) => {
     if (assetsBalance.value < amountNano) return 'Not enough balance'
     if (balance.value < amountNano) return 'Not enough liquidity in vault'
@@ -220,7 +253,7 @@ const {
   isSameAsset, sameVaultError, errorText,
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
-  effectiveQuoteFetchedAt,
+  quoteCardsSorted, effectiveQuoteFetchedAt,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
@@ -343,12 +376,15 @@ const addToBatch = async () => {
     const maxShares = isMax ? savingPosition.value?.shares : undefined
     const sameAsset = isSameAsset.value
     const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    const quoteIntents = swapQuote
+      ? quoteCardsSorted.value.find(card => card.quote === swapQuote)?.intents
+      : undefined
     const label = sameAsset
       ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
       : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
     await addBatchEntry({
       label,
-      intent: createIntent({
+      intent: quoteIntents?.[0] ?? createIntent({
         kind: sameAsset ? 'refinance' : 'collateral',
         planner: sameAsset ? 'migrate-same-asset-collateral' : 'swap-collateral',
         args: sameAsset

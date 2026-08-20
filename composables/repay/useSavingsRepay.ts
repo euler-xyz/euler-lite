@@ -72,7 +72,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { open: openCeremonyReview } = useCeremonyReview()
   const { account: planAccount } = usePlanAccount()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeCeremonyUi } = useTxFinalization()
@@ -121,7 +121,8 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
     clearSimulationError,
     getCurrentDebt,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    createIntentsForQuote: quote => [createRepayIntent(quote)],
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
       const savingsPos = sourceVault.value ? getSavingsPosition(sourceVault.value.address, selectedSavingSubAccount.value) : undefined
@@ -480,7 +481,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           fromAccount,
           cleanupOnMax: isFullRepay,
         },
-        source: 'position/repay-savings:add-to-batch',
+        source: 'position/repay-savings',
         subAccounts: [receiver, fromAccount],
       })
     }
@@ -498,7 +499,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       kind: 'repay',
       planner: 'repay-with-swap',
       args: { swapQuote, cleanupOnMax, swapperMode },
-      source: 'position/repay-savings:add-to-batch',
+      source: 'position/repay-savings',
       subAccounts: [receiver, fromAccount],
     })
   }
@@ -509,6 +510,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
 
     isPreparing.value = true
     try {
+      const quoteIntents = core.quotes.selectedQuoteCard.value?.quote === core.quotes.selectedQuote.value
+        ? core.quotes.selectedQuoteCard.value.intents
+        : undefined
+      const intents = quoteIntents?.length ? quoteIntents : [createRepayIntent()]
       try {
         plan.value = await buildRepayPlan()
       }
@@ -536,7 +541,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       })
 
       if (!plan.value) return
-      await openCeremonyReview(plan.value, {
+      await openCeremonyReview(intents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',

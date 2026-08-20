@@ -121,6 +121,33 @@ const form = useCollateralForm({
     })
   },
 
+  createReviewIntent: (quote?: SwapQuote) => {
+    const vault = form.collateralVault.value
+    const asset = form.asset.value
+    const owner = (form.position.value?.subAccount ?? address.value) as Address | undefined
+    if (!vault || !asset || !owner) throw new Error('Position is not loaded')
+    const assets = valueToNano(form.amount.value || '0', asset.decimals)
+    if (quote) {
+      return createIntent({
+        kind: 'withdraw',
+        planner: 'withdraw-and-swap',
+        args: { swapQuote: quote, vaultAddress: vault.address as Address, assets, owner },
+        source: 'position/withdraw:review',
+        subAccounts: [owner],
+      })
+    }
+    const full = isFullCollateralWithdraw(assets)
+    return createIntent({
+      kind: 'withdraw',
+      planner: full ? 'redeem' : 'withdraw',
+      args: full
+        ? { vaultAddress: vault.address as Address, shares: maxUint256, owner }
+        : { vaultAddress: vault.address as Address, assets, owner },
+      source: 'position/withdraw:review',
+      subAccounts: [owner],
+    })
+  },
+
   requestSwapQuoteParams: ({ userAddr, subAccountAddr, amountNano, slippage, asset, vaultAddress }) => {
     if (!selectedOutputAsset.value) return null
     return {
@@ -195,9 +222,10 @@ const addToBatch = async () => {
     if (needsSwap.value) {
       const quote = form.swapEffectiveQuote.value
       if (!quote) return
+      const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
       await addBatchEntry({
         label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
-        intent: createIntent({
+        intent: quoteIntents?.[0] ?? createIntent({
           kind: 'withdraw',
           planner: 'withdraw-and-swap',
           args: { swapQuote: quote, vaultAddress, assets, owner },

@@ -2,8 +2,6 @@ import type { Hash } from 'viem'
 import { CeremonyOperationReviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
-import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getEagerPlanIntents } from '~/features/transaction-ceremony/planning/eager-plan-intents'
 
 export interface CeremonyReviewPresentation extends Record<string, unknown> {
   asset: { address: string, symbol: string, decimals: number, name?: string }
@@ -57,8 +55,5 @@ export const useCeremonyReview = () => {
     return { ceremonyId, consentDigest }
   }
 
-  const openEagerPlan = (plan: TransactionPlan, options: OpenCeremonyReviewOptions) =>
-    open(getEagerPlanIntents(plan), options)
-
-  return { open, openEagerPlan }
+  return { open }
 }

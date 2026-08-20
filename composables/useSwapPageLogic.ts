@@ -15,6 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -41,6 +42,8 @@ export interface UseSwapPageLogicOptions {
   buildQuoteRequest: (amount: bigint) => { params: SwapQuoteInput } | null
   /** Build the TransactionPlan for the current swap (same-asset or quote-based). Must throw on failure. */
   buildPlan: (quote?: SwapQuote, context?: SwapQuotePlanContext) => Promise<TransactionPlan>
+  /** Capture the immutable operation DTO from the same form snapshot used by buildPlan. */
+  createReviewIntent: (quote?: SwapQuote) => Readonly<OperationIntent>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -79,6 +82,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     quoteDiffPrefix,
     buildQuoteRequest,
     buildPlan,
+    createReviewIntent,
     getBalanceError,
     getGeoBlockedAddresses,
     redirectPath,
@@ -99,7 +103,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
   const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
-  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { open: openCeremonyReview } = useCeremonyReview()
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -147,12 +151,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     // its own buildPlan. We just forward the candidate quote so the parallel
     // engine can build a plan per quote for gas estimation.
     buildTxPlanForQuote: (quote, _provider, context) => buildPlan(quote, context),
+    createIntentsForQuote: quote => [createReviewIntent(quote)],
     getPlanAccount: () => getPlanAccount?.() ?? defaultPlanAccount.value,
     getStateOverrideOptions: () => buildSwapStateOverrideOptions(),
     // Sweep-scoped prefetch — Pyth Hermes / keyring vault gating resolved once
     // per fetch instead of per-quote.
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
-    prepareTransactionPlan: (plan, account, prefetch) => prepareTransactionPlan(plan, { account, prefetch }),
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
+    prepareTransactionPlan: (plan, account, prefetch, intents) => prepareTransactionPlan(plan, { account, prefetch, intents }),
   })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
@@ -504,6 +509,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return {
       plan: card.plan ?? card.preparedPlan.plan,
       prepared: card.preparedPlan as TransactionPlanPrepared,
+      intents: card.intents,
     }
   }
 
@@ -525,15 +531,20 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
         preparedPlan.value = null
         plan.value = null
+        let intents: readonly OperationIntent[]
         try {
           const preparedQuotePlan = getSelectedPreparedQuotePlan()
           if (preparedQuotePlan) {
             plan.value = preparedQuotePlan.plan
             preparedPlan.value = preparedQuotePlan.prepared
+            intents = preparedQuotePlan.intents?.length
+              ? preparedQuotePlan.intents
+              : [createReviewIntent(selectedQuote.value ?? undefined)]
           }
           else {
+            intents = [createReviewIntent(isSameAsset.value ? undefined : selectedQuote.value ?? undefined)]
             plan.value = await buildPlan(undefined, currentPlanContext())
-            preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount() })
+            preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount(), intents })
           }
         }
         catch (e) {
@@ -545,7 +556,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         }
 
         if (preparedPlan.value) {
-          const ok = await runPreparedSimulation(preparedPlan.value, buildSwapStateOverrideOptions())
+          const ok = await runPreparedSimulation(preparedPlan.value, buildSwapStateOverrideOptions(), undefined, intents)
           if (!ok) return
         }
         else if (plan.value) {
@@ -555,7 +566,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
         const showSwapAmounts = sameAssetModalType === 'transfer' || !isSameAsset.value
         if (!plan.value) return
-        await openCeremonyReview(plan.value, {
+        await openCeremonyReview(intents, {
           presentationKind: isSameAsset.value ? sameAssetModalType : 'swap',
           review: {
             type: isSameAsset.value ? sameAssetModalType : 'swap',

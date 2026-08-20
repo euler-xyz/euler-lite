@@ -96,8 +96,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   const modal = useModal()
   const { error } = useToast()
-  const { planBorrow, planSwapAndBorrow, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { planBorrow, planSwapAndBorrow, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+  const { open: openCeremonyReview } = useCeremonyReview()
   const { create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
@@ -147,6 +147,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     sortedQuoteCards: borrowSwapQuoteCards,
     selectedProvider: borrowSwapSelectedProvider,
     selectedQuote: borrowSwapSelectedQuote,
+    selectedQuoteCard: borrowSwapSelectedQuoteCard,
     effectiveQuote: borrowSwapEffectiveQuote,
     effectiveQuoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt,
     isLoading: isBorrowSwapQuoteLoading,
@@ -160,12 +161,18 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     amountField: 'amountOut',
     compare: 'max',
     buildTxPlanForQuote: (quote, _provider, context) => buildSwapBorrowPlanFromQuote(quote, context.account),
+    createIntentsForQuote: (quote) => {
+      const subAccount = pendingSubAccount.value
+      if (!subAccount) throw new Error('Borrow sub-account is not resolved')
+      return [createBorrowIntent({ ...captureBorrowSnapshot(getAddress(subAccount)), quote })]
+    },
     getPlanAccount: () => planAccount.value,
     getStateOverrideOptions: () => buildBorrowStateOverrideOptions(),
     // First quote in each sweep resolves the plugin prefetch (Pyth Hermes /
     // keyring vault gating); subsequent quotes reuse it so per-quote prepare
     // skips Hermes pulls and keyring reads.
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
+    prepareTransactionPlan: (plan, account, prefetch, intents) => prepareTransactionPlan(plan, { account, prefetch, intents }),
   })
   // --- Form state ---
   const ltv = ref(0)
@@ -1037,7 +1044,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
             : undefined,
         },
-        source: 'composables/borrow/useBorrowForm.ts#batch',
+        source: 'composables/borrow/useBorrowForm.ts',
         subAccounts: [subAccount],
       })
     }
@@ -1074,9 +1081,26 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
                 : undefined,
             },
       },
-      source: 'composables/borrow/useBorrowForm.ts#batch',
+      source: 'composables/borrow/useBorrowForm.ts',
       subAccounts: [subAccount],
     })
+  }
+
+  const captureBorrowSnapshot = (subAccount: Address): BorrowBatchSnapshot => {
+    if (!collateralVault.value || !borrowVault.value) throw new Error('Borrow vaults are not loaded')
+    return {
+      subAccount,
+      collateralVault: collateralVault.value,
+      borrowVault: borrowVault.value,
+      collateralAmount: collateralAmount.value,
+      borrowAmount: borrowAmount.value,
+      needsSwap: borrowNeedsSwap.value,
+      selectedAsset: borrowSelectedAsset.value,
+      isSavingCollateral: isSavingCollateral.value,
+      savingCollateral: savingCollateral.value,
+      isBorrowNativeWrap: isBorrowNativeWrap.value,
+      quote: borrowNeedsSwap.value ? borrowSwapEffectiveQuote.value ?? undefined : undefined,
+    }
   }
 
   const submit = async () => {
@@ -1095,8 +1119,16 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
       // Swap & borrow path
       if (borrowNeedsSwap.value && borrowSwapEffectiveQuote.value) {
+        const subAccount = (await resolvePendingSubAccount()) as Address
+        const snapshot = captureBorrowSnapshot(subAccount)
+        const quoteIntents = borrowSwapSelectedQuoteCard.value?.quote === snapshot.quote
+          ? borrowSwapSelectedQuoteCard.value.intents
+          : undefined
+        const intents = quoteIntents?.length ? quoteIntents : [createBorrowIntent(snapshot)]
         try {
-          plan.value = await buildSwapBorrowPlanFromQuote(borrowSwapEffectiveQuote.value)
+          const account = planAccount.value
+          await ensureBorrowSubAccountSnapshot(account, subAccount)
+          plan.value = await buildBorrowPlan(snapshot, account)
         }
         catch (e) {
           logWarn('borrow/buildSwapPlan', e)
@@ -1115,7 +1147,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           ? (resolveWrappedNativeAsset(chainId.value!) || borrowSelectedAsset.value!)
           : (borrowSelectedAsset.value || collateralVault.value.asset)
         if (!plan.value) return
-        await openCeremonyReview(plan.value, {
+        await openCeremonyReview(intents, {
           presentationKind: 'swap-borrow',
           review: {
             type: 'swap-borrow' as const,
@@ -1137,60 +1169,13 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       // Standard borrow path
-      const collateralAmountNano = valueToNano(collateralAmount.value || '0', collateralVault.value?.asset.decimals)
-      const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals)
-      let collateralAmountForPlan = collateralAmountNano
-      let selectedSavingsCollateral: PortfolioSavingsPosition<VaultEntity> | undefined
-
-      if (isSavingCollateral.value) {
-        selectedSavingsCollateral = savingCollateral.value
-        if (!selectedSavingsCollateral) {
-          plan.value = null
-          return
-        }
-        if (selectedSavingsCollateral.assets === collateralAmountNano) {
-          collateralAmountForPlan = selectedSavingsCollateral.shares
-        }
-        else {
-          collateralAmountForPlan = collateralVault.value.convertToShares(collateralAmountNano)
-        }
-      }
-
+      const subAccountAddr = (await resolvePendingSubAccount()) as Address
+      const snapshot = captureBorrowSnapshot(subAccountAddr)
+      const intent = createBorrowIntent(snapshot)
       try {
-        const subAccountAddr = (await resolvePendingSubAccount()) as Address
         const account = planAccount.value
-        const subAccountSnapshotApplied = await ensureBorrowSubAccountSnapshot(account, subAccountAddr)
-        plan.value = isSavingCollateral.value
-          ? await planBorrow({
-              vaultAddress: borrowVault.value.address as Address,
-              assetAddress: borrowVault.value.asset.address as Address,
-              amount: borrowAmountNano,
-              borrowAccount: subAccountAddr,
-              account,
-              subAccountSnapshotApplied,
-              collateral: {
-                vault: collateralVault.value.address as Address,
-                amount: collateralAmountForPlan,
-                source: 'savings',
-                from: selectedSavingsCollateral!.subAccount as Address,
-              },
-            })
-          : await planBorrow({
-              vaultAddress: borrowVault.value.address as Address,
-              assetAddress: borrowVault.value.asset.address as Address,
-              amount: borrowAmountNano,
-              borrowAccount: subAccountAddr,
-              account,
-              subAccountSnapshotApplied,
-              collateral: {
-                vault: collateralVault.value.address as Address,
-                asset: collateralVault.value.asset.address as Address,
-                amount: collateralAmountForPlan,
-                wrappedNativeInfo: isBorrowNativeWrap.value
-                  ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
-                  : undefined,
-              },
-            })
+        await ensureBorrowSubAccountSnapshot(account, subAccountAddr)
+        plan.value = await buildBorrowPlan(snapshot, account)
       }
       catch (e) {
         logWarn('borrow/buildPlan', e)
@@ -1205,7 +1190,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       if (!plan.value) return
-      await openCeremonyReview(plan.value, {
+      await openCeremonyReview([intent], {
         presentationKind: 'borrow',
         review: {
           type: 'borrow',

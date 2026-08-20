@@ -185,7 +185,7 @@ describe('useCollateralSwapRepay', () => {
 
   beforeEach(() => {
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useCeremonyReview', () => ({ openEagerPlan: vi.fn() }))
+    vi.stubGlobal('useCeremonyReview', () => ({ open: vi.fn() }))
     vi.clearAllMocks()
     mocks.quoteInstances.length = 0
     mocks.getCollateralApySnapshot.mockResolvedValue({

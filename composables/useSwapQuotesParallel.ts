@@ -29,6 +29,7 @@ import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { profAsync, profMark } from '~/utils/profiler'
+import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
 
 export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
 export type SwapQuotePlanContext = {
@@ -44,6 +45,8 @@ type SwapQuotesParallelOptions = {
   /** Build a TransactionPlan from a quote so the composable can run gas
    *  estimation and discard quotes that fail with swapper/verifier reverts. */
   buildTxPlanForQuote?: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
+  /** Capture explicit immutable operation DTOs from the same quote snapshot. */
+  createIntentsForQuote?: (quote: SwapQuote, provider: string) => readonly OperationIntent[]
   /** Optionally wrap the quote plan before gas estimation. Batch flows use this
    *  to estimate the real atomic transaction: existing batch + candidate quote. */
   buildGasEstimatePlan?: (candidatePlan: TransactionPlan) => Promise<TransactionPlan> | TransactionPlan
@@ -56,7 +59,11 @@ type SwapQuotesParallelOptions = {
    *  plan; the result is cached and passed to `prepareTransactionPlan` for
    *  every subsequent quote so per-quote prepare doesn't re-do Hermes /
    *  keyring / vault-meta lookups. */
-  prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  prefetchPluginData?: (
+    plan: TransactionPlan,
+    account: SwapQuotePlanAccount,
+    intents: readonly OperationIntent[] | undefined,
+  ) => Promise<PluginPrefetchData>
   /** App-level prepare hook. Lets callers reuse the same Permit2 / plugin
    *  configuration as Review-click preparation while still doing it at
    *  quote-estimation time. */
@@ -64,6 +71,7 @@ type SwapQuotesParallelOptions = {
     plan: TransactionPlan,
     account: SwapQuotePlanAccount,
     prefetch: PluginPrefetchData | undefined,
+    intents: readonly OperationIntent[] | undefined,
   ) => Promise<TransactionPlanPrepared>
   /** Optional already-loaded Account for SDK plan/plugin processing. */
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
@@ -238,11 +246,15 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   // Resolve the sweep-scoped prefetch on demand: first caller initialises the
   // promise; later callers await the same result. Errors degrade gracefully —
   // a failed prefetch falls back to the plugin's live-fetch path.
-  const ensureSweepPrefetch = (plan: TransactionPlan, account: SwapQuotePlanAccount) => {
+  const ensureSweepPrefetch = (
+    plan: TransactionPlan,
+    account: SwapQuotePlanAccount,
+    intents: readonly OperationIntent[] | undefined,
+  ) => {
     if (!options.prefetchPluginData) return Promise.resolve<PluginPrefetchData | undefined>(undefined)
     if (!sweepPrefetchPromise) {
       sweepPrefetchPromise = options
-        .prefetchPluginData(plan, account)
+        .prefetchPluginData(plan, account, intents)
         .then(result => result as PluginPrefetchData | undefined)
         .catch((err) => {
           logWarn('useSwapQuotesParallel/prefetch', err)
@@ -259,9 +271,10 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     plan: TransactionPlan,
     account: SwapQuotePlanAccount,
     prefetch: PluginPrefetchData | undefined,
+    intents: readonly OperationIntent[] | undefined,
   ): Promise<TransactionPlanPrepared> => {
     if (options.prepareTransactionPlan) {
-      return options.prepareTransactionPlan(plan, account, prefetch)
+      return options.prepareTransactionPlan(plan, account, prefetch, intents)
     }
     if (!chainId.value) throw new Error('preparePlanForQuote: no chainId')
     const sdk = await getEulerSdkFresh()
@@ -323,16 +336,18 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
     let gas: bigint
     let plan: TransactionPlan
     let prepared: TransactionPlanPrepared
+    let intents: readonly OperationIntent[] | undefined
     try {
       const fallbackAccount = (params.origin || effectiveOwner.value || quote.accountIn) as Address
       const account = getPlanAccount(fallbackAccount)
       plan = await profAsync(`quote:${provider}`, 'buildTxPlanForQuote', () => options.buildTxPlanForQuote!(quote, provider, getPlanContext(account)))
-      const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account))
-      prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch))
+      intents = options.createIntentsForQuote?.(quote, provider)
+      const prefetch = await profAsync(`quote:${provider}`, 'sweepPrefetch', () => ensureSweepPrefetch(plan, account, intents))
+      prepared = await profAsync(`quote:${provider}`, 'prepareTxPlan', () => preparePlanForQuote(plan, account, prefetch, intents))
       const gasPlan = await profAsync(`quote:${provider}`, 'buildGasEstimatePlan', () => buildGasEstimatePlan(plan))
       const gasPrepared = gasPlan === plan
         ? prepared
-        : await profAsync(`quote:${provider}`, 'prepareGasEstimatePlan', () => preparePlanForQuote(gasPlan, account, undefined))
+        : await profAsync(`quote:${provider}`, 'prepareGasEstimatePlan', () => preparePlanForQuote(gasPlan, account, undefined, undefined))
       gas = await profAsync(`quote:${provider}`, 'estimateTxPlanGas', () => estimateTxPlanGas(gasPrepared))
     }
     catch (err) {
@@ -352,7 +367,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
     const gasPrice = await gasPricePromise
     if (!gasPrice) {
-      return { provider, quote, amountUsd: await amountUsdPromise, plan, preparedPlan: prepared }
+      return { provider, quote, amountUsd: await amountUsdPromise, plan, preparedPlan: prepared, intents }
     }
 
     const gasCostNative = gas * gasPrice
@@ -368,6 +383,7 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
       gasCostUsd,
       plan,
       preparedPlan: prepared,
+      intents,
     }
   }
 

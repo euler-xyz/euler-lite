@@ -86,6 +86,18 @@ describe('Stage A transaction inventory', () => {
     }
   })
 
+  it('keeps operation authority explicit and independent of SDK object identity', () => {
+    const candidates = ['pages', 'components', 'composables', 'features/transaction-ceremony']
+      .flatMap(listProductionSources)
+    const production = candidates.map(source => read(source)).join('\n')
+
+    expect(production).not.toMatch(/\b(?:openEagerPlan|bindEagerPlanIntents|getEagerPlanIntents|collectEagerPlanIntents)\b/)
+    expect(read('features/transaction-ceremony/planning/preview-evidence.ts')).not.toMatch(/\bWeakMap\b|\btoRaw\b/)
+    expect(read('composables/useEulerTx.ts')).not.toMatch(/\bcreateOperationIntent\b/)
+    expect(production).not.toMatch(/\bopenCeremonyReview\s*\(\s*(?:plan|rawPlan|multiplyPlan)\b/)
+    expect(count(read('composables/useTransactionCeremony.ts'), /\buseConfig\(\)/g)).toBe(1)
+  })
+
   it('forbids new wallet write owners outside the frozen in-scope and excluded boundaries', () => {
     const candidates = ['pages', 'components', 'composables', 'features', 'utils'].flatMap(listProductionSources)
     const writePattern = /\b(?:useSendTransaction|useSignTypedData|sendCalls|sendTransaction)\s*\(|eth_signTypedData_v4|\.execute(?:TransactionPlan|PreparedTransactionPlan|CowSwapTransactionPlan)\s*\(/

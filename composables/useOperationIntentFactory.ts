@@ -17,13 +17,16 @@ export interface ConnectedOperationIntentInput {
 }
 
 /**
- * Captures the connected wallet context at the trusted form action boundary.
+ * Captures the effective account context at the trusted form action boundary.
  * The returned value is an immutable, serializable DTO; SDK accounts and Vue
  * refs in planner inputs are deliberately stripped by createOperationIntent.
+ * Spy previews use the browsed chain until a wallet chain is available.
  */
 export const useOperationIntentFactory = () => {
   const { effectiveAddress } = useEffectiveAddress()
-  const { chainId } = useWagmi()
+  const { chainId: wagmiChainId } = useWagmi()
+  const { chainId: browsedChainId } = useEulerAddresses()
+  const chainId = computed(() => wagmiChainId.value ?? browsedChainId.value)
 
   const create = (input: ConnectedOperationIntentInput): Readonly<OperationIntent> => {
     if (!effectiveAddress.value || !chainId.value) throw new Error('Wallet is not connected')

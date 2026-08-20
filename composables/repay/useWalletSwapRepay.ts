@@ -78,7 +78,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { error } = useToast()
   const { planSwapAndRepay, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { open: openCeremonyReview } = useCeremonyReview()
   // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
   // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
   // than forging it. Skip balance overrides + keep slot hints + wallet
@@ -117,7 +117,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const quotes = useSwapRepayQuotes({
     direction,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    createIntentsForQuote: quote => [createRepayIntent(quote)],
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
     getPlanAccount: () => planAccount.value,
   })
   // --- Derived ---
@@ -943,7 +944,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
           : undefined,
       },
-      source: 'position/repay-wallet-swap:add-to-batch',
+      source: 'position/repay-wallet-swap',
       subAccounts: [repayAccount],
     })
   }
@@ -957,6 +958,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
     isPreparing.value = true
     try {
+      const quoteIntents = quotes.selectedQuoteCard.value?.quote === quotes.selectedQuote.value
+        ? quotes.selectedQuoteCard.value.intents
+        : undefined
+      const intents = quoteIntents?.length ? quoteIntents : [createRepayIntent()]
       try {
         plan.value = await buildRepayPlan()
       }
@@ -984,7 +989,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const reviewAsset = isNativeRepay
         ? (resolveWrappedNativeAsset(chainId.value!) || selectedAsset.value)
         : selectedAsset.value
-      await openCeremonyReview(plan.value, {
+      await openCeremonyReview(intents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',

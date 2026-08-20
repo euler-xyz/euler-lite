@@ -31,6 +31,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -88,6 +89,9 @@ export interface UseCollateralFormOptions {
     account?: Account<IHasVaultAddress>
   }) => Promise<TransactionPlan>
 
+  /** Capture the immutable operation DTO from the same form snapshot used by buildRawPlan. */
+  createReviewIntent: (quote?: SwapQuote) => Readonly<OperationIntent>
+
   requestSwapQuoteParams: (ctx: {
     userAddr: Address
     subAccountAddr: Address
@@ -122,7 +126,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
-  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { open: openCeremonyReview } = useCeremonyReview()
   const usePreparedPipeline = options.usePreparedPipeline ?? true
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
@@ -203,12 +207,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     amountField: 'amountOut',
     compare: 'max',
     buildTxPlanForQuote: (quote, _provider, context) => buildCollateralSwapPlanFromQuote(quote, context.account),
+    createIntentsForQuote: quote => [options.createReviewIntent(quote)],
     getPlanAccount: () => planAccount.value,
     getStateOverrideOptions: () => buildCollateralStateOverrideOptions(),
     // Sweep-scoped plugin prefetch — Hermes pull + keyring read happen once per
     // sweep instead of once per quote.
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
-    prepareTransactionPlan: (plan, account, prefetch) => prepareTransactionPlan(plan, { account, prefetch }),
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
+    prepareTransactionPlan: (plan, account, prefetch, intents) => prepareTransactionPlan(plan, { account, prefetch, intents }),
   })
 
   async function buildCollateralSwapPlanFromQuote(quote: SwapQuote, account = planAccount.value): Promise<TransactionPlan> {
@@ -993,6 +998,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     return {
       plan: card.plan ?? card.preparedPlan.plan,
       prepared: card.preparedPlan as TransactionPlanPrepared,
+      intents: card.intents,
     }
   }
 
@@ -1012,17 +1018,22 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         plan.value = null
         preparedPlan.value = null
+        let intents: readonly OperationIntent[]
         try {
           const preparedSwapPlan = usePreparedPipeline ? getSelectedPreparedSwapPlan() : null
           if (preparedSwapPlan) {
             plan.value = preparedSwapPlan.plan
             preparedPlan.value = preparedSwapPlan.prepared
+            intents = preparedSwapPlan.intents?.length
+              ? preparedSwapPlan.intents
+              : [options.createReviewIntent(swapEffectiveQuote.value ?? undefined)]
           }
           else {
+            intents = [options.createReviewIntent(options.needsSwap.value ? swapEffectiveQuote.value ?? undefined : undefined)]
             const rawPlan = await buildRawPlan()
             plan.value = rawPlan
             if (rawPlan && usePreparedPipeline) {
-              preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: planAccount.value })
+              preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: planAccount.value, intents })
             }
           }
         }
@@ -1041,7 +1052,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         if (usePreparedPipeline) {
           if (!preparedPlan.value) return
-          const ok = await runPreparedSimulation(preparedPlan.value, buildCollateralStateOverrideOptions())
+          const ok = await runPreparedSimulation(preparedPlan.value, buildCollateralStateOverrideOptions(), undefined, intents)
           if (!ok) return
         }
         else if (plan.value) {
@@ -1052,7 +1063,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         const reviewAsset = options.getReviewAsset(options.needsSwap.value)
         const reviewType = options.needsSwap.value ? options.swapReviewType : options.reviewType
         if (!plan.value) return
-        await openCeremonyReview(plan.value, {
+        await openCeremonyReview(intents, {
           presentationKind: reviewType,
           review: {
             type: reviewType,

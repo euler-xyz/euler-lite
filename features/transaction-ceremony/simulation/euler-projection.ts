@@ -21,8 +21,11 @@ interface EulerSimulationResultLike {
 
 /** Normalize the SDK result once so eager and authoritative paths agree exactly. */
 export const projectEulerSimulation = (result: EulerSimulationResultLike): EulerSimulationProjection => ({
-  canExecute: result.canExecute
-    && !result.failedBatchItems?.length
+  // The SDK's aggregate canExecute also includes real-wallet balance and
+  // allowance diagnostics. Those are intentionally resolved by the existing
+  // review/dispatch flow; only a simulated transaction or snapshot failure
+  // invalidates the reviewed state projection.
+  canExecute: !result.failedBatchItems?.length
     && !result.accountStatusErrors?.length
     && !result.vaultStatusErrors?.length
     && !result.simulationError

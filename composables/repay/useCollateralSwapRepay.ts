@@ -77,7 +77,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { open: openCeremonyReview } = useCeremonyReview()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
@@ -160,8 +160,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     getCurrentDebt,
     includeCowSwap: () => !cowSwapForcedOff.value && batchEntryCount.value === 0,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
+    createIntentsForQuote: quote => [createRepayIntent(quote)],
     buildGasEstimatePlan: buildBatchAwareGasEstimatePlan,
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
       const subAccount = (position.value?.subAccount || effectiveAddress.value || zeroAddress) as Address
@@ -581,7 +582,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           fromAccount: subAccount,
           cleanupOnMax: isFullRepay,
         },
-        source: 'position/repay-collateral:add-to-batch',
+        source: 'position/repay-collateral',
         subAccounts: [subAccount],
       })
     }
@@ -599,7 +600,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       kind: 'repay',
       planner: 'repay-with-swap',
       args: { swapQuote, cleanupOnMax, swapperMode },
-      source: 'position/repay-collateral:add-to-batch',
+      source: 'position/repay-collateral',
       subAccounts: [subAccount],
     })
   }
@@ -745,6 +746,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     isPreparing.value = true
     try {
+      const quoteIntents = core.quotes.selectedQuoteCard.value?.quote === core.quotes.selectedQuote.value
+        ? core.quotes.selectedQuoteCard.value.intents
+        : undefined
+      const intents = quoteIntents?.length ? quoteIntents : [createRepayIntent()]
       try {
         plan.value = await buildRepayPlan()
       }
@@ -766,7 +771,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       })
 
       if (!plan.value) return
-      await openCeremonyReview(plan.value, {
+      await openCeremonyReview(intents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',

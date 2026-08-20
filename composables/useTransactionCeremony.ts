@@ -37,7 +37,7 @@ import { EoaAttemptReconciler, SafeAttemptReconciler } from '~/features/transact
 import type { WalletProviderLike } from '~/utils/safeWalletTransactions'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
-import { bindEagerPlanIntents, matchEagerAcceleration, matchEagerMigrationCompilation } from '~/features/transaction-ceremony/planning/eager-plan-intents'
+import { matchPreviewEvidence, matchPreviewMigrationCompilation } from '~/features/transaction-ceremony/planning/preview-evidence'
 import { compileCrossProtocolMigrationIntent, type MigrationCompilerSdk } from '~/features/transaction-ceremony/planning/migration-compiler'
 import type { AdditionalMaterializedCall } from '~/features/transaction-ceremony/materialization/prepared-plan'
 import { projectEulerSimulation } from '~/features/transaction-ceremony/simulation/euler-projection'
@@ -133,8 +133,10 @@ const sessionIdFor = async (connector: NonNullable<ReturnType<typeof getWagmiAcc
   })
 }
 
-const captureWalletBinding = async (): Promise<WalletBinding> => {
-  const config = useConfig()
+const captureWalletBinding = async (
+  config: ReturnType<typeof useConfig>,
+  signaturesEnabled: boolean,
+): Promise<WalletBinding> => {
   const first = getWagmiAccount(config)
   if (!first.address || !first.chainId || !first.connector) throw new Error('Wallet is not connected')
   const account = getAddress(first.address)
@@ -150,7 +152,6 @@ const captureWalletBinding = async (): Promise<WalletBinding> => {
     || await sessionIdFor(second.connector) !== connectorSessionId) {
     throw new Error('Wallet context changed while classification was resolving')
   }
-  const { signaturesEnabled } = useSignaturePreference()
   return {
     chainId: first.chainId,
     account,
@@ -160,7 +161,7 @@ const captureWalletBinding = async (): Promise<WalletBinding> => {
     walletKind,
     ...(walletKind === 'safe' ? { safeAddress: account } : {}),
     classificationVersion: CLASSIFICATION_VERSION,
-    approvalMode: walletKind === 'safe' || !signaturesEnabled.value ? 'approve' : 'permit2',
+    approvalMode: walletKind === 'safe' || !signaturesEnabled ? 'approve' : 'permit2',
   }
 }
 
@@ -171,7 +172,7 @@ const loadPlanningAccount = async (owner: Address, chainId: number): Promise<Acc
       assertRuntimeAccountContext(warmed, owner, chainId)
       return warmed
     }
-    catch { /* a stale eager snapshot is never adopted */ }
+    catch { /* a stale preloaded account snapshot is never adopted */ }
   }
   const sdk = await getEulerSdkFresh()
   const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
@@ -205,6 +206,7 @@ export const useTransactionCeremony = () => {
   const { rewards, buildClaimRewardPlan } = useSdkRewards()
   const { locks, buildUnlockREULPlan } = useREULLocks()
   const config = useConfig()
+  const { signaturesEnabled } = useSignaturePreference()
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
 
   const prepare = async (intents: readonly OperationIntent[], options: PrepareCeremonyOptions): Promise<PreparedCeremonyReview> => {
@@ -213,14 +215,14 @@ export const useTransactionCeremony = () => {
     const publisher = options.generation ?? new GenerationPublisher()
     const cartGeneration = options.cartGeneration ?? publisher.advance()
     if (options.cartGeneration !== undefined) publisher.assertCurrent(cartGeneration)
-    const captured = await captureWalletBinding()
+    const captured = await captureWalletBinding(config, signaturesEnabled.value)
     publisher.assertCurrent(cartGeneration)
     const requirements = collectPlanningRequirements(intents)
     if (requirements.chainId !== captured.chainId || requirements.owner !== captured.account) throw new Error('Intent context does not match the connected wallet')
     const wallet: WalletBinding = { ...captured, subAccounts: requirements.accounts }
     const assertPreparationContext = async () => {
       publisher.assertCurrent(cartGeneration)
-      const current = await captureWalletBinding()
+      const current = await captureWalletBinding(config, signaturesEnabled.value)
       publisher.assertCurrent(cartGeneration)
       assertExactWalletBinding(wallet, { ...current, subAccounts: wallet.subAccounts })
     }
@@ -279,7 +281,7 @@ export const useTransactionCeremony = () => {
             after: migrationAfter,
             stateOverrides: migrationStateOverrides,
           },
-          warmedResult: matchEagerMigrationCompilation(intent, context.snapshot.observedBlock),
+          warmedResult: matchPreviewMigrationCompilation(intent, context.snapshot.observedBlock),
         })
       },
     }
@@ -297,7 +299,7 @@ export const useTransactionCeremony = () => {
       snapshotLoader,
       materializationSdk: sdk,
       async prefetchPlugins(plan, binding) {
-        const eager = matchEagerAcceleration({
+        const previewEvidence = matchPreviewEvidence({
           intents,
           rawPlan: plan,
           owner: binding.account,
@@ -306,7 +308,7 @@ export const useTransactionCeremony = () => {
           unlimitedApproval: false,
           allowSimulation: false,
         })
-        if (eager.pluginPrefetch !== undefined) return eager.pluginPrefetch
+        if (previewEvidence.pluginPrefetch !== undefined) return previewEvidence.pluginPrefetch
         return serializePluginPrefetch(await sdk.executionService.prefetchPluginDataForPlan(plan, account, binding.chainId))
       },
       async processPlugins(plan, binding, prefetched) {
@@ -348,7 +350,7 @@ export const useTransactionCeremony = () => {
       async simulate(plan, template, _snapshot, rawPlan) {
         const stateCovered = template.effects.some(node => node.simulation.kind === 'evc-state' || node.simulation.kind === 'independent-call')
         if (!stateCovered) return undefined
-        const eager = matchEagerAcceleration({
+        const previewEvidence = matchPreviewEvidence({
           intents,
           rawPlan,
           preparedPlan: plan,
@@ -361,8 +363,8 @@ export const useTransactionCeremony = () => {
             && !migrationAfter.length
             && !migrationStateOverrides.length,
         })
-        if (eager.simulationProjection !== undefined) {
-          return eager.simulationProjection as unknown as EulerSimulationProjection
+        if (previewEvidence.simulationProjection !== undefined) {
+          return previewEvidence.simulationProjection as unknown as EulerSimulationProjection
         }
         const prepared: TransactionPlanPrepared = {
           __prepared: true,
@@ -419,7 +421,7 @@ export const useTransactionCeremony = () => {
   const getCeremony = (ceremonyId: Hash) => ceremonies.get(ceremonyId)
 
   /**
-   * Compile a non-authoritative eager preview for form and cart projections.
+   * Compile a non-authoritative preview for form and cart projections.
    * The preview remains outside the draft DTO and is always recompiled or
    * deep-validated by prepare() before review.
    */
@@ -463,7 +465,7 @@ export const useTransactionCeremony = () => {
             after: migrationAfter,
             stateOverrides: migrationStateOverrides,
           },
-          warmedResult: matchEagerMigrationCompilation(intent, context.snapshot.observedBlock),
+          warmedResult: matchPreviewMigrationCompilation(intent, context.snapshot.observedBlock),
         })
       },
     }
@@ -486,7 +488,7 @@ export const useTransactionCeremony = () => {
       { snapshot, runtime: asCompilerRuntime(runtime) },
       () => {},
     )
-    return bindEagerPlanIntents(compiled.plan, intents)
+    return compiled.plan
   }
 
   const executionRuntime = async (ceremony: SealedCeremony) => {
@@ -538,7 +540,7 @@ export const useTransactionCeremony = () => {
         safe: new SafeCeremonyAdapter(safe.adapter),
       },
       async readWalletBinding() {
-        const current = await captureWalletBinding()
+        const current = await captureWalletBinding(config, signaturesEnabled.value)
         return { ...current, subAccounts: ceremony.template.wallet.subAccounts }
       },
       async revalidatePolicy(current) {

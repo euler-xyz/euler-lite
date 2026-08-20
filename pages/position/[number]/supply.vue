@@ -122,6 +122,52 @@ const form = useCollateralForm({
     })
   },
 
+  createReviewIntent: (quote?: SwapQuote) => {
+    const vault = form.collateralVault.value
+    const asset = form.asset.value
+    const receiver = form.position.value?.subAccount as Address | undefined
+    if (!vault || !asset || !receiver) throw new Error('Position is not loaded')
+    if (quote) {
+      const selected = selectedAsset.value
+      if (!selected) throw new Error('No selected asset')
+      const amount = valueToNano(form.amount.value || '0', selected.decimals)
+      const isNative = isNativeCurrencyAddress(selected.address)
+      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+      if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+      return createIntent({
+        kind: 'deposit',
+        planner: 'deposit-with-swap',
+        args: {
+          swapQuote: quote,
+          amount,
+          tokenIn: (wrappedAddress || selected.address) as Address,
+          wrappedNativeInfo: isNative && wrappedAddress
+            ? { wrappedTokenAddress: wrappedAddress, nativeAmount: amount }
+            : undefined,
+        },
+        source: 'position/supply:review',
+        subAccounts: [receiver],
+      })
+    }
+    const amount = valueToNano(form.amount.value || '0', asset.decimals)
+    const wrappedAddress = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
+    return createIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: {
+        vaultAddress: vault.address as Address,
+        assetAddress: asset.address as Address,
+        amount,
+        receiver,
+        wrappedNativeInfo: isNativeWrap.value && wrappedAddress
+          ? { wrappedTokenAddress: wrappedAddress, nativeAmount: amount }
+          : undefined,
+      },
+      source: 'position/supply:review',
+      subAccounts: [receiver],
+    })
+  },
+
   requestSwapQuoteParams: ({ userAddr, subAccountAddr, amountNano: _amountNano, slippage }) => {
     if (!selectedAsset.value || !form.asset.value || !form.collateralVault.value) return null
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
@@ -214,9 +260,10 @@ const addToBatch = async () => {
       if (isNative && !wrappedAddress) return
       const tokenIn = (wrappedAddress || sel.address) as Address
       const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
+      const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
       await addBatchEntry({
         label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
-        intent: createIntent({
+        intent: quoteIntents?.[0] ?? createIntent({
           kind: 'deposit',
           planner: 'deposit-with-swap',
           args: { swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo },

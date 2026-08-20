@@ -98,14 +98,19 @@ const compilePublicPlanner = async (intent: OperationIntent, context: IntentComp
   }
   switch (intent.planner.name) {
     case 'deposit':
-      return service.planDeposit({ ...args, vault: args.vaultAddress, asset: args.assetAddress } as never)
+      return service.planDeposit({
+        ...args,
+        vault: args.vaultAddress,
+        asset: args.assetAddress,
+        receiver: args.receiver ?? intent.account,
+      } as never)
     case 'withdraw':
-      return service.planWithdraw({ ...args, vault: args.vaultAddress } as never)
+      return service.planWithdraw({ ...args, vault: args.vaultAddress, receiver: args.receiver ?? intent.account } as never)
     case 'redeem':
-      return service.planRedeem({ ...args, vault: args.vaultAddress } as never)
+      return service.planRedeem({ ...args, vault: args.vaultAddress, receiver: args.receiver ?? intent.account } as never)
     case 'borrow': {
       const { assetAddress: _assetAddress, ...plannerInput } = args
-      return service.planBorrow({ ...plannerInput, vault: args.vaultAddress } as never)
+      return service.planBorrow({ ...plannerInput, vault: args.vaultAddress, receiver: args.receiver ?? intent.account } as never)
     }
     case 'repay-from-wallet': {
       const { liabilityAsset: _liabilityAsset, ...plannerInput } = args
@@ -121,8 +126,13 @@ const compilePublicPlanner = async (intent: OperationIntent, context: IntentComp
       return service.planDepositWithSwapFromWallet(args as never)
     case 'swap-from-wallet':
       return service.planSwapFromWallet(args as never)
-    case 'swap-and-borrow':
-      return service.planSwapAndBorrowFromWallet(args as never)
+    case 'swap-and-borrow': {
+      const quote = args.swapQuote as { accountOut?: Address } | undefined
+      return service.planSwapAndBorrowFromWallet({
+        ...args,
+        borrowAccount: args.borrowAccount ?? quote?.accountOut,
+      } as never)
+    }
     case 'swap-and-repay':
       return service.planSwapAndRepayFromWallet(args as never)
     case 'withdraw-and-swap':

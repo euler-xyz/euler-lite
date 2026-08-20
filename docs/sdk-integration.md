@@ -254,7 +254,7 @@ const freshPlanContext = async () => {
 }
 ```
 
-Plan builders call `freshPlanContext()` or receive a preloaded account from `useFreshAccount()` and pass that `account` into the SDK. Simulation and ceremony preparation use `getEulerSdkFresh()`. Matching eager account, slot-hint, plugin-prefetch, and simulation records remain reusable only through their context-complete cache identities.
+Plan builders call `freshPlanContext()` or receive a preloaded account from `useFreshAccount()` and pass that `account` into the SDK. Simulation and ceremony preparation use `getEulerSdkFresh()`. Matching account, slot-hint, plugin-prefetch, and simulation preview evidence remains reusable only through context-complete canonical identities; SDK object identity is never an authorization or cache key.
 
 The plan-time `Account` snapshot is what gives planners their entity math: `totalShares` / `totalAssets` for asset↔share conversion, sub-account positions for `getPosition`, controller flags for `isControllerEnabled`.
 

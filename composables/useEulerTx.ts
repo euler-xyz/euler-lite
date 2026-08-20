@@ -42,15 +42,13 @@ import type {
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { profAsync } from '~/utils/profiler'
-import { createOperationIntent } from '~/features/transaction-ceremony/domain/factory'
-import type { IntentConstraint, OperationIntentKind, PlannerName } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
 import {
-  bindEagerPlanIntents,
-  collectEagerPlanIntents,
-  publishEagerPluginPrefetch,
-  publishEagerPreparedPlan,
-  publishEagerPreparedSimulation,
-} from '~/features/transaction-ceremony/planning/eager-plan-intents'
+  publishPreviewPlan,
+  publishPreviewPluginEvidence,
+  publishPreviewPreparedEvidence,
+  publishPreviewSimulationEvidence,
+} from '~/features/transaction-ceremony/planning/preview-evidence'
 import { serializePluginPrefetch } from '~/features/transaction-ceremony/planning/plugin-evidence'
 import { projectEulerSimulation } from '~/features/transaction-ceremony/simulation/euler-projection'
 import { toCanonicalValue } from '~/features/transaction-ceremony/domain/canonical'
@@ -434,22 +432,6 @@ export const useEulerTx = () => {
     return chainId.value
   }
 
-  const bindIntent = (
-    plan: TransactionPlan,
-    kind: OperationIntentKind,
-    planner: PlannerName,
-    args: object,
-    constraints?: readonly IntentConstraint[],
-  ): TransactionPlan => bindEagerPlanIntents(plan, [createOperationIntent({
-    kind,
-    planner,
-    args: args as Readonly<Record<string, unknown>>,
-    chainId: requireChainId(),
-    account: requireOwner(),
-    source: `useEulerTx.${planner}`,
-    constraints,
-  })])
-
   /**
    * Resolve a plan-time SDK + Account pair.
    *
@@ -529,7 +511,7 @@ export const useEulerTx = () => {
       enableCollateral: input.enableCollateral,
       wrappedNativeInfo: input.wrappedNativeInfo,
     }
-    return bindIntent(sdk.executionService.planDeposit(args), 'deposit', 'deposit', input)
+    return sdk.executionService.planDeposit(args)
   }
 
   const planWithdraw = async (input: PlanWithdrawInput): Promise<TransactionPlan> => {
@@ -543,7 +525,7 @@ export const useEulerTx = () => {
       receiver: input.receiver ?? owner,
       disableCollateral: input.disableCollateral,
     }
-    return bindIntent(sdk.executionService.planWithdraw(args), 'withdraw', 'withdraw', { ...input, receiver: input.receiver ?? owner })
+    return sdk.executionService.planWithdraw(args)
   }
 
   const planRedeem = async (input: PlanRedeemInput): Promise<TransactionPlan> => {
@@ -559,7 +541,7 @@ export const useEulerTx = () => {
     const args: PlanRedeemArgs = 'shares' in input && input.shares !== undefined
       ? { ...base, shares: input.shares }
       : { ...base, assets: (input as { assets: bigint }).assets }
-    return bindIntent(sdk.executionService.planRedeem(args), 'withdraw', 'redeem', { ...input, receiver: input.receiver ?? owner })
+    return sdk.executionService.planRedeem(args)
   }
 
   const planBorrow = async (input: PlanBorrowInput): Promise<TransactionPlan> => {
@@ -577,7 +559,7 @@ export const useEulerTx = () => {
       collateral: input.collateral,
       skipCleanup: input.skipCleanup,
     }
-    return bindIntent(sdk.executionService.planBorrow(args), 'borrow', 'borrow', { ...input, receiver: input.receiver ?? owner })
+    return sdk.executionService.planBorrow(args)
   }
 
   const planRepayFromWallet = async (input: PlanRepayFromWalletInput): Promise<TransactionPlan> => {
@@ -589,7 +571,7 @@ export const useEulerTx = () => {
       receiver: input.receiver,
       cleanupOnMax: input.cleanupOnMax,
     }
-    return bindIntent(sdk.executionService.planRepayFromWallet(args), 'repay', 'repay-from-wallet', input)
+    return sdk.executionService.planRepayFromWallet(args)
   }
 
   const planRepayFromDeposit = async (input: PlanRepayFromDepositInput): Promise<TransactionPlan> => {
@@ -603,7 +585,7 @@ export const useEulerTx = () => {
       fromAccount: input.fromAccount,
       cleanupOnMax: input.cleanupOnMax,
     }
-    return bindIntent(sdk.executionService.planRepayFromDeposit(args), 'repay', 'repay-from-deposit', input)
+    return sdk.executionService.planRepayFromDeposit(args)
   }
 
   const planRepayWithSwap = async (input: PlanRepayWithSwapInput): Promise<TransactionPlan> => {
@@ -614,7 +596,7 @@ export const useEulerTx = () => {
       cleanupOnMax: input.cleanupOnMax,
       swapperMode: input.swapperMode,
     }
-    return bindIntent(sdk.executionService.planRepayWithSwap(args), 'repay', 'repay-with-swap', input)
+    return sdk.executionService.planRepayWithSwap(args)
   }
 
   const planDepositWithSwap = async (input: PlanDepositWithSwapInput): Promise<TransactionPlan> => {
@@ -627,7 +609,7 @@ export const useEulerTx = () => {
       enableCollateral: input.enableCollateral,
       wrappedNativeInfo: input.wrappedNativeInfo,
     }
-    return bindIntent(sdk.executionService.planDepositWithSwapFromWallet(args), 'deposit', 'deposit-with-swap', input)
+    return sdk.executionService.planDepositWithSwapFromWallet(args)
   }
 
   const planSwapFromWallet = async (input: PlanSwapFromWalletInput): Promise<TransactionPlan> => {
@@ -639,7 +621,7 @@ export const useEulerTx = () => {
       tokenIn: input.tokenIn,
       wrappedNativeInfo: input.wrappedNativeInfo,
     }
-    return bindIntent(sdk.executionService.planSwapFromWallet(args), 'swap', 'swap-from-wallet', input)
+    return sdk.executionService.planSwapFromWallet(args)
   }
 
   const planSwapCollateral = async (input: PlanSwapCollateralInput): Promise<TransactionPlan> => {
@@ -649,7 +631,7 @@ export const useEulerTx = () => {
       swapQuote: input.swapQuote,
       swapperMode: input.swapperMode,
     }
-    return bindIntent(sdk.executionService.planSwapCollateral(args), 'collateral', 'swap-collateral', input)
+    return sdk.executionService.planSwapCollateral(args)
   }
 
   const planSwapDebt = async (input: PlanSwapDebtInput): Promise<TransactionPlan> => {
@@ -659,7 +641,7 @@ export const useEulerTx = () => {
       swapQuote: input.swapQuote,
       swapperMode: input.swapperMode,
     }
-    return bindIntent(sdk.executionService.planSwapDebt(args), 'refinance', 'swap-debt', input)
+    return sdk.executionService.planSwapDebt(args)
   }
 
   const planSwapAndBorrow = async (input: PlanSwapAndBorrowInput): Promise<TransactionPlan> => {
@@ -681,7 +663,7 @@ export const useEulerTx = () => {
       wrappedNativeInfo: input.wrappedNativeInfo,
       skipCleanup: input.skipCleanup,
     }
-    return bindIntent(sdk.executionService.planSwapAndBorrowFromWallet(args), 'borrow', 'swap-and-borrow', { ...input, borrowAccount })
+    return sdk.executionService.planSwapAndBorrowFromWallet(args)
   }
 
   const planSwapAndRepay = async (input: PlanSwapAndRepayInput): Promise<TransactionPlan> => {
@@ -697,7 +679,7 @@ export const useEulerTx = () => {
       cleanupOnMax: input.cleanupOnMax,
       wrappedNativeInfo: input.wrappedNativeInfo,
     }
-    return bindIntent(sdk.executionService.planSwapAndRepayFromWallet(args), 'repay', 'swap-and-repay', input)
+    return sdk.executionService.planSwapAndRepayFromWallet(args)
   }
 
   const planWithdrawAndSwap = async (input: PlanWithdrawAndSwapInput): Promise<TransactionPlan> => {
@@ -709,7 +691,7 @@ export const useEulerTx = () => {
       owner: input.owner,
       swapQuote: input.swapQuote,
     }
-    return bindIntent(sdk.executionService.planWithdrawAndSwap(args), 'withdraw', 'withdraw-and-swap', input)
+    return sdk.executionService.planWithdrawAndSwap(args)
   }
 
   const planRedeemAndSwap = async (input: PlanRedeemAndSwapInput): Promise<TransactionPlan> => {
@@ -721,7 +703,7 @@ export const useEulerTx = () => {
       owner: input.owner,
       swapQuote: input.swapQuote,
     }
-    return bindIntent(sdk.executionService.planRedeemAndSwap(args), 'withdraw', 'redeem-and-swap', input)
+    return sdk.executionService.planRedeemAndSwap(args)
   }
 
   const planMigrateSameAssetCollateral = async (input: PlanMigrateSameAssetCollateralInput): Promise<TransactionPlan> => {
@@ -739,7 +721,7 @@ export const useEulerTx = () => {
       enableCollateralTo: input.enableCollateralTo,
       disableCollateralFrom: input.disableCollateralFrom,
     }
-    return bindIntent(sdk.executionService.planMigrateSameAssetCollateral(args), 'refinance', 'migrate-same-asset-collateral', input)
+    return sdk.executionService.planMigrateSameAssetCollateral(args)
   }
 
   const planMigrateSameAssetDebt = async (input: PlanMigrateSameAssetDebtInput): Promise<TransactionPlan> => {
@@ -755,7 +737,7 @@ export const useEulerTx = () => {
       sweepExcess: input.sweepExcess,
       transferRemainingSharesToOwner: input.transferRemainingSharesToOwner,
     }
-    return bindIntent(sdk.executionService.planMigrateSameAssetDebt(args), 'refinance', 'migrate-same-asset-debt', input)
+    return sdk.executionService.planMigrateSameAssetDebt(args)
   }
 
   const planMultiplyWithSwap = async (input: PlanMultiplyWithSwapInput): Promise<TransactionPlan> => {
@@ -776,7 +758,7 @@ export const useEulerTx = () => {
         skipCleanup: input.skipCleanup,
       }
       const plan = await profAsync('sdk', 'planMultiplyWithSwap.sdkCall', async () => sdk.executionService.planMultiplyWithSwap(args))
-      return bindIntent(plan, 'borrow', 'multiply-with-swap', input)
+      return plan
     })
   }
 
@@ -798,7 +780,7 @@ export const useEulerTx = () => {
       receiver: input.receiver,
       skipCleanup: input.skipCleanup,
     }
-    return bindIntent(sdk.executionService.planMultiplySameAsset(args), 'borrow', 'multiply-same-asset', input)
+    return sdk.executionService.planMultiplySameAsset(args)
   }
 
   const planTransfer = async (input: PlanTransferInput): Promise<TransactionPlan> => {
@@ -812,7 +794,7 @@ export const useEulerTx = () => {
       enableCollateralTo: input.enableCollateralTo,
       disableCollateralFrom: input.disableCollateralFrom,
     }
-    return bindIntent(sdk.executionService.planTransfer(args), 'collateral', 'transfer', input)
+    return sdk.executionService.planTransfer(args)
   }
 
   const planCleanup = async (input: PlanCleanupInput): Promise<TransactionPlan> => {
@@ -953,12 +935,7 @@ export const useEulerTx = () => {
             enableCollateralTo: input.collateral.enableCollateralTo,
             disableCollateralFrom: input.collateral.disableCollateralFrom,
           })
-      plans.push(bindIntent(
-        collateralPlan,
-        'refinance',
-        input.collateral.swapQuote ? 'swap-collateral' : 'migrate-same-asset-collateral',
-        input.collateral,
-      ))
+      plans.push(collateralPlan)
     }
 
     if (input.debt) {
@@ -979,15 +956,10 @@ export const useEulerTx = () => {
             sweepExcess: input.debt.sweepExcess,
             transferRemainingSharesToOwner: input.debt.transferRemainingSharesToOwner,
           })
-      plans.push(bindIntent(
-        debtPlan,
-        'refinance',
-        input.debt.swapQuote ? 'swap-debt' : 'migrate-same-asset-debt',
-        input.debt,
-      ))
+      plans.push(debtPlan)
     }
 
-    return bindEagerPlanIntents(sdk.executionService.mergePlans(plans), collectEagerPlanIntents(plans))
+    return sdk.executionService.mergePlans(plans)
   }
 
   const getMigrationAuthorization = async (input: GetMigrationAuthorizationArgs): Promise<MigrationAuthorizationRequest | undefined> => {
@@ -1112,13 +1084,17 @@ export const useEulerTx = () => {
       chainId?: number
       prefetch?: PluginPrefetchData
       usePermit2?: boolean
+      intents?: readonly OperationIntent[]
     },
   ): Promise<TransactionPlanPrepared> => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
       const owner = requireOwner()
       const cid = options?.chainId ?? requireChainId()
       const sdk = await getEulerSdkForChain(cid)
-      if (options?.prefetch) publishEagerPluginPrefetch(plan, serializePluginPrefetch(options.prefetch))
+      if (options?.intents) publishPreviewPlan(options.intents, plan)
+      if (options?.prefetch && options.intents) {
+        publishPreviewPluginEvidence(options.intents, plan, serializePluginPrefetch(options.prefetch))
+      }
       const prepared = await sdk.executionService.prepareTransactionPlan({
         plan,
         chainId: cid,
@@ -1126,7 +1102,7 @@ export const useEulerTx = () => {
         usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
         prefetch: options?.prefetch,
       })
-      publishEagerPreparedPlan(plan, prepared)
+      if (options?.intents) publishPreviewPreparedEvidence(options.intents, plan, prepared)
       return prepared
     })
   }
@@ -1148,7 +1124,7 @@ export const useEulerTx = () => {
    */
   const prefetchPluginData = async (
     plan: TransactionPlan,
-    options?: { account?: PrefetchPluginAccount },
+    options?: { account?: PrefetchPluginAccount, intents?: readonly OperationIntent[] },
   ): Promise<PluginPrefetchData> => {
     return profAsync('sdk', 'prefetchPluginData', async () => {
       const owner = requireOwner()
@@ -1159,7 +1135,9 @@ export const useEulerTx = () => {
         options?.account ?? owner,
         cid,
       )
-      publishEagerPluginPrefetch(plan, serializePluginPrefetch(prefetched))
+      if (options?.intents) {
+        publishPreviewPluginEvidence(options.intents, plan, serializePluginPrefetch(prefetched))
+      }
       return prefetched
     })
   }
@@ -1168,6 +1146,7 @@ export const useEulerTx = () => {
     prepared: TransactionPlanPrepared,
     stateOverrideOptions?: SimulationStateOverrideOptions,
     extraStateOverrides?: StateOverride,
+    intents?: readonly OperationIntent[],
   ) => {
     return profAsync('sdk', 'simulatePreparedTransactionPlan', async () => {
       const sdk = await getEulerSdkForChain(prepared.chainId)
@@ -1181,7 +1160,9 @@ export const useEulerTx = () => {
       })
       if (!extraStateOverrides?.length) {
         const projection = projectEulerSimulation(result)
-        if (projection.canExecute) publishEagerPreparedSimulation(prepared, toCanonicalValue(projection))
+        if (projection.canExecute && intents) {
+          publishPreviewSimulationEvidence(intents, prepared, toCanonicalValue(projection))
+        }
       }
       return result
     })

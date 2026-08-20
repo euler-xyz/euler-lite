@@ -3,11 +3,11 @@ import type { Address } from 'viem'
 import type { IntentConstraint, OperationIntent } from '~/features/transaction-ceremony/domain/intents'
 import { canonicalDigest, toCanonicalValue } from '~/features/transaction-ceremony/domain/canonical'
 import {
-  bindEagerPlanIntents,
-  publishEagerMigrationCompilation,
-  publishEagerPluginPrefetch,
-  publishEagerPreparedPlan,
-} from '~/features/transaction-ceremony/planning/eager-plan-intents'
+  publishPreviewPlan,
+  publishPreviewMigrationCompilation,
+  publishPreviewPluginEvidence,
+  publishPreviewPreparedEvidence,
+} from '~/features/transaction-ceremony/planning/preview-evidence'
 import { serializePluginPrefetch } from '~/features/transaction-ceremony/planning/plugin-evidence'
 
 export interface CreateMigrationIntentInput {
@@ -70,12 +70,12 @@ export const useMigrationIntentFactory = () => {
     })
     if (input.eagerCompilation) {
       const { result, observedBlock, prefetch, prepared } = input.eagerCompilation
-      publishEagerMigrationCompilation(intent, result, observedBlock)
+      publishPreviewMigrationCompilation(intent, result, observedBlock)
       const requests = authorizationRequests(result.authorizationRequest)
       const rawPlan = requests.some(request => request.kind === 'typedData') ? result.previewPlan : result.plan
-      bindEagerPlanIntents(rawPlan, [intent])
-      if (prefetch) publishEagerPluginPrefetch(rawPlan, serializePluginPrefetch(prefetch))
-      if (prepared) publishEagerPreparedPlan(rawPlan, prepared)
+      publishPreviewPlan([intent], rawPlan)
+      if (prefetch) publishPreviewPluginEvidence([intent], rawPlan, serializePluginPrefetch(prefetch))
+      if (prepared) publishPreviewPreparedEvidence([intent], rawPlan, prepared)
     }
     return intent
   }
