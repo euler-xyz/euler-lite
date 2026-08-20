@@ -337,7 +337,7 @@ The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stable
 
 ### Server-Side API Protection
 
-The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, TRM) to keep operator API keys out of client bundles. Several layers protect these endpoints:
+The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, the compliance screening API) to keep operator API keys out of client bundles. Several layers protect these endpoints:
 
 | Layer | Purpose |
 |---|---|

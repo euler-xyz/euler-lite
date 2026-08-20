@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WALLET_SCREENING_TIMEOUT_MS } from '~/entities/tuning-constants'
-import { screenAddress } from '~/services/trm'
+import { screenAddress } from '~/services/screening'
 
 const USER = '0x0000000000000000000000000000000000000001'
 

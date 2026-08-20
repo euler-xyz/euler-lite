@@ -84,7 +84,7 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
 | `server/` | Nitro layer: `api/`, `middleware/`, `plugins/`, `utils/`. |
 | `plugins/` | Client/Nuxt plugins (numbered for load order): `00.wagmi.ts`, `00.chartjs.client.ts`, `01.query.ts`, `theme.client.ts`, `node.ts` (Buffer polyfill). |
 | `middleware/` | Route middleware (numbered): `01.network.global.ts` (normalizes `?network=`, applies legacy path rewrites), `02.spy-param.global.ts`, `ensure-vault.global.ts`. |
-| `services/` | 3 thin fetch wrappers over internal API routes (`country.ts`, `trm.ts`, `vpn.ts`). |
+| `services/` | 3 thin fetch wrappers over internal API routes (`country.ts`, `screening.ts`, `vpn.ts`). |
 | `abis/` | viem ABIs (`vault.ts`, `evc.ts`, `erc20.ts`, `pyth.ts`, `keyring.ts`, `merkl.ts`, ...). |
 | `types/` | Shared TS types + global `Window` augmentations (`types/index.ts`). |
 | `assets/` | `styles/` (SCSS + theme vars in `variables.scss`), `tokens/` (icon overrides), `chains/`, `sprite/`. |
