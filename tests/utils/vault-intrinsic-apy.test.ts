@@ -66,6 +66,17 @@ describe('resolveVaultIntrinsicApySource', () => {
     expect(resolveVaultIntrinsicApySource(projectedVault, baseVault, securitizeVault))
       .toBe(projectedVault)
   })
+
+  it('falls back to the populated base EVault when the projection has no intrinsic APY', () => {
+    const projectedVault = vaultWith(undefined)
+    const baseVault = vaultWith(apyInfo(2, 'base'))
+    const securitizeVault = vaultWith(apyInfo(1, 'SECURITIZE'))
+
+    const resolved = resolveVaultIntrinsicApySource(projectedVault, baseVault, securitizeVault)
+
+    expect(resolved).toBe(baseVault)
+    expect(getVaultIntrinsicApyInfo(resolved, true)).toEqual(apyInfo(2, 'base'))
+  })
 })
 
 describe('getVaultIntrinsicApyInfo', () => {
