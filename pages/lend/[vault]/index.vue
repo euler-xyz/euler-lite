@@ -5,7 +5,7 @@ import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic } from '~/utils/vault-intrinsic-apy'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic, resolveVaultIntrinsicApySource } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
@@ -36,6 +36,7 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -364,7 +365,12 @@ const hasRewards = computed(() => {
   void rewardsVersion.value
   return hasSupplyRewards(vaultAddress)
 })
-const intrinsicApy = computed(() => getVaultIntrinsicApy(projectionEVault.value ?? vault.value, enableIntrinsicApy.value))
+const intrinsicApyVault = computed(() => resolveVaultIntrinsicApySource(
+  projectionEVault.value,
+  eVault.value,
+  securitizeVault.value,
+))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(intrinsicApyVault.value, enableIntrinsicApy.value))
 
 const baseSupplyApy = computed(() => {
   if (!features.value.hasInterestRate) return 0
@@ -577,8 +583,8 @@ const submit = async () => {
           swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
           swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
           submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await send()
+          onConfirm: async (execution) => {
+            await send(execution)
           },
         },
       })
@@ -635,7 +641,7 @@ const addToBatch = async () => {
   })
 }
 
-const send = async () => {
+const send = async (execution: TrackedExecutionScope) => {
   try {
     isSubmitting.value = true
     if (!preparedPlan.value) {
@@ -644,11 +650,16 @@ const send = async () => {
 
     await executePreparedPlan(preparedPlan.value)
 
-    modal.close()
+    // Success signal for a detached Safe completion toast; a proposal that
+    // confirmed after its modal was closed must not redirect mid-flow.
+    execution.markSucceeded()
     await updateEstimates()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-    }, 400)
+    if (!execution.suppressPostTxUi()) {
+      modal.close()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+      }, 400)
+    }
   }
   catch (e) {
     error('Transaction failed')
@@ -748,7 +759,7 @@ const supplyApyModalData = computed(() => ({
     mode: 'supply',
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getVaultIntrinsicApyInfo(projectionEVault.value ?? vault.value, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(intrinsicApyVault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vaultAddress),
     rewardVaultAddress: vaultAddress,
   },

@@ -45,12 +45,44 @@ const encodeCall = (call: MigrationAuthorizationCall): PlainTxRequest => ({
   ...(call.value === undefined ? {} : { value: call.value }),
 })
 
+/** Stable identity of an encoded transaction, for consolidating display rows. */
+const plainTxKey = (tx: PlainTxRequest): string =>
+  `${tx.to.toLowerCase()}:${(tx.value ?? 0n).toString()}:${tx.data}`
+
 const flattenRequests = (
   request: MigrationAuthorizationRequest | undefined,
 ): MigrationAuthorizationRequest[] =>
   request
     ? [request, ...flattenRequests(request.postMigrationAuthorization)]
     : []
+
+const bigintSafeStringify = (value: unknown): string =>
+  JSON.stringify(value, (_key, entry) => (typeof entry === 'bigint' ? `${entry.toString()}n` : entry))
+
+/**
+ * Identity of the ceremony an authorization request implies: the encoded
+ * grant/revoke transactions for transaction-form requests, the typed-data
+ * payload for signature-form ones, `'none'` for no request. Compared between
+ * review and confirmation — authorization state can drift in between (an
+ * allowance granted or revoked elsewhere, a restore value that moved), and a
+ * drifted payload means the reviewed ceremony no longer matches what would
+ * execute, so the flow must invalidate and re-review rather than proceed.
+ */
+export const migrationAuthorizationPayloadKey = (
+  request: MigrationAuthorizationRequest | undefined,
+): string => {
+  if (!request) return 'none'
+  return flattenRequests(request)
+    .map((entry) => {
+      if (entry.kind !== 'transaction') {
+        return `typedData:${bigintSafeStringify(entry.typedData)}`
+      }
+      const grant = plainTxKey(encodeCall(entry.call))
+      const revoke = entry.revocation ? plainTxKey(encodeCall(entry.revocation)) : 'none'
+      return `tx:${grant}|${revoke}`
+    })
+    .join(';')
+}
 
 /**
  * Encode an authorization request into its grant and restoration transactions.
@@ -94,11 +126,16 @@ const RESTORE_LABELS: Record<string, string> = {
   metamorphoApproval: 'Restore previous Morpho vault share approval',
 }
 
-/** Review-modal rows for the standalone grant or restoration transactions. */
+/**
+ * Review-modal rows for the grant or restoration transactions. `bundled`
+ * marks them as riding in the same Safe submission as the migration batch
+ * instead of standalone transactions.
+ */
 export const buildMigrationAuthorizationTxSteps = (
   request: MigrationAuthorizationRequest | undefined,
   phase: 'grant' | 'revoke',
   startIndex = 1,
+  options?: { bundled?: boolean },
 ): DisplayStep[] => {
   const labels = phase === 'grant' ? GRANT_LABELS : RESTORE_LABELS
   const fallback = phase === 'grant' ? 'Approve migration' : 'Restore previous migration authorization'
@@ -113,7 +150,8 @@ export const buildMigrationAuthorizationTxSteps = (
     steps.push({
       index: startIndex + steps.length,
       label: (authorizationType && labels[authorizationType]) || fallback,
-      isSeparateTx: true,
+      isSeparateTx: !options?.bundled,
+      txKey: plainTxKey(encodeCall(phase === 'grant' ? entry.call : entry.revocation!)),
     })
   }
 

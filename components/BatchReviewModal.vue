@@ -10,8 +10,10 @@ import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext } from '~/utils/stepDecoding'
 import { logWarn } from '~/utils/errorHandling'
 import { buildBatchHealthSummary } from '~/utils/batchHealthSummary'
-import { getAuthorizationStepDisplay } from '~/utils/batchReviewDisplay'
+import { consolidateRestorationSummaryRows, getAuthorizationStepDisplay, groupRestorationSummaryRows, isBundledReviewEntry } from '~/utils/batchReviewDisplay'
 import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
+import { isPlanBundleable } from '~/utils/transaction-plan-calls'
+import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { formatNumber } from '~/utils/string-utils'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
@@ -44,10 +46,13 @@ const {
   fetchTenderlyEnabled,
   simulateOnTenderly,
   dismissExecutionError,
+  prepareBundledExecution,
+  latchedBundledExecution,
 } = useTxBatch()
 
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId: wagmiChainId } = useWagmi()
+const { isSafeWallet } = useSafeWallet()
 const { chainId: addressesChainId, eulerCoreAddresses } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol } = useTokenSymbolResolver()
 const { getVault, isVerifiedVault } = useVaultRegistry()
@@ -88,17 +93,35 @@ const isExternalProtocolMigrationReview = (review: ReviewWithSteps | undefined):
 const normalizeDisplaySteps = (steps: DisplayStep[] | undefined): DisplayStep[] =>
   (steps ?? []).map((step, idx) => ({ ...step, index: idx + 1 }))
 
+// Bundled styling follows the ceremony latched when this modal opened. Live
+// Safe detection can resolve later, but it cannot change what this review will
+// execute without a fresh review.
+const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
+  isBundledReviewEntry(latchedBundledExecution.value !== null, !!entry.buildBundledExecution)
+
+const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[number]): DisplayStep[] =>
+  isBundledEntry(entry)
+    ? steps.map(step => ({ ...step, isSeparateTx: false }))
+    : steps
+
 const getEntrySignatureSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  // A latched bundled ceremony carries its own rows, derived from the SAME
+  // authorization resolution the proposal executes — the add-time captures
+  // can be stale (authorization state drifts between add and review).
+  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
+  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.grantSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
-    ? normalizeDisplaySteps(review?.signatureSteps)
+    ? overrideBundled(normalizeDisplaySteps(review?.signatureSteps), entry)
     : []
 }
 
 const getEntryPostSteps = (entry: typeof entries.value[number]): DisplayStep[] => {
+  const latchedSteps = latchedBundledExecution.value?.stepsByEntryId[entry.id]
+  if (latchedSteps) return normalizeDisplaySteps(latchedSteps.revokeSteps)
   const review = entry.review as unknown as ReviewWithSteps | undefined
   return isExternalProtocolMigrationReview(review)
-    ? normalizeDisplaySteps(review?.postSteps)
+    ? overrideBundled(normalizeDisplaySteps(review?.postSteps), entry)
     : []
 }
 
@@ -113,7 +136,7 @@ const stepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
     const ctx = entry.review as unknown as StepDecodingContext | undefined
     if (!plan?.length || !ctx) continue
     try {
-      out[entry.id] = buildTransactionPlanDisplaySteps(plan, ctx, getVault, getAssetLogoUrl)
+      out[entry.id] = buildTransactionPlanDisplaySteps(plan, { ...ctx, bundledApprovals: bundlesApprovals.value }, getVault, getAssetLogoUrl)
     }
     catch (error) {
       logWarn('BatchReviewModal/steps', error)
@@ -140,22 +163,66 @@ const postStepsByEntryId = computed<Record<string, DisplayStep[]>>(() => {
   return out
 })
 
-const signatureStepsHeading = (entryId: string): string =>
-  getAuthorizationStepDisplay(
+const signatureStepsHeading = (entryId: string): string => {
+  const entry = entries.value.find(candidate => candidate.id === entryId)
+  if (entry && isBundledEntry(entry)) return 'Authorization transactions'
+  return getAuthorizationStepDisplay(
     (signatureStepsByEntryId.value[entryId] ?? []).some(step => step.isSeparateTx),
   ).detailHeading
+}
+
+const restorationStepsHeading = (entry: typeof entries.value[number]): string =>
+  isBundledEntry(entry) ? 'Authorization restorations' : 'After execution'
 
 const authorizationRows = computed(() =>
   entries.value.flatMap(entry =>
-    (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
+    (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step, bundledTx: isBundledEntry(entry) })),
   ),
 )
-const authorizationSummaryGroups = computed(() =>
-  [true, false].map((isSeparateTx) => {
-    const rows = authorizationRows.value.filter(({ step }) => step.isSeparateTx === isSeparateTx)
-    return { rows, display: getAuthorizationStepDisplay(isSeparateTx) }
-  }).filter(({ rows }) => rows.length),
-)
+// Three ceremonies, three groups: standalone transactions, transactions
+// riding in the Safe proposal, and wallet signatures.
+const authorizationSummaryGroups = computed(() => {
+  const rows = authorizationRows.value
+  const groups: Array<{ rows: typeof rows, display: { summaryHeading: string, itemCountLabel: string } }> = []
+  const separate = rows.filter(({ step }) => step.isSeparateTx)
+  if (separate.length) groups.push({ rows: separate, display: getAuthorizationStepDisplay(true) })
+  const bundled = rows.filter(({ step, bundledTx }) => !step.isSeparateTx && bundledTx)
+  if (bundled.length) {
+    groups.push({ rows: bundled, display: { summaryHeading: 'Authorization transactions', itemCountLabel: 'bundled in proposal' } })
+  }
+  const signatures = rows.filter(({ step, bundledTx }) => !step.isSeparateTx && !bundledTx)
+  if (signatures.length) groups.push({ rows: signatures, display: getAuthorizationStepDisplay(false) })
+  return groups
+})
+
+// Authorization restorations run after the operation. They either ride at the
+// tail of the same Safe proposal or are sent as standalone post-execution
+// transactions; the collapsed summary keeps those ceremonies distinct.
+//
+// Rows render in EXECUTION order: restorations unwind in reverse entry order
+// (each entry's own steps are already reversed by the encoder). Identical
+// standalone restorations are consolidated because sequential prerequisite
+// resolution sends them once. Bundled Safe restorations are already collected
+// proposal calls, so every call remains visible. Labels are NOT identity: two
+// different aTokens can share a label while representing distinct transactions.
+const restorationSummaryRows = computed(() => {
+  const rows = [...entries.value].reverse().flatMap(entry =>
+    (postStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step })),
+  )
+  return consolidateRestorationSummaryRows(rows)
+})
+
+const restorationSummaryGroups = computed(() => {
+  const rows = groupRestorationSummaryRows(restorationSummaryRows.value)
+  return [
+    ...(rows.bundled.length
+      ? [{ key: 'bundled', heading: 'Authorization restorations', itemCountLabel: 'bundled in proposal', rows: rows.bundled }]
+      : []),
+    ...(rows.postExecution.length
+      ? [{ key: 'post-execution', heading: 'After execution', itemCountLabel: '1 transaction', rows: rows.postExecution }]
+      : []),
+  ]
+})
 
 // Unverified vaults the batch touches — surfaced as a warning. A vault is the
 // target of an op's core action; we read targets off each op's contextual plan
@@ -299,6 +366,11 @@ const preparedPlanRef = ref<TransactionPlan | undefined>()
 const hasPermit2Approval = computed(() =>
   hasPermit2TokenApproval(preparedPlanRef.value, eulerCoreAddresses.value?.permit2),
 )
+// Mirrors execution eligibility: only claim bundling when the merged plan
+// would actually submit as one Safe bundle.
+const bundlesApprovals = computed(() =>
+  isSafeWallet.value && !!preparedPlanRef.value && isPlanBundleable(preparedPlanRef.value),
+)
 
 onMounted(async () => {
   nowTimer = setInterval(() => {
@@ -308,6 +380,9 @@ onMounted(async () => {
   isPreparing.value = true
   prepareError.value = ''
   try {
+    // Resolve the bundled ceremony once for this review session: the same
+    // resolution drives the rows, Copy calldata, and execution.
+    await prepareBundledExecution()
     const prepared = await prepareBatchPlan()
     preparedPlanRef.value = prepared?.plan
     const known = buildKnownSymbols()
@@ -349,6 +424,12 @@ const copyCalldata = async () => {
     const cid = chainId.value
     const sdk = await getEulerSdkForChain(cid)
     const out: { to: string, data: string, value: string }[] = []
+    // The latched Safe proposal wraps the plan with grants/revocations —
+    // the copied JSON must match the actual submission.
+    const latched = latchedBundledExecution.value
+    for (const call of latched?.grants ?? []) {
+      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
+    }
     for (const item of plan) {
       if (item.type === 'requiredApproval') {
         for (const r of item.resolved ?? []) {
@@ -372,6 +453,9 @@ const copyCalldata = async () => {
         })
       }
     }
+    for (const call of latched?.revokes ?? []) {
+      out.push({ to: call.to, data: call.data, value: (call.value ?? 0n).toString() })
+    }
     copyToClipboard(JSON.stringify(out, null, 2), 'calldata')
   }
   catch (error) {
@@ -382,7 +466,7 @@ const copyCalldata = async () => {
 const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
 
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
+  isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
@@ -392,9 +476,28 @@ const blockedReason = computed(() => {
   return ''
 })
 
+const { beginTrackedExecution, hasPendingDetachedExecution } = useSafeExecutionDetachment()
+
+let pendingBatchExecution: Promise<void> | null = null
+let executionHandle: TrackedExecutionHandle | null = null
+
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
-  await executeBatch()
+  // Latch the wallet classification at submission time; the single-slot gate
+  // rejects new submissions while a detached proposal is pending.
+  const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
+  if (!handle) return
+  const run = executeBatch(handle.scope)
+  pendingBatchExecution = run
+  executionHandle = handle
+  try {
+    await run
+  }
+  finally {
+    pendingBatchExecution = null
+    executionHandle?.release()
+    executionHandle = null
+  }
   // executeBatch clears the cart on success; close once nothing's left to do.
   if (!execError.value && entries.value.length === 0) emit('close')
 }
@@ -403,12 +506,33 @@ const handleClose = () => {
   dismissExecutionError()
   emit('close')
 }
+
+// Safe proposals can wait on co-signers for minutes to days — allow closing
+// the modal mid-execution and surface completion as a toast instead. Uses the
+// classification latched at submit, not live detection.
+const canDetachExecution = computed(() =>
+  isExecuting.value && executionHandle?.safeAtSubmit === true)
+
+const onCloseRequested = () => {
+  if (isExecuting.value) {
+    if (!canDetachExecution.value) return
+    if (pendingBatchExecution && executionHandle) {
+      // executeBatch resolves on failure too (it reports via execError), so
+      // surface that state as the detached completion outcome.
+      executionHandle.detach(pendingBatchExecution.then(() => {
+        if (execError.value) throw new Error(execError.value)
+      }), { successMessage: 'Batch confirmed' })
+      executionHandle = null
+    }
+  }
+  handleClose()
+}
 </script>
 
 <template>
   <BaseModalWrapper
     title="Review batch"
-    @close="!isExecuting && handleClose()"
+    @close="onCloseRequested"
   >
     <!-- Separator under the modal title -->
     <div class="-mx-16 mb-16 border-t border-line-default" />
@@ -460,7 +584,7 @@ const handleClose = () => {
               />
               {{ a.kind === 'permit' ? `Sign permit2 — ${a.symbol}` : `Approve ${a.symbol}` }}
             </span>
-            <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : 'bundled in batch' }}</span>
+            <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : bundlesApprovals ? 'bundled in batch' : '1 transaction' }}</span>
           </div>
         </div>
       </div>
@@ -569,7 +693,7 @@ const handleClose = () => {
                     class="border-t border-line-default"
                   />
                   <p class="text-p4 text-content-tertiary uppercase tracking-[0.04em]">
-                    After execution
+                    {{ restorationStepsHeading(entry) }}
                   </p>
                   <OperationStepsList :steps="postStepsByEntryId[entry.id]" />
                 </template>
@@ -599,6 +723,34 @@ const handleClose = () => {
         title="rEUL burn mechanics"
         :description="warning.description"
       />
+
+      <!-- Authorization restorations, grouped by the ceremony that submits them. -->
+      <template
+        v-for="group in restorationSummaryGroups"
+        :key="group.key"
+      >
+        <div>
+          <p class="text-p3 text-content-tertiary uppercase tracking-[0.04em] mb-8">
+            {{ group.heading }}
+          </p>
+          <div class="bg-surface-secondary rounded-12 px-12 divide-y divide-line-default">
+            <div
+              v-for="({ entry, step }, i) in group.rows"
+              :key="`${entry.id}-${group.key}-${i}`"
+              class="flex items-center justify-between gap-12 py-10"
+            >
+              <span class="flex items-center gap-8 text-p3 text-content-secondary min-w-0">
+                <SvgIcon
+                  name="check-circle"
+                  class="!w-16 !h-16 text-accent-500 shrink-0"
+                />
+                <span class="truncate">{{ step.label }}</span>
+              </span>
+              <span class="text-p3 text-content-tertiary shrink-0">{{ group.itemCountLabel }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
 
       <!-- Wallet changes -->
       <BatchWalletChanges

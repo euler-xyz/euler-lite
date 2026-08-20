@@ -8,6 +8,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -91,7 +92,7 @@ const ensureWalletOnClaimChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const claim = async () => {
+const claim = async (execution: TrackedExecutionScope) => {
   if (isREULBatchBlocked.value) {
     error('Clear the current batch before claiming rEUL')
     return
@@ -113,10 +114,17 @@ const claim = async () => {
       return
     }
     await executePlan(plan.value)
+    // Success signal for a detached Safe completion toast — always mark.
+    execution.markSucceeded()
     if (isREULReward.value) {
       await refreshLocks(true)
     }
-    modal.close()
+    // Unscoped modal.close() pops the top of the modal stack; after
+    // detachment the user may have opened a different modal, so global UI
+    // teardown is suppressed like navigation.
+    if (!execution.suppressPostTxUi()) {
+      modal.close()
+    }
     await refreshRewards({ delayedRetry: true })
   }
   catch (e) {
@@ -213,8 +221,8 @@ const onClaimClick = async () => {
         amount: rewardAmount.value,
         plan: plan.value || undefined,
         submittingLabel: 'Claiming...',
-        onConfirm: async () => {
-          await claim()
+        onConfirm: async (execution) => {
+          await claim(execution)
         },
       },
     })

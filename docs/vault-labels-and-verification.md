@@ -17,13 +17,26 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 | `points.json` | `GET /api/internal/labels/points.json?chainId=X` | `[]` |
 | `earn-vaults.json` | `GET /api/internal/labels/earn-vaults.json?chainId=X` | `[]` |
 
-All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are logged once per refresh so genuine outages stay visible.
+All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are reported through `reportStatus`, which logs on *transitions* rather than once per refresh: the first observation of a given status warns, an unchanged status stays silent on later refreshes, and a return to `ok` logs a recovery. A persistent outage therefore surfaces once and then goes quiet until it changes.
 
 Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/internal/oracle-adapter?chainId=X&address=0x...`.
 
 **Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels and `{baseUrl}/{chainId}/adapters/{address}.json` for oracle adapters.
 
-**Caching**: The server caches each label response for 5 minutes with in-flight request deduplication, so concurrent cache-miss callers collapse onto a single upstream fetch per `chainId:file`. On upstream failure, stale cached data is served. The client also maintains a 5-minute TTL to avoid unnecessary requests on chain switches. `server/plugins/warm-cache.ts` pre-populates the server caches at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
+**Server caching**: The server keeps one 5-minute TTL cache keyed by `chainId:file`, plus an in-flight map so concurrent callers collapse onto a single upstream fetch per key. On upstream failure, stale cached data is served. `server/plugins/warm-cache.ts` pre-populates the cache at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
+
+Two handlers front that one cache, and **they do not read from it the same way**:
+
+| Handler | Used by | Cache behavior |
+|---|---|---|
+| `/api/internal/labels/{file}?chainId=N` (query-shape) | server-side callers via `labels-helpers.ts` | Reads through. A fresh entry short-circuits and no upstream fetch happens. |
+| `/api/internal/labels/{chainId}/{file}` (path-shape) | the SDK — `eulerLabelsBaseUrl` is `/api/internal/labels`, so its default template lands here | Calls `refreshLabelFile` directly, which **bypasses the fresh-entry check**. Every request fetches upstream unless one is already in flight for the same key. |
+
+So the 5-minute TTL is not what bounds upstream traffic on the SDK's path. On that route the cache is used for writes and stale fallback, and the in-flight map is the only thing collapsing duplicate work. Warm callers (`server/plugins/warm-cache.ts` and the vault snapshot builder) call `refreshLabelFile` for the same reason — each cycle rewrites the entry instead of cache-hitting a nearly-expired value. The path handler's file header states this directly, so the two shapes' behavior is documented where it is implemented. See [server-side caching](./server-side-caching.md) for the endpoint-level view.
+
+**Client loading and chain changes**: `useEulerLabels().loadLabels()` loads a snapshot for the current chain. A ready snapshot is reused only while that chain remains selected. On a chain change, the composable publishes an empty snapshot while the new labels load, deduplicates concurrent fetches per `chainId`, and uses a monotonic load generation to prevent a late response from a previous chain or superseded refresh from overwriting current data. ERC-4626 wrap-pair probes use the same chain and generation checks.
+
+The browsing SDK applies a separate 5-minute stale window to its five label queries, so revisiting a chain may reuse SDK-cached data without an upstream request. This cache does not bypass the composable's current-chain publication guard. Call `loadLabels(true)` when an explicit refresh is required; it starts a new composable-level fetch (it does not join `pendingLabelsFetches`) and invalidates all five SDK label queries before calling the SDK. At the transport layer that invalidation does not cancel an already-running `fetchQuery` for the same key — TanStack joins the pending promise — so a force refresh can still receive the older in-flight SDK result. The monotonic load generation still decides which response may publish.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -247,6 +260,18 @@ The `useEulerLabels` composable builds a set of verified vault addresses from th
 
 The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
 
+### Governance hydration guard (SDK 2.0)
+
+SDK 2.0 `EVault` instances always **own** the `governorAdmin` property (the constructor assigns it even when governance was never fetched). An `in`-operator or "property exists" check therefore passes on every real instance and can misread a lazily-hydrated vault as "governance resolved to nothing", producing false **Unknown risk manager** badges in discovery / market graph UI.
+
+Use the value-based guard shared across badge sites:
+
+```ts
+hasResolvedGovernorAdmin(vault) // isEVault(vault) && vault.governorAdmin !== undefined
+```
+
+Only a **defined** `governorAdmin` means governance actually resolved. Until then, UI must wait (or show a loading/neutral state) rather than treating the vault as unverified.
+
 ### Ungoverned vaults
 
 Vaults with `governorAdmin = address(0)` are supported via an **artificial entity** convention: declare an `ungoverned` entity in `entities.json` whose `addresses` map contains the zero address, then list ungoverned vaults under a product that declares `entity: ["ungoverned"]`. The shared governor rule then matches the vault's zero `governorAdmin` against the artificial entity, no special-case code path needed. The UI shows the "Ungoverned" governance type chip independently of entity matching (driven by `governorAdmin === zeroAddress` directly).
@@ -316,10 +341,12 @@ Labels control which vaults appear on each discovery page:
 | Flag | Lend | Borrow | Explore |
 |------|------|--------|---------|
 | Product `notExplorable: true` | Hidden | Hidden | Hidden |
-| Override `notExplorableLend: true` | Hidden | Visible | Visible |
-| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible |
+| Override `notExplorableLend: true` | Hidden | Visible | Visible* |
+| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible* |
 | `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
 | `recently added` tag | Sorted to top | Sorted to top | Sorted to top |
+
+*Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly).
 
 Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 

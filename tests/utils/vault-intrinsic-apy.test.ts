@@ -28,6 +28,7 @@ import {
   EMPTY_INTRINSIC_APY,
   getVaultIntrinsicApy,
   getVaultIntrinsicApyInfo,
+  resolveVaultIntrinsicApySource,
   withProjectedVaultIntrinsicApy,
   withVaultIntrinsicApy,
 } from '~/utils/vault-intrinsic-apy'
@@ -45,6 +46,37 @@ const vaultWith = (intrinsicApy: IntrinsicApyInfo | undefined) => ({
   intrinsicApy,
   // The address is read by no helper but appears in fixtures for realism.
   asset: { address: '0x1111111111111111111111111111111111111111' as const },
+})
+
+describe('resolveVaultIntrinsicApySource', () => {
+  it('falls back to a populated Securitize vault when EVault sources are unavailable', () => {
+    const securitizeVault = vaultWith(apyInfo(2.632044, 'SECURITIZE'))
+
+    const resolved = resolveVaultIntrinsicApySource(undefined, undefined, securitizeVault)
+
+    expect(resolved).toBe(securitizeVault)
+    expect(getVaultIntrinsicApyInfo(resolved, true)).toEqual(apyInfo(2.632044, 'SECURITIZE'))
+  })
+
+  it('keeps the projected EVault ahead of the base and Securitize fallbacks', () => {
+    const projectedVault = vaultWith(apyInfo(3, 'projected'))
+    const baseVault = vaultWith(apyInfo(2, 'base'))
+    const securitizeVault = vaultWith(apyInfo(1, 'SECURITIZE'))
+
+    expect(resolveVaultIntrinsicApySource(projectedVault, baseVault, securitizeVault))
+      .toBe(projectedVault)
+  })
+
+  it('falls back to the populated base EVault when the projection has no intrinsic APY', () => {
+    const projectedVault = vaultWith(undefined)
+    const baseVault = vaultWith(apyInfo(2, 'base'))
+    const securitizeVault = vaultWith(apyInfo(1, 'SECURITIZE'))
+
+    const resolved = resolveVaultIntrinsicApySource(projectedVault, baseVault, securitizeVault)
+
+    expect(resolved).toBe(baseVault)
+    expect(getVaultIntrinsicApyInfo(resolved, true)).toEqual(apyInfo(2, 'base'))
+  })
 })
 
 describe('getVaultIntrinsicApyInfo', () => {
