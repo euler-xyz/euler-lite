@@ -60,6 +60,9 @@ const simEyeLabel = computed(() =>
       <li
         v-for="(entry, index) in entries"
         :key="entry.id"
+        data-testid="batch-entry"
+        :data-intent-id="entry.id"
+        :data-intent-revision="entry.intent.revision"
         class="relative flex flex-col pb-14"
       >
         <!-- Connector rail: runs from this circle's centre down to the next,

@@ -30,6 +30,7 @@ const { getVault, getSecuritizeVault } = useVaults()
 const { effectiveAddress } = useEffectiveAddress()
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -347,17 +348,14 @@ const addToBatch = async () => {
       : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
     await addBatchEntry({
       label,
-      buildPlan: account => planCollateralChange({
-        fromVault: fromAddr,
-        toVault: toAddr,
-        amount,
-        positionAccount,
-        toAsset: toAssetAddr,
-        isMax,
-        maxShares,
-        swapQuote,
-        swapperMode: SwapperMode.EXACT_IN,
-        account,
+      intent: createIntent({
+        kind: sameAsset ? 'refinance' : 'collateral',
+        planner: sameAsset ? 'migrate-same-asset-collateral' : 'swap-collateral',
+        args: sameAsset
+          ? { fromVault: fromAddr, toVault: toAddr, amount, positionAccount, toAsset: toAssetAddr, isMax, maxShares }
+          : { swapQuote, swapperMode: SwapperMode.EXACT_IN },
+        source: 'lend/swap:add-to-batch',
+        subAccounts: [positionAccount],
       }),
       subAccount: positionAccount,
       review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },

@@ -1,7 +1,7 @@
 import type { SecuritizeCollateralVault, EVault, TransactionPlan, TransactionPlanPrepared, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
-import { OperationReviewModal, SlippageSettingsModal } from '#components'
+import { SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -15,7 +15,6 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -99,7 +98,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const route = useRoute()
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
-  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -554,8 +554,10 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         }
 
         const showSwapAmounts = sameAssetModalType === 'transfer' || !isSameAsset.value
-        modal.open(OperationReviewModal, {
-          props: {
+        if (!plan.value) return
+        await openCeremonyReview(plan.value, {
+          presentationKind: isSameAsset.value ? sameAssetModalType : 'swap',
+          review: {
             type: isSameAsset.value ? sameAssetModalType : 'swap',
             asset: fromVault.value.asset,
             amount: fromAmount.value,
@@ -563,51 +565,23 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
             swapMode: showSwapAmounts ? swapperMode : undefined,
             swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
-            plan: preparedPlan.value ? undefined : (plan.value || undefined),
-            prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
-            onConfirm: async (execution) => {
-              await send(execution)
-            },
             submittingLabel: 'Submitting...',
+          },
+          onSucceeded: () => {
+            setTimeout(() => {
+              router.replace({ path: redirectPath, query: { network: route.query.network } })
+            }, 400)
+          },
+          onFailed: (cause) => {
+            showError('Transaction failed')
+            logWarn('swap/send', cause)
           },
         })
       })
     }
     finally {
       isPreparing.value = false
-    }
-  }
-
-  const send = async (execution: TrackedExecutionScope) => {
-    if (!fromVault.value || !toVault.value) return
-    if (!isSameAsset.value && !selectedQuote.value) return
-
-    isSubmitting.value = true
-    try {
-      if (preparedPlan.value) {
-        await executePreparedPlan(preparedPlan.value)
-      }
-      else {
-        const txPlan = await buildPlan(undefined, currentPlanContext())
-        await executePlan(txPlan)
-      }
-      // Success signal for a detached Safe completion toast; a proposal that
-      // confirmed after its modal was closed must not redirect mid-flow.
-      execution.markSucceeded()
-      if (!execution.suppressPostTxUi()) {
-        modal.close()
-        setTimeout(() => {
-          router.replace({ path: redirectPath, query: { network: route.query.network } })
-        }, 400)
-      }
-    }
-    catch (e) {
-      showError('Transaction failed')
-      logWarn('swap/send', e)
-    }
-    finally {
-      isSubmitting.value = false
     }
   }
 

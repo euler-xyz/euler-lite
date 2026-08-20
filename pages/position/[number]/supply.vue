@@ -19,6 +19,7 @@ const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { getBalance } = useWallets()
 const { planDeposit, planDepositWithSwap } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { chainId } = useEulerAddresses()
@@ -215,7 +216,13 @@ const addToBatch = async () => {
       const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
       await addBatchEntry({
         label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
-        buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
+        intent: createIntent({
+          kind: 'deposit',
+          planner: 'deposit-with-swap',
+          args: { swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo },
+          source: 'position/supply:add-to-batch',
+          subAccounts: [pos.subAccount as Address],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })
@@ -226,7 +233,13 @@ const addToBatch = async () => {
       const amount = valueToNano(form.amount.value, a.decimals)
       await addBatchEntry({
         label: `Supply ${form.amount.value} ${a.symbol}`,
-        buildPlan: account => planDeposit({ vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address, account }),
+        intent: createIntent({
+          kind: 'deposit',
+          planner: 'deposit',
+          args: { vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address },
+          source: 'position/supply:add-to-batch',
+          subAccounts: [pos.subAccount as Address],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'supply', asset: a, amount: form.amount.value },
       })

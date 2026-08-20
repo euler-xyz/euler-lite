@@ -29,7 +29,7 @@ const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const positionIndex = usePositionIndex()
-const { planRepayFromWallet } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
@@ -228,7 +228,7 @@ const addToBatchWithoutWarnings = async () => {
       if (!swapAsset) return
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
-        buildPlan: account => walletSwap.buildRepayPlan(quote, account, {
+        intent: walletSwap.createRepayIntent(quote, {
           selectedAsset: swapAsset,
           direction: swapDirection,
           isFullRepay: isClosing,
@@ -249,12 +249,12 @@ const addToBatchWithoutWarnings = async () => {
     const receiver = position.value.subAccount as Address
     await addBatchEntry({
       label: `Repay ${wallet.amount.value} ${borrowSymbol}`,
-      buildPlan: account => planRepayFromWallet({
-        liabilityVault,
-        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
-        receiver,
-        cleanupOnMax: isFullRepay,
-        account,
+      intent: createIntent({
+        kind: 'repay',
+        planner: 'repay-from-wallet',
+        args: { liabilityVault, liabilityAsset: borrowVault.value.asset.address as Address, liabilityAmount: isFullRepay ? maxUint256 : amountNano, receiver, cleanupOnMax: isFullRepay },
+        source: 'position/repay-wallet:add-to-batch',
+        subAccounts: [receiver],
       }),
       subAccount: position.value.subAccount as Address,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isFullRepay),
@@ -277,7 +277,7 @@ const addToBatchWithoutWarnings = async () => {
     if (!sourceVault) return
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
-      buildPlan: account => collateral.buildRepayPlan(quote, account, {
+      intent: collateral.createRepayIntent(quote, {
         sourceVault,
         amount: sourceAmount,
         debtAmount: sourceDebtAmount,
@@ -307,7 +307,7 @@ const addToBatchWithoutWarnings = async () => {
     if (!sourceVault) return
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
-      buildPlan: account => savings.buildRepayPlan(quote, account, {
+      intent: savings.createRepayIntent(quote, {
         sourceVault,
         sourceSubAccount,
         amount: sourceAmount,

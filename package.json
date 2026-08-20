@@ -23,6 +23,7 @@
     "test:golden": "vitest run tests/golden",
     "test:golden:update": "UPDATE_GOLDEN=1 vitest run tests/golden",
     "test:golden:fetch-fixtures": "jiti tests/golden/fetch-fixtures.ts",
+    "test:ceremony:sdk-conformance": "node scripts/transaction-ceremony-sdk-conformance.mjs",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare && simple-git-hooks"
   },
@@ -35,7 +36,7 @@
     ]
   },
   "dependencies": {
-    "@eulerxyz/euler-v2-sdk": "2.0.0",
+    "@eulerxyz/euler-v2-sdk": "2.0.1",
     "@floating-ui/vue": "2.0.1",
     "@gvade/nuxt3-svg-sprite": "1.0.3",
     "@keyringnetwork/keyring-connect-sdk": "3.2.0",

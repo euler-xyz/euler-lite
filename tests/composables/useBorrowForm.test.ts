@@ -249,6 +249,10 @@ describe('useBorrowForm savings collateral', () => {
     vi.stubGlobal('watchEffect', watchEffect)
     vi.stubGlobal('nextTick', nextTick)
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
+    vi.stubGlobal('useCeremonyReview', () => ({
+      openEagerPlan: async () => { mocks.modalOpen() },
+    }))
     vi.stubGlobal('useEulerTx', () => ({
       planBorrow: mocks.planBorrow,
       planSwapAndBorrow: vi.fn(),

@@ -23,7 +23,7 @@ import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/uti
 import { type Address, formatUnits, zeroAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { SwapTokenSelector, SlippageSettingsModal, OperationReviewModal } from '#components'
+import { SwapTokenSelector, SlippageSettingsModal } from '#components'
 import type { ComputedRef } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -31,7 +31,6 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -110,12 +109,9 @@ export interface UseCollateralFormOptions {
   onAfterSend?: () => Promise<void> | void
 
   /**
-   * When true, route plan construction through the prepared-envelope pipeline:
-   * builds the raw plan, runs {@link prepareTransactionPlan} once, simulates
-   * against the envelope, opens the modal with `prepared`, and uses
-   * `executePreparedPlan` on confirm. Plugin reads (TOS / Keyring / Pyth) run
-   * exactly once per Review click — no in-modal preparation spinner.
-   *
+   * When true, eagerly build, prepare, and simulate the preview before opening
+   * review. The ceremony adopts matching prefetched plugin and simulation data,
+   * while acceptance and wallet submission remain coordinator-owned.
    */
   usePreparedPipeline?: boolean
 }
@@ -125,7 +121,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const submitLabel = options.reviewLabel
-  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
   const usePreparedPipeline = options.usePreparedPipeline ?? true
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
@@ -137,7 +134,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
-  const { finalizeTxAndRedirect } = useTxFinalization()
+  const { finalizeCeremonyUi } = useTxFinalization()
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
   const {
@@ -1054,74 +1051,31 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         const reviewAsset = options.getReviewAsset(options.needsSwap.value)
         const reviewType = options.needsSwap.value ? options.swapReviewType : options.reviewType
-        modal.open(OperationReviewModal, {
-          props: {
+        if (!plan.value) return
+        await openCeremonyReview(plan.value, {
+          presentationKind: reviewType,
+          review: {
             type: reviewType,
             asset: reviewAsset,
             amount: amount.value,
-            plan: usePreparedPipeline ? undefined : (plan.value || undefined),
-            prepared: usePreparedPipeline ? (preparedPlan.value || undefined) : undefined,
             quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
             subAccount: position.value?.subAccount,
             hasBorrows: (position.value?.borrowed || 0n) > 0n,
             swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
             swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
             swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-            onConfirm: async (execution) => {
-              await send(execution)
-            },
             submittingLabel: 'Submitting...',
+          },
+          onSucceeded: () => finalizeCeremonyUi(options.onAfterSend),
+          onFailed: (cause) => {
+            logWarn('collateral/send', cause)
+            error('Transaction failed')
           },
         })
       })
     }
     finally {
       isPreparing.value = false
-    }
-  }
-
-  // --- Send ---
-  const send = async (execution: TrackedExecutionScope) => {
-    try {
-      isSubmitting.value = true
-      if (!asset.value?.address || !collateralVault.value?.address) return
-
-      if (usePreparedPipeline) {
-        if (!preparedPlan.value) return
-        await executePreparedPlan(preparedPlan.value)
-      }
-      else {
-        // Explicit legacy opt-out rebuilds the plan at send time.
-        let txPlan: TransactionPlan
-        if (options.needsSwap.value && (swapSelectedQuote.value || swapEffectiveQuote.value)) {
-          const quote = swapSelectedQuote.value || swapEffectiveQuote.value!
-          txPlan = await options.buildSwapPlan(quote, {
-            vaultAddress: collateralVault.value.address,
-            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-            slippage: swapSlippage.value,
-            subAccount: position.value?.subAccount,
-            account: planAccount.value,
-          })
-        }
-        else {
-          txPlan = await options.buildDirectPlan({
-            vaultAddress: collateralVault.value.address,
-            assetAddress: asset.value.address,
-            amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-            subAccount: position.value?.subAccount,
-            account: planAccount.value,
-          })
-        }
-        await executePlan(txPlan)
-      }
-      await finalizeTxAndRedirect({ onAfterClose: options.onAfterSend, scope: execution })
-    }
-    catch (e) {
-      logWarn('collateral/send', e)
-      error('Transaction failed')
-    }
-    finally {
-      isSubmitting.value = false
     }
   }
 
@@ -1340,7 +1294,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     // Actions
     loadSelectedCollateral,
     submit,
-    send,
     updateEstimates: () => {
       updateSyncEstimates()
       scheduleAsyncEstimates()

@@ -77,7 +77,7 @@ The SDK plugin pipeline processes the plan before runtime work. Pyth update item
 
 Read-path Pyth helpers return empty update sets or `undefined` decoded results when they cannot build or simulate updates. Callers can continue rendering with available data and let the next refresh attempt recover.
 
-Transaction-path errors are surfaced through SDK simulation and execution results. Forms show simulation errors through `useTransactionPlanSimulation()`, and the review modal blocks confirmation when plan preparation fails.
+Transaction-path errors are surfaced through ceremony preparation and execution. Forms show eager simulation errors through `useTransactionPlanSimulation()`. The ceremony seals bounded Pyth refresh slots, refreshes them only after durable reservation, and blocks execution if refresh or slot verification fails. Pyth remains absent from the user-facing review.
 
 ## Files
 
@@ -86,6 +86,7 @@ Transaction-path errors are surfaced through SDK simulation and execution result
 | `utils/pyth.ts` | Hermes fetching, read-path batch item building, lens simulation helpers |
 | `entities/oracle.ts` | Oracle adapter decoding helpers and Pyth feed types used by UI code |
 | `server/api/internal/pyth/updates.get.ts` | Server-side Hermes proxy endpoint |
-| `composables/useEulerTx.ts` | SDK `TransactionPlan` simulation, preparation, and execution wrapper |
+| `composables/useEulerTx.ts` | SDK `TransactionPlan` planning, eager preparation, and simulation helpers |
+| `composables/useTransactionCeremony.ts` | Sealed Pyth evidence collection, execution-time refresh, and slot verification integration |
 | `composables/useTransactionPlanSimulation.ts` | Form-level simulation state and error formatting |
 | `docs/pricing-system.md` | Full pricing architecture and vault/account read flow |

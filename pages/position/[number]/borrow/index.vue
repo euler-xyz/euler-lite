@@ -27,10 +27,8 @@ import {
   reconcileBorrowMoreDraftBeforeYieldRefresh,
 } from '~/utils/borrow-more'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { BorrowVaultPair } from '~/types/borrow-pair'
-import { OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
 import {
   getProjectedYieldState,
@@ -42,13 +40,13 @@ import {
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const router = useRouter()
 const _route = useRoute()
-const modal = useModal()
 const { error } = useToast()
-const { planBorrow, executePlan } = useEulerTx()
+const { planBorrow } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { open: openCeremonyReview } = useCeremonyReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -228,10 +226,6 @@ const priceFixed = computed(() => {
   return FixedPoint.fromValue(conservativePriceRatio(collateralPrice, borrowPrice), 18)
 })
 priceInvert.autoInvert(() => priceFixed.value.toUnsafeFloat())
-const borrowAmountFixed = computed(() => FixedPoint.fromValue(
-  valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals),
-  Number(borrowVault.value?.asset.decimals),
-))
 const ltvFixed = computed(() => {
   const fn = FixedPoint.fromValue(valueToNano(ltv.value, 4), 4)
   const maxLtv = FixedPoint.fromValue(valueToNano(ltvToPercent(pair.value?.ltv.borrowLTV ?? 0), 4), 4)
@@ -430,13 +424,22 @@ const submit = async () => {
       return
     }
 
+    const capturedAmount = borrowAmount.value
+    const plannerArgs = {
+      vaultAddress: borrowVault.value.address as Address,
+      assetAddress: borrowVault.value.asset.address as Address,
+      amount: valueToNano(capturedAmount || '0', borrowVault.value.shares.decimals),
+      borrowAccount: position.value!.subAccount as Address,
+    }
+    const intent = createIntent({
+      kind: 'borrow',
+      planner: 'borrow',
+      args: plannerArgs,
+      source: 'pages/position/[number]/borrow/index.vue',
+      subAccounts: [plannerArgs.borrowAccount],
+    })
     try {
-      plan.value = await planBorrow({
-        vaultAddress: borrowVault.value.address as Address,
-        amount: valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals),
-        borrowAccount: position.value!.subAccount as Address,
-        account: planAccount.value,
-      })
+      plan.value = await planBorrow({ ...plannerArgs, account: planAccount.value })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -450,18 +453,25 @@ const submit = async () => {
       }
     }
 
-    modal.open(OperationReviewModal, {
-      props: {
+    await openCeremonyReview([intent], {
+      presentationKind: 'borrow',
+      review: {
         type: 'borrow',
         asset: borrowVault.value?.asset,
-        amount: borrowAmount.value,
-        plan: plan.value || undefined,
+        amount: capturedAmount,
         subAccount: position.value?.subAccount,
         hasBorrows: (position.value?.borrowed || 0n) > 0n,
         submittingLabel: 'Submitting...',
-        onConfirm: async (execution) => {
-          await send(execution)
-        },
+      },
+      onSucceeded: () => {
+        updateBalance()
+        setTimeout(() => {
+          router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+        }, 400)
+      },
+      onFailed: (cause) => {
+        console.warn(cause)
+        error('Transaction failed')
       },
     })
   }
@@ -481,13 +491,20 @@ const addToBatch = async () => {
   const amount = valueToNano(borrowAmount.value, borrowVault.value.shares.decimals)
   const borrowAccount = position.value.subAccount as Address
   const label = `Borrow ${borrowAmount.value} ${borrowVault.value.asset.symbol}`
+  const intent = createIntent({
+    kind: 'borrow',
+    planner: 'borrow',
+    args: { vaultAddress, assetAddress: borrowVault.value.asset.address as Address, amount, borrowAccount },
+    source: 'pages/position/[number]/borrow/index.vue#batch',
+    subAccounts: [borrowAccount],
+  })
   await addBatchEntry({
+    intent,
     label,
     // subAccountSnapshotApplied: the layer account passed by useTxBatch already
     // reflects the simulated (or freshly-fetched base) sub-account state, so the
     // planner must NOT re-fetch it on-chain — that would clobber a simulated
     // collateral deposit from an earlier batch step.
-    buildPlan: account => planBorrow({ vaultAddress, amount, borrowAccount, account, subAccountSnapshotApplied: true }),
     subAccount: borrowAccount,
     review: { type: 'borrow', asset: borrowVault.value.asset, amount: borrowAmount.value },
   })
@@ -495,39 +512,6 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio', { subAccount: borrowAccount })
 }
 
-const send = async (execution: TrackedExecutionScope) => {
-  try {
-    isSubmitting.value = true
-    if (!collateralVault.value || !borrowVault.value || !position.value) {
-      return
-    }
-    const txPlan = await planBorrow({
-      vaultAddress: borrowVault.value.address as Address,
-      amount: borrowAmountFixed.value.toFormat({ decimals: Number(borrowVault.value.shares.decimals) }).value,
-      borrowAccount: position.value.subAccount as Address,
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
-
-    // Success signal for a detached Safe completion toast; a proposal that
-    // confirmed after its modal was closed must not redirect mid-flow.
-    execution.markSucceeded()
-    updateBalance()
-    if (!execution.suppressPostTxUi()) {
-      modal.close()
-      setTimeout(() => {
-        router.replace({ path: '/portfolio', query: { network: _route.query.network } })
-      }, 400)
-    }
-  }
-  catch (e) {
-    console.warn(e)
-    error('Transaction failed')
-  }
-  finally {
-    isSubmitting.value = false
-  }
-}
 const isLtvDriven = ref(true)
 
 // Reactive borrow amount: uses FixedPoint throughout to avoid precision loss on large bigints.

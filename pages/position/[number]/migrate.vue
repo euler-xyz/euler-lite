@@ -14,15 +14,14 @@ import {
   type MorphoMarketParams,
   type MorphoMigrationTargetRaw,
   type PluginPrefetchData,
+  type PlanMigrationSimulationResult,
   type PortfolioBorrowPosition,
   type SecuritizeCollateralVault,
-  type SignedMigrationAuthorization,
   type TransactionPlan,
   type TransactionPlanPrepared,
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
-import { OperationReviewModal } from '#components'
 import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS } from '~/composables/useExternalMigrationPositions'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
@@ -34,17 +33,10 @@ import { OP_REDEEM, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
   buildMigrationAuthorizationTxSteps,
-  encodeMigrationAuthorizationTxs,
-  migrationAuthorizationPayloadKey,
-  type MigrationAuthorizationRevoke,
 } from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
-import { assertReviewedExecutionCurrent } from '~/utils/reviewedExecution'
-import { assertWalletExecutionContext } from '~/utils/walletExecutionContext'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 
 type AaveOutgoingMigrationTarget = MigrationTarget<AaveMigrationTargetRaw, AavePositionRef, AaveMigrationTargetExtraData>
@@ -86,6 +78,9 @@ type OutgoingMigrationPreview = {
   authorizationRequest?: MigrationAuthorizationRequest
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
+  compilerResult: PlanMigrationSimulationResult
+  observedBlock?: bigint
+  prefetch?: PluginPrefetchData
 }
 
 type MigrationTargetAssetLike = {
@@ -101,44 +96,35 @@ type TargetExternalLink = {
 
 const route = useRoute()
 const router = useRouter()
-const modal = useModal()
 const { error: showError } = useToast()
-const { isConnected, address, chainId: walletChainId } = useWagmi()
+const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
 const { chainId } = useEulerAddresses()
 const { getVault } = useVaultRegistry()
 const { settings } = useUserSettings()
 const { account: planAccount } = usePlanAccount()
-const { buildStateOverrideOptions, primeSlotHintsFor } = useStateOverrideOptions()
+const { client: rpcClient } = useRpcClient()
+const { primeSlotHintsFor } = useStateOverrideOptions()
 const {
   listMigrationTargets,
   getMigrationPosition,
   getMigrationAuthorization,
-  signMigrationAuthorization,
-  executeMigrationAuthorizationGrants,
-  planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
-  executePreparedPlan,
-  executePreparedPlanWithPlainCalls,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
 const { signaturesEnabled } = useSignaturePreference()
 const { isSafeWallet } = useSafeWallet()
 const {
-  restorePendingBeforeRetry,
-  revokeAfterSuccess,
-  revokeAfterAbort,
-  toMigrationExecutionError,
-} = useMigrationAuthorizationFlow()
-const {
   addEntry: addBatchEntry,
   entryCount: batchEntryCount,
 } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
-const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
+const { simulationError, clearSimulationError } = useTransactionPlanSimulation()
+const { open: openCeremonyReview } = useCeremonyReview()
+const { createMigrationIntent } = useMigrationIntentFactory()
 
 const positionIndex = usePositionIndex()
 const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
@@ -243,7 +229,6 @@ const hasLoadedTargets = ref(false)
 const targetsError = ref('')
 const reviewingTargetId = ref('')
 const batchingTargetId = ref('')
-const submittingTargetId = ref('')
 const targetLiquidityUsdById = shallowRef<Record<string, number | null>>({})
 let targetsRequestId = 0
 let targetLiquidityUsdRequestId = 0
@@ -634,29 +619,6 @@ async function getAuthorizationRequest(
   })
 }
 
-async function buildMigrationPlan(
-  input: OutgoingMigrationInput,
-  authorization?: SignedMigrationAuthorization,
-  migrationPosition?: MigrationPosition,
-  account: Account<IHasVaultAddress> | undefined = planAccount.value,
-): Promise<TransactionPlan> {
-  return planCrossProtocolMigration({
-    direction: 'euler-to-external',
-    connectorId: input.target.connectorId,
-    chainId: input.target.chainId,
-    owner: input.owner,
-    position: migrationPosition,
-    positionRef: input.target.ref,
-    source: input.source,
-    externalTarget: input.externalTarget,
-    authorization,
-    removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
-    account,
-    cleanupEulerPosition: input.cleanupEulerPosition,
-    operationName: `${input.target.connectorId}OutgoingMigration`,
-  })
-}
-
 async function buildMigrationSimulation(
   input: OutgoingMigrationInput,
   migrationPosition: MigrationPosition,
@@ -712,19 +674,6 @@ const STALE_OUTGOING_MIGRATION_PREVIEW_ERROR = 'Migration inputs changed while p
 const outgoingPreviewKeyFor = (target: OutgoingMigrationTarget) => {
   const base = outgoingPreviewBaseKey.value
   return base ? `${base}|${target.id}` : ''
-}
-
-/**
- * Evict one cached preview so the next review rebuilds it. Used when the
- * confirmation gate detects that authorization state drifted since review —
- * returning the stale cache would re-present the very ceremony that was
- * rejected.
- */
-function invalidateOutgoingMigrationPreview(key: string) {
-  if (!(key in outgoingPreviews.value)) return
-  outgoingPreviews.value = Object.fromEntries(
-    Object.entries(outgoingPreviews.value).filter(([cachedKey]) => cachedKey !== key),
-  )
 }
 
 async function prepareOutgoingMigrationPreview(
@@ -800,6 +749,10 @@ async function prepareOutgoingMigrationPreview(
         : Promise.resolve(undefined),
     ])
     const calldataPrepared = previewPrepared ?? tenderlyPrepared
+    const observedBlock = await rpcClient.value?.getBlockNumber().catch((err) => {
+      logWarn('positionMigration/previewBlock', err)
+      return undefined
+    })
 
     if (epoch !== outgoingPreviewEpoch || key !== outgoingPreviewKeyFor(target)) {
       throw new Error(STALE_OUTGOING_MIGRATION_PREVIEW_ERROR)
@@ -818,6 +771,9 @@ async function prepareOutgoingMigrationPreview(
         stateOverrides: simulationResult.stateOverrides,
       },
       calldataPrepared,
+      compilerResult: simulationResult,
+      ...(observedBlock === undefined ? {} : { observedBlock }),
+      ...(prefetch ? { prefetch } : {}),
       ...(authorizationRequest
         ? { authorizationRequest }
         : {}),
@@ -860,30 +816,29 @@ watch([targets, outgoingPreviewBaseKey], ([targetList, baseKey]) => {
 }, { immediate: true })
 
 async function reviewMigration(target: OutgoingMigrationTarget) {
-  if (reviewingTargetId.value || submittingTargetId.value || isOperationBlocked.value || !canReviewTarget(target) || !sourceDebtVault.value) return
+  if (reviewingTargetId.value || isOperationBlocked.value || !canReviewTarget(target) || !sourceDebtVault.value) return
   reviewingTargetId.value = target.id
   clearSimulationError()
   try {
     const preview = await prepareOutgoingMigrationPreview(target)
-
-    modal.open(OperationReviewModal, {
-      props: {
+    const intent = createOutgoingMigrationIntent(preview)
+    await openCeremonyReview([intent], {
+      presentationKind: 'migration',
+      review: {
         type: 'migration',
         asset: sourceDebtVault.value.asset,
         amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
         signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
-        calldataPrepared: preview.calldataPrepared,
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
-        calldataWrapCalls: buildCalldataWrapCalls(preview.authorizationRequest, preview.bundledReview),
-        tenderlyPrepared: preview.tenderlySimulation.prepared,
-        tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
         allowConfirmWithoutPlan: true,
-        onConfirm: async (execution) => {
-          await sendMigration(execution, preview)
-        },
         submittingLabel: 'Migrating...',
       },
+      onSucceeded: () => {
+        schedulePostMigrationRefreshes()
+        setTimeout(() => void router.replace({ path: '/portfolio', query: { network: route.query.network } }), MODAL_CLOSE_REDIRECT_DELAY_MS)
+      },
+      onFailed: (cause) => { showError(cause instanceof Error ? cause.message : 'Migration failed') },
     })
   }
   catch (err) {
@@ -895,174 +850,40 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   }
 }
 
-async function sendMigration(execution: TrackedExecutionScope, preview: OutgoingMigrationPreview) {
-  const { input: reviewedInput, account: reviewedAccount, position: migrationPosition, useSignatures } = preview
-  const { target } = reviewedInput
-  submittingTargetId.value = target.id
-  clearSimulationError()
-  try {
-    assertReviewedExecutionCurrent({
-      reviewedKey: preview.key,
-      currentKey: outgoingPreviewKeyFor(target),
-    })
-    assertWalletExecutionContext({
-      expectedAccount: reviewedInput.owner,
-      expectedChainId: target.chainId,
-      currentAccount: address.value as Address | undefined,
-      currentChainId: walletChainId.value,
-    })
-    if (!await restorePendingBeforeRetry()) return
-    const input = reviewedInput
-    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, reviewedAccount, useSignatures)
-
-    // The reviewed ceremony is defined by the authorization payload the modal
-    // displayed and copied. Authorization state can drift between review and
-    // confirmation (an allowance granted or revoked elsewhere, a restore
-    // value that moved) — executing the fresh payload would add or remove
-    // grant/revoke calls the user never reviewed. Evict the cached preview so
-    // the re-review builds against the current state.
-    if (migrationAuthorizationPayloadKey(authorizationRequest) !== migrationAuthorizationPayloadKey(preview.authorizationRequest)) {
-      invalidateOutgoingMigrationPreview(preview.key)
-      throw new Error('Authorization requirements changed since review — please review the migration again.')
-    }
-
-    // An undefined request means the grant is already live on-chain: nothing to
-    // sign, nothing to grant, and nothing of ours to revoke afterwards.
-    let authorization: SignedMigrationAuthorization | undefined
-    const revokeTxs: MigrationAuthorizationRevoke[] = []
-    try {
-      if (preview.bundledReview) {
-        // The review promised ONE atomic Safe proposal. Revalidate that mode
-        // at confirmation: a wallet that no longer classifies as a Safe must
-        // re-review, never silently receive the sequential multi-proposal
-        // ceremony; a degraded Safe (provider unavailable) throws inside the
-        // bundle helper.
-        if (!isSafeWallet.value) {
-          throw new Error('Wallet changed since review — please review the migration again.')
-        }
-        // bundledReview implies the review carried a request, and payload
-        // equality above pins the fresh one to it — reaching here without
-        // one is drift the gate somehow missed, so fail closed.
-        if (!authorizationRequest) {
-          invalidateOutgoingMigrationPreview(preview.key)
-          throw new Error('Authorization requirements changed since review — please review the migration again.')
-        }
-        const outcome = await sendMigrationAsSafeBundle(input, migrationPosition, authorizationRequest, reviewedAccount)
-        if (outcome === 'aborted') return
-        finishMigrationSuccess(execution)
-        return
-      }
-
-      if (authorizationRequest) {
-        if (useSignatures) {
-          authorization = await signMigrationAuthorization(authorizationRequest)
-        }
-        else {
-          // Record each revoke as soon as its grant is broadcast so partial or
-          // receipt-ambiguous failures can still unwind what may have landed.
-          await executeMigrationAuthorizationGrants(authorizationRequest, revokeTxs)
-        }
-      }
-      const plan = await buildMigrationPlan(input, authorization, migrationPosition, reviewedAccount)
-      const prepared = await prepareTransactionPlan(plan, {
-        account: reviewedAccount,
-        chainId: input.target.chainId,
-        usePermit2: useSignatures,
-      })
-      const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
-      if (!ok) {
-        await revokeAfterAbort(revokeTxs)
-        return
-      }
-      await executePreparedPlan(prepared)
-    }
-    catch (err) {
-      // Covers a rejected batch, a failed prepare, and a stale grant.
-      await revokeAfterAbort(revokeTxs)
-      throw toMigrationExecutionError(err)
-    }
-
-    await revokeAfterSuccess(revokeTxs)
-    finishMigrationSuccess(execution)
-  }
-  catch (err) {
-    showError(err instanceof Error ? err.message : 'Migration failed')
-    logWarn('positionMigration/send', err)
-  }
-  finally {
-    submittingTargetId.value = ''
-  }
-}
-
-/**
- * The grant/revocation calls the Safe bundle wraps around the migration plan
- * — surfaced so Copy calldata matches the actual proposal. Empty for
- * signature-mode migrations and non-Safe wallets (which broadcast them as
- * standalone transactions instead).
- */
-function buildCalldataWrapCalls(
-  authorizationRequest: MigrationAuthorizationRequest | undefined,
-  bundledReview: boolean,
-) {
-  // Driven by the latched review mode, not live detection — displayed and
-  // copied calldata must match the ceremony the confirmation will run.
-  if (!authorizationRequest || !bundledReview) return undefined
-  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
-  return { before: grants, after: revokes }
-}
-
-function finishMigrationSuccess(execution: TrackedExecutionScope) {
-  // Success signal for a detached Safe completion toast; a proposal that
-  // confirmed after its modal was closed must not yank the user mid-flow.
-  // Bound to THIS execution's record.
-  execution.markSucceeded()
-  schedulePostMigrationRefreshes()
-  if (execution.suppressPostTxUi()) return
-  modal.close()
-  setTimeout(() => {
-    void router.replace({ path: '/portfolio', query: { network: route.query.network } })
-  }, MODAL_CLOSE_REDIRECT_DELAY_MS)
-}
-
-/**
- * Execute the migration as one atomic Safe proposal: authorization grants,
- * the migration batch, and the revocations in a single wallet_sendCalls
- * bundle. The plan comes from the simulation variant, which is byte-identical
- * to the execution plan for transaction-kind authorizations but validates the
- * grant instead of reading the live allowance — so nothing needs to be mined
- * before the bundle is built. The pre-bundle simulation runs with the SDK's
- * authorization state overrides for the same reason.
- *
- * Returns 'executed' when the bundle confirmed and 'aborted' when the
- * simulation rejected (nothing on-chain, nothing to unwind). There is no
- * sequential fallback: the review promised one proposal, so an unavailable
- * Safe bundle context throws instead of silently splitting the ceremony.
- */
-async function sendMigrationAsSafeBundle(
-  input: OutgoingMigrationInput,
-  migrationPosition: MigrationPosition,
-  authorizationRequest: MigrationAuthorizationRequest,
-  account?: Account<IHasVaultAddress>,
-): Promise<'executed' | 'aborted'> {
-  const { grants, revokes } = encodeMigrationAuthorizationTxs(authorizationRequest)
-  const simulation = await buildMigrationSimulation(input, migrationPosition, authorizationRequest, account)
-  const prepared = await prepareTransactionPlan(simulation.plan, {
-    account,
-    chainId: input.target.chainId,
-    usePermit2: false,
+const createOutgoingMigrationIntent = (preview: OutgoingMigrationPreview) => {
+  const { input, useSignatures, authorizationRequest } = preview
+  const migrationSubAccount = input.source.eulerAccount
+  return createMigrationIntent({
+    args: {
+      direction: 'euler-to-external',
+      connectorId: input.target.connectorId,
+      owner: input.owner,
+      positionRef: input.target.ref,
+      source: input.source,
+      externalTarget: input.externalTarget,
+      removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
+      cleanupEulerPosition: input.cleanupEulerPosition,
+      operationName: `${input.target.connectorId}OutgoingMigration`,
+      authorizationKind: useSignatures ? 'typedData' : 'transaction',
+    },
+    authorizationRequest,
+    ...(preview.observedBlock === undefined
+      ? {}
+      : {
+          eagerCompilation: {
+            result: preview.compilerResult,
+            observedBlock: preview.observedBlock,
+            ...(preview.prefetch ? { prefetch: preview.prefetch } : {}),
+            prepared: preview.calldataPrepared,
+          },
+        }),
+    source: 'position/external-migration-outbound',
+    subAccounts: [input.owner, migrationSubAccount],
+    bounds: [
+      { kind: 'maximum-input', token: sourceDebtVault.value!.asset.address as Address, amount: input.source.debtAmount ?? currentDebt.value },
+      { kind: 'maximum-input', token: sourceCollateralEVault.value!.asset.address as Address, amount: currentCollateralAssets.value },
+    ],
   })
-  const ok = await runPreparedSimulation(
-    prepared,
-    buildStateOverrideOptions({ noBalanceOverride: true }),
-    simulation.stateOverrides,
-  )
-  if (!ok) return 'aborted'
-
-  const result = await executePreparedPlanWithPlainCalls(prepared, { before: grants, after: revokes }, { allowSingleCall: true })
-  if (!result) {
-    throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
-  }
-  return 'executed'
 }
 
 async function addMigrationToBatch(target: OutgoingMigrationTarget) {
@@ -1087,59 +908,16 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
     throw new Error('Migration inputs are incomplete')
   }
 
-  const { input, position: migrationPosition, authorizationRequest, useSignatures } = preview
+  const { input, authorizationRequest, useSignatures } = preview
   const sourceDebtAsset = sourceDebtVault.value.asset
   const sourceDebtSymbol = sourceDebtAsset.symbol
   const sourceCollateralSymbol = sourceCollateralEVault.value.asset.symbol
   const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
-  const batchEntry = {
+  const intent = createOutgoingMigrationIntent(preview)
+  await addBatchEntry({
+    intent,
     label: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetProtocolDisplay(input.target)}`,
     nameOverride: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
-    buildExecutionPlan: async (account: Account<IHasVaultAddress>) => {
-      const executionAuthorizationRequest = useSignatures
-        ? await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-        : undefined
-      const authorization = executionAuthorizationRequest
-        ? await signMigrationAuthorization(executionAuthorizationRequest)
-        : undefined
-      // Without signatures the grant was already mined by the batch's pre-phase,
-      // so the connector omits the authorization item from the plan.
-      return buildMigrationPlan(input, authorization, migrationPosition, account)
-    },
-    ...(useSignatures
-      ? {}
-      : {
-          buildExecutionPrerequisites: async (account: Account<IHasVaultAddress>) => {
-            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-            if (!request) return undefined
-            const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(request)
-            return {
-              preTxs: grants,
-              walletContext: { account: request.owner, chainId: request.chainId },
-              postTxs: revokes,
-              postTxsByPreTx: revokesByGrant,
-            }
-          },
-          // Bundled counterpart for Safe execution: the simulation-variant
-          // plan validates the grant instead of reading the live allowance,
-          // so nothing needs to mine before the proposal is assembled. The
-          // review rows come from the SAME resolution so the modal cannot
-          // display a ceremony other than the one that executes.
-          buildBundledExecution: async (account: Account<IHasVaultAddress>) => {
-            const request = await getAuthorizationRequest(input, migrationPosition, account, useSignatures)
-            const { grants, revokes } = request
-              ? encodeMigrationAuthorizationTxs(request)
-              : { grants: [], revokes: [] }
-            const simulation = await buildMigrationSimulation(input, migrationPosition, request, account)
-            return {
-              plan: simulation.plan,
-              grants,
-              revokes,
-              grantSteps: buildMigrationAuthorizationTxSteps(request, 'grant', 1, { bundled: true }),
-              revokeSteps: buildMigrationAuthorizationTxSteps(request, 'revoke', 1, { bundled: true }),
-            }
-          },
-        }),
     stateOverrides: preview.tenderlySimulation.stateOverrides,
     subAccount: migrationAccount.value,
     refreshExternalMigrationPositions: true,
@@ -1156,40 +934,6 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures, false),
       postSteps: buildRevokeSteps(authorizationRequest, useSignatures, false),
       displayPlan: preview.calldataPrepared.plan,
-    },
-  }
-
-  await addBatchEntry({
-    ...batchEntry,
-    buildPlan: async (account: Account<IHasVaultAddress>) => {
-      // The preview was warmed against the fresh owner account. For the first
-      // batch entry the planning account is that same account, so reuse the
-      // prewarmed plan instead of re-running the full cross-protocol migration
-      // simulation (position resolve → plan build). Only re-simulate when the
-      // batch already has entries, where the planning account is a later layer
-      // the prewarm didn't account for.
-      if (!isBatchActive.value) {
-        return {
-          plan: preview.tenderlySimulation.plan,
-          stateOverrides: preview.tenderlySimulation.stateOverrides,
-        }
-      }
-      const simulationAuthorizationRequest = await getAuthorizationRequest(
-        input,
-        migrationPosition,
-        account,
-        useSignatures,
-      )
-      const simulationResult = await buildMigrationSimulation(
-        input,
-        migrationPosition,
-        simulationAuthorizationRequest,
-        account,
-      )
-      return {
-        plan: simulationResult.plan,
-        stateOverrides: simulationResult.stateOverrides,
-      }
     },
   })
   redirectAfterAdd('/portfolio', {

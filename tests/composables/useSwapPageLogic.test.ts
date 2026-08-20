@@ -14,6 +14,7 @@ const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
     selectedQuoteCard: null as unknown as Ref<unknown>,
     modalOpen: vi.fn(),
     modalClose: vi.fn(),
+    ceremonyOpen: vi.fn(),
     executePlan: vi.fn(),
     executePreparedPlan: vi.fn(),
     prepareTransactionPlan: vi.fn(),
@@ -160,6 +161,8 @@ describe('useSwapPageLogic', () => {
     }))
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
     vi.stubGlobal('formatSmartAmount', (value: string) => value)
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
+    vi.stubGlobal('useCeremonyReview', () => ({ openEagerPlan: captured.ceremonyOpen }))
   })
 
   afterEach(() => {
@@ -212,7 +215,7 @@ describe('useSwapPageLogic', () => {
     expect(plan).toEqual({ quote, context })
   })
 
-  it('uses the selected quote card prepared plan for review and confirm', async () => {
+  it('uses the selected quote card prepared plan for eager simulation before ceremony review', async () => {
     const toVault = makeVault(
       '0x0000000000000000000000000000000000000002',
       '0x0000000000000000000000000000000000000003',
@@ -226,6 +229,7 @@ describe('useSwapPageLogic', () => {
     const toVaultRef = shallowRef<EVault | undefined>(toVault)
     const buildPlan = vi.fn(async () => ({ type: 'rebuilt' }) as unknown as TransactionPlan)
     const quote = { amountIn: '100', amountOut: '200' } as SwapQuote
+    const eagerPlan = { type: 'quote-plan' } as unknown as TransactionPlan
     const prepared = {
       __prepared: true,
       plan: [{ type: 'evcBatch', items: [] }],
@@ -237,7 +241,7 @@ describe('useSwapPageLogic', () => {
     captured.selectedQuoteCard.value = {
       provider: 'provider',
       quote,
-      plan: { type: 'quote-plan' },
+      plan: eagerPlan,
       preparedPlan: prepared,
     }
 
@@ -263,21 +267,12 @@ describe('useSwapPageLogic', () => {
     expect(buildPlan).not.toHaveBeenCalled()
     expect(captured.prepareTransactionPlan).not.toHaveBeenCalled()
     expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {})
-    expect(captured.modalOpen).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      props: expect.objectContaining({
-        prepared,
-        plan: undefined,
-      }),
-    }))
-
-    const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm()
-
-    expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
+    expect(captured.ceremonyOpen).toHaveBeenCalledWith(eagerPlan, expect.objectContaining({ presentationKind: 'swap' }))
+    expect(captured.executePreparedPlan).not.toHaveBeenCalled()
     expect(captured.executePlan).not.toHaveBeenCalled()
   })
 
-  it('prepares a rebuilt plan once and reuses it for confirm when no quote prepared plan is available', async () => {
+  it('prepares a rebuilt plan once for eager simulation before ceremony review', async () => {
     const toVault = makeVault(
       '0x0000000000000000000000000000000000000002',
       '0x0000000000000000000000000000000000000003',
@@ -314,15 +309,14 @@ describe('useSwapPageLogic', () => {
     })
 
     await swap.submit()
-    const modalArgs = captured.modalOpen.mock.calls.at(-1)?.[1]
-    await modalArgs.props.onConfirm()
 
     expect(buildPlan).toHaveBeenCalledTimes(1)
     expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(1)
     expect(buildPlan).toHaveBeenCalledWith(undefined, { account: captured.planAccount })
     expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(rawPlan, { account: captured.planAccount })
     expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {})
-    expect(captured.executePreparedPlan).toHaveBeenCalledWith(prepared)
+    expect(captured.ceremonyOpen).toHaveBeenCalledWith(rawPlan, expect.objectContaining({ presentationKind: 'swap' }))
+    expect(captured.executePreparedPlan).not.toHaveBeenCalled()
     expect(captured.executePlan).not.toHaveBeenCalled()
   })
 })

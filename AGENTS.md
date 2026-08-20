@@ -165,6 +165,10 @@ invariants — do **not** reinvent them inline. The authoritative sources are `d
 upstream `euler-xyz/agent-skills` (`euler-vaults`, `euler-earn`, `euler-advanced`, `euler-irm-oracles`)
 plus https://docs.euler.finance. Key invariants those cover (checklist, not a substitute for the docs):
 
+The transaction ceremony is exhaustive internally, while the user-facing review remains intentionally
+handcrafted and non-one-to-one. Read [User-facing review compatibility](docs/transaction-building.md#user-facing-review-compatibility)
+before changing review inputs or rendering. Pyth ceremony details remain invisible in review.
+
 - Vault state-changing calls go through the **EVC** (`abis/evc.ts`), not directly to the vault.
 - At most **one controller (borrow) vault enabled per account**; `enableController()` must precede
   the borrow, and `enableCollateral()` must be set before collateral is counted.

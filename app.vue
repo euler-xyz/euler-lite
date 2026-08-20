@@ -33,6 +33,11 @@ useExternalMigrationPositions()
 // Instantiate the batch store at app root so its simulation watchers stay
 // alive across navigation (mirrors useEulerAccount above).
 useTxBatch()
+// Recovery is application-scoped so an unresolved attempt remains visible
+// across navigation and independently of whether new ceremonies are enabled.
+useTransactionCeremonyRecovery()
+// Owns all in-scope ceremony preparation, acceptance, and recovery handlers.
+useTransactionCeremony()
 
 const { theme } = useTheme()
 
@@ -226,6 +231,7 @@ onUnmounted(() => {
   <UiModals />
   <UiToastContainer />
   <BatchDrawer />
+  <TransactionCeremonyRecovery />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>

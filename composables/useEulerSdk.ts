@@ -5,6 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
+import { PYTH_MAX_UPDATE_FEE } from '~/features/transaction-ceremony/planning/plugin-config'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
 // useEulerSdk -> sdk-keyring -> eulerLabelsUtils -> useEulerLabels ->
@@ -338,7 +339,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
     },
     servicesOverrides: { intrinsicApyService },
     plugins: [
-      createPythPlugin({ buildQuery, fetchFn: pythProxyFetch }),
+      createPythPlugin({ buildQuery, fetchFn: pythProxyFetch, maxUpdateFee: PYTH_MAX_UPDATE_FEE }),
       createKeyringPlugin({
         hookTargets: keyringHookTargets,
         getCredentialData: getSdkKeyringCredential,

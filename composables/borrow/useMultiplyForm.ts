@@ -16,10 +16,8 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { findBlockingDisabledOp, OP_BORROW, OP_DEPOSIT, OP_SKIM, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { formatUnits, zeroAddress, type Address } from 'viem'
-import { OperationReviewModal } from '#components'
 import { profAsync, profMark } from '~/utils/profiler'
 import type { Ref, ComputedRef } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
@@ -43,7 +41,6 @@ import {
   type ProjectedYieldRateLine,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -89,9 +86,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     isMultiplyRestricted,
   } = options
 
-  const modal = useModal()
   const { error } = useToast()
-  const { planMultiply, prepareTransactionPlan, prefetchPluginData, executePlan, preloadSubAccountSnapshot } = useEulerTx()
+  const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+  const { create: createIntent } = useOperationIntentFactory()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   // State-override knobs: skip balance probing (form validates "Not enough
   // balance"), pass current wallet snapshot, and pre-prime slot hints when the
@@ -102,7 +100,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { account: planAccount } = usePlanAccount()
   const { chainId } = useEulerAddresses()
   const { getBalance } = useWallets()
-  const { finalizeTxAndRedirect } = useTxFinalization()
+  const { finalizeCeremonyUi } = useTxFinalization()
   const { entryCount: batchEntryCount } = useTxBatch()
   const { cowSwapForcedOff } = useCowSwapEligibility()
   const {
@@ -244,6 +242,40 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       swapperMode: SwapperMode.EXACT_IN,
       account,
       subAccountSnapshotApplied: true,
+    })
+  }
+
+  const createMultiplyIntent = (snap: MultiplyBatchSnapshot) => {
+    const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyVault.asset.decimals)
+    let supplyShares: bigint | undefined
+    if (snap.isSavingCollateral && snap.savingFrom) {
+      supplyShares = snap.savingAssets === supplyAmountNano
+        ? snap.savingShares
+        : snap.supplyVault.convertToShares(supplyAmountNano)
+    }
+    const collateralShareSource = snap.isSavingCollateral && supplyShares && snap.savingFrom
+      ? { from: snap.savingFrom, shares: supplyShares }
+      : undefined
+    const common = {
+      collateralVault: snap.supplyVault.address as Address,
+      collateralAmount: snap.isSavingCollateral ? 0n : supplyAmountNano,
+      collateralAsset: snap.supplyVault.asset.address as Address,
+      collateralShareSource,
+    }
+    return createIntent({
+      kind: 'borrow',
+      planner: snap.quote ? 'multiply-with-swap' : 'multiply-same-asset',
+      args: snap.quote
+        ? { ...common, swapQuote: snap.quote, swapperMode: SwapperMode.EXACT_IN }
+        : {
+            ...common,
+            longVault: snap.longVault.address as Address,
+            liabilityVault: snap.shortVault.address as Address,
+            liabilityAmount: snap.debtAmount,
+            receiver: snap.subAccount,
+          },
+      source: 'composables/borrow/useMultiplyForm.ts#batch',
+      subAccounts: [snap.subAccount],
     })
   }
   // --- Vault aliases ---
@@ -1313,12 +1345,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       }
 
       profMark('review', 'submitMultiply.modalOpen')
-      modal.open(OperationReviewModal, {
-        props: {
+      if (!multiplyPlan.value) return
+      await openCeremonyReview(multiplyPlan.value, {
+        presentationKind: 'borrow',
+        review: {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-          prepared: preparedMultiplyPlan.value || undefined,
           quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           supplyingAssetForBorrow: multiplySupplyVault.value.asset,
           supplyingAmount: multiplyInputAmount.value,
@@ -1327,33 +1360,16 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async (execution) => {
-            await sendMultiply(execution)
-          },
+        },
+        onSucceeded: () => finalizeCeremonyUi(),
+        onFailed: (cause) => {
+          logWarn('multiply/send', cause)
+          error('Transaction failed')
         },
       })
     }
     finally {
       isMultiplyPreparing.value = false
-    }
-  }
-
-  const sendMultiply = async (execution: TrackedExecutionScope) => {
-    // Use the unprepared plan and let executeTransactionPlan re-run plugins
-    // at submit time — keeps the on-chain Pyth update payload fresh so the
-    // staleness check can't bite us between Review-click and broadcast.
-    if (!multiplyPlan.value) return
-    isMultiplySubmitting.value = true
-    try {
-      await executePlan(multiplyPlan.value)
-      await finalizeTxAndRedirect({ scope: execution })
-    }
-    catch (e) {
-      logWarn('multiply/send', e)
-      error('Transaction failed')
-    }
-    finally {
-      isMultiplySubmitting.value = false
     }
   }
 
@@ -1570,7 +1586,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     onRefreshMultiplyQuotes,
     submitMultiply,
     buildMultiplyPlan, // Batch
-    sendMultiply,
+    createMultiplyIntent,
     updateMultiplyAssetBalance,
     initMultiplySupplyVault,
     resetOnTabSwitch,

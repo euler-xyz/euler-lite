@@ -10,7 +10,6 @@ import { convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { cowSwapInboxExists } from '~/utils/cowswap-inbox'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import { useModal } from '~/components/ui/composables/useModal'
-import { OperationReviewModal } from '#components'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
@@ -33,7 +32,6 @@ import { COWSWAP_ORDER_DEADLINE_SECONDS, getCowSwapChainConfig, getCowSwapQuoteO
 import { type CowSwapClosePositionExecuteParams, useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -75,17 +73,18 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   } = options
 
   const router = useRouter()
-  const modal = useModal()
   const { error } = useToast()
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
-  const { planRepayFromSource, executePlan, prefetchPluginData } = useEulerTx()
+  const { planRepayFromSource, prefetchPluginData } = useEulerTx()
+  const { create: createIntent } = useOperationIntentFactory()
+  const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId: currentChainId } = useEulerAddresses()
-  const { finalizeTxAndRedirect } = useTxFinalization()
+  const { finalizeCeremonyUi } = useTxFinalization()
   const { refreshAllPositions } = useEulerAccount()
   const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
@@ -543,6 +542,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     return planRepayFromSource({
       liabilityVault: borrowVault.value.address as Address,
+      liabilityAsset: borrowVault.value.asset.address as Address,
       liabilityAmount,
       receiver: subAccount,
       fromVault: source.address as Address,
@@ -551,6 +551,56 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       swapperMode: swapMode,
       cleanupOnMax: isFullRepay,
       account,
+    })
+  }
+
+  function createRepayIntent(
+    quote?: SwapQuote,
+    snapshot: CollateralSwapRepayPlanSnapshot = {},
+  ) {
+    const source = snapshot.sourceVault ?? sourceVault.value
+    if (!position.value || !borrowVault.value || !source) throw new Error('Position or vaults not loaded')
+    const subAccount = position.value.subAccount as Address
+    const sameAsset = snapshot.isSameAsset ?? core.isSameAsset.value
+    const amountInput = snapshot.amount ?? core.amount.value
+    const debtAmountInput = snapshot.debtAmount ?? core.debtAmount.value
+    if (sameAsset) {
+      const debtNano = debtAmountInput
+        ? valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+        : valueToNano(amountInput, source.asset.decimals)
+      const isFullRepay = debtNano >= getCurrentDebt()
+      return createIntent({
+        kind: 'repay',
+        planner: 'repay-from-deposit',
+        args: {
+          liabilityVault: borrowVault.value.address as Address,
+          liabilityAsset: borrowVault.value.asset.address as Address,
+          liabilityAmount: isFullRepay ? maxUint256 : debtNano,
+          receiver: subAccount,
+          fromVault: source.address as Address,
+          fromAccount: subAccount,
+          cleanupOnMax: isFullRepay,
+        },
+        source: 'position/repay-collateral:add-to-batch',
+        subAccounts: [subAccount],
+      })
+    }
+    const swapQuote = quote || core.quotes.selectedQuote.value
+    if (!swapQuote) throw new Error('No quote selected')
+    const swapperMode = snapshot.direction ?? core.direction.value
+    const currentDebt = getCurrentDebt()
+    let targetDebt = 0n
+    if (swapperMode === SwapperMode.TARGET_DEBT && debtAmountInput) {
+      const debtAmountNano = valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+      targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
+    }
+    const cleanupOnMax = targetDebt === 0n && swapperMode === SwapperMode.TARGET_DEBT
+    return createIntent({
+      kind: 'repay',
+      planner: 'repay-with-swap',
+      args: { swapQuote, cleanupOnMax, swapperMode },
+      source: 'position/repay-collateral:add-to-batch',
+      subAccounts: [subAccount],
     })
   }
 
@@ -715,45 +765,30 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         swapperMode: core.direction.value,
       })
 
-      modal.open(OperationReviewModal, {
-        props: {
+      if (!plan.value) return
+      await openCeremonyReview(plan.value, {
+        presentationKind: 'repay',
+        review: {
           type: 'repay',
           asset: sourceVault.value.asset,
           amount: inputDisplay,
-          plan: plan.value || undefined,
           quoteFetchedAt: !core.isSameAsset.value ? core.quotes.effectiveQuoteFetchedAt.value : null,
           swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
           swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
           swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async (execution) => {
-            await send(execution)
-          },
           submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => finalizeCeremonyUi(),
+        onFailed: (cause) => {
+          error('Transaction failed')
+          logWarn('collateralSwapRepay/send', cause)
         },
       })
     }
     finally {
       isPreparing.value = false
-    }
-  }
-
-  const send = async (execution: TrackedExecutionScope) => {
-    if (!position.value || !borrowVault.value) return
-    if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
-    try {
-      isSubmitting.value = true
-      const txPlan = await buildRepayPlan()
-      await executePlan(txPlan)
-      await finalizeTxAndRedirect({ scope: execution })
-    }
-    catch (e) {
-      error('Transaction failed')
-      logWarn('collateralSwapRepay/send', e)
-    }
-    finally {
-      isSubmitting.value = false
     }
   }
 
@@ -827,11 +862,11 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     onSourceMax: core.onSourceMax,
     onProviderSelect: core.onProviderSelect,
     submit,
-    send,
     updateSourceBalance,
     initVault,
     resetOnTabSwitch,
     // Batch
     buildRepayPlan,
+    createRepayIntent,
   }
 }

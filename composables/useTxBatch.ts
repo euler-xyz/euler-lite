@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type Hex, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -11,6 +11,7 @@ import type {
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
+import { ceremonyPresentationCacheDigest, type PreparedCeremonyReview } from '~/composables/useTransactionCeremony'
 import {
   getBatchPrefetchedBaseAccount,
   getBatchPrefetchedPlanningAccount,
@@ -18,7 +19,6 @@ import {
   mergeBatchPrefetchedSlotHints,
 } from '~/composables/batchPrefetchState'
 import { getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import { useTenderlySimulation } from '~/composables/useTenderlySimulation'
 import {
   activeLayerVaultsRef,
@@ -27,13 +27,14 @@ import {
   type LayeredVaultMap,
 } from '~/composables/useLayeredVaults'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import { buildPlanMarketLabel, type DisplayStep } from '~/utils/stepDecoding'
+import { buildPlanMarketLabel } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
-import { formatSimulationFailure, getTxErrorMessage } from '~/utils/tx-errors'
+import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
-import type { MigrationAuthorizationRevoke } from '~/utils/migrationAuthorizationTxs'
-import type { WalletExecutionContext } from '~/utils/walletExecutionContext'
+import type { BatchDraftEntry, OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import { GenerationPublisher } from '~/features/transaction-ceremony/planning/cache'
+import { intentSetDigest } from '~/features/transaction-ceremony/planning/requirements'
 
 export interface BatchWalletChange {
   token: string
@@ -61,76 +62,20 @@ export interface BatchClosedPosition {
  * keep reading `useEulerAccount().portfolio`, which transparently returns the
  * active layer's portfolio (see `activeLayerPortfolioRef`).
  *
- * Layered data source (for now): prefix re-simulation against the stock SDK.
- * `layer[i] = simulateTransactionPlan(mergePlans(entries[0..i]))` — the final
- * simulated account of a prefix *is* the world after that prefix. Each entry's
- * transaction plan is fixed at add-time against the current batch end-state;
- * later resimulations only replay stored plans. The production path (one batch
- * with interspersed lens reads + per-op errors, exposed via a `layers` flag on
- * `simulateTransactionPlan`) is a drop-in replacement for `resimulate()` — the
- * layer interface is unchanged.
+ * Draft intents are appended synchronously. Generation-bound background work
+ * compiles them for layered state previews, while the ceremony service remains
+ * the sole authority for final whole-cart preparation and execution.
  */
-
-export interface BatchEntryExternalTx {
-  to: Address
-  data: Hex
-  value?: bigint
-  label?: string
-}
-
-export interface BatchEntryExecutionPrerequisites {
-  /** Sent and mined before the merged plan is built. */
-  preTxs: BatchEntryExternalTx[]
-  /** Wallet context used to build the prerequisite request. */
-  walletContext: WalletExecutionContext
-  /** Sent after the batch executes. Failures are non-fatal. */
-  postTxs: BatchEntryExternalTx[]
-  /** Revoke paired with each pre-transaction, in pre-transaction order. */
-  postTxsByPreTx?: Array<BatchEntryExternalTx | undefined>
-}
-
-export interface BatchEntryBundledExecution {
-  /**
-   * Execution payload built WITHOUT live authorization reads (the
-   * simulation-variant plan) — the grants ride in the same Safe proposal
-   * and are not mined when this plan is built.
-   */
-  plan: TransactionPlan
-  /** Grant calls to prepend to the proposal, in dependency order. */
-  grants: BatchEntryExternalTx[]
-  /** Revocation calls to append, already in unwind order for this entry. */
-  revokes: BatchEntryExternalTx[]
-  /**
-   * Review rows for the grants above, derived from the SAME authorization
-   * resolution — the modal renders these, never the add-time captures, so
-   * the displayed ceremony cannot drift from the executed one.
-   */
-  grantSteps: DisplayStep[]
-  /** Review rows for the revocations above, same resolution. */
-  revokeSteps: DisplayStep[]
-}
 
 export interface BatchEntry {
   id: string
+  intent: OperationIntent
   label: string
+  /** Draft acknowledgement is published before asynchronous preparation. */
+  preparing?: boolean
+  preparationError?: string
   /** Fixed transaction payload captured when the user added this entry. */
   plan: TransactionPlan
-  /** Optional real execution payload builder for entries whose preview plan uses simulation-only state. */
-  buildExecutionPlan?: (account: Account<IHasVaultAddress>) => Promise<TransactionPlan>
-  /** Standalone transactions this entry needs around the merged batch, resolved
-   *  at execution time. Migrations without message signatures use this to grant
-   *  their authorization before the batch and revoke it after: the grants cannot
-   *  be plan items (`mergePlans` rejects contractCall, and the EVC would be the
-   *  msg.sender), and must be mined before the plan is built. */
-  buildExecutionPrerequisites?: (
-    account: Account<IHasVaultAddress>,
-  ) => Promise<BatchEntryExecutionPrerequisites | undefined>
-  /** Bundled-mode counterpart of the two builders above: plan + grant/revoke
-   *  calls for ONE atomic Safe proposal. Entries providing this let the cart
-   *  skip the standalone grant broadcasts entirely when a Safe executes. */
-  buildBundledExecution?: (
-    account: Account<IHasVaultAddress>,
-  ) => Promise<BatchEntryBundledExecution>
   /** Extra simulation-only overrides required by this entry, e.g. migration authorization. */
   stateOverrides?: StateOverride
   /** Props for the per-operation review modal (OperationReviewModal), captured at
@@ -164,25 +109,8 @@ export interface BatchEntry {
   rewardClaimKey?: string
 }
 
-type BatchEntryBuildResult = TransactionPlan | {
-  plan: TransactionPlan
-  stateOverrides?: StateOverride
-}
-
-type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan'>
-
-export type BatchEntryInput = BatchEntryInputBase & (
-  {
-    /** Builds this entry once, at add-time, against the current batch end-state. */
-    buildPlan: (account: Account<IHasVaultAddress>) => Promise<BatchEntryBuildResult>
-    requiresPlanningAccount?: true
-  } | {
-    /** Builds this entry once, at add-time, without a simulated account snapshot. */
-    buildPlan: () => Promise<BatchEntryBuildResult>
-    /** Set false for standalone plans that do not need the current simulated account. */
-    requiresPlanningAccount: false
-  }
-)
+type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan' | 'preparing' | 'preparationError'>
+export type BatchEntryInput = BatchEntryInputBase
 
 export interface BatchLayer {
   /** Simulated account snapshot after this layer's entry (layer 0 = real). */
@@ -224,42 +152,47 @@ export interface WalletShortfall {
 }
 
 // --- module-scoped state (single shared cart for the session) ---
-const entries: Ref<BatchEntry[]> = ref([])
+const draftEntries: Ref<BatchDraftEntry[]> = ref([])
+const entryPresentationById = shallowRef<Record<string, Omit<BatchEntry, 'id' | 'intent' | 'plan' | 'preparing' | 'preparationError'>>>({})
+const entryPlanById = shallowRef<Record<string, TransactionPlan>>({})
+const entryPreparationById = shallowRef<Record<string, { preparing: boolean, preparationError?: string }>>({})
+const entries = computed<BatchEntry[]>(() => draftEntries.value.map((draft) => {
+  const presentation = entryPresentationById.value[draft.intentId]
+  if (!presentation) throw new Error(`Batch presentation ${draft.intentId} is missing`)
+  const preparation = entryPreparationById.value[draft.intentId] ?? { preparing: true }
+  return {
+    id: draft.intentId,
+    intent: draft.intent,
+    plan: entryPlanById.value[draft.intentId] ?? [],
+    ...presentation,
+    ...preparation,
+  }
+}))
+const removeEntryStorage = (id: string) => {
+  draftEntries.value = draftEntries.value.filter(entry => entry.intentId !== id)
+  entryPresentationById.value = Object.fromEntries(Object.entries(entryPresentationById.value).filter(([key]) => key !== id))
+  entryPlanById.value = Object.fromEntries(Object.entries(entryPlanById.value).filter(([key]) => key !== id))
+  entryPreparationById.value = Object.fromEntries(Object.entries(entryPreparationById.value).filter(([key]) => key !== id))
+}
 const layers = shallowRef<BatchLayer[]>([])
-/**
- * Bundled ceremony resolved ONCE when the review modal opens, displayed,
- * copied, and executed verbatim — the latch that keeps the reviewed
- * ceremony, the copied payload, and the submitted proposal identical. A
- * cart edit or account/chain reset clears it; executeBatch treats its
- * presence as the reviewed promise of ONE proposal. Module-scoped like the
- * rest of the cart state so every component instance shares it.
- */
-const latchedBundledExecution = shallowRef<{
-  plans: TransactionPlan[]
-  grants: BatchEntryExternalTx[]
-  revokes: BatchEntryExternalTx[]
-  /** Per-entry review rows from the same resolution, for the modal to render. */
-  stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }>
-} | null>(null)
 // Per-entry fixed plan (keyed by entry id), used by the review modal and by the
 // merged whole-batch plan. These are captured once when the entry is added.
 const entryPlans = computed<Record<string, TransactionPlan>>(() =>
-  Object.fromEntries(entries.value.map(entry => [entry.id, entry.plan])),
+  ({ ...entryPlanById.value }),
 )
 // Tokens the full batch would overdraw from the real wallet (execute-time gate).
 const walletShortfalls = shallowRef<WalletShortfall[]>([])
 const activeLayer = ref(0)
 const isSimulating = ref(false)
 const simError = ref<string | undefined>(undefined)
-const isExecuting = ref(false)
 const execError = ref<string | undefined>(undefined)
 // Drawer expanded/collapsed state, shared so the mobile nav's "Batch" item and
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
 const drawerOpen = ref(true)
-// The merged plan from the most recent successful resimulation, reused by
-// executeBatch so the executed batch is exactly what was simulated.
-let lastMerged: TransactionPlan | null = null
+// Non-authoritative merged preview from the latest successful layered
+// simulation. It supports form projections and never authorizes execution.
+let lastSimulatedPlan: TransactionPlan | null = null
 let baseAccountSnapshot: Account<IHasVaultAddress> | null = null
 
 // "Simulate on Tenderly" for the whole batch — runs the exact merged plan
@@ -303,7 +236,6 @@ export const activeLayerWalletBalancesRef = shallowRef<Record<string, bigint>>({
  */
 export const activeLayerAccountRef = shallowRef<Account<IHasVaultAddress> | undefined>(undefined)
 
-let idSeq = 0
 let resimToken = 0
 let scope: EffectScope | undefined
 let resimulatePromise: Promise<void> | null = null
@@ -316,6 +248,13 @@ const pendingAddSignatures = new Set<string>()
 // Symbol/decimals for touched wallet tokens, for the wallet-changes summary.
 const walletAssetMeta: Record<string, { symbol: string, decimals: number }> = {}
 let batchSlotHints: SlotHints = {}
+const batchGenerationPublisher = new GenerationPublisher()
+let batchCeremonyPreparation: {
+  generation: number
+  intentSetHash: `0x${string}`
+  presentationDigest: `0x${string}`
+  promise: Promise<PreparedCeremonyReview>
+} | undefined
 
 // TEMP DIAGNOSTICS — hunting an unreproducible "Batch simulation not loaded"
 // error that some users hit when adding a second operation to the batch. Every
@@ -504,29 +443,6 @@ const primeBatchSlotHintsFor = async (chainId: number, tokens: Address[]): Promi
   }
 }
 
-const redirectAfterBatchExecution = async (scope?: TrackedExecutionScope) => {
-  try {
-    // Success signal for a detached Safe completion toast, and the gate that
-    // keeps a background-confirmed batch from yanking the user mid-flow.
-    // Bound to THIS execution's record — a late tail can never mark or read
-    // a successor execution.
-    scope?.markSucceeded()
-    if (scope?.suppressPostTxUi()) return
-    const router = useRouter()
-    const route = useRoute()
-    const query: Record<string, string> = {}
-    const network = route.query.network
-    if (typeof network === 'string') query.network = network
-    else if (Array.isArray(network) && typeof network[0] === 'string') query.network = network[0]
-    await router.replace({ path: '/portfolio', query })
-  }
-  catch (error) {
-    // The transaction has already mined. Navigation is best-effort and should
-    // never turn a successful batch execution into an execution failure.
-    logWarn('useTxBatch/redirectAfterBatchExecution', error)
-  }
-}
-
 export const buildWalletChanges = (
   current: Record<string, bigint> | undefined,
   base: Record<string, bigint> | undefined,
@@ -709,7 +625,7 @@ const invalidateSimulationLayers = () => {
   layers.value = []
   activeLayer.value = 0
   walletShortfalls.value = []
-  lastMerged = null
+  lastSimulatedPlan = null
   syncOverlay()
 }
 
@@ -726,18 +642,6 @@ const describeFailure = (sim: Parameters<typeof formatSimulationFailure>[0]): st
   }
   catch {
     return 'Operation would revert'
-  }
-}
-
-// Concise message from an execution / gas-estimate error. Gas estimation throws
-// raw viem errors, so run them through the same decoder used by direct tx flows.
-const describeExecError = async (error: unknown): Promise<string> => {
-  try {
-    return await getTxErrorMessage(error)
-  }
-  catch {
-    const e = error as { shortMessage?: string, details?: string, message?: string }
-    return e?.shortMessage || e?.details || e?.message || String(error)
   }
 }
 
@@ -1736,18 +1640,16 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 }
 
 export const useTxBatch = () => {
+  const ceremonyService = useTransactionCeremony()
+  const { compileEager } = ceremonyService
   const { chainId: wagmiChainId } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
-  const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
 
   const owner = computed(
     () => effectiveAddress.value as Address | undefined,
   )
   const chainId = computed(() => wagmiChainId.value ?? addressesChainId.value)
-  const { prepareTransactionPlan, executePreparedPlan, executePreparedPlanWithPlainCalls, estimateGasForPlan, sendPlainTransactions } = useEulerTx()
-  const { isSafeWallet } = useSafeWallet()
-  const { restorePendingBeforeRetry, revokeAfterSuccess, revokeAfterAbort } = useMigrationAuthorizationFlow()
   const { getTokenByAddress } = useTokenList()
   const ownerSubAccountKey = computed(() => {
     try {
@@ -1774,10 +1676,18 @@ export const useTxBatch = () => {
       simError.value = undefined
       execError.value = undefined
       walletShortfalls.value = []
-      lastMerged = null
+      lastSimulatedPlan = null
       baseAccountSnapshot = null
       batchSlotHints = {}
       syncOverlay()
+      return
+    }
+
+    // A draft row is visible immediately. It has no execution authority until
+    // its eager plan build finishes and a whole-cart simulation is published.
+    // Keep the last completed prefix projection intact: the queued builder for
+    // this draft may still need that exact account as its planning input.
+    if (entries.value.some(entry => entry.preparing)) {
       return
     }
 
@@ -1806,7 +1716,7 @@ export const useTxBatch = () => {
       // operation and returns simulatedAccounts = [base, afterOp0, afterOp1, …]
       // plus per-operation revert attribution via failedBatchItems.
       const merged = sdk.executionService.mergePlans(plans)
-      lastMerged = merged
+      lastSimulatedPlan = merged
       const sim = await sdk.executionService.simulateTransactionPlan(
         cid,
         ownerAddr,
@@ -2134,9 +2044,8 @@ export const useTxBatch = () => {
       watch(entries, () => {
         logBatchDiag('watch:entries-changed')
         tenderly.clearSimulation()
-        // A cart edit invalidates the latched bundled ceremony — the modal
-        // re-latches on next open.
-        latchedBundledExecution.value = null
+        // A cart edit invalidates the sealed whole-cart result; background
+        // preparation immediately targets the new generation.
         void runResimulate()
       })
       watch([activeLayer, layers], syncOverlay)
@@ -2144,15 +2053,18 @@ export const useTxBatch = () => {
       watch([owner, chainId], () => {
         logBatchDiag('watch:owner-or-chain-reset', {}, 'error')
         resimToken++
-        entries.value = []
-        latchedBundledExecution.value = null
+        batchGenerationPublisher.advance()
+        draftEntries.value = []
+        entryPresentationById.value = {}
+        entryPlanById.value = {}
+        entryPreparationById.value = {}
         layers.value = []
         activeLayer.value = 0
         isSimulating.value = false
         simError.value = undefined
         execError.value = undefined
         walletShortfalls.value = []
-        lastMerged = null
+        lastSimulatedPlan = null
         baseAccountSnapshot = null
         batchSlotHints = {}
         resimulatePromise = null
@@ -2163,8 +2075,9 @@ export const useTxBatch = () => {
   }
 
   const getEntryPlanningAccount = async (): Promise<Account<IHasVaultAddress>> => {
+    const preparedEntryCount = entries.value.filter(entry => !entry.preparing).length
     const getCurrentFinalLayer = () => (
-      entries.value.length > 0 && layers.value.length === entries.value.length + 1
+      preparedEntryCount > 0 && layers.value.length === preparedEntryCount + 1
         ? layers.value[layers.value.length - 1]?.account
         : undefined
     )
@@ -2173,7 +2086,7 @@ export const useTxBatch = () => {
     logBatchDiag('getEntryPlanningAccount:enter', { fastPathHit: finalLayer !== undefined })
     if (finalLayer) return finalLayer
 
-    if (entries.value.length > 0) {
+    if (preparedEntryCount > 0) {
       // Retry across superseded resimulations until the final layer for the
       // present entries settles or a real error appears (see awaitFinalPlanningLayer).
       try {
@@ -2244,12 +2157,25 @@ export const useTxBatch = () => {
     if (pendingAddSignatures.has(signature)) return
     pendingAddSignatures.add(signature)
 
+    const { intent, ...presentation } = entry
+    const entryId = entry.intent.intentId
+    const capturedOwner = owner.value
+    const capturedChainId = chainId.value
+    registerReviewAssetMeta(presentation.review)
+    // Keep this before the first await/promise continuation. The browser can
+    // paint the row while account, plugin, slot-hint, and simulation work uses
+    // the warmed caches in the background.
+    const cartGeneration = batchGenerationPublisher.advance()
+    entryPresentationById.value = { ...entryPresentationById.value, [entryId]: presentation }
+    entryPreparationById.value = { ...entryPreparationById.value, [entryId]: { preparing: true } }
+    draftEntries.value = [...draftEntries.value, { intentId: entryId, revision: intent.revision, intent }]
+
     const add = async () => {
       execError.value = undefined
       logBatchDiag('addEntry:building', {
         label: entry.label,
         subAccount: entry.subAccount,
-        requiresPlanningAccount: entry.requiresPlanningAccount !== false,
+        intentId: entry.intent.intentId,
       })
       // Account-free entries never reach `getEntryPlanningAccount`, so seed layer 0
       // from the prefetched base here too — otherwise resimulate would refetch it.
@@ -2265,11 +2191,7 @@ export const useTxBatch = () => {
           // The simulator will surface the normal account-loading error later.
         }
       }
-      const buildResult = entry.requiresPlanningAccount === false
-        ? await entry.buildPlan()
-        : await entry.buildPlan(await getEntryPlanningAccount())
-      const plan = Array.isArray(buildResult) ? buildResult : buildResult.plan
-      const builtStateOverrides = Array.isArray(buildResult) ? undefined : buildResult.stateOverrides
+      const plan = await compileEager([entry.intent], await getEntryPlanningAccount())
       const cid = chainId.value
       if (cid) {
         batchSlotHints = {
@@ -2281,18 +2203,10 @@ export const useTxBatch = () => {
           .filter(token => batchSlotHints[token] === undefined)
         await primeBatchSlotHintsFor(cid, missingSlotHintTokens)
       }
-      const {
-        buildPlan: _buildPlan,
-        requiresPlanningAccount: _requiresPlanningAccount,
-        ...fixedEntry
-      } = entry
-      registerReviewAssetMeta(fixedEntry.review)
-      entries.value = [...entries.value, {
-        ...fixedEntry,
-        ...(builtStateOverrides ? { stateOverrides: builtStateOverrides } : {}),
-        plan,
-        id: `entry-${++idSeq}`,
-      }]
+      // Clear/account/chain changes and row removal invalidate this late result.
+      if (owner.value !== capturedOwner || chainId.value !== capturedChainId || !draftEntries.value.some(candidate => candidate.intentId === entryId && candidate.revision === intent.revision)) return
+      entryPlanById.value = { ...entryPlanById.value, [entryId]: plan }
+      entryPreparationById.value = { ...entryPreparationById.value, [entryId]: { preparing: false } }
       logBatchDiag('addEntry:added', { label: entry.label, newEntryCount: entries.value.length })
     }
 
@@ -2301,6 +2215,7 @@ export const useTxBatch = () => {
 
     try {
       await nextAdd
+      void warmBatchCeremony(cartGeneration)
     }
     catch (error) {
       logBatchDiag('addEntry:threw', {
@@ -2309,6 +2224,7 @@ export const useTxBatch = () => {
       }, 'error')
       logWarn('useTxBatch/addEntry', error)
       simError.value = error instanceof Error ? error.message : String(error)
+      removeEntryStorage(entryId)
       throw error
     }
     finally {
@@ -2317,9 +2233,10 @@ export const useTxBatch = () => {
   }
 
   const removeEntry = (id: string) => {
-    const nextEntries = entries.value.filter(entry => entry.id !== id)
+    const cartGeneration = batchGenerationPublisher.advance()
+    removeEntryStorage(id)
+    const nextEntries = draftEntries.value
     execError.value = undefined
-    entries.value = nextEntries
     if (nextEntries.length === 0) {
       resimToken++
       layers.value = []
@@ -2327,25 +2244,32 @@ export const useTxBatch = () => {
       isSimulating.value = false
       simError.value = undefined
       walletShortfalls.value = []
-      lastMerged = null
+      lastSimulatedPlan = null
       baseAccountSnapshot = null
       batchSlotHints = {}
       resimulatePromise = null
       tenderly.clearSimulation()
       syncOverlay()
     }
+    else {
+      void warmBatchCeremony(cartGeneration)
+    }
   }
 
   const clearBatch = () => {
     resimToken++
-    entries.value = []
+    batchGenerationPublisher.advance()
+    draftEntries.value = []
+    entryPresentationById.value = {}
+    entryPlanById.value = {}
+    entryPreparationById.value = {}
     layers.value = []
     activeLayer.value = 0
     isSimulating.value = false
     simError.value = undefined
     execError.value = undefined
     walletShortfalls.value = []
-    lastMerged = null
+    lastSimulatedPlan = null
     baseAccountSnapshot = null
     batchSlotHints = {}
     resimulatePromise = null
@@ -2360,6 +2284,63 @@ export const useTxBatch = () => {
 
   const dismissExecutionError = () => {
     execError.value = undefined
+  }
+
+  const setExecutionError = (message: string | undefined) => {
+    execError.value = message
+  }
+
+  /** Immutable intent set stored by the authoritative draft cart. */
+  const getBatchIntents = (): readonly OperationIntent[] =>
+    draftEntries.value.map(entry => entry.intent)
+
+  const batchPresentationInputs = () => entries.value.map(entry => ({ id: entry.id, review: entry.review }))
+
+  const startBatchCeremonyPreparation = (cartGeneration: number): Promise<PreparedCeremonyReview> => {
+    batchGenerationPublisher.assertCurrent(cartGeneration)
+    const intents = [...getBatchIntents()]
+    const presentationInputs = batchPresentationInputs()
+    const intentSetHash = intentSetDigest(intents)
+    const presentationDigest = ceremonyPresentationCacheDigest('batch', presentationInputs)
+    if (batchCeremonyPreparation
+      && batchCeremonyPreparation.generation === cartGeneration
+      && batchCeremonyPreparation.intentSetHash === intentSetHash
+      && batchCeremonyPreparation.presentationDigest === presentationDigest) {
+      return batchCeremonyPreparation.promise
+    }
+    const promise = ceremonyService.prepare(intents, {
+      presentationKind: 'batch',
+      presentationInputs,
+      generation: batchGenerationPublisher,
+      cartGeneration,
+    })
+    batchCeremonyPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, promise }
+    void promise.catch(() => {
+      if (batchCeremonyPreparation?.promise === promise) batchCeremonyPreparation = undefined
+    })
+    return promise
+  }
+
+  const prepareBatchCeremony = () => startBatchCeremonyPreparation(batchGenerationPublisher.current())
+
+  const warmBatchCeremony = async (cartGeneration: number) => {
+    if (!draftEntries.value.length) return
+    try {
+      await startBatchCeremonyPreparation(cartGeneration)
+    }
+    catch (error) {
+      if (cartGeneration !== batchGenerationPublisher.current()) return
+      logWarn('useTxBatch/warmBatchCeremony', error)
+    }
+  }
+
+  /** Remove only revisions captured by a completed ceremony; newer edits stay. */
+  const removeIntentRevisions = (completed: readonly { intentId: string, revision: number }[]) => {
+    const identities = new Set(completed.map(item => `${item.intentId}:${item.revision}`))
+    const removeIds = draftEntries.value
+      .filter(entry => identities.has(`${entry.intentId}:${entry.revision}`))
+      .map(entry => entry.intentId)
+    for (const id of removeIds) removeEntry(id)
   }
 
   /** Lazily check (once) whether the server has Tenderly credentials configured,
@@ -2377,11 +2358,13 @@ export const useTxBatch = () => {
    * a dashboard URL surfaced via `tenderlyUrl`. Works in spy mode too — it's a
    * read-only simulation, no signature required.
    */
-  const simulateOnTenderly = async (): Promise<void> => {
-    if (!lastMerged) return
-    const o = owner.value
-    const cid = chainId.value
-    if (!o || !cid) return
+  const simulateOnTenderly = async (
+    prepared?: Awaited<ReturnType<typeof prepareBatchCeremony>>,
+  ): Promise<void> => {
+    if (!prepared) return
+    const { ceremony, previewPlan } = prepared
+    const o = ceremony.template.wallet.account
+    const cid = ceremony.template.wallet.chainId
     tenderly.clearSimulation()
     try {
       const sdk = await getEulerSdkFresh()
@@ -2389,8 +2372,8 @@ export const useTxBatch = () => {
         entries.value.flatMap(entry => entry.stateOverrides ?? []),
       )
       const payload = await buildTenderlySimulationPayload({
-        plan: lastMerged,
-        owner: getAddress(o),
+        plan: previewPlan,
+        owner: o,
         chainId: cid,
         sdk,
         extraStateOverrides,
@@ -2399,7 +2382,20 @@ export const useTxBatch = () => {
         tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
         return
       }
-      await tenderly.simulate(payload)
+      const sealedRequest = ceremony.template.requests.find(request =>
+        request.to === payload.to
+        && request.data === payload.data
+        && request.value.toString() === payload.value,
+      )
+      if (!sealedRequest) {
+        throw new Error('Tenderly projection does not match the reviewed execution template')
+      }
+      await tenderly.simulate({
+        ...payload,
+        to: sealedRequest.to,
+        data: sealedRequest.data,
+        value: sealedRequest.value.toString(),
+      })
     }
     catch (error) {
       logWarn('useTxBatch/simulateOnTenderly', error)
@@ -2407,225 +2403,8 @@ export const useTxBatch = () => {
     }
   }
 
-  /** The latest merged preview plan (null until a successful simulation).
-   *  The review modal prepares & decodes this to surface approvals. */
-  const getMergedPlan = (): TransactionPlan | null => lastMerged
-
-  /** Resolve approvals/permits/plugins for the merged batch plan, so the review
-   *  modal can list the approvals the user will be asked to sign. */
-  const prepareBatchPlan = async () => {
-    if (!lastMerged) return null
-    return prepareTransactionPlan(lastMerged)
-  }
-
-  const getExecutionPlanningAccount = async (entryIndex: number): Promise<Account<IHasVaultAddress>> => {
-    const getLayerAccount = () => layers.value[entryIndex]?.account
-
-    const layerAccount = getLayerAccount()
-    if (layerAccount) return layerAccount
-
-    if (entries.value.length > 0) {
-      await (resimulatePromise ?? runResimulate())
-      const refreshedLayerAccount = getLayerAccount()
-      if (refreshedLayerAccount) return refreshedLayerAccount
-      throw new Error(simError.value ?? 'Batch simulation not loaded')
-    }
-
-    if (baseAccountSnapshot) return baseAccountSnapshot
-
-    const o = owner.value
-    const cid = chainId.value
-    if (!o || !cid) throw new Error('Account not loaded')
-    const sdk = await getEulerSdkFresh()
-    baseAccountSnapshot = await fetchBaseAccountSnapshot(sdk, cid, getAddress(o))
-    return baseAccountSnapshot
-  }
-
-  const buildMergedExecutionPlan = async (): Promise<TransactionPlan> => {
-    const sdk = await getEulerSdkFresh()
-    const plans: TransactionPlan[] = []
-    for (const [index, entry] of entries.value.entries()) {
-      plans.push(entry.buildExecutionPlan
-        ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
-        : entry.plan)
-    }
-    return sdk.executionService.mergePlans(plans)
-  }
-
-  /**
-   * A Safe executes the cart's prerequisites inside the batch proposal when
-   * every prerequisite-bearing entry provides a bundled builder — mixed
-   * carts (a prerequisite entry without bundled support) keep the sequential
-   * ceremony for all entries, so the review never half-describes it.
-   */
-  const willBundlePrerequisites = computed(() =>
-    isSafeWallet.value
-    && entries.value.some(entry => entry.buildBundledExecution)
-    && entries.value.every(entry => !entry.buildExecutionPrerequisites || entry.buildBundledExecution),
-  )
-
-  /**
-   * Bundled ceremony resolved ONCE when the review modal opens, displayed,
-   * copied, and executed verbatim — the latch that keeps the reviewed
-   * ceremony, the copied payload, and the submitted proposal identical. A
-   * cart edit or account/chain reset clears it; executeBatch treats its
-   * presence as the reviewed promise of ONE proposal.
-   */
-  const prepareBundledExecution = async () => {
-    if (!willBundlePrerequisites.value) {
-      latchedBundledExecution.value = null
-      return null
-    }
-    const collected = await collectBundledExecution()
-    latchedBundledExecution.value = collected
-    return collected
-  }
-
-  /**
-   * Assemble the bundled ceremony: each entry's simulation-variant plan plus
-   * its grant/revoke calls. Grants keep entry order; revokes unwind in
-   * reverse entry order (each entry's own revokes are already reversed).
-   */
-  const collectBundledExecution = async () => {
-    const plans: TransactionPlan[] = []
-    const grants: BatchEntryExternalTx[] = []
-    const revokesByEntry: BatchEntryExternalTx[][] = []
-    const stepsByEntryId: Record<string, { grantSteps: DisplayStep[], revokeSteps: DisplayStep[] }> = {}
-    for (const [index, entry] of entries.value.entries()) {
-      if (entry.buildBundledExecution) {
-        const bundled = await entry.buildBundledExecution(await getExecutionPlanningAccount(index))
-        plans.push(bundled.plan)
-        grants.push(...bundled.grants)
-        revokesByEntry.push(bundled.revokes)
-        stepsByEntryId[entry.id] = { grantSteps: bundled.grantSteps, revokeSteps: bundled.revokeSteps }
-        continue
-      }
-      plans.push(entry.buildExecutionPlan
-        ? await entry.buildExecutionPlan(await getExecutionPlanningAccount(index))
-        : entry.plan)
-      revokesByEntry.push([])
-    }
-    return { plans, grants, revokes: revokesByEntry.reverse().flat(), stepsByEntryId }
-  }
-
-  /**
-   * Send each entry's prerequisite grants, mined, before the merged plan is
-   * built — plan builders read live on-chain allowances to decide whether their
-   * batch still needs an authorization item.
-   *
-   * Sequential on purpose: a later entry needing the same grant sees the earlier
-   * one already on-chain and resolves to no prerequisite at all.
-   */
-  const sendExecutionPrerequisites = async (
-    grantedRevokes: MigrationAuthorizationRevoke[],
-  ): Promise<void> => {
-    for (const [index, entry] of entries.value.entries()) {
-      if (!entry.buildExecutionPrerequisites) continue
-      const prerequisites = await entry.buildExecutionPrerequisites(await getExecutionPlanningAccount(index))
-      if (!prerequisites) continue
-      let grantWalletContext: WalletExecutionContext | undefined
-      if (prerequisites.preTxs.length) {
-        await sendPlainTransactions(prerequisites.preTxs, {
-          walletContext: prerequisites.walletContext,
-          onBroadcast: (preTxIndex, walletContext) => {
-            grantWalletContext = walletContext
-            const revoke = prerequisites.postTxsByPreTx?.[preTxIndex]
-            if (revoke) {
-              grantedRevokes.unshift({ transaction: revoke, walletContext })
-            }
-          },
-        })
-      }
-      // Entries without a one-to-one mapping retain the original all-or-nothing
-      // behavior. Migration entries always provide postTxsByPreTx so partial or
-      // receipt-ambiguous grant sequences can unwind precisely.
-      if (!prerequisites.postTxsByPreTx && prerequisites.postTxs.length) {
-        if (!grantWalletContext) {
-          throw new Error('Cannot restore prerequisite transactions without their wallet context')
-        }
-        grantedRevokes.push(...prerequisites.postTxs.map(transaction => ({
-          transaction,
-          walletContext: grantWalletContext,
-        })))
-      }
-    }
-  }
-
-  /**
-   * Execute the whole batch as one atomic transaction. Entries normally reuse
-   * the preview plan; entries with simulation-only preview state can rebuild a
-   * signed execution plan before the merged batch is prepared and sent.
-   */
-  const executeBatch = async (scope?: TrackedExecutionScope) => {
-    if (isExecuting.value || entries.value.length === 0 || !lastMerged) return
-    // simError covers both a top-level EVC revert and a deferred status-check
-    // failure; walletShortfalls covers an under-funded wallet. Either way the
-    // real `batch` tx would revert, so refuse to send.
-    if (simError.value || walletShortfalls.value.length > 0 || hasFailedOps.value) return
-    execError.value = undefined
-    isExecuting.value = true
-    const grantedRevokes: MigrationAuthorizationRevoke[] = []
-    try {
-      if (!await restorePendingBeforeRetry()) return
-      // Final on-chain gas estimate before asking the user to sign. If the batch
-      // would revert (against the current chain state, which may have moved since
-      // the last simulation), surface the decoded reason and don't send.
-      const shouldRefreshExternalMigrationPositions = entries.value.some(entry => entry.refreshExternalMigrationPositions)
-
-      if (latchedBundledExecution.value) {
-        // The review modal latched and displayed ONE atomic proposal built
-        // from this exact resolution — execute it verbatim (payload
-        // identity), even when the grants resolved empty: the provider-bound
-        // Safe path must not silently degrade into anything else.
-        if (!isSafeWallet.value) {
-          throw new Error('Wallet changed since review — please review the batch again.')
-        }
-        const collected = latchedBundledExecution.value
-        // No standalone gas estimate — grants are unmined until the
-        // proposal executes; the cart's continuous simulation (which runs
-        // with the entries' authorization state overrides) is the
-        // pre-flight validation. Atomicity also removes the unwind
-        // bookkeeping: a failed proposal reverts its grants with it.
-        const sdk = await getEulerSdkFresh()
-        const executionPlan = sdk.executionService.mergePlans(collected.plans)
-        const prepared = await prepareTransactionPlan(executionPlan)
-        const result = await executePreparedPlanWithPlainCalls(prepared, {
-          before: collected.grants,
-          after: collected.revokes,
-        }, { allowSingleCall: true })
-        if (!result) {
-          // The review described ONE proposal; never silently degrade to
-          // the sequential multi-proposal ceremony.
-          throw new Error('Safe connection unavailable — the reviewed single-proposal submission cannot run. Reconnect your Safe and retry.')
-        }
-        latchedBundledExecution.value = null
-        clearBatch()
-        if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
-        await redirectAfterBatchExecution(scope)
-        return
-      }
-
-      await sendExecutionPrerequisites(grantedRevokes)
-      const executionPlan = await buildMergedExecutionPlan()
-      await estimateGasForPlan(executionPlan)
-      const prepared = await prepareTransactionPlan(executionPlan)
-      await executePreparedPlan(prepared)
-      clearBatch()
-      if (shouldRefreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
-      await revokeAfterSuccess(grantedRevokes)
-      await redirectAfterBatchExecution(scope)
-    }
-    catch (error) {
-      logWarn('useTxBatch/executeBatch', error)
-      // The batch never landed, so no granted authorization should be left
-      // standing. Entries stay in the cart for a retry, which re-grants.
-      await revokeAfterAbort(grantedRevokes)
-      execError.value = await describeExecError(error)
-    }
-    finally {
-      isExecuting.value = false
-    }
-  }
+  /** Non-authoritative layered preview used by downstream form projections. */
+  const getMergedPlan = (): TransactionPlan | null => lastSimulatedPlan
 
   const isSimulated = computed(() => activeLayer.value > 0 && layers.value.length > 0)
   const hasFailedOps = computed(() => layers.value.some(layer => layer.failed))
@@ -2651,7 +2430,6 @@ export const useTxBatch = () => {
   const canExecuteBatch = computed(() =>
     entries.value.length > 0
     && !isSimulating.value
-    && !isExecuting.value
     && !hasFailedOps.value
     && !simError.value
     && !hasInsufficientBalance.value,
@@ -2722,7 +2500,6 @@ export const useTxBatch = () => {
     isSimulated,
     isSimulating,
     simError,
-    isExecuting,
     execError,
     hasFailedOps,
     canExecuteBatch,
@@ -2743,11 +2520,11 @@ export const useTxBatch = () => {
     removeEntry,
     clearBatch,
     dismissExecutionError,
+    setExecutionError,
+    getBatchIntents,
+    prepareBatchCeremony,
+    removeIntentRevisions,
     setActiveLayer,
-    executeBatch,
-    willBundlePrerequisites,
-    prepareBundledExecution,
-    latchedBundledExecution,
     // Tenderly "Simulate on Tenderly" for the whole batch.
     tenderlyEnabled,
     isTenderlySimulating: tenderly.isSimulating,
@@ -2757,6 +2534,6 @@ export const useTxBatch = () => {
     simulateOnTenderly,
     // For the Review batch modal.
     getMergedPlan,
-    prepareBatchPlan,
+    draftEntries,
   }
 }

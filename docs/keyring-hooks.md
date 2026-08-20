@@ -66,12 +66,13 @@ Page calls useOperationGuard([vaultAddresses])
   → credential obtained from extension
   → setSdkKeyringCredential(...) publishes it to the SDK plugin store
 
-Page calls executePlan(plan) as normal
-  → the SDK keyring plugin automatically prepends createCredential
-  → transaction executes with credential registration + vault operation atomically
+Page creates an operation intent and opens ceremony review
+  → ceremony preparation processes the SDK keyring plugin
+  → createCredential is sealed as an explicit static effect
+  → coordinator submits credential registration + vault operation atomically
 ```
 
-This means **pages need zero changes to their submit handlers** — they just call `useOperationGuard()` in setup and the rest is automatic.
+Pages call `useOperationGuard()` in setup and use the normal intent/ceremony review launcher. They do not inject or execute the credential call themselves.
 
 ### Transaction injection
 

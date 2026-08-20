@@ -21,13 +21,12 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { SlippageSettingsModal, OperationReviewModal } from '#components'
+import { SlippageSettingsModal } from '#components'
 import { formatUnits, type Address } from 'viem'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { reportClientEvent } from '~/utils/client-observability'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -43,7 +42,9 @@ const { error } = useToast()
 const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
-const { planMultiply, prepareTransactionPlan, executePreparedPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
+const { openEagerPlan: openCeremonyReview } = useCeremonyReview()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -833,21 +834,19 @@ const addToBatch = async () => {
     const short = multiplyShortVault.value!.address as Address
     const debtAmount = multiplyDebtAmountNano.value
     const receiver = multiplySubAccount.value as Address
+    const common = { collateralVault: supply, collateralAmount: 0n, collateralAsset: supplyAsset }
+    const intent = createIntent({
+      kind: 'borrow',
+      planner: quote ? 'multiply-with-swap' : 'multiply-same-asset',
+      args: quote
+        ? { ...common, swapQuote: quote, swapperMode: SwapperMode.EXACT_IN }
+        : { ...common, longVault: long, liabilityVault: short, liabilityAmount: debtAmount, receiver },
+      source: 'pages/position/[number]/multiply.vue#batch',
+      subAccounts: [receiver],
+    })
     await addBatchEntry({
+      intent,
       label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
-      buildPlan: account => planMultiply({
-        collateralVault: supply,
-        collateralAmount: 0n,
-        collateralAsset: supplyAsset,
-        longVault: long,
-        liabilityVault: short,
-        liabilityAmount: debtAmount,
-        receiver,
-        swapQuote: quote,
-        swapperMode: SwapperMode.EXACT_IN,
-        account,
-        subAccountSnapshotApplied: true,
-      }),
       subAccount: receiver,
       multiply: true,
       review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
@@ -986,64 +985,45 @@ const submitMultiply = async () => {
         ? trimTrailingZeros(formatUnits(BigInt(quote.amountOut || 0), Number(multiplyLongVault.value.asset.decimals)))
         : undefined
 
-      modal.open(OperationReviewModal, {
-        props: {
+      if (!plan.value) return
+      await openCeremonyReview(plan.value, {
+        presentationKind: 'borrow',
+        review: {
           type: 'borrow',
           asset: multiplyShortVault.value.asset,
           amount: reviewBorrowAmount,
-          prepared: preparedPlan.value || undefined,
           quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
           swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
           swapToAmount: reviewSwapToAmount,
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
-          onConfirm: async (execution) => {
-            await sendMultiply(execution)
-          },
+        },
+        onSucceeded: () => {
+          refreshAllPositions(eulerLensAddresses.value, address.value || '')
+          setTimeout(() => {
+            router.replace({ path: '/portfolio', query: { network: route.query.network } })
+          }, 400)
+        },
+        onFailed: (cause) => {
+          console.warn(cause)
+          error('Transaction failed')
+          void reportClientEvent({
+            event: 'tx_execute_failed',
+            flow: 'multiply',
+            phase: 'execute',
+            chainId: chainId.value,
+            operationType: 'multiply',
+            vaultAddress: multiplyLongVault.value?.address,
+            assetAddress: multiplyLongVault.value?.asset.address,
+            quoteProvider: multiplyRoutedVia.value ?? undefined,
+          }, cause)
         },
       })
     })
   }
   finally {
     isPreparing.value = false
-  }
-}
-
-const sendMultiply = async (execution: TrackedExecutionScope) => {
-  if (!preparedPlan.value) {
-    return
-  }
-  isSubmitting.value = true
-  try {
-    await executePreparedPlan(preparedPlan.value)
-    // Success signal for a detached Safe completion toast; a proposal that
-    // confirmed after its modal was closed must not redirect mid-flow.
-    execution.markSucceeded()
-    refreshAllPositions(eulerLensAddresses.value, address.value || '')
-    if (!execution.suppressPostTxUi()) {
-      modal.close()
-      setTimeout(() => {
-        router.replace({ path: '/portfolio', query: { network: route.query.network } })
-      }, 400)
-    }
-  }
-  catch (e) {
-    console.warn(e)
-    error('Transaction failed')
-    void reportClientEvent({
-      event: 'tx_execute_failed',
-      flow: 'multiply',
-      phase: 'execute',
-      chainId: chainId.value,
-      operationType: 'multiply',
-      vaultAddress: multiplyLongVault.value?.address,
-      assetAddress: multiplyLongVault.value?.asset.address,
-      quoteProvider: multiplyRoutedVia.value ?? undefined,
-    }, e)
-  }
-  finally {
-    isSubmitting.value = false
   }
 }
 
