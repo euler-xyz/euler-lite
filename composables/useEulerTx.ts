@@ -42,16 +42,16 @@ import type {
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { profAsync } from '~/utils/profiler'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import {
-  publishPreviewPlan,
-  publishPreviewPluginEvidence,
-  publishPreviewPreparedEvidence,
-  publishPreviewSimulationEvidence,
-} from '~/features/transaction-ceremony/planning/preview-evidence'
-import { serializePluginPrefetch } from '~/features/transaction-ceremony/planning/plugin-evidence'
-import { projectEulerSimulation } from '~/features/transaction-ceremony/simulation/euler-projection'
-import { toCanonicalValue } from '~/features/transaction-ceremony/domain/canonical'
+  cachePreviewPlan,
+  cachePreviewPluginData,
+  cachePreparedPreview,
+  cachePreviewSimulation,
+} from '~/features/reviewed-execution/planning/preview-cache'
+import { serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
+import { projectEulerSimulation } from '~/features/reviewed-execution/simulation/euler-projection'
+import { toCanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 
 const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
@@ -93,7 +93,7 @@ export type PlanRedeemInput = {
 
 export interface PlanBorrowInput {
   vaultAddress: Address
-  /** Underlying asset bound into the ceremony outcome; not forwarded to the SDK planner. */
+  /** Underlying asset bound into the reviewed execution outcome; not forwarded to the SDK planner. */
   assetAddress: Address
   amount: bigint
   borrowAccount: Address
@@ -120,7 +120,7 @@ export interface PlanBorrowInput {
 
 export interface PlanRepayFromWalletInput {
   liabilityVault: Address
-  /** Underlying liability asset bound into the ceremony outcome. */
+  /** Underlying liability asset bound into the reviewed execution outcome. */
   liabilityAsset: Address
   liabilityAmount: bigint
   receiver: Address
@@ -131,7 +131,7 @@ export interface PlanRepayFromWalletInput {
 
 export interface PlanRepayFromDepositInput {
   liabilityVault: Address
-  /** Underlying liability asset bound into the ceremony outcome. */
+  /** Underlying liability asset bound into the reviewed execution outcome. */
   liabilityAsset: Address
   liabilityAmount: bigint
   receiver: Address
@@ -1091,9 +1091,9 @@ export const useEulerTx = () => {
       const owner = requireOwner()
       const cid = options?.chainId ?? requireChainId()
       const sdk = await getEulerSdkForChain(cid)
-      if (options?.intents) publishPreviewPlan(options.intents, plan)
+      if (options?.intents) cachePreviewPlan(options.intents, plan)
       if (options?.prefetch && options.intents) {
-        publishPreviewPluginEvidence(options.intents, plan, serializePluginPrefetch(options.prefetch))
+        cachePreviewPluginData(options.intents, plan, serializePluginPrefetch(options.prefetch))
       }
       const prepared = await sdk.executionService.prepareTransactionPlan({
         plan,
@@ -1102,7 +1102,7 @@ export const useEulerTx = () => {
         usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
         prefetch: options?.prefetch,
       })
-      if (options?.intents) publishPreviewPreparedEvidence(options.intents, plan, prepared)
+      if (options?.intents) cachePreparedPreview(options.intents, plan, prepared)
       return prepared
     })
   }
@@ -1136,7 +1136,7 @@ export const useEulerTx = () => {
         cid,
       )
       if (options?.intents) {
-        publishPreviewPluginEvidence(options.intents, plan, serializePluginPrefetch(prefetched))
+        cachePreviewPluginData(options.intents, plan, serializePluginPrefetch(prefetched))
       }
       return prefetched
     })
@@ -1161,7 +1161,7 @@ export const useEulerTx = () => {
       if (!extraStateOverrides?.length) {
         const projection = projectEulerSimulation(result)
         if (projection.canExecute && intents) {
-          publishPreviewSimulationEvidence(intents, prepared, toCanonicalValue(projection))
+          cachePreviewSimulation(intents, prepared, toCanonicalValue(projection))
         }
       }
       return result

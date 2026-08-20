@@ -11,7 +11,7 @@ import {
   setBatchPrefetchedPlanningAccount,
 } from '~/composables/batchPrefetchState'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -41,8 +41,8 @@ const intentFor = (plan: TransactionPlan, subAccounts: Address[] = [owner]): Ope
     metadata: { createdAt: testIntentSequence, source: 'test' },
   }
 }
-const ceremonyMocks = {
-  compileEager: vi.fn(async (intents: readonly OperationIntent[]) => testIntentPlans.get(intents[0]!.intentId) ?? []),
+const executionMocks = {
+  compilePreview: vi.fn(async (intents: readonly OperationIntent[]) => testIntentPlans.get(intents[0]!.intentId) ?? []),
   prepare: vi.fn(async () => { throw new Error('authoritative preparation not configured in batch unit test') }),
 }
 const position = (account: Address, shares: bigint) => ({
@@ -262,7 +262,7 @@ const stubBatchComposableGlobals = () => {
     effectiveAddress: ref(owner),
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
-  vi.stubGlobal('useTransactionCeremony', () => ceremonyMocks)
+  vi.stubGlobal('useReviewedExecution', () => executionMocks)
   vi.stubGlobal('useTokenList', () => ({
     getTokenByAddress: vi.fn(),
   }))
@@ -295,8 +295,8 @@ const createMockSdk = () => ({
 
 beforeEach(() => {
   vi.restoreAllMocks()
-  ceremonyMocks.compileEager.mockClear()
-  ceremonyMocks.prepare.mockClear()
+  executionMocks.compilePreview.mockClear()
+  executionMocks.prepare.mockClear()
   testIntentPlans.clear()
   testIntentSequence = 0
   stubBatchComposableGlobals()
@@ -781,7 +781,7 @@ describe('useTxBatch execution errors', () => {
 
     // The plan builds against the fresh planning account; layer 0 stays the
     // enriched portfolio account. Neither costs a populateAll fetchAccount.
-    expect(ceremonyMocks.compileEager).toHaveBeenCalledWith(expect.any(Array), planningAccount)
+    expect(executionMocks.compilePreview).toHaveBeenCalledWith(expect.any(Array), planningAccount)
     expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
     expect(useTxBatch().layers.value[0]?.account).toBe(portfolioAccount)
   })
@@ -851,7 +851,7 @@ describe('useTxBatch execution errors', () => {
     expect(sdk.accountService.fetchAccount).toHaveBeenCalledWith(1, owner, {
       populateAll: true,
     })
-    expect(ceremonyMocks.compileEager).toHaveBeenCalledWith(expect.any(Array), expect.not.objectContaining({ chainId: 8453 }))
+    expect(executionMocks.compilePreview).toHaveBeenCalledWith(expect.any(Array), expect.not.objectContaining({ chainId: 8453 }))
   })
 
   it('ignores prefetched accounts belonging to another owner', async () => {
@@ -873,7 +873,7 @@ describe('useTxBatch execution errors', () => {
     expect(sdk.accountService.fetchAccount).toHaveBeenCalledWith(1, owner, {
       populateAll: true,
     })
-    expect(ceremonyMocks.compileEager).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ owner }))
+    expect(executionMocks.compilePreview).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ owner }))
   })
 
   it('publishes per-layer simulated vault state even without an enriched account position', async () => {
@@ -1147,11 +1147,11 @@ describe('useTxBatch execution errors', () => {
     expect(batch.execError.value).toBeUndefined()
   })
 
-  it('publishes an exact serializable draft before eager preparation settles', async () => {
+  it('publishes an exact serializable draft before preview preparation settles', async () => {
     const batch = useTxBatch()
     const intent = intentFor([] as TransactionPlan, [subAccount])
     let release!: () => void
-    ceremonyMocks.compileEager.mockImplementationOnce(() => new Promise<TransactionPlan>((resolve) => {
+    executionMocks.compilePreview.mockImplementationOnce(() => new Promise<TransactionPlan>((resolve) => {
       release = () => resolve([])
     }))
 
@@ -1170,14 +1170,14 @@ describe('useTxBatch execution errors', () => {
   it('adopts the exact generation-bound whole-cart preparation warmed after add', async () => {
     const batch = useTxBatch()
     const intent = intentFor([] as TransactionPlan, [subAccount])
-    const warmed = { ceremony: { ceremonyId: '0x01' }, previewPlan: [], prepared: {} }
-    ceremonyMocks.prepare.mockResolvedValue(warmed as never)
+    const warmed = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    executionMocks.prepare.mockResolvedValue(warmed as never)
 
     await batch.addEntry({ intent, label: 'Supply USDC', subAccount, review: { type: 'supply' } })
-    await vi.waitFor(() => expect(ceremonyMocks.prepare).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(executionMocks.prepare).toHaveBeenCalledOnce())
 
-    await expect(batch.prepareBatchCeremony()).resolves.toBe(warmed)
-    expect(ceremonyMocks.prepare).toHaveBeenCalledOnce()
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
+    expect(executionMocks.prepare).toHaveBeenCalledOnce()
   })
 
   it('clears failed execution messages when the batch is cleared', () => {

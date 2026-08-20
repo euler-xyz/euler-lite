@@ -77,7 +77,7 @@ const reviewSupplyLabel = 'Review Supply'
 useFullBalances()
 const { planDeposit, planDepositWithSwap, prepareTransactionPlan } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -639,7 +639,7 @@ const submit = async () => {
         : needsSwap.value && selectedAsset.value ? selectedAsset.value : asset.value
       const reviewType = needsSwap.value ? 'swap-supply' as const : 'supply' as const
       if (!intents.length) return
-      await openCeremonyReview(intents, {
+      await openReviewState(intents, {
         presentationKind: reviewType,
         review: {
           type: reviewType,

@@ -19,7 +19,7 @@ const route = useRoute()
 const { error } = useToast()
 const { planWithdrawOrRedeem } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -182,7 +182,7 @@ const submit = async () => {
       }
     }
 
-    await openCeremonyReview([intent], {
+    await openReviewState([intent], {
       presentationKind: 'withdraw',
       review: {
         type: 'withdraw',

@@ -12,12 +12,12 @@ This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler L
 | `composables/useEnvConfig.ts` | Resolves env-derived config (incl. `enableV3Backend`) on server and client |
 | `server/plugins/app-config.ts` | Reads env at server startup and injects `window.__APP_CONFIG__` |
 | `nuxt.config.ts` | Declares the public runtime config keys that mirror env vars |
-| `composables/useEulerTx.ts` | Consumes the fresh SDK for plan construction, eager preparation, and simulation |
-| `composables/useTransactionCeremony.ts` | Builds sealed ceremonies and owns the app-facing execution/recovery boundary |
+| `composables/useEulerTx.ts` | Consumes the fresh SDK for plan construction, preview preparation, and simulation |
+| `composables/useReviewedExecution.ts` | Builds sealed reviewed executions and owns the app-facing execution/recovery boundary |
 
-## Transaction-ceremony SDK release gate
+## Reviewed-execution SDK release gate
 
-The transaction ceremony depends only on public SDK APIs and deliberately does not copy SDK internals into Lite. Its pinned published SDK release must provide:
+The reviewed execution depends only on public SDK APIs and deliberately does not copy SDK internals into Lite. Its pinned published SDK release must provide:
 
 - public whole-plan plugin prefetch and processing;
 - fail-closed processing for required plugins;
@@ -27,7 +27,7 @@ The transaction ceremony depends only on public SDK APIs and deliberately does n
 - migration simulation that models authorization without executing it; and
 - public simulation documentation linked from the relevant prepare, simulate, execute, and direct-call surfaces.
 
-Run `npm run test:ceremony:sdk-conformance` against the installed package before freezing a candidate. The command also rejects a local SDK symlink or a version that differs from the exact `package.json` pin. Missing capabilities block the release; Lite's migration compiler, plugin evidence collector, and finalizer fail closed instead of emulating them. During sealing, Lite invokes the SDK materializer with pinned Permit2 nonce/deadline/expiration values and the reviewed EVC address, then independently rejects any request-byte, signature-slot, or insertion-coordinate disagreement with its richer effect projection. For EOA dispatch, Lite passes the already-finalized exact vector to `executeMaterialized`; awaited hooks persist dispatch state and verify the submitted transaction before the SDK advances to the next wallet prompt. Safe transport retains its calls-ID reconciliation adapter.
+Run `npm run test:reviewed-execution:sdk-conformance` against the installed package before freezing a candidate. The command also rejects a local SDK symlink or a version that differs from the exact `package.json` pin. Missing capabilities block the release; Lite's migration compiler, plugin-data collector, and finalizer fail closed instead of emulating them. During sealing, Lite invokes the SDK materializer with pinned Permit2 nonce/deadline/expiration values and the reviewed EVC address, then independently rejects any request-byte, signature-slot, or insertion-coordinate disagreement with its richer effect projection. For EOA dispatch, Lite passes the already-finalized exact vector to `executeMaterialized`; awaited hooks persist dispatch state and verify the submitted transaction before the SDK advances to the next wallet prompt. Safe transport retains its calls-ID reconciliation adapter.
 
 ## SDK Entry Points
 
@@ -44,7 +44,7 @@ The app exposes three SDK entry points, all produced by the same factory in `com
 
 - **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Plan-critical account and vault reads use shorter form-time windows than browsing reads: for example, `queryAccountVaults` uses 1 minute and balance-like migration reads use 15 seconds. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches an `Account` through those onchain adapters.
 
-  Pinning the adapters changes the *data source*, not the cache. `sdkFreshBuildQuery` still runs through the shared `QueryClient`, and `freshPlanContext()` does not invalidate before fetching, so a plan-time `Account` is onchain-backed but only as fresh as its `FORM_STALE_TIMES` rows allow — up to a minute old for `queryAccountVaults`. Post-ceremony invalidation (`invalidateAfterTx`) marks those rows stale so a later idle read re-fetches after the user's own state changes; the fresh instance alone does not. Invalidation is not a transport-level freshness boundary: an in-flight `fetchQuery` for the same key is joined. Do not rely on this entry point for a latest-block guarantee.
+  Pinning the adapters changes the *data source*, not the cache. `sdkFreshBuildQuery` still runs through the shared `QueryClient`, and `freshPlanContext()` does not invalidate before fetching, so a plan-time `Account` is onchain-backed but only as fresh as its `FORM_STALE_TIMES` rows allow — up to a minute old for `queryAccountVaults`. Post-reviewed execution invalidation (`invalidateAfterTx`) marks those rows stale so a later idle read re-fetches after the user's own state changes; the fresh instance alone does not. Invalidation is not a transport-level freshness boundary: an in-flight `fetchQuery` for the same key is joined. Do not rely on this entry point for a latest-block guarantee.
 
 All entry points share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the browsing entry points read from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -224,7 +224,7 @@ Key properties:
 
 Two execution boundaries pass the whole `INVALIDATE_AFTER_TX` list:
 
-- `composables/useTransactionCeremony.ts:accept` — fires after a successful ceremony dispatch and triggers the portfolio refresh.
+- `composables/useReviewedExecution.ts:accept` — fires after a successful reviewed execution dispatch and triggers the portfolio refresh.
 - `composables/cowswap/useCowSwapExecutionCore.ts:cancelOrder` — the permit **hard-cancellation** branch only. That path plans and executes an EVC nonce write to invalidate the permit, which is a real on-chain state change. CoW order submission and settlement do not invalidate, and neither does the `cow-api` soft-cancellation branch.
 
 Both callers import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
@@ -233,7 +233,7 @@ Other callers pass their own narrower name list for an explicit refresh: `compos
 
 ### Post-Tx Portfolio Refresh
 
-Successful `useTransactionCeremony.accept` invalidates `INVALIDATE_AFTER_TX` and calls `triggerPortfolioRefresh()`. The shared `portfolioRefreshCounter` drives two refreshes:
+Successful `useReviewedExecution.accept` invalidates `INVALIDATE_AFTER_TX` and calls `triggerPortfolioRefresh()`. The shared `portfolioRefreshCounter` drives two refreshes:
 
 - `composables/useFreshAccount.ts` reloads the plan-time account snapshot. It races the fast SDK and fresh SDK account reads; fast can fill an empty ref, but the fresh result always wins for the current load cursor.
 - `pages/portfolio.vue` calls `updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })`. That calls `refreshAllPositions(..., { source: 'fresh', preempt: true })`, so `composables/useEulerAccount.ts` loads the visible portfolio through `getEulerSdkFresh()` for the post-tx refresh. `preempt: true` advances the position race guard and resets the refresh coordinator so preempted fast portfolio reads cannot write stale portfolio data or diagnostics over the fresh result.
@@ -254,7 +254,7 @@ const freshPlanContext = async () => {
 }
 ```
 
-Plan builders call `freshPlanContext()` or receive a preloaded account from `useFreshAccount()` and pass that `account` into the SDK. Simulation and ceremony preparation use `getEulerSdkFresh()`. Matching account, slot-hint, plugin-prefetch, and simulation preview evidence remains reusable only through context-complete canonical identities; SDK object identity is never an authorization or cache key.
+Plan builders call `freshPlanContext()` or receive a preloaded account from `useFreshAccount()` and pass that `account` into the SDK. Simulation and reviewed execution preparation use `getEulerSdkFresh()`. Matching account, slot-hint, plugin-prefetch, and simulation preview cache remains reusable only through context-complete canonical identities; SDK object identity is never an authorization or cache key.
 
 The plan-time `Account` snapshot is what gives planners their entity math: `totalShares` / `totalAssets` for asset↔share conversion, sub-account positions for `getPosition`, controller flags for `isControllerEnabled`.
 
@@ -264,7 +264,7 @@ How fresh that snapshot actually is depends on the path taken:
 |---|---|
 | `freshPlanContext()` fetches it | Onchain adapters, but served from the shared `QueryClient` at each row's `FORM_STALE_TIMES` window — `queryAccountVaults` is 1 minute, so a snapshot up to a minute old can be reused. No invalidation happens first. |
 | Caller passes `input.account` | The `useFreshAccount()` race-replace snapshot, reloaded on wallet/chain change and on `triggerPortfolioRefresh()`. Its fresh task also calls `getEulerSdkFresh()` and then `fetchAccount()`, so those reads go through the shared `QueryClient` as well — bounded by the trigger cadence *and* the applicable `FORM_STALE_TIMES` windows, not by the cadence alone. (A parallel fast task uses the browsing windows; the fresh result wins whenever it lands.) |
-| After a successful ceremony execution | Ceremony acceptance completion and CoW hard-cancel mark the `invalidateAfterTx` rows stale. They stay in the cache — nothing is removed — and a later idle plan-time read re-fetches instead of reusing them. This is not unconditional: an in-flight `fetchQuery` for the same key is joined rather than replaced. |
+| After a successful reviewed execution | Execution acceptance completion and CoW hard-cancel mark the `invalidateAfterTx` rows stale. They stay in the cache — nothing is removed — and a later idle plan-time read re-fetches instead of reusing them. This is not unconditional: an in-flight `fetchQuery` for the same key is joined rather than replaced. |
 
 `attachSubAccountSnapshot` re-reads the receiver sub-account before planning, because a stale controller flag makes the planner skip `enableController` and the EVC batch reverts. That re-read goes through the same cache, so it corrects a snapshot carried over from an earlier portfolio load but is itself bounded by the same 1-minute window. A planner that needs a stronger guarantee has to invalidate the relevant rows explicitly.
 ## Where to Extend

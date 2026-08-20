@@ -78,7 +78,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { error } = useToast()
   const { planSwapAndRepay, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
   // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
   // than forging it. Skip balance overrides + keep slot hints + wallet
@@ -89,7 +89,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
   const { getBalance } = useWallets()
-  const { finalizeCeremonyUi } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
   const {
@@ -989,7 +989,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const reviewAsset = isNativeRepay
         ? (resolveWrappedNativeAsset(chainId.value!) || selectedAsset.value)
         : selectedAsset.value
-      await openCeremonyReview(intents, {
+      await openReviewState(intents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',
@@ -1003,7 +1003,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           submittingLabel: 'Submitting...',
         },
-        onSucceeded: () => finalizeCeremonyUi(),
+        onSucceeded: () => finalizeExecutionUi(),
         onFailed: (cause) => {
           error('Transaction failed')
           logWarn('walletSwapRepay/send', cause)

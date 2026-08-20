@@ -35,7 +35,7 @@ const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewar
 const { getTokenCategoryTags } = useTokenList()
 const { planTransfer } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { account: planAccount } = usePlanAccount()
 const {
   runSimulation: runDisableCollateralSimulation,
@@ -702,7 +702,7 @@ const disableCollateral = async (vault: EVault) => {
         }
       }
 
-      await openCeremonyReview([intent], {
+      await openReviewState([intent], {
         presentationKind: 'disableCollateral',
         review: {
           type: 'disableCollateral',

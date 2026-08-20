@@ -42,7 +42,7 @@ const { error } = useToast()
 useFullBalances()
 const { planWithdrawOrRedeem, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: cachedAccount } = useFreshAccount()
@@ -529,7 +529,7 @@ const submit = async () => {
       if (!ok) return
 
       const reviewType = needsSwap.value ? 'swap-withdraw' as const : 'withdraw' as const
-      await openCeremonyReview(intents, {
+      await openReviewState(intents, {
         presentationKind: reviewType,
         review: {
           type: reviewType,

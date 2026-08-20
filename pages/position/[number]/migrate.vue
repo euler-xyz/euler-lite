@@ -69,7 +69,7 @@ type OutgoingMigrationPreview = {
   /**
    * The review showed the authorization riding in ONE atomic Safe proposal.
    * Latched at review time and revalidated at confirmation — execution must
-   * never silently run a ceremony the user did not review.
+   * never silently run a reviewed execution the user did not review.
    */
   bundledReview: boolean
   input: OutgoingMigrationInput
@@ -123,7 +123,7 @@ const {
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
 const { simulationError, clearSimulationError } = useTransactionPlanSimulation()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { createMigrationIntent } = useMigrationIntentFactory()
 
 const positionIndex = usePositionIndex()
@@ -822,7 +822,7 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   try {
     const preview = await prepareOutgoingMigrationPreview(target)
     const intent = createOutgoingMigrationIntent(preview)
-    await openCeremonyReview([intent], {
+    await openReviewState([intent], {
       presentationKind: 'migration',
       review: {
         type: 'migration',
@@ -870,7 +870,7 @@ const createOutgoingMigrationIntent = (preview: OutgoingMigrationPreview) => {
     ...(preview.observedBlock === undefined
       ? {}
       : {
-          eagerCompilation: {
+          previewCompilation: {
             result: preview.compilerResult,
             observedBlock: preview.observedBlock,
             ...(preview.prefetch ? { prefetch: preview.prefetch } : {}),

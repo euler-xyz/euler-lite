@@ -30,11 +30,11 @@ export const useTxFinalization = () => {
     setTimeout(() => router.replace('/portfolio'), MODAL_CLOSE_REDIRECT_DELAY_MS)
   }
 
-  /** UI-only completion for the ceremony adapter, which owns modal closure. */
-  const finalizeCeremonyUi = async (onAfterClose?: () => void | Promise<void>) => {
+  /** UI-only completion for the reviewed execution adapter, which owns modal closure. */
+  const finalizeExecutionUi = async (onAfterClose?: () => void | Promise<void>) => {
     if (onAfterClose) await onAfterClose()
     setTimeout(() => router.replace('/portfolio'), MODAL_CLOSE_REDIRECT_DELAY_MS)
   }
 
-  return { finalizeTxAndRedirect, finalizeCeremonyUi }
+  return { finalizeTxAndRedirect, finalizeExecutionUi }
 }

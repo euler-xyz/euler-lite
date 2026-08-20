@@ -15,7 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -103,7 +103,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
   const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -566,7 +566,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
         const showSwapAmounts = sameAssetModalType === 'transfer' || !isSameAsset.value
         if (!plan.value) return
-        await openCeremonyReview(intents, {
+        await openReviewState(intents, {
           presentationKind: isSameAsset.value ? sameAssetModalType : 'swap',
           review: {
             type: isSameAsset.value ? sameAssetModalType : 'swap',

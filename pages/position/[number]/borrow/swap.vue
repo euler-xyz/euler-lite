@@ -109,7 +109,7 @@ const {
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { create: createIntent } = useOperationIntentFactory()
 const { createMigrationIntent } = useMigrationIntentFactory()
 const { signaturesEnabled } = useSignaturePreference()
@@ -2652,7 +2652,7 @@ type InboundExternalMigrationPreview = {
   /**
    * The review showed the authorization riding in ONE atomic Safe proposal.
    * Latched at review time and revalidated at confirmation — execution must
-   * never silently run a ceremony the user did not review.
+   * never silently run a reviewed execution the user did not review.
    */
   bundledReview: boolean
   input: InboundExternalMigrationInput
@@ -3344,7 +3344,7 @@ const reviewInboundExternalMigration = async () => {
     const preview = await prepareInboundExternalMigrationPreview()
     inboundExternalAuthorizationConnector.value = preview.authorizationRequest ? preview.input.source.connectorId : null
     const intent = createInboundMigrationIntent(preview)
-    await openCeremonyReview([intent], {
+    await openReviewState([intent], {
       presentationKind: 'migration',
       review: {
         type: 'migration',
@@ -3401,7 +3401,7 @@ const createInboundMigrationIntent = (preview: InboundExternalMigrationPreview) 
     ...(preview.observedBlock === undefined
       ? {}
       : {
-          eagerCompilation: {
+          previewCompilation: {
             result: preview.compilerResult,
             observedBlock: preview.observedBlock,
             ...(preview.prefetch ? { prefetch: preview.prefetch } : {}),
@@ -3572,7 +3572,7 @@ const submit = async () => {
       if (!ok) return
 
       if (!plan.value) return
-      await openCeremonyReview([intent], {
+      await openReviewState([intent], {
         presentationKind: 'refinance',
         review: {
           type: 'refinance',

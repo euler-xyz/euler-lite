@@ -29,7 +29,7 @@ import { resolveWrappedNativeAddress } from '~/utils/native-currency'
 import { shouldDiscardQuoteOnEstimateGasError } from '~/utils/tx-errors'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { profAsync, profMark } from '~/utils/profiler'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export type SwapQuotePlanAccount = Account<IHasVaultAddress> | Address
 export type SwapQuotePlanContext = {

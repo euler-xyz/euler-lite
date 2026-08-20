@@ -6,7 +6,7 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
-import { rewardClaimId, rewardClaimSetDigest } from '~/features/transaction-ceremony/domain/rewards'
+import { rewardClaimId, rewardClaimSetDigest } from '~/features/reviewed-execution/domain/rewards'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -40,7 +40,7 @@ const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
 const { refreshLocks } = useREULLocks()
 const { addEntry: addBatchEntry, entries: batchEntries, entryCount, clearBatch } = useTxBatch()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const { settings } = useUserSettings()
@@ -183,7 +183,7 @@ const onClaimClick = async () => {
 
     const intent = createRewardIntent()
 
-    await openCeremonyReview([intent], {
+    await openReviewState([intent], {
       presentationKind: planKind.value,
       review: {
         type: planKind.value,

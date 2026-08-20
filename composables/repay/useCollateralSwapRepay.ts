@@ -77,14 +77,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId: currentChainId } = useEulerAddresses()
-  const { finalizeCeremonyUi } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { refreshAllPositions } = useEulerAccount()
   const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
@@ -771,7 +771,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       })
 
       if (!plan.value) return
-      await openCeremonyReview(intents, {
+      await openReviewState(intents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',
@@ -785,7 +785,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           submittingLabel: 'Submitting...',
         },
-        onSucceeded: () => finalizeCeremonyUi(),
+        onSucceeded: () => finalizeExecutionUi(),
         onFailed: (cause) => {
           error('Transaction failed')
           logWarn('collateralSwapRepay/send', cause)

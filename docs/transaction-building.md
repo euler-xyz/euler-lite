@@ -4,9 +4,19 @@ This document describes how euler-lite constructs, simulates, reviews, and execu
 
 ## Overview
 
-Protocol actions start as serializable operation intents. Lite compiles those intents with the SDK into one sealed execution template, binds the existing handcrafted review to that template, and submits only the template's finalized request vector. The SDK owns protocol call planning, approval resolution, deterministic request composition, Permit2 encoding, simulation, plugin processing, and EOA request sequencing. Lite independently verifies that composition against its exhaustive effect and policy graph; its transaction-ceremony coordinator uses awaited SDK dispatch hooks to own review acceptance, durable attempt state, bounded Pyth and migration-slot finalization, submitted-transaction verification, and recovery. Safe calls remain under the dedicated calls-ID adapter.
+Protocol actions start as serializable operation intents. Lite compiles those intents with the SDK into one reviewed execution, binds the existing handcrafted review to it, and submits only its finalized request vector. The SDK owns protocol call planning, approval resolution, deterministic request composition, Permit2 encoding, simulation, plugin processing, and EOA request sequencing. Lite independently verifies that composition against its exhaustive effect and policy graph; its reviewed-execution coordinator uses awaited SDK dispatch hooks to own review acceptance, durable attempt state, bounded Pyth and migration-slot finalization, submitted-transaction verification, and recovery. Safe calls remain under the dedicated calls-ID adapter.
 
-`composables/useEulerTx.ts` is planning-only. Executable flows enter through `composables/useTransactionCeremony.ts`; wallet writes are confined to that boundary and the EOA/Safe adapters under `features/transaction-ceremony/adapters/`.
+`composables/useEulerTx.ts` is planning-only. Executable flows enter through `composables/useReviewedExecution.ts`; wallet writes are confined to that boundary and the EOA/Safe adapters under `features/reviewed-execution/adapters/`.
+
+## Domain Vocabulary
+
+The transaction lifecycle has three first-class records:
+
+- `OperationIntent` describes the immutable operation to compile and review.
+- `ReviewedExecution` is the immutable, wallet-bound result accepted by the user.
+- `SubmissionAttempt` records one coordinator-controlled submission of that reviewed execution.
+
+The reviewed request set, effect map, policy and simulation results, review binding, planning and plugin snapshots, signature/Pyth slots, finalized requests, and preview-cache records are internal parts or mechanics of those three records. They are not independent business entities. A preview plan is form-time work that may warm the cache; it never authorizes a wallet write.
 
 ## SDK TransactionPlan
 
@@ -55,19 +65,19 @@ Combined helpers keep page code simpler where a workflow can use either a same-a
 - `planDebtChange`
 - `planWithdrawOrRedeem`
 
-The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and chain id. The quote and vault inputs stay explicit at the page/composable boundary. Forms capture an immutable `OperationIntent` from the same input snapshot used to build each preview; selected quote cards carry that intent alongside their optional plan and prepared result. These helpers may eagerly build and simulate previews, but their results are not wallet-executable authority. The ceremony captures the connected wallet/session and seals the effective approval mode before review.
+The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and chain id. The quote and vault inputs stay explicit at the page/composable boundary. Forms capture an immutable `OperationIntent` from the same input snapshot used to build each preview; selected quote cards carry that intent alongside their optional plan and prepared result. These helpers may eagerly build and simulate previews, but their results are not wallet-executable authority. The reviewed execution captures the connected wallet/session and seals the effective approval mode before review.
 
 ## Execution Flow
 
-1. Forms eagerly preprocess accounts, quotes, slot hints, plugin data, and simulation results. Preview evidence is stored only as canonical serializable values keyed by the full intent/content identity; it never recovers authority from an SDK plan object or Vue reference. Add-to-batch stores only `{ intentId, revision, intent }`; plans and builders stay outside the durable draft DTO.
-2. `useTransactionCeremony.prepare()` captures the exact account, chain, connector session, wallet kind, approval mode, and required sub-accounts, then compiles the current intent revisions against a generation-bound planning snapshot.
-3. The service processes plugins, resolves approvals, pins Permit2 nonce/deadline/expiration inputs, and asks the SDK to deterministically materialize the plan. Lite declares its richer typed dynamic slots, builds the complete before/main/cleanup effect graph, and rejects any SDK request-byte or insertion-coordinate disagreement before evaluating policy, simulating, and sealing one immutable ceremony. Context-complete preview evidence is reused only when the intent set, raw and prepared plan digests, wallet binding, approval mode, account set, and freshness all match.
-4. The existing review modal renders the prepared preview and receives only an opaque `{ ceremonyId, consentDigest }` binding. It cannot prepare, replan, sign, or submit.
-5. Acceptance checks the binding and current cart generation. Before any wallet interaction, the coordinator stores the ceremony and atomically reserves a durable wallet lane.
-6. The coordinator revalidates the exact wallet/session and policy, collects declared signatures, refreshes Pyth only inside bounded slots, verifies the finalized artifact against the sealed template, and dispatches the exact request vector through the EOA or Safe adapter.
+1. Forms eagerly preprocess accounts, quotes, slot hints, plugin data, and simulation results. Preview data is cached only as canonical serializable values keyed by the full intent/content identity; it never recovers authority from an SDK plan object or Vue reference. Add-to-batch stores only `{ intentId, revision, intent }`; plans and builders stay outside the durable draft DTO.
+2. `useReviewedExecution.prepare()` captures the exact account, chain, connector session, wallet kind, approval mode, and required sub-accounts, then compiles the current intent revisions against a generation-bound planning snapshot.
+3. The service processes plugins, resolves approvals, pins Permit2 nonce/deadline/expiration inputs, and asks the SDK to deterministically materialize the plan. Lite declares its richer typed dynamic slots, builds the complete before/main/cleanup effect graph, and rejects any SDK request-byte or insertion-coordinate disagreement before evaluating policy, simulating, and sealing one immutable reviewed execution. Context-complete preview cache is reused only when the intent set, raw and prepared plan digests, wallet binding, approval mode, account set, and freshness all match.
+4. The existing review modal renders the prepared preview and receives only an opaque `{ reviewId, reviewDigest }` binding. It cannot prepare, replan, sign, or submit.
+5. Acceptance checks the binding and current cart generation. Before any wallet interaction, the coordinator stores the reviewed execution and atomically reserves a durable wallet lane.
+6. The coordinator revalidates the exact wallet/session and policy, collects declared signatures, refreshes Pyth only inside bounded slots, verifies the finalized artifact against the reviewed request set, and dispatches the exact request vector through the EOA or Safe adapter.
 7. Confirmed execution invalidates the configured SDK queries and triggers portfolio refresh. Ambiguous submissions remain journaled for reconciliation; they are never retried as new requests.
 
-Every await across preparation and execution is guarded by generation, reservation, or wallet-binding checks. A stale form, edited cart, changed connector session, expired ceremony, policy failure, unavailable durable storage, or undeclared effect fails closed.
+Every await across preparation and execution is guarded by generation, reservation, or wallet-binding checks. A stale form, edited cart, changed connector session, expired reviewed execution, policy failure, unavailable durable storage, or undeclared effect fails closed.
 
 ## Approvals and Gasless Signatures
 
@@ -76,7 +86,7 @@ Plans may include `requiredApproval` items. During review and execution, `resolv
 - an ERC-20 approval transaction, or
 - a Permit2 signature request.
 
-Ceremony preparation resolves each approval according to the sealed wallet binding. On-chain approvals become explicit prerequisite effects and requests. Permit2 becomes a typed signature slot with exact insertion coordinates; only the resulting signature bytes may change after review.
+Execution preparation resolves each approval according to the sealed wallet binding. On-chain approvals become explicit prerequisite effects and requests. Permit2 becomes a typed signature slot with exact insertion coordinates; only the resulting signature bytes may change after review.
 
 ### User preference (`useSignaturePreference`)
 
@@ -91,7 +101,7 @@ Do not treat the stored preference as the value that reaches planning or executi
 | Default stored | `true` (gasless / typed-data path) |
 | Effective `signaturesEnabled` | `userPreference && !signaturesForcedOff` |
 | Forced off | `isSafeWallet` or `!isSafeWalletResolved` — fail closed while Safe detection is pending; Settings switch is disabled. Copy explaining the Safe restriction appears only after a Safe is positively identified. |
-| Ceremony wallet binding | Captures `approvalMode: 'permit2'` only for a resolved EOA with the effective preference enabled; Safe and unresolved/unsupported states fail closed to on-chain approval or abort preparation |
+| Execution wallet binding | Captures `approvalMode: 'permit2'` only for a resolved EOA with the effective preference enabled; Safe and unresolved/unsupported states fail closed to on-chain approval or abort preparation |
 | Post-review behavior | Revalidates the exact account, chain, connector identity/session, wallet kind, and approval mode; it never changes approval strategy after consent |
 
 When the **effective** flag is **off**, approval-capable flows fall back to on-chain approval transactions instead of Permit2 (and other) message signatures. Users can still turn the setting off on regular wallets that cannot sign typed data reliably. Safe wallets do not use that toggle: they are forced onto the approval / batched-transaction path.
@@ -113,18 +123,18 @@ Typed-data migration authorization is also a declared signature slot. Its digest
 
 `utils/operationGuardRegistry.ts` stores reactive submit blockers and per-concern metadata. Blockers gate the submit button (pending Keyring verification, unverified-vault acknowledgement); metadata annotates failures (e.g. keyring credential cost in `tx-errors`).
 
-Plan transformation runs as SDK `EulerPlugin`s registered in `composables/useEulerSdk.ts`. Ceremony preparation processes the plugin pipeline once into the sealed preview:
+Plan transformation runs as SDK `EulerPlugin`s registered in `composables/useEulerSdk.ts`. Execution preparation processes the plugin pipeline once into the sealed preview:
 
 - Terms-of-use signing — `createLiteTosPlugin()` (`utils/sdk-tos.ts`) prepends a signed terms-of-use `EVCBatchItem` to every `evcBatch` item. Injection only happens when `useTosGuard` has published a signed message for the owner and the chain's deployment has a `termsOfUseSigner` address.
 - Keyring credential injection for private vaults — the SDK's [`createKeyringPlugin`](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/src/plugins/keyring/keyringPlugin.ts), configured with hook targets and a credential store from `utils/sdk-keyring.ts`. `composables/useOperationGuard.ts` publishes verified credentials into that store; the plugin prepends a Keyring `createCredential` `EVCBatchItem` when a plan touches a keyring hook target, the sender has no valid on-chain credential, and the store returns a current credential.
 
-Submit blockers remain the UI gate, while ceremony policy resolution independently requires complete final-graph evidence. Missing TOS, Keyring, labels, screening, asset/vault metadata, authority binding, acknowledgements, or durable policy storage prevents sealing or acceptance. Plugin-prefetch reuse is context-bound and does not weaken those checks.
+Submit blockers remain the UI gate, while reviewed execution policy resolution independently requires complete final-graph evidence. Missing TOS, Keyring, labels, screening, asset/vault metadata, authority binding, acknowledgements, or durable policy storage prevents sealing or acceptance. Plugin-prefetch reuse is context-bound and does not weaken those checks.
 
 See the SDK side: [plugins.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/plugins.md).
 
 ## Review Display
 
-`components/entities/operation/OperationReviewModal.vue` is presentation-only. Its ceremony wrapper supplies the already prepared preview and opaque binding. The modal uses:
+`components/entities/operation/OperationReviewModal.vue` is presentation-only. Its reviewed execution wrapper supplies the already prepared preview and opaque binding. The modal uses:
 
 - `buildTransactionPlanDisplaySteps` for human-readable step labels and asset amounts
 - `flattenBatchEntries` and `encodeBatch` for calldata copy and Tenderly simulation
@@ -134,15 +144,15 @@ Copy calldata includes approval transactions, encoded EVC batches, and direct co
 
 ### User-facing review compatibility
 
-The exhaustive transaction ceremony and the visible operation review serve different purposes. The ceremony is the internal execution authority: it records every effect, request, authorization, policy item, simulation coverage class, cleanup obligation, and bounded dynamic slot. The review is an intentionally handcrafted product presentation for the operation. It can combine, summarize, reorder, or omit internal effects and is not expected to map one-to-one to the ceremony manifest.
+The exhaustive reviewed execution and the visible operation review serve different purposes. The reviewed execution is the internal execution authority: it records every effect, request, authorization, policy item, simulation coverage class, cleanup obligation, and bounded dynamic slot. The review is an intentionally handcrafted product presentation for the operation. It can combine, summarize, reorder, or omit internal effects and is not expected to map one-to-one to the effect map.
 
-Operation review components receive only their existing display inputs plus an opaque ceremony binding. They do not receive an execution closure and cannot sign or submit. Acceptance binds the current presentation digest and intent revisions to the sealed ceremony; submission uses the ceremony's materialized request vector through the coordinator.
+Operation review components receive only their existing display inputs plus an opaque reviewed execution binding. They do not receive an execution closure and cannot sign or submit. Acceptance binds the current presentation digest and intent revisions to the sealed reviewed execution; submission uses the reviewed execution's materialized request vector through the coordinator.
 
-Do not synthesize generic effect rows or expose internal targets, selectors, plugin calls, template digests, coverage classes, cleanup metadata, or authorization machinery. Existing approval and signature presentation remains operation-specific. Unknown or undecodable production effects fail internal sealing instead of creating a fallback review row.
+Do not synthesize generic effect rows or expose internal targets, selectors, plugin calls, request digests, coverage classes, cleanup metadata, or authorization machinery. Existing approval and signature presentation remains operation-specific. Unknown or undecodable production effects fail internal sealing instead of creating a fallback review row.
 
-Pyth updates are completely invisible in review. Preview fees, maximum fees, feed IDs, payload hashes, publish times, freshness rules, execution-time refresh behavior, and refresh failures are internal ceremony data. A failed refresh follows the existing transaction-preparation error behavior and does not add a Pyth-specific review field or notice.
+Pyth updates are completely invisible in review. Preview fees, maximum fees, feed IDs, payload hashes, publish times, freshness rules, execution-time refresh behavior, and refresh failures are internal reviewed execution data. A failed refresh follows the existing transaction-preparation error behavior and does not add a Pyth-specific review field or notice.
 
-The rendered-output fixtures in `tests/transaction-ceremony/inventory.test.ts` protect this contract. Changes to the visible review are separate product work and require explicit approval.
+The rendered-output fixtures in `tests/reviewed-execution/inventory.test.ts` protect this contract. Changes to the visible review are separate product work and require explicit approval.
 
 ## Simulation Performance Tuning
 
@@ -217,7 +227,7 @@ The SDK emits one simulated account layer per top-level batch **operation**. Pla
 
 After selection, a healthy sim must yield exactly `entries + 1` layers (`getCurrentFinalLayer`'s contract). Fresh Safes hit the ToS plugin path often because every Safe address is a new on-chain account — without the map, `awaitFinalPlanningLayer` exhausts retries into the generic "Batch simulation not loaded" error.
 
-### Sealed batch ceremony
+### Reviewed batch execution
 
 Every cart entry stores a serializable intent and revision. `lastSimulatedPlan` and the layered simulated accounts remain non-authoritative projections for responsive forms. Review preparation recompiles or deeply validates the current generation, seals one complete request vector, and binds the existing batch display to it. Tenderly and calldata-copy actions derive from that sealed vector. A Safe submits the vector atomically; an EOA follows its explicit request phases. Details and CoW/signature gates: [Safe Wallet Compatibility](./safe-wallets.md).
 
@@ -241,9 +251,9 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 
 | File | Purpose |
 |------|---------|
-| `composables/useEulerTx.ts` | Page-facing SDK planning, eager preparation, and simulation helpers; no wallet execution |
-| `composables/useTransactionCeremony.ts` | App integration for prepare, accept, resume, reconcile, and post-confirmation invalidation |
-| `features/transaction-ceremony/` | Intents, compiler, immutable template, policy, simulation, journal, coordinator, finalization, recovery, and transport adapters |
+| `composables/useEulerTx.ts` | Page-facing SDK planning, preview preparation, and simulation helpers; no wallet execution |
+| `composables/useReviewedExecution.ts` | App integration for prepare, accept, resume, reconcile, and post-confirmation invalidation |
+| `features/reviewed-execution/` | Intents, compiler, immutable reviewed execution, policy, simulation, journal, coordinator, finalization, recovery, and transport adapters |
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
 | `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |

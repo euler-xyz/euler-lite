@@ -1,6 +1,6 @@
 import { getAddress, type Address, type Hash } from 'viem'
-import { createOperationIntent, type CreateOperationIntentInput } from '~/features/transaction-ceremony/domain/factory'
-import type { IntentConstraint, OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import { createOperationIntent, type CreateOperationIntentInput } from '~/features/reviewed-execution/domain/factory'
+import type { IntentConstraint, OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export interface ConnectedOperationIntentInput {
   kind: CreateOperationIntentInput['kind']

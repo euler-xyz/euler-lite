@@ -66,13 +66,13 @@ Page calls useOperationGuard([vaultAddresses])
   → credential obtained from extension
   → setSdkKeyringCredential(...) publishes it to the SDK plugin store
 
-Page creates an operation intent and opens ceremony review
-  → ceremony preparation processes the SDK keyring plugin
+Page creates an operation intent and opens reviewed execution review
+  → reviewed execution preparation processes the SDK keyring plugin
   → createCredential is sealed as an explicit static effect
   → coordinator submits credential registration + vault operation atomically
 ```
 
-Pages call `useOperationGuard()` in setup and use the normal intent/ceremony review launcher. They do not inject or execute the credential call themselves.
+Pages call `useOperationGuard()` in setup and use the normal intent/reviewed execution review launcher. They do not inject or execute the credential call themselves.
 
 ### Transaction injection
 

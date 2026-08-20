@@ -97,7 +97,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planBorrow, planSwapAndBorrow, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   const { create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
@@ -114,7 +114,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   } = useRewardsApy()
   const { settings } = useUserSettings()
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-  const { finalizeCeremonyUi } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
   // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
   // skips per-call balanceOf + slot probing. Slot hints + wallet snapshot are still
@@ -1147,7 +1147,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           ? (resolveWrappedNativeAsset(chainId.value!) || borrowSelectedAsset.value!)
           : (borrowSelectedAsset.value || collateralVault.value.asset)
         if (!plan.value) return
-        await openCeremonyReview(intents, {
+        await openReviewState(intents, {
           presentationKind: 'swap-borrow',
           review: {
             type: 'swap-borrow' as const,
@@ -1159,7 +1159,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             swapMode: SwapperMode.EXACT_IN,
             submittingLabel: 'Submitting...',
           },
-          onSucceeded: () => finalizeCeremonyUi(),
+          onSucceeded: () => finalizeExecutionUi(),
           onFailed: (cause) => {
             logWarn('borrow/send', cause)
             error('Transaction failed')
@@ -1190,7 +1190,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       if (!plan.value) return
-      await openCeremonyReview([intent], {
+      await openReviewState([intent], {
         presentationKind: 'borrow',
         review: {
           type: 'borrow',
@@ -1200,7 +1200,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           supplyingAmount: collateralAmount.value,
           submittingLabel: 'Submitting...',
         },
-        onSucceeded: () => finalizeCeremonyUi(),
+        onSucceeded: () => finalizeExecutionUi(),
         onFailed: (cause) => {
           logWarn('borrow/send', cause)
           error('Transaction failed')

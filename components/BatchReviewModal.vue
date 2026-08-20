@@ -14,13 +14,13 @@ import { hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { formatNumber } from '~/utils/string-utils'
-import type { PreparedCeremonyReview } from '~/composables/useTransactionCeremony'
+import type { PreparedExecutionReview } from '~/composables/useReviewedExecution'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
 // and one atomic Execute. Opened from the "Review batch" button in the drawer
 // (and mobile page). The per-operation detail is the data captured at add-time;
-// execution is authorized only by the sealed whole-cart ceremony.
+// execution is authorized only by the reviewed whole-cart execution.
 const emit = defineEmits(['close'])
 
 const {
@@ -34,7 +34,7 @@ const {
   hasFailedOps,
   hasInsufficientBalance,
   insufficientBalanceMessage,
-  prepareBatchCeremony,
+  prepareBatchExecutionReview,
   removeIntentRevisions,
   setExecutionError,
   entryPlans,
@@ -47,9 +47,9 @@ const {
   simulateOnTenderly: simulateBatchOnTenderly,
   dismissExecutionError,
 } = useTxBatch()
-const ceremonyService = useTransactionCeremony()
+const executionService = useReviewedExecution()
 const isExecuting = ref(false)
-const preparedCeremony = shallowRef<PreparedCeremonyReview | null>(null)
+const preparedExecution = shallowRef<PreparedExecutionReview | null>(null)
 
 const { isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { eulerCoreAddresses } = useEulerAddresses()
@@ -92,9 +92,9 @@ const normalizeDisplaySteps = (steps: DisplayStep[] | undefined): DisplayStep[] 
   (steps ?? []).map((step, idx) => ({ ...step, index: idx + 1 }))
 
 // Bundled styling follows the wallet transport sealed for this review. Live
-// wallet state cannot change the displayed or submitted ceremony.
+// wallet state cannot change the displayed or submitted execution.
 const isBundledEntry = (entry: typeof entries.value[number]): boolean =>
-  preparedCeremony.value?.ceremony.template.transport === 'safe'
+  preparedExecution.value?.execution.requestSet.transport === 'safe'
   && isExternalProtocolMigrationReview(entry.review as unknown as ReviewWithSteps | undefined)
 
 const overrideBundled = (steps: DisplayStep[], entry: typeof entries.value[number]): DisplayStep[] =>
@@ -170,7 +170,7 @@ const authorizationRows = computed(() =>
     (signatureStepsByEntryId.value[entry.id] ?? []).map(step => ({ entry, step, bundledTx: isBundledEntry(entry) })),
   ),
 )
-// Three ceremonies, three groups: standalone transactions, transactions
+// Three reviewed executions, three groups: standalone transactions, transactions
 // riding in the Safe proposal, and wallet signatures.
 const authorizationSummaryGroups = computed(() => {
   const rows = authorizationRows.value
@@ -188,7 +188,7 @@ const authorizationSummaryGroups = computed(() => {
 
 // Authorization restorations run after the operation. They either ride at the
 // tail of the same Safe proposal or are sent as standalone post-execution
-// transactions; the collapsed summary keeps those ceremonies distinct.
+// transactions; the collapsed summary keeps those reviewed executions distinct.
 //
 // Rows render in EXECUTION order: restorations unwind in reverse entry order
 // (each entry's own steps are already reversed by the encoder). Identical
@@ -360,7 +360,7 @@ const hasPermit2Approval = computed(() =>
 // Mirrors execution eligibility: only claim bundling when the merged plan
 // would actually submit as one Safe bundle.
 const bundlesApprovals = computed(() =>
-  preparedCeremony.value?.ceremony.template.wallet.walletKind === 'safe'
+  preparedExecution.value?.execution.requestSet.wallet.walletKind === 'safe'
   && !!preparedPlanRef.value
   && isPlanBundleable(preparedPlanRef.value),
 )
@@ -373,8 +373,8 @@ onMounted(async () => {
   isPreparing.value = true
   prepareError.value = ''
   try {
-    const prepared = await prepareBatchCeremony()
-    preparedCeremony.value = prepared
+    const prepared = await prepareBatchExecutionReview()
+    preparedExecution.value = prepared
     preparedPlanRef.value = prepared.previewPlan
     const known = buildKnownSymbols()
     const out: Array<{ kind: 'approve' | 'permit', symbol: string }> = []
@@ -409,10 +409,10 @@ const isCalldataCopyDisabled = computed(() =>
   isPreparing.value || !!prepareError.value || !preparedPlanRef.value?.length,
 )
 const copyCalldata = async () => {
-  const prepared = preparedCeremony.value
+  const prepared = preparedExecution.value
   if (!prepared) return
   try {
-    const out = prepared.ceremony.template.requests.map(request => ({
+    const out = prepared.execution.requestSet.requests.map(request => ({
       to: request.to,
       data: request.data,
       value: request.value.toString(),
@@ -425,7 +425,7 @@ const copyCalldata = async () => {
 }
 
 const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyError.value))
-const simulateOnTenderly = () => simulateBatchOnTenderly(preparedCeremony.value ?? undefined)
+const simulateOnTenderly = () => simulateBatchOnTenderly(preparedExecution.value ?? undefined)
 
 const isConfirmDisabled = computed(() =>
   isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
@@ -445,18 +445,18 @@ let executionHandle: TrackedExecutionHandle | null = null
 
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
-  const prepared = preparedCeremony.value
+  const prepared = preparedExecution.value
   if (!prepared) return
   // Latch the wallet classification at submission time; the single-slot gate
   // rejects new submissions while a detached proposal is pending.
-  const handle = beginTrackedExecution({ safeAtSubmit: prepared.ceremony.template.wallet.walletKind === 'safe' })
+  const handle = beginTrackedExecution({ safeAtSubmit: prepared.execution.requestSet.wallet.walletKind === 'safe' })
   if (!handle) return
-  const capturedRevisions = prepared.ceremony.reviewBinding.intentRevisions
+  const capturedRevisions = prepared.execution.binding.intentRevisions
   isExecuting.value = true
   setExecutionError(undefined)
   const run = (async () => {
     try {
-      await ceremonyService.accept(prepared.ceremony.ceremonyId, prepared.ceremony.consentDigest)
+      await executionService.accept(prepared.execution.reviewId, prepared.execution.reviewDigest)
       handle.scope.markSucceeded()
       if (!handle.scope.suppressPostTxUi()) {
         removeIntentRevisions(capturedRevisions)
@@ -481,7 +481,7 @@ const handleExecute = async () => {
     executionHandle?.release()
     executionHandle = null
   }
-  // A successful ceremony removes only its captured intent revisions.
+  // A successful execution removes only its captured intent revisions.
   if (!execError.value && entries.value.length === 0) emit('close')
 }
 
@@ -707,7 +707,7 @@ const onCloseRequested = () => {
         :description="warning.description"
       />
 
-      <!-- Authorization restorations, grouped by the ceremony that submits them. -->
+      <!-- Authorization restorations, grouped by the reviewed execution that submits them. -->
       <template
         v-for="group in restorationSummaryGroups"
         :key="group.key"

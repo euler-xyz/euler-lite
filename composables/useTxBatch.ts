@@ -11,7 +11,7 @@ import type {
   VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { ceremonyPresentationCacheDigest, type PreparedCeremonyReview } from '~/composables/useTransactionCeremony'
+import { reviewPresentationCacheDigest, type PreparedExecutionReview } from '~/composables/useReviewedExecution'
 import {
   getBatchPrefetchedBaseAccount,
   getBatchPrefetchedPlanningAccount,
@@ -32,9 +32,9 @@ import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
-import type { BatchDraftEntry, OperationIntent } from '~/features/transaction-ceremony/domain/intents'
-import { GenerationPublisher } from '~/features/transaction-ceremony/planning/cache'
-import { intentSetDigest } from '~/features/transaction-ceremony/planning/requirements'
+import type { BatchDraftEntry, OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { GenerationPublisher } from '~/features/reviewed-execution/planning/cache'
+import { intentSetDigest } from '~/features/reviewed-execution/planning/requirements'
 
 export interface BatchWalletChange {
   token: string
@@ -63,7 +63,7 @@ export interface BatchClosedPosition {
  * active layer's portfolio (see `activeLayerPortfolioRef`).
  *
  * Draft intents are appended synchronously. Generation-bound background work
- * compiles them for layered state previews, while the ceremony service remains
+ * compiles them for layered state previews, while the reviewed execution service remains
  * the sole authority for final whole-cart preparation and execution.
  */
 
@@ -249,11 +249,11 @@ const pendingAddSignatures = new Set<string>()
 const walletAssetMeta: Record<string, { symbol: string, decimals: number }> = {}
 let batchSlotHints: SlotHints = {}
 const batchGenerationPublisher = new GenerationPublisher()
-let batchCeremonyPreparation: {
+let batchExecutionPreparation: {
   generation: number
   intentSetHash: `0x${string}`
   presentationDigest: `0x${string}`
-  promise: Promise<PreparedCeremonyReview>
+  promise: Promise<PreparedExecutionReview>
 } | undefined
 
 // TEMP DIAGNOSTICS — hunting an unreproducible "Batch simulation not loaded"
@@ -1640,8 +1640,8 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 }
 
 export const useTxBatch = () => {
-  const ceremonyService = useTransactionCeremony()
-  const { compileEager } = ceremonyService
+  const executionService = useReviewedExecution()
+  const { compilePreview } = executionService
   const { chainId: wagmiChainId } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
@@ -1684,7 +1684,7 @@ export const useTxBatch = () => {
     }
 
     // A draft row is visible immediately. It has no execution authority until
-    // its eager plan build finishes and a whole-cart simulation is published.
+    // its preview plan build finishes and a whole-cart simulation is published.
     // Keep the last completed prefix projection intact: the queued builder for
     // this draft may still need that exact account as its planning input.
     if (entries.value.some(entry => entry.preparing)) {
@@ -2191,7 +2191,7 @@ export const useTxBatch = () => {
           // The simulator will surface the normal account-loading error later.
         }
       }
-      const plan = await compileEager([entry.intent], await getEntryPlanningAccount())
+      const plan = await compilePreview([entry.intent], await getEntryPlanningAccount())
       const cid = chainId.value
       if (cid) {
         batchSlotHints = {
@@ -2215,7 +2215,7 @@ export const useTxBatch = () => {
 
     try {
       await nextAdd
-      void warmBatchCeremony(cartGeneration)
+      void warmBatchExecutionReview(cartGeneration)
     }
     catch (error) {
       logBatchDiag('addEntry:threw', {
@@ -2252,7 +2252,7 @@ export const useTxBatch = () => {
       syncOverlay()
     }
     else {
-      void warmBatchCeremony(cartGeneration)
+      void warmBatchExecutionReview(cartGeneration)
     }
   }
 
@@ -2296,45 +2296,45 @@ export const useTxBatch = () => {
 
   const batchPresentationInputs = () => entries.value.map(entry => ({ id: entry.id, review: entry.review }))
 
-  const startBatchCeremonyPreparation = (cartGeneration: number): Promise<PreparedCeremonyReview> => {
+  const startBatchExecutionPreparation = (cartGeneration: number): Promise<PreparedExecutionReview> => {
     batchGenerationPublisher.assertCurrent(cartGeneration)
     const intents = [...getBatchIntents()]
     const presentationInputs = batchPresentationInputs()
     const intentSetHash = intentSetDigest(intents)
-    const presentationDigest = ceremonyPresentationCacheDigest('batch', presentationInputs)
-    if (batchCeremonyPreparation
-      && batchCeremonyPreparation.generation === cartGeneration
-      && batchCeremonyPreparation.intentSetHash === intentSetHash
-      && batchCeremonyPreparation.presentationDigest === presentationDigest) {
-      return batchCeremonyPreparation.promise
+    const presentationDigest = reviewPresentationCacheDigest('batch', presentationInputs)
+    if (batchExecutionPreparation
+      && batchExecutionPreparation.generation === cartGeneration
+      && batchExecutionPreparation.intentSetHash === intentSetHash
+      && batchExecutionPreparation.presentationDigest === presentationDigest) {
+      return batchExecutionPreparation.promise
     }
-    const promise = ceremonyService.prepare(intents, {
+    const promise = executionService.prepare(intents, {
       presentationKind: 'batch',
       presentationInputs,
       generation: batchGenerationPublisher,
       cartGeneration,
     })
-    batchCeremonyPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, promise }
+    batchExecutionPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, promise }
     void promise.catch(() => {
-      if (batchCeremonyPreparation?.promise === promise) batchCeremonyPreparation = undefined
+      if (batchExecutionPreparation?.promise === promise) batchExecutionPreparation = undefined
     })
     return promise
   }
 
-  const prepareBatchCeremony = () => startBatchCeremonyPreparation(batchGenerationPublisher.current())
+  const prepareBatchExecutionReview = () => startBatchExecutionPreparation(batchGenerationPublisher.current())
 
-  const warmBatchCeremony = async (cartGeneration: number) => {
+  const warmBatchExecutionReview = async (cartGeneration: number) => {
     if (!draftEntries.value.length) return
     try {
-      await startBatchCeremonyPreparation(cartGeneration)
+      await startBatchExecutionPreparation(cartGeneration)
     }
     catch (error) {
       if (cartGeneration !== batchGenerationPublisher.current()) return
-      logWarn('useTxBatch/warmBatchCeremony', error)
+      logWarn('useTxBatch/warmBatchExecutionReview', error)
     }
   }
 
-  /** Remove only revisions captured by a completed ceremony; newer edits stay. */
+  /** Remove only revisions captured by a completed execution; newer edits stay. */
   const removeIntentRevisions = (completed: readonly { intentId: string, revision: number }[]) => {
     const identities = new Set(completed.map(item => `${item.intentId}:${item.revision}`))
     const removeIds = draftEntries.value
@@ -2359,12 +2359,12 @@ export const useTxBatch = () => {
    * read-only simulation, no signature required.
    */
   const simulateOnTenderly = async (
-    prepared?: Awaited<ReturnType<typeof prepareBatchCeremony>>,
+    prepared?: Awaited<ReturnType<typeof prepareBatchExecutionReview>>,
   ): Promise<void> => {
     if (!prepared) return
-    const { ceremony, previewPlan } = prepared
-    const o = ceremony.template.wallet.account
-    const cid = ceremony.template.wallet.chainId
+    const { execution, previewPlan } = prepared
+    const o = execution.requestSet.wallet.account
+    const cid = execution.requestSet.wallet.chainId
     tenderly.clearSimulation()
     try {
       const sdk = await getEulerSdkFresh()
@@ -2382,13 +2382,13 @@ export const useTxBatch = () => {
         tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
         return
       }
-      const sealedRequest = ceremony.template.requests.find(request =>
+      const sealedRequest = execution.requestSet.requests.find(request =>
         request.to === payload.to
         && request.data === payload.data
         && request.value.toString() === payload.value,
       )
       if (!sealedRequest) {
-        throw new Error('Tenderly projection does not match the reviewed execution template')
+        throw new Error('Tenderly projection does not match the reviewed request set')
       }
       await tenderly.simulate({
         ...payload,
@@ -2522,7 +2522,7 @@ export const useTxBatch = () => {
     dismissExecutionError,
     setExecutionError,
     getBatchIntents,
-    prepareBatchCeremony,
+    prepareBatchExecutionReview,
     removeIntentRevisions,
     setActiveLayer,
     // Tenderly "Simulate on Tenderly" for the whole batch.

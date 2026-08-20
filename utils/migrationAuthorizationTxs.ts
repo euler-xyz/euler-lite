@@ -60,12 +60,12 @@ const bigintSafeStringify = (value: unknown): string =>
   JSON.stringify(value, (_key, entry) => (typeof entry === 'bigint' ? `${entry.toString()}n` : entry))
 
 /**
- * Identity of the ceremony an authorization request implies: the encoded
+ * Identity of the execution an authorization request implies: the encoded
  * grant/revoke transactions for transaction-form requests, the typed-data
  * payload for signature-form ones, `'none'` for no request. Compared between
  * review and confirmation — authorization state can drift in between (an
  * allowance granted or revoked elsewhere, a restore value that moved), and a
- * drifted payload means the reviewed ceremony no longer matches what would
+ * drifted payload means the reviewed execution no longer matches what would
  * execute, so the flow must invalidate and re-review rather than proceed.
  */
 export const migrationAuthorizationPayloadKey = (

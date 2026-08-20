@@ -72,10 +72,10 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   const { account: planAccount } = usePlanAccount()
   const { getVault: registryGetVault } = useVaultRegistry()
-  const { finalizeCeremonyUi } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   // --- Savings options ---
@@ -541,7 +541,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       })
 
       if (!plan.value) return
-      await openCeremonyReview(intents, {
+      await openReviewState(intents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',
@@ -556,7 +556,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           transferAmounts,
           submittingLabel: 'Submitting...',
         },
-        onSucceeded: () => finalizeCeremonyUi(),
+        onSucceeded: () => finalizeExecutionUi(),
         onFailed: (cause) => {
           error('Transaction failed')
           logWarn('savingsRepay/send', cause)

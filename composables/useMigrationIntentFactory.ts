@@ -1,14 +1,14 @@
 import type { MigrationAuthorizationRequest, PlanMigrationSimulationResult, PluginPrefetchData, SwapQuote, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
-import type { IntentConstraint, OperationIntent } from '~/features/transaction-ceremony/domain/intents'
-import { canonicalDigest, toCanonicalValue } from '~/features/transaction-ceremony/domain/canonical'
+import type { IntentConstraint, OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { canonicalDigest, toCanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 import {
-  publishPreviewPlan,
-  publishPreviewMigrationCompilation,
-  publishPreviewPluginEvidence,
-  publishPreviewPreparedEvidence,
-} from '~/features/transaction-ceremony/planning/preview-evidence'
-import { serializePluginPrefetch } from '~/features/transaction-ceremony/planning/plugin-evidence'
+  cachePreviewPlan,
+  cacheMigrationPreview,
+  cachePreviewPluginData,
+  cachePreparedPreview,
+} from '~/features/reviewed-execution/planning/preview-cache'
+import { serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
 
 export interface CreateMigrationIntentInput {
   args: Readonly<Record<string, unknown>>
@@ -16,7 +16,7 @@ export interface CreateMigrationIntentInput {
   source: string
   subAccounts: readonly Address[]
   bounds: readonly IntentConstraint[]
-  eagerCompilation?: {
+  previewCompilation?: {
     result: PlanMigrationSimulationResult
     observedBlock: bigint
     prefetch?: PluginPrefetchData
@@ -68,14 +68,14 @@ export const useMigrationIntentFactory = () => {
         { kind: 'deadline', timestamp: Number(deadline) },
       ],
     })
-    if (input.eagerCompilation) {
-      const { result, observedBlock, prefetch, prepared } = input.eagerCompilation
-      publishPreviewMigrationCompilation(intent, result, observedBlock)
+    if (input.previewCompilation) {
+      const { result, observedBlock, prefetch, prepared } = input.previewCompilation
+      cacheMigrationPreview(intent, result, observedBlock)
       const requests = authorizationRequests(result.authorizationRequest)
       const rawPlan = requests.some(request => request.kind === 'typedData') ? result.previewPlan : result.plan
-      publishPreviewPlan([intent], rawPlan)
-      if (prefetch) publishPreviewPluginEvidence([intent], rawPlan, serializePluginPrefetch(prefetch))
-      if (prepared) publishPreviewPreparedEvidence([intent], rawPlan, prepared)
+      cachePreviewPlan([intent], rawPlan)
+      if (prefetch) cachePreviewPluginData([intent], rawPlan, serializePluginPrefetch(prefetch))
+      if (prepared) cachePreparedPreview([intent], rawPlan, prepared)
     }
     return intent
   }

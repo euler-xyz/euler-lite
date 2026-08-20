@@ -12,7 +12,7 @@ import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { type Address, formatUnits, zeroAddress } from 'viem'
 import type { Ref, ComputedRef } from 'vue'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 interface QuoteAccounts {
   accountIn: Address

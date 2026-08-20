@@ -34,10 +34,10 @@ useExternalMigrationPositions()
 // alive across navigation (mirrors useEulerAccount above).
 useTxBatch()
 // Recovery is application-scoped so an unresolved attempt remains visible
-// across navigation and independently of whether new ceremonies are enabled.
-useTransactionCeremonyRecovery()
-// Owns all in-scope ceremony preparation, acceptance, and recovery handlers.
-useTransactionCeremony()
+// across navigation and independently of whether new reviewed executions are enabled.
+useReviewedExecutionRecovery()
+// Owns all in-scope reviewed execution preparation, acceptance, and recovery handlers.
+useReviewedExecution()
 
 const { theme } = useTheme()
 
@@ -231,7 +231,7 @@ onUnmounted(() => {
   <UiModals />
   <UiToastContainer />
   <BatchDrawer />
-  <TransactionCeremonyRecovery />
+  <ReviewedExecutionRecovery />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>

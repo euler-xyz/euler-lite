@@ -2,7 +2,7 @@ import type { Ref } from 'vue'
 import type { PluginPrefetchData, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 /**
  * Wraps two useSwapQuotesParallel instances (exact-in + target-debt) and provides

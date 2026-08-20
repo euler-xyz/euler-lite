@@ -43,7 +43,7 @@ const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
@@ -1010,7 +1010,7 @@ const submitMultiply = async () => {
         : undefined
 
       if (!plan.value) return
-      await openCeremonyReview(intents, {
+      await openReviewState(intents, {
         presentationKind: 'borrow',
         review: {
           type: 'borrow',

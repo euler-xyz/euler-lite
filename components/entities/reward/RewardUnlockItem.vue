@@ -19,7 +19,7 @@ const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
 const { entryCount, clearBatch } = useTxBatch()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openCeremonyReview } = useCeremonyReview()
+const { open: openReviewState } = useExecutionReview()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
@@ -169,7 +169,7 @@ const onUnlockClick = async () => {
       return
     }
 
-    await openCeremonyReview([intent], {
+    await openReviewState([intent], {
       presentationKind: 'reul-unlock',
       review: {
         ...getReviewProps(reviewedLock),

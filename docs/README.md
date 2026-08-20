@@ -57,7 +57,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Gasless-signature preference (`useSignaturePreference`), Safe forced-off override, and sequential vs atomic Safe migration authorization paths
 - Sub-accounts and position isolation
 - Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
-- [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal ceremonies remain separate from the unchanged handcrafted review
+- [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
 
 ### 🔐 [Safe Wallet Compatibility](./safe-wallets.md)
 

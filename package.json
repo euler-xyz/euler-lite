@@ -23,7 +23,7 @@
     "test:golden": "vitest run tests/golden",
     "test:golden:update": "UPDATE_GOLDEN=1 vitest run tests/golden",
     "test:golden:fetch-fixtures": "jiti tests/golden/fetch-fixtures.ts",
-    "test:ceremony:sdk-conformance": "node scripts/transaction-ceremony-sdk-conformance.mjs",
+    "test:reviewed-execution:sdk-conformance": "node scripts/reviewed-execution-sdk-conformance.mjs",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare && simple-git-hooks"
   },

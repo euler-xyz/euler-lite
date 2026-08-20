@@ -88,7 +88,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const { error } = useToast()
   const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   const { create: createIntent } = useOperationIntentFactory()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   // State-override knobs: skip balance probing (form validates "Not enough
@@ -100,7 +100,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { account: planAccount } = usePlanAccount()
   const { chainId } = useEulerAddresses()
   const { getBalance } = useWallets()
-  const { finalizeCeremonyUi } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { entryCount: batchEntryCount } = useTxBatch()
   const { cowSwapForcedOff } = useCowSwapEligibility()
   const {
@@ -1381,7 +1381,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
       profMark('review', 'submitMultiply.modalOpen')
       if (!multiplyPlan.value) return
-      await openCeremonyReview(intents, {
+      await openReviewState(intents, {
         presentationKind: 'borrow',
         review: {
           type: 'borrow',
@@ -1396,7 +1396,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           subAccount,
           submittingLabel: 'Submitting...',
         },
-        onSucceeded: () => finalizeCeremonyUi(),
+        onSucceeded: () => finalizeExecutionUi(),
         onFailed: (cause) => {
           logWarn('multiply/send', cause)
           error('Transaction failed')

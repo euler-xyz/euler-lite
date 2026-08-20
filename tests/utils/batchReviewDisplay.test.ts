@@ -20,7 +20,7 @@ describe('getAuthorizationStepDisplay', () => {
 })
 
 describe('isBundledReviewEntry', () => {
-  it('requires both a latched ceremony and a bundled execution builder', () => {
+  it('requires both a latched execution and a bundled execution builder', () => {
     expect(isBundledReviewEntry(true, true)).toBe(true)
     expect(isBundledReviewEntry(false, true)).toBe(false)
     expect(isBundledReviewEntry(true, false)).toBe(false)

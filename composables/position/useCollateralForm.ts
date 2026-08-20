@@ -31,7 +31,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -114,7 +114,7 @@ export interface UseCollateralFormOptions {
 
   /**
    * When true, eagerly build, prepare, and simulate the preview before opening
-   * review. The ceremony adopts matching prefetched plugin and simulation data,
+   * review. The reviewed execution adopts matching prefetched plugin and simulation data,
    * while acceptance and wallet submission remain coordinator-owned.
    */
   usePreparedPipeline?: boolean
@@ -126,7 +126,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   const usePreparedPipeline = options.usePreparedPipeline ?? true
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
@@ -138,7 +138,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
-  const { finalizeCeremonyUi } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const positionIndex = usePositionIndex()
   const { isPositionsLoaded, getPositionBySubAccountIndex } = useEulerAccount()
   const {
@@ -1063,7 +1063,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         const reviewAsset = options.getReviewAsset(options.needsSwap.value)
         const reviewType = options.needsSwap.value ? options.swapReviewType : options.reviewType
         if (!plan.value) return
-        await openCeremonyReview(intents, {
+        await openReviewState(intents, {
           presentationKind: reviewType,
           review: {
             type: reviewType,
@@ -1077,7 +1077,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
             swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
             submittingLabel: 'Submitting...',
           },
-          onSucceeded: () => finalizeCeremonyUi(options.onAfterSend),
+          onSucceeded: () => finalizeExecutionUi(options.onAfterSend),
           onFailed: (cause) => {
             logWarn('collateral/send', cause)
             error('Transaction failed')

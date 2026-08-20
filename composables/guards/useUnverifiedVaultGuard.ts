@@ -1,7 +1,7 @@
 import { computed, provide, reactive, ref, watch, onUnmounted, type ComputedRef } from 'vue'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
-import { recordUnverifiedVaultAcknowledgement } from '~/features/transaction-ceremony/policy/acknowledgements'
+import { recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
 
 export interface UnverifiedVaultGuardState {
   isAcknowledgmentRequired: boolean

@@ -1,5 +1,5 @@
 import { SwapperMode, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export type SwapQuoteAmountField = 'amountIn' | 'amountOut' | 'amountInMax' | 'amountOutMin'
 export type SwapQuoteCompare = 'max' | 'min'

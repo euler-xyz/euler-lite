@@ -7,7 +7,7 @@ import {
   isNonBlockingApprovalSimulationFailure,
 } from '~/utils/tx-errors'
 import { reportClientEvent } from '~/utils/client-observability'
-import type { OperationIntent } from '~/features/transaction-ceremony/domain/intents'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export const useTransactionPlanSimulation = () => {
   const { simulatePlan, simulatePreparedPlan } = useEulerTx()

@@ -14,7 +14,7 @@ import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactio
 import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import type { EoaRequest, SafeCall } from '~/features/transaction-ceremony/domain/template'
+import type { EoaRequest, SafeCall } from '~/features/reviewed-execution/domain/reviewed-execution'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -25,7 +25,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, ceremonyId, consentDigest, ceremonyWalletKind, ceremonyRequests, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedWalletKind, reviewedRequests, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -67,10 +67,10 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, ceremonyId, consentDi
   swapEstimatedSide?: 'input' | 'output'
   reulUnlockInfo?: REULUnlockInfo
   /** Opaque acceptance identity. This presentation never receives execution authority. */
-  ceremonyId?: Hash
-  consentDigest?: Hash
-  ceremonyWalletKind?: 'eoa' | 'safe'
-  ceremonyRequests?: readonly (EoaRequest | SafeCall)[]
+  reviewId?: Hash
+  reviewDigest?: Hash
+  reviewedWalletKind?: 'eoa' | 'safe'
+  reviewedRequests?: readonly (EoaRequest | SafeCall)[]
   externalSubmitting?: boolean
   subAccount?: string
   hasBorrows?: boolean
@@ -111,7 +111,7 @@ const hasCopiedCalldata = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
-// Executable reviews receive an already prepared envelope from the ceremony
+// Executable reviews receive an already prepared preview from the reviewed execution
 // coordinator. A raw plan is accepted only for the read-only batch row peek.
 const reviewPlan = computed(() => prepared?.plan ?? (hideExecute ? plan : undefined))
 const prepareError = computed(() =>
@@ -177,13 +177,13 @@ const handleTenderlySimulate = async () => {
       return
     }
 
-    if (ceremonyRequests?.length) {
-      const sealedRequest = ceremonyRequests.find(request =>
+    if (reviewedRequests?.length) {
+      const sealedRequest = reviewedRequests.find(request =>
         request.to === payload.to
         && request.data === payload.data
         && request.value.toString() === payload.value,
       )
-      if (!sealedRequest) throw new Error('Tenderly projection does not match the reviewed execution template')
+      if (!sealedRequest) throw new Error('Tenderly projection does not match the reviewed request set')
       payload.to = sealedRequest.to
       payload.data = sealedRequest.data
       payload.value = sealedRequest.value.toString()
@@ -200,8 +200,8 @@ const internalSubmitting = computed(() => externalSubmitting === true)
 const { hasPendingDetachedExecution } = useSafeExecutionDetachment()
 
 const handleConfirm = () => {
-  if (isConfirmDisabled.value || !ceremonyId || !consentDigest) return
-  emits('confirm', { ceremonyId, consentDigest })
+  if (isConfirmDisabled.value || !reviewId || !reviewDigest) return
+  emits('confirm', { reviewId, reviewDigest })
 }
 
 const onCloseRequested = () => {
@@ -220,7 +220,7 @@ const rawDisplaySteps = computed((): DisplayStep[] => {
     swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs,
     // Bundle eligibility mirrors execution: Safe wallet AND a plan that can
     // actually submit as one bundle — otherwise approves stay "Separate tx".
-    bundledApprovals: (ceremonyWalletKind ? ceremonyWalletKind === 'safe' : isSafeWallet.value) && isPlanBundleable(currentPlan),
+    bundledApprovals: (reviewedWalletKind ? reviewedWalletKind === 'safe' : isSafeWallet.value) && isPlanBundleable(currentPlan),
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })
@@ -274,8 +274,8 @@ const copyCalldata = async () => {
   const currentPlan = calldataPlan.value
   if (!currentPlan?.length) return
   try {
-    if (ceremonyRequests?.length) {
-      await copyToClipboard(JSON.stringify(ceremonyRequests.map(request => ({
+    if (reviewedRequests?.length) {
+      await copyToClipboard(JSON.stringify(reviewedRequests.map(request => ({
         to: request.to,
         data: request.data,
         value: request.value.toString(),

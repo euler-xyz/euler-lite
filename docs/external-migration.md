@@ -139,4 +139,4 @@ inside the atomic proposal — see [Safe Wallet Compatibility](./safe-wallets.md
 | `server/api/internal/proxy/aave.post.ts` | Aave GraphQL proxy the SDK Aave connector is configured with (not used by discovery's on-chain reads) |
 | `utils/migrationAuthorizationTxs.ts` | Grant/revoke encode + review steps |
 | `pages/portfolio/migrate.vue` | Inbound Migrate tab |
-| `pages/position/[number]/migrate.vue` | Outbound migrate ceremony |
+| `pages/position/[number]/migrate.vue` | Outbound migrate reviewed execution |

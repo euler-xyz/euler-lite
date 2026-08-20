@@ -65,13 +65,13 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const { error } = useToast()
   const { planRepayFromWallet } = useEulerTx()
-  const { open: openCeremonyReview } = useCeremonyReview()
+  const { open: openReviewState } = useExecutionReview()
   const { create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
   const { primeSlotHintsFor } = useStateOverrideOptions()
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
-  const { finalizeCeremonyUi } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
   const {
     version: rewardsVersion,
@@ -201,7 +201,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       }
 
       if (!plan.value) return
-      await openCeremonyReview([intent], {
+      await openReviewState([intent], {
         presentationKind: 'repay',
         review: {
           type: 'repay',
@@ -211,7 +211,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           submittingLabel: 'Submitting...',
         },
-        onSucceeded: () => finalizeCeremonyUi(),
+        onSucceeded: () => finalizeExecutionUi(),
         onFailed: (cause) => {
           error('Transaction failed')
           logWarn('walletRepay/send', cause)
