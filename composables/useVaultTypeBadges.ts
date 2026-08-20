@@ -3,6 +3,7 @@ import { isEVault, type EulerEarn, type EVault, type SecuritizeCollateralVault }
 import type { Ref } from 'vue'
 import { getEntitiesByEarnVault, getEntitiesByVault, isVaultAccessControlled, isVaultCyclicalNote, isVaultGovernanceLimited, isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import type { EulerRouterGovernanceCarrier } from '~/utils/vault/euler-router-governance'
 
 type VaultTypeBadgeVault = EVault | EulerEarn | SecuritizeCollateralVault
 
@@ -12,7 +13,7 @@ export type VaultTypeSummaryBadge = Extract<VaultTypeBadge, 'cyclicalNote' | 'pr
 
 export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
-  const { getVaultCategory } = useVaultRegistry()
+  const { getVault, getVaultCategory } = useVaultRegistry()
 
   const addressRef = computed(() => vault.value.address)
 
@@ -24,10 +25,35 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
     return getEntitiesByVault(vault.value as EVault | SecuritizeCollateralVault)
   })
 
+  const verificationVault = computed<VaultTypeBadgeVault>(() => {
+    const current = vault.value
+    if (!isEVault(current) || current.oracle?.name !== 'EulerRouter') return current
+
+    const currentGovernance = current as EVault & EulerRouterGovernanceCarrier
+    if (currentGovernance.eulerRouterGovernor !== undefined) return current
+
+    const registered = getVault(current.address)
+    if (!registered || !isEVault(registered) || registered.oracle?.name !== 'EulerRouter') return current
+
+    const currentRouter = current.oracle.oracle?.toLowerCase()
+    const registeredRouter = registered.oracle.oracle?.toLowerCase()
+    if (!currentRouter || currentRouter !== registeredRouter) return current
+
+    const registeredGovernance = registered as EVault & EulerRouterGovernanceCarrier
+    if (registeredGovernance.eulerRouterGovernor === undefined) return current
+
+    const enriched = Object.assign(
+      Object.create(Object.getPrototypeOf(current)) as EVault & EulerRouterGovernanceCarrier,
+      current,
+    )
+    enriched.eulerRouterGovernor = registeredGovernance.eulerRouterGovernor
+    return enriched
+  })
+
   const isVerified = computed(() => {
     if (isEarn.value) return isEarnVaultOwnerVerified(vault.value as EulerEarn)
     if (isSecuritize.value) return isSecuritizeGovernorVerified(vault.value as SecuritizeCollateralVault)
-    return isVaultGovernorVerified(vault.value as EVault)
+    return isVaultGovernorVerified(verificationVault.value as EVault)
   })
 
   const governanceType = computed<VaultGovernanceBadge>(() => {

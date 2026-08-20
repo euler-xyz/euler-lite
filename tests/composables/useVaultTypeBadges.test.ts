@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   governanceLimitedVaults: new Set<string>(),
   keyringVaults: new Set<string>(),
   cyclicalNoteVaults: new Set<string>(),
+  registryVaults: new Map<string, EVault>(),
+  requiredRouterGovernors: new Map<string, string>(),
   verifiedEarnVaults: new Set<string>(),
   verifiedVaults: new Set<string>(),
 }))
@@ -29,6 +31,7 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
 
 vi.mock('~/composables/useVaultRegistry', () => ({
   useVaultRegistry: () => ({
+    getVault: (address: string) => state.registryVaults.get(address.toLowerCase()),
     getVaultCategory: () => 'evk',
     isVerifiedVault: (address: string) => state.verifiedVaults.has(address.toLowerCase()),
   }),
@@ -62,8 +65,12 @@ const setupVaultsMock = () => {
   ;(globalThis as unknown as { useVaults: unknown }).useVaults = () => ({
     isEarnVaultOwnerVerified: (vault: { address: string }) =>
       state.verifiedEarnVaults.has(vault.address.toLowerCase()),
-    isVaultGovernorVerified: (vault: { address: string }) =>
-      state.verifiedVaults.has(vault.address.toLowerCase()),
+    isVaultGovernorVerified: (vault: { address: string, eulerRouterGovernor?: string | null }) => {
+      const address = vault.address.toLowerCase()
+      const requiredRouterGovernor = state.requiredRouterGovernors.get(address)
+      return state.verifiedVaults.has(address)
+        && (!requiredRouterGovernor || vault.eulerRouterGovernor?.toLowerCase() === requiredRouterGovernor)
+    },
   })
 }
 
@@ -80,6 +87,8 @@ describe('useVaultTypeBadges', () => {
     state.governanceLimitedVaults.clear()
     state.keyringVaults.clear()
     state.cyclicalNoteVaults.clear()
+    state.registryVaults.clear()
+    state.requiredRouterGovernors.clear()
     state.verifiedEarnVaults.clear()
     state.verifiedVaults.clear()
     setupVaultsMock()
@@ -170,6 +179,47 @@ describe('useVaultTypeBadges', () => {
     expect(badges.value).toEqual(['governed'])
     expect(summaryBadges.value).toEqual(['unknown'])
     expect(summaryGovernanceType.value).toBe('unknown')
+  })
+
+  it('uses matching registry EulerRouter governance to verify a portfolio vault copy', () => {
+    const router = '0x4000000000000000000000000000000000000004'
+    const routerGovernor = '0x5000000000000000000000000000000000000005'
+    const portfolioVault = makeVault({
+      oracle: { oracle: router, name: 'EulerRouter' },
+    })
+    const registryVault = Object.assign(makeVault({
+      oracle: { oracle: router, name: 'EulerRouter' },
+    }), { eulerRouterGovernor: routerGovernor })
+
+    verify(portfolioVault)
+    state.registryVaults.set(portfolioVault.address.toLowerCase(), registryVault)
+    state.requiredRouterGovernors.set(portfolioVault.address.toLowerCase(), routerGovernor.toLowerCase())
+
+    const { isVerified, summaryBadges } = useVaultTypeBadges(shallowRef(portfolioVault))
+
+    expect(isVerified.value).toBe(true)
+    expect(summaryBadges.value).toEqual([])
+  })
+
+  it('does not borrow registry governance from a different EulerRouter', () => {
+    const portfolioVault = makeVault({
+      oracle: { oracle: '0x4000000000000000000000000000000000000004', name: 'EulerRouter' },
+    })
+    const registryVault = Object.assign(makeVault({
+      oracle: { oracle: '0x6000000000000000000000000000000000000006', name: 'EulerRouter' },
+    }), { eulerRouterGovernor: '0x5000000000000000000000000000000000000005' })
+
+    verify(portfolioVault)
+    state.registryVaults.set(portfolioVault.address.toLowerCase(), registryVault)
+    state.requiredRouterGovernors.set(
+      portfolioVault.address.toLowerCase(),
+      '0x5000000000000000000000000000000000000005',
+    )
+
+    const { isVerified, summaryBadges } = useVaultTypeBadges(shallowRef(portfolioVault))
+
+    expect(isVerified.value).toBe(false)
+    expect(summaryBadges.value).toEqual(['unknown'])
   })
 
   it('keeps unverified ungoverned vaults out of the pair summary', () => {
