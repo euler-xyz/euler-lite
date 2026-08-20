@@ -42,7 +42,6 @@
     "@nuxt/eslint": "1.16.0",
     "@reown/appkit": "1.8.23",
     "@reown/appkit-adapter-wagmi": "1.8.23",
-    "@tanstack/query-core": "5.101.4",
     "@tanstack/vue-query": "5.101.4",
     "@vueuse/nuxt": "14.4.0",
     "@wagmi/core": "3.6.4",
@@ -77,7 +76,11 @@
   "overrides": {
     "@base-org/account": "2.5.1",
     "@wagmi/connectors": "8.0.26",
-    "serialize-javascript": "7.0.4"
+    "serialize-javascript": "7.1.0",
+    "ws": "8.21.3",
+    "@coinbase/cdp-sdk": {
+      "axios": "1.19.0"
+    }
   },
   "license": "MIT"
 }
