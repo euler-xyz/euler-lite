@@ -195,10 +195,13 @@ describe('useVaultTypeBadges', () => {
     state.registryVaults.set(portfolioVault.address.toLowerCase(), registryVault)
     state.requiredRouterGovernors.set(portfolioVault.address.toLowerCase(), routerGovernor.toLowerCase())
 
-    const { isVerified, summaryBadges } = useVaultTypeBadges(shallowRef(portfolioVault))
+    const { isVerified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
 
     expect(isVerified.value).toBe(true)
     expect(summaryBadges.value).toEqual([])
+    expect(verificationVault.value).not.toBe(portfolioVault)
+    expect(verificationVault.value).toHaveProperty('eulerRouterGovernor', routerGovernor)
+    expect(portfolioVault).not.toHaveProperty('eulerRouterGovernor')
   })
 
   it('does not borrow registry governance from a different EulerRouter', () => {
@@ -216,10 +219,11 @@ describe('useVaultTypeBadges', () => {
       '0x5000000000000000000000000000000000000005',
     )
 
-    const { isVerified, summaryBadges } = useVaultTypeBadges(shallowRef(portfolioVault))
+    const { isVerified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
 
     expect(isVerified.value).toBe(false)
     expect(summaryBadges.value).toEqual(['unknown'])
+    expect(verificationVault.value).toBe(portfolioVault)
   })
 
   it('keeps unverified ungoverned vaults out of the pair summary', () => {

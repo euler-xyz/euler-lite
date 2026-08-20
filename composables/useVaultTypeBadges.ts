@@ -119,5 +119,6 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
     isVerified,
     summaryBadges,
     summaryGovernanceType,
+    verificationVault,
   }
 }
