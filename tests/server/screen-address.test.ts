@@ -24,7 +24,7 @@ vi.mock('~/server/utils/logger', () => ({
 
 const handler = (await import('~/server/api/internal/screen-address.post')).default
 
-const USER = '0x0000000000000000000000000000000000000001'
+const USER = '0x0000000000000000000000000000000000000abc'
 const OTHER = '0x0000000000000000000000000000000000000002'
 const SCREENING_URI = 'https://v3.example/v3/compliance/address-screening'
 const SCREENING_API_KEY = 'test-restricted-key'
@@ -49,8 +49,22 @@ function stubScreeningEnv(uri: string = SCREENING_URI): void {
   process.env.ADDRESS_SCREENING_API_KEY = SCREENING_API_KEY
 }
 
+function fullVerdict(overrides: Record<string, unknown> = {}, status = 200): Response {
+  return new Response(JSON.stringify({
+    data: {
+      address: USER,
+      addressIsSuspicious: false,
+      screenedAt: '2026-08-21T00:00:00.000Z',
+      resolvedChain: 'ethereum',
+      cached: false,
+      ruleVersion: 'trm-custom-v1',
+      ...overrides,
+    },
+  }), { status })
+}
+
 function cleanVerdict(address: string = USER): Response {
-  return new Response(JSON.stringify({ data: { address, addressIsSuspicious: false } }), { status: 200 })
+  return fullVerdict({ address })
 }
 
 describe('POST /api/internal/screen-address', () => {
@@ -70,7 +84,7 @@ describe('POST /api/internal/screen-address', () => {
 
   it('binds the verdict to the requested address case-insensitively', async () => {
     stubScreeningEnv()
-    vi.stubGlobal('fetch', vi.fn(async () => cleanVerdict(USER.toUpperCase().replace('0X', '0x'))))
+    vi.stubGlobal('fetch', vi.fn(async () => cleanVerdict(`0x${USER.slice(2).toUpperCase()}`)))
 
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
   })
@@ -95,20 +109,36 @@ describe('POST /api/internal/screen-address', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { address: USER, addressIsSuspicious: null } }), { status: 200 }))
       // Legacy flat shape (pre-data-v3 lambda) must no longer pass.
       .mockResolvedValueOnce(new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 }))
+      // Partial success envelope: matching address + clean verdict but the
+      // remaining required contract fields are missing.
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { address: USER, addressIsSuspicious: false } }), { status: 200 }))
+      .mockResolvedValueOnce(fullVerdict({ ruleVersion: undefined }))
+      // A complete clean envelope on a non-200 success status is not a verdict.
+      .mockResolvedValueOnce(fullVerdict({}, 201))
 
     vi.stubGlobal('fetch', fetchMock)
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 7; i++) {
       await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
     }
   })
 
-  it('disables screening when neither env var is configured (forks pass every address)', async () => {
+  it('disables screening when neither env var is configured outside production (forks pass)', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when unconfigured in production — a missing secret injection is not an opt-out', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
   })
 
   it('fails closed when only one of URI / API key is configured', async () => {
@@ -228,10 +258,15 @@ describe('POST /api/internal/screen-address', () => {
       { address: USER, vpnIsUsed: true },
       {},
     ))
+    // Empty/whitespace header values are equally unmeasured.
+    await handler(makeEvent(
+      { address: USER, vpnIsUsed: true },
+      { 'x-is-vpn': '  ' },
+    ))
 
     const bodies = fetchMock.mock.calls.map(([, init]) =>
       JSON.parse(String(init?.body)) as { vpnIsUsed: boolean | null },
     )
-    expect(bodies.map(body => body.vpnIsUsed)).toEqual([true, true, true, true, false, null])
+    expect(bodies.map(body => body.vpnIsUsed)).toEqual([true, true, true, true, false, null, null])
   })
 })

@@ -9,12 +9,16 @@ export interface ScreeningResult {
 }
 
 interface ScreeningVerdictData {
-  address?: unknown
-  addressIsSuspicious?: unknown
+  address: string
+  addressIsSuspicious: boolean
+  screenedAt: string
+  resolvedChain: string
+  cached: boolean
+  ruleVersion: string
 }
 
-// Narrow the untrusted upstream payload without asserting anything about the
-// verdict fields themselves — their validation stays with the caller.
+// Narrow the untrusted upstream payload to the complete documented success
+// contract — a partial envelope (however plausible) is not a verdict.
 function extractVerdictData(body: unknown): ScreeningVerdictData | null {
   if (typeof body !== 'object' || body === null) {
     return null
@@ -23,7 +27,15 @@ function extractVerdictData(body: unknown): ScreeningVerdictData | null {
   if (typeof data !== 'object' || data === null) {
     return null
   }
-  return data as ScreeningVerdictData
+  const candidate = data as Record<string, unknown>
+  const valid
+    = typeof candidate.address === 'string'
+      && typeof candidate.addressIsSuspicious === 'boolean'
+      && typeof candidate.screenedAt === 'string'
+      && typeof candidate.resolvedChain === 'string'
+      && typeof candidate.cached === 'boolean'
+      && typeof candidate.ruleVersion === 'string'
+  return valid ? (data as unknown as ScreeningVerdictData) : null
 }
 
 export function isValidScreeningAddress(value: unknown): value is string {
@@ -39,7 +51,8 @@ function isTruthyHeader(value: string | string[] | undefined): boolean {
 }
 
 function hasHeader(value: string | string[] | undefined): boolean {
-  return Array.isArray(value) ? value.length > 0 : value !== undefined
+  const values = Array.isArray(value) ? value : [value]
+  return values.some(entry => typeof entry === 'string' && entry.trim() !== '')
 }
 
 // The VPN verdict comes from edge-set request headers, never from the client
@@ -96,9 +109,16 @@ export async function screenAddressUpstream(
 
   // Screening is opt-in by configuration: with BOTH vars absent the app is
   // treated as a deployment without a screening provider (e.g. a fork) and
-  // every address passes. Anything partial is a misconfiguration of a
-  // deployment that intended to screen — that fails closed.
+  // every address passes. Production (DOPPLER_ENVIRONMENT=prd — the same
+  // convention the CORS/geo/rate middleware use) is the exception: there an
+  // absent configuration is a failed secret injection, not an opt-out, and
+  // it fails closed rather than silently disabling screening. Anything
+  // partial is a misconfiguration in every environment — that fails closed.
   if (!screeningUri && !apiKey) {
+    if (process.env.DOPPLER_ENVIRONMENT === 'prd') {
+      logger.warn({ ctx: logCtx }, 'address screening not configured in production — failing closed')
+      return { addressIsSuspicious: true }
+    }
     logger.info({ ctx: logCtx }, 'address screening not configured — screening disabled, address passes')
     return { addressIsSuspicious: false }
   }
@@ -130,19 +150,18 @@ export async function screenAddressUpstream(
       redirect: 'error',
     })
 
-    if (!resp.ok) {
-      logger.warn({ ctx: logCtx, status: resp.status }, 'screening API non-ok response — failing closed')
+    // The documented success contract is exactly HTTP 200 with a complete
+    // envelope — any other 2xx is not a verdict.
+    if (resp.status !== 200) {
+      logger.warn({ ctx: logCtx, status: resp.status }, 'screening API non-200 response — failing closed')
       return { addressIsSuspicious: true }
     }
 
     const body: unknown = await resp.json()
     const data = extractVerdictData(body)
-    const verdict = data?.addressIsSuspicious
-    const echoedAddress = data?.address
     const addressMatches
-      = typeof echoedAddress === 'string'
-        && echoedAddress.toLowerCase() === address.toLowerCase()
-    const isSuspicious = verdict !== false || !addressMatches
+      = data !== null && data.address.toLowerCase() === address.toLowerCase()
+    const isSuspicious = data === null || data.addressIsSuspicious !== false || !addressMatches
 
     if (isSuspicious) {
       logger.warn(
