@@ -1,36 +1,65 @@
 import type { H3Event } from 'h3'
+import {
+  EDGE_ORIGIN_AUTH_HEADER,
+  INTERNAL_MARKER_HEADER,
+  INTERNAL_SENTINEL_HEADER,
+  INTERNAL_SENTINEL_VALUE,
+} from '~/utils/edge-presets'
+import { timingSafeEqualStrings } from '~/server/utils/timing-safe'
 
 /**
  * Synthetic headers for server-internal $fetch calls.
  *
  * The rate-limit middleware in production (DOPPLER_ENVIRONMENT=prd) fails
- * closed when `cf-connecting-ip` is absent — a Cloudflare egress invariant
- * that keeps direct-to-origin traffic out. The geo-gate middleware
- * likewise fails closed when `cf-ipcountry` is absent. Internal fetches
- * from warm-cache, vaults-cache, etc. don't go through Cloudflare, so
- * without these headers every internal request would be 403'd or 451'd.
+ * closed when the configured edge provider supplies no trusted client
+ * identity, and the geo-gate middleware fails closed when it supplies no
+ * country. Internal fetches from warm-cache, vaults-cache, etc. never
+ * traverse the edge, so without these headers every internal request would
+ * be 403'd or 451'd. Downstream middleware recognises them via
+ * `isInternalRequest` and bypasses those checks; internal traffic is not
+ * rate-limited (warm-cache issues at most ~240 requests per 5-min cycle
+ * against a >=600/min-per-endpoint budget).
  *
- * `cf-connecting-ip` is a fixed loopback sentinel that downstream
- * middleware also uses to identify internal traffic (see isInternalRequest
- * below) — all server-internal traffic shares one rate-limit bucket, which
- * is fine: warm-cache issues at most ~240 requests per 5-min cycle
- * against a >=600/min-per-endpoint budget.
+ * Two trust models, selected by whether EDGE_ORIGIN_SECRET is configured:
  *
- * SECURITY: this sentinel relies on origin ingress NOT being directly
- * reachable — Cloudflare is the only public entrypoint. If that
- * assumption changes (eg a new ingress is exposed), attackers could
- * spoof these headers to bypass rate limiting AND geo-blocking. Do not
- * add the headers to anything that forwards user input into the
- * downstream URL, and keep origin locked behind Cloudflare.
+ * - Secret configured: internal fetches stamp the origin-auth header plus
+ *   an internal marker header, both carrying the secret. External clients
+ *   cannot forge the marker without knowing the secret, and the edge never
+ *   stamps it (it should strip it from inbound traffic as defense-in-depth).
+ *   This is the recommended mode for any deployment fronted by an edge.
+ *
+ * - No secret: fall back to a loopback sentinel in a header the edge
+ *   overwrites in transit (see the sentinel constants and their rationale
+ *   in utils/edge-presets.ts). SECURITY: this sentinel
+ *   is only sound while the edge overwrites that header in transit AND the
+ *   origin is not directly reachable — an attacker who bypasses the edge
+ *   can spoof it to skip rate limiting AND geo-blocking. Configure
+ *   EDGE_ORIGIN_SECRET to close that hole. Do not add these headers to
+ *   anything that forwards user input into the downstream URL.
  */
-export const INTERNAL_FETCH_HEADERS = { 'cf-connecting-ip': '127.0.0.1' } as const
+export function getInternalFetchHeaders(): Record<string, string> {
+  const secret = process.env.EDGE_ORIGIN_SECRET?.trim()
+  if (secret) {
+    return {
+      [EDGE_ORIGIN_AUTH_HEADER]: secret,
+      [INTERNAL_MARKER_HEADER]: secret,
+    }
+  }
+  return { [INTERNAL_SENTINEL_HEADER]: INTERNAL_SENTINEL_VALUE }
+}
 
 /**
- * True when the incoming request bears the loopback `cf-connecting-ip`
- * sentinel set by `INTERNAL_FETCH_HEADERS`. Middleware uses this to
- * bypass geo/rate checks for warm-cache → `/api/*` traffic that never
- * traversed Cloudflare. Relies on the same origin-locked-behind-CF
- * security invariant noted above.
+ * True when the incoming request was issued by this server itself via
+ * `getInternalFetchHeaders()`. Middleware uses this to bypass geo/rate
+ * checks for warm-cache → `/api/*` traffic that never traversed the edge.
+ * See the trust model above.
  */
-export const isInternalRequest = (event: H3Event): boolean =>
-  event.node.req.headers['cf-connecting-ip'] === '127.0.0.1'
+export function isInternalRequest(event: H3Event): boolean {
+  const secret = process.env.EDGE_ORIGIN_SECRET?.trim()
+  const headers = event.node.req.headers
+  if (secret) {
+    const marker = headers[INTERNAL_MARKER_HEADER]
+    return typeof marker === 'string' && timingSafeEqualStrings(marker, secret)
+  }
+  return headers[INTERNAL_SENTINEL_HEADER] === INTERNAL_SENTINEL_VALUE
+}

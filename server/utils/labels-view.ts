@@ -17,7 +17,7 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { createInFlightDedup } from './in-flight'
-import { INTERNAL_FETCH_HEADERS } from './internal-headers'
+import { getInternalFetchHeaders } from './internal-headers'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
 import { summarizeSdkIssue } from './observability'
@@ -137,7 +137,7 @@ const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   const data = await $fetch<TokenListResponse>('/api/internal/token-list', {
     query: { chainId },
-    headers: INTERNAL_FETCH_HEADERS,
+    headers: getInternalFetchHeaders(),
   })
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
