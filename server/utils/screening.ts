@@ -76,10 +76,19 @@ export async function screenAddressUpstream(
   const screeningUri = process.env.ADDRESS_SCREENING_URI
   const apiKey = process.env.ADDRESS_SCREENING_API_KEY
 
+  // Screening is opt-in by configuration: with BOTH vars absent the app is
+  // treated as a deployment without a screening provider (e.g. a fork) and
+  // every address passes. Anything partial is a misconfiguration of a
+  // deployment that intended to screen — that fails closed.
+  if (!screeningUri && !apiKey) {
+    logger.info({ ctx: logCtx }, 'address screening not configured — screening disabled, address passes')
+    return { addressIsSuspicious: false }
+  }
+
   if (!screeningUri || !apiKey) {
     logger.warn(
       { ctx: logCtx },
-      'ADDRESS_SCREENING_URI or ADDRESS_SCREENING_API_KEY is not set — failing closed',
+      'only one of ADDRESS_SCREENING_URI / ADDRESS_SCREENING_API_KEY is set — failing closed',
     )
     return { addressIsSuspicious: true }
   }

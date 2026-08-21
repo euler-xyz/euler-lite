@@ -18,6 +18,7 @@ vi.mock('~/server/utils/rate-limit', () => ({
 vi.mock('~/server/utils/logger', () => ({
   logger: {
     warn: mocks.warn,
+    info: vi.fn(),
   },
 }))
 
@@ -102,7 +103,15 @@ describe('POST /api/internal/screen-address', () => {
     }
   })
 
-  it('fails closed when the URI or API key is not configured', async () => {
+  it('disables screening when neither env var is configured (forks pass every address)', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when only one of URI / API key is configured', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
