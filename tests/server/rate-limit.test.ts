@@ -16,6 +16,7 @@ vi.mock('~/server/utils/logger', () => ({
 }))
 
 const { createRateLimiter } = await import('~/server/utils/rate-limit')
+const { getInternalFetchHeaders } = await import('~/server/utils/internal-headers')
 
 const eventWith = (
   headers: Record<string, string | string[] | undefined>,
@@ -97,7 +98,7 @@ describe('trusted identity (cloudflare preset)', () => {
   it('never rate-limits internal server-to-server requests', () => {
     process.env.DOPPLER_ENVIRONMENT = 'prd'
     const limiter = makeLimiter(1)
-    const internal = () => eventWith({ 'cf-connecting-ip': '127.0.0.1' })
+    const internal = () => eventWith({ ...getInternalFetchHeaders() })
     expect(() => {
       for (let i = 0; i < 10; i++) limiter.consume(internal())
     }).not.toThrow()
@@ -122,6 +123,29 @@ describe('none preset', () => {
     // Rotating the client-controlled leftmost entry must not reset the budget.
     limiter.consume(eventWith({ 'x-forwarded-for': 'spoof-1, 203.0.113.1' }))
     expect(() => limiter.consume(eventWith({ 'x-forwarded-for': 'spoof-2, 203.0.113.1' }))).toThrow()
+  })
+
+  it('a forged legacy loopback sentinel does not bypass rate limiting', () => {
+    // Reproduces the review finding: under `none` there is no edge to
+    // overwrite cf-connecting-ip, so trusting it as an internal marker let
+    // forged requests skip rate-limit accounting entirely.
+    process.env.DOPPLER_ENVIRONMENT = 'prd'
+    process.env.EDGE_PROVIDER = 'none'
+    const limiter = makeLimiter(2)
+    const forged = () => eventWith({
+      'cf-connecting-ip': '127.0.0.1',
+      'x-forwarded-for': '203.0.113.1',
+    })
+
+    limiter.consume(forged())
+    limiter.consume(forged())
+    try {
+      limiter.consume(forged())
+      throw new Error('Expected the third forged request to be rate limited')
+    }
+    catch (err) {
+      expect(err).toMatchObject({ statusCode: 429 })
+    }
   })
 })
 

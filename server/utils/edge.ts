@@ -1,8 +1,8 @@
 import type { H3Event } from 'h3'
 import {
   EDGE_ORIGIN_AUTH_HEADER,
-  edgeHonorsInternalSentinel,
   edgeProvidesGeo,
+  edgeRequiresOriginSecret,
   extractEdgeInputs,
   normalizeCountry,
   parseEdgeProvider,
@@ -81,10 +81,8 @@ export function getEdgeContext(event: H3Event): EdgeContext {
  * not silently degrade to `none`), when production boots without a
  * preset (under `none` geo-blocking is off and rate limiting falls back to
  * best-effort identity, which is fork-friendly but never acceptable for a
- * production deployment), and when a preset that cannot honour the
- * loopback sentinel runs without EDGE_ORIGIN_SECRET (its edge forwards
- * client headers untouched, so unauthenticated internal detection would be
- * forgeable — and internal fetches could not pass the gates at all).
+ * production deployment), and when a preset that mandates origin auth
+ * runs without EDGE_ORIGIN_SECRET (see `edgeRequiresOriginSecret`).
  */
 export function assertEdgeConfig(): void {
   const provider = parseEdgeProvider(process.env.EDGE_PROVIDER)
@@ -96,12 +94,12 @@ export function assertEdgeConfig(): void {
       + 'for a deployment that intentionally runs without one.',
     )
   }
-  if (!edgeHonorsInternalSentinel(provider) && !process.env.EDGE_ORIGIN_SECRET?.trim()) {
+  if (edgeRequiresOriginSecret(provider) && !process.env.EDGE_ORIGIN_SECRET?.trim()) {
     throw new Error(
-      `EDGE_PROVIDER=${provider} requires EDGE_ORIGIN_SECRET: this edge does not `
-      + 'overwrite the internal sentinel header in transit, so internal fetches must '
-      + 'authenticate with the origin-auth secret instead. Configure the edge to stamp '
-      + 'x-edge-origin-auth and set the secret.',
+      `EDGE_PROVIDER=${provider} requires EDGE_ORIGIN_SECRET: without origin auth `
+      + 'this edge\'s trusted inputs would be forgeable by anyone who can reach the '
+      + 'origin directly. Configure the edge to stamp x-edge-origin-auth and set '
+      + 'the secret.',
     )
   }
 }

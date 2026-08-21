@@ -10,14 +10,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { H3Event } from 'h3'
 import {
-  edgeHonorsInternalSentinel,
   edgeProvidesGeo,
   edgeProvidesVpnEvidence,
+  edgeRequiresOriginSecret,
   extractEdgeInputs,
   normalizeCountry,
   parseEdgeProvider,
 } from '~/utils/edge-presets'
 import { assertEdgeConfig, getEdgeContext } from '~/server/utils/edge'
+import { getInternalFetchHeaders } from '~/server/utils/internal-headers'
 
 const ENV_KNOBS = ['EDGE_PROVIDER', 'EDGE_ORIGIN_SECRET', 'DEV_GEO_COUNTRY', 'DOPPLER_ENVIRONMENT'] as const
 
@@ -92,11 +93,11 @@ describe('preset capabilities', () => {
     expect(edgeProvidesVpnEvidence('none')).toBe(false)
   })
 
-  it('only presets whose edge overwrites (or never trusts) the sentinel header honour it', () => {
-    expect(edgeHonorsInternalSentinel('cloudflare')).toBe(true)
-    expect(edgeHonorsInternalSentinel('none')).toBe(true)
-    expect(edgeHonorsInternalSentinel('google')).toBe(false)
-    expect(edgeHonorsInternalSentinel('cloudfront')).toBe(false)
+  it('only google and cloudfront mandate the origin-auth secret', () => {
+    expect(edgeRequiresOriginSecret('cloudflare')).toBe(false)
+    expect(edgeRequiresOriginSecret('none')).toBe(false)
+    expect(edgeRequiresOriginSecret('google')).toBe(true)
+    expect(edgeRequiresOriginSecret('cloudfront')).toBe(true)
   })
 })
 
@@ -247,7 +248,9 @@ describe('getEdgeContext', () => {
   })
 
   it('flags internal requests', () => {
-    expect(getEdgeContext(eventWith({ 'cf-connecting-ip': '127.0.0.1' })).isInternal).toBe(true)
+    expect(getEdgeContext(eventWith({ ...getInternalFetchHeaders() })).isInternal).toBe(true)
+    // A forged legacy sentinel is not internal.
+    expect(getEdgeContext(eventWith({ 'cf-connecting-ip': '127.0.0.1' })).isInternal).toBe(false)
 
     process.env.EDGE_ORIGIN_SECRET = 'shared-secret'
     expect(getEdgeContext(eventWith({

@@ -67,8 +67,8 @@ function isEulerFinanceOrigin(origin: string): boolean {
 const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
 
 // The cookie is an advisory first-party marker, not a security boundary:
-// anyone can obtain it from `GET /`, and the internal sentinel
-// (see server/utils/internal-headers.ts) bypasses this check entirely.
+// anyone can obtain it from `GET /`, and internal server-to-server requests
+// (see server/utils/internal-headers.ts) bypass this check entirely.
 // Its job is to let same-origin browser GETs (which carry no Origin
 // header) through the no-Origin rejection below.
 //

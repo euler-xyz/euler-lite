@@ -4,10 +4,13 @@
  * Server-internal $fetch calls (warm-cache, vaults-cache, etc.) do not
  * traverse the edge, so they carry no trusted country or client identity.
  * Both the geo-gate and rate-limit middlewares fail-closed when those
- * inputs are missing. `getInternalFetchHeaders()` stamps headers that
- * downstream middleware recognises via `isInternalRequest` to bypass those
- * checks — a secret-based marker when EDGE_ORIGIN_SECRET is configured, a
- * loopback sentinel otherwise.
+ * inputs are missing. `getInternalFetchHeaders()` stamps a marker header
+ * that downstream middleware recognises via `isInternalRequest` to bypass
+ * those checks — the value is EDGE_ORIGIN_SECRET when configured, or a
+ * random per-process fallback otherwise, so internal status is not
+ * forgeable under any preset. (An earlier loopback `cf-connecting-ip`
+ * sentinel was forgeable wherever the edge did not overwrite it — notably
+ * under the `none` preset — and must never be honoured again.)
  *
  * If this contract breaks — the headers stop being set, the helper stops
  * recognising them, or a middleware forgets to consult the helper — every
@@ -40,9 +43,12 @@ afterEach(() => {
   }
 })
 
-describe('without EDGE_ORIGIN_SECRET (sentinel mode)', () => {
-  it('stamps the loopback sentinel', () => {
-    expect(getInternalFetchHeaders()).toEqual({ 'cf-connecting-ip': '127.0.0.1' })
+describe('without EDGE_ORIGIN_SECRET (per-process marker mode)', () => {
+  it('stamps a random per-process marker and nothing else', () => {
+    const headers = getInternalFetchHeaders()
+    expect(Object.keys(headers)).toEqual(['x-edge-internal'])
+    // 32 random bytes, base64url — long enough to be unguessable.
+    expect(headers['x-edge-internal']).toMatch(/^[A-Za-z0-9_-]{43}$/)
   })
 
   it('recognises requests decorated with getInternalFetchHeaders()', () => {
@@ -51,36 +57,29 @@ describe('without EDGE_ORIGIN_SECRET (sentinel mode)', () => {
     expect(isInternalRequest(eventWithHeaders({ ...getInternalFetchHeaders() }))).toBe(true)
   })
 
-  it('returns false when the sentinel is absent or different', () => {
+  it('rejects guessed, empty, or same-length marker values', () => {
     expect(isInternalRequest(eventWithHeaders({}))).toBe(false)
-    expect(isInternalRequest(eventWithHeaders({ 'cf-connecting-ip': '203.0.113.1' }))).toBe(false)
-    expect(isInternalRequest(eventWithHeaders({ 'cf-connecting-ip': '::1' }))).toBe(false)
-    expect(isInternalRequest(eventWithHeaders({ 'cf-connecting-ip': '127.0.0.2' }))).toBe(false)
-  })
-
-  it('ignores the secret marker header entirely (nothing to verify it against)', () => {
     expect(isInternalRequest(eventWithHeaders({ 'x-edge-internal': 'anything' }))).toBe(false)
+    const realLength = getInternalFetchHeaders()['x-edge-internal'].length
+    // Same byte length as the real marker — exercises the timing-safe compare.
+    expect(isInternalRequest(eventWithHeaders({ 'x-edge-internal': 'x'.repeat(realLength) }))).toBe(false)
   })
 
-  it('honours the sentinel only under presets whose edge overwrites it (or the none preset)', () => {
-    const sentinel = eventWithHeaders({ 'cf-connecting-ip': '127.0.0.1' })
-
-    process.env.EDGE_PROVIDER = 'cloudflare'
-    expect(isInternalRequest(sentinel)).toBe(true)
-    process.env.EDGE_PROVIDER = 'none'
-    expect(isInternalRequest(sentinel)).toBe(true)
-
-    // These edges forward client headers untouched — a forged sentinel must
-    // never grant internal status (they require EDGE_ORIGIN_SECRET at boot;
-    // this is the defense-in-depth backstop).
-    process.env.EDGE_PROVIDER = 'google'
-    expect(isInternalRequest(sentinel)).toBe(false)
-    process.env.EDGE_PROVIDER = 'cloudfront'
-    expect(isInternalRequest(sentinel)).toBe(false)
+  it('never honours the legacy loopback sentinel, under any preset', () => {
+    // Reproduces the review finding: under `none` (and any preset whose
+    // edge forwards client headers untouched) a forged sentinel used to
+    // grant internal status, bypassing rate limiting and the internal
+    // exceptions in the CORS and geo middleware.
+    const forged = eventWithHeaders({ 'cf-connecting-ip': '127.0.0.1' })
+    for (const provider of ['none', 'cloudflare', 'google', 'cloudfront', undefined]) {
+      if (provider === undefined) Reflect.deleteProperty(process.env, 'EDGE_PROVIDER')
+      else process.env.EDGE_PROVIDER = provider
+      expect(isInternalRequest(forged), `provider=${provider}`).toBe(false)
+    }
   })
 })
 
-describe('with EDGE_ORIGIN_SECRET (marker mode)', () => {
+describe('with EDGE_ORIGIN_SECRET (shared-secret marker mode)', () => {
   beforeEach(() => {
     process.env.EDGE_ORIGIN_SECRET = 'shared-secret'
   })
@@ -102,7 +101,7 @@ describe('with EDGE_ORIGIN_SECRET (marker mode)', () => {
     expect(isInternalRequest(eventWithHeaders({ 'x-edge-internal': 'shared-secreX' }))).toBe(false)
   })
 
-  it('no longer honours the loopback sentinel — spoofing it must not bypass gates', () => {
+  it('never honours the legacy loopback sentinel', () => {
     expect(isInternalRequest(eventWithHeaders({ 'cf-connecting-ip': '127.0.0.1' }))).toBe(false)
   })
 
