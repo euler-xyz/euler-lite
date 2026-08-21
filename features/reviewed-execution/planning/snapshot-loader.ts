@@ -32,7 +32,6 @@ const requirementKeys = (requirements: PlanningRequirements) => [
   ...requirements.accounts.map(value => `account:${value}`),
   ...requirements.vaults.map(value => `vault:${value}`),
   ...requirements.assets.map(value => `asset:${value}`),
-  ...requirements.contracts.map(value => `contract:${value}`),
   ...requirements.quotes.map(value => `quote:${value}`),
 ].filter((value, index, values) => values.indexOf(value) === index).sort()
 

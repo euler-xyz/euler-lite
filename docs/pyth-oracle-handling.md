@@ -77,7 +77,7 @@ The SDK plugin pipeline inserts Pyth update items into EVC batches when the plan
 
 Read-path Pyth helpers return empty update sets or `undefined` decoded results when they cannot build or simulate updates. Callers can continue rendering with available data and let the next refresh attempt recover.
 
-Transaction-path errors are surfaced through reviewed execution preparation and execution. Forms show eager simulation errors through `useTransactionPlanSimulation()`. The reviewed execution seals bounded Pyth refresh slots, refreshes them only after the synchronous duplicate guard is acquired and any static EOA prefix has confirmed, and blocks the Pyth-bearing wallet handoff if refresh or slot verification fails. Expiry of the short review/cache TTL during an already-started prerequisite receipt wait does not invalidate that accepted sequence. Pyth remains absent from the user-facing review.
+Transaction-path errors are surfaced through reviewed execution preparation and execution. Forms show eager simulation errors through `useTransactionPlanSimulation()`. The reviewed execution seals bounded Pyth refresh slots, refreshes them only after the synchronous duplicate guard is acquired and any static EOA prefix has confirmed, and blocks the Pyth-bearing wallet handoff if refresh or slot verification fails. Preparation cache expiry controls whether a prepared review may be reused; explicit quote, signature, policy, and Pyth validity checks govern the accepted execution. Pyth remains absent from the user-facing review.
 
 ## Files
 

@@ -262,32 +262,30 @@ export class ReviewedExecutionCoordinator {
         throw new Error('Review acceptance does not match the reviewed execution')
       }
 
-      const assertFresh = () => {
-        // Once an EOA prerequisite has a successful receipt, the accepted
-        // sequence is already in progress. A wallet-controlled receipt delay
-        // must not expire the in-memory review before its JIT-finalized core.
-        if (transport === 'eoa' && execution.requestSet.pythRefreshSlots.length > 0 && confirmedSteps.size > 0) return
-        const expiresAt = execution.validity.expiresAt
-        if (expiresAt !== undefined && expiresAt <= now()) throw new ReviewedExecutionExpiredError()
+      const assertExplicitDeadlines = () => {
+        const nowSeconds = Math.floor(now() / 1000)
+        if (execution.requestSet.constraints.some(constraint => constraint.kind === 'deadline' && constraint.timestamp <= nowSeconds)) {
+          throw new ReviewedExecutionExpiredError('A reviewed operation expired')
+        }
+        if (execution.requestSet.signatureSlots.some(slot => slot.validUntil !== undefined && slot.validUntil <= nowSeconds)) {
+          throw new ReviewedExecutionExpiredError('A reviewed signature request expired')
+        }
       }
       const assertWallet = async () => {
-        assertFresh()
         const actual = await dependencies.readWalletBinding()
-        assertFresh()
         assertExactWalletBinding(execution.requestSet.wallet, actual)
       }
       const assertPolicyAndWallet = async () => {
+        assertExplicitDeadlines()
         await assertWallet()
         await dependencies.revalidatePolicy(execution)
         await assertWallet()
+        assertExplicitDeadlines()
       }
 
       await assertPolicyAndWallet()
       const signatures: CollectedExecutionSignature[] = []
       for (const slot of execution.requestSet.signatureSlots) {
-        if (slot.validUntil !== undefined && slot.validUntil <= Math.floor(now() / 1000)) {
-          throw new ReviewedExecutionExpiredError('A reviewed signature request expired')
-        }
         await assertPolicyAndWallet()
         let signature: Hex
         try {
@@ -349,6 +347,7 @@ export class ReviewedExecutionCoordinator {
       const isJitEoaPyth = transport === 'eoa' && execution.requestSet.pythRefreshSlots.length > 0
       await assertPolicyAndWallet()
       const pythValues = await dependencies.refreshPyth(execution)
+      assertExplicitDeadlines()
       if (!isJitEoaPyth) await assertPolicyAndWallet()
       artifact = dependencies.finalize(execution, signatures, pythValues)
       if (artifact.reviewId !== execution.reviewId || artifact.requestDigest !== execution.requestDigest || artifact.transport !== transport) {

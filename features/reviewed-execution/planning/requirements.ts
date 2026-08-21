@@ -10,7 +10,6 @@ export interface PlanningRequirements {
   accounts: readonly Address[]
   vaults: readonly Address[]
   assets: readonly Address[]
-  contracts: readonly Address[]
   quotes: readonly string[]
 }
 
@@ -18,7 +17,7 @@ const VAULT_KEYS = new Set(['vaultAddress', 'borrowVault', 'collateralVault', 'l
 const ASSET_KEYS = new Set(['assetAddress', 'liabilityAsset', 'tokenIn', 'tokenOut', 'collateralAsset', 'debtAsset', 'fromAsset', 'toAsset', 'oldLiabilityAsset', 'newLiabilityAsset', 'wrappedTokenAddress', 'loanToken', 'collateralToken'])
 const ACCOUNT_KEYS = new Set(['owner', 'receiver', 'borrowAccount', 'repayAccount', 'positionAccount', 'liabilityAccount', 'fromAccount', 'from', 'to', 'subAccount', 'accountIn', 'accountOut', 'account', 'eulerAccount'])
 
-const collectNamedAddresses = (value: unknown, key: string | undefined, target: { accounts: Set<Address>, vaults: Set<Address>, assets: Set<Address>, contracts: Set<Address> }) => {
+const collectNamedAddresses = (value: unknown, key: string | undefined, target: { accounts: Set<Address>, vaults: Set<Address>, assets: Set<Address> }) => {
   if (typeof value === 'string' && isAddress(value)) {
     const address = getAddress(value)
     // SDK swap quotes use zero-address account/vault fields to mean that the
@@ -28,7 +27,6 @@ const collectNamedAddresses = (value: unknown, key: string | undefined, target: 
     if (key && VAULT_KEYS.has(key)) target.vaults.add(address)
     else if (key && ASSET_KEYS.has(key)) target.assets.add(address)
     else if (key && ACCOUNT_KEYS.has(key)) target.accounts.add(address)
-    else target.contracts.add(address)
     return
   }
   if (Array.isArray(value)) value.forEach(entry => collectNamedAddresses(entry, key, target))
@@ -42,7 +40,7 @@ export const collectPlanningRequirements = (intents: readonly OperationIntent[])
   if (!intents.length) throw new Error('Cannot collect requirements for an empty intent set')
   const owner = getAddress(intents[0].account)
   const chainId = intents[0].chainId
-  const collected = { accounts: new Set<Address>([owner]), vaults: new Set<Address>(), assets: new Set<Address>(), contracts: new Set<Address>() }
+  const collected = { accounts: new Set<Address>([owner]), vaults: new Set<Address>(), assets: new Set<Address>() }
   const quotes = new Set<string>()
   for (const intent of intents) {
     if (intent.chainId !== chainId || getAddress(intent.account) !== owner) throw new Error('Planning requirements mix accounts or chains')
@@ -63,7 +61,6 @@ export const collectPlanningRequirements = (intents: readonly OperationIntent[])
     accounts: sorted(collected.accounts),
     vaults: sorted(collected.vaults),
     assets: sorted(collected.assets),
-    contracts: sorted(collected.contracts),
     quotes: [...quotes].sort(),
   }) as Readonly<PlanningRequirements>
 }

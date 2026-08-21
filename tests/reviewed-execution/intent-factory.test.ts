@@ -75,7 +75,7 @@ describe('operation intent factory', () => {
     expect(requirements.vaults).toEqual([TEST_VAULT])
   })
 
-  it('does not load zero-address swap sentinels as accounts, vaults, or contracts', () => {
+  it('does not load zero-address swap sentinels as planning dependencies', () => {
     const quote = {
       ...makeSwapQuote(),
       accountIn: zeroAddress,
@@ -97,7 +97,6 @@ describe('operation intent factory', () => {
       ...requirements.accounts,
       ...requirements.vaults,
       ...requirements.assets,
-      ...requirements.contracts,
     ]).not.toContain(zeroAddress)
   })
 })

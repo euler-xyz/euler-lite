@@ -206,7 +206,6 @@ const intentSubjects = (intents: readonly OperationIntent[], owner: EffectOwner)
     ...requirements.accounts.map(value => ({ kind: 'account' as const, value })),
     ...requirements.vaults.map(value => ({ kind: 'vault-or-contract' as const, value })),
     ...requirements.assets.map(value => ({ kind: 'asset' as const, value })),
-    ...requirements.contracts.map(value => ({ kind: 'vault-or-contract' as const, value })),
   ]
 }
 

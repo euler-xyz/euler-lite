@@ -113,6 +113,74 @@ describe('reviewed execution coordinator', () => {
     expect(sendTransaction).toHaveBeenCalledOnce()
   })
 
+  it('does not reject an unchanged reviewed request solely because time elapsed', async () => {
+    const execution = makeReviewedExecution()
+    const sendTransaction = vi.fn(async () => HASH)
+    const prepared = setup({
+      execution,
+      client: makeClient(execution, { sendTransaction }),
+      now: () => execution.validity.createdAt + 24 * 60 * 60_000,
+    })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'submitted' })
+    expect(sendTransaction).toHaveBeenCalledOnce()
+  })
+
+  it('rejects an expired operation deadline before wallet handoff', async () => {
+    const execution = makeReviewedExecution('eoa', {
+      constraints: [
+        { kind: 'exact-input', token: TEST_TOKEN, amount: 10n },
+        { kind: 'deadline', timestamp: 101 },
+      ],
+    })
+    const sendTransaction = vi.fn(async () => HASH)
+    const prepared = setup({
+      execution,
+      client: makeClient(execution, { sendTransaction }),
+      now: () => 102_000,
+    })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({
+      status: 'failed',
+      message: 'A reviewed operation expired',
+    })
+    expect(sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('does not hand off a core request when its signature expires during a prerequisite receipt wait', async () => {
+    const owner = { intentId: 'intent-1', intentRevision: 1 }
+    const execution = makeReviewedExecution('eoa', {
+      before: [{
+        phase: 'prerequisite',
+        owner,
+        provenance: { source: 'migration-authorization', mode: 'transaction' },
+        chainId: 1,
+        to: TEST_TOKEN,
+        data: '0x01020304',
+      }],
+      signatureValidUntil: 101,
+    })
+    let nowMs = 100_000
+    const sentPhases: string[] = []
+    const client = makeClient(execution, {
+      sendTransaction: async (request) => {
+        sentPhases.push(request.phase)
+        return HASH
+      },
+      waitForTransactionReceipt: async (hash) => {
+        nowMs = 102_000
+        return { transactionHash: hash, status: 'success' }
+      },
+    })
+    const prepared = setup({ execution, client, now: () => nowMs })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({
+      status: 'unknown',
+      message: 'A reviewed signature request expired',
+    })
+    expect(sentPhases).toEqual(['prerequisite'])
+  })
+
   it('synchronously rejects duplicate confirmation for the same active review', async () => {
     const execution = makeReviewedExecution()
     let initialize!: () => void

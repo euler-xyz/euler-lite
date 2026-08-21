@@ -40,7 +40,7 @@ import { projectEulerSimulation } from '~/features/reviewed-execution/simulation
 const COMPILER_VERSION = 'lite-reviewed-execution-v2'
 const CLASSIFICATION_VERSION = 'safe-classification-v2'
 const POLICY_VERSION = 'lite-policy-v2'
-const REVIEW_TTL_MS = 60_000
+const PREPARATION_CACHE_TTL_MS = 60_000
 
 const PERMIT2_ALLOWANCE_ABI = [{
   type: 'function',
@@ -87,7 +87,6 @@ const reviewGenerations = new Map<Hash, { publisher: GenerationPublisher, genera
 
 const currentPolicyVersionDigest = () => canonicalDigest('policy-version-v1', toCanonicalValue({
   version: POLICY_VERSION,
-  labels: getEulerLabelsVersion(),
 }))
 
 export const canonicalReviewPresentation = (value: unknown, path = '$'): CanonicalValue => {
@@ -395,7 +394,7 @@ export const useReviewedExecution = () => {
       presentationInputs,
       compilerVersion: COMPILER_VERSION,
       policyVersionDigest,
-      freshUntil: Date.now() + REVIEW_TTL_MS,
+      freshUntil: Date.now() + PREPARATION_CACHE_TTL_MS,
       ...(safeAtomicCapability ? { safeAtomicCapability } : {}),
       before: migrationBefore,
       after: migrationAfter,
@@ -530,7 +529,7 @@ export const useReviewedExecution = () => {
       },
       async revalidatePolicy(current) {
         if (current.validity.policyVersionDigest !== currentPolicyVersionDigest()) {
-          throw new Error('Policy configuration or labels version changed after review')
+          throw new Error('Policy configuration changed after review')
         }
         const policy = await resolveAppPolicy(current.requestSet)
         assertPolicyVersionsMatch(current.policy, policy)

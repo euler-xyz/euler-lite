@@ -9,7 +9,6 @@ import { validateReviewedRequestSet, validateIntentSet } from '~/features/review
 import { connectorSessionDigest } from '~/features/reviewed-execution/domain/wallet-session'
 import { materializePreparedPlan, reviewedRequestDigest } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { PreparationCache, type PreparationCacheIdentity } from '~/features/reviewed-execution/planning/cache'
-import { collectScreenedPolicyAccounts } from '~/features/reviewed-execution/policy/app-policy'
 import { assertPolicyVersionsMatch, buildReviewedPolicy, collectPolicyRequirements, collectPolicySubjects, type PolicyResultInput } from '~/features/reviewed-execution/policy/engine'
 import { buildReviewedSimulation, validateSimulationCoverage } from '~/features/reviewed-execution/simulation/coverage'
 
@@ -95,7 +94,7 @@ describe('reviewed execution semantic kernel', () => {
     expect(() => buildReviewedPolicy({ requestSet: preliminary, results: [...policyResultsFor(preliminary), policyResultsFor(preliminary)[0]!], now: 10 })).toThrow(/duplicated/)
   })
 
-  it('screens every normalized wallet account and omits zero-address EVC sentinels', () => {
+  it('binds all normalized accounts without adding derived-address screening requirements', () => {
     const owner = getAddress('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd')
     const subAccount = getAddress('0x1234567890abcdef1234567890abcdef12345678')
     const multiAccountIntent: OperationIntent = {
@@ -121,9 +120,11 @@ describe('reviewed execution semantic kernel', () => {
       policyDigest: keccak256(toHex('pending')),
     })
 
-    expect(collectScreenedPolicyAccounts(requestSet)).toEqual([subAccount, owner].sort((left, right) =>
-      left.toLowerCase().localeCompare(right.toLowerCase()),
-    ))
+    expect(collectPolicySubjects(requestSet)).toEqual(expect.arrayContaining([
+      { kind: 'account', value: owner },
+      { kind: 'account', value: subAccount },
+    ]))
+    expect(collectPolicyRequirements(requestSet).filter(requirement => requirement.subject.startsWith('account:'))).toEqual([])
     expect(collectPolicySubjects(requestSet)).not.toContainEqual({ kind: 'account', value: zeroAddress })
   })
 
@@ -178,7 +179,7 @@ describe('reviewed execution semantic kernel', () => {
       policy: policy,
       simulation,
       pluginSnapshot: plugins,
-      validity: { createdAt: 10, expiresAt: 1000, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy-version')) },
+      validity: { createdAt: 10, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy-version')) },
       presentationKind: 'supply',
       presentationInputs: { type: 'supply', amount: '10', symbol: 'USDC' },
     })

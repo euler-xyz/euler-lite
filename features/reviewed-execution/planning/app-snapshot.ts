@@ -89,10 +89,6 @@ export const createAppSnapshotDependencies = (context: AppSnapshotContext): Snap
         if (!token) throw new Error(`Asset snapshot is unavailable for ${address}`)
         value = { address: getAddress(token.address), symbol: token.symbol, name: token.name, decimals: token.decimals }
       }
-      else if (kind === 'contract') {
-        if (!address) throw new Error(`Malformed contract snapshot key ${key}`)
-        value = { address }
-      }
       else if (kind === 'quote') {
         value = { quoteId: rawValue }
       }

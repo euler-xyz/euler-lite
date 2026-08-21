@@ -100,7 +100,6 @@ const validateEffectGraph = (effects: readonly EffectNode[], intents: readonly O
       ...requirements.accounts.map(value => `account:${value.toLowerCase()}`),
       ...requirements.vaults.map(value => `vault-or-contract:${value.toLowerCase()}`),
       ...requirements.assets.map(value => `asset:${value.toLowerCase()}`),
-      ...requirements.contracts.map(value => `vault-or-contract:${value.toLowerCase()}`),
     ]
     const effect = node.effect
     if (effect.kind === 'approval') required.push(`account:${effect.owner.toLowerCase()}`, `asset:${effect.token.toLowerCase()}`, `spender:${effect.spender.toLowerCase()}`)

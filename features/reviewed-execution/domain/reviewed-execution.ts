@@ -185,7 +185,6 @@ export interface ReviewBinding {
 
 export interface ReviewValidity {
   createdAt: number
-  expiresAt?: number
   cartGeneration: number
   planningSnapshotDigest: Hash
   policyVersionDigest: Hash

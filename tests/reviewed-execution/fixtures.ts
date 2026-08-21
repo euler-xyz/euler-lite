@@ -6,6 +6,7 @@ import type { PolicyState, FinalizedRequestSet, ReviewedExecution, PluginSnapsho
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { digestPluginPlan, sealReviewedExecution } from '~/features/reviewed-execution/domain/seal'
 import { reviewedRequestDigest, materializePreparedPlan, type AdditionalMaterializedCall } from '~/features/reviewed-execution/materialization/prepared-plan'
+import { prepareMigrationSignatureEvidence } from '~/features/reviewed-execution/materialization/signature-slots'
 import { buildReviewedPolicy, collectPolicyRequirements } from '~/features/reviewed-execution/policy/engine'
 import { buildReviewedSimulation } from '~/features/reviewed-execution/simulation/coverage'
 import type { EoaMaterializedExecutor } from '~/features/reviewed-execution/adapters/eoa'
@@ -45,7 +46,12 @@ const allowed = (): PolicyState => ({ state: 'allowed', version: 'v1', observedA
 
 export const makeReviewedExecution = (
   transport: 'eoa' | 'safe' = 'eoa',
-  additional: { before?: readonly AdditionalMaterializedCall[], after?: readonly AdditionalMaterializedCall[] } = {},
+  additional: {
+    before?: readonly AdditionalMaterializedCall[]
+    after?: readonly AdditionalMaterializedCall[]
+    constraints?: OperationIntent['constraints']
+    signatureValidUntil?: number
+  } = {},
 ): ReviewedExecution => {
   const wallet: WalletBinding = {
     chainId: 1,
@@ -58,11 +64,28 @@ export const makeReviewedExecution = (
     classificationVersion: 'classification-1',
     approvalMode: 'approve',
   }
+  const reviewedIntent: OperationIntent = additional.constraints ? { ...intent, constraints: additional.constraints } : intent
+  const migrationSignatureSlots = additional.signatureValidUntil === undefined
+    ? []
+    : [prepareMigrationSignatureEvidence({
+        planItemIndex: 0,
+        batchItemIndex: 0,
+        signer: TEST_ACCOUNT,
+        chainId: 1,
+        typedData: {
+          domain: { name: 'Test authorization', version: '1', chainId: 1, verifyingContract: TEST_VAULT },
+          types: { Authorization: [{ name: 'owner', type: 'address' }] },
+          primaryType: 'Authorization',
+          message: { owner: TEST_ACCOUNT },
+        },
+        validUntil: additional.signatureValidUntil,
+        abiArgumentPath: ['signature'],
+      })]
   const safeAtomicCapability = transport === 'safe' ? { status: 'supported' as const } : undefined
-  const preliminary = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, ...additional, safeAtomicCapability, policyDigest: keccak256(toHex('pending')) })
+  const preliminary = materializePreparedPlan({ intents: [reviewedIntent], plan, wallet, sdk, before: additional.before, after: additional.after, migrationSignatureSlots, safeAtomicCapability, policyDigest: keccak256(toHex('pending')) })
   const results = collectPolicyRequirements(preliminary).map(requirement => ({ ...requirement, result: allowed() }))
   const policy = buildReviewedPolicy({ requestSet: preliminary, results, now: 10 })
-  const requestSet = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, ...additional, safeAtomicCapability, policyDigest: policy.digest })
+  const requestSet = materializePreparedPlan({ intents: [reviewedIntent], plan, wallet, sdk, before: additional.before, after: additional.after, migrationSignatureSlots, safeAtomicCapability, policyDigest: policy.digest })
   const requestDigest = reviewedRequestDigest(requestSet)
   const plugins: PluginSnapshot = {
     rawPlan: plan as never,
@@ -72,12 +95,12 @@ export const makeReviewedExecution = (
     pluginConfigurationDigest: digestPluginPlan('configuration', { plugins: ['tos', 'keyring', 'pyth'] }),
   }
   return sealReviewedExecution({
-    intents: [intent],
+    intents: [reviewedIntent],
     requestSet: requestSet,
     policy: policy,
     simulation: buildReviewedSimulation({ requestSet, requestDigest, observedAt: 10, projection: { canExecute: true, simulatedAccounts: [], simulatedVaults: [] } }),
     pluginSnapshot: plugins,
-    validity: { createdAt: 10, expiresAt: 9_000, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy')) },
+    validity: { createdAt: 10, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy')) },
     presentationKind: 'supply',
     presentationInputs: { amount: '10', symbol: 'USDC' },
   })
@@ -150,7 +173,7 @@ export const makePythReviewedExecution = (): ReviewedExecution => {
     policy,
     simulation: buildReviewedSimulation({ requestSet, requestDigest, observedAt: 10, projection: { canExecute: true, simulatedAccounts: [], simulatedVaults: [] } }),
     pluginSnapshot: plugins,
-    validity: { createdAt: 10, expiresAt: 160_000, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy')) },
+    validity: { createdAt: 10, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy')) },
     presentationKind: 'supply',
     presentationInputs: { amount: '10', symbol: 'USDC' },
   })

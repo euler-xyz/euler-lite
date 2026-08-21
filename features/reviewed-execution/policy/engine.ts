@@ -38,8 +38,8 @@ export const collectPolicySubjects = (requestSet: ReviewedRequestSet): readonly 
 }
 
 const SUBJECT_CONCERNS: Readonly<Record<PolicySubject['kind'], readonly string[]>> = {
-  'account': ['sanctions-screening'],
-  'vault-or-contract': ['canonical-live-authority', 'labels-version'],
+  'account': [],
+  'vault-or-contract': ['vault-metadata'],
   'asset': ['asset-metadata'],
   'spender': ['spender-binding'],
   'pyth-feed': ['pyth-freshness'],
@@ -56,7 +56,7 @@ export const collectPolicyRequirements = (requestSet: ReviewedRequestSet): reado
     if (node.effect.kind === 'pyth-update') requirements.push({ subject: `effect:${node.effectId}`, concern: 'pyth-preview-bound' })
     if (node.effect.kind === 'migration-authorization') requirements.push({ subject: `effect:${node.effectId}`, concern: 'authorization-binding' })
   }
-  for (const concern of ['country', 'vpn', 'wallet-screening', 'tos', 'unverified-acknowledgement']) {
+  for (const concern of ['wallet-screening', 'tos', 'unverified-acknowledgement']) {
     requirements.push({ subject: 'global', concern })
   }
   return requirements.sort((left, right) => `${left.subject}:${left.concern}`.localeCompare(`${right.subject}:${right.concern}`))
@@ -77,7 +77,7 @@ const assertAllowed = (item: PolicyResultInput, now: number) => {
 }
 
 const EXPIRING_CONCERNS = new Set([
-  'country', 'vpn', 'wallet-screening', 'sanctions-screening', 'canonical-live-authority',
+  'wallet-screening', 'vault-metadata',
   'asset-metadata', 'spender-binding', 'pyth-freshness', 'authorization-target',
   'approval-binding', 'pyth-preview-bound', 'authorization-binding',
   'unverified-acknowledgement',

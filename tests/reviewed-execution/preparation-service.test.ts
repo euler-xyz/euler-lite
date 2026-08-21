@@ -1,19 +1,30 @@
 import { encodeFunctionData, getAddress, keccak256, toHex } from 'viem'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { EVC_ABI } from '~/abis/evc'
 import type { PolicyState, WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
 import { GenerationPublisher, PreparationCache } from '~/features/reviewed-execution/planning/cache'
 import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
 import { PlanningSnapshotLoader } from '~/features/reviewed-execution/planning/snapshot-loader'
+import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { buildReviewedPolicy, collectPolicyRequirements } from '~/features/reviewed-execution/policy/engine'
+import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
+import { detectVpn } from '~/services/vpn'
+import { screenAddress } from '~/services/trm'
+
+vi.mock('~/services/vpn', () => ({ detectVpn: vi.fn(async () => false) }))
+vi.mock('~/services/trm', () => ({ screenAddress: vi.fn(async () => false) }))
+vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsVersion: vi.fn(() => 1) }))
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
 const TOKEN = getAddress('0x2000000000000000000000000000000000000000')
 const VAULT = getAddress('0x3000000000000000000000000000000000000000')
 const EVC = getAddress('0x4000000000000000000000000000000000000000')
+const AAVE_POOL = getAddress('0x5000000000000000000000000000000000000000')
+const POSITION_ACCOUNT = getAddress('0x6000000000000000000000000000000000000000')
 const intent: OperationIntent = {
   schemaVersion: 1, intentId: 'intent-1', revision: 1, kind: 'deposit', chainId: 1, account: ACCOUNT,
   subAccounts: [ACCOUNT], planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 10n } },
@@ -25,6 +36,81 @@ const wallet: WalletBinding = {
 }
 const plan: TransactionPlan = [{ type: 'evcBatch', items: [{ targetContract: VAULT, onBehalfOfAccount: ACCOUNT, value: 0n, data: '0x12345678' }] }]
 const allowed = (): PolicyState => ({ state: 'allowed', version: 'v1', observedAt: 1, expiresAt: 10_000 })
+
+let currentVault: { address: typeof VAULT, type?: string, asset?: { address?: typeof TOKEN, symbol?: string, decimals?: number } } | undefined
+
+beforeEach(() => {
+  currentVault = { address: VAULT, type: 'evault', asset: { address: TOKEN, symbol: 'TEST', decimals: 18 } }
+  vi.mocked(getEulerLabelsVersion).mockReturnValue(1)
+  vi.mocked(detectVpn).mockReset().mockResolvedValue(false)
+  vi.mocked(screenAddress).mockReset().mockResolvedValue(false)
+  vi.stubGlobal('useVaultRegistry', () => ({
+    getVault: (address: string) => getAddress(address) === VAULT ? currentVault : undefined,
+    isVerifiedVault: () => true,
+  }))
+  vi.stubGlobal('useTokenList', () => ({
+    getTokenByAddress: (address: string) => getAddress(address) === TOKEN
+      ? { address: TOKEN, symbol: 'TEST', name: 'Test token', decimals: 18 }
+      : undefined,
+  }))
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+const createAppPolicyService = (plannerName: OperationIntent['planner']['name']) => {
+  const cache = new PreparationCache()
+  const generation = new GenerationPublisher()
+  const snapshotLoader = new PlanningSnapshotLoader(cache, { load: async key => ({
+    value: { key }, observedBlock: 100n, version: 'v1', freshUntil: 5_000,
+  }) }, generation, 'compiler-v1')
+  const compiler = new IntentCompilerRegistry({ [plannerName]: { compile: async () => plan } }, plans => plans.flat())
+  return new ReviewedExecutionPreparationService({
+    compiler,
+    snapshotLoader,
+    materializationSdk: {
+      deploymentService: { getDeployment: () => ({ addresses: { coreAddrs: { evc: EVC } } }) },
+      executionService: { encodeBatch: (items: EVCBatchItem[]) => encodeFunctionData({ abi: EVC_ABI, functionName: 'batch', args: [items] }) },
+    },
+    prefetchPlugins: async () => ({}),
+    processPlugins: async current => current,
+    resolveApprovals: async current => current,
+    preparePermit2Slots: async () => [],
+    prepareMigrationSignatureSlots: async () => [],
+    collectPythEvidence: async () => [],
+    resolvePolicy: requestSet => resolveAppPolicy(requestSet, 100),
+    simulate: async () => ({ canExecute: true, simulatedAccounts: [], simulatedVaults: [], blockNumber: 100n }),
+    pluginConfiguration: {},
+  }, cache, generation, () => 100)
+}
+
+const aaveMigrationIntent: OperationIntent = {
+  schemaVersion: 1,
+  intentId: 'intent-aave-migration',
+  revision: 1,
+  kind: 'migration',
+  chainId: 1,
+  account: ACCOUNT,
+  subAccounts: [ACCOUNT, POSITION_ACCOUNT],
+  planner: {
+    name: 'cross-protocol-migration',
+    args: {
+      direction: 'euler-to-external',
+      connectorId: 'aave',
+      owner: ACCOUNT,
+      positionRef: { collateralAsset: TOKEN, debtAsset: TOKEN, pool: AAVE_POOL },
+      deadline: 1_000n,
+      authorizationEvidenceDigest: keccak256(toHex('aave-authorization')),
+    },
+  },
+  constraints: [
+    { kind: 'maximum-input', token: TOKEN, amount: 10n },
+    { kind: 'deadline', timestamp: 1_000 },
+  ],
+  metadata: { createdAt: 1, source: 'test' },
+}
+const aaveWallet: WalletBinding = { ...wallet, subAccounts: [ACCOUNT, POSITION_ACCOUNT] }
 
 describe('authoritative reviewed execution preparation', () => {
   it('adopts exact warmed snapshots, plugin prefetch, simulation, and reviewed executions', async () => {
@@ -129,5 +215,124 @@ describe('authoritative reviewed execution preparation', () => {
       },
     })).rejects.toThrow(/wallet context changed/)
     expect(compilerCall).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['direct', 'migration', { type: 'migration' }],
+    ['batch', 'batch', [{ id: aaveMigrationIntent.intentId, review: { type: 'migration' } }]],
+  ] as const)('prepares and revalidates an Aave migration without screening its derived account for %s review', async (_path, presentationKind, presentationInputs) => {
+    const service = createAppPolicyService('cross-protocol-migration')
+    const execution = await service.prepare({
+      intents: [aaveMigrationIntent],
+      wallet: aaveWallet,
+      cartGeneration: 0,
+      runtime: {},
+      presentationKind,
+      presentationInputs,
+      compilerVersion: 'compiler-v1',
+      policyVersionDigest: keccak256(toHex('policy-v1')),
+      freshUntil: 5_000,
+    })
+
+    expect(execution.binding.presentationKind).toBe(presentationKind)
+    expect(execution.policy.subjects).not.toContainEqual(expect.objectContaining({ value: AAVE_POOL }))
+    expect(execution.validity).not.toHaveProperty('expiresAt')
+    await expect(resolveAppPolicy(execution.requestSet, 200)).resolves.toBeDefined()
+    expect(screenAddress).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(screenAddress).mock.calls).toEqual([[ACCOUNT, false], [ACCOUNT, false]])
+    expect(screenAddress).not.toHaveBeenCalledWith(POSITION_ACCOUNT, expect.any(Boolean))
+  })
+
+  it('passes a positive VPN verdict into connected-wallet screening without blocking it independently', async () => {
+    vi.mocked(detectVpn).mockResolvedValue(true)
+    const service = createAppPolicyService('cross-protocol-migration')
+
+    await expect(service.prepare({
+      intents: [aaveMigrationIntent],
+      wallet: aaveWallet,
+      cartGeneration: 0,
+      runtime: {},
+      presentationKind: 'migration',
+      presentationInputs: {},
+      compilerVersion: 'compiler-v1',
+      policyVersionDigest: keccak256(toHex('policy-v1')),
+      freshUntil: 5_000,
+    })).resolves.toBeDefined()
+    expect(screenAddress).toHaveBeenCalledOnce()
+    expect(screenAddress).toHaveBeenCalledWith(ACCOUNT, true)
+  })
+
+  it('keeps a blocked connected wallet fail closed', async () => {
+    vi.mocked(screenAddress).mockResolvedValue(true)
+    const service = createAppPolicyService('cross-protocol-migration')
+
+    await expect(service.prepare({
+      intents: [aaveMigrationIntent],
+      wallet: aaveWallet,
+      cartGeneration: 0,
+      runtime: {},
+      presentationKind: 'migration',
+      presentationInputs: {},
+      compilerVersion: 'compiler-v1',
+      policyVersionDigest: keccak256(toHex('policy-v1')),
+      freshUntil: 5_000,
+    })).rejects.toThrow('Connected wallet policy screening is blocked')
+    expect(screenAddress).toHaveBeenCalledOnce()
+    expect(screenAddress).toHaveBeenCalledWith(ACCOUNT, false)
+  })
+
+  it('keeps real vault metadata failures fail closed', async () => {
+    currentVault = { address: VAULT }
+    const service = createAppPolicyService('deposit')
+
+    await expect(service.prepare({
+      intents: [intent],
+      wallet,
+      cartGeneration: 0,
+      runtime: {},
+      presentationKind: 'supply',
+      presentationInputs: {},
+      compilerVersion: 'compiler-v1',
+      policyVersionDigest: keccak256(toHex('policy-v1')),
+      freshUntil: 5_000,
+    })).rejects.toThrow(`Vault metadata is incomplete for ${VAULT}`)
+  })
+
+  it('does not require Euler labels for a reviewed direct call with no vault subject', async () => {
+    vi.mocked(getEulerLabelsVersion).mockReturnValue(0)
+    const rewardIntent: OperationIntent = {
+      schemaVersion: 1,
+      intentId: 'intent-reward',
+      revision: 1,
+      kind: 'reward-claim',
+      chainId: 1,
+      account: ACCOUNT,
+      subAccounts: [ACCOUNT],
+      planner: {
+        name: 'reward-claim',
+        args: { claimIds: ['claim-1'], provider: 'test', rewardsDigest: keccak256(toHex('rewards')) },
+      },
+      constraints: [{ kind: 'selected-rewards', claimIds: ['claim-1'] }],
+      metadata: { createdAt: 1, source: 'test' },
+    }
+    const directPlan: TransactionPlan = [{
+      type: 'contractCall',
+      chainId: 1,
+      to: AAVE_POOL,
+      abi: [{ type: 'function', name: 'claim', inputs: [], outputs: [], stateMutability: 'nonpayable' }],
+      functionName: 'claim',
+      args: [],
+      value: 0n,
+    }]
+    const requestSet = materializePreparedPlan({
+      intents: [rewardIntent],
+      plan: directPlan,
+      wallet,
+      sdk: { deploymentService: { getDeployment: () => ({ addresses: { coreAddrs: { evc: EVC } } }) }, executionService: { encodeBatch: () => '0x' } },
+      directCallAllowlist: { [`1:${AAVE_POOL.toLowerCase()}:claim`]: 'reward:test' },
+      policyDigest: keccak256(toHex('pending')),
+    })
+
+    await expect(resolveAppPolicy(requestSet, 100)).resolves.toMatchObject({ schemaVersion: 1 })
   })
 })

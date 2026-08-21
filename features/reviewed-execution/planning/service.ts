@@ -230,7 +230,6 @@ export class ReviewedExecutionPreparationService {
       pluginSnapshot: plugins,
       validity: {
         createdAt: this.now(),
-        expiresAt: request.freshUntil,
         cartGeneration: request.cartGeneration,
         planningSnapshotDigest: snapshot.digest,
         policyVersionDigest: request.policyVersionDigest,

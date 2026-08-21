@@ -216,7 +216,7 @@ At review, Lite seals both the raw pre-plugin plan and the fully processed previ
 
 Pyth finalization is just in time for the request that contains the update, not merely for the beginning of a multi-request EOA sequence. In the initial schema every Pyth slot in one reviewed execution must belong to the same Pyth-bearing EVC request. If static approval or migration-grant requests precede it, Lite first hands only that static prefix to SDK `executeMaterialized`; after the SDK has obtained each required successful receipt, Lite reruns the public SDK plugin prefetch and complete plugin pipeline and finalizes the Pyth-bearing suffix immediately before its next wallet request. The suffix is then handed back to `executeMaterialized`, which continues the reviewed core and normal revocation sequence. A signature slot may not occur in the pre-Pyth prefix. Supporting multiple independently timed Pyth-bearing requests requires an SDK just-in-time request-finalization hook or a new reviewed schema; the initial implementation fails closed before the first wallet request.
 
-Lite does not adopt the refreshed plugin result directly. A structural verifier compares it with the sealed preview and accepts only changes represented by the declared Pyth slot: a fresh `updatePriceFeeds` payload and its native fee at or below the sealed maximum. Pyth target, selector, feed set, insertion point, effect ordering, chain, and account remain immutable. TOS, Keyring, and every other plugin output must be byte-for-byte and structurally unchanged; any added, removed, reordered, retargeted, or modified static effect fails before the Pyth-bearing wallet request. Wallet and policy revalidation for the first Pyth-bearing suffix request runs immediately before refresh; after the verifier timestamps the fresh evidence, only synchronous finalization, exact byte checks, and SDK handoff may occur before that wallet request. Later non-Pyth suffix requests retain their normal per-request checks. Once a static EOA prerequisite has a successful receipt, expiry of the short-lived review/cache TTL during wallet-controlled receipt waiting does not abort that already-started accepted sequence; wallet, policy, slot, operation-deadline, and byte-equality checks remain in force.
+Lite does not adopt the refreshed plugin result directly. A structural verifier compares it with the sealed preview and accepts only changes represented by the declared Pyth slot: a fresh `updatePriceFeeds` payload and its native fee at or below the sealed maximum. Pyth target, selector, feed set, insertion point, effect ordering, chain, and account remain immutable. TOS, Keyring, and every other plugin output must be byte-for-byte and structurally unchanged; any added, removed, reordered, retargeted, or modified static effect fails before the Pyth-bearing wallet request. Wallet and policy revalidation for the first Pyth-bearing suffix request runs immediately before refresh; after the verifier timestamps the fresh evidence, only synchronous finalization, exact byte checks, and SDK handoff may occur before that wallet request. Later non-Pyth suffix requests retain their normal per-request checks. Preparation-cache expiry controls only whether cached work may be reused; it does not invalidate an accepted in-memory execution. Wallet, policy, signature, operation-deadline, Pyth, and byte-equality checks remain in force.
 
 Pyth is the only dynamic plugin kind in the initial schema, for example `pyth-update-v1`. Supporting another dynamic plugin requires a new versioned slot type, structural validator, internal policy treatment, and regression suite. This restriction is Lite-owned and does not require an SDK API that filters execution to Pyth alone.
 
@@ -241,9 +241,9 @@ Do not perform a costly sequential backend simulation of approvals, permits, plu
 
 ### 5.8 Policy from the final graph
 
-Policy subjects are derived exclusively from the final typed effect graph. They include all source, destination, acquired, input, underlying, prerequisite, post-migration revocation/restoration, wrapper, direct-call, and plugin-injected subjects.
+Policy subjects come from the exact wallet binding, sealed constraints, and final typed effect graph. They include all source, destination, acquired, input, underlying, prerequisite, post-migration revocation/restoration, wrapper, direct-call, and plugin-injected subjects needed by the existing checks.
 
-Pending country detection, failed screening, missing metadata, unresolved vault type, missing underlying asset, unknown authority, or unavailable required policy result all fail closed.
+Connected-wallet screening remains fail closed and receives the current VPN verdict as an input, matching the established wallet-connect guard. Derived EVC accounts and sub-accounts are bound into the reviewed request but are not screened as additional wallets. Country, vault, asset, and swap eligibility remain enforced by the existing server and form guards; reviewed execution does not add a parallel global country or VPN rule. Missing required vault or asset metadata, unresolved vault type, missing underlying asset, or unavailable required policy result still fail closed. Planner and compiler validation remain responsible for protocol-specific addresses embedded in operation inputs; reviewed execution does not impose a generic contract allowlist on those addresses.
 
 ### 5.9 Submission boundary and unknown status
 
@@ -581,9 +581,9 @@ type PolicyState =
 
 Evidence covers:
 
-- Country/geo and VPN screening.
-- Wallet/account screening.
-- Vault chain, type, underlying, labels version, and canonical live authority.
+- Connected-wallet screening, with the current VPN verdict passed to the established screening service.
+- Exact wallet, account, and sub-account binding without additional derived-address screening.
+- Vault chain, type, underlying, and labels version.
 - Unverified-vault acknowledgement scoped to the exact reviewed execution subject set.
 - TOS document/message digest and `(chainId, account)` acceptance.
 - Quote identity, provider, calldata digest, assets, amounts, spender, limits, and expiry.
@@ -596,7 +596,7 @@ Policy result is internal. It does not add visible review fields or acknowledgem
 
 The policy engine lives at application scope. It does not retain component callbacks whose state can freeze after unmount.
 
-Reviewed execution validity, policy result, wallet connector/session, classification, and draft revision are checked after every relevant await and immediately before every signature or send. For the first EOA Pyth-bearing suffix request, these checks occur immediately before its Pyth refresh; the structural verifier, synchronous finalizer, exact-byte hook, and SDK handoff are the only subsequent work before send. A failure before the wallet request is reported without submission. If the wallet interaction may have been accepted but the provider cannot report a result, Lite reports status unknown and stops.
+Reviewed execution integrity, policy result, wallet connector/session, classification, and draft revision are checked at their applicable pre-handoff boundaries. Operation-specific quote, signature, and Pyth deadlines remain explicit; there is no blanket expiry for an unchanged reviewed execution. For the first EOA Pyth-bearing suffix request, the mutable checks occur immediately before its Pyth refresh; the structural verifier, synchronous finalizer, exact-byte hook, and SDK handoff are the only subsequent work before send. A failure before the wallet request is reported without submission. If the wallet interaction may have been accepted but the provider cannot report a result, Lite reports status unknown and stops.
 
 No post-acceptance check may rebuild or mutate the accepted artifact. A failed check invalidates that reviewed execution and requires fresh preparation and review.
 
@@ -623,7 +623,7 @@ Rules:
 
 - Acquire an in-memory guard synchronously at coordinator entry, before awaiting any signature or wallet method. Re-entry for that active reviewed execution/process is rejected and the confirm action remains disabled.
 - The coordinator guard prevents duplicate callbacks for the active reviewed execution before handoff. It is not shared across tabs or reloads. After handoff, the pre-existing Safe tracked-execution slot may continue gating confirmations while the Safe proposal awaits its established current-session outcome.
-- Revalidate the opaque acceptance binding, reviewed execution integrity, current account, chain, connector session, wallet kind, policy, expiry, and cart generation before collecting signatures and again immediately before the transport request.
+- Revalidate the opaque acceptance binding, reviewed execution integrity, current account, chain, connector session, wallet kind, policy, applicable operation/signature deadlines, and cart generation at their pre-handoff boundaries.
 - Finalization may fill only declared signature slots, bounded Pyth refresh slots, and wallet-owned transport fields. Compare the finalized normalized artifact with the accepted request set immediately before calling the adapter. For an EOA sequence with static prerequisites before its single Pyth-bearing request, dispatch only that reviewed static prefix first; refresh and finalize Pyth only after its SDK-owned receipts and immediately before dispatching the finalized suffix.
 - Call each wallet method at most once from that invocation. Do not automatically retry after any error or unknown response.
 - A recognized wallet rejection or known failure is reported as such. A timeout, disconnect, malformed response, missing identifier, or otherwise inconclusive result after wallet interaction is reported as **status unknown**.
@@ -881,8 +881,8 @@ Inject failure or context change before and after every await in preparation, fi
 | Safe classification resolves late and rewrites approval mode | #782, #784 | Classification/approval mode resolved before seal; drift invalidates | Unresolved-to-Safe and Permit2-to-approval transitions require new review |
 | Reviewed Safe silently falls back to EOA/sequential execution | #782, #784 | Transport-specific reviewed request set and adapter; no fallback return type | Provider loss fails closed with no alternate wallet write |
 | Safe call batch is assumed atomic from one RPC invocation | Plan review | Seal version/from/chain/atomic requirement/calls/capabilities, require per-chain atomic capability, and verify confirmed atomic status | Missing/unsupported capability blocks review; envelope drift blocks handoff; `atomic: false` or missing evidence never reports success |
-| Policy covers only page-primary vaults | #781 | Subjects derived from complete effect graph | Blocked destination/input/underlying/prerequisite/plugin subject prevents review |
-| Policy callback outlives component but its state freezes | #783 | App-scoped evidence with direct expiry/version evaluation | Unmount, advance time/switch wallet, then sign/send remains blocked |
+| Final-graph metadata or acknowledgements cover only page-primary vaults | #781 | Required vault and asset subjects are derived from the complete effect graph | Missing metadata or acknowledgement for a required secondary subject prevents review |
+| Policy callback outlives component but its state freezes | #783 | App-scoped evidence with policy-result expiry and version evaluation | Unmount, advance time/switch wallet, then sign/send remains blocked |
 | Policy asserted only before the terminal batch, not prerequisites | #783 | Coordinator validates before every irreversible step | Flip policy during prerequisite build; no grant is sent |
 | Module-global latch from reviewed execution A overwrites B | #810, #784 | Reviewed execution is instance-owned by ID; no module-global execution authority | A prepares, cart clears/B prepares, A finishes last; B remains authoritative |
 | Shared modal refs let review A execute plan B | #782, #784 | Modal captures immutable reviewed execution ID/digest | Two overlapping direct-operation reviews execute their own exact artifacts |
@@ -902,12 +902,12 @@ Inject failure or context change before and after every await in preparation, fi
 
 Preserve:
 
-- Unknown country and missing metadata fail closed.
-- Policy includes source, destination, acquired, input, underlying, and distinct multiply/refinance/migration subjects.
-- Hard blocks and acquired-exposure restrictions are modeled explicitly.
+- Existing server and form geo restrictions remain authoritative, and missing required metadata fails closed.
+- Required metadata and acknowledgements include source, destination, acquired, input, underlying, and distinct multiply/refinance/migration subjects.
+- Existing form guards retain their hard-block and acquired-exposure restriction semantics.
 - Unverified acknowledgement binds to account, chain, final subject set, and reviewed execution digest.
 
-Do not port page-by-page guards or copied policy metadata. The final effect graph is the only policy-subject source.
+Do not port page-by-page guards or copied policy metadata. Use the exact wallet binding, sealed constraints, and final effect graph only for evidence the reviewed boundary must revalidate.
 
 ### PR #782 - exact artifact and submission integrity
 
@@ -921,7 +921,7 @@ Do not port modal callbacks, object-identity authorization, heuristic equality, 
 
 Preserve:
 
-- TOS/account/chain versioning, positive VPN result preservation, canonical authority verification, pending geo blocking, stale async rejection, direct expiry evaluation, and policy assertions at every irreversible boundary.
+- TOS/account/chain versioning, connected-wallet screening with its VPN input, required vault metadata verification, existing geo blockers, stale async rejection, operation-specific and policy-result expiry evaluation, and policy assertions at every irreversible boundary.
 
 Improve on it by owning evidence at application scope instead of retaining callbacks whose component-scoped state can stop updating.
 

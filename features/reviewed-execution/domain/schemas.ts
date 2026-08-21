@@ -504,9 +504,8 @@ const assertReviewBinding = (value: unknown, path: string) => {
 
 const assertValidity = (value: unknown, path: string) => {
   assertRecord(value, path)
-  assertExactKeys(value, ['createdAt', 'expiresAt', 'cartGeneration', 'planningSnapshotDigest', 'policyVersionDigest'], path)
+  assertExactKeys(value, ['createdAt', 'cartGeneration', 'planningSnapshotDigest', 'policyVersionDigest'], path)
   assertSafeInteger(value.createdAt, `${path}.createdAt`)
-  assertOptional(value.expiresAt, `${path}.expiresAt`, (candidate, candidatePath) => assertSafeInteger(candidate, candidatePath))
   assertSafeInteger(value.cartGeneration, `${path}.cartGeneration`)
   assertHash(value.planningSnapshotDigest, `${path}.planningSnapshotDigest`)
   assertHash(value.policyVersionDigest, `${path}.policyVersionDigest`)
