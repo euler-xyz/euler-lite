@@ -337,7 +337,7 @@ The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stable
 
 ### Server-Side API Protection
 
-The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, TRM) to keep operator API keys out of client bundles. Several layers protect these endpoints:
+The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, the compliance screening API) to keep operator API keys out of client bundles. Several layers protect these endpoints:
 
 | Layer | Purpose |
 |---|---|
@@ -357,7 +357,7 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
 
-**Wallet screening fail-closed**: `server/api/internal/screen-address.post.ts` proxies address checks to the TRM API (configured via `WALLET_SCREENING_URI`). If the env var is not set, or the TRM API returns an error or times out, the endpoint returns `addressIsSuspicious: true` — the app fails closed rather than open. Operators must set `WALLET_SCREENING_URI` or all users will be treated as suspicious.
+**Wallet screening fail-closed**: `server/api/internal/screen-address.post.ts` proxies address checks to the data-v3 compliance API (configured via `ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`; the shared upstream logic lives in `server/utils/screening.ts`). With BOTH env vars unset the deployment is treated as having no screening provider (a fork, typically) and every address passes — except in production (`DOPPLER_ENVIRONMENT=prd`, the same convention the CORS/geo/rate middleware use), where an absent configuration is a failed secret injection rather than an opt-out and screening fails closed. Once either var is set, the path is fail-closed: partial configuration, a non-https `ADDRESS_SCREENING_URI` (plain http is tolerated for localhost/127.0.0.1 only — the restricted key must not travel without TLS), upstream errors, timeouts, redirects, address-mismatched or malformed verdicts all return `addressIsSuspicious: true`. Operators of screened deployments must therefore set both vars — and be aware that removing both silently disables screening, production refuses to run unscreened, and non-production monitoring can watch the screening-disabled log line. The route is also consumed cross-origin by first-party `*.euler.finance` SPAs that have no server of their own — `server/middleware/cors.ts` carries a CORS exception scoped to exactly this path, so no other internal route is exposed to sibling apps. It deliberately stays under `/api/internal/` (not `/api/public/`): the consumers are our own apps, and the public prefix would advertise it to external integrators. Because of these external first-party consumers, changes to this route's request/response contract must stay backward-compatible.
 
 **Important**: This is a best-effort safeguard, not a security boundary. It catches accidental abuse (e.g. a client stuck in a retry loop) but will not stop a determined attacker. Known limitations:
 

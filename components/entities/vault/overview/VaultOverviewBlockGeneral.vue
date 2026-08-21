@@ -23,7 +23,6 @@ const emit = defineEmits<{
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { isVaultGovernorVerified } = useVaults()
 const { get: registryGet } = useVaultRegistry()
 const {
   load: loadOpenInterest,
@@ -39,7 +38,8 @@ const vaultAddress = computed(() => getAddress(vault.address))
 const vaultRef = computed(() => vault)
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
-const { badges, governanceType } = useVaultTypeBadges(vaultRef)
+const { badges, governanceType, isVerified: isGovernorVerified, verificationVault } = useVaultTypeBadges(vaultRef)
+const governanceVault = computed(() => verificationVault.value as EVault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
 const description = computed(() => {
@@ -51,7 +51,6 @@ const isDeprecated = computed(() => {
 })
 const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
@@ -186,7 +185,7 @@ watchEffect(() => {
         label="Vault type"
       >
         <VaultTypeChip
-          :vault="vault"
+          :vault="governanceVault"
           :type="governanceType"
           nudge
           class="w-fit"
@@ -213,7 +212,7 @@ watchEffect(() => {
       >
         <VaultTypeChip
           v-if="!isGovernorVerified"
-          :vault="vault"
+          :vault="governanceVault"
           type="unknown"
           nudge
           class="w-fit"

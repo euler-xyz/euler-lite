@@ -39,7 +39,7 @@ vi.mock('~/services/vpn', () => ({
   resetVpnCache: mocks.resetVpnCache,
 }))
 
-vi.mock('~/services/trm', () => ({
+vi.mock('~/services/screening', () => ({
   screenAddress: mocks.screenAddress,
 }))
 
