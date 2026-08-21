@@ -94,6 +94,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             </template>
             <RecentlyAddedBadge
               v-if="market.metrics.hasRecentlyAdded"
+              entity="market"
             />
             <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
