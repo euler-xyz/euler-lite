@@ -15,10 +15,10 @@ import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-polic
 import { buildReviewedPolicy, collectPolicyRequirements } from '~/features/reviewed-execution/policy/engine'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { detectVpn } from '~/services/vpn'
-import { screenAddress } from '~/services/trm'
+import { screenAddress } from '~/services/screening'
 
 vi.mock('~/services/vpn', () => ({ detectVpn: vi.fn(async () => false) }))
-vi.mock('~/services/trm', () => ({ screenAddress: vi.fn(async () => false) }))
+vi.mock('~/services/screening', () => ({ screenAddress: vi.fn(async () => false) }))
 vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsVersion: vi.fn(() => 1) }))
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')

@@ -4,7 +4,7 @@ import type { PolicyState, ReviewedPolicy, ReviewedRequestSet } from '../domain/
 import { buildReviewedPolicy, collectPolicyRequirements, type PolicyResultInput } from './engine'
 import { hasUnverifiedVaultAcknowledgement } from './acknowledgements'
 import { detectVpn } from '~/services/vpn'
-import { screenAddress } from '~/services/trm'
+import { screenAddress } from '~/services/screening'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { operationBlockerEntries } from '~/utils/operationGuardRegistry'
 
