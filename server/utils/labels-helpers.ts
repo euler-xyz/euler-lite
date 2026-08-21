@@ -1,5 +1,5 @@
 import { getAddress, type Address } from 'viem'
-import { INTERNAL_FETCH_HEADERS } from './internal-headers'
+import { getInternalFetchHeaders } from './internal-headers'
 
 export interface EntityEntry {
   addresses?: unknown
@@ -46,6 +46,6 @@ export async function fetchLabels<T>(
 ): Promise<T> {
   return await $fetch<T>(`/api/internal/labels/${file}`, {
     query: { chainId },
-    headers: INTERNAL_FETCH_HEADERS,
+    headers: getInternalFetchHeaders(),
   }) as unknown as T
 }
