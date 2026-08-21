@@ -20,11 +20,38 @@ function isTruthyHeader(value: string | string[] | undefined): boolean {
     .some(token => token.trim().toLowerCase() === 'true')
 }
 
+function hasHeader(value: string | string[] | undefined): boolean {
+  return Array.isArray(value) ? value.length > 0 : value !== undefined
+}
+
 // The VPN verdict comes from edge-set request headers, never from the client
-// body — a client could otherwise clear its own flag.
-export function deriveVpnIsUsed(event: H3Event): boolean {
-  return isTruthyHeader(event.node.req.headers['x-is-vpn'])
-    || isTruthyHeader(event.node.req.headers['x-is-proxy-or-vpn'])
+// body — a client could otherwise clear its own flag. When neither header is
+// present the measurement is unknown and reported as null (the upstream
+// stores it as "not measured"), never as a fabricated false.
+export function deriveVpnIsUsed(event: H3Event): boolean | null {
+  const vpn = event.node.req.headers['x-is-vpn']
+  const proxyOrVpn = event.node.req.headers['x-is-proxy-or-vpn']
+  if (!hasHeader(vpn) && !hasHeader(proxyOrVpn)) {
+    return null
+  }
+  return isTruthyHeader(vpn) || isTruthyHeader(proxyOrVpn)
+}
+
+// The restricted API key must only travel over TLS, and never follow a
+// redirect (Node preserves request headers across cross-origin redirects).
+// Plain http is tolerated for loopback targets only, so local dev against
+// a local upstream keeps working.
+function isAllowedScreeningUri(uri: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(uri)
+    if (protocol === 'https:') {
+      return true
+    }
+    return protocol === 'http:' && (hostname === 'localhost' || hostname === '127.0.0.1')
+  }
+  catch {
+    return false
+  }
 }
 
 /**
@@ -32,9 +59,10 @@ export function deriveVpnIsUsed(event: H3Event): boolean {
  * (`POST /v3/compliance/address-screening`).
  *
  * Fail-closed: every branch other than an HTTP 200 carrying an explicit
- * `data.addressIsSuspicious: false` reports the address as suspicious —
- * missing configuration, upstream errors, timeouts, and malformed or
- * ambiguous verdicts included.
+ * `data.addressIsSuspicious: false` **for the requested address** reports the
+ * address as suspicious — missing or non-TLS configuration, upstream errors,
+ * timeouts, redirects, malformed or ambiguous verdicts, and verdicts echoing
+ * a different address included.
  *
  * `chain` is deliberately omitted from the request: the upstream defaults to
  * `ethereum`, and unknown chain names would only trigger its provider
@@ -42,7 +70,7 @@ export function deriveVpnIsUsed(event: H3Event): boolean {
  */
 export async function screenAddressUpstream(
   address: string,
-  vpnIsUsed: boolean,
+  vpnIsUsed: boolean | null,
   logCtx: string,
 ): Promise<ScreeningResult> {
   const screeningUri = process.env.ADDRESS_SCREENING_URI
@@ -56,6 +84,14 @@ export async function screenAddressUpstream(
     return { addressIsSuspicious: true }
   }
 
+  if (!isAllowedScreeningUri(screeningUri)) {
+    logger.warn(
+      { ctx: logCtx },
+      'ADDRESS_SCREENING_URI is not https (or local http) — refusing to send the API key, failing closed',
+    )
+    return { addressIsSuspicious: true }
+  }
+
   try {
     const resp = await fetchWithTimeout(screeningUri, UPSTREAM_FETCH_TIMEOUT_MS, {
       method: 'POST',
@@ -64,6 +100,7 @@ export async function screenAddressUpstream(
         'X-API-Key': apiKey,
       },
       body: JSON.stringify({ address, vpnIsUsed }),
+      redirect: 'error',
     })
 
     if (!resp.ok) {
@@ -72,11 +109,16 @@ export async function screenAddressUpstream(
     }
 
     const body = await resp.json()
-    const isSuspicious = body?.data?.addressIsSuspicious !== false
+    const verdict = body?.data?.addressIsSuspicious
+    const echoedAddress = body?.data?.address
+    const addressMatches
+      = typeof echoedAddress === 'string'
+        && echoedAddress.toLowerCase() === address.toLowerCase()
+    const isSuspicious = verdict !== false || !addressMatches
 
     if (isSuspicious) {
       logger.warn(
-        { ctx: logCtx, addressHash: hashIdentifier(address) },
+        { ctx: logCtx, addressHash: hashIdentifier(address), addressMatches },
         'flagged, malformed, or ambiguous screening response — failing closed',
       )
     }
