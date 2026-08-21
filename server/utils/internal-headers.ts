@@ -1,9 +1,11 @@
 import type { H3Event } from 'h3'
 import {
   EDGE_ORIGIN_AUTH_HEADER,
+  edgeHonorsInternalSentinel,
   INTERNAL_MARKER_HEADER,
   INTERNAL_SENTINEL_HEADER,
   INTERNAL_SENTINEL_VALUE,
+  parseEdgeProvider,
 } from '~/utils/edge-presets'
 import { timingSafeEqualStrings } from '~/server/utils/timing-safe'
 
@@ -30,12 +32,16 @@ import { timingSafeEqualStrings } from '~/server/utils/timing-safe'
  *
  * - No secret: fall back to a loopback sentinel in a header the edge
  *   overwrites in transit (see the sentinel constants and their rationale
- *   in utils/edge-presets.ts). SECURITY: this sentinel
- *   is only sound while the edge overwrites that header in transit AND the
- *   origin is not directly reachable — an attacker who bypasses the edge
- *   can spoof it to skip rate limiting AND geo-blocking. Configure
- *   EDGE_ORIGIN_SECRET to close that hole. Do not add these headers to
- *   anything that forwards user input into the downstream URL.
+ *   in utils/edge-presets.ts). The sentinel is only honoured under presets
+ *   where that overwrite actually happens or where no edge-derived trust
+ *   exists at all (`edgeHonorsInternalSentinel`); the remaining presets
+ *   forward client headers untouched and therefore require
+ *   EDGE_ORIGIN_SECRET — enforced at boot by edge-guard. SECURITY: even
+ *   where honoured, the sentinel relies on the origin not being directly
+ *   reachable — an attacker who bypasses the edge can spoof it to skip
+ *   rate limiting AND geo-blocking. Configure EDGE_ORIGIN_SECRET to close
+ *   that hole. Do not add these headers to anything that forwards user
+ *   input into the downstream URL.
  */
 export function getInternalFetchHeaders(): Record<string, string> {
   const secret = process.env.EDGE_ORIGIN_SECRET?.trim()
@@ -60,6 +66,11 @@ export function isInternalRequest(event: H3Event): boolean {
   if (secret) {
     const marker = headers[INTERNAL_MARKER_HEADER]
     return typeof marker === 'string' && timingSafeEqualStrings(marker, secret)
+  }
+  // Defense-in-depth backstop: presets that require the secret never honour
+  // the sentinel, even if a deployment somehow reaches this state.
+  if (!edgeHonorsInternalSentinel(parseEdgeProvider(process.env.EDGE_PROVIDER))) {
+    return false
   }
   return headers[INTERNAL_SENTINEL_HEADER] === INTERNAL_SENTINEL_VALUE
 }

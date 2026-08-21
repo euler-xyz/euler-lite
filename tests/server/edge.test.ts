@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { H3Event } from 'h3'
 import {
+  edgeHonorsInternalSentinel,
   edgeProvidesGeo,
   edgeProvidesVpnEvidence,
   extractEdgeInputs,
@@ -89,6 +90,13 @@ describe('preset capabilities', () => {
     expect(edgeProvidesVpnEvidence('google')).toBe(false)
     expect(edgeProvidesVpnEvidence('cloudfront')).toBe(false)
     expect(edgeProvidesVpnEvidence('none')).toBe(false)
+  })
+
+  it('only presets whose edge overwrites (or never trusts) the sentinel header honour it', () => {
+    expect(edgeHonorsInternalSentinel('cloudflare')).toBe(true)
+    expect(edgeHonorsInternalSentinel('none')).toBe(true)
+    expect(edgeHonorsInternalSentinel('google')).toBe(false)
+    expect(edgeHonorsInternalSentinel('cloudfront')).toBe(false)
   })
 })
 
@@ -283,5 +291,16 @@ describe('assertEdgeConfig', () => {
   it('refuses to boot on a typoed preset in any environment', () => {
     process.env.EDGE_PROVIDER = 'cloudflre'
     expect(() => assertEdgeConfig()).toThrow(/Unknown EDGE_PROVIDER/)
+  })
+
+  it('refuses to boot presets that cannot honour the sentinel without the origin-auth secret', () => {
+    for (const provider of ['google', 'cloudfront']) {
+      process.env.EDGE_PROVIDER = provider
+      expect(() => assertEdgeConfig()).toThrow(/requires EDGE_ORIGIN_SECRET/)
+
+      process.env.EDGE_ORIGIN_SECRET = 'shared-secret'
+      expect(() => assertEdgeConfig()).not.toThrow()
+      Reflect.deleteProperty(process.env, 'EDGE_ORIGIN_SECRET')
+    }
   })
 })
