@@ -1,36 +1,16 @@
-import { getAddress, isHash, type Hash, type Hex } from 'viem'
+import { getAddress, isHash, type Hash } from 'viem'
 import {
   MaterializedTransactionRevertedError,
   type ExecuteMaterializedOptions,
   type FinalizedMaterializedExecution,
   type MaterializedExecutionResult,
 } from '@eulerxyz/euler-v2-sdk'
-import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { EoaRequest, FinalizedRequestSet, ReviewedExecution } from '../domain/reviewed-execution'
 import { AttemptRevertedError, DispatchStatusUnknownError, ProvenPreDispatchCancellationError } from '../coordinator/errors'
-import type { ExecutionTransportAdapter, DispatchCallbacks, DispatchResult } from './types'
-
-export interface EoaSubmittedTransaction {
-  hash: Hash
-  from: `0x${string}`
-  to: `0x${string}` | null
-  input: Hex
-  value: bigint
-  chainId?: number
-  nonce: number
-}
-
-export interface EoaReceipt {
-  transactionHash: Hash
-  status: 'success' | 'reverted'
-}
+import type { ExecutionTransportAdapter, DispatchCallbacks, DispatchOptions, DispatchResult } from './types'
 
 export interface EoaAdapterClient {
-  getBlockNumber(): Promise<bigint>
-  getTransactionCount(account: `0x${string}`, blockTag: 'pending'): Promise<number>
   sendTransaction(request: EoaRequest): Promise<Hash>
-  getTransaction(hash: Hash): Promise<EoaSubmittedTransaction>
-  waitForTransactionReceipt(hash: Hash): Promise<EoaReceipt>
 }
 
 export type EoaMaterializedExecutor = (
@@ -45,25 +25,12 @@ const isUserRejected = (error: unknown) => {
   return code === 4001 || code === 5000 || message.includes('user rejected') || message.includes('user denied')
 }
 
-export const eoaRequestSemanticDigest = (request: Pick<EoaRequest, 'chainId' | 'from' | 'to' | 'data' | 'value'>): Hash =>
-  canonicalDigest('eoa-request-semantics-v1', toCanonicalValue({
-    chainId: request.chainId,
-    from: getAddress(request.from),
-    to: getAddress(request.to),
-    data: request.data.toLowerCase(),
-    value: request.value,
-  }))
-
-const submittedSemanticDigest = (transaction: EoaSubmittedTransaction, fallbackChainId: number): Hash => {
-  if (!transaction.to) throw new Error('Submitted transaction unexpectedly creates a contract')
-  return eoaRequestSemanticDigest({
-    chainId: transaction.chainId ?? fallbackChainId,
-    from: getAddress(transaction.from),
-    to: getAddress(transaction.to),
-    data: transaction.input,
-    value: transaction.value,
-  })
-}
+const sameRequest = (left: Pick<EoaRequest, 'chainId' | 'from' | 'to' | 'data' | 'value'>, right: EoaRequest) =>
+  left.chainId === right.chainId
+  && getAddress(left.from) === getAddress(right.from)
+  && getAddress(left.to) === getAddress(right.to)
+  && left.data.toLowerCase() === right.data.toLowerCase()
+  && left.value === right.value
 
 export class EoaExecutionAdapter implements ExecutionTransportAdapter {
   readonly transport = 'eoa' as const
@@ -74,13 +41,26 @@ export class EoaExecutionAdapter implements ExecutionTransportAdapter {
     private readonly evcAddress: `0x${string}`,
   ) {}
 
-  async dispatch(execution: ReviewedExecution, artifact: FinalizedRequestSet, callbacks: DispatchCallbacks): Promise<DispatchResult> {
+  async dispatch(execution: ReviewedExecution, artifact: FinalizedRequestSet, callbacks: DispatchCallbacks, options: DispatchOptions = {}): Promise<DispatchResult> {
     if (artifact.transport !== 'eoa') throw new Error('EOA adapter received a Safe artifact')
     const requests = artifact.requests as readonly EoaRequest[]
+    const requestOffset = options.requestOffset ?? 0
+    if (options.skipFirstPreDispatchRevalidation) {
+      const firstRequest = requests[0]
+      const reviewedRequest = execution.requestSet.requests[requestOffset]
+      const isPythBearingRequest = firstRequest
+        && reviewedRequest
+        && 'requestId' in reviewedRequest
+        && reviewedRequest.requestId === firstRequest.requestId
+        && execution.requestSet.pythRefreshSlots.some(slot => slot.insertionPoint.requestId === firstRequest.requestId)
+      if (!isPythBearingRequest) {
+        throw new Error('Pre-dispatch revalidation may only be skipped for the JIT-finalized Pyth request')
+      }
+    }
     const evcAddress = getAddress(this.evcAddress)
     const sdkRequests = requests.map((request, requestIndex) => ({
       requestIndex,
-      sourcePlanItemIndex: requestIndex,
+      sourcePlanItemIndex: requestOffset + requestIndex,
       kind: getAddress(request.to) === evcAddress ? 'evcBatch' as const : 'contractCall' as const,
       chainId: request.chainId,
       from: getAddress(request.from),
@@ -99,32 +79,24 @@ export class EoaExecutionAdapter implements ExecutionTransportAdapter {
       signatureValues: Object.freeze([]),
       safeCalls: Object.freeze(sdkRequests.map(({ to, data, value }) => Object.freeze({ to, data, value }))),
     })
-    const dispatchMetadata = new Map<number, { expectedNonce: number, request: EoaRequest }>()
-
     try {
       const result = await this.executeMaterialized(finalized, {
         onFinalized: async (execution) => {
           if (execution !== finalized) throw new Error('SDK replaced the finalized execution vector')
-          await callbacks.assertReservation()
         },
         onBeforeStep: async (sdkRequest, stepIndex) => {
           const request = requests[stepIndex]
-          if (!request || eoaRequestSemanticDigest(sdkRequest) !== eoaRequestSemanticDigest(request)) {
+          if (!request || !sameRequest(sdkRequest, request)) {
             throw new Error('SDK dispatch request does not match the finalized reviewed execution')
           }
-          await callbacks.assertWalletBinding()
-          await callbacks.assertReservation()
-          const [startBlock, expectedNonce] = await Promise.all([
-            this.client.getBlockNumber(),
-            this.client.getTransactionCount(request.from, 'pending'),
-          ])
-          await callbacks.assertWalletBinding()
-          dispatchMetadata.set(stepIndex, { expectedNonce, request })
-          await callbacks.beforeDispatch(stepIndex, { startBlock, expectedNonce, requestDigest: eoaRequestSemanticDigest(request) })
+          if (!(options.skipFirstPreDispatchRevalidation && stepIndex === 0)) {
+            await callbacks.assertWalletBinding()
+            await callbacks.beforeDispatch(requestOffset + stepIndex)
+          }
         },
         sendTransaction: async (sdkRequest) => {
           const request = requests[sdkRequest.requestIndex]
-          if (!request || eoaRequestSemanticDigest(sdkRequest) !== eoaRequestSemanticDigest(request)) {
+          if (!request || !sameRequest(sdkRequest, request)) {
             throw new Error('SDK wallet request does not match the finalized reviewed execution')
           }
           try {
@@ -137,23 +109,14 @@ export class EoaExecutionAdapter implements ExecutionTransportAdapter {
         },
         onTransactionHash: async (_sdkRequest, stepIndex, hash) => {
           if (!isHash(hash)) throw new DispatchStatusUnknownError('Wallet returned no valid transaction hash')
-          await callbacks.recordExternalId('transaction-hash', hash)
-          const metadata = dispatchMetadata.get(stepIndex)
-          if (!metadata) throw new DispatchStatusUnknownError('Dispatch metadata is unavailable')
-          const submitted = await this.client.getTransaction(hash).catch(() => undefined)
-          if (!submitted) throw new DispatchStatusUnknownError('Submitted transaction cannot yet be verified')
-          if (submitted.nonce !== metadata.expectedNonce
-            || submittedSemanticDigest(submitted, metadata.request.chainId) !== eoaRequestSemanticDigest(metadata.request)) {
-            throw new DispatchStatusUnknownError('Submitted transaction does not match the reviewed request')
-          }
-          await callbacks.assertWalletBinding()
-          await callbacks.markConfirming(stepIndex)
+          await callbacks.recordExternalId(requestOffset + stepIndex, 'transaction-hash', hash)
+          await callbacks.markConfirming(requestOffset + stepIndex)
         },
         onAfterStep: async (_request, stepIndex, hash, receipt) => {
           if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
             throw new DispatchStatusUnknownError('Receipt belongs to another transaction')
           }
-          await callbacks.afterConfirmed(stepIndex)
+          await callbacks.afterConfirmed(requestOffset + stepIndex)
         },
       })
       return { transactionHashes: result.hashes }

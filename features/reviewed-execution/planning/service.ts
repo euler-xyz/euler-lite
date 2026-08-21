@@ -1,7 +1,7 @@
 import { zeroHash, type Hash } from 'viem'
 import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { canonicalDigest, toCanonicalValue, type CanonicalValue } from '../domain/canonical'
-import type { ReviewedPolicy, ReviewedExecution, PluginSnapshot, ReviewedRequestSet, ReviewedSimulation, WalletBinding } from '../domain/reviewed-execution'
+import type { ReviewedPolicy, ReviewedExecution, PluginSnapshot, ReviewedRequestSet, ReviewedSimulation, SafeAtomicCapabilityStatus, WalletBinding } from '../domain/reviewed-execution'
 import type { OperationIntent } from '../domain/intents'
 import { assertReviewedExecutionIntegrity, sealReviewedExecution } from '../domain/seal'
 import type { AdditionalMaterializedCall, EffectOwner, PlanMaterializationSdk, PythPreviewData } from '../materialization/prepared-plan'
@@ -40,6 +40,7 @@ export interface PrepareReviewedExecutionRequest {
   compilerVersion: string
   policyVersionDigest: Hash
   freshUntil: number
+  safeAtomicCapability?: Readonly<{ status: SafeAtomicCapabilityStatus }>
   before?: readonly AdditionalMaterializedCall[]
   after?: readonly AdditionalMaterializedCall[]
   adopt?: PreparationCacheIdentity
@@ -175,6 +176,7 @@ export class ReviewedExecutionPreparationService {
       before: request.before,
       after: request.after,
       directCallAllowlist: this.dependencies.directCallAllowlist,
+      safeAtomicCapability: request.safeAtomicCapability,
       policyDigest,
     })
     const preliminary = materialize(zeroHash)

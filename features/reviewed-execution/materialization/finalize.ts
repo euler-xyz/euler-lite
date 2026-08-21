@@ -135,6 +135,14 @@ export const finalizeReviewedRequestSet = ({
     requestDigest,
     transport: requestSet.transport,
     requests,
+    ...(requestSet.safeTransport
+      ? {
+          safeTransport: {
+            ...requestSet.safeTransport,
+            calls: (requests as readonly SafeCall[]).map(({ to, data, value }) => ({ to, data, value })),
+          },
+        }
+      : {}),
     signatureValues: signatures.map(value => ({ ...value })),
     pythValues: pythValues.map(value => ({ slotId: value.slotId, payloadHash: value.payloadHash, value: value.value })),
   }

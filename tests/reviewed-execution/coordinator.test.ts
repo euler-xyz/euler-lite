@@ -1,287 +1,547 @@
-import { getAddress, hashTypedData, keccak256, toHex, type Hash } from 'viem'
+import { encodeFunctionData, type Hash, type Hex, type TransactionReceipt } from 'viem'
+import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { describe, expect, it, vi } from 'vitest'
+import { EVC_ABI } from '~/abis/evc'
+import { PYTH_ABI } from '~/abis/pyth'
 import { EoaExecutionAdapter, type EoaAdapterClient } from '~/features/reviewed-execution/adapters/eoa'
+import { SafeExecutionAdapter } from '~/features/reviewed-execution/adapters/safe'
 import type { ExecutionTransportAdapter } from '~/features/reviewed-execution/adapters/types'
-import { ReviewedExecutionCoordinator } from '~/features/reviewed-execution/coordinator/coordinator'
-import { MutableExecutionEmergencySwitch } from '~/features/reviewed-execution/coordinator/emergency-switch'
-import { sealReviewedExecution } from '~/features/reviewed-execution/domain/seal'
-import { reviewedRequestDigest } from '~/features/reviewed-execution/materialization/prepared-plan'
-import { MemorySubmissionJournal, requestVectorDigest } from '~/features/reviewed-execution/persistence/journal'
-import { walletLaneKey } from '~/features/reviewed-execution/persistence/locks'
-import { buildReviewedSimulation } from '~/features/reviewed-execution/simulation/coverage'
-import { artifactFor, makeReviewedExecution, materializedExecutorFor, TEST_ACCOUNT, TEST_EVC, TEST_TOKEN } from './fixtures'
+import { ReviewedExecutionCoordinator, type CoordinatorDependencies } from '~/features/reviewed-execution/coordinator/coordinator'
+import type { ReviewedExecution } from '~/features/reviewed-execution/domain/reviewed-execution'
+import { finalizeReviewedRequestSet } from '~/features/reviewed-execution/materialization/finalize'
+import { verifyRefreshedPluginPlan } from '~/features/reviewed-execution/materialization/pyth-refresh'
+import { artifactFor, makePythReviewedExecution, makeReviewedExecution, materializedExecutorFor, TEST_EVC, TEST_TOKEN } from './fixtures'
 
-const HASH = `0x${'ab'.repeat(32)}` as Hash
+const hashFor = (value: number) => `0x${value.toString(16).padStart(64, '0')}` as Hash
+const HASH = hashFor(1)
 
-const makeClient = (overrides: Partial<EoaAdapterClient> = {}): EoaAdapterClient => ({
-  getBlockNumber: async () => 100n,
-  getTransactionCount: async () => 7,
+interface TestEoaClient extends EoaAdapterClient {
+  waitForTransactionReceipt(hash: Hash): Promise<Pick<TransactionReceipt, 'transactionHash' | 'status'>>
+}
+
+const makeClient = (_execution: ReviewedExecution, overrides: Partial<TestEoaClient> = {}): TestEoaClient => ({
   sendTransaction: async () => HASH,
-  getTransaction: async () => ({
-    hash: HASH,
-    from: getAddress('0x1000000000000000000000000000000000000000'),
-    to: getAddress('0x4000000000000000000000000000000000000000'),
-    input: makeReviewedExecution().requestSet.requests[0]!.data,
-    value: 0n,
-    chainId: 1,
-    nonce: 7,
-  }),
-  waitForTransactionReceipt: async () => ({ transactionHash: HASH, status: 'success' }),
+  waitForTransactionReceipt: async hash => ({ transactionHash: hash, status: 'success' }),
   ...overrides,
 })
 
-const rejectingSafeAdapter: ExecutionTransportAdapter = {
+const unusedSafeAdapter: ExecutionTransportAdapter = {
   transport: 'safe',
   dispatch: async () => { throw new Error('not used') },
 }
 
-const setup = (
-  client: EoaAdapterClient,
-  journal = new MemorySubmissionJournal(),
+const setup = ({
   execution = makeReviewedExecution(),
-  eoaAdapter: ExecutionTransportAdapter = new EoaExecutionAdapter(client, materializedExecutorFor(client), TEST_EVC),
-) => {
-  const emergencySwitch = new MutableExecutionEmergencySwitch()
-  let now = 100
-  const coordinator = new ReviewedExecutionCoordinator({
-    journal,
-    emergencySwitch,
-    adapters: { eoa: eoaAdapter, safe: rejectingSafeAdapter },
-    readWalletBinding: async () => execution.requestSet.wallet,
-    revalidatePolicy: async () => {},
+  client,
+  eoaAdapter,
+  safeAdapter = unusedSafeAdapter,
+  readWalletBinding,
+  revalidatePolicy,
+  initializationBarrier,
+  refreshPyth,
+  finalize,
+  now,
+}: {
+  execution?: ReviewedExecution
+  client?: TestEoaClient
+  eoaAdapter?: ExecutionTransportAdapter
+  safeAdapter?: ExecutionTransportAdapter
+  readWalletBinding?: () => Promise<ReviewedExecution['requestSet']['wallet']>
+  revalidatePolicy?: () => Promise<void>
+  initializationBarrier?: Promise<void>
+  refreshPyth?: CoordinatorDependencies['refreshPyth']
+  finalize?: CoordinatorDependencies['finalize']
+  now?: () => number
+} = {}) => {
+  const actualClient = client ?? makeClient(execution)
+  const dependencies: CoordinatorDependencies = {
+    adapters: {
+      eoa: eoaAdapter ?? new EoaExecutionAdapter(actualClient, materializedExecutorFor(actualClient.waitForTransactionReceipt), TEST_EVC),
+      safe: safeAdapter,
+    },
+    readWalletBinding: readWalletBinding ?? (async () => execution.requestSet.wallet),
+    revalidatePolicy: revalidatePolicy ?? (async () => {}),
     collectSignature: async () => '0x01',
-    refreshPyth: async () => [],
-    finalize: current => artifactFor(current),
-    now: () => now++,
-    createId: kind => `${kind}-1`,
-    withLaneLock: async (_lane, work) => work(),
-  })
-  return { execution, coordinator, journal, emergencySwitch }
+    refreshPyth: refreshPyth ?? (async () => []),
+    finalize: finalize ?? (current => artifactFor(current)),
+    now: now ?? (() => 100),
+  }
+  const initializeDependencies = initializationBarrier
+    ? vi.fn(() => initializationBarrier.then(() => dependencies))
+    : undefined
+  const coordinator = new ReviewedExecutionCoordinator(initializeDependencies ?? dependencies)
+  return { execution, coordinator, client: actualClient, initializeDependencies }
 }
 
-const executionWithSignature = () => {
-  const base = makeReviewedExecution()
-  const request = base.requestSet.requests[0]!
-  const requestId = 'requestId' in request ? request.requestId : request.callId
-  const typedData = {
-    domain: { name: 'Authorization', chainId: 1, verifyingContract: TEST_TOKEN },
-    types: { Authorization: [{ name: 'owner', type: 'address' }, { name: 'deadline', type: 'uint256' }] },
-    primaryType: 'Authorization' as const,
-    message: { owner: TEST_ACCOUNT, deadline: 2_000_000_000n },
-  }
-  const requestSet = {
-    ...base.requestSet,
-    signatureSlots: [{
-      slotId: keccak256(toHex('signature-slot')),
-      kind: 'migration' as const,
-      signer: TEST_ACCOUNT,
+const execute = (coordinator: ReviewedExecutionCoordinator, execution: ReviewedExecution) =>
+  coordinator.execute(execution, { reviewId: execution.reviewId, reviewDigest: execution.reviewDigest })
+
+const migrationExecution = (includeGrant = true) => {
+  const owner = { intentId: 'intent-1', intentRevision: 1 }
+  return makeReviewedExecution('eoa', {
+    before: includeGrant
+      ? [{
+          phase: 'prerequisite',
+          owner,
+          provenance: { source: 'migration-authorization', mode: 'transaction' },
+          chainId: 1,
+          to: TEST_TOKEN,
+          data: '0x01020304',
+        }]
+      : [],
+    after: [{
+      phase: 'cleanup',
+      owner,
+      provenance: { source: 'migration-authorization', mode: 'transaction' },
       chainId: 1,
-      typedData,
-      typedDataHash: hashTypedData(typedData),
-      validUntil: 2_000_000_000,
-      insertionPoints: [{ requestId, effectId: base.requestSet.effects[0]!.effectId, batchItemIndex: 0, abiArgumentPath: ['authorization', 'signature'] }],
+      to: TEST_TOKEN,
+      data: '0x05060708',
     }],
-  }
-  const requestDigest = reviewedRequestDigest(requestSet)
-  return sealReviewedExecution({
-    intents: base.intents,
-    requestSet: requestSet,
-    policy: base.policy,
-    simulation: buildReviewedSimulation({ requestSet, requestDigest, observedAt: 10, projection: { canExecute: true, simulatedAccounts: [], simulatedVaults: [] } }),
-    pluginSnapshot: base.pluginSnapshot,
-    validity: base.validity,
-    presentationKind: 'supply',
-    presentationInputs: { amount: '10', symbol: 'USDC' },
   })
 }
 
 describe('reviewed execution coordinator', () => {
-  it('persists and reads back dispatching before invoking the wallet', async () => {
-    const journal = new MemorySubmissionJournal()
-    const sendTransaction = vi.fn(async () => {
-      const attempts = await journal.listRecoverableAttempts()
-      expect(attempts).toHaveLength(1)
-      expect(attempts[0]!.state).toBe('dispatching')
-      return HASH
-    })
-    const prepared = setup(makeClient({ sendTransaction }), journal)
-    const result = await prepared.coordinator.execute(prepared.execution, { reviewId: prepared.execution.reviewId, reviewDigest: prepared.execution.reviewDigest })
-
-    expect(sendTransaction).toHaveBeenCalledOnce()
-    expect(result.attempt.state).toBe('succeeded')
-    expect(result.attempt.externalIds).toEqual([{ kind: 'transaction-hash', value: HASH }])
-    expect(await journal.listRecoverableAttempts()).toEqual([])
-  })
-
-  it('retains the lane and external ID when verification after dispatch is ambiguous', async () => {
-    const prepared = setup(makeClient({
-      getTransaction: async () => {
-        throw new Error('rpc unavailable')
-      },
-    }))
-    await expect(prepared.coordinator.execute(prepared.execution, { reviewId: prepared.execution.reviewId, reviewDigest: prepared.execution.reviewDigest }))
-      .rejects.toThrow(/cannot yet be verified/)
-    const [attempt] = await prepared.journal.listRecoverableAttempts()
-    expect(attempt?.state).toBe('recovery-required')
-    expect(attempt?.externalIds).toEqual([{ kind: 'transaction-hash', value: HASH }])
-  })
-
-  it('proves wallet rejection before submission and releases the lane', async () => {
-    const rejection = Object.assign(new Error('User rejected'), { code: 4001 })
-    const prepared = setup(makeClient({
-      sendTransaction: async () => {
-        throw rejection
-      },
-    }))
-    await expect(prepared.coordinator.execute(prepared.execution, { reviewId: prepared.execution.reviewId, reviewDigest: prepared.execution.reviewDigest }))
-      .rejects.toThrow(/cancelled/)
-    expect(await prepared.journal.listRecoverableAttempts()).toEqual([])
-  })
-
-  it('blocks new reservations with the emergency switch without hiding recovery state', async () => {
-    const prepared = setup(makeClient())
-    prepared.emergencySwitch.disableNewReviews('maintenance')
-    await expect(prepared.coordinator.execute(prepared.execution, { reviewId: prepared.execution.reviewId, reviewDigest: prepared.execution.reviewDigest }))
-      .rejects.toThrow(/maintenance/)
-    expect(await prepared.journal.listRecoverableAttempts()).toEqual([])
-  })
-
-  it('resumes an already reserved pre-dispatch attempt while new reviewed executions are disabled', async () => {
-    const prepared = setup(makeClient())
-    await prepared.journal.putReviewedExecution(prepared.execution)
-    const attempt = await prepared.journal.reserveAttempt({
-      execution: prepared.execution,
-      attemptId: 'attempt-existing',
-      reservationId: 'reservation-existing',
-      laneKey: walletLaneKey(prepared.execution.requestSet.wallet.account, prepared.execution.requestSet.wallet.chainId),
-      requestVectorDigest: requestVectorDigest(prepared.execution),
-      now: 50,
-    })
-    prepared.emergencySwitch.disableNewReviews('maintenance')
-    const result = await prepared.coordinator.resume(attempt.attemptId)
-    expect(result.attempt.state).toBe('succeeded')
-  })
-
-  it('never retries an attempt that reached a durable signature prompt', async () => {
-    const prepared = setup(makeClient())
-    await prepared.journal.putReviewedExecution(prepared.execution)
-    let attempt = await prepared.journal.reserveAttempt({
-      execution: prepared.execution,
-      attemptId: 'attempt-signing',
-      reservationId: 'reservation-signing',
-      laneKey: walletLaneKey(prepared.execution.requestSet.wallet.account, prepared.execution.requestSet.wallet.chainId),
-      requestVectorDigest: requestVectorDigest(prepared.execution),
-      now: 50,
-    })
-    attempt = await prepared.journal.transitionAttempt({ expected: attempt, to: 'revalidating', now: 51 })
-    attempt = await prepared.journal.transitionAttempt({ expected: attempt, to: 'signing', now: 52 })
-
-    await expect(prepared.coordinator.resume(attempt.attemptId)).rejects.toThrow(/wallet prompt.*reconciled/)
-    expect((await prepared.journal.listRecoverableAttempts())[0]?.state).toBe('signing')
-  })
-
-  it('never retries a finalized attempt after a signature was collected', async () => {
-    const execution = executionWithSignature()
-    const prepared = setup(makeClient(), new MemorySubmissionJournal(), execution)
-    await prepared.journal.putReviewedExecution(execution)
-    let attempt = await prepared.journal.reserveAttempt({
-      execution,
-      attemptId: 'attempt-signed-finalized',
-      reservationId: 'reservation-signed-finalized',
-      laneKey: walletLaneKey(execution.requestSet.wallet.account, execution.requestSet.wallet.chainId),
-      requestVectorDigest: requestVectorDigest(execution),
-      now: 50,
-    })
-    attempt = await prepared.journal.transitionAttempt({ expected: attempt, to: 'revalidating', now: 51 })
-    attempt = await prepared.journal.transitionAttempt({ expected: attempt, to: 'signing', now: 52 })
-    attempt = await prepared.journal.transitionAttempt({ expected: attempt, to: 'finalized', now: 53 })
-
-    await expect(prepared.coordinator.resume(attempt.attemptId)).rejects.toThrow(/wallet prompt.*reconciled/)
-    expect((await prepared.journal.listRecoverableAttempts())[0]?.state).toBe('finalized')
-  })
-
-  it('keeps the lane recoverable when wallet context drifts after a signature response', async () => {
-    const execution = executionWithSignature()
-    const journal = new MemorySubmissionJournal()
+  it('submits the finalized reviewed request once', async () => {
+    const execution = makeReviewedExecution()
     const sendTransaction = vi.fn(async () => HASH)
-    const collectSignature = vi.fn(async () => '0x01' as const)
-    let walletReads = 0
-    const coordinator = new ReviewedExecutionCoordinator({
-      journal,
-      emergencySwitch: new MutableExecutionEmergencySwitch(),
-      adapters: {
-        eoa: (() => {
-          const client = makeClient({ sendTransaction })
-          return new EoaExecutionAdapter(client, materializedExecutorFor(client), TEST_EVC)
-        })(),
-        safe: rejectingSafeAdapter,
-      },
-      readWalletBinding: async () => ++walletReads >= 5
+    const prepared = setup({ execution, client: makeClient(execution, { sendTransaction }) })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result.status).toBe('submitted')
+    expect(result.dispatch?.transactionHashes).toEqual([HASH])
+    expect(sendTransaction).toHaveBeenCalledOnce()
+  })
+
+  it('synchronously rejects duplicate confirmation for the same active review', async () => {
+    const execution = makeReviewedExecution()
+    let initialize!: () => void
+    const initializationBarrier = new Promise<void>((resolve) => {
+      initialize = resolve
+    })
+    let release!: () => void
+    let started!: () => void
+    const dispatchStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const dispatchReleased = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const dispatch = vi.fn(async () => {
+      started()
+      await dispatchReleased
+      return { transactionHashes: [HASH] }
+    })
+    const prepared = setup({
+      execution,
+      eoaAdapter: { transport: 'eoa', dispatch },
+      initializationBarrier,
+    })
+
+    const first = execute(prepared.coordinator, execution)
+    const duplicate = await execute(prepared.coordinator, execution)
+    expect(duplicate).toMatchObject({ status: 'failed', message: expect.stringMatching(/already being submitted/) })
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(prepared.initializeDependencies).toHaveBeenCalledOnce()
+
+    initialize()
+    await dispatchStarted
+    expect(dispatch).toHaveBeenCalledOnce()
+
+    release()
+    await expect(first).resolves.toMatchObject({ status: 'submitted' })
+  })
+
+  it('rejects wallet context drift before handoff', async () => {
+    const execution = makeReviewedExecution()
+    const dispatch = vi.fn(async () => ({ transactionHashes: [HASH] }))
+    let reads = 0
+    const prepared = setup({
+      execution,
+      eoaAdapter: { transport: 'eoa', dispatch },
+      readWalletBinding: async () => ++reads >= 2
         ? { ...execution.requestSet.wallet, connectorSessionId: 'changed-session' }
         : execution.requestSet.wallet,
-      revalidatePolicy: async () => {},
-      collectSignature,
-      refreshPyth: async () => [],
-      finalize: current => artifactFor(current),
-      now: () => 100,
-      createId: kind => `${kind}-signed`,
-      withLaneLock: async (_lane, work) => work(),
     })
 
-    await expect(coordinator.execute(execution, { reviewId: execution.reviewId, reviewDigest: execution.reviewDigest }))
-      .rejects.toThrow(/Wallet connection.*changed/)
-    expect(collectSignature).toHaveBeenCalledOnce()
-    expect(sendTransaction).not.toHaveBeenCalled()
-    expect((await journal.listRecoverableAttempts())[0]?.state).toBe('recovery-required')
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result).toMatchObject({ status: 'failed', message: expect.stringMatching(/Wallet connection.*changed/) })
+    expect(dispatch).not.toHaveBeenCalled()
   })
 
-  it('persists cleanup before dispatch and completes it after the reviewed cleanup confirms', async () => {
-    const owner = { intentId: 'intent-1', intentRevision: 1 }
-    const execution = makeReviewedExecution('eoa', {
-      before: [{ phase: 'prerequisite', owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: TEST_TOKEN, data: '0x01020304' }],
-      after: [{ phase: 'cleanup', owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: TEST_TOKEN, data: '0x05060708' }],
+  it('reports an inconclusive wallet response as unknown and releases the local guard', async () => {
+    const execution = makeReviewedExecution()
+    const sendTransaction = vi.fn(async () => {
+      throw new Error('provider disconnected after approval')
     })
-    const requests = execution.requestSet.requests
-    let sent = 0
-    const prepared = setup(makeClient({
+    const prepared = setup({ execution, client: makeClient(execution, { sendTransaction }) })
+
+    const first = await execute(prepared.coordinator, execution)
+    const second = await execute(prepared.coordinator, execution)
+
+    expect(first.status).toBe('unknown')
+    expect(first.message).toMatch(/status is unknown/i)
+    expect(second.status).toBe('unknown')
+    expect(sendTransaction).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves post-handoff receipt sequencing to the SDK when wallet context later changes', async () => {
+    const execution = makeReviewedExecution()
+    let handedOff = false
+    const client = makeClient(execution, {
       sendTransaction: async () => {
-        sent++
-        return (`0x${String(sent).padStart(64, '0')}`) as Hash
+        handedOff = true
+        return HASH
       },
-      getTransactionCount: async () => 7,
-      getTransaction: async (hash) => {
-        const index = Number.parseInt(hash.slice(-1), 16) - 1
-        const request = requests[index]!
-        return { hash, from: TEST_ACCOUNT, to: request.to, input: request.data, value: request.value, chainId: 1, nonce: 7 }
-      },
-      waitForTransactionReceipt: async hash => ({ transactionHash: hash, status: 'success' }),
-    }), new MemorySubmissionJournal(), execution)
-    const result = await prepared.coordinator.execute(execution, { reviewId: execution.reviewId, reviewDigest: execution.reviewDigest })
-    const obligations = await prepared.journal.listCleanupObligations(result.attempt.attemptId)
-    expect(obligations).toHaveLength(1)
-    expect(obligations[0]?.status).toBe('completed')
+    })
+    const prepared = setup({
+      execution,
+      client,
+      readWalletBinding: async () => handedOff
+        ? { ...execution.requestSet.wallet, connectorSessionId: 'changed-after-handoff' }
+        : execution.requestSet.wallet,
+    })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result).toMatchObject({ status: 'submitted', dispatch: { transactionHashes: [HASH] } })
   })
 
-  it('retains the lane as cleanup-required when a grant succeeded before a later known revert', async () => {
-    const owner = { intentId: 'intent-1', intentRevision: 1 }
-    const execution = makeReviewedExecution('eoa', {
-      before: [{ phase: 'prerequisite', owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: TEST_TOKEN, data: '0x01020304' }],
-      after: [{ phase: 'cleanup', owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: TEST_TOKEN, data: '0x05060708' }],
-    })
-    const requests = execution.requestSet.requests
+  it('refreshes Pyth only after a delayed prerequisite receipt exceeds the freshness window', async () => {
+    const execution = makePythReviewedExecution()
+    let nowMs = 100_000
     let sent = 0
-    const prepared = setup(makeClient({
-      sendTransaction: async () => (`0x${String(++sent).padStart(64, '0')}`) as Hash,
-      getTransaction: async (hash) => {
-        const index = Number.parseInt(hash.slice(-1), 16) - 1
-        const request = requests[index]!
-        return { hash, from: TEST_ACCOUNT, to: request.to, input: request.data, value: request.value, chainId: 1, nonce: 7 }
+    let refreshed = false
+    let finalizedCoreData: Hex | undefined
+    const events: string[] = []
+    const client = makeClient(execution, {
+      sendTransaction: async (request) => {
+        events.push(`send:${request.phase}`)
+        if (request.phase === 'core') finalizedCoreData = request.data
+        return hashFor(++sent)
       },
-      waitForTransactionReceipt: async hash => ({ transactionHash: hash, status: hash.endsWith('2') ? 'reverted' : 'success' }),
-    }), new MemorySubmissionJournal(), execution)
-    await expect(prepared.coordinator.execute(execution, { reviewId: execution.reviewId, reviewDigest: execution.reviewDigest })).rejects.toThrow(/reverted/)
-    const [attempt] = await prepared.journal.listRecoverableAttempts()
-    expect(attempt?.state).toBe('cleanup-required')
-    expect((await prepared.journal.listCleanupObligations(attempt!.attemptId))[0]?.status).toBe('pending')
+      waitForTransactionReceipt: async (hash) => {
+        events.push('receipt:start')
+        if (sent === 1) nowMs += 61_000
+        events.push('receipt:confirmed')
+        return { transactionHash: hash, status: 'success' }
+      },
+    })
+    const refreshPyth = vi.fn(async () => {
+      events.push(`refresh:${nowMs}`)
+      refreshed = true
+      const sealedPreview = execution.pluginSnapshot.previewPlan as unknown as TransactionPlan
+      const raw = execution.pluginSnapshot.rawPlan as unknown as TransactionPlan
+      const sealedBatch = sealedPreview[1]
+      if (sealedBatch?.type !== 'evcBatch') throw new Error('Expected reviewed EVC batch')
+      const freshPayload = encodeFunctionData({ abi: PYTH_ABI, functionName: 'updatePriceFeeds', args: [['0xaabb']] })
+      const refreshedPlan: TransactionPlan = [
+        raw[0]!,
+        {
+          ...sealedBatch,
+          items: sealedBatch.items.map((item, index) => index === 0 ? { ...item, data: freshPayload } : item),
+        },
+      ]
+      const slot = execution.requestSet.pythRefreshSlots[0]!
+      return verifyRefreshedPluginPlan({
+        sealedPreview,
+        refreshed: refreshedPlan,
+        slots: execution.requestSet.pythRefreshSlots,
+        evidence: [{
+          planItemIndex: slot.sourcePlanItemIndex,
+          batchItemIndex: slot.sourceBatchItemIndex,
+          target: slot.target,
+          requiredFeedIds: slot.requiredFeedIds,
+          publishTimes: [160],
+          maxValue: slot.maxValue,
+          freshnessPolicy: slot.freshnessPolicy,
+        }],
+        nowSeconds: Math.floor(nowMs / 1000),
+      })
+    })
+    const finalizationSdk = {
+      executionService: {
+        encodeBatch: (items: EVCBatchItem[]) => encodeFunctionData({ abi: EVC_ABI, functionName: 'batch', args: [items] }),
+        encodePermit2Call: () => { throw new Error('unused') },
+      },
+    }
+    const prepared = setup({
+      execution,
+      client,
+      refreshPyth,
+      now: () => nowMs,
+      readWalletBinding: async () => {
+        if (refreshed) events.push('wallet-check:after-refresh')
+        return execution.requestSet.wallet
+      },
+      revalidatePolicy: async () => {
+        if (refreshed) events.push('policy-check:after-refresh')
+      },
+      finalize: (current, signatures, pythValues) => finalizeReviewedRequestSet({
+        reviewId: current.reviewId,
+        requestDigest: current.requestDigest,
+        requestSet: current.requestSet,
+        sdk: finalizationSdk,
+        signatures,
+        pythValues,
+      }),
+    })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result).toMatchObject({ status: 'submitted' })
+    expect(refreshPyth).toHaveBeenCalledOnce()
+    expect(finalizedCoreData).not.toBe(execution.requestSet.requests[1]?.data)
+    expect(events).toEqual([
+      'send:prerequisite',
+      'receipt:start',
+      'receipt:confirmed',
+      'refresh:161000',
+      'send:core',
+      'receipt:start',
+      'receipt:confirmed',
+    ])
+  })
+
+  it('preserves the established current-session Safe status flow without durable recovery', async () => {
+    const execution = makeReviewedExecution('safe')
+    const callsId = hashFor(2)
+    const sendCalls = vi.fn(async () => callsId)
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls,
+      waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: true }),
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result).toMatchObject({
+      status: 'submitted',
+      dispatch: { callsId, executionHash: HASH, transactionHashes: [HASH], atomic: true },
+    })
+    expect(sendCalls).toHaveBeenCalledOnce()
+    expect(sendCalls).toHaveBeenCalledWith(execution.requestSet.safeTransport)
+  })
+
+  it('reports inconclusive Safe status as unknown without retrying', async () => {
+    const execution = makeReviewedExecution('safe')
+    const sendCalls = vi.fn(async () => hashFor(2))
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls,
+      waitForExecution: async () => { throw new Error('provider unavailable') },
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result.status).toBe('unknown')
+    expect(sendCalls).toHaveBeenCalledOnce()
+  })
+
+  it('revalidates Safe atomic capability before wallet handoff', async () => {
+    const execution = makeReviewedExecution('safe')
+    const sendCalls = vi.fn(async () => hashFor(2))
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => { throw new Error('Safe wallet atomic execution is unsupported on chain 1') },
+      sendCalls,
+      waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: true }),
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'failed', message: expect.stringMatching(/unsupported/) })
+    expect(sendCalls).not.toHaveBeenCalled()
+  })
+
+  it('rejects finalized Safe envelope drift before wallet handoff', async () => {
+    const execution = makeReviewedExecution('safe')
+    const sendCalls = vi.fn(async () => hashFor(2))
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls,
+      waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: true }),
+    })
+    const prepared = setup({
+      execution,
+      safeAdapter,
+      finalize: (current) => {
+        const artifact = artifactFor(current)
+        return { ...artifact, safeTransport: { ...artifact.safeTransport!, chainId: 2 } }
+      },
+    })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'failed', message: expect.stringMatching(/fields changed/) })
+    expect(sendCalls).not.toHaveBeenCalled()
+  })
+
+  it('does not report success unless Safe confirms atomic execution', async () => {
+    const execution = makeReviewedExecution('safe')
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls: async () => hashFor(2),
+      waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: false }),
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'failed', message: expect.stringMatching(/not confirmed atomic/) })
+  })
+
+  it('reports current-session Safe cancellation as rejected', async () => {
+    const execution = makeReviewedExecution('safe')
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls: async () => hashFor(2),
+      waitForExecution: async () => { throw new Error('Safe transaction was cancelled') },
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'rejected' })
+  })
+
+  it('reports a reverted Safe receipt as failed', async () => {
+    const execution = makeReviewedExecution('safe')
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls: async () => hashFor(2),
+      waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'reverted', atomic: true }),
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'failed' })
+  })
+
+  it('preserves a conclusive current-session Safe failure', async () => {
+    const execution = makeReviewedExecution('safe')
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls: async () => hashFor(2),
+      waitForExecution: async () => { throw new Error('Safe transaction failed') },
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({
+      status: 'failed',
+      message: 'Safe transaction failed',
+    })
+  })
+
+  it('reports an atomic Safe migration and revocation as unknown after handoff', async () => {
+    const execution = makeReviewedExecution('safe', {
+      before: [{
+        phase: 'prerequisite',
+        owner: { intentId: 'intent-1', intentRevision: 1 },
+        provenance: { source: 'migration-authorization', mode: 'transaction' },
+        chainId: 1,
+        to: TEST_TOKEN,
+        data: '0x01020304',
+      }],
+      after: [{
+        phase: 'cleanup',
+        owner: { intentId: 'intent-1', intentRevision: 1 },
+        provenance: { source: 'migration-authorization', mode: 'transaction' },
+        chainId: 1,
+        to: TEST_TOKEN,
+        data: '0x05060708',
+      }],
+    })
+    const sendCalls = vi.fn(async () => hashFor(2))
+    const safeAdapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      sendCalls,
+      waitForExecution: async () => { throw new Error('provider unavailable') },
+    })
+    const prepared = setup({ execution, safeAdapter })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result).toMatchObject({
+      status: 'unknown',
+      migration: {
+        submission: { status: 'unknown' },
+        revocation: { status: 'unknown' },
+        authorizationMayRemain: true,
+      },
+    })
+    expect(sendCalls).toHaveBeenCalledOnce()
+  })
+
+  it('executes the reviewed migration grant, core, and revocation in order', async () => {
+    const execution = migrationExecution()
+    let sent = 0
+    const client = makeClient(execution, { sendTransaction: async () => hashFor(++sent) })
+    const prepared = setup({ execution, client })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(sent).toBe(3)
+    expect(result.status).toBe('submitted')
+    expect(result.migration).toMatchObject({
+      submission: { status: 'submitted' },
+      revocation: { status: 'submitted' },
+      authorizationMayRemain: false,
+    })
+  })
+
+  it('stops after a failed migration core and does not synthesize cleanup', async () => {
+    const execution = migrationExecution()
+    let sent = 0
+    const client = makeClient(execution, {
+      sendTransaction: async () => hashFor(++sent),
+      waitForTransactionReceipt: async hash => ({ transactionHash: hash, status: hash === hashFor(2) ? 'reverted' : 'success' }),
+    })
+    const prepared = setup({ execution, client })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(sent).toBe(2)
+    expect(result.status).toBe('failed')
+    expect(result.migration).toMatchObject({
+      submission: { status: 'failed' },
+      revocation: { status: 'not-submitted' },
+      authorizationMayRemain: true,
+    })
+    expect(result.migration?.warning).toMatch(/authorization may remain active/i)
+  })
+
+  it('warns when a rejected fresh migration leaves a pre-existing authorization active', async () => {
+    const execution = migrationExecution(false)
+    const sendTransaction = vi.fn(async () => {
+      throw Object.assign(new Error('User rejected'), { code: 4001 })
+    })
+    const prepared = setup({ execution, client: makeClient(execution, { sendTransaction }) })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(result.status).toBe('rejected')
+    expect(result.migration).toMatchObject({
+      submission: { status: 'rejected' },
+      revocation: { status: 'not-submitted' },
+      authorizationMayRemain: true,
+    })
+    expect(result.migration?.warning).toMatch(/authorization may remain active/i)
+    expect(sendTransaction).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a submitted migration when revocation fails', async () => {
+    const execution = migrationExecution()
+    let sent = 0
+    const client = makeClient(execution, {
+      sendTransaction: async () => hashFor(++sent),
+      waitForTransactionReceipt: async hash => ({ transactionHash: hash, status: hash === hashFor(3) ? 'reverted' : 'success' }),
+    })
+    const prepared = setup({ execution, client })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(sent).toBe(3)
+    expect(result.status).toBe('submitted')
+    expect(result.migration).toMatchObject({
+      submission: { status: 'submitted' },
+      revocation: { status: 'failed' },
+      authorizationMayRemain: true,
+    })
+    expect(result.migration?.warning).toMatch(/Migration submitted.*authorization revocation.*failed/i)
   })
 })

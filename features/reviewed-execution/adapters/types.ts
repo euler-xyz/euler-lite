@@ -1,24 +1,28 @@
 import type { Hash } from 'viem'
-import type { SubmissionAttempt } from '../domain/submission-attempt'
 import type { ReviewedExecution, FinalizedRequestSet } from '../domain/reviewed-execution'
-import type { CanonicalValue } from '../domain/canonical'
 
 export interface DispatchCallbacks {
-  getAttempt(): SubmissionAttempt
-  assertReservation(): Promise<void>
   assertWalletBinding(): Promise<void>
-  beforeDispatch(stepIndex: number, detail?: CanonicalValue): Promise<void>
-  recordExternalId(kind: 'transaction-hash' | 'calls-id' | 'execution-hash', value: string): Promise<void>
+  beforeDispatch(stepIndex: number): Promise<void>
+  recordExternalId(stepIndex: number, kind: 'transaction-hash' | 'calls-id' | 'execution-hash', value: string): Promise<void>
   markConfirming(stepIndex: number): Promise<void>
   afterConfirmed(stepIndex: number): Promise<void>
 }
 
 export interface DispatchResult {
   transactionHashes: readonly Hash[]
+  callsId?: string
   executionHash?: Hash
+  atomic?: true
+}
+
+export interface DispatchOptions {
+  requestOffset?: number
+  /** Revalidation already ran immediately before JIT Pyth refresh/finalization. */
+  skipFirstPreDispatchRevalidation?: boolean
 }
 
 export interface ExecutionTransportAdapter {
   readonly transport: 'eoa' | 'safe'
-  dispatch(execution: ReviewedExecution, artifact: FinalizedRequestSet, callbacks: DispatchCallbacks): Promise<DispatchResult>
+  dispatch(execution: ReviewedExecution, artifact: FinalizedRequestSet, callbacks: DispatchCallbacks, options?: DispatchOptions): Promise<DispatchResult>
 }

@@ -2,6 +2,7 @@ import type { Hash } from 'viem'
 import { ReviewedOperationModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import type { SubmissionResult } from '~/features/reviewed-execution/coordinator/coordinator'
 
 export interface ReviewPresentation extends Record<string, unknown> {
   asset: { address: string, symbol: string, decimals: number, name?: string }
@@ -11,7 +12,8 @@ export interface ReviewPresentation extends Record<string, unknown> {
 export interface OpenExecutionReviewOptions {
   presentationKind: string
   review: ReviewPresentation
-  onSucceeded?: () => void | Promise<void>
+  onResult?: (result: SubmissionResult) => void | Promise<void>
+  onSucceeded?: (result: SubmissionResult) => void | Promise<void>
   onFailed?: (cause: unknown) => void | Promise<void>
 }
 
@@ -46,8 +48,9 @@ export const useExecutionReview = () => {
           calldataPrepared: prepared.prepared,
           tenderlyPrepared: prepared.prepared,
         },
-        onSucceeded: async () => {
-          await options.onSucceeded?.()
+        onResult: options.onResult,
+        onSucceeded: async (result: SubmissionResult) => {
+          await options.onSucceeded?.(result)
         },
         onFailed: options.onFailed,
       },

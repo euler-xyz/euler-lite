@@ -72,6 +72,14 @@ describe('authoritative reviewed execution preparation', () => {
     expect(pluginPrefetch).toHaveBeenCalledOnce()
     expect(simulation).toHaveBeenCalledOnce()
     expect(dependencyLoad).toHaveBeenCalled()
+
+    const batchExecution = await service.prepare({
+      ...request,
+      presentationKind: 'batch',
+      presentationInputs: [{ id: intent.intentId, review: request.presentationInputs }],
+    })
+    expect(batchExecution.requestDigest).toBe(execution.requestDigest)
+    expect(batchExecution.requestSet).toEqual(execution.requestSet)
   })
 
   it('discards every result published after the cart generation advances', async () => {

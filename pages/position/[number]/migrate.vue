@@ -96,7 +96,7 @@ type TargetExternalLink = {
 
 const route = useRoute()
 const router = useRouter()
-const { error: showError } = useToast()
+const { error: showError, success: showSuccess, warning: showWarning } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
@@ -833,6 +833,16 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
         allowConfirmWithoutPlan: true,
         submittingLabel: 'Migrating...',
+      },
+      onResult: (result) => {
+        const migration = result.migration
+        if (!migration || result.status !== 'submitted') return
+        const revocation = migration.revocation
+        const description = revocation
+          ? `Authorization revocation status: ${revocation.status}.`
+          : 'No separate authorization revocation request was required.'
+        if (migration.warning) showWarning('Migration submitted', { description: `${description} ${migration.warning}` })
+        else showSuccess('Migration submitted', { description })
       },
       onSucceeded: () => {
         schedulePostMigrationRefreshes()

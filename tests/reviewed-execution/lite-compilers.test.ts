@@ -33,6 +33,10 @@ const compile = async (planner: Parameters<typeof createOperationIntent>[0]['pla
     planRedeem: vi.fn(() => plan),
     planBorrow: vi.fn(() => plan),
     planSwapAndBorrowFromWallet: vi.fn(() => plan),
+    planSwapCollateral: vi.fn((_args: unknown) => plan),
+    planSwapDebt: vi.fn((_args: unknown) => plan),
+    planMigrateSameAssetCollateral: vi.fn(() => plan),
+    planMigrateSameAssetDebt: vi.fn(() => plan),
   }
   const fallback = vi.fn(() => plan)
   const sdk = {
@@ -44,7 +48,13 @@ const compile = async (planner: Parameters<typeof createOperationIntent>[0]['pla
     }),
   }
   const intent = createOperationIntent({
-    kind: planner === 'borrow' || planner === 'swap-and-borrow' ? 'borrow' : planner === 'deposit' ? 'deposit' : 'withdraw',
+    kind: planner === 'refinance-position'
+      ? 'refinance'
+      : planner === 'borrow' || planner === 'swap-and-borrow'
+        ? 'borrow'
+        : planner === 'deposit'
+          ? 'deposit'
+          : 'withdraw',
     planner,
     args,
     chainId: 1,
@@ -83,5 +93,33 @@ describe('Lite intent compiler wrapper parity', () => {
       borrowAmount: 1n,
     })
     expect(calls.planSwapAndBorrowFromWallet).toHaveBeenCalledWith(expect.objectContaining({ borrowAccount: SUB_ACCOUNT }))
+  })
+
+  it('passes only swap-debt compiler arguments for a refinance debt swap', async () => {
+    const quote = makeSwapQuote()
+    const calls = await compile('refinance-position', {
+      debt: {
+        planner: 'swap-debt',
+        args: { swapQuote: quote, swapperMode: 1 },
+      },
+    })
+
+    const args = calls.planSwapDebt.mock.calls[0]?.[0] as unknown as Record<string, unknown>
+    expect(Object.keys(args).sort()).toEqual(['account', 'swapQuote', 'swapperMode'])
+    expect(args).toMatchObject({ swapQuote: quote, swapperMode: 1 })
+  })
+
+  it('passes only swap-collateral compiler arguments for a refinance collateral swap', async () => {
+    const quote = makeSwapQuote()
+    const calls = await compile('refinance-position', {
+      collateral: {
+        planner: 'swap-collateral',
+        args: { swapQuote: quote, swapperMode: 0 },
+      },
+    })
+
+    const args = calls.planSwapCollateral.mock.calls[0]?.[0] as unknown as Record<string, unknown>
+    expect(Object.keys(args).sort()).toEqual(['account', 'swapQuote', 'swapperMode'])
+    expect(args).toMatchObject({ swapQuote: quote, swapperMode: 0 })
   })
 })

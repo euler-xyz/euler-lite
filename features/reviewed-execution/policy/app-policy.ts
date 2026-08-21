@@ -1,7 +1,7 @@
 import { getAddress, isAddress, type Address } from 'viem'
 import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { PolicyState, ReviewedPolicy, ReviewedRequestSet } from '../domain/reviewed-execution'
-import { buildReviewedPolicy, collectPolicyRequirements, type PolicyResultInput } from './engine'
+import { buildReviewedPolicy, collectPolicyRequirements, collectPolicySubjects, type PolicyResultInput } from './engine'
 import { hasUnverifiedVaultAcknowledgement } from './acknowledgements'
 import { detectCountry } from '~/services/country'
 import { detectVpn } from '~/services/vpn'
@@ -22,6 +22,12 @@ const addressOfSubject = (subject: string): Address | undefined => {
   return isAddress(value) ? getAddress(value) : undefined
 }
 
+/** Accounts that the validated final policy graph requires TRM to screen. */
+export const collectScreenedPolicyAccounts = (requestSet: ReviewedRequestSet): readonly Address[] =>
+  collectPolicySubjects(requestSet)
+    .filter(subject => subject.kind === 'account')
+    .map(subject => getAddress(subject.value))
+
 /** Resolve the reviewed policy from the final effect graph only. */
 export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Date.now()): Promise<Readonly<ReviewedPolicy>> => {
   const expiresAt = now + 5 * 60_000
@@ -29,11 +35,11 @@ export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Dat
   if (!country || SANCTIONED_COUNTRIES.includes(country)) throw new Error('Country policy result is unavailable or blocked')
   if (vpn) throw new Error('VPN policy result is blocked')
 
-  const accounts = new Set(
-    requestSet.effects.flatMap(effect => effect.policySubjects.filter(subject => subject.kind === 'account').map(subject => getAddress(subject.value))),
-  )
-  accounts.add(getAddress(requestSet.wallet.account))
-  requestSet.wallet.subAccounts.forEach(account => accounts.add(getAddress(account)))
+  // Use the same validated subject set that is sealed into ReviewedPolicy.
+  // Raw EVC effects may carry zero-address onBehalfOfAccount sentinels, which
+  // are deliberately omitted by collectPolicySubjects and must not be sent to
+  // the screening endpoint.
+  const accounts = new Set(collectScreenedPolicyAccounts(requestSet))
   const screening = await Promise.all([...accounts].map(async account => ({ account, restricted: await screenAddress(account, vpn) })))
   if (screening.some(result => result.restricted)) throw new Error('Wallet or sub-account policy screening is blocked')
 
@@ -66,7 +72,6 @@ export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Dat
         if (operationBlockerEntries.value.some(([key]) => key === 'tos')) throw new Error('Terms-of-use policy remains unresolved')
         version = `tos:${tosEffectDigest}`
       }
-      else if (requirement.concern === 'policy-storage' && !globalThis.indexedDB) throw new Error('Durable policy storage is unavailable')
       else if (requirement.concern === 'unverified-acknowledgement') {
         const unverified = requestSet.effects
           .flatMap(effect => effect.policySubjects)

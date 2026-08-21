@@ -777,7 +777,7 @@ const assertPythSlot = (value: unknown, path: string) => {
 
 export function assertReviewedRequestSet(value: unknown): asserts value is ReviewedRequestSet {
   assertRecord(value, 'requestSet')
-  assertExactKeys(value, ['schemaVersion', 'wallet', 'effects', 'transport', 'requests', 'signatureSlots', 'pythRefreshSlots', 'constraints', 'policyDigest'], 'requestSet')
+  assertExactKeys(value, ['schemaVersion', 'wallet', 'effects', 'transport', 'requests', 'safeTransport', 'signatureSlots', 'pythRefreshSlots', 'constraints', 'policyDigest'], 'requestSet')
   if (value.schemaVersion !== 1) throw new Error('requestSet.schemaVersion is unsupported')
   assertRecord(value.wallet, 'requestSet.wallet')
   assertExactKeys(value.wallet, ['chainId', 'account', 'subAccounts', 'connectorId', 'connectorSessionId', 'walletKind', 'safeAddress', 'classificationVersion', 'approvalMode'], 'requestSet.wallet')
@@ -798,6 +798,33 @@ export function assertReviewedRequestSet(value: unknown): asserts value is Revie
   value.effects.forEach((entry, index) => assertEffectNode(entry, `requestSet.effects[${index}]`))
   if (!Array.isArray(value.requests)) throw new Error('requestSet.requests must be an array')
   value.requests.forEach((entry, index) => assertRequest(entry, `requestSet.requests[${index}]`, transport))
+  if (value.safeTransport !== undefined) {
+    assertRecord(value.safeTransport, 'requestSet.safeTransport')
+    assertExactKeys(value.safeTransport, ['schemaVersion', 'version', 'from', 'chainId', 'atomicRequired', 'calls', 'capabilities', 'atomicCapability'], 'requestSet.safeTransport')
+    if (value.safeTransport.schemaVersion !== 1) throw new Error('requestSet.safeTransport.schemaVersion is unsupported')
+    if (value.safeTransport.version !== '2.0.0') throw new Error('requestSet.safeTransport.version is unsupported')
+    assertAddress(value.safeTransport.from, 'requestSet.safeTransport.from')
+    assertSafeInteger(value.safeTransport.chainId, 'requestSet.safeTransport.chainId', 1)
+    if (value.safeTransport.atomicRequired !== true) throw new Error('requestSet.safeTransport.atomicRequired must be true')
+    if (!Array.isArray(value.safeTransport.calls)) throw new Error('requestSet.safeTransport.calls must be an array')
+    value.safeTransport.calls.forEach((call, index) => {
+      const path = `requestSet.safeTransport.calls[${index}]`
+      assertRecord(call, path)
+      assertExactKeys(call, ['to', 'data', 'value'], path)
+      assertAddress(call.to, `${path}.to`)
+      assertHex(call.data, `${path}.data`)
+      assertBigInt(call.value, `${path}.value`)
+    })
+    assertRecord(value.safeTransport.capabilities, 'requestSet.safeTransport.capabilities')
+    assertExactKeys(value.safeTransport.capabilities, [], 'requestSet.safeTransport.capabilities')
+    assertRecord(value.safeTransport.atomicCapability, 'requestSet.safeTransport.atomicCapability')
+    assertExactKeys(value.safeTransport.atomicCapability, ['status'], 'requestSet.safeTransport.atomicCapability')
+    if (value.safeTransport.atomicCapability.status !== 'supported' && value.safeTransport.atomicCapability.status !== 'ready') {
+      throw new Error('requestSet.safeTransport.atomicCapability.status is unsupported')
+    }
+  }
+  if (transport === 'safe' && value.safeTransport === undefined) throw new Error('requestSet.safeTransport is required for Safe wallets')
+  if (transport === 'eoa' && value.safeTransport !== undefined) throw new Error('requestSet.safeTransport is invalid for EOA wallets')
   if (!Array.isArray(value.signatureSlots)) throw new Error('requestSet.signatureSlots must be an array')
   value.signatureSlots.forEach((entry, index) => assertSignatureSlot(entry, `requestSet.signatureSlots[${index}]`))
   if (!Array.isArray(value.pythRefreshSlots)) throw new Error('requestSet.pythRefreshSlots must be an array')

@@ -63,7 +63,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - Safe detection (iframe connector, named wallet, WalletConnect peer metadata)
 - Force-disabled signatures and CoW quotes while Safe / detection-pending
-- EIP-5792 atomic request vectors, sealed wallet bindings, durable co-signer recovery
+- EIP-5792 atomic request vectors, sealed wallet bindings, and current-session Safe detachment/status handling
 
 ### 🔄 [External Migration Discovery](./external-migration.md)
 

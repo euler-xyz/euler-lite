@@ -1,4 +1,4 @@
-import { encodeFunctionData, getAddress, keccak256, toHex } from 'viem'
+import { encodeFunctionData, getAddress, keccak256, toHex, zeroAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { EVC_ABI } from '~/abis/evc'
@@ -9,6 +9,7 @@ import { validateReviewedRequestSet, validateIntentSet } from '~/features/review
 import { connectorSessionDigest } from '~/features/reviewed-execution/domain/wallet-session'
 import { materializePreparedPlan, reviewedRequestDigest } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { PreparationCache, type PreparationCacheIdentity } from '~/features/reviewed-execution/planning/cache'
+import { collectScreenedPolicyAccounts } from '~/features/reviewed-execution/policy/app-policy'
 import { assertPolicyVersionsMatch, buildReviewedPolicy, collectPolicyRequirements, collectPolicySubjects, type PolicyResultInput } from '~/features/reviewed-execution/policy/engine'
 import { buildReviewedSimulation, validateSimulationCoverage } from '~/features/reviewed-execution/simulation/coverage'
 
@@ -92,6 +93,38 @@ describe('reviewed execution semantic kernel', () => {
     }
     expect(() => validateReviewedRequestSet(missingAsset, [intent])).toThrow(/omits policy subject/)
     expect(() => buildReviewedPolicy({ requestSet: preliminary, results: [...policyResultsFor(preliminary), policyResultsFor(preliminary)[0]!], now: 10 })).toThrow(/duplicated/)
+  })
+
+  it('screens every normalized wallet account and omits zero-address EVC sentinels', () => {
+    const owner = getAddress('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd')
+    const subAccount = getAddress('0x1234567890abcdef1234567890abcdef12345678')
+    const multiAccountIntent: OperationIntent = {
+      ...intent,
+      account: owner,
+      subAccounts: [owner, subAccount],
+    }
+    const multiAccountWallet: WalletBinding = {
+      ...wallet,
+      account: owner,
+      subAccounts: [owner, subAccount],
+    }
+    const sentinelPlan: TransactionPlan = [{
+      type: 'evcBatch',
+      items: [{ targetContract: VAULT, onBehalfOfAccount: zeroAddress, value: 0n, data: '0x12345678' }],
+    }]
+
+    const requestSet = materializePreparedPlan({
+      intents: [multiAccountIntent],
+      plan: sentinelPlan,
+      wallet: multiAccountWallet,
+      sdk,
+      policyDigest: keccak256(toHex('pending')),
+    })
+
+    expect(collectScreenedPolicyAccounts(requestSet)).toEqual([subAccount, owner].sort((left, right) =>
+      left.toLowerCase().localeCompare(right.toLowerCase()),
+    ))
+    expect(collectPolicySubjects(requestSet)).not.toContainEqual({ kind: 'account', value: zeroAddress })
   })
 
   it('rejects policy source-version drift even when current evidence remains allowed', () => {

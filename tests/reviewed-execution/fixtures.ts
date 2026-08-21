@@ -1,18 +1,20 @@
 import { encodeFunctionData, getAddress, keccak256, toHex, type Hash, type TransactionReceipt } from 'viem'
 import { MaterializedTransactionRevertedError, type EVCBatchItem, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { EVC_ABI } from '~/abis/evc'
+import { PYTH_ABI } from '~/abis/pyth'
 import type { PolicyState, FinalizedRequestSet, ReviewedExecution, PluginSnapshot, WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { digestPluginPlan, sealReviewedExecution } from '~/features/reviewed-execution/domain/seal'
 import { reviewedRequestDigest, materializePreparedPlan, type AdditionalMaterializedCall } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { buildReviewedPolicy, collectPolicyRequirements } from '~/features/reviewed-execution/policy/engine'
 import { buildReviewedSimulation } from '~/features/reviewed-execution/simulation/coverage'
-import type { EoaAdapterClient, EoaMaterializedExecutor } from '~/features/reviewed-execution/adapters/eoa'
+import type { EoaMaterializedExecutor } from '~/features/reviewed-execution/adapters/eoa'
 
 export const TEST_ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
 export const TEST_TOKEN = getAddress('0x2000000000000000000000000000000000000000')
 export const TEST_VAULT = getAddress('0x3000000000000000000000000000000000000000')
 export const TEST_EVC = getAddress('0x4000000000000000000000000000000000000000')
+export const TEST_PYTH = getAddress('0x5000000000000000000000000000000000000000')
 
 const intent: OperationIntent = {
   schemaVersion: 1,
@@ -56,10 +58,11 @@ export const makeReviewedExecution = (
     classificationVersion: 'classification-1',
     approvalMode: 'approve',
   }
-  const preliminary = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, ...additional, policyDigest: keccak256(toHex('pending')) })
+  const safeAtomicCapability = transport === 'safe' ? { status: 'supported' as const } : undefined
+  const preliminary = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, ...additional, safeAtomicCapability, policyDigest: keccak256(toHex('pending')) })
   const results = collectPolicyRequirements(preliminary).map(requirement => ({ ...requirement, result: allowed() }))
   const policy = buildReviewedPolicy({ requestSet: preliminary, results, now: 10 })
-  const requestSet = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, ...additional, policyDigest: policy.digest })
+  const requestSet = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, ...additional, safeAtomicCapability, policyDigest: policy.digest })
   const requestDigest = reviewedRequestDigest(requestSet)
   const plugins: PluginSnapshot = {
     rawPlan: plan as never,
@@ -80,17 +83,93 @@ export const makeReviewedExecution = (
   })
 }
 
+export const makePythReviewedExecution = (): ReviewedExecution => {
+  const wallet: WalletBinding = {
+    chainId: 1,
+    account: TEST_ACCOUNT,
+    subAccounts: [TEST_ACCOUNT],
+    connectorId: 'injected',
+    connectorSessionId: 'session-1',
+    walletKind: 'eoa',
+    classificationVersion: 'classification-1',
+    approvalMode: 'approve',
+  }
+  const approveData = encodeFunctionData({
+    abi: [{ type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] }],
+    functionName: 'approve',
+    args: [TEST_VAULT, 10n],
+  })
+  const rawApproval: TransactionPlan[number] = { type: 'requiredApproval', token: TEST_TOKEN, owner: TEST_ACCOUNT, spender: TEST_VAULT, amount: 10n }
+  const resolvedApproval: TransactionPlan[number] = {
+    ...rawApproval,
+    resolved: [{ type: 'approve', token: TEST_TOKEN, owner: TEST_ACCOUNT, spender: TEST_VAULT, amount: 10n, data: approveData }],
+  }
+  const rawPlan: TransactionPlan = [
+    rawApproval,
+    ...plan,
+  ]
+  const previewPlan: TransactionPlan = [
+    resolvedApproval,
+    {
+      type: 'evcBatch',
+      items: [
+        {
+          targetContract: TEST_PYTH,
+          onBehalfOfAccount: TEST_ACCOUNT,
+          value: 2n,
+          data: encodeFunctionData({ abi: PYTH_ABI, functionName: 'updatePriceFeeds', args: [['0x0102']] }),
+        },
+        ...(plan[0]!.type === 'evcBatch' ? plan[0]!.items : []),
+      ],
+    },
+  ]
+  const pythPreviewData = [{
+    planItemIndex: 1,
+    batchItemIndex: 0,
+    target: TEST_PYTH,
+    requiredFeedIds: [keccak256(toHex('feed'))],
+    publishTimes: [90],
+    maxValue: 10n,
+    freshnessPolicy: { maximumAgeSeconds: 60, minimumPublishTime: 80 },
+  }]
+  const preliminary = materializePreparedPlan({ intents: [intent], plan: previewPlan, wallet, sdk, pythPreviewData, policyDigest: keccak256(toHex('pending')) })
+  const results = collectPolicyRequirements(preliminary).map(requirement => ({ ...requirement, result: allowed() }))
+  const policy = buildReviewedPolicy({ requestSet: preliminary, results, now: 10 })
+  const requestSet = materializePreparedPlan({ intents: [intent], plan: previewPlan, wallet, sdk, pythPreviewData, policyDigest: policy.digest })
+  const requestDigest = reviewedRequestDigest(requestSet)
+  const plugins: PluginSnapshot = {
+    rawPlan: rawPlan as never,
+    previewPlan: previewPlan as never,
+    rawPlanDigest: digestPluginPlan('raw', rawPlan as never),
+    previewPlanDigest: digestPluginPlan('preview', previewPlan as never),
+    pluginConfigurationDigest: digestPluginPlan('configuration', { plugins: ['tos', 'keyring', 'pyth'] }),
+  }
+  return sealReviewedExecution({
+    intents: [intent],
+    requestSet,
+    policy,
+    simulation: buildReviewedSimulation({ requestSet, requestDigest, observedAt: 10, projection: { canExecute: true, simulatedAccounts: [], simulatedVaults: [] } }),
+    pluginSnapshot: plugins,
+    validity: { createdAt: 10, expiresAt: 160_000, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy')) },
+    presentationKind: 'supply',
+    presentationInputs: { amount: '10', symbol: 'USDC' },
+  })
+}
+
 export const artifactFor = (execution: ReviewedExecution): FinalizedRequestSet => ({
   __finalizedRequestSet: true,
   reviewId: execution.reviewId,
   requestDigest: execution.requestDigest,
   transport: execution.requestSet.transport,
   requests: execution.requestSet.requests,
+  ...(execution.requestSet.safeTransport ? { safeTransport: execution.requestSet.safeTransport } : {}),
   signatureValues: [],
   pythValues: [],
 })
 
-export const materializedExecutorFor = (client: EoaAdapterClient): EoaMaterializedExecutor => async (execution, options) => {
+export const materializedExecutorFor = (
+  waitForTransactionReceipt: (hash: Hash) => Promise<Pick<TransactionReceipt, 'transactionHash' | 'status'>>,
+): EoaMaterializedExecutor => async (execution, options) => {
   await options.onFinalized?.(execution)
   const hashes: Hash[] = []
   const receipts: TransactionReceipt[] = []
@@ -99,7 +178,7 @@ export const materializedExecutorFor = (client: EoaAdapterClient): EoaMaterializ
     const hash = await options.sendTransaction(request)
     hashes.push(hash)
     await options.onTransactionHash?.(request, index, hash)
-    const received = await client.waitForTransactionReceipt(hash)
+    const received = await waitForTransactionReceipt(hash)
     if (received.status !== 'success') throw new MaterializedTransactionRevertedError(hash)
     const sdkReceipt = received as TransactionReceipt
     receipts.push(sdkReceipt)

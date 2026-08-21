@@ -77,9 +77,9 @@ export const digestPluginPlan = (schema: 'raw' | 'preview' | 'configuration', va
   canonicalDigest(`plugin-${schema}-v1`, value)
 
 /**
- * Recomputes every derivable commitment after cache or journal retrieval.
- * Shape validation alone is insufficient because persisted records are an
- * untrusted serialization boundary.
+ * Recomputes every derivable commitment before an in-memory reviewed
+ * execution reaches the wallet boundary. Shape validation alone is
+ * insufficient because cached preparation data is not execution authority.
  */
 export function assertReviewedExecutionIntegrity(value: unknown): asserts value is ReviewedExecution {
   assertReviewedExecution(value)

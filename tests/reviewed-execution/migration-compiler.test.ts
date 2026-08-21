@@ -124,6 +124,35 @@ describe('cross-protocol migration compiler', () => {
     })
   })
 
+  it('accepts a fresh existing-authorization result that contains only the normal revocation', async () => {
+    const enableRequest = typedRequest as Extract<MigrationAuthorizationRequest, { kind: 'typedData' }>
+    const disableRequest = {
+      ...enableRequest,
+      typedData: {
+        ...enableRequest.typedData,
+        message: { ...enableRequest.typedData.message, isAuthorized: false },
+      },
+    } as MigrationAuthorizationRequest
+    const output = collectors()
+
+    await compileCrossProtocolMigrationIntent({
+      intent: intentFor(disableRequest),
+      account,
+      sdk: sdkFor(disableRequest, () => [{
+        authorizationRequestIndex: 0,
+        planItemIndex: 0,
+        batchItemIndex: 1,
+        abiArgumentPath: ['authorization', 'signature'],
+      }]),
+      collectors: output,
+    })
+
+    expect(output.before).toEqual([])
+    expect(output.after).toEqual([])
+    expect(output.migrationSlots).toHaveLength(1)
+    expect(output.migrationSlots[0]?.typedData.message).toMatchObject({ isAuthorized: false })
+  })
+
   it('fails closed when authorization evidence drifts', async () => {
     await expect(compileCrossProtocolMigrationIntent({
       intent: intentFor(undefined),

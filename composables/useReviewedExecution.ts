@@ -1,13 +1,13 @@
 import { useConfig } from '@wagmi/vue'
-import { getAccount as getWagmiAccount, sendCalls, sendTransaction } from '@wagmi/vue/actions'
+import { getAccount as getWagmiAccount, sendTransaction } from '@wagmi/vue/actions'
 import { getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
 import type { Account, IHasVaultAddress, Permit2DataToSign, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { getSafeWalletProvider, isSafeConnectorIdentity } from '~/utils/safeWalletTransactions'
+import { getSafeAtomicCapability, getSafeWalletProvider, isSafeConnectorIdentity } from '~/utils/safeWalletTransactions'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { canonicalDigest, toCanonicalValue, type CanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 import { connectorSessionDigest } from '~/features/reviewed-execution/domain/wallet-session'
-import type { ReviewedExecution, WalletBinding, EoaRequest, SafeCall, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
+import type { ReviewedExecution, WalletBinding, EoaRequest, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { validateIntentSet } from '~/features/reviewed-execution/domain/validators'
 import { rewardClaimId, rewardClaimSetDigest } from '~/features/reviewed-execution/domain/rewards'
@@ -23,16 +23,12 @@ import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-polic
 import { assertPolicyVersionsMatch } from '~/features/reviewed-execution/policy/engine'
 import type { EulerSimulationProjection } from '~/features/reviewed-execution/simulation/coverage'
 import { collectPlanningRequirements, intentSetDigest } from '~/features/reviewed-execution/planning/requirements'
-import { MutableExecutionEmergencySwitch } from '~/features/reviewed-execution/coordinator/emergency-switch'
 import { assertExactWalletBinding, ReviewedExecutionCoordinator, type SubmissionResult } from '~/features/reviewed-execution/coordinator/coordinator'
-import { IndexedDbSubmissionJournal } from '~/features/reviewed-execution/persistence/journal'
 import { EoaExecutionAdapter } from '~/features/reviewed-execution/adapters/eoa'
 import { SafeExecutionAdapter } from '~/features/reviewed-execution/adapters/safe'
 import { createAppEoaClients, createAppSafeClients } from '~/features/reviewed-execution/adapters/app-clients'
 import { finalizeReviewedRequestSet } from '~/features/reviewed-execution/materialization/finalize'
 import { verifyRefreshedPluginPlan } from '~/features/reviewed-execution/materialization/pyth-refresh'
-import { SubmissionRecoveryService } from '~/features/reviewed-execution/coordinator/recovery'
-import { EoaAttemptReconciler, SafeAttemptReconciler } from '~/features/reviewed-execution/coordinator/reconcilers'
 import type { WalletProviderLike } from '~/utils/safeWalletTransactions'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
@@ -86,12 +82,8 @@ export interface PreparedExecutionReview {
 }
 
 const cache = new PreparationCache()
-const emergencySwitch = new MutableExecutionEmergencySwitch()
 const executions = new Map<Hash, Readonly<ReviewedExecution>>()
 const reviewGenerations = new Map<Hash, { publisher: GenerationPublisher, generation: number }>()
-let journalPromise: Promise<IndexedDbSubmissionJournal> | undefined
-
-const getJournal = () => journalPromise ??= IndexedDbSubmissionJournal.open()
 
 const currentPolicyVersionDigest = () => canonicalDigest('policy-version-v1', toCanonicalValue({
   version: POLICY_VERSION,
@@ -209,7 +201,6 @@ export const useReviewedExecution = () => {
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
 
   const prepare = async (intents: readonly OperationIntent[], options: PrepareReviewedExecutionOptions): Promise<PreparedExecutionReview> => {
-    if (emergencySwitch.isNewReviewDisabled()) throw new Error(emergencySwitch.reason() ?? 'New transaction reviewed executions are disabled')
     validateIntentSet(intents)
     const publisher = options.generation ?? new GenerationPublisher()
     const cartGeneration = options.cartGeneration ?? publisher.advance()
@@ -225,6 +216,15 @@ export const useReviewedExecution = () => {
       publisher.assertCurrent(cartGeneration)
       assertExactWalletBinding(wallet, { ...current, subAccounts: wallet.subAccounts })
     }
+    const safeAtomicCapability = wallet.walletKind === 'safe'
+      ? await (async () => {
+          const connected = getWagmiAccount(config)
+          const provider = connected.connector ? await getSafeWalletProvider(connected.connector) : undefined
+          if (!provider) throw new Error('Safe wallet provider is unavailable')
+          return getSafeAtomicCapability(provider, wallet.account, wallet.chainId)
+        })()
+      : undefined
+    await assertPreparationContext()
     const sdk = await getEulerSdkFresh()
     if (typeof (sdk.executionService as { materializeExecution?: unknown }).materializeExecution !== 'function') {
       throw new Error('SDK deterministic execution materialization is unavailable')
@@ -396,6 +396,7 @@ export const useReviewedExecution = () => {
       compilerVersion: COMPILER_VERSION,
       policyVersionDigest,
       freshUntil: Date.now() + REVIEW_TTL_MS,
+      ...(safeAtomicCapability ? { safeAtomicCapability } : {}),
       before: migrationBefore,
       after: migrationAfter,
       assertContext: assertPreparationContext,
@@ -491,7 +492,6 @@ export const useReviewedExecution = () => {
   }
 
   const executionRuntime = async (execution: ReviewedExecution) => {
-    const journal = await getJournal()
     const sdk = await getEulerSdkFresh()
     const publicClient = sdk.providerService.getProvider(execution.requestSet.wallet.chainId)
     const evcAddress = getAddress(sdk.deploymentService.getDeployment(execution.requestSet.wallet.chainId).addresses.coreAddrs.evc)
@@ -499,7 +499,6 @@ export const useReviewedExecution = () => {
     const connector = connected.connector
     const safeProvider = connector ? await getSafeWalletProvider(connector) : undefined
     const eoa = createAppEoaClients({
-      publicClient: publicClient as never,
       send: async (request: EoaRequest) => sendTransaction(config, {
         account: request.from,
         chainId: request.chainId,
@@ -515,21 +514,8 @@ export const useReviewedExecution = () => {
     const safe = createAppSafeClients({
       provider: safeProvider ?? unavailableSafeProvider,
       publicClient: publicClient as never,
-      send: async (calls: readonly SafeCall[]) => {
-        if (!connector || !safeProvider) throw new Error('The reviewed Safe connector session is unavailable')
-        const result = await sendCalls(config, {
-          account: execution.requestSet.wallet.account,
-          chainId: execution.requestSet.wallet.chainId,
-          connector,
-          forceAtomic: true,
-          calls: calls.map(call => ({ to: call.to, data: call.data, value: call.value })),
-        })
-        return result.id
-      },
     })
-    const coordinator = new ReviewedExecutionCoordinator({
-      journal,
-      emergencySwitch,
+    return {
       adapters: {
         eoa: new EoaExecutionAdapter(
           eoa.adapter,
@@ -608,56 +594,39 @@ export const useReviewedExecution = () => {
           pythValues,
         })
       },
-    })
-    const recovery = new SubmissionRecoveryService(journal, {
-      eoa: new EoaAttemptReconciler(journal, eoa.recovery),
-      safe: new SafeAttemptReconciler(journal, safe.recovery),
-    })
-    return { coordinator, recovery }
+    }
   }
 
   const accept = async (reviewId: Hash, reviewDigest: Hash): Promise<SubmissionResult> => {
     const generation = reviewGenerations.get(reviewId)
     generation?.publisher.assertCurrent(generation.generation)
-    const memoryExecution = executions.get(reviewId)
-    const execution = memoryExecution ?? await (await getJournal()).getReviewedExecution(reviewId)
+    const execution = executions.get(reviewId)
     if (!execution) throw new Error('Reviewed execution is unavailable')
-    const { coordinator } = await executionRuntime(execution)
-    const result = await coordinator.execute(execution, { reviewId, reviewDigest })
-    void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
-    triggerPortfolioRefresh()
-    return result
+    // The coordinator invokes this factory only after acquiring its synchronous
+    // guard, so a duplicate callback cannot even initialize a second runtime.
+    const coordinator = new ReviewedExecutionCoordinator(() => executionRuntime(execution))
+    try {
+      const result = await coordinator.execute(execution, { reviewId, reviewDigest })
+      void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
+      triggerPortfolioRefresh()
+      return result
+    }
+    finally {
+      executions.delete(reviewId)
+      reviewGenerations.delete(reviewId)
+    }
   }
 
-  const resume = async (attemptId: string) => {
-    const attempt = await (await getJournal()).getAttempt(attemptId)
-    if (!attempt) throw new Error('Attempt is unavailable')
-    const execution = await (await getJournal()).getReviewedExecution(attempt.reviewId)
-    if (!execution) throw new Error('Attempt reviewed execution is unavailable')
-    return (await executionRuntime(execution)).coordinator.resume(attemptId)
-  }
-
-  const reconcile = async (attemptId: string) => {
-    const attempt = await (await getJournal()).getAttempt(attemptId)
-    if (!attempt) throw new Error('Attempt is unavailable')
-    const execution = await (await getJournal()).getReviewedExecution(attempt.reviewId)
-    if (!execution) throw new Error('Attempt reviewed execution is unavailable')
-    return (await executionRuntime(execution)).recovery.reconcile(attemptId)
-  }
-
-  if (import.meta.client) {
-    useReviewedExecutionRecovery().registerReconciler(async (attemptId) => {
-      await reconcile(attemptId)
-    })
+  const discard = (reviewId: Hash) => {
+    executions.delete(reviewId)
+    reviewGenerations.delete(reviewId)
   }
 
   return {
     prepare,
     compilePreview,
     accept,
-    resume,
-    reconcile,
+    discard,
     getReviewedExecution,
-    emergencySwitch,
   }
 }

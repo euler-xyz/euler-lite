@@ -4,7 +4,7 @@ import { PYTH_ABI } from '~/abis/pyth'
 import { canonicalDigest, deepFreezeSerializable, toCanonicalValue } from '../domain/canonical'
 import type { EffectNode, EffectPolicySubject, EffectProvenance, EffectPhase, SimulationCoverage, TypedEffect } from '../domain/effects'
 import type { OperationIntent } from '../domain/intents'
-import type { EoaRequest, ReviewedRequestSet, PythRefreshSlot, SafeCall, SignatureSlot, WalletBinding } from '../domain/reviewed-execution'
+import type { EoaRequest, ReviewedRequestSet, PythRefreshSlot, SafeAtomicCapabilityStatus, SafeCall, SignatureSlot, WalletBinding } from '../domain/reviewed-execution'
 import type { PreparedMigrationSignatureSlot, PreparedPermit2Slot } from './signature-slots'
 import { collectPlanningRequirements } from '../planning/requirements'
 
@@ -337,6 +337,7 @@ export const materializePreparedPlan = ({
   before = [],
   after = [],
   directCallAllowlist = {},
+  safeAtomicCapability,
   policyDigest,
 }: {
   intents: readonly OperationIntent[]
@@ -350,6 +351,7 @@ export const materializePreparedPlan = ({
   before?: readonly AdditionalMaterializedCall[]
   after?: readonly AdditionalMaterializedCall[]
   directCallAllowlist?: Readonly<Record<string, string>>
+  safeAtomicCapability?: Readonly<{ status: SafeAtomicCapabilityStatus }>
   policyDigest: Hash
 }): Readonly<ReviewedRequestSet> => {
   if (!intents.length) throw new Error('Cannot materialize an empty intent set')
@@ -584,17 +586,35 @@ export const materializePreparedPlan = ({
     ? pendingRequests.map((request): EoaRequest => ({ requestId: makeRequestId(request), ...request }))
     : pendingRequests.map((request): SafeCall => ({ callId: makeRequestId(request), effectIds: request.effectIds, phase: request.phase, to: request.to, data: request.data, value: request.value }))
 
+  if (wallet.walletKind === 'safe' && !safeAtomicCapability) {
+    throw new Error('Safe atomic capability must be supported or ready before review')
+  }
+
+  const safeTransport = wallet.walletKind === 'safe'
+    ? {
+        schemaVersion: 1 as const,
+        version: '2.0.0' as const,
+        from: getAddress(wallet.account),
+        chainId: wallet.chainId,
+        atomicRequired: true as const,
+        calls: (requests as SafeCall[]).map(({ to, data, value }) => ({ to, data, value })),
+        capabilities: {},
+        atomicCapability: { status: safeAtomicCapability!.status },
+      }
+    : undefined
+
   const requestSet: ReviewedRequestSet = {
     schemaVersion: 1,
     wallet: {
       ...wallet,
       account: getAddress(wallet.account),
-      subAccounts: wallet.subAccounts.map(getAddress),
+      subAccounts: wallet.subAccounts.map(value => getAddress(value)),
       ...(wallet.safeAddress ? { safeAddress: getAddress(wallet.safeAddress) } : {}),
     },
     transport: wallet.walletKind,
     effects,
     requests,
+    ...(safeTransport ? { safeTransport } : {}),
     signatureSlots,
     pythRefreshSlots,
     constraints: intents.flatMap(intent => intent.constraints),

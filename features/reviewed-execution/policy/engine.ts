@@ -54,9 +54,9 @@ export const collectPolicyRequirements = (requestSet: ReviewedRequestSet): reado
   for (const node of requestSet.effects) {
     if (node.effect.kind === 'approval') requirements.push({ subject: `effect:${node.effectId}`, concern: 'approval-binding' })
     if (node.effect.kind === 'pyth-update') requirements.push({ subject: `effect:${node.effectId}`, concern: 'pyth-preview-bound' })
-    if (node.effect.kind === 'migration-authorization') requirements.push({ subject: `effect:${node.effectId}`, concern: 'cleanup-obligation' })
+    if (node.effect.kind === 'migration-authorization') requirements.push({ subject: `effect:${node.effectId}`, concern: 'authorization-binding' })
   }
-  for (const concern of ['country', 'vpn', 'wallet-screening', 'tos', 'policy-storage', 'unverified-acknowledgement']) {
+  for (const concern of ['country', 'vpn', 'wallet-screening', 'tos', 'unverified-acknowledgement']) {
     requirements.push({ subject: 'global', concern })
   }
   return requirements.sort((left, right) => `${left.subject}:${left.concern}`.localeCompare(`${right.subject}:${right.concern}`))
@@ -79,7 +79,7 @@ const assertAllowed = (item: PolicyResultInput, now: number) => {
 const EXPIRING_CONCERNS = new Set([
   'country', 'vpn', 'wallet-screening', 'sanctions-screening', 'canonical-live-authority',
   'asset-metadata', 'spender-binding', 'pyth-freshness', 'authorization-target',
-  'approval-binding', 'pyth-preview-bound', 'cleanup-obligation', 'policy-storage',
+  'approval-binding', 'pyth-preview-bound', 'authorization-binding',
   'unverified-acknowledgement',
 ])
 

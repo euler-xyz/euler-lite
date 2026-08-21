@@ -15,6 +15,8 @@ import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import { formatNumber } from '~/utils/string-utils'
 import type { PreparedExecutionReview } from '~/composables/useReviewedExecution'
+import { submissionResultMessage } from '~/features/reviewed-execution/coordinator/coordinator'
+import { useToast } from '~/components/ui/composables/useToast'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -48,6 +50,7 @@ const {
   dismissExecutionError,
 } = useTxBatch()
 const executionService = useReviewedExecution()
+const toast = useToast()
 const isExecuting = ref(false)
 const preparedExecution = shallowRef<PreparedExecutionReview | null>(null)
 
@@ -456,9 +459,18 @@ const handleExecute = async () => {
   setExecutionError(undefined)
   const run = (async () => {
     try {
-      await executionService.accept(prepared.execution.reviewId, prepared.execution.reviewDigest)
+      const result = await executionService.accept(prepared.execution.reviewId, prepared.execution.reviewDigest)
+      if (result.status !== 'submitted') throw new Error(submissionResultMessage(result))
       handle.scope.markSucceeded()
       if (!handle.scope.suppressPostTxUi()) {
+        if (result.migration) {
+          const revocation = result.migration.revocation
+          const description = revocation
+            ? `Authorization revocation status: ${revocation.status}.`
+            : 'No separate authorization revocation request was required.'
+          if (result.migration.warning) toast.warning('Migration submitted', { description: `${description} ${result.migration.warning}` })
+          else toast.success('Migration submitted', { description })
+        }
         removeIntentRevisions(capturedRevisions)
       }
     }
@@ -486,6 +498,9 @@ const handleExecute = async () => {
 }
 
 const handleClose = () => {
+  if (!isExecuting.value && preparedExecution.value) {
+    executionService.discard(preparedExecution.value.execution.reviewId)
+  }
   dismissExecutionError()
   emit('close')
 }

@@ -33,10 +33,7 @@ useExternalMigrationPositions()
 // Instantiate the batch store at app root so its simulation watchers stay
 // alive across navigation (mirrors useEulerAccount above).
 useTxBatch()
-// Recovery is application-scoped so an unresolved attempt remains visible
-// across navigation and independently of whether new reviewed executions are enabled.
-useReviewedExecutionRecovery()
-// Owns all in-scope reviewed execution preparation, acceptance, and recovery handlers.
+// Owns all in-scope reviewed execution preparation and acceptance handlers.
 useReviewedExecution()
 
 const { theme } = useTheme()
@@ -231,7 +228,6 @@ onUnmounted(() => {
   <UiModals />
   <UiToastContainer />
   <BatchDrawer />
-  <ReviewedExecutionRecovery />
   <Transition name="page">
     <TheMenu v-show="isMenuVisible" />
   </Transition>

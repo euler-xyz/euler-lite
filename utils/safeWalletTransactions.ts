@@ -1,4 +1,5 @@
-import type { Hash, Transaction, TransactionReceipt } from 'viem'
+import { numberToHex, type Address, type Hash, type Transaction, type TransactionReceipt } from 'viem'
+import type { SafeAtomicCapabilityStatus, SafeTransportEnvelope } from '~/features/reviewed-execution/domain/reviewed-execution'
 
 const SAFE_STATUS_POLL_INTERVAL_MS = 2_000
 const SAFE_STATUS_POLL_TIMEOUT_MS = 5 * 60_000
@@ -30,12 +31,14 @@ interface SafeCallsStatusReceipt {
 
 interface SafeCallsStatus {
   status?: number | string
+  atomic?: boolean
   receipts?: SafeCallsStatusReceipt[]
 }
 
 export interface SafeTransactionExecution {
   hash: Hash
   receipt: TransactionReceipt
+  atomic?: true
 }
 
 export class SafeTransactionStatusUnknownError extends Error {
@@ -125,6 +128,55 @@ export const getSafeWalletProvider = async (
     : undefined
 }
 
+export const getSafeAtomicCapability = async (
+  provider: WalletProviderLike,
+  account: Address,
+  chainId: number,
+): Promise<Readonly<{ status: SafeAtomicCapabilityStatus }>> => {
+  const raw = await provider.request({
+    method: 'wallet_getCapabilities',
+    params: [account, [numberToHex(chainId)]],
+  })
+  if (!isRecord(raw)) throw new Error('Safe wallet returned invalid capability data')
+  const entries = Object.entries(raw)
+  const chainCapabilities = entries.find(([key]) => Number(key) === chainId)?.[1]
+  const atomic = isRecord(chainCapabilities) && isRecord(chainCapabilities.atomic)
+    ? chainCapabilities.atomic
+    : undefined
+  if (!atomic) {
+    throw new Error(`Safe wallet does not advertise atomic execution on chain ${chainId}`)
+  }
+  const status = atomic.status
+  if (status !== 'supported' && status !== 'ready') {
+    throw new Error(`Safe wallet atomic execution is unsupported on chain ${chainId}`)
+  }
+  return { status }
+}
+
+export const sendSafeAtomicCalls = async (
+  provider: WalletProviderLike,
+  envelope: SafeTransportEnvelope,
+): Promise<string> => {
+  const result = await provider.request({
+    method: 'wallet_sendCalls',
+    params: [{
+      version: envelope.version,
+      from: envelope.from,
+      chainId: numberToHex(envelope.chainId),
+      atomicRequired: envelope.atomicRequired,
+      calls: envelope.calls.map(call => ({
+        to: call.to,
+        data: call.data,
+        value: numberToHex(call.value),
+      })),
+      capabilities: envelope.capabilities,
+    }],
+  })
+  if (typeof result === 'string') return result
+  if (isRecord(result) && typeof result.id === 'string') return result.id
+  throw new Error('Safe returned no calls ID')
+}
+
 const parseStatus = (value: number | string | undefined): number | undefined => {
   if (typeof value === 'number') return value
   if (typeof value !== 'string' || !value) return undefined
@@ -142,7 +194,8 @@ const parseCallsStatus = (value: unknown): SafeCallsStatus | undefined => {
   const status = typeof value.status === 'number' || typeof value.status === 'string'
     ? value.status
     : undefined
-  return { status, receipts }
+  const atomic = typeof value.atomic === 'boolean' ? value.atomic : undefined
+  return { status, atomic, receipts }
 }
 
 const isUnsupportedMethodError = (error: unknown) => {
@@ -209,6 +262,7 @@ export const waitForSafeTransactionExecution = async ({
   publicClient,
   pollingIntervalMs = SAFE_STATUS_POLL_INTERVAL_MS,
   timeoutMs = SAFE_STATUS_POLL_TIMEOUT_MS,
+  requireAtomic = false,
   signal,
 }: {
   submittedHash: Hash
@@ -216,6 +270,7 @@ export const waitForSafeTransactionExecution = async ({
   publicClient: ReceiptClientLike
   pollingIntervalMs?: number
   timeoutMs?: number
+  requireAtomic?: boolean
   signal?: AbortSignal
 }): Promise<SafeTransactionExecution> => {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -223,6 +278,7 @@ export const waitForSafeTransactionExecution = async ({
   }
 
   let executionHash = submittedHash
+  let atomicConfirmed = !requireAtomic
   let callsStatusSupported = true
   let stopReason: 'timeout' | 'aborted' = 'timeout'
   const deadlineAt = Date.now() + timeoutMs
@@ -271,7 +327,9 @@ export const waitForSafeTransactionExecution = async ({
       }
 
       const receipt = await withStopSignal(getPublicReceipt(publicClient, executionHash))
-      if (receipt) return { hash: executionHash, receipt }
+      if (receipt && atomicConfirmed) {
+        return { hash: executionHash, receipt, ...(requireAtomic ? { atomic: true as const } : {}) }
+      }
 
       if (callsStatusSupported) {
         try {
@@ -282,23 +340,30 @@ export const waitForSafeTransactionExecution = async ({
           const callsStatus = parseCallsStatus(rawStatus)
           const status = parseStatus(callsStatus?.status)
 
-          if (status === 400) {
-            throw new Error('Safe transaction was cancelled')
-          }
-          if (status !== undefined && status >= 500) {
-            throw new Error('Safe transaction failed')
-          }
-
           const resolvedHash = callsStatus?.receipts
             ?.map(item => item.transactionHash)
             .find(isHash)
           if (resolvedHash) executionHash = resolvedHash
+
+          if (status === 400) {
+            throw new Error('Safe transaction was cancelled')
+          }
+          if (requireAtomic && callsStatus?.atomic === false) {
+            throw new Error('Safe call batch was not atomic')
+          }
+          if (requireAtomic && status !== undefined && status >= 200 && status < 300 && callsStatus?.atomic === true) {
+            atomicConfirmed = true
+          }
+          if (status !== undefined && status >= 500) {
+            throw new Error('Safe transaction failed')
+          }
         }
         catch (error) {
           if (error instanceof SafeTransactionStatusUnknownError) throw error
           if (error instanceof Error && (
             error.message === 'Safe transaction was cancelled'
             || error.message === 'Safe transaction failed'
+            || error.message === 'Safe call batch was not atomic'
           )) {
             throw error
           }

@@ -133,11 +133,25 @@ describe('prepared plan materialization', () => {
       approvalMode: 'approve',
     }
 
-    const requestSet = materializePreparedPlan({ intents: [intent], plan, wallet: safeWallet, sdk, policyDigest: POLICY })
+    const requestSet = materializePreparedPlan({ intents: [intent], plan, wallet: safeWallet, sdk, safeAtomicCapability: { status: 'supported' }, policyDigest: POLICY })
     expect(requestSet.transport).toBe('safe')
     expect(requestSet.requests).toHaveLength(1)
     expect(requestSet.requests[0]).toHaveProperty('callId')
     expect(requestSet.requests[0]).not.toHaveProperty('requestId')
+    expect(requestSet.safeTransport).toMatchObject({
+      version: '2.0.0',
+      from: ACCOUNT,
+      chainId: 1,
+      atomicRequired: true,
+      atomicCapability: { status: 'supported' },
+    })
+    expect(requestSet.safeTransport?.calls).toEqual([{ to: EVC, data: requestSet.requests[0].data, value: 0n }])
+  })
+
+  it('blocks Safe review without supported or ready atomic capability evidence', () => {
+    const safeWallet: WalletBinding = { ...eoa, connectorId: 'safe', walletKind: 'safe', safeAddress: ACCOUNT, approvalMode: 'approve' }
+    expect(() => materializePreparedPlan({ intents: [intent], plan: [{ type: 'evcBatch', items: [coreItem] }], wallet: safeWallet, sdk, policyDigest: POLICY }))
+      .toThrow(/atomic capability/i)
   })
 
   it('binds Permit2 typed data to an ABI-aware insertion point', async () => {

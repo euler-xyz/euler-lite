@@ -31,7 +31,7 @@ export const serializePluginPrefetch = (prefetch: PluginPrefetchData): Canonical
         gatedVaults?: Map<Address, unknown>
       }
       const serialized: SerializedKeyringPrefetch = {
-        ...(keyring.targetAddresses ? { targetAddresses: [...keyring.targetAddresses].map(getAddress).sort() } : {}),
+        ...(keyring.targetAddresses ? { targetAddresses: [...keyring.targetAddresses].map(value => getAddress(value)).sort() } : {}),
         gatedVaults: [...(keyring.gatedVaults ?? new Map())].map(([address, entry]) => [getAddress(address), entry === null ? null : toCanonicalValue(entry)]),
       }
       result[name] = toCanonicalValue(serialized)
@@ -50,7 +50,7 @@ export const rehydratePluginPrefetch = (prefetch: CanonicalValue): PluginPrefetc
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Keyring prefetch data is malformed')
       const keyring = value as unknown as SerializedKeyringPrefetch
       result.keyring = {
-        ...(keyring.targetAddresses ? { targetAddresses: new Set(keyring.targetAddresses.map(getAddress)) } : {}),
+        ...(keyring.targetAddresses ? { targetAddresses: new Set(keyring.targetAddresses.map(value => getAddress(value))) } : {}),
         gatedVaults: new Map(keyring.gatedVaults.map(([address, entry]) => [getAddress(address), entry as never])),
       }
       continue

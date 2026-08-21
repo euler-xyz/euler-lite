@@ -1,23 +1,18 @@
 import { getAddress, type Hash, type Hex } from 'viem'
 import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
-import type { SubmissionAttempt, SubmissionState } from '../domain/submission-attempt'
-import type { ReviewedExecution, FinalizedRequestSet, SignatureSlot, WalletBinding } from '../domain/reviewed-execution'
+import type { ReviewedExecution, EoaRequest, FinalizedRequestSet, SafeCall, SignatureSlot, WalletBinding } from '../domain/reviewed-execution'
 import { assertReviewedExecutionIntegrity } from '../domain/seal'
 import type { RefreshedPythValue } from '../materialization/pyth-refresh'
-import type { SubmissionJournal, ReservationExpectation } from '../persistence/journal'
-import { requestVectorDigest } from '../persistence/journal'
-import { walletLaneKey, withWalletLaneLock } from '../persistence/locks'
-import type { ExecutionTransportAdapter, DispatchCallbacks, DispatchResult } from '../adapters/types'
+import type { DispatchCallbacks, ExecutionTransportAdapter, DispatchResult } from '../adapters/types'
 import {
-  AttemptExpiredError,
   AttemptRevertedError,
-  CleanupRequiredError,
+  DispatchFailedError,
   DispatchStatusUnknownError,
   ProvenOffchainCancellationError,
   ProvenPreDispatchCancellationError,
+  ReviewedExecutionExpiredError,
   SignatureStatusUnknownError,
 } from './errors'
-import type { ExecutionEmergencySwitch } from './emergency-switch'
 
 export interface CollectedExecutionSignature {
   slotId: Hash
@@ -25,8 +20,6 @@ export interface CollectedExecutionSignature {
 }
 
 export interface CoordinatorDependencies {
-  journal: SubmissionJournal
-  emergencySwitch: ExecutionEmergencySwitch
   adapters: Readonly<Record<'eoa' | 'safe', ExecutionTransportAdapter>>
   readWalletBinding(): Promise<WalletBinding>
   revalidatePolicy(execution: ReviewedExecution): Promise<void>
@@ -36,10 +29,8 @@ export interface CoordinatorDependencies {
     execution: ReviewedExecution,
     signatures: readonly CollectedExecutionSignature[],
     pythValues: readonly RefreshedPythValue[],
-  ): Promise<FinalizedRequestSet> | FinalizedRequestSet
+  ): FinalizedRequestSet
   now?: () => number
-  createId?: (kind: 'attempt' | 'reservation') => string
-  withLaneLock?: <T>(laneKey: string, work: () => Promise<T>) => Promise<T>
 }
 
 export interface ReviewAcceptance {
@@ -47,17 +38,70 @@ export interface ReviewAcceptance {
   reviewDigest: Hash
 }
 
-export interface SubmissionResult {
-  attempt: SubmissionAttempt
-  dispatch: DispatchResult
+export type SubmissionStatus = 'submitted' | 'rejected' | 'failed' | 'unknown'
+export type SubmissionPhaseStatus = SubmissionStatus | 'not-submitted'
+
+export interface SubmissionPhaseResult {
+  status: SubmissionPhaseStatus
+  requestIndexes: readonly number[]
+  identifiers: readonly string[]
+  message?: string
 }
 
+export interface MigrationSubmissionResult {
+  submission: SubmissionPhaseResult
+  revocation?: SubmissionPhaseResult
+  authorizationMayRemain: boolean
+  warning?: string
+}
+
+export interface SubmissionResult {
+  status: SubmissionStatus
+  transport: 'eoa' | 'safe'
+  dispatch?: DispatchResult
+  message?: string
+  migration?: MigrationSubmissionResult
+}
+
+export class SubmissionOutcomeError extends Error {
+  constructor(readonly result: SubmissionResult) {
+    super(submissionResultMessage(result))
+    this.name = 'SubmissionOutcomeError'
+  }
+}
+
+const activeReviewIds = new Set<Hash>()
+
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown transaction error'
+
+const isUserRejected = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false
+  const code = 'code' in error ? Number(error.code) : undefined
+  const message = 'message' in error && typeof error.message === 'string' ? error.message.toLowerCase() : ''
+  return code === 4001 || code === 5000 || message.includes('user rejected') || message.includes('user denied')
+}
+
+const statusForError = (error: unknown, crossedWalletBoundary: boolean): SubmissionStatus => {
+  if (error instanceof ProvenPreDispatchCancellationError || error instanceof ProvenOffchainCancellationError || isUserRejected(error)) return 'rejected'
+  if (error instanceof AttemptRevertedError || error instanceof DispatchFailedError) return 'failed'
+  if (error instanceof DispatchStatusUnknownError || error instanceof SignatureStatusUnknownError || crossedWalletBoundary) return 'unknown'
+  return 'failed'
+}
+
+const defaultStatusMessage = (status: SubmissionStatus) => {
+  if (status === 'rejected') return 'The wallet request was rejected.'
+  if (status === 'unknown') return 'Transaction status is unknown. Check your wallet or block explorer for the latest status.'
+  if (status === 'failed') return 'Transaction submission failed.'
+  return 'Transaction submitted.'
+}
+
+export const submissionResultMessage = (result: SubmissionResult) =>
+  result.migration?.warning ?? result.message ?? defaultStatusMessage(result.status)
 
 export const walletBindingDigest = (binding: WalletBinding): Hash => canonicalDigest('wallet-binding-v1', toCanonicalValue({
   ...binding,
   account: getAddress(binding.account),
-  subAccounts: binding.subAccounts.map(getAddress),
+  subAccounts: binding.subAccounts.map(value => getAddress(value)),
   ...(binding.safeAddress ? { safeAddress: getAddress(binding.safeAddress) } : {}),
 }))
 
@@ -67,293 +111,265 @@ export const assertExactWalletBinding = (expected: WalletBinding, actual: Wallet
   }
 }
 
-const defaultId = (kind: 'attempt' | 'reservation') => {
-  const uuid = globalThis.crypto?.randomUUID?.()
-  if (!uuid) throw new Error('Secure random IDs are unavailable')
-  return `${kind}:${uuid}`
+const requestIdentifier = (
+  requestIndex: number,
+  externalIds: ReadonlyMap<number, readonly { kind: string, value: string }[]>,
+) => externalIds.get(requestIndex)?.map(item => item.value) ?? []
+
+const requestIdOf = (request: EoaRequest | SafeCall) => 'requestId' in request ? request.requestId : request.callId
+
+const mergeDispatchResults = (first: DispatchResult | undefined, second: DispatchResult): DispatchResult => ({
+  transactionHashes: [...(first?.transactionHashes ?? []), ...second.transactionHashes],
+  ...(second.callsId ?? first?.callsId ? { callsId: second.callsId ?? first?.callsId } : {}),
+  ...(second.executionHash ?? first?.executionHash ? { executionHash: second.executionHash ?? first?.executionHash } : {}),
+  ...(second.atomic ?? first?.atomic ? { atomic: true } : {}),
+})
+
+const migrationResultFor = ({
+  execution,
+  artifact,
+  status,
+  message,
+  confirmedSteps,
+  activeStepIndex,
+  externalIds,
+}: {
+  execution: ReviewedExecution
+  artifact?: FinalizedRequestSet
+  status: SubmissionStatus
+  message: string
+  confirmedSteps: ReadonlySet<number>
+  activeStepIndex?: number
+  externalIds: ReadonlyMap<number, readonly { kind: string, value: string }[]>
+}): MigrationSubmissionResult | undefined => {
+  const hasMigration = execution.intents.some(intent => intent.kind === 'migration')
+    || execution.requestSet.effects.some(node => node.effect.kind === 'migration-authorization')
+  if (!hasMigration) return undefined
+  const requests = artifact?.requests ?? execution.requestSet.requests
+  const coreIndexes = requests.flatMap((request, index) => request.phase === 'core' ? [index] : [])
+  const revocationIndexes = requests.flatMap((request, index) => request.phase === 'cleanup' ? [index] : [])
+  const successfulCore = coreIndexes.length > 0 && coreIndexes.every(index => confirmedSteps.has(index))
+  const successfulRevocation = revocationIndexes.length > 0 && revocationIndexes.every(index => confirmedSteps.has(index))
+  const safeHandedOff = execution.requestSet.transport === 'safe'
+    && [...externalIds.values()].some(items => items.some(item => item.kind === 'calls-id'))
+  const activePhase = activeStepIndex === undefined ? undefined : requests[activeStepIndex]?.phase
+  const identifiersFor = (indexes: readonly number[]) => indexes.flatMap(index => requestIdentifier(index, externalIds))
+
+  const submissionStatus: SubmissionPhaseStatus = successfulCore || (safeHandedOff && status === 'submitted')
+    ? 'submitted'
+    : activePhase === 'core' || (execution.requestSet.transport === 'safe' && status !== 'submitted')
+      ? status
+      : 'not-submitted'
+  const revocationStatus: SubmissionPhaseStatus | undefined = !revocationIndexes.length
+    ? undefined
+    : successfulRevocation || safeHandedOff
+      ? status
+      : activePhase === 'cleanup'
+        ? status
+        : 'not-submitted'
+
+  const hasMigrationGrant = requests.some(request => request.effectIds.some(effectId => execution.requestSet.effects.some(node =>
+    node.effectId === effectId
+    && node.effect.kind === 'migration-authorization'
+    && node.effect.action === 'grant')))
+  const successfulMigrationGrant = requests.some((request, index) => confirmedSteps.has(index)
+    && request.effectIds.some(effectId => execution.requestSet.effects.some(node =>
+      node.effectId === effectId
+      && node.effect.kind === 'migration-authorization'
+      && node.effect.action === 'grant')))
+  // A reviewed revocation without a reviewed grant means preparation observed
+  // an authorization that was already active before this operation.
+  const preexistingAuthorization = revocationStatus !== undefined && !hasMigrationGrant
+  const authorizationMayRemain = revocationStatus !== undefined && revocationStatus !== 'submitted'
+    ? successfulCore || successfulMigrationGrant || preexistingAuthorization || status === 'unknown'
+    : !successfulCore && (successfulMigrationGrant || status === 'unknown')
+
+  let warning: string | undefined
+  if (authorizationMayRemain && successfulCore && revocationStatus && revocationStatus !== 'submitted') {
+    warning = `Migration submitted, but authorization revocation ${revocationStatus === 'not-submitted' ? 'was not submitted' : `status is ${revocationStatus}`}. Authorization may remain active.`
+  }
+  else if (authorizationMayRemain) {
+    warning = `${submissionStatus === 'unknown' ? 'Migration status is unknown' : 'Migration was not submitted'}. Authorization may remain active.`
+  }
+
+  return {
+    submission: {
+      status: submissionStatus,
+      requestIndexes: coreIndexes,
+      identifiers: identifiersFor(coreIndexes),
+      ...(submissionStatus === 'submitted' ? {} : { message }),
+    },
+    ...(revocationStatus === undefined
+      ? {}
+      : {
+          revocation: {
+            status: revocationStatus,
+            requestIndexes: revocationIndexes,
+            identifiers: identifiersFor(revocationIndexes),
+            ...(revocationStatus === 'submitted' ? {} : { message }),
+          },
+        }),
+    authorizationMayRemain,
+    ...(warning ? { warning } : {}),
+  }
 }
 
-const isAfterExternalBoundary = (attempt: SubmissionAttempt, execution?: ReviewedExecution) =>
-  attempt.state === 'signing'
-  || (attempt.state === 'finalized' && Boolean(execution?.requestSet.signatureSlots.length))
-  || attempt.state === 'dispatching'
-  || attempt.state === 'identified'
-  || attempt.state === 'confirming'
-  || attempt.externalIds.length > 0
-
 export class ReviewedExecutionCoordinator {
-  private readonly now: () => number
-  private readonly createId: NonNullable<CoordinatorDependencies['createId']>
-  private readonly withLaneLock: NonNullable<CoordinatorDependencies['withLaneLock']>
+  constructor(private readonly dependencySource: CoordinatorDependencies | (() => Promise<CoordinatorDependencies>)) {}
 
-  constructor(private readonly dependencies: CoordinatorDependencies) {
-    this.now = dependencies.now ?? Date.now
-    this.createId = dependencies.createId ?? defaultId
-    this.withLaneLock = dependencies.withLaneLock ?? withWalletLaneLock
-    if (dependencies.adapters.eoa.transport !== 'eoa' || dependencies.adapters.safe.transport !== 'safe') {
-      throw new Error('Execution adapters are registered under the wrong transport')
+  execute(execution: ReviewedExecution, acceptance: ReviewAcceptance): Promise<SubmissionResult> {
+    const transport = execution.requestSet.transport
+    if (activeReviewIds.has(execution.reviewId)) {
+      return Promise.resolve({ status: 'failed', transport, message: 'This reviewed transaction is already being submitted.' })
     }
+    // Synchronous and process-local: the first caller owns this reviewed
+    // execution before even its wallet-specific runtime can yield.
+    activeReviewIds.add(execution.reviewId)
+    return this.executeActive(execution, acceptance).finally(() => {
+      activeReviewIds.delete(execution.reviewId)
+    })
   }
 
-  async execute(execution: ReviewedExecution, acceptance: ReviewAcceptance): Promise<SubmissionResult> {
-    assertReviewedExecutionIntegrity(execution)
-    if (this.dependencies.emergencySwitch.isNewReviewDisabled()) {
-      throw new Error(this.dependencies.emergencySwitch.reason() ?? 'New transaction reviewed executions are disabled')
-    }
-    if (acceptance.reviewId !== execution.reviewId || acceptance.reviewDigest !== execution.reviewDigest) {
-      throw new Error('Review acceptance does not match the reviewed execution')
-    }
-    const laneKey = walletLaneKey(execution.requestSet.wallet.account, execution.requestSet.wallet.chainId)
-    return this.withLaneLock(laneKey, async () => {
-      // The switch governs only creation. Once reservation exists, recovery and
-      // completion remain available even if the switch changes.
-      if (this.dependencies.emergencySwitch.isNewReviewDisabled()) {
-        throw new Error(this.dependencies.emergencySwitch.reason() ?? 'New transaction reviewed executions are disabled')
+  private async executeActive(execution: ReviewedExecution, acceptance: ReviewAcceptance): Promise<SubmissionResult> {
+    const transport = execution.requestSet.transport
+    let artifact: FinalizedRequestSet | undefined
+    let activeStepIndex: number | undefined
+    const confirmedSteps = new Set<number>()
+    const externalIds = new Map<number, { kind: string, value: string }[]>()
+    const buildResult = (status: SubmissionStatus, error?: unknown, dispatch?: DispatchResult): SubmissionResult => {
+      const message = error ? errorMessage(error) : defaultStatusMessage(status)
+      const migration = migrationResultFor({ execution, artifact, status, message, confirmedSteps, activeStepIndex, externalIds })
+      const effectiveStatus = migration?.submission.status === 'submitted' ? 'submitted' : status
+      return {
+        status: effectiveStatus,
+        transport,
+        ...(dispatch ? { dispatch } : {}),
+        ...(effectiveStatus === 'submitted' && !migration?.warning ? {} : { message }),
+        ...(migration ? { migration } : {}),
       }
-      await this.dependencies.journal.putReviewedExecution(execution)
-      const attemptId = this.createId('attempt')
-      const reservationId = this.createId('reservation')
-      const requestDigest = requestVectorDigest(execution)
-      const attempt = await this.dependencies.journal.reserveAttempt({
-        execution,
-        attemptId,
-        reservationId,
-        laneKey,
-        requestVectorDigest: requestDigest,
-        now: this.now(),
-      })
-      return this.continueReserved(execution, attempt, requestDigest)
-    })
-  }
+    }
 
-  async resume(attemptId: string): Promise<SubmissionResult> {
-    const attempt = await this.dependencies.journal.getAttempt(attemptId)
-    if (!attempt) throw new Error('Attempt is missing')
-    const execution = await this.dependencies.journal.getReviewedExecution(attempt.reviewId)
-    if (!execution || execution.requestDigest !== attempt.requestDigest) throw new Error('Attempt reviewed execution is missing or corrupt')
-    assertReviewedExecutionIntegrity(execution)
-    if (isAfterExternalBoundary(attempt, execution)) throw new Error('Attempts that reached a wallet prompt must be reconciled, never retried')
-    if (!['reserved', 'revalidating', 'finalized'].includes(attempt.state)) throw new Error(`Attempt ${attempt.state} cannot be resumed`)
-    return this.withLaneLock(attempt.laneKey, () => this.continueReserved(execution, attempt, requestVectorDigest(execution)))
-  }
-
-  private async continueReserved(execution: ReviewedExecution, initialAttempt: SubmissionAttempt, requestDigest: Hash): Promise<SubmissionResult> {
-    let attempt = initialAttempt
-    const expectation = (): ReservationExpectation => ({
-      attemptId: attempt.attemptId,
-      reservationId: attempt.reservationId,
-      reviewId: execution.reviewId,
-      requestDigest: execution.requestDigest,
-      account: execution.requestSet.wallet.account,
-      chainId: execution.requestSet.wallet.chainId,
-      laneKey: attempt.laneKey,
-      requestVectorDigest: requestDigest,
-      version: attempt.version,
-      fence: attempt.fence,
-    })
-    const verify = async () => {
-      attempt = await this.dependencies.journal.verifyReservation(expectation())
-    }
-    const assertFresh = () => {
-      const expiresAt = execution.validity.expiresAt
-      if (expiresAt !== undefined && expiresAt <= this.now()) throw new AttemptExpiredError()
-    }
-    const transition = async (to: SubmissionState, options?: { stepIndex?: number, error?: string, detail?: Parameters<SubmissionJournal['transitionAttempt']>[0]['detail'] }) => {
-      attempt = await this.dependencies.journal.transitionAttempt({
-        expected: { attemptId: attempt.attemptId, version: attempt.version, fence: attempt.fence }, to, now: this.now(), ...options,
-      })
-    }
-    const assertWallet = async () => {
-      assertFresh()
-      const actual = await this.dependencies.readWalletBinding()
-      assertFresh()
-      assertExactWalletBinding(execution.requestSet.wallet, actual)
-      await verify()
-      assertFresh()
-    }
-    const assertPolicyAndWallet = async () => {
-      await assertWallet()
-      await this.dependencies.revalidatePolicy(execution)
-      await assertWallet()
-    }
-    const recordExternal = async (kind: 'transaction-hash' | 'calls-id' | 'execution-hash', value: string) => {
-      attempt = await this.dependencies.journal.recordExternalArtifact(
-        { attemptId: attempt.attemptId, version: attempt.version, fence: attempt.fence }, { kind, value, observedAt: this.now() },
-      )
-    }
-    await verify()
     try {
-      return await this.runReserved({ execution, getAttempt: () => attempt, verify, transition, assertWallet, assertPolicyAndWallet, recordExternal })
-    }
-    catch (error) {
-      const current = await this.dependencies.journal.getAttempt(attempt.attemptId)
-      if (current) attempt = current
-      const terminal = await this.classifyFailure(execution, attempt, error, transition)
-      if (terminal === 'safely-rejected-before-dispatch' || terminal === 'reverted' || terminal === 'cancelled-proven' || terminal === 'expired') {
-        await this.dependencies.journal.releaseLane({ attemptId: attempt.attemptId, version: attempt.version, fence: attempt.fence }, this.now())
+      const dependencies = typeof this.dependencySource === 'function'
+        ? await this.dependencySource()
+        : this.dependencySource
+      if (dependencies.adapters.eoa.transport !== 'eoa' || dependencies.adapters.safe.transport !== 'safe') {
+        throw new Error('Execution adapters are registered under the wrong transport')
       }
-      throw error
-    }
-  }
+      const now = dependencies.now ?? Date.now
+      assertReviewedExecutionIntegrity(execution)
+      if (acceptance.reviewId !== execution.reviewId || acceptance.reviewDigest !== execution.reviewDigest) {
+        throw new Error('Review acceptance does not match the reviewed execution')
+      }
 
-  private async runReserved({
-    execution,
-    getAttempt,
-    verify,
-    transition,
-    assertWallet,
-    assertPolicyAndWallet,
-    recordExternal,
-  }: {
-    execution: ReviewedExecution
-    getAttempt: () => SubmissionAttempt
-    verify: () => Promise<void>
-    transition: (to: SubmissionState, options?: { stepIndex?: number, error?: string, detail?: Parameters<SubmissionJournal['transitionAttempt']>[0]['detail'] }) => Promise<void>
-    assertWallet: () => Promise<void>
-    assertPolicyAndWallet: () => Promise<void>
-    recordExternal: (kind: 'transaction-hash' | 'calls-id' | 'execution-hash', value: string) => Promise<void>
-  }): Promise<SubmissionResult> {
-    const expiresAt = execution.validity.expiresAt
-    if (expiresAt !== undefined && expiresAt <= this.now()) throw new AttemptExpiredError()
-    await transition('revalidating')
-    await assertPolicyAndWallet()
+      const assertFresh = () => {
+        // Once an EOA prerequisite has a successful receipt, the accepted
+        // sequence is already in progress. A wallet-controlled receipt delay
+        // must not expire the in-memory review before its JIT-finalized core.
+        if (transport === 'eoa' && execution.requestSet.pythRefreshSlots.length > 0 && confirmedSteps.size > 0) return
+        const expiresAt = execution.validity.expiresAt
+        if (expiresAt !== undefined && expiresAt <= now()) throw new ReviewedExecutionExpiredError()
+      }
+      const assertWallet = async () => {
+        assertFresh()
+        const actual = await dependencies.readWalletBinding()
+        assertFresh()
+        assertExactWalletBinding(execution.requestSet.wallet, actual)
+      }
+      const assertPolicyAndWallet = async () => {
+        await assertWallet()
+        await dependencies.revalidatePolicy(execution)
+        await assertWallet()
+      }
 
-    const signatures: CollectedExecutionSignature[] = []
-    for (const [slotIndex, slot] of execution.requestSet.signatureSlots.entries()) {
-      if (slot.validUntil !== undefined && slot.validUntil <= Math.floor(this.now() / 1000)) throw new AttemptExpiredError('A reviewed signature request expired')
-      await transition('signing', { stepIndex: slotIndex, detail: { slotId: slot.slotId } })
       await assertPolicyAndWallet()
-      let signature: Hex
-      try {
-        signature = await this.dependencies.collectSignature(slot)
-      }
-      catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && (Number(error.code) === 4001 || Number(error.code) === 5000)) {
-          throw new ProvenPreDispatchCancellationError('Signature request was rejected')
+      const signatures: CollectedExecutionSignature[] = []
+      for (const slot of execution.requestSet.signatureSlots) {
+        if (slot.validUntil !== undefined && slot.validUntil <= Math.floor(now() / 1000)) {
+          throw new ReviewedExecutionExpiredError('A reviewed signature request expired')
         }
-        throw new SignatureStatusUnknownError(errorMessage(error))
-      }
-      await assertWallet()
-      signatures.push({ slotId: slot.slotId, signature })
-    }
-
-    // Refresh is deliberately after durable reservation and as late as possible.
-    await assertPolicyAndWallet()
-    const pythValues = await this.dependencies.refreshPyth(execution)
-    await assertPolicyAndWallet()
-    const artifact = await this.dependencies.finalize(execution, signatures, pythValues)
-    if (artifact.reviewId !== execution.reviewId || artifact.requestDigest !== execution.requestDigest || artifact.transport !== execution.requestSet.transport) {
-      throw new Error('Finalized artifact does not match the reviewed execution')
-    }
-    await transition('finalized')
-    await verify()
-
-    const cleanupByRequestIndex = new Map<number, Hash[]>()
-    const cleanupObligationIds: Hash[] = []
-    for (const [requestIndex, request] of artifact.requests.entries()) {
-      if (request.phase !== 'cleanup') continue
-      const ids: Hash[] = []
-      for (const effectId of request.effectIds) {
-        const obligationId = canonicalDigest('cleanup-obligation-v1', toCanonicalValue({
-          attemptId: getAttempt().attemptId,
-          requestIndex,
-          effectId,
-          request,
-        }))
-        await this.dependencies.journal.putCleanupObligation(
-          { attemptId: getAttempt().attemptId, version: getAttempt().version, fence: getAttempt().fence },
-          {
-            schemaVersion: 1,
-            obligationId,
-            attemptId: getAttempt().attemptId,
-            effectId,
-            status: 'pending',
-            request: toCanonicalValue(request),
-            createdAt: this.now(),
-            updatedAt: this.now(),
-          },
-        )
-        ids.push(obligationId)
-        cleanupObligationIds.push(obligationId)
-      }
-      cleanupByRequestIndex.set(requestIndex, ids)
-    }
-    await verify()
-
-    let confirmedPrerequisite = false
-    const markCleanupCompleted = async (obligationId: Hash) => {
-      const current = getAttempt()
-      await this.dependencies.journal.updateCleanupObligation(
-        { attemptId: current.attemptId, version: current.version, fence: current.fence },
-        obligationId,
-        'completed',
-        this.now(),
-      )
-    }
-
-    const callbacks: DispatchCallbacks = {
-      getAttempt,
-      assertReservation: verify,
-      assertWalletBinding: assertWallet,
-      beforeDispatch: async (stepIndex, detail) => {
         await assertPolicyAndWallet()
-        const storedDetail = detail && typeof detail === 'object' && !Array.isArray(detail)
-          ? { stepIndex, ...detail }
-          : { stepIndex, ...(detail === undefined ? {} : { adapterDetail: detail }) }
-        await transition('dispatching', { stepIndex, detail: storedDetail })
-        await verify()
-      },
-      recordExternalId: async (kind, value) => {
-        await recordExternal(kind, value)
-      },
-      markConfirming: async (stepIndex) => {
-        await transition('confirming', { stepIndex })
-      },
-      afterConfirmed: async (stepIndex) => {
-        const request = artifact.requests[stepIndex]
-        if (!request) throw new Error('Adapter confirmed an unknown request')
-        if (request.phase === 'prerequisite') confirmedPrerequisite = true
-        for (const obligationId of cleanupByRequestIndex.get(stepIndex) ?? []) {
-          await markCleanupCompleted(obligationId)
+        let signature: Hex
+        try {
+          signature = await dependencies.collectSignature(slot)
         }
-      },
-    }
-    const adapter = this.dependencies.adapters[execution.requestSet.transport]
-    let dispatch: DispatchResult
-    try {
-      dispatch = await adapter.dispatch(execution, artifact, callbacks)
+        catch (error) {
+          if (isUserRejected(error)) throw new ProvenPreDispatchCancellationError('Signature request was rejected')
+          throw new SignatureStatusUnknownError(errorMessage(error))
+        }
+        await assertWallet()
+        signatures.push({ slotId: slot.slotId, signature })
+      }
+
+      const adapter = dependencies.adapters[transport]
+      const callbacks: DispatchCallbacks = {
+        assertWalletBinding: assertWallet,
+        beforeDispatch: async (stepIndex) => {
+          activeStepIndex = stepIndex
+          await assertPolicyAndWallet()
+        },
+        recordExternalId: async (stepIndex, kind, value) => {
+          const items = externalIds.get(stepIndex) ?? []
+          items.push({ kind, value })
+          externalIds.set(stepIndex, items)
+        },
+        markConfirming: async (stepIndex) => {
+          activeStepIndex = stepIndex
+        },
+        afterConfirmed: async (stepIndex) => {
+          confirmedSteps.add(stepIndex)
+        },
+      }
+
+      let dispatch: DispatchResult | undefined
+      let pythRequestIndex = 0
+      if (transport === 'eoa' && execution.requestSet.pythRefreshSlots.length) {
+        const pythRequestIds = new Set(execution.requestSet.pythRefreshSlots.map(slot => slot.insertionPoint.requestId))
+        if (pythRequestIds.size !== 1) throw new Error('EOA execution contains more than one Pyth-bearing request')
+        pythRequestIndex = execution.requestSet.requests.findIndex(request => pythRequestIds.has(requestIdOf(request)))
+        if (pythRequestIndex < 0) throw new Error('Pyth refresh slot points to a missing EOA request')
+        const prefixIds = new Set(execution.requestSet.requests.slice(0, pythRequestIndex).map(requestIdOf))
+        if (execution.requestSet.signatureSlots.some(slot => slot.insertionPoints.some(point => prefixIds.has(point.requestId)))) {
+          throw new Error('A dynamic signature slot precedes the Pyth execution boundary')
+        }
+        if (pythRequestIndex > 0) {
+          const prefixArtifact: FinalizedRequestSet = {
+            __finalizedRequestSet: true,
+            reviewId: execution.reviewId,
+            requestDigest: execution.requestDigest,
+            transport: 'eoa',
+            requests: execution.requestSet.requests.slice(0, pythRequestIndex),
+            signatureValues: [],
+            pythValues: [],
+          }
+          dispatch = await adapter.dispatch(execution, prefixArtifact, callbacks)
+        }
+      }
+
+      const isJitEoaPyth = transport === 'eoa' && execution.requestSet.pythRefreshSlots.length > 0
+      await assertPolicyAndWallet()
+      const pythValues = await dependencies.refreshPyth(execution)
+      if (!isJitEoaPyth) await assertPolicyAndWallet()
+      artifact = dependencies.finalize(execution, signatures, pythValues)
+      if (artifact.reviewId !== execution.reviewId || artifact.requestDigest !== execution.requestDigest || artifact.transport !== transport) {
+        throw new Error('Finalized artifact does not match the reviewed execution')
+      }
+      if (!isJitEoaPyth) await assertPolicyAndWallet()
+
+      const dispatchArtifact = transport === 'eoa' && pythRequestIndex > 0
+        ? { ...artifact, requests: artifact.requests.slice(pythRequestIndex) }
+        : artifact
+      if (isJitEoaPyth) activeStepIndex = pythRequestIndex
+      const finalizedDispatch = await adapter.dispatch(execution, dispatchArtifact, callbacks, {
+        requestOffset: pythRequestIndex,
+        skipFirstPreDispatchRevalidation: isJitEoaPyth,
+      })
+      dispatch = mergeDispatchResults(dispatch, finalizedDispatch)
+      return buildResult('submitted', undefined, dispatch)
     }
     catch (error) {
-      if (confirmedPrerequisite && !(error instanceof DispatchStatusUnknownError)) {
-        throw new CleanupRequiredError(errorMessage(error))
-      }
-      throw error
+      const crossedWalletBoundary = [...externalIds.values()].some(items => items.length > 0)
+      return buildResult(statusForError(error, crossedWalletBoundary), error)
     }
-    // A Safe proposal confirms its whole call vector at once. Completing all
-    // obligations here also covers transports that report only bundle-level
-    // confirmation rather than individual cleanup call indexes.
-    for (const obligationId of cleanupObligationIds) await markCleanupCompleted(obligationId)
-    await transition('succeeded')
-    const succeeded = getAttempt()
-    await this.dependencies.journal.releaseLane({ attemptId: succeeded.attemptId, version: succeeded.version, fence: succeeded.fence }, this.now())
-    return { attempt: succeeded, dispatch }
-  }
-
-  private async classifyFailure(
-    execution: ReviewedExecution,
-    attempt: SubmissionAttempt,
-    error: unknown,
-    transition: (to: SubmissionState, options?: { error?: string }) => Promise<void>,
-  ): Promise<SubmissionState> {
-    let state: SubmissionState
-    if (error instanceof AttemptExpiredError && !isAfterExternalBoundary(attempt)) state = 'expired'
-    else if (error instanceof ProvenPreDispatchCancellationError && attempt.externalIds.length === 0) state = 'safely-rejected-before-dispatch'
-    else if (error instanceof ProvenOffchainCancellationError) state = 'cancelled-proven'
-    else if (error instanceof AttemptRevertedError) state = 'reverted'
-    else if (error instanceof CleanupRequiredError) state = 'cleanup-required'
-    else if (error instanceof DispatchStatusUnknownError || error instanceof SignatureStatusUnknownError || isAfterExternalBoundary(attempt, execution)) state = 'recovery-required'
-    else state = 'safely-rejected-before-dispatch'
-    if (attempt.state !== state) await transition(state, { error: errorMessage(error) })
-    return state
   }
 }

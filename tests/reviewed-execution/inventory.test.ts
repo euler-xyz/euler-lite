@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -98,19 +98,47 @@ describe('Stage A transaction inventory', () => {
     expect(count(read('composables/useReviewedExecution.ts'), /\buseConfig\(\)/g)).toBe(1)
   })
 
-  it('keeps the lifecycle vocabulary centered on intents, reviewed executions, and submission attempts', () => {
+  it('keeps lifecycle authority centered on intents and reviewed executions', () => {
     const production = ['pages', 'components', 'composables', 'features/reviewed-execution']
       .flatMap(listProductionSources)
       .map(source => read(source))
       .join('\n')
     const domain = read('features/reviewed-execution/domain/reviewed-execution.ts')
       + read('features/reviewed-execution/domain/intents.ts')
-      + read('features/reviewed-execution/domain/submission-attempt.ts')
+      + read('features/reviewed-execution/coordinator/coordinator.ts')
 
     expect(production).not.toMatch(/\b(?:Ceremony|ceremony)\b/)
     expect(domain).toMatch(/interface OperationIntent\b/)
     expect(domain).toMatch(/interface ReviewedExecution\b/)
-    expect(domain).toMatch(/interface SubmissionAttempt\b/)
+    expect(domain).toMatch(/interface SubmissionResult\b/)
+    expect(production).not.toMatch(/IndexedDbSubmissionJournal|SubmissionRecoveryService|withWalletLaneLock|BroadcastChannel|ExecutionEmergencySwitch|MutableExecutionEmergencySwitch|emergencySwitch/)
+  })
+
+  it('starts cleanly after reload without removing current-session Safe detachment', () => {
+    for (const path of [
+      'features/reviewed-execution/persistence/journal.ts',
+      'features/reviewed-execution/persistence/locks.ts',
+      'features/reviewed-execution/coordinator/recovery.ts',
+      'features/reviewed-execution/coordinator/reconcilers.ts',
+      'features/reviewed-execution/coordinator/emergency-switch.ts',
+      'composables/useReviewedExecutionRecovery.ts',
+      'components/entities/reviewed-execution/ReviewedExecutionRecovery.vue',
+    ]) expect(existsSync(resolve(root, path)), path).toBe(false)
+
+    expect(read('app.vue')).not.toMatch(/ReviewedExecutionRecovery|useReviewedExecutionRecovery/)
+    expect(read('composables/useReviewedExecution.ts')).not.toMatch(/indexedDB|localStorage|BroadcastChannel|\.resume\(|\.reconcile\(/i)
+    expect(existsSync(resolve(root, 'composables/useSafeExecutionDetachment.ts'))).toBe(true)
+  })
+
+  it('renders migration and revocation outcomes as separate statuses', () => {
+    const sources = [
+      read('pages/position/[number]/migrate.vue'),
+      read('pages/position/[number]/borrow/swap.vue'),
+      read('components/BatchReviewModal.vue'),
+    ].join('\n')
+
+    expect(count(sources, /Migration submitted/g)).toBeGreaterThanOrEqual(3)
+    expect(count(sources, /Authorization revocation status:/g)).toBeGreaterThanOrEqual(3)
   })
 
   it('forbids new wallet write owners outside the frozen in-scope and excluded boundaries', () => {

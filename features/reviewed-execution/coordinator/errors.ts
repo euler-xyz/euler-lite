@@ -19,29 +19,29 @@ export class AttemptRevertedError extends Error {
   }
 }
 
-export class CleanupRequiredError extends Error {
-  constructor(message = 'A prerequisite succeeded and its reviewed cleanup remains outstanding') {
+export class DispatchFailedError extends Error {
+  constructor(message = 'Transaction execution failed') {
     super(message)
-    this.name = 'CleanupRequiredError'
+    this.name = 'DispatchFailedError'
   }
 }
 
-export class AttemptExpiredError extends Error {
+export class ReviewedExecutionExpiredError extends Error {
   constructor(message = 'The reviewed transaction expired') {
     super(message)
-    this.name = 'AttemptExpiredError'
+    this.name = 'ReviewedExecutionExpiredError'
   }
 }
 
 export class DispatchStatusUnknownError extends Error {
-  constructor(message = 'Submission may have occurred; reconciliation is required') {
+  constructor(message = 'Transaction status is unknown. Check your wallet or block explorer for the latest status.') {
     super(message)
     this.name = 'DispatchStatusUnknownError'
   }
 }
 
 export class SignatureStatusUnknownError extends Error {
-  constructor(message = 'The wallet may have returned a signature; reconciliation is required before creating another attempt') {
+  constructor(message = 'Signature status is unknown. Reopen review before making another submission.') {
     super(message)
     this.name = 'SignatureStatusUnknownError'
   }

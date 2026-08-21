@@ -145,7 +145,10 @@ export const createOperationIntent = (input: CreateOperationIntentInput): Readon
     kind: input.kind,
     chainId: input.chainId,
     account: getAddress(input.account),
-    subAccounts: [...new Set((input.subAccounts ?? [input.account]).map(getAddress))],
+    // `getAddress` accepts an optional chainId as its second argument. Passing
+    // it directly to Array.map leaks the item index into that parameter and
+    // produces EIP-1191 checksums that normal address validation rejects.
+    subAccounts: [...new Set((input.subAccounts ?? [input.account]).map(value => getAddress(value)))],
     planner: { name: input.planner, args },
     constraints: input.constraints ? [...input.constraints] : [...inferIntentConstraints(input.planner, args)],
     metadata: {

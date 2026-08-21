@@ -1,4 +1,4 @@
-import { getAddress, isAddress, type Address, type Hash } from 'viem'
+import { getAddress, isAddress, zeroAddress, type Address, type Hash } from 'viem'
 import { canonicalDigest, deepFreezeSerializable, toCanonicalValue } from '../domain/canonical'
 import type { OperationIntent } from '../domain/intents'
 
@@ -21,6 +21,10 @@ const ACCOUNT_KEYS = new Set(['owner', 'receiver', 'borrowAccount', 'repayAccoun
 const collectNamedAddresses = (value: unknown, key: string | undefined, target: { accounts: Set<Address>, vaults: Set<Address>, assets: Set<Address>, contracts: Set<Address> }) => {
   if (typeof value === 'string' && isAddress(value)) {
     const address = getAddress(value)
+    // SDK swap quotes use zero-address account/vault fields to mean that the
+    // corresponding wallet-side leg is absent. They are transport sentinels,
+    // not snapshot or policy dependencies.
+    if (address === zeroAddress) return
     if (key && VAULT_KEYS.has(key)) target.vaults.add(address)
     else if (key && ASSET_KEYS.has(key)) target.assets.add(address)
     else if (key && ACCOUNT_KEYS.has(key)) target.accounts.add(address)

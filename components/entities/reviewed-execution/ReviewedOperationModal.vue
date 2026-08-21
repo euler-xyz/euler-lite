@@ -3,17 +3,19 @@ import type { Hash } from 'viem'
 import { OperationReviewModal } from '#components'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import type { VaultAsset } from '~/types/asset'
+import { SubmissionOutcomeError, type SubmissionResult } from '~/features/reviewed-execution/coordinator/coordinator'
 
 const props = defineProps<{
   reviewId: Hash
   reviewDigest: Hash
   review: Record<string, unknown> & { asset: { address: string, symbol: string, decimals: number, name?: string }, amount: number | string }
-  onSucceeded?: () => void | Promise<void>
+  onResult?: (result: SubmissionResult) => void | Promise<void>
+  onSucceeded?: (result: SubmissionResult) => void | Promise<void>
   onFailed?: (cause: unknown) => void | Promise<void>
 }>()
 const emit = defineEmits(['close'])
 
-const { getReviewedExecution, accept } = useReviewedExecution()
+const { getReviewedExecution, accept, discard } = useReviewedExecution()
 const { beginTrackedExecution } = useSafeExecutionDetachment()
 const isSubmitting = ref(false)
 const operationReviewProps = computed(() => props.review as unknown as Record<string, unknown> & { asset: VaultAsset, amount: number | string })
@@ -34,10 +36,14 @@ const acceptReview = () => {
   isSubmitting.value = true
   pending = (async () => {
     try {
-      await accept(props.reviewId, props.reviewDigest)
+      const result = await accept(props.reviewId, props.reviewDigest)
+      if (result.status !== 'submitted') {
+        throw new SubmissionOutcomeError(result)
+      }
       handle.scope.markSucceeded()
       if (!handle.scope.suppressPostTxUi()) {
-        await props.onSucceeded?.()
+        await props.onResult?.(result)
+        await props.onSucceeded?.(result)
         emit('close')
       }
     }
@@ -57,6 +63,7 @@ const acceptReview = () => {
 
 const requestClose = () => {
   if (!isSubmitting.value) {
+    discard(props.reviewId)
     emit('close')
     return
   }

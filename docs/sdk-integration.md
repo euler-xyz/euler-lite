@@ -13,7 +13,7 @@ This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler L
 | `server/plugins/app-config.ts` | Reads env at server startup and injects `window.__APP_CONFIG__` |
 | `nuxt.config.ts` | Declares the public runtime config keys that mirror env vars |
 | `composables/useEulerTx.ts` | Consumes the fresh SDK for plan construction, preview preparation, and simulation |
-| `composables/useReviewedExecution.ts` | Builds sealed reviewed executions and owns the app-facing execution/recovery boundary |
+| `composables/useReviewedExecution.ts` | Builds sealed reviewed executions and owns the app-facing preparation and wallet-handoff boundary |
 
 ## Reviewed-execution SDK release gate
 
@@ -27,7 +27,7 @@ The reviewed execution depends only on public SDK APIs and deliberately does not
 - migration simulation that models authorization without executing it; and
 - public simulation documentation linked from the relevant prepare, simulate, execute, and direct-call surfaces.
 
-Run `npm run test:reviewed-execution:sdk-conformance` against the installed package before freezing a candidate. The command also rejects a local SDK symlink or a version that differs from the exact `package.json` pin. Missing capabilities block the release; Lite's migration compiler, plugin-data collector, and finalizer fail closed instead of emulating them. During sealing, Lite invokes the SDK materializer with pinned Permit2 nonce/deadline/expiration values and the reviewed EVC address, then independently rejects any request-byte, signature-slot, or insertion-coordinate disagreement with its richer effect projection. For EOA dispatch, Lite passes the already-finalized exact vector to `executeMaterialized`; awaited hooks persist dispatch state and verify the submitted transaction before the SDK advances to the next wallet prompt. Safe transport retains its calls-ID reconciliation adapter.
+Lite's migration compiler, plugin-data collector, and finalizer fail closed when these capabilities are unavailable instead of emulating them. During sealing, Lite invokes the SDK materializer with pinned Permit2 nonce/deadline/expiration values and the reviewed EVC address, then independently rejects any request-byte, signature-slot, or insertion-coordinate disagreement with its richer effect projection. For an EOA with static prerequisites before its single Pyth-bearing request, Lite gives the reviewed static prefix to `executeMaterialized`, refreshes and finalizes Pyth only after the SDK receipts that prefix, then gives the finalized suffix to `executeMaterialized`; the SDK owns receipt sequencing within both segments. Other EOA executions use one already-finalized vector. Awaited pre-prompt hooks verify the wallet binding and exact request. Safe transport seals its atomic EIP-5792 envelope while retaining the calls-ID status adapter and current-session detachment behavior.
 
 ## SDK Entry Points
 

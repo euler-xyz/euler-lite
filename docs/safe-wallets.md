@@ -11,8 +11,8 @@ Lite therefore:
 1. Detects Safe connectors, including WalletConnect peer metadata.
 2. Force-disables Permit2 and migration message-signature modes for a Safe.
 3. Seals `walletKind: 'safe'`, the account, chain, connector identity/session, Safe address, and approval mode before review.
-4. Materializes the complete reviewed request vector as one EIP-5792 `wallet_sendCalls` proposal with `forceAtomic: true`.
-5. Persists the attempt before any wallet interaction and reconciles ambiguous proposal state from the durable journal.
+4. Requires per-chain EIP-5792 atomic capability to be `supported` or `ready`, then seals the complete `wallet_sendCalls` envelope with `atomicRequired: true`.
+5. Guards duplicate confirmation before wallet handoff, then uses the established in-memory Safe detachment/status flow while co-signers act.
 
 ## Detection
 
@@ -34,7 +34,7 @@ A wallet is Safe when any of these hold:
 
 `useSafeWallet` clears `isSafeWallet` and sets `isSafeWalletResolved = false` on every connector change until the probe finishes. Signature and CoW eligibility treat unresolved detection as forced off.
 
-Executable reviewed execution preparation is stricter. It captures account, chain, connector UID, connector session digest, wallet kind, and approval mode, then reads them again after asynchronous Safe classification. An identifiable Safe without an available provider cannot produce a reviewed execution. Acceptance rechecks the same complete binding after policy validation, every signature, Pyth refresh, and immediately before dispatch.
+Executable reviewed execution preparation is stricter. It captures account, chain, connector UID, connector session digest, wallet kind, and approval mode, then reads them again after asynchronous Safe classification. An identifiable Safe without an available provider cannot produce a reviewed execution. Preparation also calls `wallet_getCapabilities` for that account and chain; missing or `unsupported` atomic capability blocks review, while `supported` and `ready` are admitted and sealed. Acceptance rechecks the wallet binding after policy validation, every signature, Pyth refresh, and immediately before dispatch, and revalidates atomic capability before handoff.
 
 ## Signatures and Permit2
 
@@ -55,18 +55,18 @@ signaturesEnabled = userPreference && !signaturesForcedOff
 
 The reviewed execution builds one exhaustive effect graph before review. Approvals, migration authorization grants, the main Euler action, and authorization restorations are explicit prerequisite, main, and cleanup effects. The same graph produces transport-specific requests:
 
-- EOA: an ordered sequence of exact requests, each verified against its submitted transaction and receipt.
-- Safe: one ordered `SafeCall[]` vector submitted with `wallet_sendCalls({ forceAtomic: true })`.
+- EOA: an ordered sequence of exact requests, each checked before the wallet prompt and advanced by the SDK only after a successful receipt.
+- Safe: one ordered envelope containing version, from, chain, `atomicRequired: true`, exact calls, request capabilities, and the admitted atomic-capability snapshot. The reviewed Safe provider receives those exact serialized `wallet_sendCalls` fields directly, without a client layer injecting unreviewed capabilities.
 
-`SafeExecutionAdapter` records the returned calls ID, reads the proposed calls back, compares the semantic call-vector digest, waits for status, records the execution hash when available, and verifies the execution receipt. Off-chain cancellation and on-chain revert are terminal. Missing or ambiguous status becomes `recovery-required`; it never triggers a fallback EOA or sequential send.
+`SafeExecutionAdapter` verifies and hands the exact finalized envelope to `wallet_sendCalls`, keeps the returned calls ID in the active invocation, and uses the established current-session status poller to resolve the execution hash and receipt. A successful result additionally requires `wallet_getCallsStatus.atomic === true`; explicit non-atomic execution fails the reviewed guarantee, while missing atomic evidence cannot become success. Off-chain cancellation and on-chain revert are terminal. Missing or ambiguous status is reported as unknown; it never triggers a fallback EOA, sequential send, automatic retry, or durable reconciliation.
 
-The coordinator reserves a durable, wallet-scoped lane before signatures or dispatch. This prevents concurrent tabs from creating overlapping attempts for the same account and chain. The emergency switch can block new reviewed executions without disabling recovery of already reserved attempts.
+The coordinator synchronously guards the accepted review ID before signatures or dispatch so overlapping callbacks for that reviewed execution cannot open duplicate wallet requests. The guard is process-local and is not restored after reload. Once the Safe request is handed off, `useSafeExecutionDetachment` retains the existing single tracked-execution UI slot: the modal may close while co-signers act, confirmations remain gated in that session, and completion is attributed to the captured context.
 
 ### Batch and migration
 
-Batch drafts contain only serializable intents and revisions. Review preparation recompiles or deeply validates the current generation and seals one request vector. The visible batch review and calldata/Tenderly actions project from that vector; `lastSimulatedPlan` is only an preview form-layer projection.
+Batch drafts contain only serializable intents and revisions. Review preparation recompiles or deeply validates the current generation and seals one request vector. The visible batch review and calldata/Tenderly actions project from that vector; `lastSimulatedPlan` is only a preview form-layer projection.
 
-Migration authorization grants and restorations use the same reviewed execution. For a Safe they are calls inside the atomic proposal, so a reverted proposal reverts them together. Typed-data migration authorization is not used for a Safe. For an EOA, cleanup obligations are journaled before dispatch and remain recoverable if a prerequisite succeeds but a later request does not.
+Migration authorization grants and revocations/restorations use the same reviewed execution. For a Safe they are calls inside the atomic proposal, so a reverted proposal reverts them together. Typed-data migration authorization is not used for a Safe. For an EOA, the SDK advances from a successful migration receipt to the reviewed revocation request. A revocation problem is reported separately and does not turn the migration into a failure or block a fresh operation.
 
 ## CoW Swap gating
 
@@ -80,18 +80,18 @@ Quote consumers AND this into `includeCowSwap`. `useSwapQuotesParallel` re-evalu
 
 Defence in depth: `useCowSwapExecutionCore.assertTransactionsEnabled` throws before any CoW wallet write if Safe detection is positive or unresolved. CoW solver-order execution remains an explicitly excluded wallet-write boundary outside reviewed execution V2.
 
-## Durable recovery
+## Current-session detachment
 
-`IndexedDbSubmissionJournal` stores the sealed reviewed execution, attempt reservation, state transitions, external IDs, and cleanup obligations. `ReviewedExecutionRecovery` starts at the app root and reconciles non-terminal attempts.
+`useSafeExecutionDetachment` lets the review modal close while the Safe request waits for co-signers. Its module-scoped tracked execution records whether the flow reached its success point and whether the original wallet context was abandoned.
 
-Safe recovery uses the recorded calls ID and execution hash to distinguish:
+The active Safe flow distinguishes:
 
 - confirmed success,
 - proven off-chain cancellation,
 - proven on-chain revert,
-- still-pending or unavailable status requiring continued reconciliation.
+- pending or unavailable status in the current session.
 
-The presentation layer may detach while co-signers act, but durability does not depend on the modal or route remaining mounted. An account or connector change cannot attribute completion to another wallet because every continuation verifies the sealed binding and fenced reservation.
+Detachment suppresses stale modal closure and navigation while still allowing a context-scoped completion toast. An account or connector change abandons the tracked UI record so a late completion cannot affect the newly connected context. This state is intentionally in-memory: reload restores no reviewed execution, submission record, or application lock.
 
 ## Related UI
 
@@ -99,7 +99,7 @@ The presentation layer may detach while co-signers act, but durability does not 
 - `composables/useSafeAddressInfo.ts` and `utils/safe-account.ts` — Safe owner/threshold lookup
 - `components/BatchReviewModal.vue` — unchanged handcrafted batch presentation
 - `components/entities/operation/OperationReviewModal.vue` — presentation-only operation review
-- `components/entities/reviewed-execution/ReviewedExecutionRecovery.vue` — root recovery surface
+- `composables/useSafeExecutionDetachment.ts` — current-session modal detachment, confirmation gate, and completion toasts
 - Settings → signatures toggle — disabled while `signaturesForcedOff`
 
 ## Pitfalls
@@ -109,7 +109,8 @@ The presentation layer may detach while co-signers act, but durability does not 
 | Permit2 appears for a Safe | Detection/binding regression; Safe reviewed executions must seal `approvalMode: 'approve'` |
 | More than one Safe proposal appears | A wallet-write path bypassed the reviewed execution or the request vector changed after sealing |
 | Review succeeds but acceptance fails | Cart generation, connector session, account, chain, wallet kind, approval mode, policy, or reviewed execution freshness changed |
-| Safe proposal remains pending after reload | Expected; recovery uses the journaled calls ID rather than resubmitting |
+| Safe review is unavailable | The wallet did not advertise per-chain atomic capability as `supported` or `ready` |
+| Safe proposal remains pending after reload | Check the Safe UI; Lite does not restore the old reviewed execution or tracked status after reload |
 | Review said one proposal but execution attempted many | Transport was not derived from the sealed wallet binding |
 | CoW quotes flash then vanish | Safe detection resolved after the first sweep; forced-off eviction is expected |
 
@@ -123,8 +124,7 @@ The presentation layer may detach while co-signers act, but durability does not 
 - `tests/composables/useTxBatch.test.ts`
 - `tests/composables/useSwapQuotesParallel.test.ts`
 - `tests/reviewed-execution/coordinator.test.ts`
-- `tests/reviewed-execution/journal.test.ts`
-- `tests/reviewed-execution/recovery.test.ts`
+- `tests/composables/useSafeExecutionDetachment.test.ts`
 
 ## Files
 
@@ -133,9 +133,8 @@ The presentation layer may detach while co-signers act, but durability does not 
 | `composables/useSafeWallet.ts` | Reactive Safe detection |
 | `composables/useSignaturePreference.ts` | Force-off signatures for Safe |
 | `composables/useCowSwapEligibility.ts` | Force-off CoW for Safe |
-| `composables/useReviewedExecution.ts` | Wallet binding, reviewed execution app clients, acceptance, and recovery integration |
+| `composables/useReviewedExecution.ts` | Wallet binding, reviewed execution preparation, acceptance, and current-session outcome integration |
 | `features/reviewed-execution/adapters/safe.ts` | Exact Safe call-vector dispatch and verification |
-| `features/reviewed-execution/coordinator/coordinator.ts` | Durable reservation, lifecycle, and transport selection |
-| `features/reviewed-execution/persistence/journal.ts` | IndexedDB reviewed execution and attempt journal |
-| `components/entities/reviewed-execution/ReviewedExecutionRecovery.vue` | Recovery UI |
+| `features/reviewed-execution/coordinator/coordinator.ts` | Synchronous duplicate guard, revalidation, bounded finalization, phase outcomes, and transport selection |
+| `composables/useSafeExecutionDetachment.ts` | In-memory post-handoff Safe tracking and context-scoped UI effects |
 | `utils/safeWalletTransactions.ts` | Provider identity and Safe status helpers |

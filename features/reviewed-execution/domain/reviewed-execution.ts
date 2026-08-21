@@ -82,6 +82,26 @@ export interface SafeCall {
   value: bigint
 }
 
+export type SafeAtomicCapabilityStatus = 'supported' | 'ready'
+
+export interface SafeTransportCall {
+  to: Address
+  data: Hex
+  value: bigint
+}
+
+/** Exact EIP-5792 request inputs plus the per-chain capability evidence used to admit review. */
+export interface SafeTransportEnvelope {
+  schemaVersion: 1
+  version: '2.0.0'
+  from: Address
+  chainId: number
+  atomicRequired: true
+  calls: readonly SafeTransportCall[]
+  capabilities: Readonly<Record<string, never>>
+  atomicCapability: Readonly<{ status: SafeAtomicCapabilityStatus }>
+}
+
 /** Internal request data committed by a ReviewedExecution. */
 export interface ReviewedRequestSet {
   schemaVersion: 1
@@ -89,6 +109,7 @@ export interface ReviewedRequestSet {
   effects: readonly EffectNode[]
   transport: 'eoa' | 'safe'
   requests: readonly EoaRequest[] | readonly SafeCall[]
+  safeTransport?: SafeTransportEnvelope
   signatureSlots: readonly SignatureSlot[]
   pythRefreshSlots: readonly PythRefreshSlot[]
   constraints: readonly IntentConstraint[]
@@ -102,6 +123,7 @@ export interface FinalizedRequestSet {
   requestDigest: Hash
   transport: 'eoa' | 'safe'
   requests: readonly EoaRequest[] | readonly SafeCall[]
+  safeTransport?: SafeTransportEnvelope
   signatureValues: readonly { slotId: Hash, signature: Hex }[]
   pythValues: readonly { slotId: Hash, payloadHash: Hash, value: bigint }[]
 }

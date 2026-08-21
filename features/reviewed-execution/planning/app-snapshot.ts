@@ -12,8 +12,8 @@ export const snapshotAccount = (account: Account<IHasVaultAddress>) => ({
     owner: getAddress(subAccount!.owner),
     timestamp: subAccount!.timestamp,
     lastAccountStatusCheckTimestamp: subAccount!.lastAccountStatusCheckTimestamp,
-    enabledControllers: subAccount!.enabledControllers.map(getAddress),
-    enabledCollaterals: subAccount!.enabledCollaterals.map(getAddress),
+    enabledControllers: subAccount!.enabledControllers.map(value => getAddress(value)),
+    enabledCollaterals: subAccount!.enabledCollaterals.map(value => getAddress(value)),
     positions: subAccount!.positions.map(position => ({
       account: getAddress(position.account),
       vaultAddress: getAddress(position.vaultAddress),

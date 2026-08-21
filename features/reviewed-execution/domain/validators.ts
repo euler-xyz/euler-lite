@@ -420,4 +420,26 @@ export const validateReviewedRequestSet = (requestSet: ReviewedRequestSet, inten
 
   const requests = validateRequestVector(requestSet)
   validateDynamicSlots(requestSet, requests)
+
+  if (requestSet.transport === 'eoa' && requestSet.pythRefreshSlots.length) {
+    const pythRequestIds = new Set(requestSet.pythRefreshSlots.map(slot => slot.insertionPoint.requestId))
+    if (pythRequestIds.size !== 1) throw new Error('EOA reviewed execution may contain only one Pyth-bearing request')
+    const pythRequestIndex = requestSet.requests.findIndex(request => pythRequestIds.has(requestIdOf(request)))
+    const prefixIds = new Set(requestSet.requests.slice(0, pythRequestIndex).map(requestIdOf))
+    if (requestSet.signatureSlots.some(slot => slot.insertionPoints.some(point => prefixIds.has(point.requestId)))) {
+      throw new Error('A dynamic signature slot may not precede the Pyth execution boundary')
+    }
+  }
+
+  if (requestSet.transport === 'safe') {
+    const envelope = requestSet.safeTransport
+    if (!envelope) throw new Error('Safe transport envelope is missing')
+    if (envelope.from !== requestSet.wallet.account || envelope.chainId !== requestSet.wallet.chainId) {
+      throw new Error('Safe transport envelope has a different wallet context')
+    }
+    const calls = (requestSet.requests as readonly SafeCall[]).map(({ to, data, value }) => ({ to, data, value }))
+    if (!canonicalEqual('safe-transport-calls-v1', envelope.calls, calls)) {
+      throw new Error('Safe transport envelope calls differ from the reviewed request vector')
+    }
+  }
 }

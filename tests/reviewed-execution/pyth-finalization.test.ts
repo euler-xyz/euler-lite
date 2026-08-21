@@ -5,6 +5,7 @@ import { EVC_ABI } from '~/abis/evc'
 import { PYTH_ABI } from '~/abis/pyth'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import type { WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
+import { validateReviewedRequestSet } from '~/features/reviewed-execution/domain/validators'
 import { assertFinalizedRequestsMatch, finalizeReviewedRequestSet } from '~/features/reviewed-execution/materialization/finalize'
 import { reviewedRequestDigest, materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { verifyRefreshedPluginPlan } from '~/features/reviewed-execution/materialization/pyth-refresh'
@@ -116,6 +117,28 @@ describe('bounded Pyth refresh', () => {
     const extraPyth: TransactionPlan = [{ type: 'evcBatch', items: [pythItem(['0xaabb'], 4n), pythItem(['0xccdd'], 1n), coreItem()] }]
     expect(() => verifyRefreshedPluginPlan({ sealedPreview: preview, refreshed: extraPyth, slots: requestSet.pythRefreshSlots, evidence: [{ ...previewCache, publishTimes: [999] }], nowSeconds: 1000 }))
       .toThrow()
+  })
+
+  it('rejects more than one independently timed Pyth-bearing EOA request', () => {
+    const first = pythItem(['0x0102'], 2n)
+    const second = pythItem(['0x0304'], 2n)
+    const multiple: TransactionPlan = [
+      { type: 'evcBatch', items: [first, coreItem()] },
+      { type: 'evcBatch', items: [second, coreItem()] },
+    ]
+    const requestSet = materializePreparedPlan({
+      intents: [intent],
+      plan: multiple,
+      wallet,
+      sdk,
+      pythPreviewData: [
+        previewCache,
+        { ...previewCache, planItemIndex: 1, requiredFeedIds: [keccak256(toHex('feed-2'))] },
+      ],
+      policyDigest: POLICY,
+    })
+
+    expect(() => validateReviewedRequestSet(requestSet, [intent])).toThrow(/one Pyth-bearing request/)
   })
 
   it('compares plugin structure before approval resolution without adopting refreshed approvals', () => {

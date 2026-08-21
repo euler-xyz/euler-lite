@@ -93,7 +93,7 @@ import { getLayeredVault } from '~/composables/useLayeredVaults'
 const route = useRoute()
 const router = useRouter()
 const modal = useModal()
-const { error: showError } = useToast()
+const { error: showError, success: showSuccess, warning: showWarning } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
@@ -1060,16 +1060,32 @@ const createRefinanceIntent = (
   planner: 'refinance-position',
   args: {
     collateral: input.collateral
-      ? {
-          planner: input.collateral.swapQuote ? 'swap-collateral' : 'migrate-same-asset-collateral',
-          args: input.collateral,
-        }
+      ? input.collateral.swapQuote
+        ? {
+            planner: 'swap-collateral',
+            args: {
+              swapQuote: input.collateral.swapQuote,
+              swapperMode: input.collateral.swapperMode,
+            },
+          }
+        : {
+            planner: 'migrate-same-asset-collateral',
+            args: input.collateral,
+          }
       : undefined,
     debt: input.debt
-      ? {
-          planner: input.debt.swapQuote ? 'swap-debt' : 'migrate-same-asset-debt',
-          args: input.debt,
-        }
+      ? input.debt.swapQuote
+        ? {
+            planner: 'swap-debt',
+            args: {
+              swapQuote: input.debt.swapQuote,
+              swapperMode: input.debt.swapperMode,
+            },
+          }
+        : {
+            planner: 'migrate-same-asset-debt',
+            args: input.debt,
+          }
       : undefined,
   },
   source,
@@ -3358,6 +3374,16 @@ const reviewInboundExternalMigration = async () => {
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
         submittingLabel: 'Migrating...',
+      },
+      onResult: (result) => {
+        const migration = result.migration
+        if (!migration || result.status !== 'submitted') return
+        const revocation = migration.revocation
+        const description = revocation
+          ? `Authorization revocation status: ${revocation.status}.`
+          : 'No separate authorization revocation request was required.'
+        if (migration.warning) showWarning('Migration submitted', { description: `${description} ${migration.warning}` })
+        else showSuccess('Migration submitted', { description })
       },
       onSucceeded: () => {
         schedulePostMigrationRefreshes(preview.input.owner)

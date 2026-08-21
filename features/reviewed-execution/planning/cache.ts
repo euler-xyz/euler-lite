@@ -30,7 +30,7 @@ interface PreparationCacheRecord {
 const normalizedIdentity = (identity: PreparationCacheIdentity): PreparationCacheIdentity => ({
   ...identity,
   owner: getAddress(identity.owner),
-  accounts: identity.accounts.map(getAddress),
+  accounts: identity.accounts.map(value => getAddress(value)),
   dataSourceVersions: Object.fromEntries(Object.entries(identity.dataSourceVersions).sort(([left], [right]) => left.localeCompare(right))),
 })
 

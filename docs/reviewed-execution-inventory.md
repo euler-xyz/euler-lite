@@ -2,7 +2,7 @@
 
 This inventory records the centralized reviewed-execution boundary. The machine-readable registry is `features/reviewed-execution/inventory/registry.ts`; its test fails when a production planner, batch-form branch, review launcher, or wallet-write owner appears without an explicit disposition.
 
-The inventory uses the same three first-class lifecycle records as the implementation: `OperationIntent`, `ReviewedExecution`, and `SubmissionAttempt`. Request sets, effects, simulations, policies, bindings, snapshots, slots, and cache records are internal implementation details of those records.
+The inventory uses two consent-bearing lifecycle records: `OperationIntent` and `ReviewedExecution`. Submission produces a current-session `SubmissionResult`; request sets, effects, simulations, policies, bindings, snapshots, slots, finalized requests, and cache records are internal implementation details.
 
 ## Operation coverage
 
@@ -14,7 +14,7 @@ FeeFlow buy and liquidation execution have no production Lite caller on the inve
 
 ## Irreversible boundaries
 
-The only in-scope wallet-write boundary is `composables/useReviewedExecution.ts`, which supplies app clients to the centralized coordinator. EOA sends and Safe `wallet_sendCalls` are dispatched only through `features/reviewed-execution/adapters/eoa.ts` and `features/reviewed-execution/adapters/safe.ts`. Signature collection, migration prerequisites/cleanup, durable reservation, and request verification all remain inside that reviewed execution boundary. `composables/useEulerTx.ts` is planning and simulation only.
+The only in-scope wallet-write boundary is `composables/useReviewedExecution.ts`, which supplies app clients to the centralized coordinator. EOA sends and Safe `wallet_sendCalls` are dispatched only through `features/reviewed-execution/adapters/eoa.ts` and `features/reviewed-execution/adapters/safe.ts`. Signature collection, migration prerequisites and revocation, the synchronous duplicate-invocation guard, and request verification all remain inside that reviewed execution boundary. `composables/useEulerTx.ts` is planning and simulation only. After Safe handoff, the established `useSafeExecutionDetachment` flow owns current-session waiting, modal detachment, confirmation gating, and context-scoped completion toasts.
 
 The excluded CoW boundary is `composables/cowswap/useCowSwapExecutionCore.ts`.
 
