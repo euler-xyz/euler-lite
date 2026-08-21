@@ -8,6 +8,24 @@ export interface ScreeningResult {
   addressIsSuspicious: boolean
 }
 
+interface ScreeningVerdictData {
+  address?: unknown
+  addressIsSuspicious?: unknown
+}
+
+// Narrow the untrusted upstream payload without asserting anything about the
+// verdict fields themselves — their validation stays with the caller.
+function extractVerdictData(body: unknown): ScreeningVerdictData | null {
+  if (typeof body !== 'object' || body === null) {
+    return null
+  }
+  const data = (body as { data?: unknown }).data
+  if (typeof data !== 'object' || data === null) {
+    return null
+  }
+  return data as ScreeningVerdictData
+}
+
 export function isValidScreeningAddress(value: unknown): value is string {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
 }
@@ -117,9 +135,10 @@ export async function screenAddressUpstream(
       return { addressIsSuspicious: true }
     }
 
-    const body = await resp.json()
-    const verdict = body?.data?.addressIsSuspicious
-    const echoedAddress = body?.data?.address
+    const body: unknown = await resp.json()
+    const data = extractVerdictData(body)
+    const verdict = data?.addressIsSuspicious
+    const echoedAddress = data?.address
     const addressMatches
       = typeof echoedAddress === 'string'
         && echoedAddress.toLowerCase() === address.toLowerCase()
