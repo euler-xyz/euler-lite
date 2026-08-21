@@ -40,6 +40,29 @@ function parseAllowedOrigins(): Set<string> {
 }
 
 let allowedOrigins: Set<string> | null = null
+
+// /api/internal/screen-address is also consumed cross-origin by first-party
+// Euler SPAs that have no server of their own (create/redemptions/maglev
+// .euler.finance). The exception is scoped to this single path so no other
+// internal route is exposed to sibling apps; configured origins
+// (CORS_ALLOWED_ORIGINS / dev localhost) keep working via the regular
+// allowlist. It stays under /api/internal/ deliberately: the consumers are
+// our own apps, and /api/public/ would advertise it to external integrators.
+const SCREENING_PATH = '/api/internal/screen-address'
+
+function isEulerFinanceOrigin(origin: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(origin)
+    if (protocol !== 'https:') {
+      return false
+    }
+    return hostname === 'euler.finance' || hostname.endsWith('.euler.finance')
+  }
+  catch {
+    return false
+  }
+}
+
 const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
 
 // The cookie is an advisory first-party marker, not a security boundary:
@@ -167,7 +190,7 @@ export default defineEventHandler((event) => {
 
   const origin = event.node.req.headers.origin
 
-  if (origin && allowedOrigins.has(origin)) {
+  if (origin && (allowedOrigins.has(origin) || (url.pathname === SCREENING_PATH && isEulerFinanceOrigin(origin)))) {
     setResponseHeader(event, 'Access-Control-Allow-Origin', origin)
   }
   else if (origin && process.env.DOPPLER_ENVIRONMENT !== 'dev') {

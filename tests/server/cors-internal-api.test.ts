@@ -85,6 +85,62 @@ describe('cors internal API boundary', () => {
     expect(event.headers['X-API-Stability']).toBeUndefined()
   })
 
+  it('allows the internal screening route from *.euler.finance origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+
+    for (const origin of ['https://create.euler.finance', 'https://redemptions.euler.finance', 'https://maglev.euler.finance', 'https://euler.finance']) {
+      const event = makeEvent('/api/internal/screen-address', { origin }, 'POST')
+      expect(handler(event)).toBeUndefined()
+      expect(event.headers['Access-Control-Allow-Origin']).toBe(origin)
+      expect(event.headers['X-API-Stability']).toBe('internal; may-break-without-notice')
+    }
+  })
+
+  it('allows the internal screening route from configured CORS origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('CORS_ALLOWED_ORIGINS', 'https://preview.example')
+    const handler = await loadHandler()
+    const event = makeEvent('/api/internal/screen-address', { origin: 'https://preview.example' }, 'POST')
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['Access-Control-Allow-Origin']).toBe('https://preview.example')
+  })
+
+  it('rejects the screening route for lookalike and non-https origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+
+    for (const origin of [
+      'https://evil-euler.finance',
+      'https://euler.finance.evil.com',
+      'https://xeuler.finance',
+      'http://create.euler.finance',
+      'null',
+    ]) {
+      try {
+        handler(makeEvent('/api/internal/screen-address', { origin }, 'POST'))
+        throw new Error(`Expected origin to be rejected: ${origin}`)
+      }
+      catch (err) {
+        expect(err).toMatchObject({ statusCode: 403, statusMessage: 'Origin not allowed' })
+      }
+    }
+  })
+
+  it('does not extend the *.euler.finance exception to other internal routes', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+
+    try {
+      handler(makeEvent('/api/internal/vaults', { origin: 'https://create.euler.finance' }))
+      throw new Error('Expected origin to be rejected on a non-screening route')
+    }
+    catch (err) {
+      expect(err).toMatchObject({ statusCode: 403, statusMessage: 'Origin not allowed' })
+    }
+  })
+
   it('marks internal API responses as unstable for allowed app origins', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     vi.stubEnv('CORS_ALLOWED_ORIGINS', 'https://app.example')

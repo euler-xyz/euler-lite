@@ -84,7 +84,7 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
 | `server/` | Nitro layer: `api/`, `middleware/`, `plugins/`, `utils/`. |
 | `plugins/` | Client/Nuxt plugins (numbered for load order): `00.wagmi.ts`, `00.chartjs.client.ts`, `01.query.ts`, `theme.client.ts`, `node.ts` (Buffer polyfill). |
 | `middleware/` | Route middleware (numbered): `01.network.global.ts` (normalizes `?network=`, applies legacy path rewrites), `02.spy-param.global.ts`, `ensure-vault.global.ts`. |
-| `services/` | 3 thin fetch wrappers over internal API routes (`country.ts`, `trm.ts`, `vpn.ts`). |
+| `services/` | 3 thin fetch wrappers over internal API routes (`country.ts`, `screening.ts`, `vpn.ts`). |
 | `abis/` | viem ABIs (`vault.ts`, `evc.ts`, `erc20.ts`, `pyth.ts`, `keyring.ts`, `merkl.ts`, ...). |
 | `types/` | Shared TS types + global `Window` augmentations (`types/index.ts`). |
 | `assets/` | `styles/` (SCSS + theme vars in `variables.scss`), `tokens/` (icon overrides), `chains/`, `sprite/`. |
@@ -105,6 +105,9 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   diagnostics local) — treat the `server/api/internal/` directory + `docs/architecture.md` as the
   authoritative inventory, especially when auditing CSP / `connect-src`.
 - **Public routes** (`server/api/public/`): `is-known`, `metadata` (documented in `docs/public-api.md`).
+  Note: `internal/screen-address` is additionally consumed cross-origin by first-party
+  `*.euler.finance` SPAs via a path-scoped CORS exception in `cors.ts` — keep its contract
+  backward-compatible.
 - **Server middleware:** `geo-gate.ts` (451 for sanctioned countries via Cloudflare `CF-IPCountry`;
   set `DEV_GEO_COUNTRY` locally since there's no CF header), `cors.ts`, `security-headers.ts`,
   `body-limit.ts`, `ensure-vault.ts`.
