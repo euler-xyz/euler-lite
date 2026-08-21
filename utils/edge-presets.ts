@@ -101,7 +101,8 @@ function isTruthyHeader(value: string | string[] | undefined): boolean {
 }
 
 function hasHeader(value: string | string[] | undefined): boolean {
-  return Array.isArray(value) ? value.length > 0 : value !== undefined
+  const values = Array.isArray(value) ? value : [value]
+  return values.some(entry => typeof entry === 'string' && entry.trim() !== '')
 }
 
 // The VPN verdict comes from edge-set request headers, never from the client

@@ -2,6 +2,7 @@ import type { H3Event } from 'h3'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createError, getCookie, getRequestURL, setCookie, setResponseHeader, sendNoContent } from 'h3'
 import { logger } from '~/server/utils/logger'
+import { getEdgeContext } from '~/server/utils/edge'
 import { isInternalRequest } from '~/server/utils/internal-headers'
 
 function parseAllowedOrigins(): Set<string> {
@@ -135,29 +136,22 @@ export default defineEventHandler((event) => {
   }
 
   // Strip any client-supplied x-country-code to prevent geo-blocking bypass.
-  // The authoritative value comes from Cloudflare's CF-IPCountry header which is
-  // set by their edge network and cannot be modified by clients.
+  // The authoritative value comes from the configured edge provider's trusted
+  // header (see server/utils/edge.ts), which clients cannot modify. The
+  // context also applies the DEV_GEO_COUNTRY fallback (mirroring geo-gate.ts)
+  // so envs without a geo-capable edge still emit x-country-code.
   delete event.node.req.headers['x-country-code']
 
-  const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
-  let country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
+  const edge = getEdgeContext(event)
 
-  // When Cloudflare is not in the request path (local dev, PR previews, etc.)
-  // cf-ipcountry is never set. Mirror geo-gate.ts: use DEV_GEO_COUNTRY as a
-  // fallback regardless of environment so x-country-code is set in the response.
-  if (!country) {
-    const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
-    if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
-      country = devCountry
-    }
+  if (edge.country) {
+    setResponseHeader(event, 'x-country-code', edge.country)
   }
-
-  if (country) {
-    setResponseHeader(event, 'x-country-code', country)
-  }
-  else if (process.env.DOPPLER_ENVIRONMENT === 'dev') {
-    // No DEV_GEO_COUNTRY set — send a placeholder so the client doesn't fail-closed.
-    // '--' is not a real country code so no geo-blocks will trigger.
+  else if (!edge.providesGeo || process.env.DOPPLER_ENVIRONMENT === 'dev') {
+    // No geo evidence exists by design (`none` preset — forks, previews) or
+    // this is local dev without DEV_GEO_COUNTRY — send a placeholder so the
+    // client doesn't fail-closed. '--' is not a real country code so no
+    // geo-blocks will trigger.
     setResponseHeader(event, 'x-country-code', '--')
   }
 
