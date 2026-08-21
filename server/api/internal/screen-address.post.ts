@@ -1,6 +1,7 @@
 import { createError, readBody } from 'h3'
+import { getEdgeContext } from '~/server/utils/edge'
 import { createRateLimiter } from '~/server/utils/rate-limit'
-import { deriveVpnIsUsed, isValidScreeningAddress, screenAddressUpstream } from '~/server/utils/screening'
+import { isValidScreeningAddress, screenAddressUpstream } from '~/server/utils/screening'
 
 const rateLimiter = createRateLimiter({
   max: 10,
@@ -17,5 +18,5 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid address' })
   }
 
-  return screenAddressUpstream(body.address, deriveVpnIsUsed(event), 'screen-address')
+  return screenAddressUpstream(body.address, getEdgeContext(event).vpnIsUsed, 'screen-address')
 })

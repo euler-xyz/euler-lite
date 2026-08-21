@@ -317,4 +317,36 @@ describe('cors internal API boundary', () => {
     expect(handler(internalEvent)).toBeUndefined()
     expect(internalEvent.headers['X-API-Stability']).toBe('internal; may-break-without-notice')
   })
+
+  it('derives x-country-code from the edge and strips the client-supplied value', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('EDGE_PROVIDER', 'cloudflare')
+    const handler = await loadHandler()
+    const event = makeEvent('/', { 'cf-ipcountry': 'DE', 'x-country-code': 'US' })
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['x-country-code']).toBe('DE')
+    expect(event.node.req.headers['x-country-code']).toBeUndefined()
+  })
+
+  it('omits x-country-code when a geo-capable edge leaves the country undetermined in prod', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('EDGE_PROVIDER', 'cloudflare')
+    vi.stubEnv('DEV_GEO_COUNTRY', '')
+    const handler = await loadHandler()
+    const event = makeEvent('/')
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['x-country-code']).toBeUndefined()
+  })
+
+  it('sends the "--" placeholder under the none preset so clients do not fail closed', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('DEV_GEO_COUNTRY', '')
+    const handler = await loadHandler()
+    const event = makeEvent('/')
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['x-country-code']).toBe('--')
+  })
 })
