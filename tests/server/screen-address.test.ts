@@ -21,8 +21,7 @@ vi.mock('~/server/utils/logger', () => ({
   },
 }))
 
-const internalHandler = (await import('~/server/api/internal/screen-address.post')).default
-const publicHandler = (await import('~/server/api/public/screen-address.post')).default
+const handler = (await import('~/server/api/internal/screen-address.post')).default
 
 const USER = '0x0000000000000000000000000000000000000001'
 const SCREENING_URI = 'https://v3.example/v3/compliance/address-screening'
@@ -48,12 +47,7 @@ function stubScreeningEnv(): void {
   process.env.ADDRESS_SCREENING_API_KEY = SCREENING_API_KEY
 }
 
-const handlers = [
-  ['internal', internalHandler],
-  ['public', publicHandler],
-] as const
-
-describe.each(handlers)('POST screen-address (%s route)', (_name, handler) => {
+describe('POST /api/internal/screen-address', () => {
   afterEach(() => {
     delete process.env.ADDRESS_SCREENING_URI
     delete process.env.ADDRESS_SCREENING_API_KEY

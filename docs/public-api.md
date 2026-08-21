@@ -4,8 +4,6 @@ Endpoints under `/api/public/` are intentionally reachable from any origin (no C
 
 The `/api/public/` path prefix is the contract: any handler placed below it in `server/api/public/` automatically receives `Access-Control-Allow-Origin: *` via `server/middleware/cors.ts`. Do not put internal endpoints under this prefix.
 
-One exception: `POST /api/public/screen-address` echoes the origin instead of `*` and only for first-party `https://*.euler.finance` origins (plus configured `CORS_ALLOWED_ORIGINS` / dev localhost) — see its section below.
-
 All public endpoints are rate-limited per client IP and return JSON.
 
 ---
@@ -279,45 +277,9 @@ curl 'https://<host>/api/public/metadata?chainId=1'
 
 ---
 
-## `POST /api/public/screen-address`
-
-Address screening for first-party Euler SPAs that have no server of their own (e.g. create.euler.finance, redemptions.euler.finance, maglev.euler.finance). Proxies the data-v3 compliance API without exposing its restricted API key.
-
-Unlike the rest of `/api/public/`, browser access is limited to `https://*.euler.finance` origins (plus configured `CORS_ALLOWED_ORIGINS` and dev localhost): requests carrying any other `Origin` are rejected with `403`, and the `Access-Control-Allow-Origin` response header echoes the caller's origin rather than `*`. Each call hits a quota'd upstream, so this endpoint is not for external integrators.
-
-The VPN flag sent upstream is derived server-side from the edge-set `x-is-vpn` / `x-is-proxy-or-vpn` request headers; the request body cannot influence it.
-
-### Request
-
-JSON body:
-
-| Field     | Type   | Required | Description                          |
-|-----------|--------|----------|--------------------------------------|
-| `address` | string | yes      | EVM address (`0x` + 40 hex chars).   |
-
-### Response
-
-Status `200`:
-
-```json
-{ "addressIsSuspicious": false }
-```
-
-**Fail-closed contract**: `addressIsSuspicious` is `false` only when the upstream compliance API explicitly cleared the address. Missing server configuration, upstream errors, timeouts, and malformed or ambiguous verdicts all return `addressIsSuspicious: true`. Callers must treat anything other than an HTTP `200` with `addressIsSuspicious: false` — including transport errors and timeouts on their side — as blocked.
-
-### Errors
-
-| Status | Cause                                             |
-|--------|---------------------------------------------------|
-| `400`  | Missing or malformed `address`.                   |
-| `403`  | `Origin` outside the allowed set.                 |
-| `429`  | Rate limit exceeded for this client IP.           |
-
----
-
 ## Implementation notes
 
-- Handlers: `server/api/public/is-known.get.ts`, `server/api/public/metadata.get.ts`, `server/api/public/screen-address.post.ts` (shared upstream logic: `server/utils/screening.ts`)
+- Handlers: `server/api/public/is-known.get.ts`, `server/api/public/metadata.get.ts`
 - Verified-set builder + cache: `server/utils/verified-vaults.ts`
 - Metadata builder + cache: `server/utils/vault-metadata.ts`
 - Shared verification rule (also used by the client UI): `utils/vault/governor-verification.ts`
