@@ -18,6 +18,8 @@
  * shipped once (internal `/api/internal/vaults` → `/api/internal/euler-chains`
  * 451'd by geo-gate). Lock it down.
  */
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { H3Event } from 'h3'
 import { getInternalFetchHeaders, isInternalRequest } from '~/server/utils/internal-headers'
@@ -109,5 +111,22 @@ describe('with EDGE_ORIGIN_SECRET (shared-secret marker mode)', () => {
     // The edge stamps x-edge-origin-auth on ALL forwarded requests; that
     // alone must never grant internal status.
     expect(isInternalRequest(eventWithHeaders({ 'x-edge-origin-auth': 'shared-secret' }))).toBe(false)
+  })
+})
+
+describe('retired loopback sentinel hygiene', () => {
+  it('no repo script sends the retired sentinel or the internal marker', () => {
+    // External processes (recorder, parity tooling, healthchecks) cannot be
+    // internal by design — they must authenticate as normal first-party
+    // callers (allowed Origin / first-party cookie). A script quietly
+    // reintroducing these headers would 403 against any non-dev server.
+    const scriptsDir = join(process.cwd(), 'scripts')
+    const offenders = readdirSync(scriptsDir)
+      .filter(file => /\.(mjs|js|ts)$/.test(file))
+      .filter((file) => {
+        const source = readFileSync(join(scriptsDir, file), 'utf8')
+        return source.includes('cf-connecting-ip') || source.includes('x-edge-internal')
+      })
+    expect(offenders).toEqual([])
   })
 })

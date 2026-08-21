@@ -548,10 +548,14 @@ async function preflightV3Proxy({ appUrl, fixture }) {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          // Internal sentinel (see server/utils/internal-headers.ts) so the
-          // no-Origin rejection in server/middleware/cors.ts doesn't 403 this
-          // preflight against non-dev servers.
-          'cf-connecting-ip': '127.0.0.1',
+          // Identify as a normal first-party caller: the app's own origin is
+          // in the CORS allowlist by construction (NUXT_PUBLIC_APP_URL /
+          // CORS_ALLOWED_ORIGINS), so the no-Origin rejection in
+          // server/middleware/cors.ts doesn't 403 this preflight against
+          // non-dev servers. Internal-request markers are deliberately
+          // unavailable to external processes like this recorder (see
+          // server/utils/internal-headers.ts).
+          'origin': new URL(appUrl).origin,
         },
         body: JSON.stringify({
           chainId: Number(fixture.chainId),
