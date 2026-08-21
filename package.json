@@ -39,7 +39,7 @@
     "@floating-ui/vue": "2.0.1",
     "@gvade/nuxt3-svg-sprite": "1.0.3",
     "@keyringnetwork/keyring-connect-sdk": "3.2.0",
-    "@nuxt/eslint": "1.17.0",
+    "@nuxt/eslint": "1.16.0",
     "@reown/appkit": "1.8.23",
     "@reown/appkit-adapter-wagmi": "1.8.23",
     "@tanstack/vue-query": "5.101.4",
@@ -75,7 +75,7 @@
   },
   "overrides": {
     "@base-org/account": "2.5.1",
-    "@wagmi/connectors": "8.0.26",
+    "@wagmi/connectors": "8.1.0",
     "serialize-javascript": "7.1.0",
     "ws": "8.21.3",
     "@coinbase/cdp-sdk": {
