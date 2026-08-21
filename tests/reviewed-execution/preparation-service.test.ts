@@ -9,6 +9,8 @@ import { IntentCompilerRegistry } from '~/features/reviewed-execution/planning/c
 import { GenerationPublisher, PreparationCache } from '~/features/reviewed-execution/planning/cache'
 import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
 import { PlanningSnapshotLoader } from '~/features/reviewed-execution/planning/snapshot-loader'
+import { createAppSnapshotDependencies } from '~/features/reviewed-execution/planning/app-snapshot'
+import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { buildReviewedPolicy, collectPolicyRequirements } from '~/features/reviewed-execution/policy/engine'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
@@ -25,6 +27,7 @@ const VAULT = getAddress('0x3000000000000000000000000000000000000000')
 const EVC = getAddress('0x4000000000000000000000000000000000000000')
 const AAVE_POOL = getAddress('0x5000000000000000000000000000000000000000')
 const POSITION_ACCOUNT = getAddress('0x6000000000000000000000000000000000000000')
+const REUL = getAddress('0x7000000000000000000000000000000000000000')
 const intent: OperationIntent = {
   schemaVersion: 1, intentId: 'intent-1', revision: 1, kind: 'deposit', chainId: 1, account: ACCOUNT,
   subAccounts: [ACCOUNT], planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 10n } },
@@ -111,6 +114,21 @@ const aaveMigrationIntent: OperationIntent = {
   metadata: { createdAt: 1, source: 'test' },
 }
 const aaveWallet: WalletBinding = { ...wallet, subAccounts: [ACCOUNT, POSITION_ACCOUNT] }
+const reulIntent: OperationIntent = {
+  schemaVersion: 1,
+  intentId: 'intent-reul-unlock',
+  revision: 1,
+  kind: 'reul-unlock',
+  chainId: 1,
+  account: ACCOUNT,
+  subAccounts: [ACCOUNT],
+  planner: {
+    name: 'reul-unlock',
+    args: { lockTimestamps: [1], lockAmounts: [10n], remainderLossMaximum: 0n },
+  },
+  constraints: [{ kind: 'remainder-loss', token: REUL, maximumLoss: 0n }],
+  metadata: { createdAt: 1, source: 'test' },
+}
 
 describe('authoritative reviewed execution preparation', () => {
   it('adopts exact warmed snapshots, plugin prefetch, simulation, and reviewed executions', async () => {
@@ -334,5 +352,41 @@ describe('authoritative reviewed execution preparation', () => {
     })
 
     await expect(resolveAppPolicy(requestSet, 100)).resolves.toMatchObject({ schemaVersion: 1 })
+  })
+
+  it.each([
+    ['direct', 'reul-unlock', { type: 'reul-unlock' }],
+    ['batch', 'batch', [{ id: reulIntent.intentId, review: { type: 'reul-unlock' } }]],
+  ] as const)('prepares an rEUL unlock without optional token-list metadata for %s review', async (_path, presentationKind, presentationInputs) => {
+    const service = createAppPolicyService('reul-unlock')
+
+    const execution = await service.prepare({
+      intents: [reulIntent],
+      wallet,
+      cartGeneration: 0,
+      runtime: {},
+      presentationKind,
+      presentationInputs,
+      compilerVersion: 'compiler-v1',
+      policyVersionDigest: keccak256(toHex('policy-v1')),
+      freshUntil: 5_000,
+    })
+
+    expect(execution.policy.subjects).toContainEqual({ kind: 'asset', value: REUL })
+  })
+
+  it('keeps an asset address in the planning snapshot when optional display metadata is unavailable', async () => {
+    const dependencies = createAppSnapshotDependencies({
+      account: {} as never,
+      getBlockNumber: async () => 100n,
+      dataVersion: 'compiler-v1',
+      labelsVersion: 'labels-v1',
+    })
+
+    await expect(dependencies.load(`asset:${REUL}`, collectPlanningRequirements([reulIntent]))).resolves.toMatchObject({
+      value: { address: REUL },
+      observedBlock: 100n,
+      version: 'compiler-v1',
+    })
   })
 })

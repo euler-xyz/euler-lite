@@ -59,7 +59,7 @@ const coreItem = {
 }
 
 describe('prepared plan materialization', () => {
-  it('materializes a deterministic EOA request vector and complete effect graph', () => {
+  it('materializes a deterministic EOA request vector and complete decoded-call list', () => {
     const plan: TransactionPlan = [
       {
         type: 'requiredApproval',

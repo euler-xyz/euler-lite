@@ -104,12 +104,19 @@ function buildRecorderArgs({ group, groupDir, fixturePath, scenariosPath, anvilR
     anvilRpcUrl,
   ]
 
-  for (const key of ['url', 'vault-snapshot', 'swap-api-url']) {
+  for (const key of ['url', 'vault-snapshot', 'swap-api-url', 'pyth-updates-url']) {
     if (args[key]) {
       recorderArgs.push(`--${key}`, String(args[key]))
     }
   }
-  for (const key of ['headless', 'keep-open', 'skip-v3-preflight', 'v3-preflight']) {
+  for (const key of [
+    'headless',
+    'keep-open',
+    'skip-v3-preflight',
+    'v3-preflight',
+    'all-browser-rpc-to-anvil',
+    'no-video',
+  ]) {
     if (args[key]) {
       recorderArgs.push(`--${key}`)
     }

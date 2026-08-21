@@ -4,7 +4,7 @@ This document describes how euler-lite constructs, simulates, reviews, and execu
 
 ## Overview
 
-Protocol actions start as serializable operation intents. Lite compiles those intents with the SDK into one reviewed execution, binds the existing handcrafted review to it, and submits only its finalized request vector. The SDK owns protocol call planning, approval resolution, deterministic request composition, Permit2 encoding, simulation, plugin processing, and EOA request sequencing. Lite independently verifies that composition against its exhaustive effect and policy graph; its reviewed-execution coordinator owns review acceptance, a synchronous pre-handoff duplicate guard, bounded Pyth and migration-slot finalization, and exact request verification. Safe calls use the dedicated calls-ID adapter and the established current-session detachment/status flow after handoff.
+Protocol actions start as serializable operation intents. Lite compiles those intents with the SDK into one reviewed execution, binds the existing handcrafted review to it, and submits only its finalized request vector. The SDK owns protocol call planning, approval resolution, deterministic request composition, Permit2 encoding, simulation, plugin processing, and EOA request sequencing. Lite independently verifies every decoded call and applies the existing policy checks; its reviewed-execution coordinator owns review acceptance, a synchronous pre-handoff duplicate guard, bounded Pyth and migration-slot finalization, and exact request verification. Safe calls use the dedicated calls-ID adapter and the established current-session detachment/status flow after handoff.
 
 `composables/useEulerTx.ts` is planning-only. Executable flows enter through `composables/useReviewedExecution.ts`; wallet writes are confined to that boundary and the EOA/Safe adapters under `features/reviewed-execution/adapters/`.
 
@@ -16,7 +16,7 @@ The transaction lifecycle has two consent-bearing records:
 - `ReviewedExecution` is the immutable, wallet-bound result accepted by the user.
 - `SubmissionResult` reports the current invocation's submitted, rejected, failed, or unknown outcome. It is not persisted or resumable.
 
-The reviewed request set, effect map, policy and simulation results, review binding, planning and plugin snapshots, signature/Pyth slots, finalized requests, and preview-cache records are internal parts or mechanics of those records. They are not independent business entities. A preview plan is form-time work that may warm the cache; it never authorizes a wallet write.
+The reviewed request set, the record of which intent owns each call, policy and simulation results, review binding, planning and plugin snapshots, signature/Pyth slots, finalized requests, and preview-cache records are internal details. A preview plan is form-time work that may warm the cache; it never authorizes a wallet write.
 
 ## SDK TransactionPlan
 
@@ -71,13 +71,13 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and ch
 
 1. Forms eagerly preprocess accounts, quotes, slot hints, plugin data, and simulation results. Preview data is cached only as canonical serializable values keyed by the full intent/content identity; it never recovers authority from an SDK plan object or Vue reference. Add-to-batch stores only `{ intentId, revision, intent }`; plans and builders stay outside the draft DTO.
 2. `useReviewedExecution.prepare()` captures the exact account, chain, connector session, wallet kind, approval mode, and required sub-accounts, then compiles the current intent revisions against a generation-bound planning snapshot.
-3. The service processes plugins, resolves approvals, pins Permit2 nonce/deadline/expiration inputs, and asks the SDK to deterministically materialize the plan. Lite declares its richer typed dynamic slots, builds the complete before/main/cleanup effect graph, and rejects any SDK request-byte or insertion-coordinate disagreement before evaluating policy, simulating, and sealing one immutable reviewed execution. Context-complete preview cache is reused only when the intent set, raw and prepared plan digests, wallet binding, approval mode, account set, and freshness all match.
+3. The service processes plugins, resolves approvals, pins Permit2 nonce/deadline/expiration inputs, and asks the SDK to deterministically materialize the plan. Lite records every prerequisite, main, and cleanup call, and rejects any SDK request-byte or insertion-coordinate disagreement before evaluating policy, simulating, and sealing one immutable reviewed execution. Context-complete preview cache is reused only when the intent set, raw and prepared plan digests, wallet binding, approval mode, account set, and freshness all match.
 4. The existing review modal renders the prepared preview and receives only an opaque `{ reviewId, reviewDigest }` binding. It cannot prepare, replan, sign, or submit.
 5. Acceptance checks the binding and current cart generation. Before any wallet interaction, the coordinator synchronously guards that reviewed execution against duplicate confirmation in the current process.
 6. The coordinator revalidates the exact wallet/session and policy, collects declared signatures, and verifies the finalized artifact against the reviewed request set. If static EOA prerequisites precede the single Pyth-bearing request, SDK `executeMaterialized` receipts that static prefix before Lite refreshes Pyth and hands the finalized suffix back to the SDK. Otherwise bounded Pyth refresh occurs immediately before the one transport handoff.
 7. EOA receipt sequencing remains SDK-owned. Safe handoff continues through the current-session calls-ID status and detachment flow. Completion invalidates the configured SDK queries and triggers portfolio refresh; unknown status is reported without persistence, reconciliation, or automatic retry.
 
-Every await across preparation and pre-handoff execution is guarded by generation or wallet-binding checks. A stale form, edited cart, changed connector session, expired reviewed execution, policy failure, or undeclared effect fails closed.
+Every await across preparation and pre-handoff execution is guarded by generation or wallet-binding checks. A stale form, edited cart, changed connector session, expired operation-specific deadline, policy failure, or undeclared effect fails closed. An accepted in-memory review has no separate blanket timeout.
 
 ## Approvals and Gasless Signatures
 
@@ -113,9 +113,9 @@ Do not treat this as an Incentra- or rewards-specific switch — it covers every
 Outgoing migrate (`pages/position/[number]/migrate.vue`) and inbound external migrate (`pages/position/[number]/borrow/swap.vue`) thread the same **effective** flag as `useSignatures`:
 
 - **On** → `authorizationKind: 'typedData'`; Morpho can append a signed post-migration disable (`removeAuthorizationAfterMigration`) inside the batch.
-- **Off** → `authorizationKind: 'transaction'`; connector grants and restorations become explicit prerequisite and cleanup effects in the sealed graph.
+- **Off** → `authorizationKind: 'transaction'`; connector grants and restorations become explicit prerequisite and cleanup calls in the reviewed request set.
 
-For an EOA, the coordinator dispatches the exact prerequisite, migration, and revocation requests through SDK-owned receipt sequencing. A failed or unknown core request stops before revocation; a failed or unknown revocation preserves the migration result and reports that authorization may remain active. No cleanup obligation or retry gate is created. For a Safe, the same effect graph is normalized into one sealed EIP-5792 envelope. Review requires per-chain atomic capability `supported` or `ready`; handoff sets `atomicRequired: true`, never falls back, and reports success only when calls status confirms `atomic: true`.
+For an EOA, the coordinator dispatches the exact prerequisite, migration, and revocation requests through SDK-owned receipt sequencing. A failed or unknown core request stops before revocation; a failed or unknown revocation preserves the migration result and reports that authorization may remain active. No cleanup obligation or retry gate is created. For a Safe, those same reviewed calls are normalized into one sealed EIP-5792 envelope. Review requires per-chain atomic capability `supported` or `ready`; handoff sets `atomicRequired: true`, never falls back, and reports success only when calls status confirms `atomic: true`.
 
 Typed-data migration authorization is also a declared signature slot. Its digest, signer, typed-data schema, reviewed EVC item, and ABI argument path are sealed. Finalization delegates the ABI-aware insertion to the documented SDK public encoder and rejects missing, ambiguous, or drifting coordinates.
 
@@ -128,7 +128,7 @@ Plan transformation runs as SDK `EulerPlugin`s registered in `composables/useEul
 - Terms-of-use signing — `createLiteTosPlugin()` (`utils/sdk-tos.ts`) prepends a signed terms-of-use `EVCBatchItem` to every `evcBatch` item. Injection only happens when `useTosGuard` has published a signed message for the owner and the chain's deployment has a `termsOfUseSigner` address.
 - Keyring credential injection for private vaults — the SDK's [`createKeyringPlugin`](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/src/plugins/keyring/keyringPlugin.ts), configured with hook targets and a credential store from `utils/sdk-keyring.ts`. `composables/useOperationGuard.ts` publishes verified credentials into that store; the plugin prepends a Keyring `createCredential` `EVCBatchItem` when a plan touches a keyring hook target, the sender has no valid on-chain credential, and the store returns a current credential.
 
-Submit blockers remain the operation-eligibility gate. Reviewed execution rechecks the connected wallet with the current VPN verdict and requires the TOS, Keyring, labels, asset/vault metadata, authority bindings, and acknowledgements needed by the exact final graph. Derived EVC accounts are bound into that graph but are not screened as separate wallets. Country, vault, asset, and swap restrictions remain in the existing server and form guards. Plugin-prefetch reuse is context-bound and does not weaken those checks.
+Submit blockers remain the operation-eligibility gate. Reviewed execution rechecks the connected wallet with the current VPN verdict and requires the TOS, Keyring, labels, vault metadata, authority bindings, and acknowledgements needed by the exact reviewed calls. Derived EVC accounts are bound into the reviewed request but are not screened as separate wallets. Country, vault, asset, and swap restrictions remain in the existing server and form guards. Plugin-prefetch reuse is context-bound and does not weaken those checks.
 
 See the SDK side: [plugins.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/plugins.md).
 
@@ -144,11 +144,11 @@ Copy calldata includes approval transactions, encoded EVC batches, and direct co
 
 ### User-facing review compatibility
 
-The exhaustive reviewed execution and the visible operation review serve different purposes. The reviewed execution is the internal execution authority: it records every effect, request, authorization, policy item, simulation coverage class, revocation step, and bounded dynamic slot. The review is an intentionally handcrafted product presentation for the operation. It can combine, summarize, reorder, or omit internal effects and is not expected to map one-to-one to the effect map.
+The complete reviewed execution and the visible operation review serve different purposes. The reviewed execution is the internal execution authority: it records every call, request, authorization, policy result, simulation result, revocation step, and bounded value that may be refreshed. The review is an intentionally handcrafted product presentation for the operation. It can combine, summarize, reorder, or omit internal calls and is not expected to list them one-to-one.
 
 Operation review components receive only their existing display inputs plus an opaque reviewed execution binding. They do not receive an execution closure and cannot sign or submit. Acceptance binds the current presentation digest and intent revisions to the sealed reviewed execution; submission uses the reviewed execution's materialized request vector through the coordinator.
 
-Do not synthesize generic effect rows or expose internal targets, selectors, plugin calls, request digests, coverage classes, cleanup metadata, or authorization machinery. Existing approval and signature presentation remains operation-specific. Unknown or undecodable production effects fail internal sealing instead of creating a fallback review row.
+Do not synthesize generic rows or expose internal targets, selectors, plugin calls, request digests, simulation classifications, cleanup metadata, or authorization machinery. Existing approval and signature presentation remains operation-specific. Unknown or undecodable production calls fail internal sealing instead of creating a fallback review row.
 
 Pyth updates are completely invisible in review. Preview fees, maximum fees, feed IDs, payload hashes, publish times, freshness rules, execution-time refresh behavior, and refresh failures are internal reviewed execution data. A failed refresh follows the existing transaction-preparation error behavior and does not add a Pyth-specific review field or notice.
 

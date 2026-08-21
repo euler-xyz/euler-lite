@@ -71,7 +71,7 @@ describe('reviewed execution semantic kernel', () => {
     }])).toThrow(/planner-enforced exact-input/)
   })
 
-  it('derives policy subjects from the final effect graph and fails closed', () => {
+  it('derives policy inputs from every finalized call and fails closed', () => {
     const preliminary = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, policyDigest: keccak256(toHex('pending')) })
     const subjects = collectPolicySubjects(preliminary)
     expect(subjects).toEqual(expect.arrayContaining([
@@ -153,7 +153,7 @@ describe('reviewed execution semantic kernel', () => {
     expect(connectorSessionDigest(identity)).not.toBe(connectorSessionDigest({ ...identity, sessionTopic: 'topic-2' }))
   })
 
-  it('seals one digest across the request set, simulation, effect map, and review binding', () => {
+  it('seals one digest across the request set, simulation, decoded calls, and review binding', () => {
     const preliminary = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, policyDigest: keccak256(toHex('pending')) })
     const policy = buildReviewedPolicy({ requestSet: preliminary, results: policyResultsFor(preliminary), now: 10 })
     const requestSet = materializePreparedPlan({ intents: [intent], plan, wallet, sdk, policyDigest: policy.digest })

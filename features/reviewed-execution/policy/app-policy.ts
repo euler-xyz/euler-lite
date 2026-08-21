@@ -30,13 +30,6 @@ export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Dat
   const { getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
   const labelsVersion = getEulerLabelsVersion()
-  const knownVaultAssets = new Set(requestSet.effects
-    .flatMap(effect => effect.policySubjects)
-    .filter(subject => subject.kind === 'vault-or-contract')
-    .flatMap((subject) => {
-      const asset = getVault(subject.value)?.asset?.address
-      return asset ? [getAddress(asset).toLowerCase()] : []
-    }))
   const approvalSpenders = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'approval' ? [getAddress(node.effect.spender).toLowerCase()] : []))
   const migrationAuthorities = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'migration-authorization' ? [getAddress(node.effect.target).toLowerCase()] : []))
   const pythFeeds = new Set(requestSet.pythRefreshSlots.flatMap(slot => slot.requiredFeedIds.map(feed => feed.toLowerCase())))
@@ -75,8 +68,7 @@ export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Dat
     else if (requirement.subject.startsWith('asset:')) {
       const address = addressOfSubject(requirement.subject)
       const token = address ? getTokenByAddress(address) : undefined
-      const vaultAsset = address && knownVaultAssets.has(address.toLowerCase())
-      if (!address || (!token && !vaultAsset)) throw new Error(`Asset metadata is unavailable for ${requirement.subject}`)
+      if (!address) throw new Error(`Asset policy subject is malformed: ${requirement.subject}`)
       version = token ? `asset:${token.symbol}:${token.decimals}` : `asset:${address}`
     }
     else if (requirement.subject.startsWith('spender:')) {

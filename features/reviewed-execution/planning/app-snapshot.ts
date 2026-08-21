@@ -86,8 +86,9 @@ export const createAppSnapshotDependencies = (context: AppSnapshotContext): Snap
       else if (kind === 'asset') {
         if (!address) throw new Error(`Malformed asset snapshot key ${key}`)
         const token = useTokenList().getTokenByAddress(address)
-        if (!token) throw new Error(`Asset snapshot is unavailable for ${address}`)
-        value = { address: getAddress(token.address), symbol: token.symbol, name: token.name, decimals: token.decimals }
+        value = token
+          ? { address: getAddress(token.address), symbol: token.symbol, name: token.name, decimals: token.decimals }
+          : { address }
       }
       else if (kind === 'quote') {
         value = { quoteId: rawValue }

@@ -30,7 +30,7 @@ The preserved post-handoff behavior is the baseline behavior that predates this 
 The architecture has two consent-bearing lifecycle concepts:
 
 - `OperationIntent`: the immutable user operation to compile and review.
-- `ReviewedExecution`: the immutable, wallet-bound result accepted by the user. It owns the request set, policy result, simulation result, effect mapping, review binding, validity, and plugin snapshot.
+- `ReviewedExecution`: the immutable, wallet-bound result accepted by the user. It owns the request set, policy result, simulation result, the record of which intent owns each call, review binding, validity, and plugin snapshot.
 - `SubmissionResult`: the non-persistent current-invocation outcome returned after the established EOA or Safe flow terminates.
 
 Everything else is an internal field or mechanism, not a peer domain entity. Planning snapshots, request sets, effects, policies, simulations, bindings, signature and Pyth slots, plugin snapshots, finalized requests, and preview-cache records exist only to prepare, verify, or submit a `ReviewedExecution`. A preview plan is form-time work used to warm that cache; it is never execution authority.
@@ -90,7 +90,7 @@ At kickoff, pin the published version and prove with targeted integration tests 
 
 The SDK documentation must state the simulation contract in section 5.7: approvals and migration authorization are modeled rather than executed, EVC effects are state-simulated, independent direct calls produce no Euler state projection, and Pyth data is normally refreshed at execution. Link that document from the public comments for `simulateTransactionPlan`, `simulatePreparedTransactionPlan`, the prepare/execute methods, `materializeExecution`, `finalizeMaterializedExecution`, `executeMaterialized`, and `ContractCall.simulationMode` so callers do not infer full sequential simulation or hidden request recomposition from the method names.
 
-Use only that release's public planners, plugin processor, decoders, simulation APIs, typed-data builders, materialization/finalization APIs, and encoders. The SDK owns deterministic base transaction-plan materialization, Permit2 finalization, and EOA request dispatch. Lite supplies the explicit reviewed EVC and Permit2 inputs, invokes `materializeExecution`, seals its immutable output inside the reviewed request set, and rejects any request-byte, Safe-call, signature-slot, or insertion-coordinate disagreement with Lite's richer effect projection.
+Use only that release's public planners, plugin processor, decoders, simulation APIs, typed-data builders, materialization/finalization APIs, and encoders. The SDK owns deterministic base transaction-plan materialization, Permit2 finalization, and EOA request dispatch. Lite supplies the explicit reviewed EVC and Permit2 inputs, invokes `materializeExecution`, seals its immutable output inside the reviewed request set, and rejects any request-byte, Safe-call, signature-slot, or insertion-coordinate disagreement with the decoded calls Lite recorded.
 
 Lite may finalize only the declared typed differences: Permit2 through `finalizeMaterializedExecution`, migration signatures through the SDK's reviewed ABI-slot encoder, and Pyth through the bounded structural verifier in section 5.5. Each operation produces a new finalized vector; the SDK materialization accepted at review remains unchanged.
 
@@ -208,7 +208,7 @@ Finalization may change only those locations. Byte-pattern searches, all-zero wi
 Pyth is intentionally dynamic. The reviewed request set commits to a typed refresh slot containing:
 
 - Chain, official Pyth target, `updatePriceFeeds` selector, insertion point, and affected `effectId`.
-- The exact required feed-ID set derived from the final operation graph.
+- The exact required feed-ID set derived from the final decoded calls.
 - The SDK freshness policy and the maximum native update fee accepted by the configured Pyth plugin.
 - The preview payload hash, publish-time evidence, and fee used by review-time simulation.
 
@@ -239,11 +239,11 @@ Every effect receives one explicit coverage class:
 
 Do not perform a costly sequential backend simulation of approvals, permits, plugin prerequisites, or reward side effects. Do not combine an unsimulated direct call with an EVC batch and then present the EVC result as full-plan simulation. Results and assumptions map by `effectId`, never by array position.
 
-### 5.8 Policy from the final graph
+### 5.8 Policy from the final reviewed calls
 
-Policy subjects come from the exact wallet binding, sealed constraints, and final typed effect graph. They include all source, destination, acquired, input, underlying, prerequisite, post-migration revocation/restoration, wrapper, direct-call, and plugin-injected subjects needed by the existing checks.
+Policy inputs come from the exact wallet binding, sealed constraints, and final decoded calls. They include all source, destination, acquired, input, underlying, prerequisite, post-migration revocation/restoration, wrapper, direct-call, and plugin-injected addresses needed by the existing checks.
 
-Connected-wallet screening remains fail closed and receives the current VPN verdict as an input, matching the established wallet-connect guard. Derived EVC accounts and sub-accounts are bound into the reviewed request but are not screened as additional wallets. Country, vault, asset, and swap eligibility remain enforced by the existing server and form guards; reviewed execution does not add a parallel global country or VPN rule. Missing required vault or asset metadata, unresolved vault type, missing underlying asset, or unavailable required policy result still fail closed. Planner and compiler validation remain responsible for protocol-specific addresses embedded in operation inputs; reviewed execution does not impose a generic contract allowlist on those addresses.
+Connected-wallet screening remains fail closed and receives the current VPN verdict as an input, matching the established wallet-connect guard. Derived EVC accounts and sub-accounts are bound into the reviewed request but are not screened as additional wallets. Country, vault, asset, and swap eligibility remain enforced by the existing server and form guards; reviewed execution does not add a parallel global country, VPN, or asset-metadata rule. Asset addresses are sealed even when optional display metadata is unavailable. Missing required vault metadata, unresolved vault type, missing underlying asset, or unavailable required policy result still fail closed. Planner and compiler validation remain responsible for protocol-specific addresses embedded in operation inputs; reviewed execution does not impose a generic contract allowlist on those addresses.
 
 ### 5.9 Submission boundary and unknown status
 
@@ -270,7 +270,7 @@ Forms / batch cart
 Requirement collector ---> pinned PlanningSnapshot
         |
         v
-Pure intent compilers ---> typed EffectGraph with stable IDs
+Pure intent compilers ---> decoded calls with stable IDs and intent ownership
         |
         +--- Policy engine ---> versioned ReviewedPolicy
         +--- SDK materializer -> immutable MaterializedExecution
@@ -475,7 +475,7 @@ These results live in a preparation cache outside `BatchDraftEntry` and `Reviewe
 
 `prepare()` is cache-first. It adopts matching prefetched inputs and an exact whole-cart background result before issuing new I/O, fetches only missing or stale dependencies, and reruns only invalidated stages. An unchanged cart may reuse its complete background reviewed simulation when the cart generation, intent-set hash, normalized request digest, planning snapshot, policy versions, and freshness rules all match. Per-entry simulations are not composed into a full-batch claim.
 
-Authoritative sealing still invokes or deep-validates the SDK materialization and validates the final effect graph, simulation mapping, effect map, review binding, and canonical digest. Raw page-owned plans, mutable SDK instances, and results without complete cache identity are never adopted. Cheap pure compilation and validation may run again; expensive account/RPC reads, slot discovery, quotes, plugin prefetch, gas work, and exact full-cart simulation should normally come from valid warmed caches.
+Authoritative sealing still invokes or deep-validates the SDK materialization and validates every decoded call, its simulation and intent ownership, the review binding, and the canonical digest. Raw page-owned plans, mutable SDK instances, and results without complete cache identity are never adopted. Cheap pure compilation and validation may run again; expensive account/RPC reads, slot discovery, quotes, plugin prefetch, gas work, and exact full-cart simulation should normally come from valid warmed caches.
 
 Cache misses affect preparation latency, not correctness. Any late result for a superseded generation is discarded. Review remains unavailable until one current authoritative reviewed execution is sealed. Review-time Pyth data may come from the matching cache, but the bounded execution-time Pyth refresh remains mandatory.
 
@@ -486,14 +486,14 @@ Cache misses affect preparation latency, not correctness. Any late result for a 
 3. Have each intent declare required accounts, vaults, assets, balances, allowances, feeds, quotes, policy subjects, and bounded postconditions.
 4. Assemble one generation-bound planning snapshot by adopting compatible prefetched data first and fetching only gaps or stale entries. Use a common block where possible. Cache keys include owner, chain, block, connector/session where relevant, and data-source version.
 5. Reject every stale async completion before every publication, not merely at the final return.
-6. Compile the entire intent set into one effect graph with stable intent/effect IDs.
+6. Compile the entire intent set into one ordered call list and record which intent owns each call.
 7. Run semantic validators: no orphan approvals or revocations, no mixed accounts/chains, no expanded reward set, and no undisclosed native value.
-8. Resolve policy result from the final graph.
-9. Seal the raw pre-plugin plan, process plugins for the review snapshot, and seal the processed preview. Seal TOS and Keyring as static effects. Convert each Pyth update into a typed refresh slot whose target, selector, feed set, ordering, freshness rule, and maximum value are immutable while payload and exact fee may refresh.
+8. Resolve policy results from the final reviewed calls.
+9. Seal the raw pre-plugin plan, process plugins for the review snapshot, and seal the processed preview. Seal the TOS and Keyring calls unchanged. Record each Pyth update with an immutable target, selector, feed set, ordering, freshness rule, and maximum value while allowing only its payload and exact fee to refresh.
 10. Resolve approvals and every signature request, including Permit2 nonce and typed data, before review.
-11. Call SDK `materializeExecution` with the prepared preview plan, reviewed EVC address, and pinned Permit2 nonce/deadline/expiration inputs. Seal the returned immutable requests, signature slots, and Safe calls; fail if they disagree with the typed effect graph or Lite extension slots.
+11. Call SDK `materializeExecution` with the prepared preview plan, reviewed EVC address, and pinned Permit2 nonce/deadline/expiration inputs. Seal the returned immutable requests, signature slots, and Safe calls; fail if they disagree with the decoded calls or Lite extension slots.
 12. Produce the classified reviewed simulation from section 5.7. EVC state simulation, modeled authorizations, independent direct calls, and intentionally absent state projections remain distinct and map by `effectId`.
-13. Generate an exhaustive effect map from the typed effects/request set, and bind the current operation-specific presentation inputs to the reviewed execution without changing their visible projection or requiring a one-to-one effect mapping.
+13. Record which intent owns each decoded call, and bind the current operation-specific presentation inputs to the reviewed execution without changing what the user sees or requiring the review rows to list calls one-to-one.
 14. Generate calldata and Tenderly projections solely from that request set.
 15. Deep-validate, seal, and hash the reviewed execution.
 
@@ -503,7 +503,7 @@ No prerequisite or post-execution revocation call may be added, removed, or chan
 
 The reviewed execution is an execution-authority refactor, not a review redesign. Preserve the current rendered review for every operation and batch variant exactly: fields, labels, values, grouping, ordering, abstractions, warnings, tooltips, explanatory copy, buttons, and operation-specific conditional behavior.
 
-The current review is intentionally handcrafted for the operation. It may summarize, combine, omit, or present information differently from the underlying transaction plan or EVC batch. There is no requirement that visible rows correspond one-to-one with effects, calls, approvals, plugin items, or simulation coverage. The exhaustive effect graph, effect map, policy result, and reviewed simulation remain internal safety artifacts.
+The current review is intentionally handcrafted for the operation. It may summarize, combine, omit, or present information differently from the underlying transaction plan or EVC batch. There is no requirement that visible rows correspond one-to-one with calls, approvals, plugin items, or simulation coverage. The complete decoded-call list, its intent ownership, policy result, and reviewed simulation remain internal checks.
 
 Do not add generic effect rows or expose internal targets, selectors, plugin calls, coverage classes, request digests, or authorization machinery unless the current operation-specific review already shows that information in that form. Existing displayed approval/signature information remains exactly as it is; the centralized internal representation does not expand it.
 
@@ -680,20 +680,20 @@ Exit: every operation and irreversible boundary has an owner and migration row, 
 
 ### Stage B - Domain kernel, SDK materialization, and Lite verification
 
-- Implement intents, effect graph, stable IDs, canonical encoding/digests, runtime schemas, typed signature slots, bounded Pyth refresh slots, the plugin structural verifier, and semantic validators around SDK `materializeExecution`.
-- Seal the immutable SDK materialization inside `ReviewedRequestSet`, prove Lite's richer effect projection agrees with every SDK request/slot/Safe call, and use `finalizeMaterializedExecution` plus the public migration encoder for declared signature changes.
+- Implement intents, decoded calls with explicit intent ownership, canonical encoding/digests, runtime schemas, typed signature slots, bounded Pyth refresh slots, the plugin structural verifier, and semantic validators around SDK `materializeExecution`.
+- Seal the immutable SDK materialization inside `ReviewedRequestSet`, prove Lite's decoded calls agree with every SDK request, slot, and Safe call, and use `finalizeMaterializedExecution` plus the public migration encoder for declared signature changes.
 - Prove every finalizer returns a new vector, leaves the reviewed SDK materialization unchanged, and changes only declared signature, Pyth-refresh, and transport slots.
 
 Exit: every supported operation can produce a deterministic reviewed request set without wallet interaction.
 
 ### Stage C - Snapshot, policy, simulation, and review binding
 
-- Implement eager, generation-bound preparation; context-complete cache identities; cache-first snapshot loading; exact whole-cart result adoption; app-scoped policy result; classified simulation coverage; effect map generation; calldata/Tenderly projection; and opaque adapters that bind the unchanged operation-specific review components to reviewed executions.
+- Implement eager, generation-bound preparation; context-complete cache identities; cache-first snapshot loading; exact whole-cart result adoption; app-scoped policy result; classified simulation coverage; decoded-call ownership; calldata/Tenderly projection; and opaque adapters that bind the unchanged operation-specific review components to reviewed executions.
 - Add the direct-only simulation adapter: accept SDK-declared `independent` only when there is no EVC batch or earlier-effect dependency, beginning with Turtle; preserve empty account/vault projections; keep calldata and Tenderly available independently of state simulation.
 - Add the implementation documentation and links required by section 9, including the root `AGENTS.md` invariant.
 - Run V2 in test/dev shadow comparison against current `development` flows while the PR remains draft.
 
-Exit: the internal reviewed simulation, effect map, export, and materialized request set share one normalized request digest; every coverage class is recorded internally; and the complete rendered review compatibility suite is unchanged.
+Exit: the internal reviewed simulation, decoded calls, export, and materialized request set share one normalized request digest; every simulation class is recorded internally; and the complete rendered review compatibility suite is unchanged.
 
 ### Stage D - Submission coordinator and adapters
 
@@ -750,7 +750,7 @@ Do not mark the PR ready for human review until this gate completes.
 1. Freeze the candidate SHA and give every reviewer the exact SHA and `development` base.
 2. Spawn fresh read-only agents with no implementation conversation history:
    - one using `review-stack` for Vue/Nuxt/TypeScript architecture and lifecycle correctness;
-   - one using `review-business` for Euler operation semantics, bounded effects, policy subjects, and user-visible accuracy;
+   - one using `review-business` for Euler operation semantics, enforced limits, policy inputs, and user-visible accuracy;
    - one using `review-security` for signing, wallet binding, re-entry, unknown-status handling, and transaction integrity;
    - after those reviews finish, one using `review-pr` for a full surface pass and deep caller/callee trace of every modified symbol.
 3. Require findings to name exact files/lines, reachable call chains, severity, and a discriminating reproduction/test. Agents remain read-only and do not post to GitHub.
@@ -769,7 +769,7 @@ Historical approvals, aggregate PR badges, and a queued/incomplete agent run do 
 - Canonical digest is deterministic and schema-versioned.
 - SDK materialization is deterministic and deeply frozen; repeated calls with the same prepared plan and explicit inputs produce identical requests, Permit2 slots, and Safe calls.
 - SDK Permit2 finalization and Lite's typed migration/Pyth extension finalizers return new immutable vectors, leave the reviewed SDK materialization unchanged, and change only declared signature, Pyth-refresh, and wallet transport slots.
-- Every executable effect is represented in the effect map or rejected. Visible review output is intentionally not required to map one-to-one to effects.
+- Every executable call is decoded and assigned to an intent or rejected. Visible review output is intentionally not required to list calls one-to-one.
 - Every executable effect has an explicit simulation coverage class; no partial result is represented as full-plan state simulation.
 - EVC simulation includes the preview plugin calls and maps operation layers by stable `effectId`/operation ID.
 - Approvals and Permit2/migration authorizations are recorded as modeled assumptions, not fabricated simulated transactions.
@@ -789,7 +789,7 @@ Historical approvals, aggregate PR badges, and a queued/incomplete agent run do 
 
 - Exercise every current operation-specific review and batch-review variant against the pre-refactor fixtures, including conditional fields, expanded/collapsed states, warnings, tooltips, action labels, and display-only/read-only modes.
 - Require identical rendered labels, values, grouping, ordering, visibility, and interaction states after migration. Do not regenerate fixtures merely because the reviewed execution internals changed.
-- Prove the internal effect graph may contain more or differently grouped effects than the visible review without leaking generic rows or internal metadata into the UI.
+- Prove the internal decoded-call list may contain more or differently grouped calls than the visible review without leaking generic rows or internal metadata into the UI.
 - Prove Pyth fee, maximum, feed IDs, payload/freshness data, and refresh behavior never appear in the review UI.
 - Prove each unchanged operation-specific presentation is bound to the exact intent IDs/revisions and reviewed execution accepted by the user, while remaining unable to sign or submit directly.
 
@@ -872,7 +872,7 @@ Inject failure or context change before and after every await in preparation, fi
 | --- | --- | --- | --- |
 | Display, simulation, calldata, and execution use different plans | #810, #782 | One reviewed request set and one normalized digest; review takes only reviewed execution data | Digest equality tests across every projection and the finalized request passed to the wallet after declared slot normalization |
 | Confirm callback rebuilds from reactive form state | #810, #782 | Pages create intents only; planner imports forbidden after seal | Overlapping reviews where A confirms after B prepares still execute A |
-| Batch simulation uses add-time plans while execution authority rebuilds | #810 | Whole cart compiled and simulated as one authoritative reviewed execution | Add-time preview differs from final graph; only the final graph is executable, while the unchanged handcrafted review remains bound to the final intent set |
+| Batch simulation uses add-time plans while execution authority rebuilds | #810 | Whole cart compiled and simulated as one authoritative reviewed execution | Add-time preview differs from the final compiled calls; only those final calls are executable, while the unchanged handcrafted review remains bound to the final intent set |
 | `Object.freeze` wraps closures and mutable objects | #810 | Serializable runtime schema and deep validation reject functions/refs/classes | Construction fails for closures, Vue refs, SDK accounts, and unknown fields |
 | Signature parity scans placeholder bytes | #810, #782, #784 | ABI-aware typed slots with signer/hash/path | Repeated placeholders, transposition, selector collision, and unrelated 65-byte data all fail |
 | Pyth refresh becomes an unrestricted post-review replan or expires behind EOA prerequisite receipts | #782, #784, LITE-280, LITE-289, LITE-292 | Typed slot seals official target, selector, feed set, ordering, freshness, and max value; only payload and bounded fee refresh; static prerequisite prefix is receipted before JIT suffix finalization | Fresh payload succeeds; delayed prerequisite beyond freshness still refreshes afterward; unknown target, selector/order/feed change, stale data, plugin failure, or excess fee blocks the Pyth-bearing wallet request |
@@ -881,7 +881,7 @@ Inject failure or context change before and after every await in preparation, fi
 | Safe classification resolves late and rewrites approval mode | #782, #784 | Classification/approval mode resolved before seal; drift invalidates | Unresolved-to-Safe and Permit2-to-approval transitions require new review |
 | Reviewed Safe silently falls back to EOA/sequential execution | #782, #784 | Transport-specific reviewed request set and adapter; no fallback return type | Provider loss fails closed with no alternate wallet write |
 | Safe call batch is assumed atomic from one RPC invocation | Plan review | Seal version/from/chain/atomic requirement/calls/capabilities, require per-chain atomic capability, and verify confirmed atomic status | Missing/unsupported capability blocks review; envelope drift blocks handoff; `atomic: false` or missing evidence never reports success |
-| Final-graph metadata or acknowledgements cover only page-primary vaults | #781 | Required vault and asset subjects are derived from the complete effect graph | Missing metadata or acknowledgement for a required secondary subject prevents review |
+| Metadata or acknowledgements cover only page-primary vaults | #781 | Required vault addresses are derived from every decoded call | Missing metadata or acknowledgement for a required secondary vault prevents review |
 | Policy callback outlives component but its state freezes | #783 | App-scoped evidence with policy-result expiry and version evaluation | Unmount, advance time/switch wallet, then sign/send remains blocked |
 | Policy asserted only before the terminal batch, not prerequisites | #783 | Coordinator validates before every irreversible step | Flip policy during prerequisite build; no grant is sent |
 | Module-global latch from reviewed execution A overwrites B | #810, #784 | Reviewed execution is instance-owned by ID; no module-global execution authority | A prepares, cart clears/B prepares, A finishes last; B remains authoritative |
@@ -907,7 +907,7 @@ Preserve:
 - Existing form guards retain their hard-block and acquired-exposure restriction semantics.
 - Unverified acknowledgement binds to account, chain, final subject set, and reviewed execution digest.
 
-Do not port page-by-page guards or copied policy metadata. Use the exact wallet binding, sealed constraints, and final effect graph only for evidence the reviewed boundary must revalidate.
+Do not port page-by-page guards or copied policy metadata. Use the exact wallet binding, sealed constraints, and final decoded calls only for evidence the reviewed boundary must revalidate.
 
 ### PR #782 - exact artifact and submission integrity
 
@@ -921,7 +921,7 @@ Do not port modal callbacks, object-identity authorization, heuristic equality, 
 
 Preserve:
 
-- TOS/account/chain versioning, connected-wallet screening with its VPN input, required vault metadata verification, existing geo blockers, stale async rejection, operation-specific and policy-result expiry evaluation, and policy assertions at every irreversible boundary.
+- TOS/account/chain versioning, connected-wallet screening with its VPN input, required vault metadata verification, stale async rejection, operation-specific and policy-result expiry evaluation, and policy assertions at every irreversible boundary. Existing server and form guards remain responsible for country, asset, and swap eligibility; reviewed execution adds no parallel gate.
 
 Improve on it by owning evidence at application scope instead of retaining callbacks whose component-scoped state can stop updating.
 
@@ -944,7 +944,7 @@ The current exact head still demonstrates why the clean boundary is required: re
 - Every reviewed request set seals the immutable SDK materialization used to derive its EOA requests and Safe calls; no Lite-owned base materializer or generic executor remains.
 - Wallet kind, Safe classification, connector/session, approval mode, policy result, static transport fields, signature slots, and bounded Pyth-refresh slots are sealed before review.
 - Execution-time plugin processing receives only the sealed raw plan/configuration, and Lite accepts only the declared fresh Pyth payload and bounded fee difference.
-- Reviewed simulations, the effect map, export, Tenderly, and normalized submission share one request digest. Internal metadata identifies each literal Pyth preview payload; the user-facing review remains unchanged and intentionally need not map one-to-one to that request set.
+- Reviewed simulations, decoded calls, export, Tenderly, and normalized submission share one request digest. Internal metadata identifies each literal Pyth preview payload; the user-facing review remains unchanged and intentionally need not list that request set one-to-one.
 - The coordinator acquires one synchronous in-memory guard before any signature or wallet request, makes each adapter call once, and keeps the guard through SDK EOA receipt sequencing. Safe handoff preserves the pre-existing `useSafeExecutionDetachment` status watcher and confirmation gate until its current-session lifecycle terminates.
 - The exact finalized EOA request or complete Safe transport envelope is compared with the accepted request set immediately before the wallet call.
 - The EOA adapter dispatches only through SDK `executeMaterialized` and proves that every SDK hook and wallet call receives either the byte-static reviewed pre-Pyth prefix or already-finalized reviewed bytes without recomposition.

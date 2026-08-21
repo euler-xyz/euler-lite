@@ -53,7 +53,7 @@ signaturesEnabled = userPreference && !signaturesForcedOff
 
 ## Atomic reviewed execution dispatch
 
-The reviewed execution builds one exhaustive effect graph before review. Approvals, migration authorization grants, the main Euler action, and authorization restorations are explicit prerequisite, main, and cleanup effects. The same graph produces transport-specific requests:
+The reviewed execution records every call before review. Approvals, migration authorization grants, the main Euler action, and authorization restorations are explicit prerequisite, main, and cleanup calls. That ordered call list produces transport-specific requests:
 
 - EOA: an ordered sequence of exact requests, each checked before the wallet prompt and advanced by the SDK only after a successful receipt.
 - Safe: one ordered envelope containing version, from, chain, `atomicRequired: true`, exact calls, request capabilities, and the admitted atomic-capability snapshot. The reviewed Safe provider receives those exact serialized `wallet_sendCalls` fields directly, without a client layer injecting unreviewed capabilities.
