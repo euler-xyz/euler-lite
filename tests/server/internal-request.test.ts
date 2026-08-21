@@ -22,16 +22,22 @@ import { getInternalFetchHeaders, isInternalRequest } from '~/server/utils/inter
 const eventWithHeaders = (headers: Record<string, string | string[] | undefined>): H3Event =>
   ({ node: { req: { headers } } }) as unknown as H3Event
 
-let secretSnapshot: string | undefined
+const ENV_KNOBS = ['EDGE_ORIGIN_SECRET', 'EDGE_PROVIDER'] as const
+
+const envSnapshot: Record<string, string | undefined> = {}
 
 beforeEach(() => {
-  secretSnapshot = process.env.EDGE_ORIGIN_SECRET
-  Reflect.deleteProperty(process.env, 'EDGE_ORIGIN_SECRET')
+  for (const key of ENV_KNOBS) {
+    envSnapshot[key] = process.env[key]
+    Reflect.deleteProperty(process.env, key)
+  }
 })
 
 afterEach(() => {
-  if (secretSnapshot === undefined) Reflect.deleteProperty(process.env, 'EDGE_ORIGIN_SECRET')
-  else process.env.EDGE_ORIGIN_SECRET = secretSnapshot
+  for (const key of ENV_KNOBS) {
+    if (envSnapshot[key] === undefined) Reflect.deleteProperty(process.env, key)
+    else process.env[key] = envSnapshot[key]
+  }
 })
 
 describe('without EDGE_ORIGIN_SECRET (sentinel mode)', () => {
@@ -54,6 +60,23 @@ describe('without EDGE_ORIGIN_SECRET (sentinel mode)', () => {
 
   it('ignores the secret marker header entirely (nothing to verify it against)', () => {
     expect(isInternalRequest(eventWithHeaders({ 'x-edge-internal': 'anything' }))).toBe(false)
+  })
+
+  it('honours the sentinel only under presets whose edge overwrites it (or the none preset)', () => {
+    const sentinel = eventWithHeaders({ 'cf-connecting-ip': '127.0.0.1' })
+
+    process.env.EDGE_PROVIDER = 'cloudflare'
+    expect(isInternalRequest(sentinel)).toBe(true)
+    process.env.EDGE_PROVIDER = 'none'
+    expect(isInternalRequest(sentinel)).toBe(true)
+
+    // These edges forward client headers untouched — a forged sentinel must
+    // never grant internal status (they require EDGE_ORIGIN_SECRET at boot;
+    // this is the defense-in-depth backstop).
+    process.env.EDGE_PROVIDER = 'google'
+    expect(isInternalRequest(sentinel)).toBe(false)
+    process.env.EDGE_PROVIDER = 'cloudfront'
+    expect(isInternalRequest(sentinel)).toBe(false)
   })
 })
 

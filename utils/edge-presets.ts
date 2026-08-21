@@ -71,6 +71,19 @@ export function edgeProvidesVpnEvidence(provider: EdgeProvider): boolean {
 }
 
 /**
+ * Whether the no-secret loopback sentinel is a sound internal-request
+ * signal under this preset. Only true where the edge overwrites the
+ * sentinel header in transit (cloudflare) or where no edge-derived trust
+ * exists at all (none — forks, previews). The other presets forward
+ * client-supplied headers untouched, so an external caller could forge
+ * internal status with one header; they must authenticate internal fetches
+ * with EDGE_ORIGIN_SECRET instead (enforced at boot by edge-guard).
+ */
+export function edgeHonorsInternalSentinel(provider: EdgeProvider): boolean {
+  return provider === 'cloudflare' || provider === 'none'
+}
+
+/**
  * Uppercase ISO 3166-1 alpha-2 or null. 'XX' (unknown IP) and non-alpha
  * codes (e.g. 'T1' for Tor exit nodes) are treated as undetermined.
  */

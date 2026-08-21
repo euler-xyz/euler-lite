@@ -1,6 +1,7 @@
 import type { H3Event } from 'h3'
 import {
   EDGE_ORIGIN_AUTH_HEADER,
+  edgeHonorsInternalSentinel,
   edgeProvidesGeo,
   extractEdgeInputs,
   normalizeCountry,
@@ -77,19 +78,30 @@ export function getEdgeContext(event: H3Event): EdgeContext {
  * Boot-time validation, called from `server/plugins/edge-guard.ts`.
  *
  * Throws on an unknown EDGE_PROVIDER value (any environment — a typo must
- * not silently degrade to `none`), and when production boots without a
- * preset: under `none` geo-blocking is off and rate limiting falls back to
+ * not silently degrade to `none`), when production boots without a
+ * preset (under `none` geo-blocking is off and rate limiting falls back to
  * best-effort identity, which is fork-friendly but never acceptable for a
- * production deployment.
+ * production deployment), and when a preset that cannot honour the
+ * loopback sentinel runs without EDGE_ORIGIN_SECRET (its edge forwards
+ * client headers untouched, so unauthenticated internal detection would be
+ * forgeable — and internal fetches could not pass the gates at all).
  */
 export function assertEdgeConfig(): void {
-  parseEdgeProvider(process.env.EDGE_PROVIDER)
+  const provider = parseEdgeProvider(process.env.EDGE_PROVIDER)
   if (process.env.DOPPLER_ENVIRONMENT === 'prd' && !process.env.EDGE_PROVIDER?.trim()) {
     throw new Error(
       'EDGE_PROVIDER must be set in production (DOPPLER_ENVIRONMENT=prd): '
       + 'without it geo-blocking is disabled and there is no trusted client identity. '
       + 'Set it to the deployment\'s fronting edge preset, or explicitly to "none" '
       + 'for a deployment that intentionally runs without one.',
+    )
+  }
+  if (!edgeHonorsInternalSentinel(provider) && !process.env.EDGE_ORIGIN_SECRET?.trim()) {
+    throw new Error(
+      `EDGE_PROVIDER=${provider} requires EDGE_ORIGIN_SECRET: this edge does not `
+      + 'overwrite the internal sentinel header in transit, so internal fetches must '
+      + 'authenticate with the origin-auth secret instead. Configure the edge to stamp '
+      + 'x-edge-origin-auth and set the secret.',
     )
   }
 }
