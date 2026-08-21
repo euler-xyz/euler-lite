@@ -25,22 +25,14 @@ export type EdgeProvider = (typeof EDGE_PROVIDERS)[number]
 export const EDGE_ORIGIN_AUTH_HEADER = 'x-edge-origin-auth'
 
 /**
- * Internal-fetch marker header: set (with the origin-auth secret as value)
- * only by server-internal $fetch calls, never by the edge. Because the
- * value is the secret itself, external clients cannot forge it. The edge
- * should additionally strip this header from inbound traffic as
+ * Internal-fetch marker header: set only by server-internal $fetch calls,
+ * never by the edge. The value is EDGE_ORIGIN_SECRET when configured, or a
+ * random per-process fallback otherwise (see
+ * `server/utils/internal-headers.ts`) — external clients cannot forge
+ * either. The edge should strip this header from inbound traffic as
  * defense-in-depth.
  */
 export const INTERNAL_MARKER_HEADER = 'x-edge-internal'
-
-/**
- * No-secret internal sentinel. Deliberately reuses the cloudflare preset's
- * trusted-IP header: that edge always overwrites it in transit, so external
- * clients cannot smuggle the loopback value through the edge. See
- * `server/utils/internal-headers.ts` for the full trust model.
- */
-export const INTERNAL_SENTINEL_HEADER = 'cf-connecting-ip'
-export const INTERNAL_SENTINEL_VALUE = '127.0.0.1'
 
 type RawHeaders = Record<string, string | string[] | undefined>
 
@@ -71,16 +63,16 @@ export function edgeProvidesVpnEvidence(provider: EdgeProvider): boolean {
 }
 
 /**
- * Whether the no-secret loopback sentinel is a sound internal-request
- * signal under this preset. Only true where the edge overwrites the
- * sentinel header in transit (cloudflare) or where no edge-derived trust
- * exists at all (none — forks, previews). The other presets forward
- * client-supplied headers untouched, so an external caller could forge
- * internal status with one header; they must authenticate internal fetches
- * with EDGE_ORIGIN_SECRET instead (enforced at boot by edge-guard).
+ * Whether the preset refuses to run without EDGE_ORIGIN_SECRET (enforced at
+ * boot by edge-guard). These edges stamp origin custom headers as a matter
+ * of course, and without origin auth their trusted inputs would be
+ * forgeable by anyone who can reach the origin directly — with no
+ * compensating deployment history. `cloudflare` stays optional for rollout
+ * parity (the origin-locked topology is its documented historical
+ * assumption) and `none` carries no edge-derived trust to protect.
  */
-export function edgeHonorsInternalSentinel(provider: EdgeProvider): boolean {
-  return provider === 'cloudflare' || provider === 'none'
+export function edgeRequiresOriginSecret(provider: EdgeProvider): boolean {
+  return provider === 'google' || provider === 'cloudfront'
 }
 
 /**

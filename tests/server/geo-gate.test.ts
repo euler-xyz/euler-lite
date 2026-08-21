@@ -14,6 +14,7 @@
  */
 import type { H3Event } from 'h3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getInternalFetchHeaders } from '~/server/utils/internal-headers'
 
 vi.mock('h3', () => ({
   createError: (error: unknown) => error,
@@ -117,12 +118,25 @@ describe('geo-gate log hygiene', () => {
     process.env.EDGE_PROVIDER = 'cloudflare'
 
     expect(() =>
-      runHandler(makeEvent(`https://app.example/api/internal/proxy/merkl/users/${ADDRESS}/rewards`, {
-        'cf-connecting-ip': '127.0.0.1',
-      })),
+      runHandler(makeEvent(
+        `https://app.example/api/internal/proxy/merkl/users/${ADDRESS}/rewards`,
+        { ...getInternalFetchHeaders() },
+      )),
     ).not.toThrow()
 
     expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('gates requests bearing a forged legacy loopback sentinel like any external request', () => {
+    process.env.DOPPLER_ENVIRONMENT = 'prd'
+    process.env.EDGE_PROVIDER = 'cloudflare'
+
+    // The sentinel used to grant the internal bypass; it must not anymore.
+    expect(() =>
+      runHandler(makeEvent('https://app.example/api/internal/vaults', {
+        'cf-connecting-ip': '127.0.0.1',
+      })),
+    ).toThrow()
   })
 })
 
