@@ -188,7 +188,7 @@ describe('POST /api/internal/screen-address', () => {
     }
   })
 
-  it('sends the API key, blocks redirects, and omits chain from the upstream body', async () => {
+  it('sends the API key, blocks redirects, and requests all-chains screening', async () => {
     stubScreeningEnv()
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => cleanVerdict())
     vi.stubGlobal('fetch', fetchMock)
@@ -199,7 +199,7 @@ describe('POST /api/internal/screen-address', () => {
     expect(url).toBe(SCREENING_URI)
     expect((init?.headers as Record<string, string>)['X-API-Key']).toBe(SCREENING_API_KEY)
     expect(init?.redirect).toBe('error')
-    expect(JSON.parse(String(init?.body))).toEqual({ address: USER, vpnIsUsed: null })
+    expect(JSON.parse(String(init?.body))).toEqual({ address: USER, chain: 'all', vpnIsUsed: null })
   })
 
   it('rejects invalid addresses without calling upstream', async () => {
