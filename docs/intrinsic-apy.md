@@ -68,21 +68,41 @@ These options flow into every place the registry is filled: `composables/useVaul
 
 ## Helpers
 
-`utils/vault-intrinsic-apy.ts` exposes three pure functions:
+`utils/vault-intrinsic-apy.ts` exposes pure helpers:
 
 ```ts
 import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
 
 export const EMPTY_INTRINSIC_APY: IntrinsicApyInfo = { apy: 0, provider: '' }
 
+export function resolveVaultIntrinsicApySource(
+  ...vaults: Array<VaultWithIntrinsicApy | undefined>
+): VaultWithIntrinsicApy | undefined
 export function getVaultIntrinsicApyInfo(vault, enabled): IntrinsicApyInfo
 export function getVaultIntrinsicApy(vault, enabled): number
 export function withVaultIntrinsicApy(baseApy: number, vault, enabled: boolean): number
 ```
 
-- `enabled` is the per-user toggle from `useUserSettings().settings.value.enableIntrinsicApy`. When false, the helpers return zero (or `baseApy` for `withVaultIntrinsicApy`).
+- `enabled` is the per-user toggle from `useUserSettings().settings.value.enableIntrinsicApy`. When false, the getters return zero (or `baseApy` for `withVaultIntrinsicApy`).
 - `withVaultIntrinsicApy` applies the canonical compound formula `base + (1 + base/100) * intrinsic`. Same formula for supply and borrow; the role lives at the call site (e.g. `borrowApy - rewards` vs `supplyApy + rewards`).
 - `getVaultIntrinsicApyInfo` returns the full info object including `provider` and `source` for use in APY-breakdown modals.
+- `resolveVaultIntrinsicApySource` returns the first argument whose `intrinsicApy` field is **defined** (including `{ apy: 0, provider }`). It does not prefer a higher APY — order is the contract.
+
+### Which vault entity to read
+
+`intrinsicApy` is populated onto whichever SDK entity `fetchVaults` returned. On an EVK lend page that is usually the EVault (or a layered overlay from `getLayeredVault`). On a **Securitize** lend page there is no EVault: `eVault` / `projectionEVault` stay undefined and the rate lives on the `SecuritizeCollateralVault` fetched with `liteSecuritizeVaultFetchOptions.populateIntrinsicApy: true`.
+
+`pages/lend/[vault]/index.vue` therefore resolves in this order:
+
+```ts
+resolveVaultIntrinsicApySource(
+  projectionEVault.value, // layered EVK overlay, if any
+  eVault.value,
+  securitizeVault.value,  // ERC-4626 collateral vault; not an EVault
+)
+```
+
+A projected overlay that exists but has `intrinsicApy: undefined` must not shadow a populated base EVault — `find` skips it. Passing only `eVault` on a Securitize page drops the V3-populated rate even though `securitizeVault.intrinsicApy` is set. Pinned by `tests/utils/vault-intrinsic-apy.test.ts`.
 
 The SDK exposes an equivalent on its side: `computeSupplyApyBreakdown(vault)` returns `{ lending, intrinsicApy, rewards, total }` with the compounding pre-applied. Use whichever fits the call site; both produce the same numbers for supply.
 
@@ -116,3 +136,10 @@ V3 owns the provider list. Add the asset upstream in the V3 backend's intrinsic-
 If a provider needs Lite-specific handling before it is available in V3, keep the data on an explicit current data path such as a labels payload field and wire it into the vault display code with tests. The preferred durable path is upstream into V3.
 
 For form previews, the intrinsic component is recomputed against projected market rates and included in the before/after contribution breakdown. See [Projected Yield](./projected-yield.md).
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Securitize lend page shows 0 intrinsic APY while V3 has a rate | The headline helpers must run through `resolveVaultIntrinsicApySource(projection, eVault, securitize)`. Reading only `eVault` misses the Securitize entity. |
+| Overlay APY dropped after a projection refresh | The overlay's `intrinsicApy` is `undefined`, so the helper should fall through to the base EVault. Do not treat "vault object present" as "intrinsic populated". |

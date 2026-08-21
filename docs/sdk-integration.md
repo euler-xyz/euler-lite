@@ -92,8 +92,8 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 |-----------|-------|-----------------|
 | `v3ApiUrl`, `tokenlistApiBaseUrl` | `/api/internal` | V3 proxy with exact SDK browser endpoint allowlist (`server/api/internal/v3/[...path].ts`) |
 | `eulerInterfacesBranch` | `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | Branch selection for the euler-interfaces manifests (browser ABI fetches themselves go through the proxy below) |
-| `deploymentsUrl` | `/api/internal/euler-chains` | Local proxy |
-| ABI fetches (`setQueryABI` in `configureAppProxies`) | `/api/internal/abis/{contract}` | Runtime ABI proxy (`AccountLens`/`VaultLens`/`UtilsLens` allowlist) |
+| `deploymentsUrl` | `/api/internal/euler-chains` | Local proxy with per-entry admission (see [server-side caching](./server-side-caching.md#deployment-manifest-and-runtime-abis)) |
+| ABI fetches (`setQueryABI` in `configureAppProxies`) | `/api/internal/abis/{contract}` | Runtime ABI proxy (`AccountLens`/`VaultLens`/`UtilsLens`); required signatures must be encodable and have non-empty `outputs` |
 | `eulerLabelsBaseUrl` | `/api/internal/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
 | `rewardsMerklApiUrl` | `/api/internal/proxy/merkl` | Merkl proxy |
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
@@ -131,7 +131,7 @@ A few representative rows:
 export const SDK_QUERY_POLICY = {
   // Static catalogue
   queryDeployments:    { staleTimeMs: 5 * MINUTE },
-  queryABI:            { staleTimeMs: Infinity },
+  queryABI:            { staleTimeMs: Infinity }, // browser keeps the first admitted ABI until reload
 
   // Account/vault reads
   queryAccountVaults:  { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },

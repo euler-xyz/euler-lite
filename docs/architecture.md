@@ -205,8 +205,8 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/internal/labels/{chainId}/{file}` | 5 min | Path-shape labels endpoint matching the SDK's default `eulerLabelsBaseUrl` template; shares the underlying cache with the query-shape route |
 | `/api/internal/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
 | `/api/internal/oracle-adapter` | 5 min | Lazy per-address fetch |
-| `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo. 7-day stale window so a running instance outlives upstream outages |
-| `/api/internal/abis/{contract}` | 5 min | Runtime ABI documents from `euler-interfaces` (`AccountLens`/`VaultLens`/`UtilsLens` allowlist; SDK `setQueryABI` target). Same 7-day stale window as euler-chains |
+| `/api/internal/euler-chains` | 5 min | `EulerChains.json` from `euler-interfaces`. 7-day stale window; per-entry admission so an unusable 200 cannot overwrite last-known-good. Enabled chains (`RPC_URL_*` ∩ known registry) must be complete |
+| `/api/internal/abis/{contract}` | 5 min | Runtime ABI documents (`AccountLens`/`VaultLens`/`UtilsLens`). Same 7-day window; required function signatures must be encodable **and** have non-empty `outputs` |
 | `/api/internal/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |
 | `/api/internal/proxy/merkl/{path}` | 60 s | Same-origin proxy to Merkl v4; path allowlist; GET/HEAD only |
 | `/api/internal/proxy/fuul/{path}` | 30 s | Same-origin proxy to Fuul; path allowlist; GET/HEAD/POST |
@@ -218,7 +218,7 @@ Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, sta
 
 `server/plugins/warm-cache.ts` pre-populates labels and token-list for every enabled chain, plus `/api/internal/euler-chains` and the runtime ABI manifests once globally, on a 5-min cycle. The vault snapshot runs on its own faster timer (1 min when V3 is configured, 5 min otherwise) so V3-backed refreshes stay tight without hammering upstream. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ TTL − 2 s) and the entry would then expire with no refresh until the next cycle — leaving a stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh previous entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
 
-For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
+For the full setup — per-host proxies, deployment-manifest / ABI admission, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
 ### Vault snapshot pipeline
 

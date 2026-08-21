@@ -86,6 +86,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🗄️ [Server-Side Caching](./server-side-caching.md)
 
 - Per-host external proxies (Merkl, Fuul, Incentra, Goldsky subgraph) with TTL + in-flight dedup
+- Deployment-manifest / runtime-ABI caches with 7-day stale windows and admission (poison 200s cannot overwrite last-known-good)
 - Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
@@ -102,6 +103,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - SDK/V3 provider architecture
 - Vault-entity intrinsic APY fields and refresh cadence
 - Source attribution in APY modals
+- Securitize vs EVault source resolution on the lend page
 - Adding new providers and tokens
 
 ### 🔐 [Keyring Hooks (Private Vaults)](./keyring-hooks.md)

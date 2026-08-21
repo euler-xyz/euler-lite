@@ -7,7 +7,7 @@ Lite ships a layered cache between the browser and every external data source �
 3. **CORS avoidance.** Most upstreams don't set permissive CORS; same-origin proxying sidesteps the issue.
 4. **First-paint amortization.** A consolidated vault snapshot is built every minute and served directly to `/lend`, so first paint is one HTTP fetch instead of a fan-out of per-vault calls.
 
-This document covers the per-host proxies, the vault snapshot pipeline, the warm-cache plugin, and how V3 configuration changes the cadence.
+This document covers the per-host proxies, the deployment-manifest and runtime-ABI caches, the vault snapshot pipeline, the warm-cache plugin, and how V3 configuration changes the cadence.
 
 ## Files at a Glance
 
@@ -20,11 +20,15 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
 | `server/api/internal/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
 | `server/api/internal/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
+| `server/utils/euler-interfaces.ts` | Shared branch + 7-day stale window for euler-interfaces manifests |
+| `server/api/internal/euler-chains.get.ts` | `EulerChains.json` proxy with per-entry admission |
+| `server/api/internal/abis/[contract].get.ts` | Runtime ABI proxy (`AccountLens` / `UtilsLens` / `VaultLens`) with signature admission |
+| `server/plugins/sdk-deployments.ts` | Points every server SDK build at `loadEulerChains()` |
 | `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
 | `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
-| `server/plugins/warm-cache.ts` | Boot + interval warm cycles for labels, token-list, vault snapshot |
+| `server/plugins/warm-cache.ts` | Boot + interval warm cycles for labels, token-list, euler-chains, ABIs, vault snapshot |
 | `utils/snapshot-codec.ts` | Bigint-safe JSON wire format |
 | `utils/snapshot-types.ts` | Wire-shape types shared client + server |
 | `utils/sdk-vault-meta-stub.ts` | Registry-backed `IVaultMetaService` for the client-side hydration two-pass |
@@ -78,7 +82,84 @@ Both endpoints write to and fall back on the same in-memory TTL cache, but only 
 
 Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
 
-### V3 proxy
+## Deployment Manifest and Runtime ABIs
+
+`/api/internal/euler-chains` and `/api/internal/abis/{contract}` serve boot-critical, low-churn documents from [euler-interfaces](https://github.com/euler-xyz/euler-interfaces). They share one branch resolver and one 7-day stale window (`MANIFEST_MAX_STALE_MS` in `server/utils/euler-interfaces.ts`) so a running instance outlives a GitHub outage. The long window only works if poison cannot overwrite last-known-good — that is what **admission** enforces.
+
+Resolution chain for both (`loadEulerChains` / `loadAbi`):
+
+```text
+fresh TTL hit (5 min)
+  → else upstream fetch + admission
+  → else stale cache (up to 7 days)
+  → else throw → HTTP 502
+```
+
+Admission runs on every refresh, including warm-cache's forced `refreshEulerChains()` / `refreshAbi()`. An unusable 200 does **not** `cache.set`, so the previous timestamp is preserved and the stale window is not reset by garbage.
+
+### Upstream selection
+
+| Lever | EulerChains | ABIs |
+|---|---|---|
+| Default | `euler-interfaces` `master` `EulerChains.json` | `euler-interfaces` `master` `abis/{contract}.json` |
+| Branch | `EULER_SDK_EULER_INTERFACES_BRANCH`, then `NUXT_PUBLIC_EULER_INTERFACES_BRANCH`, then `NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH` | same branch vars |
+| Emergency URL | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` (full URL) | `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` (must serve `{base}/{contract}.json`) |
+
+An explicit URL **wins over the branch**. The branch only selects a GitHub ref of the default source; the URL is the outage-repoint lever. `.env.example` documents this; do not invert it.
+
+Server-side SDK builds never hit GitHub for deployments: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot. Browser bundles keep `deploymentsUrl: /api/internal/euler-chains` and `setQueryABI` → `/api/internal/abis/{contract}` (CSP blocks `raw.githubusercontent.com`).
+
+### EulerChains admission
+
+`admitDeploymentManifest` in `server/api/internal/euler-chains.get.ts` is **per entry**, then gated on this deployment's enabled chains (`getEnabledChainIds()` = known `chainRegistry` ids that have a valid `RPC_URL_<id>`).
+
+An entry is valid when it has a positive integer `chainId` and EVM addresses for:
+
+| Group | Required keys |
+|---|---|
+| `addresses.coreAddrs` | `eVaultFactory`, `evc`, `permit2` |
+| `addresses.lensAddrs` | `accountLens`, `oracleLens`, `utilsLens`, `vaultLens` |
+
+Peripheral keys are **not** required — a sparse extra field degrades a feature, not the chain. All current production entries carry the full key set; the required subset is what SDK builds and core lend/borrow need on every chain.
+
+Then:
+
+| Payload | Effect |
+|---|---|
+| Non-array, empty array, or zero valid entries | Throw. Do not cache. |
+| Invalid entry for a chain this process does **not** enable | Drop it, `logger.warn` with `ctx: 'euler-chains'` / `dropped`, admit the rest. A routine euler-interfaces commit adding a sparse new chain must not freeze the whole manifest. |
+| Missing or invalid entry for an **enabled** chain | Throw (`missing or invalid for enabled chains: …`). That is the poison the 7-day window exists to outlive. |
+
+Enabling a chain therefore has three gates: it must be in `entities/chainRegistry`, it must have a valid `RPC_URL_<id>`, and EulerChains must already carry the required addresses. An unknown `RPC_URL_99999` is ignored for admission (not in the known set). Restart Nitro after changing `RPC_URL_*` — enabled chains are derived from env and are not hot-reloaded.
+
+Pinned by `tests/server/euler-chains-route.test.ts`.
+
+### ABI admission
+
+Unknown `{contract}` values 404. The allowlist is `AccountLens`, `UtilsLens`, `VaultLens` (`ABI_CONTRACTS`). Item shape alone is not enough: a function fragment with the right name but missing `inputs` makes viem derive a wrong selector; a stripped `outputs: []` makes lens reads decode to `undefined`.
+
+Each contract pins the **canonical signatures** (name + inputs, via `toFunctionSignature`) its consumers encode, and requires those fragments to carry a **non-empty** `outputs` tuple. Return-tuple *shape* stays unpinned — that drift is why ABIs are fetched at runtime instead of compiled in.
+
+| Contract | Required signatures | Consumers |
+|---|---|---|
+| `AccountLens` | `getEVCAccountInfo(address,address)`, `getVaultAccountInfo(address,address)` | SDK account adapter / simulate / rewards |
+| `UtilsLens` | `computeAPYs(uint256,uint256,uint256,uint256)` | IRM overview `computeAPYs` read |
+| `VaultLens` | `getVaultInterestRateModelInfo(address,uint256[],uint256[])` | Projected rates (`utils/vault/apy.ts`) and IRM overview |
+
+A 502 from this proxy surfaces as `ABI request failed` to `queryABI`. Browser `queryABI` is cached at `staleTimeMs: Infinity`, so a running tab keeps the ABI it first fetched; admission is the last server-side check before that cache is filled. Pinned by `tests/server/abis-route.test.ts`.
+
+### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| `/api/internal/euler-chains` 502 while GitHub returns 200 | Admission rejected the body. Look for `ctx: "euler-chains"` warnings (dropped entries) or the throw `missing or invalid for enabled chains`. A running instance keeps last-known-good; a **cold** process has nothing to serve. |
+| New euler-interfaces chain froze deploys / caused 502 | Only if that `chainId` is enabled here. Sparse entries for other chains are dropped. If you just added `RPC_URL_<id>`, that chain is now required to be complete. |
+| Cold-start 502, GitHub down | Set `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and/or `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` to a mirror. The 7-day window only helps processes that already cached a valid copy. |
+| `/api/internal/abis/VaultLens` 502 on a 200 JSON array | Missing required signature, or the required function has empty/malformed `outputs`. A valid VaultLens payload is not a valid AccountLens payload. |
+| `/api/internal/abis/SomeOther` 404 | Not in `ABI_CONTRACTS`. Extend the allowlist and the required-signature map together when a new runtime consumer appears. |
+| Browser ABI fetch CSP-blocked | `abiService.setQueryABI` was missing; `configureAppProxies` logs this as an error. Fetches must go through `/api/internal/abis`. |
+
+## V3 Proxy
 
 `/api/internal/v3/{...path}` is a deliberately narrow same-origin proxy for browser-side SDK V3 calls and a few Lite-owned chart endpoints. It normalizes browser paths to `/v3/...`, validates the exact path/method allowlist, consumes a local rate-limit budget, injects the server-side V3 API key when configured, and forwards only JSON-safe headers to the upstream V3 API. Query strings and POST bodies are forwarded unchanged after the route/method check; V3 remains responsible for domain-level validation.
 
@@ -224,7 +305,7 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 `labels-view.ts` shares the same `getServerSdk` instance per chain.
 
-Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
+Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches. Admission still applies on that path — see [Deployment Manifest and Runtime ABIs](#deployment-manifest-and-runtime-abis).
 
 ### Disabling the snapshot
 
@@ -323,6 +404,8 @@ Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
     /api/internal/token-list
 ```
 
+Manifest refreshes still run through admission (`admitDeploymentManifest` / `isValidAbi`) — a forced warm fetch that returns an unusable 200 does not overwrite last-known-good. See [Deployment Manifest and Runtime ABIs](#deployment-manifest-and-runtime-abis).
+
 Vault snapshot has its own faster timer because V3-backed refreshes are cheap — one batched POST per chain hitting V3's own cache. Pulling a fresh snapshot every minute keeps it tight without hammering upstream. Without V3, the snapshot is built from heavier onchain lens multicalls, so it falls back to the global 5-min cadence.
 
 When the two intervals are equal (V3 off), the timers naturally double-warm at every 5-min boundary; the in-flight dedup inside `refreshChainVaults` collapses the concurrent calls onto a single upstream pass.
@@ -372,6 +455,9 @@ The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=tru
 | `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |
 | `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/internal/vaults` returns 503, browser falls through to RPC pipeline. |
 | `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured. |
+| `EULER_SDK_EULER_INTERFACES_BRANCH` | server | git branch | `master` | Branch of `euler-interfaces` for EulerChains + runtime ABIs. |
+| `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` | server | URL | unset | Full-URL override for EulerChains.json; **wins over** the branch. |
+| `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | server | URL | unset | Base-URL override for `{base}/{contract}.json`; **wins over** the branch. |
 
 ## Verification
 
