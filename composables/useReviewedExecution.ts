@@ -33,7 +33,7 @@ import type { WalletProviderLike } from '~/utils/safeWalletTransactions'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { readPreviewCache, readMigrationPreviewCache } from '~/features/reviewed-execution/planning/preview-cache'
-import { compileCrossProtocolMigrationIntent, type MigrationCompilerSdk } from '~/features/reviewed-execution/planning/migration-compiler'
+import { buildMigrationSimulationPlan, compileCrossProtocolMigrationIntent, type MigrationCompilerSdk } from '~/features/reviewed-execution/planning/migration-compiler'
 import type { AdditionalMaterializedCall } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { projectEulerSimulation } from '~/features/reviewed-execution/simulation/euler-projection'
 
@@ -240,6 +240,7 @@ export const useReviewedExecution = () => {
     const migrationBefore: AdditionalMaterializedCall[] = []
     const migrationAfter: AdditionalMaterializedCall[] = []
     const migrationStateOverrides: StateOverride = []
+    const migrationPlansForSimulation = new Map<string, TransactionPlan>()
     const runtime: LiteCompilerRuntime = {
       account,
       sdk,
@@ -278,6 +279,7 @@ export const useReviewedExecution = () => {
             before: migrationBefore,
             after: migrationAfter,
             stateOverrides: migrationStateOverrides,
+            plansForSimulation: migrationPlansForSimulation,
           },
           warmedResult: readMigrationPreviewCache(intent, context.snapshot.observedBlock),
         })
@@ -345,9 +347,10 @@ export const useReviewedExecution = () => {
         return collectPythPreviewData(plan, prefetched)
       },
       resolvePolicy: requestSet => resolveAppPolicy(requestSet),
-      async simulate(plan, requestSet, _snapshot, rawPlan) {
+      async simulate(plan, requestSet, _snapshot, rawPlan, intentPlans, prefetchedPlugins) {
         const stateCovered = requestSet.effects.some(node => node.simulation.kind === 'evc-state' || node.simulation.kind === 'independent-call')
         if (!stateCovered) return undefined
+        const usesMigrationSimulationPlan = migrationPlansForSimulation.size > 0
         const previewCache = readPreviewCache({
           intents,
           rawPlan,
@@ -356,17 +359,34 @@ export const useReviewedExecution = () => {
           chainId: wallet.chainId,
           usePermit2: wallet.approvalMode === 'permit2',
           unlimitedApproval: false,
-          allowSimulation: !requestSet.signatureSlots.some(slot => slot.kind === 'migration')
-            && !migrationBefore.length
-            && !migrationAfter.length
-            && !migrationStateOverrides.length,
+          allowSimulation: !usesMigrationSimulationPlan,
         })
         if (previewCache.simulationProjection !== undefined) {
           return previewCache.simulationProjection as unknown as EulerSimulationProjection
         }
+        let planForSimulation = plan
+        if (usesMigrationSimulationPlan) {
+          const rawPlanForSimulation = buildMigrationSimulationPlan(
+            intentPlans,
+            migrationPlansForSimulation,
+            plans => sdk.executionService.mergePlans(plans),
+          )
+          const withPlugins = await sdk.executionService.processPlanPlugins(
+            rawPlanForSimulation,
+            account,
+            wallet.chainId,
+            rehydratePluginPrefetch(prefetchedPlugins),
+          )
+          planForSimulation = await sdk.executionService.resolveRequiredApprovals({
+            plan: withPlugins,
+            chainId: wallet.chainId,
+            account: wallet.account,
+            usePermit2: wallet.approvalMode === 'permit2',
+          })
+        }
         const prepared: TransactionPlanPrepared = {
           __prepared: true,
-          plan,
+          plan: planForSimulation,
           chainId: wallet.chainId,
           account,
           usePermit2: wallet.approvalMode === 'permit2',
@@ -424,10 +444,14 @@ export const useReviewedExecution = () => {
    * The preview remains outside the draft DTO and is always recompiled or
    * deep-validated by prepare() before review.
    */
-  const compilePreview = async (
+  const compilePreviewForSimulation = async (
     intents: readonly OperationIntent[],
     providedAccount?: Account<IHasVaultAddress>,
-  ): Promise<TransactionPlan> => {
+  ): Promise<{
+    reviewedPlan: TransactionPlan
+    plan: TransactionPlan
+    migrationStateOverrides?: StateOverride
+  }> => {
     validateIntentSet(intents)
     const requirements = collectPlanningRequirements(intents)
     const sdk = await getEulerSdkFresh()
@@ -438,6 +462,7 @@ export const useReviewedExecution = () => {
     const migrationBefore: AdditionalMaterializedCall[] = []
     const migrationAfter: AdditionalMaterializedCall[] = []
     const migrationStateOverrides: StateOverride = []
+    const migrationPlansForSimulation = new Map<string, TransactionPlan>()
     const runtime: LiteCompilerRuntime = {
       account,
       sdk,
@@ -463,6 +488,7 @@ export const useReviewedExecution = () => {
             before: migrationBefore,
             after: migrationAfter,
             stateOverrides: migrationStateOverrides,
+            plansForSimulation: migrationPlansForSimulation,
           },
           warmedResult: readMigrationPreviewCache(intent, context.snapshot.observedBlock),
         })
@@ -487,8 +513,24 @@ export const useReviewedExecution = () => {
       { snapshot, runtime: asCompilerRuntime(runtime) },
       () => {},
     )
-    return compiled.plan
+    if (!migrationPlansForSimulation.size) {
+      return { reviewedPlan: compiled.plan, plan: compiled.plan }
+    }
+    return {
+      reviewedPlan: compiled.plan,
+      plan: buildMigrationSimulationPlan(
+        compiled.intentPlans,
+        migrationPlansForSimulation,
+        plans => sdk.executionService.mergePlans(plans),
+      ),
+      migrationStateOverrides,
+    }
   }
+
+  const compilePreview = async (
+    intents: readonly OperationIntent[],
+    providedAccount?: Account<IHasVaultAddress>,
+  ): Promise<TransactionPlan> => (await compilePreviewForSimulation(intents, providedAccount)).reviewedPlan
 
   const executionRuntime = async (execution: ReviewedExecution) => {
     const sdk = await getEulerSdkFresh()
@@ -624,6 +666,7 @@ export const useReviewedExecution = () => {
   return {
     prepare,
     compilePreview,
+    compilePreviewForSimulation,
     accept,
     discard,
     getReviewedExecution,

@@ -11,7 +11,7 @@ import type { EulerSimulationProjection } from '../simulation/coverage'
 import { buildReviewedSimulation } from '../simulation/coverage'
 import type { GenerationPublisher, PreparationCache, PreparationCacheIdentity } from './cache'
 import { collectPlanningRequirements } from './requirements'
-import type { IntentCompilerRegistry } from './compiler'
+import type { CompiledIntentSet, IntentCompilerRegistry } from './compiler'
 import type { PlanningSnapshot, PlanningSnapshotLoader } from './snapshot-loader'
 
 export interface ReviewedExecutionDependencies {
@@ -25,7 +25,14 @@ export interface ReviewedExecutionDependencies {
   prepareMigrationSignatureSlots(plan: TransactionPlan, wallet: WalletBinding, snapshot: PlanningSnapshot): Promise<readonly PreparedMigrationSignatureSlot[]>
   collectPythEvidence(plan: TransactionPlan, wallet: WalletBinding, snapshot: PlanningSnapshot, prefetched: CanonicalValue): Promise<readonly PythPreviewData[]>
   resolvePolicy(requestSet: ReviewedRequestSet, snapshot: PlanningSnapshot): Promise<ReviewedPolicy>
-  simulate(plan: TransactionPlan, requestSet: ReviewedRequestSet, snapshot: PlanningSnapshot, rawPlan: TransactionPlan): Promise<EulerSimulationProjection | undefined>
+  simulate(
+    plan: TransactionPlan,
+    requestSet: ReviewedRequestSet,
+    snapshot: PlanningSnapshot,
+    rawPlan: TransactionPlan,
+    intentPlans: CompiledIntentSet['intentPlans'],
+    prefetchedPlugins: CanonicalValue,
+  ): Promise<EulerSimulationProjection | undefined>
   pluginConfiguration: CanonicalValue
   directCallAllowlist?: Readonly<Record<string, string>>
 }
@@ -206,7 +213,14 @@ export class ReviewedExecutionPreparationService {
       if (simulation.requestDigest !== requestDigest) throw new Error('Cached simulation belongs to another request set')
     }
     else {
-      const projection = await this.dependencies.simulate(resolved, requestSet, snapshot, compiled.plan)
+      const projection = await this.dependencies.simulate(
+        resolved,
+        requestSet,
+        snapshot,
+        compiled.plan,
+        compiled.intentPlans,
+        prefetched,
+      )
       await assertContext()
       simulation = buildReviewedSimulation({ requestSet, requestDigest, projection, observedAt: this.now() })
       this.cache.put(simulationIdentity, toCanonicalValue(simulation))

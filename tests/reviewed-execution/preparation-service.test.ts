@@ -7,7 +7,7 @@ import type { OperationIntent } from '~/features/reviewed-execution/domain/inten
 import { materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
 import { GenerationPublisher, PreparationCache } from '~/features/reviewed-execution/planning/cache'
-import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
+import { ReviewedExecutionPreparationService, type ReviewedExecutionDependencies } from '~/features/reviewed-execution/planning/service'
 import { PlanningSnapshotLoader } from '~/features/reviewed-execution/planning/snapshot-loader'
 import { createAppSnapshotDependencies } from '~/features/reviewed-execution/planning/app-snapshot'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
@@ -137,7 +137,12 @@ describe('authoritative reviewed execution preparation', () => {
     const dependencyLoad = vi.fn(async (key: string) => ({ value: { key }, observedBlock: 100n, version: 'v1', freshUntil: 5_000 }))
     const compilerCall = vi.fn(async () => plan)
     const pluginPrefetch = vi.fn(async () => ({ pyth: [], keyring: [] }))
-    const simulation = vi.fn(async () => ({ canExecute: true, simulatedAccounts: [], simulatedVaults: [], blockNumber: 100n }))
+    const simulation = vi.fn(async (..._args: Parameters<ReviewedExecutionDependencies['simulate']>) => ({
+      canExecute: true,
+      simulatedAccounts: [],
+      simulatedVaults: [],
+      blockNumber: 100n,
+    }))
     const snapshotLoader = new PlanningSnapshotLoader(cache, { load: dependencyLoad }, generation, 'compiler-v1')
     const compiler = new IntentCompilerRegistry({ deposit: { compile: compilerCall } }, plans => plans.flat())
     const service = new ReviewedExecutionPreparationService({
@@ -175,6 +180,12 @@ describe('authoritative reviewed execution preparation', () => {
     expect(compilerCall).toHaveBeenCalledTimes(2)
     expect(pluginPrefetch).toHaveBeenCalledOnce()
     expect(simulation).toHaveBeenCalledOnce()
+    expect(simulation.mock.calls[0]?.[4]).toEqual([{
+      intentId: intent.intentId,
+      intentRevision: intent.revision,
+      plan,
+    }])
+    expect(simulation.mock.calls[0]?.[5]).toEqual({ pyth: [], keyring: [] })
     expect(dependencyLoad).toHaveBeenCalled()
 
     const batchExecution = await service.prepare({

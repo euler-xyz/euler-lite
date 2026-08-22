@@ -1641,7 +1641,7 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 
 export const useTxBatch = () => {
   const executionService = useReviewedExecution()
-  const { compilePreview } = executionService
+  const { compilePreviewForSimulation } = executionService
   const { chainId: wagmiChainId } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
@@ -2191,7 +2191,8 @@ export const useTxBatch = () => {
           // The simulator will surface the normal account-loading error later.
         }
       }
-      const plan = await compilePreview([entry.intent], await getEntryPlanningAccount())
+      const preview = await compilePreviewForSimulation([entry.intent], await getEntryPlanningAccount())
+      const plan = preview.plan
       const cid = chainId.value
       if (cid) {
         batchSlotHints = {
@@ -2206,6 +2207,18 @@ export const useTxBatch = () => {
       // Clear/account/chain changes and row removal invalidate this late result.
       if (owner.value !== capturedOwner || chainId.value !== capturedChainId || !draftEntries.value.some(candidate => candidate.intentId === entryId && candidate.revision === intent.revision)) return
       entryPlanById.value = { ...entryPlanById.value, [entryId]: plan }
+      if (preview.migrationStateOverrides) {
+        const currentPresentation = entryPresentationById.value[entryId]
+        if (currentPresentation) {
+          entryPresentationById.value = {
+            ...entryPresentationById.value,
+            [entryId]: {
+              ...currentPresentation,
+              stateOverrides: preview.migrationStateOverrides,
+            },
+          }
+        }
+      }
       entryPreparationById.value = { ...entryPreparationById.value, [entryId]: { preparing: false } }
       logBatchDiag('addEntry:added', { label: entry.label, newEntryCount: entries.value.length })
     }

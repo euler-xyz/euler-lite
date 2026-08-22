@@ -11,6 +11,7 @@ import type { AdditionalMaterializedCall, EffectOwner } from '../materialization
 import { prepareMigrationSignatureEvidence, type Permit2TypedData, type PreparedMigrationSignatureSlot } from '../materialization/signature-slots'
 import { rehydrateIntentSwapQuote, type IntentSwapQuote } from '../domain/swap-quote'
 import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
+import type { CompiledIntentSet } from './compiler'
 
 interface MigrationSignatureCoordinate {
   authorizationRequestIndex: number
@@ -40,6 +41,19 @@ export interface MigrationCompilationCollectors {
   before: AdditionalMaterializedCall[]
   after: AdditionalMaterializedCall[]
   stateOverrides: StateOverride
+  /** SDK plan used only for simulation; signature calls are omitted and modeled with state overrides. */
+  plansForSimulation: Map<string, TransactionPlan>
+}
+
+export const buildMigrationSimulationPlan = (
+  intentPlans: CompiledIntentSet['intentPlans'],
+  plansForSimulation: ReadonlyMap<string, TransactionPlan>,
+  mergePlans: (plans: TransactionPlan[]) => TransactionPlan,
+): TransactionPlan => {
+  const plans = intentPlans.map(({ intentId, intentRevision, plan }) =>
+    plansForSimulation.get(`${intentId}:${intentRevision}`) ?? plan,
+  )
+  return plans.length === 1 ? plans[0] : mergePlans(plans)
 }
 
 const flattenAuthorizationRequests = (request: MigrationAuthorizationRequest | undefined): MigrationAuthorizationRequest[] => {
@@ -99,6 +113,7 @@ export const compileCrossProtocolMigrationIntent = async ({
   warmedResult?: PlanMigrationSimulationResult
 }): Promise<TransactionPlan> => {
   const result = warmedResult ?? await sdk.positionMigrationService.planMigrationSimulation(plannerArgs(intent, account))
+  collectors.plansForSimulation.set(`${intent.intentId}:${intent.revision}`, result.plan)
   collectors.stateOverrides.push(...result.stateOverrides)
   const request = result.authorizationRequest
   const authorizationEvidenceDigest = canonicalDigest('migration-authorization-evidence-v1', toCanonicalValue(request ?? null))

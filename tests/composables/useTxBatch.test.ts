@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getAddress, type Address } from 'viem'
+import { getAddress, type Address, type StateOverride } from 'viem'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildOperationEntryMap, buildWalletBalanceLayers, buildWalletChanges, countPlanOperations, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
@@ -41,8 +41,17 @@ const intentFor = (plan: TransactionPlan, subAccounts: Address[] = [owner]): Ope
     metadata: { createdAt: testIntentSequence, source: 'test' },
   }
 }
+const compilePreviewMock = vi.fn(async (intents: readonly OperationIntent[], _account?: Account<IHasVaultAddress>) => testIntentPlans.get(intents[0]!.intentId) ?? [])
 const executionMocks = {
-  compilePreview: vi.fn(async (intents: readonly OperationIntent[]) => testIntentPlans.get(intents[0]!.intentId) ?? []),
+  compilePreview: compilePreviewMock,
+  compilePreviewForSimulation: vi.fn(async (intents: readonly OperationIntent[], account?: Account<IHasVaultAddress>): Promise<{
+    reviewedPlan: TransactionPlan
+    plan: TransactionPlan
+    migrationStateOverrides?: StateOverride
+  }> => {
+    const plan = await compilePreviewMock(intents, account)
+    return { reviewedPlan: plan, plan }
+  }),
   prepare: vi.fn(async () => { throw new Error('authoritative preparation not configured in batch unit test') }),
 }
 const position = (account: Address, shares: bigint) => ({
@@ -296,6 +305,7 @@ const createMockSdk = () => ({
 beforeEach(() => {
   vi.restoreAllMocks()
   executionMocks.compilePreview.mockClear()
+  executionMocks.compilePreviewForSimulation.mockClear()
   executionMocks.prepare.mockClear()
   testIntentPlans.clear()
   testIntentSequence = 0
@@ -784,6 +794,38 @@ describe('useTxBatch execution errors', () => {
     expect(executionMocks.compilePreview).toHaveBeenCalledWith(expect.any(Array), planningAccount)
     expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
     expect(useTxBatch().layers.value[0]?.account).toBe(portfolioAccount)
+  })
+
+  it('simulates a gasless migration without its placeholder signature call', async () => {
+    const sdk = createMockSdk()
+    const reviewedPlan = [{ type: 'evcBatch', items: [{ data: '0xstub' }] }] as unknown as TransactionPlan
+    const planWithoutSignatureCall = [{ type: 'evcBatch', items: [{ data: '0xcore' }] }] as unknown as TransactionPlan
+    const migrationStateOverrides = [{
+      address: vault,
+      stateDiff: [{
+        slot: `0x${'00'.repeat(32)}` as `0x${string}`,
+        value: `0x${'00'.repeat(31)}01` as `0x${string}`,
+      }],
+    }]
+    const intent = intentFor(reviewedPlan, [subAccount])
+    executionMocks.compilePreviewForSimulation.mockResolvedValueOnce({
+      reviewedPlan,
+      plan: planWithoutSignatureCall,
+      migrationStateOverrides,
+    })
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+
+    await useTxBatch().addEntry({ intent, label: 'Migrate USDC/WETH', subAccount })
+    await vi.waitFor(() => expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled())
+
+    expect(useTxBatch().entries.value[0]?.plan).toBe(planWithoutSignatureCall)
+    expect(useTxBatch().entries.value[0]?.stateOverrides).toEqual(migrationStateOverrides)
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
+      1,
+      owner,
+      planWithoutSignatureCall,
+      expect.objectContaining({ extraStateOverrides: migrationStateOverrides }),
+    )
   })
 
   it('passes chain-matched form slot hints into the first batch simulation', async () => {

@@ -17,6 +17,12 @@ export interface IntentCompiler {
 
 export interface CompiledIntentSet {
   plan: TransactionPlan
+  /** Each intent's plan before the plans are merged into the whole cart. */
+  intentPlans: readonly {
+    intentId: string
+    intentRevision: number
+    plan: TransactionPlan
+  }[]
   effectOwners: Readonly<Record<string, EffectOwner>>
 }
 
@@ -29,6 +35,7 @@ export class IntentCompilerRegistry {
   async compile(intents: readonly OperationIntent[], context: IntentCompilerContext, assertCurrent: () => void): Promise<CompiledIntentSet> {
     validateIntentSet(intents)
     const plans: TransactionPlan[] = []
+    const intentPlans: CompiledIntentSet['intentPlans'][number][] = []
     const sourceOwners: { type: TransactionPlan[number]['type'], owner: EffectOwner }[] = []
     const evcOwners: EffectOwner[] = []
     for (const intent of intents) {
@@ -46,6 +53,7 @@ export class IntentCompilerRegistry {
         }
       }
       plans.push(plan)
+      intentPlans.push({ intentId: intent.intentId, intentRevision: intent.revision, plan })
     }
     const plan = plans.length === 1 ? plans[0] : this.mergePlans(plans)
     assertCurrent()
@@ -72,6 +80,6 @@ export class IntentCompilerRegistry {
       }
     }
     if (evcIndex !== evcOwners.length || nonEvcIndex !== nonEvcOwners.length) throw new Error('Merged plan omitted an intent effect')
-    return { plan, effectOwners }
+    return { plan, intentPlans, effectOwners }
   }
 }

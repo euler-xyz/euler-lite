@@ -3,7 +3,7 @@ import type { Account, IHasVaultAddress, MigrationAuthorizationRequest, Transact
 import { describe, expect, it, vi } from 'vitest'
 import { canonicalDigest, toCanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
-import { compileCrossProtocolMigrationIntent, type MigrationCompilationCollectors, type MigrationCompilerSdk } from '~/features/reviewed-execution/planning/migration-compiler'
+import { buildMigrationSimulationPlan, compileCrossProtocolMigrationIntent, type MigrationCompilationCollectors, type MigrationCompilerSdk } from '~/features/reviewed-execution/planning/migration-compiler'
 
 const OWNER = getAddress('0x1000000000000000000000000000000000000000')
 const TOKEN = getAddress('0x2000000000000000000000000000000000000000')
@@ -63,6 +63,7 @@ const collectors = (): MigrationCompilationCollectors => ({
   before: [],
   after: [],
   stateOverrides: [],
+  plansForSimulation: new Map(),
 })
 
 const sdkFor = (
@@ -81,6 +82,21 @@ const sdkFor = (
 })
 
 describe('cross-protocol migration compiler', () => {
+  it('replaces only the migration plan when building the direct simulation input', () => {
+    const depositPlan = [{ type: 'evcBatch', items: [{ data: '0xdeposit' }] }] as unknown as TransactionPlan
+    const reviewedMigrationPlan = [{ type: 'evcBatch', items: [{ data: '0xstub' }] }] as unknown as TransactionPlan
+    const migrationSimulationPlan = [{ type: 'evcBatch', items: [{ data: '0xcore' }] }] as unknown as TransactionPlan
+    const mergePlans = vi.fn((plans: TransactionPlan[]) => plans.flat() as TransactionPlan)
+
+    const result = buildMigrationSimulationPlan([
+      { intentId: 'deposit:1', intentRevision: 1, plan: depositPlan },
+      { intentId: 'migration:1', intentRevision: 1, plan: reviewedMigrationPlan },
+    ], new Map([['migration:1:1', migrationSimulationPlan]]), mergePlans)
+
+    expect(mergePlans).toHaveBeenCalledWith([depositPlan, migrationSimulationPlan])
+    expect(result).not.toContain(reviewedMigrationPlan[0])
+  })
+
   it('materializes transaction grants and reverse-order cleanup explicitly', async () => {
     const nested = { ...transactionRequest, postMigrationAuthorization: transactionRequest } as MigrationAuthorizationRequest
     const output = collectors()
@@ -93,6 +109,7 @@ describe('cross-protocol migration compiler', () => {
     expect(output.before.every(call => call.phase === 'prerequisite')).toBe(true)
     expect(output.after.every(call => call.phase === 'cleanup')).toBe(true)
     expect(output.stateOverrides).toEqual([{ address: TOKEN, stateDiff: [] }])
+    expect(output.plansForSimulation.get('migration:1:1')).toBe(simulationPlan)
     expect(output.migrationSlots).toEqual([])
   })
 
@@ -105,13 +122,15 @@ describe('cross-protocol migration compiler', () => {
       abiArgumentPath: ['authorization', 'signature'],
     }])
 
-    await compileCrossProtocolMigrationIntent({
+    const compiled = await compileCrossProtocolMigrationIntent({
       intent: intentFor(typedRequest),
       account,
       sdk: sdkFor(typedRequest, prepareSlots),
       collectors: output,
     })
 
+    expect(compiled).toBe(previewPlan)
+    expect(output.plansForSimulation.get('migration:1:1')).toBe(simulationPlan)
     expect(prepareSlots).toHaveBeenCalledWith({ previewPlan, authorizationRequest: typedRequest })
     expect(output.migrationSlots).toHaveLength(1)
     expect(output.migrationSlots[0]).toMatchObject({
