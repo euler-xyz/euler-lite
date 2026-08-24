@@ -1,4 +1,4 @@
-import { getAddress, hashTypedData, type Address, type Hash, type Hex } from 'viem'
+import { getAddress, hashTypedData, recoverTypedDataAddress, type Address, type Hash, type Hex } from 'viem'
 import type { EVCBatchItem, Permit2DataToSign, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { SignatureInsertion, SignatureSlot } from '../domain/reviewed-execution'
@@ -207,6 +207,23 @@ export const assertPermit2NonceCurrent = async (
   const current = await readNonce(coordinate)
   if (current !== coordinate.nonce) throw new Error('Permit2 nonce changed after review')
   return coordinate
+}
+
+/** Refuse a wallet signature that is not for the exact reviewed message and signer. */
+export const assertSignatureMatchesSigner = async (slot: SignatureSlot, signature: Hex): Promise<void> => {
+  let recovered: Address
+  try {
+    recovered = await recoverTypedDataAddress({
+      ...(slot.typedData as Parameters<typeof recoverTypedDataAddress>[0]),
+      signature,
+    })
+  }
+  catch {
+    throw new Error('Wallet returned an invalid signature for the reviewed message')
+  }
+  if (getAddress(recovered) !== getAddress(slot.signer)) {
+    throw new Error('Wallet signed different typed data than the reviewed message')
+  }
 }
 
 export const prepareMigrationSignatureSlot = ({

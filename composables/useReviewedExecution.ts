@@ -1,4 +1,4 @@
-import { useConfig } from '@wagmi/vue'
+import { useConfig, useSignTypedData } from '@wagmi/vue'
 import { getAccount as getWagmiAccount, sendTransaction } from '@wagmi/vue/actions'
 import { getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
 import type { Account, IHasVaultAddress, MigrationAuthorizationRequest, Permit2DataToSign, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
@@ -18,7 +18,7 @@ import { createLiteIntentCompilerRegistry, asCompilerRuntime, type LiteCompilerR
 import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
 import { collectPythPreviewData, rehydratePluginPrefetch, serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
 import { PYTH_FRESHNESS_POLICY, PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
-import { assertPermit2NonceCurrent, preparePermit2Slots } from '~/features/reviewed-execution/materialization/signature-slots'
+import { assertPermit2NonceCurrent, assertSignatureMatchesSigner, preparePermit2Slots } from '~/features/reviewed-execution/materialization/signature-slots'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { assertPolicyVersionsMatch } from '~/features/reviewed-execution/policy/engine'
 import type { EulerSimulationProjection } from '~/features/reviewed-execution/simulation/coverage'
@@ -196,6 +196,7 @@ export const useReviewedExecution = () => {
   const { rewards, buildClaimRewardPlan } = useSdkRewards()
   const { locks, buildUnlockREULPlan } = useREULLocks()
   const config = useConfig()
+  const { signTypedDataAsync } = useSignTypedData()
   const { signaturesEnabled } = useSignaturePreference()
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
 
@@ -600,18 +601,19 @@ export const useReviewedExecution = () => {
         }
       },
       async collectSignature(slot: SignatureSlot) {
-        const current = getWagmiAccount(config)
-        if (!current.connector) throw new Error('Wallet connector is unavailable')
-        const provider = await current.connector.getProvider()
-        if (!provider || typeof provider !== 'object' || !('request' in provider) || typeof provider.request !== 'function') {
-          throw new Error('Wallet provider cannot sign typed data')
-        }
-        const signature = await provider.request({
-          method: 'eth_signTypedData_v4',
-          params: [slot.signer, JSON.stringify(slot.typedData, (_key, value) => typeof value === 'bigint' ? value.toString() : value)],
+        // Use wagmi/viem's established signer path. It supplies the required
+        // EIP712Domain type before calling the wallet; sending the SDK object
+        // directly makes Rabby sign an empty domain and Permit2 rejects it.
+        const signature = await signTypedDataAsync({
+          ...(slot.typedData as Parameters<typeof signTypedDataAsync>[0]),
+          account: slot.signer,
         })
         if (typeof signature !== 'string' || !/^0x[0-9a-f]+$/i.test(signature)) throw new Error('Wallet returned an invalid signature')
-        return signature as Hex
+        const normalized = signature as Hex
+        if (execution.requestSet.wallet.walletKind === 'eoa') {
+          await assertSignatureMatchesSigner(slot, normalized)
+        }
+        return normalized
       },
       async refreshPyth(current) {
         if (!current.requestSet.pythRefreshSlots.length) return []
