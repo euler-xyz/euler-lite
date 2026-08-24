@@ -1112,6 +1112,7 @@ const hydrateBorrowLiquidity = (
   positions: StitchPosition[],
   enabledCollaterals: Address[] | undefined,
   baseEnabledCollaterals: Address[] | undefined,
+  hasSimulatedLiquidity: boolean,
 ): void => {
   const liquidity = borrow.liquidity
   if (!liquidity || (borrow.borrowed ?? 0n) === 0n) return
@@ -1181,7 +1182,20 @@ const hydrateBorrowLiquidity = (
     const existing = existingCollaterals.get(key)
     const collateralPosition = positionsByVault.get(collateralAddress)
     const collateralMeta = getBorrowCollateralMeta(borrow.vault, collateralAddress)
-    const value = buildCurrentCollateralLiquidityValue(borrow, collateralPosition, existing, riskValueScale) ?? zeroLiquidityValue()
+    // A controller position returned by the simulation already contains the
+    // authoritative post-operation oracle values for every credited
+    // collateral. Its touched account slice can omit the corresponding
+    // collateral positions, which makes the SDK-populated `valueUsd` zero, but
+    // that does not make the oracle values stale. Re-deriving those values from
+    // the full account's market-price USD fields mixes unrelated price scales
+    // and can turn an unchanged healthy position into a false unhealthy one.
+    //
+    // Only use the USD-based fallback when the controller position itself was
+    // absent from the simulated slice and we therefore carried its old
+    // liquidity forward while stitching a changed collateral position.
+    const value = hasSimulatedLiquidity && existing?.value
+      ? cloneLiquidityValue(existing.value)!
+      : buildCurrentCollateralLiquidityValue(borrow, collateralPosition, existing, riskValueScale) ?? zeroLiquidityValue()
     const vault = existing?.vault ?? collateralPosition?.vault ?? collateralMeta?.vault
     const valueUsd = getPositionUsdValue(collateralPosition) ?? existing?.valueUsd
     nextCollaterals.push({
@@ -1214,9 +1228,18 @@ const hydrateStitchedPositions = (
   positions: StitchPosition[],
   enabledCollaterals: Address[] | undefined,
   baseEnabledCollaterals: Address[] | undefined,
+  simulatedLiquidityVaults: Set<string> = new Set(),
 ): StitchPosition[] => {
   for (const position of positions) hydratePositionMarketValues(position)
-  for (const position of positions) hydrateBorrowLiquidity(position, positions, enabledCollaterals, baseEnabledCollaterals)
+  for (const position of positions) {
+    hydrateBorrowLiquidity(
+      position,
+      positions,
+      enabledCollaterals,
+      baseEnabledCollaterals,
+      simulatedLiquidityVaults.has(getAddress(position.vaultAddress).toLowerCase()),
+    )
+  }
   return positions
 }
 
@@ -1514,6 +1537,11 @@ export const stitchAccount = (
     if (!tsa) continue
     const key = subAccountMapKey(addr)
     const existing = mergedSubs[key]
+    const simulatedLiquidityVaults = new Set(
+      tsa.positions
+        .filter(position => position.liquidity !== undefined)
+        .map(position => getAddress(position.vaultAddress).toLowerCase()),
+    )
     if (!existing) {
       mergedSubs[key] = {
         ...tsa,
@@ -1522,6 +1550,7 @@ export const stitchAccount = (
           tsa.enabledCollaterals,
           // No base sub-account: every enabled collateral is treated as new.
           undefined,
+          simulatedLiquidityVaults,
         ),
       }
       continue
@@ -1540,6 +1569,7 @@ export const stitchAccount = (
       Array.from(byVault.values()),
       tsa.enabledCollaterals,
       existing.enabledCollaterals,
+      simulatedLiquidityVaults,
     )
     mergedSubs[key] = {
       ...existing,

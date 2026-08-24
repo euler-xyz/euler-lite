@@ -375,6 +375,80 @@ describe('stitchAccount', () => {
     expect(portfolio.netAssetValueUsd).toBe(30)
   })
 
+  it('keeps simulated controller risk values when untouched collateral USD data is absent from the touched slice', () => {
+    const collateralVault = pricedVault(vault, 'COLLATERAL')
+    const borrowVaultEntity = pricedVault(borrowVault, 'DEBT', 1, [{
+      address: vault,
+      borrowLTV: 0.8,
+      liquidationLTV: 0.9,
+      vault: collateralVault,
+    }])
+    const authoritativeLiquidity: IAccountLiquidity<IHasVaultAddress> = {
+      vaultAddress: borrowVault,
+      vault: borrowVaultEntity,
+      unitOfAccount: borrowVault,
+      daysToLiquidation: 'Infinity',
+      liabilityValue: { borrowing: 50n * WAD, liquidation: 50n * WAD, oracleMid: 50n * WAD },
+      totalCollateralValue: { borrowing: 640n * WAD, liquidation: 720n * WAD, oracleMid: 800n * WAD },
+      collaterals: [{
+        address: vault,
+        vault: collateralVault,
+        value: { borrowing: 640n * WAD, liquidation: 720n * WAD, oracleMid: 800n * WAD },
+        marketPriceUsd: 1,
+        valueUsd: 100,
+      }],
+      liabilityValueUsd: 50,
+      totalCollateralValueUsd: 100,
+    }
+    const base = accountWithPositions([
+      { ...collateralPosition(100_000_000n), vault: collateralVault },
+      pricedPosition({
+        vaultAddress: borrowVault,
+        vault: borrowVaultEntity,
+        borrowed: 50_000_000n,
+        isController: true,
+        marketPriceUsd: 1,
+        borrowedValueUsd: 50,
+        liquidity: authoritativeLiquidity,
+      }),
+    ])
+    const touched = accountWithPositions([
+      pricedPosition({
+        vaultAddress: targetVault,
+        vault: pricedVault(targetVault, 'TARGET'),
+        shares: 10_000n,
+        assets: 10_000n,
+        suppliedValueUsd: 0.01,
+      }),
+      pricedPosition({
+        vaultAddress: borrowVault,
+        vault: borrowVaultEntity,
+        borrowed: 50_000_000n,
+        isController: true,
+        marketPriceUsd: 1,
+        borrowedValueUsd: 50,
+        liquidity: {
+          ...authoritativeLiquidity,
+          collaterals: authoritativeLiquidity.collaterals.map(collateral => ({
+            ...collateral,
+            // The simulation only populated USD values for positions in its
+            // touched slice. The on-chain oracle values above are still final.
+            valueUsd: 0,
+          })),
+          totalCollateralValueUsd: 0,
+        },
+      }),
+    ])
+
+    const stitched = stitchAccount(base, touched)
+    const stitchedBorrow = stitched.getPosition(subAccount, borrowVault)
+
+    expect(stitchedBorrow?.liquidity?.totalCollateralValue).toEqual(authoritativeLiquidity.totalCollateralValue)
+    expect(stitchedBorrow?.liquidity?.collaterals[0]?.value).toEqual(authoritativeLiquidity.collaterals[0]?.value)
+    expect(stitchedBorrow?.liquidity?.collaterals[0]?.valueUsd).toBe(100)
+    expect(stitched.getSubAccount(subAccount)?.healthFactor).toBe(14_400_000_000_000_000_000n)
+  })
+
   it('keeps borrow collateral USD total unknown when any included collateral has no USD value', () => {
     const knownCollateralVault = pricedVault(vault, 'USDC')
     const borrowVaultEntity = pricedVault(borrowVault, 'DEBT', 1, [
