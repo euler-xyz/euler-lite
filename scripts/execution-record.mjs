@@ -1629,14 +1629,14 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
     }
     else if (action.type === 'click') {
       const locator = page.locator(action.selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
     }
     else if (action.type === 'clickButton') {
       const locator = page.getByRole('button', { name: action.text, exact: action.exact ?? true }).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
@@ -1647,14 +1647,14 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
         throw new Error('clickTab requires tab')
       }
       const locator = page.locator(`[data-id="tab"][data-value=${cssString(tabLabel)}] button`).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
     }
     else if (action.type === 'fill') {
       const locator = page.locator(action.selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await locator.fill('', { timeout }).catch(() => null)
       await locator.type(String(action.value ?? ''), { delay: Number(action.delayMs ?? 30), timeout })
@@ -1668,7 +1668,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
       }
       const selector = `[data-id="asset-input"][data-label=${cssString(assetLabel)}] [data-id="asset-input-field"]`
       const locator = page.locator(selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await locator.fill('', { timeout }).catch(() => null)
       await locator.type(String(action.value ?? ''), { delay: Number(action.delayMs ?? 30), timeout })
@@ -1682,7 +1682,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
       }
       const selector = `[data-id="asset-input"][data-label=${cssString(assetLabel)}] [data-id="asset-input-max"]`
       const locator = page.locator(selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
@@ -1693,7 +1693,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
         throw new Error('clickRangeStep requires rangeLabel')
       }
       const range = page.locator(`[data-id="ui-range"][data-label=${cssString(rangeLabel)}]`).nth(Number(action.rangeIndex ?? 0))
-      await waitForOptional(range, action)
+      await waitForOptional(range, action, timeout)
       const track = range.locator('[data-id="ui-range-track"]').first()
       await track.waitFor({ state: 'visible', timeout })
       const min = Number(await range.getAttribute('data-min') ?? 0)
@@ -1722,7 +1722,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
       const trigger = action.triggerSelector
         ? page.locator(action.triggerSelector).nth(Number(action.triggerIndex ?? 0))
         : page.locator(`xpath=//span[normalize-space()=${xpathString(action.triggerLabel ?? 'Pay with')}]/following-sibling::button[1]`).nth(Number(action.triggerIndex ?? 0))
-      await waitForOptional(trigger, action)
+      await waitForOptional(trigger, action, timeout)
       await trigger.click({ timeout })
 
       const search = action.search ?? action.address ?? action.symbol
@@ -1746,7 +1746,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
         throw new Error('selectCollateralOption requires assetLabel')
       }
       const trigger = page.locator(`[data-id="asset-input"][data-label=${cssString(assetLabel)}] [data-id="asset-input-asset-selector"]`).nth(Number(action.triggerIndex ?? 0))
-      await waitForOptional(trigger, action)
+      await waitForOptional(trigger, action, timeout)
 
       const search = action.search ?? action.vaultAddress ?? action.assetAddress ?? action.symbol
       const searchInput = page.locator('input[placeholder="Search by name or symbol"]').first()
@@ -1841,9 +1841,9 @@ function getCollateralOptionSelector(action) {
   return selector
 }
 
-async function waitForOptional(locator, action) {
+async function waitForOptional(locator, action, timeout) {
   try {
-    await locator.waitFor({ state: 'visible', timeout: Number(action.optional ? action.probeMs ?? 2_500 : action.timeoutMs ?? 30_000) })
+    await locator.waitFor({ state: 'visible', timeout: Number(action.optional ? action.probeMs ?? 2_500 : timeout) })
   }
   catch (error) {
     if (action.optional) throw error
