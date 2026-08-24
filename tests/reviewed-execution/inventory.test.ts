@@ -152,6 +152,24 @@ describe('Stage A transaction inventory', () => {
     expect(source).not.toMatch(/reviewingTargetId\.value\s*\|\|\s*isOperationBlocked\.value/)
   })
 
+  it('keeps a conclusively cancelled review retryable and closes other failed reviews', () => {
+    const modalSource = read('components/entities/reviewed-execution/ReviewedOperationModal.vue')
+    const executionSource = read('composables/useReviewedExecution.ts')
+    expect(modalSource).toContain('const canRetry = cause instanceof SubmissionOutcomeError && cause.result.canRetry === true')
+    expect(modalSource).toContain('if (!canRetry) emit(\'close\')')
+    expect(executionSource).toContain('if (!result?.canRetry) {')
+  })
+
+  it('shows the Tenderly loader only for work started by the Tenderly action', () => {
+    const directSource = read('components/entities/operation/OperationReviewModal.vue')
+    const batchSource = read('composables/useTxBatch.ts')
+    expect(directSource).toContain('const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isBuildingTenderlyPayload.value)')
+    expect(directSource).not.toContain('const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)')
+    expect(directSource).toContain('tenderlyPayloadMatchesReviewedRequests({')
+    expect(batchSource).toContain('tenderlyPayloadMatchesReviewedRequests({')
+    expect(`${directSource}\n${batchSource}`).not.toContain('Tenderly projection does not match the reviewed request set')
+  })
+
   it('forbids new wallet write owners outside the frozen in-scope and excluded boundaries', () => {
     const candidates = ['pages', 'components', 'composables', 'features', 'utils'].flatMap(listProductionSources)
     const writePattern = /\b(?:useSendTransaction|useSignTypedData|sendCalls|sendTransaction)\s*\(|eth_signTypedData_v4|\.execute(?:TransactionPlan|PreparedTransactionPlan|CowSwapTransactionPlan)\s*\(/

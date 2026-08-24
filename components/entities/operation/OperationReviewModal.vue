@@ -13,8 +13,8 @@ import { useStateOverrideResolution } from '~/composables/useStateOverrideOption
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
-import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
-import type { EoaRequest, SafeCall } from '~/features/reviewed-execution/domain/reviewed-execution'
+import { buildTenderlySimulationPayload, tenderlyPayloadMatchesReviewedRequests } from '~/utils/tenderly-plan'
+import type { EoaRequest, SafeCall, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -25,7 +25,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedWalletKind, reviewedRequests, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedAccount, reviewedWalletKind, reviewedRequests, reviewedSignatureSlots, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -69,8 +69,10 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDiges
   /** Opaque acceptance identity. This presentation never receives execution authority. */
   reviewId?: Hash
   reviewDigest?: Hash
+  reviewedAccount?: Address
   reviewedWalletKind?: 'eoa' | 'safe'
   reviewedRequests?: readonly (EoaRequest | SafeCall)[]
+  reviewedSignatureSlots?: readonly SignatureSlot[]
   externalSubmitting?: boolean
   subAccount?: string
   hasBorrows?: boolean
@@ -120,6 +122,7 @@ const prepareError = computed(() =>
     : '',
 )
 const tenderlyLocalError = ref('')
+const isBuildingTenderlyPayload = ref(false)
 const isPreparingPlan = ref(false)
 const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
 const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
@@ -152,12 +155,13 @@ watch(() => [prepared, plan] as const, () => {
 
 const handleTenderlySimulate = async () => {
   const currentPlan = tenderlyReviewPlan.value
-  if (!currentPlan || !walletAddress.value) return
+  const owner = reviewedAccount ?? walletAddress.value as Address | undefined
+  if (!currentPlan || !owner || isTenderlyPreparing.value) return
   tenderlyLocalError.value = ''
   clearTenderly()
+  isBuildingTenderlyPayload.value = true
 
   try {
-    const owner = walletAddress.value as Address
     // Capture the plan's chain id once so the SDK backend selection and the
     // payload can't diverge if the user switches chains mid-await. Uses the
     // tenderly plan chain (not the wallet chain) so cross-chain migration
@@ -177,22 +181,23 @@ const handleTenderlySimulate = async () => {
       return
     }
 
-    if (reviewedRequests?.length) {
-      const sealedRequest = reviewedRequests.find(request =>
-        request.to === payload.to
-        && request.data === payload.data
-        && request.value.toString() === payload.value,
-      )
-      if (!sealedRequest) throw new Error('Tenderly projection does not match the reviewed request set')
-      payload.to = sealedRequest.to
-      payload.data = sealedRequest.data
-      payload.value = sealedRequest.value.toString()
+    if (reviewedRequests?.length && !tenderlyPayloadMatchesReviewedRequests({
+      payload,
+      requests: reviewedRequests,
+      signatureSlots: reviewedSignatureSlots ?? [],
+      sdk,
+    })) {
+      throw new Error('Tenderly simulation does not match the reviewed requests')
     }
 
     await tenderlySimulate(payload)
   }
   catch (err) {
     logWarn('OperationReviewModal/tenderly', err)
+    tenderlyLocalError.value = err instanceof Error ? err.message : 'Tenderly simulation failed'
+  }
+  finally {
+    isBuildingTenderlyPayload.value = false
   }
 }
 
@@ -408,7 +413,7 @@ const isSwapQuoteStale = computed(() => {
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
 const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
-const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
+const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isBuildingTenderlyPayload.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
   if (hasPendingDetachedExecution.value && !internalSubmitting.value) return 'Awaiting Safe signatures…'

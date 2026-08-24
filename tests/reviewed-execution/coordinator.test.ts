@@ -258,6 +258,21 @@ describe('reviewed execution coordinator', () => {
     expect(sendTransaction).toHaveBeenCalledTimes(2)
   })
 
+  it('allows the same reviewed request to be retried after the first wallet prompt is rejected', async () => {
+    const execution = makeReviewedExecution()
+    const sendTransaction = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('User rejected'), { code: 4001 }))
+      .mockResolvedValueOnce(HASH)
+    const prepared = setup({ execution, client: makeClient(execution, { sendTransaction }) })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({
+      status: 'rejected',
+      canRetry: true,
+    })
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'submitted' })
+    expect(sendTransaction).toHaveBeenCalledTimes(2)
+  })
+
   it('leaves post-handoff receipt sequencing to the SDK when wallet context later changes', async () => {
     const execution = makeReviewedExecution()
     let handedOff = false
@@ -542,7 +557,7 @@ describe('reviewed execution coordinator', () => {
     })
     const prepared = setup({ execution, safeAdapter })
 
-    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'rejected' })
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({ status: 'rejected', canRetry: true })
   })
 
   it('reports a reverted Safe receipt as failed', async () => {
@@ -676,6 +691,7 @@ describe('reviewed execution coordinator', () => {
         authorizationMayRemain: false,
       },
     })
+    expect(result.canRetry).toBeUndefined()
   })
 
   it('does not risk duplicate cleanup when migration core status is unknown', async () => {

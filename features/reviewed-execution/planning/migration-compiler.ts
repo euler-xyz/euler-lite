@@ -37,7 +37,8 @@ export interface MigrationCompilerSdk {
 }
 
 export interface MigrationCompilationCollectors {
-  migrationSlots: PreparedMigrationSignatureSlot[]
+  /** Authorization requests are located again after plugins finish changing the plan. */
+  migrationAuthorizationRequests: MigrationAuthorizationRequest[]
   before: AdditionalMaterializedCall[]
   after: AdditionalMaterializedCall[]
   stateOverrides: StateOverride
@@ -59,6 +60,52 @@ export const buildMigrationSimulationPlan = (
 const flattenAuthorizationRequests = (request: MigrationAuthorizationRequest | undefined): MigrationAuthorizationRequest[] => {
   if (!request) return []
   return [request, ...flattenAuthorizationRequests(request.postMigrationAuthorization)]
+}
+
+const typedAuthorizationRequests = (request: MigrationAuthorizationRequest) =>
+  flattenAuthorizationRequests(request)
+    .map((candidate, authorizationRequestIndex) => ({ candidate, authorizationRequestIndex }))
+    .filter((entry): entry is { candidate: Extract<MigrationAuthorizationRequest, { kind: 'typedData' }>, authorizationRequestIndex: number } => entry.candidate.kind === 'typedData')
+
+/** Locate typed migration authorizations in the final plan the user reviews. */
+export const prepareMigrationSignatureSlotsForPlan = async ({
+  plan,
+  authorizationRequests,
+  sdk,
+}: {
+  plan: TransactionPlan
+  authorizationRequests: readonly MigrationAuthorizationRequest[]
+  sdk: MigrationCompilerSdk
+}): Promise<PreparedMigrationSignatureSlot[]> => {
+  if (!authorizationRequests.length) return []
+  const prepareSlots = sdk.positionMigrationService.prepareMigrationAuthorizationSlots
+  if (!prepareSlots) throw new Error('SDK migration authorization slot builder is unavailable')
+
+  const result: PreparedMigrationSignatureSlot[] = []
+  const usedCoordinates = new Set<string>()
+  for (const request of authorizationRequests) {
+    const typedRequests = typedAuthorizationRequests(request)
+    const coordinates = await prepareSlots({ previewPlan: plan, authorizationRequest: request })
+    for (const entry of typedRequests) {
+      const matches = coordinates.filter(coordinate => coordinate.authorizationRequestIndex === entry.authorizationRequestIndex)
+      if (matches.length !== 1) throw new Error('SDK migration authorization slot evidence is incomplete or ambiguous')
+      const coordinate = matches[0]
+      const coordinateKey = `${coordinate.planItemIndex}:${coordinate.batchItemIndex}`
+      if (usedCoordinates.has(coordinateKey)) throw new Error('Migration authorization slots overlap in the reviewed plan')
+      usedCoordinates.add(coordinateKey)
+      result.push(prepareMigrationSignatureEvidence({
+        planItemIndex: coordinate.planItemIndex,
+        batchItemIndex: coordinate.batchItemIndex,
+        signer: getAddress(entry.candidate.owner) as Address,
+        chainId: entry.candidate.chainId,
+        typedData: entry.candidate.typedData as Permit2TypedData,
+        validUntil: validUntilFrom(entry.candidate),
+        abiArgumentPath: coordinate.abiArgumentPath,
+      }))
+    }
+    if (coordinates.length !== typedRequests.length) throw new Error('SDK returned undeclared migration signature coordinates')
+  }
+  return result
 }
 
 const validUntilFrom = (request: Extract<MigrationAuthorizationRequest, { kind: 'typedData' }>): number | undefined => {
@@ -139,28 +186,9 @@ export const compileCrossProtocolMigrationIntent = async ({
   requests.filter((candidate): candidate is Extract<MigrationAuthorizationRequest, { kind: 'transaction' }> => candidate.kind === 'transaction')
     .forEach(candidate => appendTransactionAuthorization(candidate, owner, collectors))
 
-  const typedRequests = requests
-    .map((candidate, authorizationRequestIndex) => ({ candidate, authorizationRequestIndex }))
-    .filter((entry): entry is { candidate: Extract<MigrationAuthorizationRequest, { kind: 'typedData' }>, authorizationRequestIndex: number } => entry.candidate.kind === 'typedData')
+  const typedRequests = typedAuthorizationRequests(request)
   if (!typedRequests.length) return result.plan
-
-  const prepareSlots = sdk.positionMigrationService.prepareMigrationAuthorizationSlots
-  if (!prepareSlots) throw new Error('SDK migration authorization slot builder is unavailable')
-  const coordinates = await prepareSlots({ previewPlan: result.previewPlan, authorizationRequest: request })
-  for (const entry of typedRequests) {
-    const matches = coordinates.filter(coordinate => coordinate.authorizationRequestIndex === entry.authorizationRequestIndex)
-    if (matches.length !== 1) throw new Error('SDK migration authorization slot evidence is incomplete or ambiguous')
-    const coordinate = matches[0]
-    collectors.migrationSlots.push(prepareMigrationSignatureEvidence({
-      planItemIndex: coordinate.planItemIndex,
-      batchItemIndex: coordinate.batchItemIndex,
-      signer: getAddress(entry.candidate.owner) as Address,
-      chainId: entry.candidate.chainId,
-      typedData: entry.candidate.typedData as Permit2TypedData,
-      validUntil: validUntilFrom(entry.candidate),
-      abiArgumentPath: coordinate.abiArgumentPath,
-    }))
-  }
-  if (coordinates.length !== typedRequests.length) throw new Error('SDK returned undeclared migration signature coordinates')
+  await prepareMigrationSignatureSlotsForPlan({ plan: result.previewPlan, authorizationRequests: [request], sdk })
+  collectors.migrationAuthorizationRequests.push(request)
   return result.previewPlan
 }

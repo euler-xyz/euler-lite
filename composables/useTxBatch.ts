@@ -26,7 +26,7 @@ import {
   mergeLayeredVaults,
   type LayeredVaultMap,
 } from '~/composables/useLayeredVaults'
-import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
+import { buildTenderlySimulationPayload, tenderlyPayloadMatchesReviewedRequests } from '~/utils/tenderly-plan'
 import { buildPlanMarketLabel } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure } from '~/utils/tx-errors'
@@ -2441,20 +2441,15 @@ export const useTxBatch = () => {
         tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
         return
       }
-      const sealedRequest = execution.requestSet.requests.find(request =>
-        request.to === payload.to
-        && request.data === payload.data
-        && request.value.toString() === payload.value,
-      )
-      if (!sealedRequest) {
-        throw new Error('Tenderly projection does not match the reviewed request set')
+      if (!tenderlyPayloadMatchesReviewedRequests({
+        payload,
+        requests: execution.requestSet.requests,
+        signatureSlots: execution.requestSet.signatureSlots,
+        sdk,
+      })) {
+        throw new Error('Tenderly simulation does not match the reviewed requests')
       }
-      await tenderly.simulate({
-        ...payload,
-        to: sealedRequest.to,
-        data: sealedRequest.data,
-        value: sealedRequest.value.toString(),
-      })
+      await tenderly.simulate(payload)
     }
     catch (error) {
       logWarn('useTxBatch/simulateOnTenderly', error)

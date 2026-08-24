@@ -58,6 +58,8 @@ export interface MigrationSubmissionResult {
 export interface SubmissionResult {
   status: SubmissionStatus
   transport: 'eoa' | 'safe'
+  /** True only when the wallet conclusively cancelled without leaving confirmed on-chain state. */
+  canRetry?: true
   dispatch?: DispatchResult
   message?: string
   migration?: MigrationSubmissionResult
@@ -298,9 +300,14 @@ export class ReviewedExecutionCoordinator {
       const message = error ? errorMessage(error) : defaultStatusMessage(status)
       const migration = migrationResultFor({ execution, artifact, status, message, confirmedSteps, activeStepIndex, externalIds, cleanupFailure, compensationIndexes })
       const effectiveStatus = migration?.submission.status === 'submitted' ? 'submitted' : status
+      const canRetry = effectiveStatus === 'rejected'
+        && confirmedSteps.size === 0
+        && (error instanceof ProvenOffchainCancellationError
+          || (error instanceof ProvenPreDispatchCancellationError && externalIds.size === 0))
       return {
         status: effectiveStatus,
         transport,
+        ...(canRetry ? { canRetry: true as const } : {}),
         ...(dispatch ? { dispatch } : {}),
         ...(effectiveStatus === 'submitted' && !migration?.warning ? {} : { message }),
         ...(migration ? { migration } : {}),

@@ -1,7 +1,7 @@
 import { useConfig } from '@wagmi/vue'
 import { getAccount as getWagmiAccount, sendTransaction } from '@wagmi/vue/actions'
 import { getAddress, type Address, type Hash, type Hex, type StateOverride } from 'viem'
-import type { Account, IHasVaultAddress, Permit2DataToSign, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { Account, IHasVaultAddress, MigrationAuthorizationRequest, Permit2DataToSign, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { getSafeAtomicCapability, getSafeWalletProvider, isSafeConnectorIdentity } from '~/utils/safeWalletTransactions'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
@@ -18,7 +18,7 @@ import { createLiteIntentCompilerRegistry, asCompilerRuntime, type LiteCompilerR
 import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
 import { collectPythPreviewData, rehydratePluginPrefetch, serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
 import { PYTH_FRESHNESS_POLICY, PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
-import { assertPermit2NonceCurrent, preparePermit2Slots, type PreparedMigrationSignatureSlot } from '~/features/reviewed-execution/materialization/signature-slots'
+import { assertPermit2NonceCurrent, preparePermit2Slots } from '~/features/reviewed-execution/materialization/signature-slots'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { assertPolicyVersionsMatch } from '~/features/reviewed-execution/policy/engine'
 import type { EulerSimulationProjection } from '~/features/reviewed-execution/simulation/coverage'
@@ -33,7 +33,7 @@ import type { WalletProviderLike } from '~/utils/safeWalletTransactions'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { readPreviewCache, readMigrationPreviewCache } from '~/features/reviewed-execution/planning/preview-cache'
-import { buildMigrationSimulationPlan, compileCrossProtocolMigrationIntent, type MigrationCompilerSdk } from '~/features/reviewed-execution/planning/migration-compiler'
+import { buildMigrationSimulationPlan, compileCrossProtocolMigrationIntent, prepareMigrationSignatureSlotsForPlan, type MigrationCompilerSdk } from '~/features/reviewed-execution/planning/migration-compiler'
 import type { AdditionalMaterializedCall } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { projectEulerSimulation } from '~/features/reviewed-execution/simulation/euler-projection'
 
@@ -236,7 +236,7 @@ export const useReviewedExecution = () => {
     assertRuntimeAccountContext(account, wallet.account, wallet.chainId)
 
     const directCallAllowlist: Record<string, string> = {}
-    const migrationSlots: PreparedMigrationSignatureSlot[] = []
+    const migrationAuthorizationRequests: MigrationAuthorizationRequest[] = []
     const migrationBefore: AdditionalMaterializedCall[] = []
     const migrationAfter: AdditionalMaterializedCall[] = []
     const migrationStateOverrides: StateOverride = []
@@ -275,7 +275,7 @@ export const useReviewedExecution = () => {
           account,
           sdk: sdk as unknown as MigrationCompilerSdk,
           collectors: {
-            migrationSlots,
+            migrationAuthorizationRequests,
             before: migrationBefore,
             after: migrationAfter,
             stateOverrides: migrationStateOverrides,
@@ -340,8 +340,12 @@ export const useReviewedExecution = () => {
           },
         })
       },
-      async prepareMigrationSignatureSlots() {
-        return migrationSlots
+      async prepareMigrationSignatureSlots(plan) {
+        return prepareMigrationSignatureSlotsForPlan({
+          plan,
+          authorizationRequests: migrationAuthorizationRequests,
+          sdk: sdk as unknown as MigrationCompilerSdk,
+        })
       },
       async collectPythEvidence(plan, _binding, _snapshot, prefetched) {
         return collectPythPreviewData(plan, prefetched)
@@ -458,7 +462,7 @@ export const useReviewedExecution = () => {
     const account = providedAccount ?? await loadPlanningAccount(requirements.owner, requirements.chainId)
     assertRuntimeAccountContext(account, requirements.owner, requirements.chainId)
     await hydrateRequiredSubAccounts(sdk, account, requirements.accounts, providedAccount !== undefined)
-    const migrationSlots: PreparedMigrationSignatureSlot[] = []
+    const migrationAuthorizationRequests: MigrationAuthorizationRequest[] = []
     const migrationBefore: AdditionalMaterializedCall[] = []
     const migrationAfter: AdditionalMaterializedCall[] = []
     const migrationStateOverrides: StateOverride = []
@@ -484,7 +488,7 @@ export const useReviewedExecution = () => {
           account,
           sdk: sdk as unknown as MigrationCompilerSdk,
           collectors: {
-            migrationSlots,
+            migrationAuthorizationRequests,
             before: migrationBefore,
             after: migrationAfter,
             stateOverrides: migrationStateOverrides,
@@ -646,15 +650,20 @@ export const useReviewedExecution = () => {
     // The coordinator invokes this factory only after acquiring its synchronous
     // guard, so a duplicate callback cannot even initialize a second runtime.
     const coordinator = new ReviewedExecutionCoordinator(() => executionRuntime(execution))
+    let result: SubmissionResult | undefined
     try {
-      const result = await coordinator.execute(execution, { reviewId, reviewDigest })
-      void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
-      triggerPortfolioRefresh()
+      result = await coordinator.execute(execution, { reviewId, reviewDigest })
+      if (!result.canRetry) {
+        void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
+        triggerPortfolioRefresh()
+      }
       return result
     }
     finally {
-      executions.delete(reviewId)
-      reviewGenerations.delete(reviewId)
+      if (!result?.canRetry) {
+        executions.delete(reviewId)
+        reviewGenerations.delete(reviewId)
+      }
     }
   }
 

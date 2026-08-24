@@ -53,6 +53,8 @@ const acceptReview = () => {
       })
     }
     catch (cause) {
+      const canRetry = cause instanceof SubmissionOutcomeError && cause.result.canRetry === true
+      if (!canRetry) emit('close')
       await props.onFailed?.(cause)
       throw cause
     }
@@ -85,8 +87,10 @@ const requestClose = () => {
     v-bind="operationReviewProps"
     :review-id="reviewId"
     :review-digest="reviewDigest"
+    :reviewed-account="executionRef?.requestSet.wallet.account"
     :reviewed-wallet-kind="executionRef?.requestSet.wallet.walletKind"
     :reviewed-requests="executionRef?.requestSet.requests"
+    :reviewed-signature-slots="executionRef?.requestSet.signatureSlots"
     :external-submitting="isSubmitting"
     @confirm="acceptReview"
     @close="requestClose"
