@@ -280,12 +280,30 @@ describe('prepared plan materialization', () => {
       sdk,
       policyDigest: POLICY,
       after: [
-        { phase: 'cleanup', owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: TOKEN, data: '0x00000001' },
-        { phase: 'cleanup', owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: SPENDER, data: '0x00000002' },
+        { phase: 'cleanup', authorizationId: keccak256(toHex('authorization-1')), owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: TOKEN, data: '0x00000001' },
+        { phase: 'cleanup', authorizationId: keccak256(toHex('authorization-2')), owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: SPENDER, data: '0x00000002' },
       ],
     })
 
     expect(requestSet.requests.slice(-2).map(request => request.to)).toEqual([SPENDER, TOKEN])
     expect(requestSet.requests.slice(-2).map(request => request.phase)).toEqual(['cleanup', 'cleanup'])
+  })
+
+  it('rejects ambiguous migration authorization identities', () => {
+    const owner = { intentId: intent.intentId, intentRevision: intent.revision }
+    const authorizationId = keccak256(toHex('duplicated-authorization'))
+    const requestSet = materializePreparedPlan({
+      intents: [intent],
+      plan: [{ type: 'evcBatch', items: [coreItem] }],
+      wallet: eoa,
+      sdk,
+      policyDigest: POLICY,
+      before: [
+        { phase: 'prerequisite', authorizationId, owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: TOKEN, data: '0x00000001' },
+        { phase: 'prerequisite', authorizationId, owner, provenance: { source: 'migration-authorization', mode: 'transaction' }, chainId: 1, to: SPENDER, data: '0x00000002' },
+      ],
+    })
+
+    expect(() => validateReviewedRequestSet(requestSet, [intent])).toThrow(/not a unique grant\/revocation pair/)
   })
 })

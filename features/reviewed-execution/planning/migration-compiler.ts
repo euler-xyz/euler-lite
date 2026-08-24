@@ -76,17 +76,29 @@ const appendTransactionAuthorization = (
   owner: EffectOwner,
   collectors: MigrationCompilationCollectors,
 ) => {
-  const encode = (call: typeof request.call, phase: 'prerequisite' | 'cleanup'): AdditionalMaterializedCall => ({
+  const encode = (call: typeof request.call, phase: 'prerequisite' | 'cleanup') => ({
     phase,
-    owner,
-    provenance: { source: 'migration-authorization', mode: 'transaction' },
     chainId: request.chainId,
     to: getAddress(call.to),
     data: encodeFunctionData({ abi: call.abi, functionName: call.functionName, args: call.args }),
     ...(call.value === undefined ? {} : { value: call.value }),
   })
-  collectors.before.push(encode(request.call, 'prerequisite'))
-  if (request.revocation) collectors.after.unshift(encode(request.revocation, 'cleanup'))
+  const grant = encode(request.call, 'prerequisite')
+  const revocation = request.revocation ? encode(request.revocation, 'cleanup') : undefined
+  const authorizationId = canonicalDigest('migration-authorization-pair-v1', toCanonicalValue({
+    owner,
+    pairIndex: collectors.before.length,
+    grant,
+    revocation: revocation ?? null,
+  }))
+  const decorate = (call: ReturnType<typeof encode>): AdditionalMaterializedCall => ({
+    ...call,
+    authorizationId,
+    owner,
+    provenance: { source: 'migration-authorization', mode: 'transaction' },
+  })
+  collectors.before.push(decorate(grant))
+  if (revocation) collectors.after.unshift(decorate(revocation))
 }
 
 const plannerArgs = (intent: OperationIntent, account: Account<IHasVaultAddress>) => {

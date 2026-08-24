@@ -108,6 +108,7 @@ describe('cross-protocol migration compiler', () => {
     expect(output.after).toHaveLength(2)
     expect(output.before.every(call => call.phase === 'prerequisite')).toBe(true)
     expect(output.after.every(call => call.phase === 'cleanup')).toBe(true)
+    expect(output.after.map(call => call.authorizationId)).toEqual(output.before.map(call => call.authorizationId).reverse())
     expect(output.stateOverrides).toEqual([{ address: TOKEN, stateDiff: [] }])
     expect(output.plansForSimulation.get('migration:1:1')).toBe(simulationPlan)
     expect(output.migrationSlots).toEqual([])

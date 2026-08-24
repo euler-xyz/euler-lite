@@ -587,8 +587,9 @@ function assertEffect(value: unknown, path: string): asserts value is TypedEffec
     value.requiredFeedIds.forEach((feed, index) => assertHex(feed, `${path}.requiredFeedIds[${index}]`))
   }
   else if (value.kind === 'migration-authorization') {
-    assertExactKeys(value, ['kind', 'action', 'chainId', 'target', 'value', 'data'], path)
+    assertExactKeys(value, ['kind', 'action', 'authorizationId', 'chainId', 'target', 'value', 'data'], path)
     if (value.action !== 'grant' && value.action !== 'revoke') throw new Error(`${path}.action is unsupported`)
+    assertHash(value.authorizationId, `${path}.authorizationId`)
     assertSafeInteger(value.chainId, `${path}.chainId`, 1)
     assertAddress(value.target, `${path}.target`)
     assertBigInt(value.value, `${path}.value`)

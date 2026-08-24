@@ -45,9 +45,8 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
       return !request || call.to !== request.to || call.data !== request.data || call.value !== request.value
     })) throw new Error('Safe transport envelope differs from the finalized reviewed calls')
     await callbacks.assertWalletBinding()
-    await callbacks.beforeDispatch(0)
     await this.client.assertAtomicCapability(envelope)
-    await callbacks.assertWalletBinding()
+    await callbacks.beforeDispatch(0)
 
     let callsId: string
     try {

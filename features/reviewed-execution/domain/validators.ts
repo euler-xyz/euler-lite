@@ -1,4 +1,4 @@
-import { decodeFunctionData, getAddress, hashTypedData } from 'viem'
+import { decodeFunctionData, getAddress, hashTypedData, type Hash } from 'viem'
 import { EVC_ABI } from '~/abis/evc'
 import { PYTH_ABI } from '~/abis/pyth'
 import { canonicalDigest, toCanonicalValue } from './canonical'
@@ -398,6 +398,31 @@ export const validateReviewedRequestSet = (requestSet: ReviewedRequestSet, inten
   }
   for (const effectId of represented.keys()) {
     if (!requestSet.effects.some(node => node.effectId === effectId)) throw new Error(`Request references unknown effect ${effectId}`)
+  }
+
+  const migrationAuthorizations = new Map<Hash, EffectNode[]>()
+  for (const node of requestSet.effects) {
+    if (node.effect.kind !== 'migration-authorization') continue
+    const grouped = migrationAuthorizations.get(node.effect.authorizationId) ?? []
+    grouped.push(node)
+    migrationAuthorizations.set(node.effect.authorizationId, grouped)
+    const expectedPhase = node.effect.action === 'grant' ? 'prerequisite' : 'cleanup'
+    if (node.phase !== expectedPhase) throw new Error(`Migration authorization ${node.effect.authorizationId} has the wrong phase`)
+  }
+  for (const [authorizationId, nodes] of migrationAuthorizations) {
+    const grants = nodes.filter(node => node.effect.kind === 'migration-authorization' && node.effect.action === 'grant')
+    const revocations = nodes.filter(node => node.effect.kind === 'migration-authorization' && node.effect.action === 'revoke')
+    if (grants.length > 1 || revocations.length > 1) {
+      throw new Error(`Migration authorization ${authorizationId} is not a unique grant/revocation pair`)
+    }
+    const grant = grants[0]
+    const revocation = revocations[0]
+    if (grant?.effect.kind === 'migration-authorization' && revocation?.effect.kind === 'migration-authorization' && (
+      grant.intentId !== revocation.intentId
+      || grant.intentRevision !== revocation.intentRevision
+      || grant.effect.chainId !== revocation.effect.chainId
+      || grant.effect.target !== revocation.effect.target
+    )) throw new Error(`Migration authorization ${authorizationId} pair changes owner or target`)
   }
 
   const constraintDigests = new Set(requestSet.constraints.map(constraintDigest))

@@ -844,8 +844,10 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         if (migration.warning) showWarning('Migration submitted', { description: `${description} ${migration.warning}` })
         else showSuccess('Migration submitted', { description })
       },
-      onSucceeded: () => {
+      onConfirmed: () => {
         schedulePostMigrationRefreshes()
+      },
+      onSucceeded: () => {
         setTimeout(() => void router.replace({ path: '/portfolio', query: { network: route.query.network } }), MODAL_CLOSE_REDIRECT_DELAY_MS)
       },
       onFailed: (cause) => { showError(cause instanceof Error ? cause.message : 'Migration failed') },

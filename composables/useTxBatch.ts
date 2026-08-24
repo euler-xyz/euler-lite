@@ -109,6 +109,11 @@ export interface BatchEntry {
   rewardClaimKey?: string
 }
 
+export interface CapturedBatchCompletion {
+  intentRevisions: readonly { intentId: string, revision: number }[]
+  refreshExternalMigrationPositions: boolean
+}
+
 type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan' | 'preparing' | 'preparationError'>
 export type BatchEntryInput = BatchEntryInputBase
 
@@ -1642,6 +1647,7 @@ export const awaitFinalPlanningLayer = async <T>(opts: {
 export const useTxBatch = () => {
   const executionService = useReviewedExecution()
   const { compilePreviewForSimulation } = executionService
+  const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
   const { chainId: wagmiChainId } = useWagmi()
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
@@ -2350,10 +2356,50 @@ export const useTxBatch = () => {
   /** Remove only revisions captured by a completed execution; newer edits stay. */
   const removeIntentRevisions = (completed: readonly { intentId: string, revision: number }[]) => {
     const identities = new Set(completed.map(item => `${item.intentId}:${item.revision}`))
-    const removeIds = draftEntries.value
-      .filter(entry => identities.has(`${entry.intentId}:${entry.revision}`))
-      .map(entry => entry.intentId)
-    for (const id of removeIds) removeEntry(id)
+    const nextEntries = draftEntries.value.filter(entry => !identities.has(`${entry.intentId}:${entry.revision}`))
+    if (nextEntries.length === draftEntries.value.length) return
+
+    const cartGeneration = batchGenerationPublisher.advance()
+    const remainingIds = new Set(nextEntries.map(entry => entry.intentId))
+    draftEntries.value = nextEntries
+    entryPresentationById.value = Object.fromEntries(Object.entries(entryPresentationById.value).filter(([id]) => remainingIds.has(id)))
+    entryPlanById.value = Object.fromEntries(Object.entries(entryPlanById.value).filter(([id]) => remainingIds.has(id)))
+    entryPreparationById.value = Object.fromEntries(Object.entries(entryPreparationById.value).filter(([id]) => remainingIds.has(id)))
+    execError.value = undefined
+    if (nextEntries.length === 0) {
+      resimToken++
+      layers.value = []
+      activeLayer.value = 0
+      isSimulating.value = false
+      simError.value = undefined
+      walletShortfalls.value = []
+      lastSimulatedPlan = null
+      baseAccountSnapshot = null
+      batchSlotHints = {}
+      resimulatePromise = null
+      tenderly.clearSimulation()
+      syncOverlay()
+    }
+    else {
+      void warmBatchExecutionReview(cartGeneration)
+    }
+  }
+
+  /** Capture all authoritative completion effects before wallet handoff. */
+  const captureBatchCompletion = (completed: readonly { intentId: string, revision: number }[]): CapturedBatchCompletion => {
+    const identities = new Set(completed.map(item => `${item.intentId}:${item.revision}`))
+    return {
+      intentRevisions: completed.map(item => ({ ...item })),
+      refreshExternalMigrationPositions: entries.value.some(entry =>
+        identities.has(`${entry.intent.intentId}:${entry.intent.revision}`)
+        && entry.refreshExternalMigrationPositions === true),
+    }
+  }
+
+  /** Apply captured state effects after confirmed execution, independent of UI lifetime. */
+  const completeBatchExecution = (completion: CapturedBatchCompletion) => {
+    removeIntentRevisions(completion.intentRevisions)
+    if (completion.refreshExternalMigrationPositions) scheduleExternalMigrationRefreshes()
   }
 
   /** Lazily check (once) whether the server has Tenderly credentials configured,
@@ -2537,6 +2583,8 @@ export const useTxBatch = () => {
     getBatchIntents,
     prepareBatchExecutionReview,
     removeIntentRevisions,
+    captureBatchCompletion,
+    completeBatchExecution,
     setActiveLayer,
     // Tenderly "Simulate on Tenderly" for the whole batch.
     tenderlyEnabled,

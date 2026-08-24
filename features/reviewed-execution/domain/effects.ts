@@ -73,6 +73,7 @@ export type TypedEffect
   | {
     kind: 'migration-authorization'
     action: 'grant' | 'revoke'
+    authorizationId: Hash
     chainId: number
     target: Address
     value: bigint

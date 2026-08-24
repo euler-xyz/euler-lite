@@ -101,8 +101,9 @@ Module state is keyed by `{ owner, chainId }`:
   `[0, 5s, 15s, 30s]` schedule
   (`POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS`) so watchers force-reload past
   indexer lag instead of caching a pre-migration snapshot.
-- Batch execution schedules those refreshes only when a cart entry tagged
-  `refreshExternalMigrationPositions`. The migrate pages
+- Batch submission captures whether an accepted revision is tagged
+  `refreshExternalMigrationPositions`, then confirmed completion schedules the
+  refreshes even when a Safe execution detached from its review modal. The migrate pages
   (`position/.../migrate`, borrow/swap) call
   `scheduleExternalMigrationRefreshes()` unconditionally after a successful
   migration.

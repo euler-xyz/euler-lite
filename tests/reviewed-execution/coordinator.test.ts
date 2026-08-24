@@ -10,10 +10,11 @@ import { ReviewedExecutionCoordinator, type CoordinatorDependencies } from '~/fe
 import type { ReviewedExecution } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { finalizeReviewedRequestSet } from '~/features/reviewed-execution/materialization/finalize'
 import { verifyRefreshedPluginPlan } from '~/features/reviewed-execution/materialization/pyth-refresh'
-import { artifactFor, makePythReviewedExecution, makeReviewedExecution, materializedExecutorFor, TEST_EVC, TEST_TOKEN } from './fixtures'
+import { artifactFor, makePythReviewedExecution, makeReviewedExecution, materializedExecutorFor, TEST_ACCOUNT, TEST_EVC, TEST_TOKEN } from './fixtures'
 
 const hashFor = (value: number) => `0x${value.toString(16).padStart(64, '0')}` as Hash
 const HASH = hashFor(1)
+const MIGRATION_AUTHORIZATION = hashFor(101)
 
 interface TestEoaClient extends EoaAdapterClient {
   waitForTransactionReceipt(hash: Hash): Promise<Pick<TransactionReceipt, 'transactionHash' | 'status'>>
@@ -82,6 +83,7 @@ const migrationExecution = (includeGrant = true) => {
     before: includeGrant
       ? [{
           phase: 'prerequisite',
+          authorizationId: MIGRATION_AUTHORIZATION,
           owner,
           provenance: { source: 'migration-authorization', mode: 'transaction' },
           chainId: 1,
@@ -91,6 +93,7 @@ const migrationExecution = (includeGrant = true) => {
       : [],
     after: [{
       phase: 'cleanup',
+      authorizationId: MIGRATION_AUTHORIZATION,
       owner,
       provenance: { source: 'migration-authorization', mode: 'transaction' },
       chainId: 1,
@@ -152,6 +155,7 @@ describe('reviewed execution coordinator', () => {
     const execution = makeReviewedExecution('eoa', {
       before: [{
         phase: 'prerequisite',
+        authorizationId: MIGRATION_AUTHORIZATION,
         owner,
         provenance: { source: 'migration-authorization', mode: 'transaction' },
         chainId: 1,
@@ -175,7 +179,7 @@ describe('reviewed execution coordinator', () => {
     const prepared = setup({ execution, client, now: () => nowMs })
 
     await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({
-      status: 'unknown',
+      status: 'failed',
       message: 'A reviewed signature request expired',
     })
     expect(sentPhases).toEqual(['prerequisite'])
@@ -361,15 +365,88 @@ describe('reviewed execution coordinator', () => {
     expect(result).toMatchObject({ status: 'submitted' })
     expect(refreshPyth).toHaveBeenCalledOnce()
     expect(finalizedCoreData).not.toBe(execution.requestSet.requests[1]?.data)
-    expect(events).toEqual([
+    expect(events.slice(0, 4)).toEqual([
       'send:prerequisite',
       'receipt:start',
       'receipt:confirmed',
       'refresh:161000',
-      'send:core',
-      'receipt:start',
-      'receipt:confirmed',
     ])
+    const coreSendIndex = events.indexOf('send:core')
+    expect(coreSendIndex).toBeGreaterThan(3)
+    expect(events.slice(4, coreSendIndex)).toContain('wallet-check:after-refresh')
+    expect(events.slice(4, coreSendIndex)).toContain('policy-check:after-refresh')
+    expect(events.slice(coreSendIndex)).toEqual(['send:core', 'receipt:start', 'receipt:confirmed'])
+  })
+
+  it('does not hand off any request when wallet context changes during Pyth refresh', async () => {
+    const execution = makePythReviewedExecution({ includePrerequisite: false })
+    let releaseRefresh!: () => void
+    let markRefreshStarted!: () => void
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve
+    })
+    const refreshReleased = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    let walletChanged = false
+    const sendTransaction = vi.fn(async () => HASH)
+    const prepared = setup({
+      execution,
+      client: makeClient(execution, { sendTransaction }),
+      readWalletBinding: async () => walletChanged
+        ? { ...execution.requestSet.wallet, connectorSessionId: 'changed-during-refresh' }
+        : execution.requestSet.wallet,
+      refreshPyth: async () => {
+        markRefreshStarted()
+        await refreshReleased
+        return []
+      },
+    })
+
+    const resultPromise = execute(prepared.coordinator, execution)
+    await refreshStarted
+    walletChanged = true
+    releaseRefresh()
+
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'failed',
+      message: expect.stringMatching(/Wallet connection.*changed/),
+    })
+    expect(sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('rechecks refreshed Pyth publish times after the final awaited dispatch guard', async () => {
+    const execution = makePythReviewedExecution({ includePrerequisite: false })
+    const slot = execution.requestSet.pythRefreshSlots[0]!
+    let nowMs = 100_000
+    let refreshed = false
+    const sendTransaction = vi.fn(async () => HASH)
+    const prepared = setup({
+      execution,
+      client: makeClient(execution, { sendTransaction }),
+      now: () => nowMs,
+      refreshPyth: async () => {
+        refreshed = true
+        return [{
+          slotId: slot.slotId,
+          target: slot.target,
+          onBehalfOfAccount: TEST_ACCOUNT,
+          data: '0x',
+          value: 0n,
+          payloadHash: hashFor(202),
+          publishTimes: [100],
+        }]
+      },
+      revalidatePolicy: async () => {
+        if (refreshed) nowMs = 161_000
+      },
+    })
+
+    await expect(execute(prepared.coordinator, execution)).resolves.toMatchObject({
+      status: 'failed',
+      message: expect.stringMatching(/Pyth payload expired before wallet handoff/),
+    })
+    expect(sendTransaction).not.toHaveBeenCalled()
   })
 
   it('preserves the established current-session Safe status flow without durable recovery', async () => {
@@ -499,6 +576,7 @@ describe('reviewed execution coordinator', () => {
     const execution = makeReviewedExecution('safe', {
       before: [{
         phase: 'prerequisite',
+        authorizationId: MIGRATION_AUTHORIZATION,
         owner: { intentId: 'intent-1', intentRevision: 1 },
         provenance: { source: 'migration-authorization', mode: 'transaction' },
         chainId: 1,
@@ -507,6 +585,7 @@ describe('reviewed execution coordinator', () => {
       }],
       after: [{
         phase: 'cleanup',
+        authorizationId: MIGRATION_AUTHORIZATION,
         owner: { intentId: 'intent-1', intentRevision: 1 },
         provenance: { source: 'migration-authorization', mode: 'transaction' },
         chainId: 1,
@@ -552,7 +631,7 @@ describe('reviewed execution coordinator', () => {
     })
   })
 
-  it('stops after a failed migration core and does not synthesize cleanup', async () => {
+  it('restores a confirmed temporary grant after the migration core reverts', async () => {
     const execution = migrationExecution()
     let sent = 0
     const client = makeClient(execution, {
@@ -563,14 +642,134 @@ describe('reviewed execution coordinator', () => {
 
     const result = await execute(prepared.coordinator, execution)
 
-    expect(sent).toBe(2)
+    expect(sent).toBe(3)
     expect(result.status).toBe('failed')
     expect(result.migration).toMatchObject({
       submission: { status: 'failed' },
-      revocation: { status: 'not-submitted' },
-      authorizationMayRemain: true,
+      revocation: { status: 'submitted' },
+      authorizationMayRemain: false,
     })
-    expect(result.migration?.warning).toMatch(/authorization may remain active/i)
+    expect(result.migration?.warning).toBeUndefined()
+  })
+
+  it('restores a confirmed temporary grant after the migration core is rejected', async () => {
+    const execution = migrationExecution()
+    const sentPhases: string[] = []
+    let sent = 0
+    const client = makeClient(execution, {
+      sendTransaction: async (request) => {
+        sentPhases.push(request.phase)
+        if (request.phase === 'core') throw Object.assign(new Error('User rejected'), { code: 4001 })
+        return hashFor(++sent)
+      },
+    })
+    const prepared = setup({ execution, client })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(sentPhases).toEqual(['prerequisite', 'core', 'cleanup'])
+    expect(result).toMatchObject({
+      status: 'rejected',
+      migration: {
+        submission: { status: 'rejected' },
+        revocation: { status: 'submitted' },
+        authorizationMayRemain: false,
+      },
+    })
+  })
+
+  it('does not risk duplicate cleanup when migration core status is unknown', async () => {
+    const execution = migrationExecution()
+    const sentPhases: string[] = []
+    let sent = 0
+    const client = makeClient(execution, {
+      sendTransaction: async (request) => {
+        sentPhases.push(request.phase)
+        if (request.phase === 'core') throw new Error('provider disconnected after approval')
+        return hashFor(++sent)
+      },
+    })
+    const prepared = setup({ execution, client })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(sentPhases).toEqual(['prerequisite', 'core'])
+    expect(result).toMatchObject({
+      status: 'unknown',
+      migration: {
+        submission: { status: 'unknown' },
+        revocation: { status: 'not-submitted' },
+        authorizationMayRemain: true,
+      },
+    })
+  })
+
+  it('restores only grants confirmed before a later prerequisite is rejected', async () => {
+    const owner = { intentId: 'intent-1', intentRevision: 1 }
+    const secondAuthorization = hashFor(102)
+    const execution = makeReviewedExecution('eoa', {
+      before: [
+        {
+          phase: 'prerequisite',
+          authorizationId: MIGRATION_AUTHORIZATION,
+          owner,
+          provenance: { source: 'migration-authorization', mode: 'transaction' },
+          chainId: 1,
+          to: TEST_TOKEN,
+          data: '0x01000001',
+        },
+        {
+          phase: 'prerequisite',
+          authorizationId: secondAuthorization,
+          owner,
+          provenance: { source: 'migration-authorization', mode: 'transaction' },
+          chainId: 1,
+          to: TEST_TOKEN,
+          data: '0x01000002',
+        },
+      ],
+      after: [
+        {
+          phase: 'cleanup',
+          authorizationId: MIGRATION_AUTHORIZATION,
+          owner,
+          provenance: { source: 'migration-authorization', mode: 'transaction' },
+          chainId: 1,
+          to: TEST_TOKEN,
+          data: '0x02000001',
+        },
+        {
+          phase: 'cleanup',
+          authorizationId: secondAuthorization,
+          owner,
+          provenance: { source: 'migration-authorization', mode: 'transaction' },
+          chainId: 1,
+          to: TEST_TOKEN,
+          data: '0x02000002',
+        },
+      ],
+    })
+    const sentData: Hex[] = []
+    let sent = 0
+    const client = makeClient(execution, {
+      sendTransaction: async (request) => {
+        sentData.push(request.data)
+        if (request.data === '0x01000002') throw Object.assign(new Error('User rejected'), { code: 4001 })
+        return hashFor(++sent)
+      },
+    })
+    const prepared = setup({ execution, client })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(sentData).toEqual(['0x01000001', '0x01000002', '0x02000001'])
+    expect(result).toMatchObject({
+      status: 'rejected',
+      migration: {
+        revocation: { status: 'submitted' },
+        authorizationMayRemain: false,
+      },
+    })
   })
 
   it('warns when a rejected fresh migration leaves a pre-existing authorization active', async () => {

@@ -3385,8 +3385,10 @@ const reviewInboundExternalMigration = async () => {
         if (migration.warning) showWarning('Migration submitted', { description: `${description} ${migration.warning}` })
         else showSuccess('Migration submitted', { description })
       },
-      onSucceeded: () => {
+      onConfirmed: () => {
         schedulePostMigrationRefreshes(preview.input.owner)
+      },
+      onSucceeded: () => {
         const redirectPath = preview.input.eulerTarget.borrowVault ? '/portfolio' : '/portfolio/saving'
         setTimeout(() => void router.replace({ path: redirectPath, query: { network: route.query.network } }), MODAL_CLOSE_REDIRECT_DELAY_MS)
       },

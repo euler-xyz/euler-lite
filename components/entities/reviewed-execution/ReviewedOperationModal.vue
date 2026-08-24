@@ -4,11 +4,13 @@ import { OperationReviewModal } from '#components'
 import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetachment'
 import type { VaultAsset } from '~/types/asset'
 import { SubmissionOutcomeError, type SubmissionResult } from '~/features/reviewed-execution/coordinator/coordinator'
+import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 
 const props = defineProps<{
   reviewId: Hash
   reviewDigest: Hash
   review: Record<string, unknown> & { asset: { address: string, symbol: string, decimals: number, name?: string }, amount: number | string }
+  onConfirmed?: (result: SubmissionResult) => void | Promise<void>
   onResult?: (result: SubmissionResult) => void | Promise<void>
   onSucceeded?: (result: SubmissionResult) => void | Promise<void>
   onFailed?: (cause: unknown) => void | Promise<void>
@@ -40,12 +42,15 @@ const acceptReview = () => {
       if (result.status !== 'submitted') {
         throw new SubmissionOutcomeError(result)
       }
-      handle.scope.markSucceeded()
-      if (!handle.scope.suppressPostTxUi()) {
-        await props.onResult?.(result)
-        await props.onSucceeded?.(result)
-        emit('close')
-      }
+      await finalizeSuccessfulSubmission({
+        scope: handle.scope,
+        completeAuthoritativeState: () => props.onConfirmed?.(result),
+        showSuccessUi: async () => {
+          await props.onResult?.(result)
+          await props.onSucceeded?.(result)
+          emit('close')
+        },
+      })
     }
     catch (cause) {
       await props.onFailed?.(cause)

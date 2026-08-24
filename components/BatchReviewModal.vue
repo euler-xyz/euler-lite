@@ -16,6 +16,7 @@ import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetac
 import { formatNumber } from '~/utils/string-utils'
 import type { PreparedExecutionReview } from '~/composables/useReviewedExecution'
 import { submissionResultMessage } from '~/features/reviewed-execution/coordinator/coordinator'
+import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 import { useToast } from '~/components/ui/composables/useToast'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
@@ -37,7 +38,8 @@ const {
   hasInsufficientBalance,
   insufficientBalanceMessage,
   prepareBatchExecutionReview,
-  removeIntentRevisions,
+  captureBatchCompletion,
+  completeBatchExecution,
   setExecutionError,
   entryPlans,
   marketByEntryId,
@@ -455,24 +457,28 @@ const handleExecute = async () => {
   const handle = beginTrackedExecution({ safeAtSubmit: prepared.execution.requestSet.wallet.walletKind === 'safe' })
   if (!handle) return
   const capturedRevisions = prepared.execution.binding.intentRevisions
+  const capturedCompletion = captureBatchCompletion(capturedRevisions)
+  let showPostTxUi = false
   isExecuting.value = true
   setExecutionError(undefined)
   const run = (async () => {
     try {
       const result = await executionService.accept(prepared.execution.reviewId, prepared.execution.reviewDigest)
       if (result.status !== 'submitted') throw new Error(submissionResultMessage(result))
-      handle.scope.markSucceeded()
-      if (!handle.scope.suppressPostTxUi()) {
-        if (result.migration) {
-          const revocation = result.migration.revocation
-          const description = revocation
-            ? `Authorization revocation status: ${revocation.status}.`
-            : 'No separate authorization revocation request was required.'
-          if (result.migration.warning) toast.warning('Migration submitted', { description: `${description} ${result.migration.warning}` })
-          else toast.success('Migration submitted', { description })
-        }
-        removeIntentRevisions(capturedRevisions)
-      }
+      showPostTxUi = await finalizeSuccessfulSubmission({
+        scope: handle.scope,
+        completeAuthoritativeState: () => completeBatchExecution(capturedCompletion),
+        showSuccessUi: () => {
+          if (result.migration) {
+            const revocation = result.migration.revocation
+            const description = revocation
+              ? `Authorization revocation status: ${revocation.status}.`
+              : 'No separate authorization revocation request was required.'
+            if (result.migration.warning) toast.warning('Migration submitted', { description: `${description} ${result.migration.warning}` })
+            else toast.success('Migration submitted', { description })
+          }
+        },
+      })
     }
     catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Batch execution failed'
@@ -494,7 +500,7 @@ const handleExecute = async () => {
     executionHandle = null
   }
   // A successful execution removes only its captured intent revisions.
-  if (!execError.value && entries.value.length === 0) emit('close')
+  if (showPostTxUi && !execError.value && entries.value.length === 0) emit('close')
 }
 
 const handleClose = () => {

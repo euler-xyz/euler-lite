@@ -18,8 +18,8 @@ export interface DispatchResult {
 
 export interface DispatchOptions {
   requestOffset?: number
-  /** Revalidation already ran immediately before JIT Pyth refresh/finalization. */
-  skipFirstPreDispatchRevalidation?: boolean
+  /** Original reviewed-vector indexes for a non-contiguous reviewed subset. */
+  requestIndexes?: readonly number[]
 }
 
 export interface ExecutionTransportAdapter {

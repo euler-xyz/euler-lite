@@ -106,7 +106,7 @@ export const makeReviewedExecution = (
   })
 }
 
-export const makePythReviewedExecution = (): ReviewedExecution => {
+export const makePythReviewedExecution = ({ includePrerequisite = true }: { includePrerequisite?: boolean } = {}): ReviewedExecution => {
   const wallet: WalletBinding = {
     chainId: 1,
     account: TEST_ACCOUNT,
@@ -127,27 +127,23 @@ export const makePythReviewedExecution = (): ReviewedExecution => {
     ...rawApproval,
     resolved: [{ type: 'approve', token: TEST_TOKEN, owner: TEST_ACCOUNT, spender: TEST_VAULT, amount: 10n, data: approveData }],
   }
-  const rawPlan: TransactionPlan = [
-    rawApproval,
-    ...plan,
-  ]
-  const previewPlan: TransactionPlan = [
-    resolvedApproval,
-    {
-      type: 'evcBatch',
-      items: [
-        {
-          targetContract: TEST_PYTH,
-          onBehalfOfAccount: TEST_ACCOUNT,
-          value: 2n,
-          data: encodeFunctionData({ abi: PYTH_ABI, functionName: 'updatePriceFeeds', args: [['0x0102']] }),
-        },
-        ...(plan[0]!.type === 'evcBatch' ? plan[0]!.items : []),
-      ],
-    },
-  ]
+  const pythPlan: TransactionPlan[number] = {
+    type: 'evcBatch',
+    items: [
+      {
+        targetContract: TEST_PYTH,
+        onBehalfOfAccount: TEST_ACCOUNT,
+        value: 2n,
+        data: encodeFunctionData({ abi: PYTH_ABI, functionName: 'updatePriceFeeds', args: [['0x0102']] }),
+      },
+      ...(plan[0]!.type === 'evcBatch' ? plan[0]!.items : []),
+    ],
+  }
+  const rawPlan: TransactionPlan = includePrerequisite ? [rawApproval, ...plan] : [...plan]
+  const previewPlan: TransactionPlan = includePrerequisite ? [resolvedApproval, pythPlan] : [pythPlan]
+  const pythPlanItemIndex = includePrerequisite ? 1 : 0
   const pythPreviewData = [{
-    planItemIndex: 1,
+    planItemIndex: pythPlanItemIndex,
     batchItemIndex: 0,
     target: TEST_PYTH,
     requiredFeedIds: [keccak256(toHex('feed'))],

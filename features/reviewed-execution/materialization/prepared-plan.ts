@@ -79,6 +79,8 @@ export interface PythPreviewData {
 
 export interface AdditionalMaterializedCall {
   phase: Extract<EffectPhase, 'prerequisite' | 'cleanup'>
+  /** Stable identity shared by one temporary grant and its reviewed restoration. */
+  authorizationId: Hash
   owner: EffectOwner
   provenance: Extract<EffectProvenance, { source: 'migration-authorization' }>
   chainId: number
@@ -293,6 +295,7 @@ const materializeAdditionalCall = (
   const typed: TypedEffect = {
     kind: 'migration-authorization',
     action: input.phase === 'prerequisite' ? 'grant' : 'revoke',
+    authorizationId: input.authorizationId,
     chainId: input.chainId,
     target: getAddress(input.to),
     data: input.data,

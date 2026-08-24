@@ -12,6 +12,7 @@ export interface ReviewPresentation extends Record<string, unknown> {
 export interface OpenExecutionReviewOptions {
   presentationKind: string
   review: ReviewPresentation
+  onConfirmed?: (result: SubmissionResult) => void | Promise<void>
   onResult?: (result: SubmissionResult) => void | Promise<void>
   onSucceeded?: (result: SubmissionResult) => void | Promise<void>
   onFailed?: (cause: unknown) => void | Promise<void>
@@ -48,6 +49,7 @@ export const useExecutionReview = () => {
           calldataPrepared: prepared.prepared,
           tenderlyPrepared: prepared.prepared,
         },
+        onConfirmed: options.onConfirmed,
         onResult: options.onResult,
         onSucceeded: async (result: SubmissionResult) => {
           await options.onSucceeded?.(result)

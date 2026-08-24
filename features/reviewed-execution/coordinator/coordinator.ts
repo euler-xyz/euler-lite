@@ -125,6 +125,42 @@ const mergeDispatchResults = (first: DispatchResult | undefined, second: Dispatc
   ...(second.atomic ?? first?.atomic ? { atomic: true } : {}),
 })
 
+interface CleanupFailure {
+  status: SubmissionStatus
+  message: string
+}
+
+const migrationAuthorizationFor = (execution: ReviewedExecution, effectId: Hash) => {
+  const effect = execution.requestSet.effects.find(node => node.effectId === effectId)?.effect
+  return effect?.kind === 'migration-authorization' ? effect : undefined
+}
+
+const migrationAuthorizationIdsFor = (
+  execution: ReviewedExecution,
+  request: EoaRequest | SafeCall,
+  action: 'grant' | 'revoke',
+) => request.effectIds.flatMap((effectId) => {
+  const effect = migrationAuthorizationFor(execution, effectId)
+  return effect?.action === action ? [effect.authorizationId] : []
+})
+
+const abortCleanupIndexesFor = (
+  execution: ReviewedExecution,
+  confirmedSteps: ReadonlySet<number>,
+) => {
+  const requests = execution.requestSet.requests
+  const confirmedAuthorizationIds = new Set<Hash>()
+  requests.forEach((request, index) => {
+    if (!confirmedSteps.has(index)) return
+    migrationAuthorizationIdsFor(execution, request, 'grant').forEach(id => confirmedAuthorizationIds.add(id))
+  })
+  return requests.flatMap((request, index) => request.phase === 'cleanup'
+    && !confirmedSteps.has(index)
+    && migrationAuthorizationIdsFor(execution, request, 'revoke').some(id => confirmedAuthorizationIds.has(id))
+    ? [index]
+    : [])
+}
+
 const migrationResultFor = ({
   execution,
   artifact,
@@ -133,6 +169,8 @@ const migrationResultFor = ({
   confirmedSteps,
   activeStepIndex,
   externalIds,
+  cleanupFailure,
+  compensationIndexes,
 }: {
   execution: ReviewedExecution
   artifact?: FinalizedRequestSet
@@ -141,6 +179,8 @@ const migrationResultFor = ({
   confirmedSteps: ReadonlySet<number>
   activeStepIndex?: number
   externalIds: ReadonlyMap<number, readonly { kind: string, value: string }[]>
+  cleanupFailure?: CleanupFailure
+  compensationIndexes: readonly number[]
 }): MigrationSubmissionResult | undefined => {
   const hasMigration = execution.intents.some(intent => intent.kind === 'migration')
     || execution.requestSet.effects.some(node => node.effect.kind === 'migration-authorization')
@@ -148,10 +188,12 @@ const migrationResultFor = ({
   const requests = artifact?.requests ?? execution.requestSet.requests
   const coreIndexes = requests.flatMap((request, index) => request.phase === 'core' ? [index] : [])
   const revocationIndexes = requests.flatMap((request, index) => request.phase === 'cleanup' ? [index] : [])
+  const reportedRevocationIndexes = compensationIndexes.length ? compensationIndexes : revocationIndexes
   const successfulCore = coreIndexes.length > 0 && coreIndexes.every(index => confirmedSteps.has(index))
-  const successfulRevocation = revocationIndexes.length > 0 && revocationIndexes.every(index => confirmedSteps.has(index))
+  const successfulRevocation = reportedRevocationIndexes.length > 0 && reportedRevocationIndexes.every(index => confirmedSteps.has(index))
   const safeHandedOff = execution.requestSet.transport === 'safe'
     && [...externalIds.values()].some(items => items.some(item => item.kind === 'calls-id'))
+  const requestConfirmed = (index: number) => confirmedSteps.has(index) || (safeHandedOff && status === 'submitted')
   const activePhase = activeStepIndex === undefined ? undefined : requests[activeStepIndex]?.phase
   const identifiersFor = (indexes: readonly number[]) => indexes.flatMap(index => requestIdentifier(index, externalIds))
 
@@ -160,29 +202,36 @@ const migrationResultFor = ({
     : activePhase === 'core' || (execution.requestSet.transport === 'safe' && status !== 'submitted')
       ? status
       : 'not-submitted'
-  const revocationStatus: SubmissionPhaseStatus | undefined = !revocationIndexes.length
+  const revocationStatus: SubmissionPhaseStatus | undefined = !reportedRevocationIndexes.length
     ? undefined
-    : successfulRevocation || safeHandedOff
-      ? status
-      : activePhase === 'cleanup'
+    : successfulRevocation
+      ? 'submitted'
+      : safeHandedOff
         ? status
-        : 'not-submitted'
+        : cleanupFailure
+          ? cleanupFailure.status
+          : activePhase === 'cleanup'
+            ? status
+            : 'not-submitted'
 
-  const hasMigrationGrant = requests.some(request => request.effectIds.some(effectId => execution.requestSet.effects.some(node =>
-    node.effectId === effectId
-    && node.effect.kind === 'migration-authorization'
-    && node.effect.action === 'grant')))
-  const successfulMigrationGrant = requests.some((request, index) => confirmedSteps.has(index)
-    && request.effectIds.some(effectId => execution.requestSet.effects.some(node =>
-      node.effectId === effectId
-      && node.effect.kind === 'migration-authorization'
-      && node.effect.action === 'grant')))
+  const grantAuthorizationIds = new Set(requests.flatMap(request => migrationAuthorizationIdsFor(execution, request, 'grant')))
+  const revokeAuthorizationIds = new Set(requests.flatMap(request => migrationAuthorizationIdsFor(execution, request, 'revoke')))
+  const confirmedGrantAuthorizationIds = new Set(requests.flatMap((request, index) => requestConfirmed(index)
+    ? migrationAuthorizationIdsFor(execution, request, 'grant')
+    : []))
+  const confirmedRevokeAuthorizationIds = new Set(requests.flatMap((request, index) => requestConfirmed(index)
+    ? migrationAuthorizationIdsFor(execution, request, 'revoke')
+    : []))
   // A reviewed revocation without a reviewed grant means preparation observed
   // an authorization that was already active before this operation.
-  const preexistingAuthorization = revocationStatus !== undefined && !hasMigrationGrant
-  const authorizationMayRemain = revocationStatus !== undefined && revocationStatus !== 'submitted'
-    ? successfulCore || successfulMigrationGrant || preexistingAuthorization || status === 'unknown'
-    : !successfulCore && (successfulMigrationGrant || status === 'unknown')
+  const unrevokedPreexistingAuthorization = [...revokeAuthorizationIds].some(id =>
+    !grantAuthorizationIds.has(id) && !confirmedRevokeAuthorizationIds.has(id))
+  const unrevokedConfirmedGrant = [...confirmedGrantAuthorizationIds].some(id => !confirmedRevokeAuthorizationIds.has(id))
+  const activeRequest = activeStepIndex === undefined ? undefined : requests[activeStepIndex]
+  const unknownGrantHandoff = status === 'unknown'
+    && !!activeRequest
+    && migrationAuthorizationIdsFor(execution, activeRequest, 'grant').length > 0
+  const authorizationMayRemain = unrevokedConfirmedGrant || unrevokedPreexistingAuthorization || unknownGrantHandoff
 
   let warning: string | undefined
   if (authorizationMayRemain && successfulCore && revocationStatus && revocationStatus !== 'submitted') {
@@ -204,9 +253,9 @@ const migrationResultFor = ({
       : {
           revocation: {
             status: revocationStatus,
-            requestIndexes: revocationIndexes,
-            identifiers: identifiersFor(revocationIndexes),
-            ...(revocationStatus === 'submitted' ? {} : { message }),
+            requestIndexes: reportedRevocationIndexes,
+            identifiers: identifiersFor(reportedRevocationIndexes),
+            ...(revocationStatus === 'submitted' ? {} : { message: cleanupFailure?.message ?? message }),
           },
         }),
     authorizationMayRemain,
@@ -234,11 +283,20 @@ export class ReviewedExecutionCoordinator {
     const transport = execution.requestSet.transport
     let artifact: FinalizedRequestSet | undefined
     let activeStepIndex: number | undefined
+    let compensationStepIndex: number | undefined
+    let compensating = false
+    let cleanupFailure: CleanupFailure | undefined
+    let compensationIndexes: readonly number[] = []
+    let dependencies: CoordinatorDependencies | undefined
+    let adapter: ExecutionTransportAdapter | undefined
+    let callbacks: DispatchCallbacks | undefined
+    let dispatch: DispatchResult | undefined
+    let refreshedPythValues: readonly RefreshedPythValue[] = []
     const confirmedSteps = new Set<number>()
     const externalIds = new Map<number, { kind: string, value: string }[]>()
     const buildResult = (status: SubmissionStatus, error?: unknown, dispatch?: DispatchResult): SubmissionResult => {
       const message = error ? errorMessage(error) : defaultStatusMessage(status)
-      const migration = migrationResultFor({ execution, artifact, status, message, confirmedSteps, activeStepIndex, externalIds })
+      const migration = migrationResultFor({ execution, artifact, status, message, confirmedSteps, activeStepIndex, externalIds, cleanupFailure, compensationIndexes })
       const effectiveStatus = migration?.submission.status === 'submitted' ? 'submitted' : status
       return {
         status: effectiveStatus,
@@ -250,7 +308,7 @@ export class ReviewedExecutionCoordinator {
     }
 
     try {
-      const dependencies = typeof this.dependencySource === 'function'
+      dependencies = typeof this.dependencySource === 'function'
         ? await this.dependencySource()
         : this.dependencySource
       if (dependencies.adapters.eoa.transport !== 'eoa' || dependencies.adapters.safe.transport !== 'safe') {
@@ -282,6 +340,38 @@ export class ReviewedExecutionCoordinator {
         await assertWallet()
         assertExplicitDeadlines()
       }
+      const assertCleanupPolicyAndWallet = async () => {
+        await assertWallet()
+        await dependencies!.revalidatePolicy(execution)
+        await assertWallet()
+      }
+      const assertRefreshedPythFreshness = (stepIndex: number) => {
+        const request = execution.requestSet.requests[stepIndex]
+        if (!request) throw new Error('Pyth freshness check points to a missing reviewed request')
+        const slots = transport === 'safe'
+          ? execution.requestSet.pythRefreshSlots
+          : execution.requestSet.pythRefreshSlots.filter(slot => slot.insertionPoint.requestId === requestIdOf(request))
+        if (!slots.length) return
+        const valuesBySlot = new Map(refreshedPythValues.map(value => [value.slotId, value]))
+        const nowSeconds = Math.floor(now() / 1000)
+        for (const slot of slots) {
+          const value = valuesBySlot.get(slot.slotId)
+          if (!value || value.publishTimes.length !== slot.requiredFeedIds.length || !value.publishTimes.length) {
+            throw new Error('Refreshed Pyth publish-time evidence is incomplete before wallet handoff')
+          }
+          for (const publishTime of value.publishTimes) {
+            if (!Number.isSafeInteger(publishTime) || publishTime > nowSeconds) {
+              throw new Error('Refreshed Pyth publish time is invalid before wallet handoff')
+            }
+            if (nowSeconds - publishTime > slot.freshnessPolicy.maximumAgeSeconds) {
+              throw new Error('Refreshed Pyth payload expired before wallet handoff')
+            }
+            if (slot.freshnessPolicy.minimumPublishTime !== undefined && publishTime < slot.freshnessPolicy.minimumPublishTime) {
+              throw new Error('Refreshed Pyth payload predates the reviewed freshness floor')
+            }
+          }
+        }
+      }
 
       await assertPolicyAndWallet()
       const signatures: CollectedExecutionSignature[] = []
@@ -299,12 +389,18 @@ export class ReviewedExecutionCoordinator {
         signatures.push({ slotId: slot.slotId, signature })
       }
 
-      const adapter = dependencies.adapters[transport]
-      const callbacks: DispatchCallbacks = {
+      adapter = dependencies.adapters[transport]
+      callbacks = {
         assertWalletBinding: assertWallet,
         beforeDispatch: async (stepIndex) => {
+          if (compensating) {
+            compensationStepIndex = stepIndex
+            await assertCleanupPolicyAndWallet()
+            return
+          }
           activeStepIndex = stepIndex
           await assertPolicyAndWallet()
+          assertRefreshedPythFreshness(stepIndex)
         },
         recordExternalId: async (stepIndex, kind, value) => {
           const items = externalIds.get(stepIndex) ?? []
@@ -312,14 +408,14 @@ export class ReviewedExecutionCoordinator {
           externalIds.set(stepIndex, items)
         },
         markConfirming: async (stepIndex) => {
-          activeStepIndex = stepIndex
+          if (compensating) compensationStepIndex = stepIndex
+          else activeStepIndex = stepIndex
         },
         afterConfirmed: async (stepIndex) => {
           confirmedSteps.add(stepIndex)
         },
       }
 
-      let dispatch: DispatchResult | undefined
       let pythRequestIndex = 0
       if (transport === 'eoa' && execution.requestSet.pythRefreshSlots.length) {
         const pythRequestIds = new Set(execution.requestSet.pythRefreshSlots.map(slot => slot.insertionPoint.requestId))
@@ -345,30 +441,71 @@ export class ReviewedExecutionCoordinator {
       }
 
       const isJitEoaPyth = transport === 'eoa' && execution.requestSet.pythRefreshSlots.length > 0
+      if (isJitEoaPyth) activeStepIndex = pythRequestIndex
       await assertPolicyAndWallet()
-      const pythValues = await dependencies.refreshPyth(execution)
-      assertExplicitDeadlines()
-      if (!isJitEoaPyth) await assertPolicyAndWallet()
-      artifact = dependencies.finalize(execution, signatures, pythValues)
+      refreshedPythValues = await dependencies.refreshPyth(execution)
+      await assertPolicyAndWallet()
+      artifact = dependencies.finalize(execution, signatures, refreshedPythValues)
       if (artifact.reviewId !== execution.reviewId || artifact.requestDigest !== execution.requestDigest || artifact.transport !== transport) {
         throw new Error('Finalized artifact does not match the reviewed execution')
       }
-      if (!isJitEoaPyth) await assertPolicyAndWallet()
+      await assertPolicyAndWallet()
 
       const dispatchArtifact = transport === 'eoa' && pythRequestIndex > 0
         ? { ...artifact, requests: artifact.requests.slice(pythRequestIndex) }
         : artifact
-      if (isJitEoaPyth) activeStepIndex = pythRequestIndex
       const finalizedDispatch = await adapter.dispatch(execution, dispatchArtifact, callbacks, {
         requestOffset: pythRequestIndex,
-        skipFirstPreDispatchRevalidation: isJitEoaPyth,
       })
       dispatch = mergeDispatchResults(dispatch, finalizedDispatch)
       return buildResult('submitted', undefined, dispatch)
     }
     catch (error) {
-      const crossedWalletBoundary = [...externalIds.values()].some(items => items.length > 0)
-      return buildResult(statusForError(error, crossedWalletBoundary), error)
+      const crossedWalletBoundary = activeStepIndex !== undefined
+        && !confirmedSteps.has(activeStepIndex)
+        && (externalIds.get(activeStepIndex)?.length ?? 0) > 0
+      const primaryStatus = statusForError(error, crossedWalletBoundary)
+      const primaryActiveStepIndex = activeStepIndex
+      const activePhase = activeStepIndex === undefined ? undefined : execution.requestSet.requests[activeStepIndex]?.phase
+      compensationIndexes = transport === 'eoa' && primaryStatus !== 'unknown' && activePhase !== 'cleanup'
+        ? abortCleanupIndexesFor(execution, confirmedSteps)
+        : []
+
+      if (compensationIndexes.length && adapter?.transport === 'eoa' && callbacks) {
+        const requests = (artifact?.requests ?? execution.requestSet.requests) as readonly EoaRequest[]
+        const cleanupArtifact: FinalizedRequestSet = {
+          __finalizedRequestSet: true,
+          reviewId: execution.reviewId,
+          requestDigest: execution.requestDigest,
+          transport: 'eoa',
+          requests: compensationIndexes.map((index) => {
+            const request = requests[index]
+            if (!request || request.phase !== 'cleanup') throw new Error('Reviewed migration cleanup request is missing')
+            return request
+          }),
+          signatureValues: artifact?.signatureValues ?? [],
+          pythValues: artifact?.pythValues ?? [],
+        }
+        compensating = true
+        try {
+          const cleanupDispatch = await adapter.dispatch(execution, cleanupArtifact, callbacks, { requestIndexes: compensationIndexes })
+          dispatch = mergeDispatchResults(dispatch, cleanupDispatch)
+        }
+        catch (cleanupError) {
+          const cleanupCrossedWalletBoundary = compensationStepIndex !== undefined
+            && !confirmedSteps.has(compensationStepIndex)
+            && (externalIds.get(compensationStepIndex)?.length ?? 0) > 0
+          cleanupFailure = {
+            status: statusForError(cleanupError, cleanupCrossedWalletBoundary),
+            message: errorMessage(cleanupError),
+          }
+        }
+        finally {
+          compensating = false
+          activeStepIndex = primaryActiveStepIndex
+        }
+      }
+      return buildResult(primaryStatus, error, dispatch)
     }
   }
 }

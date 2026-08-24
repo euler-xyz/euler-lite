@@ -45,22 +45,23 @@ export class EoaExecutionAdapter implements ExecutionTransportAdapter {
     if (artifact.transport !== 'eoa') throw new Error('EOA adapter received a Safe artifact')
     const requests = artifact.requests as readonly EoaRequest[]
     const requestOffset = options.requestOffset ?? 0
-    if (options.skipFirstPreDispatchRevalidation) {
-      const firstRequest = requests[0]
-      const reviewedRequest = execution.requestSet.requests[requestOffset]
-      const isPythBearingRequest = firstRequest
-        && reviewedRequest
-        && 'requestId' in reviewedRequest
-        && reviewedRequest.requestId === firstRequest.requestId
-        && execution.requestSet.pythRefreshSlots.some(slot => slot.insertionPoint.requestId === firstRequest.requestId)
-      if (!isPythBearingRequest) {
-        throw new Error('Pre-dispatch revalidation may only be skipped for the JIT-finalized Pyth request')
+    if (options.requestIndexes && options.requestOffset !== undefined) {
+      throw new Error('EOA dispatch cannot combine a request offset with explicit request indexes')
+    }
+    const requestIndexes = options.requestIndexes ?? requests.map((_request, index) => requestOffset + index)
+    if (requestIndexes.length !== requests.length || new Set(requestIndexes).size !== requestIndexes.length) {
+      throw new Error('EOA dispatch request indexes are incomplete or duplicated')
+    }
+    for (const [localIndex, request] of requests.entries()) {
+      const reviewedRequest = execution.requestSet.requests[requestIndexes[localIndex]!]
+      if (!reviewedRequest || !('requestId' in reviewedRequest) || reviewedRequest.requestId !== request.requestId) {
+        throw new Error('EOA dispatch subset does not match the reviewed request vector')
       }
     }
     const evcAddress = getAddress(this.evcAddress)
     const sdkRequests = requests.map((request, requestIndex) => ({
       requestIndex,
-      sourcePlanItemIndex: requestOffset + requestIndex,
+      sourcePlanItemIndex: requestIndexes[requestIndex]!,
       kind: getAddress(request.to) === evcAddress ? 'evcBatch' as const : 'contractCall' as const,
       chainId: request.chainId,
       from: getAddress(request.from),
@@ -89,10 +90,8 @@ export class EoaExecutionAdapter implements ExecutionTransportAdapter {
           if (!request || !sameRequest(sdkRequest, request)) {
             throw new Error('SDK dispatch request does not match the finalized reviewed execution')
           }
-          if (!(options.skipFirstPreDispatchRevalidation && stepIndex === 0)) {
-            await callbacks.assertWalletBinding()
-            await callbacks.beforeDispatch(requestOffset + stepIndex)
-          }
+          await callbacks.assertWalletBinding()
+          await callbacks.beforeDispatch(requestIndexes[stepIndex]!)
         },
         sendTransaction: async (sdkRequest) => {
           const request = requests[sdkRequest.requestIndex]
@@ -109,14 +108,14 @@ export class EoaExecutionAdapter implements ExecutionTransportAdapter {
         },
         onTransactionHash: async (_sdkRequest, stepIndex, hash) => {
           if (!isHash(hash)) throw new DispatchStatusUnknownError('Wallet returned no valid transaction hash')
-          await callbacks.recordExternalId(requestOffset + stepIndex, 'transaction-hash', hash)
-          await callbacks.markConfirming(requestOffset + stepIndex)
+          await callbacks.recordExternalId(requestIndexes[stepIndex]!, 'transaction-hash', hash)
+          await callbacks.markConfirming(requestIndexes[stepIndex]!)
         },
         onAfterStep: async (_request, stepIndex, hash, receipt) => {
           if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
             throw new DispatchStatusUnknownError('Receipt belongs to another transaction')
           }
-          await callbacks.afterConfirmed(requestOffset + stepIndex)
+          await callbacks.afterConfirmed(requestIndexes[stepIndex]!)
         },
       })
       return { transactionHashes: result.hashes }

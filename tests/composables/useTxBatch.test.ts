@@ -12,6 +12,7 @@ import {
 } from '~/composables/batchPrefetchState'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -54,6 +55,7 @@ const executionMocks = {
   }),
   prepare: vi.fn(async () => { throw new Error('authoritative preparation not configured in batch unit test') }),
 }
+const scheduleExternalMigrationRefreshes = vi.fn()
 const position = (account: Address, shares: bigint) => ({
   account,
   vaultAddress: vault,
@@ -272,6 +274,7 @@ const stubBatchComposableGlobals = () => {
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useReviewedExecution', () => executionMocks)
+  vi.stubGlobal('useExternalMigrationRefresh', () => ({ scheduleExternalMigrationRefreshes }))
   vi.stubGlobal('useTokenList', () => ({
     getTokenByAddress: vi.fn(),
   }))
@@ -307,6 +310,7 @@ beforeEach(() => {
   executionMocks.compilePreview.mockClear()
   executionMocks.compilePreviewForSimulation.mockClear()
   executionMocks.prepare.mockClear()
+  scheduleExternalMigrationRefreshes.mockReset()
   testIntentPlans.clear()
   testIntentSequence = 0
   stubBatchComposableGlobals()
@@ -1229,6 +1233,47 @@ describe('useTxBatch execution errors', () => {
     batch.clearBatch()
 
     expect(batch.execError.value).toBeUndefined()
+  })
+
+  it('completes a detached Safe batch using captured revisions while preserving newer edits', async () => {
+    const batch = useTxBatch()
+    const submittedIntent = intentFor([] as TransactionPlan, [subAccount])
+    await batch.addEntry({
+      intent: submittedIntent,
+      label: 'Migrate USDC/WETH',
+      subAccount,
+      refreshExternalMigrationPositions: true,
+    })
+    const completion = batch.captureBatchCompletion([{
+      intentId: submittedIntent.intentId,
+      revision: submittedIntent.revision,
+    }])
+    const newerIntent = { ...submittedIntent, revision: submittedIntent.revision + 1 }
+    batch.draftEntries.value = [
+      ...batch.draftEntries.value,
+      { intentId: newerIntent.intentId, revision: newerIntent.revision, intent: newerIntent },
+    ]
+    const markSucceeded = vi.fn()
+    const showSuccessUi = vi.fn()
+
+    const showPostTxUi = await finalizeSuccessfulSubmission({
+      scope: {
+        markSucceeded,
+        suppressPostTxUi: () => true,
+      },
+      completeAuthoritativeState: () => batch.completeBatchExecution(completion),
+      showSuccessUi,
+    })
+
+    expect(showPostTxUi).toBe(false)
+    expect(markSucceeded).toHaveBeenCalledOnce()
+    expect(showSuccessUi).not.toHaveBeenCalled()
+    expect(batch.draftEntries.value).toEqual([{
+      intentId: newerIntent.intentId,
+      revision: newerIntent.revision,
+      intent: newerIntent,
+    }])
+    expect(scheduleExternalMigrationRefreshes).toHaveBeenCalledOnce()
   })
 })
 
