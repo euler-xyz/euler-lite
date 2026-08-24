@@ -249,7 +249,7 @@ describe('authoritative reviewed execution preparation', () => {
   it.each([
     ['direct', 'migration', { type: 'migration' }],
     ['batch', 'batch', [{ id: aaveMigrationIntent.intentId, review: { type: 'migration' } }]],
-  ] as const)('prepares and revalidates an Aave migration without screening its derived account for %s review', async (_path, presentationKind, presentationInputs) => {
+  ] as const)('prepares and revalidates an Aave migration without transaction-time screening for %s review', async (_path, presentationKind, presentationInputs) => {
     const service = createAppPolicyService('cross-protocol-migration')
     const execution = await service.prepare({
       intents: [aaveMigrationIntent],
@@ -267,47 +267,9 @@ describe('authoritative reviewed execution preparation', () => {
     expect(execution.policy.subjects).not.toContainEqual(expect.objectContaining({ value: AAVE_POOL }))
     expect(execution.validity).not.toHaveProperty('expiresAt')
     await expect(resolveAppPolicy(execution.requestSet, 200)).resolves.toBeDefined()
-    expect(screenAddress).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(screenAddress).mock.calls).toEqual([[ACCOUNT, false], [ACCOUNT, false]])
-    expect(screenAddress).not.toHaveBeenCalledWith(POSITION_ACCOUNT, expect.any(Boolean))
-  })
-
-  it('passes a positive VPN verdict into connected-wallet screening without blocking it independently', async () => {
-    vi.mocked(detectVpn).mockResolvedValue(true)
-    const service = createAppPolicyService('cross-protocol-migration')
-
-    await expect(service.prepare({
-      intents: [aaveMigrationIntent],
-      wallet: aaveWallet,
-      cartGeneration: 0,
-      runtime: {},
-      presentationKind: 'migration',
-      presentationInputs: {},
-      compilerVersion: 'compiler-v1',
-      policyVersionDigest: keccak256(toHex('policy-v1')),
-      freshUntil: 5_000,
-    })).resolves.toBeDefined()
-    expect(screenAddress).toHaveBeenCalledOnce()
-    expect(screenAddress).toHaveBeenCalledWith(ACCOUNT, true)
-  })
-
-  it('keeps a blocked connected wallet fail closed', async () => {
-    vi.mocked(screenAddress).mockResolvedValue(true)
-    const service = createAppPolicyService('cross-protocol-migration')
-
-    await expect(service.prepare({
-      intents: [aaveMigrationIntent],
-      wallet: aaveWallet,
-      cartGeneration: 0,
-      runtime: {},
-      presentationKind: 'migration',
-      presentationInputs: {},
-      compilerVersion: 'compiler-v1',
-      policyVersionDigest: keccak256(toHex('policy-v1')),
-      freshUntil: 5_000,
-    })).rejects.toThrow('Connected wallet policy screening is blocked')
-    expect(screenAddress).toHaveBeenCalledOnce()
-    expect(screenAddress).toHaveBeenCalledWith(ACCOUNT, false)
+    expect(execution.policy.results).not.toContainEqual(expect.objectContaining({ concern: 'wallet-screening' }))
+    expect(detectVpn).not.toHaveBeenCalled()
+    expect(screenAddress).not.toHaveBeenCalled()
   })
 
   it('keeps real vault metadata failures fail closed', async () => {

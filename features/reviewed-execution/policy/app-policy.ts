@@ -3,8 +3,6 @@ import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { PolicyState, ReviewedPolicy, ReviewedRequestSet } from '../domain/reviewed-execution'
 import { buildReviewedPolicy, collectPolicyRequirements, type PolicyResultInput } from './engine'
 import { hasUnverifiedVaultAcknowledgement } from './acknowledgements'
-import { detectVpn } from '~/services/vpn'
-import { screenAddress } from '~/services/screening'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { operationBlockerEntries } from '~/utils/operationGuardRegistry'
 
@@ -23,10 +21,6 @@ const addressOfSubject = (subject: string): Address | undefined => {
 /** Resolve handoff policy evidence for the exact reviewed request set. */
 export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Date.now()): Promise<Readonly<ReviewedPolicy>> => {
   const expiresAt = now + 5 * 60_000
-  const vpn = await detectVpn()
-  const connectedAccount = getAddress(requestSet.wallet.account)
-  if (await screenAddress(connectedAccount, vpn)) throw new Error('Connected wallet policy screening is blocked')
-
   const { getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
   const labelsVersion = getEulerLabelsVersion()
@@ -39,8 +33,7 @@ export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Dat
   for (const requirement of collectPolicyRequirements(requestSet)) {
     let version = 'policy'
     if (requirement.subject === 'global') {
-      if (requirement.concern === 'wallet-screening') version = `screening:${connectedAccount}`
-      else if (requirement.concern === 'tos') {
+      if (requirement.concern === 'tos') {
         if (operationBlockerEntries.value.some(([key]) => key === 'tos')) throw new Error('Terms-of-use policy remains unresolved')
         version = `tos:${tosEffectDigest}`
       }

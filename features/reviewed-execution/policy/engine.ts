@@ -56,7 +56,7 @@ export const collectPolicyRequirements = (requestSet: ReviewedRequestSet): reado
     if (node.effect.kind === 'pyth-update') requirements.push({ subject: `effect:${node.effectId}`, concern: 'pyth-preview-bound' })
     if (node.effect.kind === 'migration-authorization') requirements.push({ subject: `effect:${node.effectId}`, concern: 'authorization-binding' })
   }
-  for (const concern of ['wallet-screening', 'tos', 'unverified-acknowledgement']) {
+  for (const concern of ['tos', 'unverified-acknowledgement']) {
     requirements.push({ subject: 'global', concern })
   }
   return requirements.sort((left, right) => `${left.subject}:${left.concern}`.localeCompare(`${right.subject}:${right.concern}`))
@@ -77,7 +77,7 @@ const assertAllowed = (item: PolicyResultInput, now: number) => {
 }
 
 const EXPIRING_CONCERNS = new Set([
-  'wallet-screening', 'vault-metadata',
+  'vault-metadata',
   'asset-metadata', 'spender-binding', 'pyth-freshness', 'authorization-target',
   'approval-binding', 'pyth-preview-bound', 'authorization-binding',
   'unverified-acknowledgement',
