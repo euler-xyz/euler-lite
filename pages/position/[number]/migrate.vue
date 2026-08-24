@@ -99,7 +99,7 @@ type TargetExternalLink = {
 const route = useRoute()
 const router = useRouter()
 const modal = useModal()
-const { error: showError, success: showSuccess, warning: showWarning } = useToast()
+const { error: showError, warning: showWarning } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
@@ -884,7 +884,6 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
         const migration = result.migration
         if (!migration || result.status !== 'submitted') return
         if (migration.warning) showWarning('Migration completed with a warning', { description: migration.warning })
-        else showSuccess('Migration successful')
       },
       onConfirmed: () => {
         schedulePostMigrationRefreshes()

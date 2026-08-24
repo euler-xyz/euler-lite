@@ -469,10 +469,7 @@ const handleExecute = async () => {
         scope: handle.scope,
         completeAuthoritativeState: () => completeBatchExecution(capturedCompletion),
         showSuccessUi: () => {
-          if (result.migration) {
-            if (result.migration.warning) toast.warning('Migration completed with a warning', { description: result.migration.warning })
-            else toast.success('Migration successful')
-          }
+          if (result.migration?.warning) toast.warning('Migration completed with a warning', { description: result.migration.warning })
         },
       })
     }
