@@ -141,6 +141,17 @@ describe('Stage A transaction inventory', () => {
     expect(count(sources, /Authorization revocation status:/g)).toBeGreaterThanOrEqual(3)
   })
 
+  it('surfaces outgoing migration prerequisites instead of silently ignoring target clicks', () => {
+    const source = read('pages/position/[number]/migrate.vue')
+
+    expect(source).toContain('modal.open(AcknowledgeTermsModal')
+    expect(source).toContain('modal.open(VaultUnverifiedDisclaimerModal')
+    expect(source).toMatch(/showError\(operationBlockReason\.value \?\? 'Complete the required verification before migrating'\)/)
+    expect(source).toContain('@click="handleMigrateClick(target)"')
+    expect(source).toContain('@click="handleAddToBatchClick(target)"')
+    expect(source).not.toMatch(/reviewingTargetId\.value\s*\|\|\s*isOperationBlocked\.value/)
+  })
+
   it('forbids new wallet write owners outside the frozen in-scope and excluded boundaries', () => {
     const candidates = ['pages', 'components', 'composables', 'features', 'utils'].flatMap(listProductionSources)
     const writePattern = /\b(?:useSendTransaction|useSignTypedData|sendCalls|sendTransaction)\s*\(|eth_signTypedData_v4|\.execute(?:TransactionPlan|PreparedTransactionPlan|CowSwapTransactionPlan)\s*\(/

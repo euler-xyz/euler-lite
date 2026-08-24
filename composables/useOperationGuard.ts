@@ -18,10 +18,10 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
   })
 
   // --- TOS guard (global, not vault-specific) ---
-  useTosGuard()
+  const tosGuard = useTosGuard()
 
   // --- Unverified vault guard ---
-  useUnverifiedVaultGuard(addresses)
+  const unverifiedVaultGuard = useUnverifiedVaultGuard(addresses)
 
   // --- Keyring guard ---
   const keyringVaultAddress = computed(() =>
@@ -115,4 +115,9 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
     clearOperationMeta('keyring')
     unregisterOperationBlocker('keyring')
   })
+
+  return {
+    tosGuard,
+    unverifiedVaultGuard,
+  }
 }

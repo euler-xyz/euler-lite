@@ -45,8 +45,11 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
     unregisterOperationBlocker('unverified-vault')
   })
 
-  provide('unverified-vault-guard', reactive({
+  const guardState = reactive({
     isAcknowledgmentRequired,
     acknowledgeRisk,
-  }))
+  })
+  provide('unverified-vault-guard', guardState)
+
+  return guardState
 }

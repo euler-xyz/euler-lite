@@ -35,8 +35,10 @@ import {
   buildMigrationAuthorizationTxSteps,
 } from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
-import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
+import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 
 type AaveOutgoingMigrationTarget = MigrationTarget<AaveMigrationTargetRaw, AavePositionRef, AaveMigrationTargetExtraData>
@@ -96,6 +98,7 @@ type TargetExternalLink = {
 
 const route = useRoute()
 const router = useRouter()
+const modal = useModal()
 const { error: showError, success: showSuccess, warning: showWarning } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
@@ -432,10 +435,53 @@ const noTargetsFound = computed(() =>
   && targets.value.length === 0,
 )
 
-useOperationGuard(computed(() => [
+const { tosGuard, unverifiedVaultGuard } = useOperationGuard(computed(() => [
   sourceDebtVault.value?.address,
   sourceCollateralVault.value?.address,
 ].filter(Boolean)))
+
+function continueAfterRequiredAcknowledgments(action: () => Promise<void>) {
+  if (tosGuard.isTermsRequired && !tosGuard.tosLoadFailed) {
+    modal.open(AcknowledgeTermsModal, {
+      props: {
+        onReject: () => modal.close(),
+        onAccept: () => {
+          tosGuard.acceptTerms()
+          modal.close()
+          void nextTick(() => continueAfterRequiredAcknowledgments(action))
+        },
+      },
+    })
+    return
+  }
+
+  if (unverifiedVaultGuard.isAcknowledgmentRequired) {
+    modal.open(VaultUnverifiedDisclaimerModal, {
+      props: {
+        acceptAction: () => {
+          unverifiedVaultGuard.acknowledgeRisk()
+          void nextTick(() => continueAfterRequiredAcknowledgments(action))
+        },
+      },
+    })
+    return
+  }
+
+  if (isOperationBlocked.value) {
+    showError(operationBlockReason.value ?? 'Complete the required verification before migrating')
+    return
+  }
+
+  void action()
+}
+
+function handleMigrateClick(target: OutgoingMigrationTarget) {
+  continueAfterRequiredAcknowledgments(() => reviewMigration(target))
+}
+
+function handleAddToBatchClick(target: OutgoingMigrationTarget) {
+  continueAfterRequiredAcknowledgments(() => addMigrationToBatch(target))
+}
 
 watch(
   [
@@ -816,7 +862,7 @@ watch([targets, outgoingPreviewBaseKey], ([targetList, baseKey]) => {
 }, { immediate: true })
 
 async function reviewMigration(target: OutgoingMigrationTarget) {
-  if (reviewingTargetId.value || isOperationBlocked.value || !canReviewTarget(target) || !sourceDebtVault.value) return
+  if (reviewingTargetId.value || !canReviewTarget(target) || !sourceDebtVault.value) return
   reviewingTargetId.value = target.id
   clearSimulationError()
   try {
@@ -1263,7 +1309,7 @@ function normalizeAddressKey(value?: string): string {
                     :disabled="!canReviewTarget(target)"
                     :loading="reviewingTargetId === target.id"
                     :aria-label="targetActionAriaLabel(target, 'migrate')"
-                    @click="reviewMigration(target)"
+                    @click="handleMigrateClick(target)"
                   >
                     Migrate
                   </UiButton>
@@ -1278,7 +1324,7 @@ function normalizeAddressKey(value?: string): string {
                     :disabled="!!batchingTargetId || !canAddToBatchTarget(target)"
                     :loading="batchingTargetId === target.id"
                     :aria-label="targetActionAriaLabel(target, 'batch')"
-                    @click="addMigrationToBatch(target)"
+                    @click="handleAddToBatchClick(target)"
                   >
                     Add to batch
                   </UiButton>
