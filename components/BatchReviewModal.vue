@@ -470,12 +470,8 @@ const handleExecute = async () => {
         completeAuthoritativeState: () => completeBatchExecution(capturedCompletion),
         showSuccessUi: () => {
           if (result.migration) {
-            const revocation = result.migration.revocation
-            const description = revocation
-              ? `Authorization revocation status: ${revocation.status}.`
-              : 'No separate authorization revocation request was required.'
-            if (result.migration.warning) toast.warning('Migration submitted', { description: `${description} ${result.migration.warning}` })
-            else toast.success('Migration submitted', { description })
+            if (result.migration.warning) toast.warning('Migration completed with a warning', { description: result.migration.warning })
+            else toast.success('Migration successful')
           }
         },
       })

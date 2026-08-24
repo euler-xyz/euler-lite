@@ -3378,12 +3378,8 @@ const reviewInboundExternalMigration = async () => {
       onResult: (result) => {
         const migration = result.migration
         if (!migration || result.status !== 'submitted') return
-        const revocation = migration.revocation
-        const description = revocation
-          ? `Authorization revocation status: ${revocation.status}.`
-          : 'No separate authorization revocation request was required.'
-        if (migration.warning) showWarning('Migration submitted', { description: `${description} ${migration.warning}` })
-        else showSuccess('Migration submitted', { description })
+        if (migration.warning) showWarning('Migration completed with a warning', { description: migration.warning })
+        else showSuccess('Migration successful')
       },
       onConfirmed: () => {
         schedulePostMigrationRefreshes(preview.input.owner)

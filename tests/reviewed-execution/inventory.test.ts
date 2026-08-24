@@ -130,15 +130,17 @@ describe('Stage A transaction inventory', () => {
     expect(existsSync(resolve(root, 'composables/useSafeExecutionDetachment.ts'))).toBe(true)
   })
 
-  it('renders migration and revocation outcomes as separate statuses', () => {
+  it('keeps revocation details out of the successful migration message', () => {
     const sources = [
       read('pages/position/[number]/migrate.vue'),
       read('pages/position/[number]/borrow/swap.vue'),
       read('components/BatchReviewModal.vue'),
     ].join('\n')
 
-    expect(count(sources, /Migration submitted/g)).toBeGreaterThanOrEqual(3)
-    expect(count(sources, /Authorization revocation status:/g)).toBeGreaterThanOrEqual(3)
+    expect(count(sources, /Migration successful/g)).toBeGreaterThanOrEqual(3)
+    expect(sources).not.toMatch(/No separate authorization revocation request was required|Authorization revocation status:/)
+    expect(count(sources, /Migration completed with a warning/g)).toBeGreaterThanOrEqual(3)
+    expect(count(sources, /migration\.warning/g)).toBeGreaterThanOrEqual(3)
   })
 
   it('surfaces outgoing migration prerequisites instead of silently ignoring target clicks', () => {
