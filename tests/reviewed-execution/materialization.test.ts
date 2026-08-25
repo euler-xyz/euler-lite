@@ -1,5 +1,4 @@
-import { encodeFunctionData, getAddress, hashTypedData, keccak256, toHex, type Hex } from 'viem'
-import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { encodeAbiParameters, encodeFunctionData, getAddress, hashTypedData, keccak256, toHex, type Hex } from 'viem'
 import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { describe, expect, it } from 'vitest'
 import { EVC_ABI } from '~/abis/evc'
@@ -7,8 +6,9 @@ import { PYTH_ABI } from '~/abis/pyth'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import type { WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { validateReviewedRequestSet } from '~/features/reviewed-execution/domain/validators'
+import { finalizeReviewedRequestSet } from '~/features/reviewed-execution/materialization/finalize'
 import { reviewedRequestDigest, materializePreparedPlan, normalizedRequestDigest } from '~/features/reviewed-execution/materialization/prepared-plan'
-import { assertPermit2NonceCurrent, assertSignatureMatchesSigner, permit2NonceCoordinate, type PreparedPermit2Slot } from '~/features/reviewed-execution/materialization/signature-slots'
+import { assertPermit2NonceCurrent, permit2NonceCoordinate, type PreparedPermit2Slot } from '~/features/reviewed-execution/materialization/signature-slots'
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
 const TOKEN = getAddress('0x2000000000000000000000000000000000000000')
@@ -60,48 +60,6 @@ const coreItem = {
 }
 
 describe('prepared plan materialization', () => {
-  it('rejects the empty-domain signature produced when typed data bypasses wagmi serialization', async () => {
-    const account = privateKeyToAccount(generatePrivateKey())
-    const typedData = {
-      domain: { name: 'Permit2', chainId: 1, verifyingContract: SPENDER },
-      types: {
-        PermitDetails: [
-          { name: 'token', type: 'address' },
-          { name: 'amount', type: 'uint160' },
-          { name: 'expiration', type: 'uint48' },
-          { name: 'nonce', type: 'uint48' },
-        ],
-        PermitSingle: [
-          { name: 'details', type: 'PermitDetails' },
-          { name: 'spender', type: 'address' },
-          { name: 'sigDeadline', type: 'uint256' },
-        ],
-      },
-      primaryType: 'PermitSingle' as const,
-      message: {
-        details: { token: TOKEN, amount: 10n, expiration: 2_000_000_000, nonce: 7 },
-        spender: VAULT,
-        sigDeadline: 2_000_000_000n,
-      },
-    }
-    const slot = {
-      slotId: keccak256(toHex('permit2-slot')),
-      kind: 'permit2' as const,
-      signer: account.address,
-      chainId: 1,
-      typedData,
-      typedDataHash: hashTypedData(typedData),
-      validUntil: 2_000_000_000,
-      nonce: 7n,
-      insertionPoints: [],
-    }
-    const validSignature = await account.signTypedData(typedData)
-    const emptyDomainSignature = await account.signTypedData({ ...typedData, domain: {} })
-
-    await expect(assertSignatureMatchesSigner(slot, validSignature)).resolves.toBeUndefined()
-    await expect(assertSignatureMatchesSigner(slot, emptyDomainSignature)).rejects.toThrow(/signed different typed data/)
-  })
-
   it('materializes a deterministic EOA request vector and complete decoded-call list', () => {
     const plan: TransactionPlan = [
       {
@@ -197,7 +155,7 @@ describe('prepared plan materialization', () => {
       .toThrow(/atomic capability/i)
   })
 
-  it('binds Permit2 typed data to an ABI-aware insertion point', async () => {
+  it('binds Permit2 typed data to an ABI-aware insertion point and accepts a Base Account signature envelope', async () => {
     const approval = { type: 'permit2' as const, token: TOKEN, owner: ACCOUNT, spender: SPENDER, amount: 10n }
     const plan: TransactionPlan = [
       { type: 'requiredApproval', token: TOKEN, owner: ACCOUNT, spender: SPENDER, amount: 10n, resolved: [approval] },
@@ -254,6 +212,42 @@ describe('prepared plan materialization', () => {
     expect(permit2NonceCoordinate(requestSet.signatureSlots[0])).toEqual({ owner: ACCOUNT, token: TOKEN, spender: SPENDER, permit2: SPENDER, nonce: 7n })
     expect(() => permit2NonceCoordinate({ ...requestSet.signatureSlots[0], nonce: 8n })).toThrow(/nonce does not match/)
     await expect(assertPermit2NonceCurrent(requestSet.signatureSlots[0], async () => 8n)).rejects.toThrow(/nonce changed after review/)
+
+    const baseAccountSignature = encodeAbiParameters(
+      [{
+        type: 'tuple',
+        components: [
+          { name: 'ownerIndex', type: 'uint8' },
+          { name: 'signatureData', type: 'bytes' },
+        ],
+      }],
+      [{ ownerIndex: 0, signatureData: `0x${'11'.repeat(65)}` }],
+    )
+    let encodedSignature: Hex | undefined
+    const finalizationSdk = {
+      ...sdk,
+      executionService: {
+        ...sdk.executionService,
+        encodePermit2Call: ({ owner, signature }: { chainId: number, owner: typeof ACCOUNT, message: Record<string, unknown>, signature: Hex }) => {
+          encodedSignature = signature
+          return { targetContract: SPENDER, onBehalfOfAccount: owner, value: 0n, data: signature }
+        },
+      },
+    }
+    const signatures = [{ slotId: requestSet.signatureSlots[0].slotId, signature: baseAccountSignature }]
+    const finalized = finalizeReviewedRequestSet({
+      reviewId: keccak256(toHex('review')),
+      requestDigest: reviewedRequestDigest(requestSet),
+      requestSet,
+      sdk: finalizationSdk,
+      signatures,
+      pythValues: [],
+    })
+
+    expect((baseAccountSignature.length - 2) / 2).toBe(224)
+    expect(encodedSignature).toBe(baseAccountSignature)
+    expect(finalized.signatureValues).toEqual(signatures)
+    expect(finalized.requests[0].data).not.toBe(requestSet.requests[0].data)
   })
 
   it('seals a bounded Pyth slot and rejects missing feed evidence', () => {

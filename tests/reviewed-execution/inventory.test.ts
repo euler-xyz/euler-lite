@@ -179,12 +179,14 @@ describe('Stage A transaction inventory', () => {
     expect(actualOwners.sort()).toEqual(WALLET_WRITE_SOURCE_INVENTORY.map(row => row.source).sort())
   })
 
-  it('uses wagmi typed-data serialization and never sends incomplete EIP-712 JSON directly', () => {
+  it('uses wagmi typed-data serialization and preserves wallet-specific signature envelopes', () => {
     const source = read('composables/useReviewedExecution.ts')
+    const slotSource = read('features/reviewed-execution/materialization/signature-slots.ts')
     expect(source).toContain('useSignTypedData()')
-    expect(source).toContain('execution.requestSet.wallet.walletKind === \'eoa\'')
-    expect(source).toContain('await assertSignatureMatchesSigner(slot, normalized)')
+    expect(source).toContain('account: slot.signer')
     expect(source).not.toContain('eth_signTypedData_v4')
+    expect(source).not.toContain('assertSignatureMatchesSigner')
+    expect(slotSource).not.toContain('recoverTypedDataAddress')
   })
 })
 

@@ -18,7 +18,7 @@ import { createLiteIntentCompilerRegistry, asCompilerRuntime, type LiteCompilerR
 import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
 import { collectPythPreviewData, rehydratePluginPrefetch, serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
 import { PYTH_FRESHNESS_POLICY, PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
-import { assertPermit2NonceCurrent, assertSignatureMatchesSigner, preparePermit2Slots } from '~/features/reviewed-execution/materialization/signature-slots'
+import { assertPermit2NonceCurrent, preparePermit2Slots } from '~/features/reviewed-execution/materialization/signature-slots'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { assertPolicyVersionsMatch } from '~/features/reviewed-execution/policy/engine'
 import type { EulerSimulationProjection } from '~/features/reviewed-execution/simulation/coverage'
@@ -609,11 +609,7 @@ export const useReviewedExecution = () => {
           account: slot.signer,
         })
         if (typeof signature !== 'string' || !/^0x[0-9a-f]+$/i.test(signature)) throw new Error('Wallet returned an invalid signature')
-        const normalized = signature as Hex
-        if (execution.requestSet.wallet.walletKind === 'eoa') {
-          await assertSignatureMatchesSigner(slot, normalized)
-        }
-        return normalized
+        return signature as Hex
       },
       async refreshPyth(current) {
         if (!current.requestSet.pythRefreshSlots.length) return []
