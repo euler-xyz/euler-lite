@@ -31,12 +31,12 @@ WORKDIR /usr/src/app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY scripts/install-preview-sdk.sh scripts/install-preview-sdk.sh
+# Preview SDK branches are mutable. Including the Lite source snapshot in this
+# layer key makes each Lite revision resolve the current remote branch head.
+COPY . .
 ARG EULER_SDK_BRANCH
 ARG EULER_SDK_PNPM_VERSION=10
 RUN chmod +x scripts/install-preview-sdk.sh && scripts/install-preview-sdk.sh
-
-COPY . .
 
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
