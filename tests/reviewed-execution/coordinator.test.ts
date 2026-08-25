@@ -789,23 +789,47 @@ describe('reviewed execution coordinator', () => {
     })
   })
 
-  it('warns when a rejected fresh migration leaves a pre-existing authorization active', async () => {
+  it('cleans up a pre-existing authorization after the migration core is rejected', async () => {
     const execution = migrationExecution(false)
-    const sendTransaction = vi.fn(async () => {
+    const sentPhases: string[] = []
+    const sendTransaction = vi.fn(async (request) => {
+      sentPhases.push(request.phase)
+      if (request.phase === 'core') throw Object.assign(new Error('User rejected'), { code: 4001 })
+      return HASH
+    })
+    const prepared = setup({ execution, client: makeClient(execution, { sendTransaction }) })
+
+    const result = await execute(prepared.coordinator, execution)
+
+    expect(sentPhases).toEqual(['core', 'cleanup'])
+    expect(result.status).toBe('rejected')
+    expect(result.migration).toMatchObject({
+      submission: { status: 'rejected' },
+      revocation: { status: 'submitted' },
+      authorizationMayRemain: false,
+    })
+    expect(result.migration?.warning).toBeUndefined()
+  })
+
+  it('warns when both a migration and its pre-existing authorization cleanup are rejected', async () => {
+    const execution = migrationExecution(false)
+    const sentPhases: string[] = []
+    const sendTransaction = vi.fn(async (request) => {
+      sentPhases.push(request.phase)
       throw Object.assign(new Error('User rejected'), { code: 4001 })
     })
     const prepared = setup({ execution, client: makeClient(execution, { sendTransaction }) })
 
     const result = await execute(prepared.coordinator, execution)
 
+    expect(sentPhases).toEqual(['core', 'cleanup'])
     expect(result.status).toBe('rejected')
     expect(result.migration).toMatchObject({
       submission: { status: 'rejected' },
-      revocation: { status: 'not-submitted' },
+      revocation: { status: 'rejected' },
       authorizationMayRemain: true,
     })
     expect(result.migration?.warning).toMatch(/authorization may remain active/i)
-    expect(sendTransaction).toHaveBeenCalledOnce()
   })
 
   it('preserves a submitted migration when revocation fails', async () => {

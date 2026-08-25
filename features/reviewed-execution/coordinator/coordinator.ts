@@ -155,14 +155,17 @@ const abortCleanupIndexesFor = (
   confirmedSteps: ReadonlySet<number>,
 ) => {
   const requests = execution.requestSet.requests
+  const reviewedGrantAuthorizationIds = new Set<Hash>()
   const confirmedAuthorizationIds = new Set<Hash>()
   requests.forEach((request, index) => {
+    migrationAuthorizationIdsFor(execution, request, 'grant').forEach(id => reviewedGrantAuthorizationIds.add(id))
     if (!confirmedSteps.has(index)) return
     migrationAuthorizationIdsFor(execution, request, 'grant').forEach(id => confirmedAuthorizationIds.add(id))
   })
   return requests.flatMap((request, index) => request.phase === 'cleanup'
     && !confirmedSteps.has(index)
-    && migrationAuthorizationIdsFor(execution, request, 'revoke').some(id => confirmedAuthorizationIds.has(id))
+    && migrationAuthorizationIdsFor(execution, request, 'revoke').some(id =>
+      confirmedAuthorizationIds.has(id) || !reviewedGrantAuthorizationIds.has(id))
     ? [index]
     : [])
 }

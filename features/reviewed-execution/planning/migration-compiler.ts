@@ -1,6 +1,7 @@
 import type {
   Account,
   IHasVaultAddress,
+  MigrationAuthorizationCall,
   MigrationAuthorizationRequest,
   PlanMigrationSimulationResult,
   TransactionPlan,
@@ -123,19 +124,19 @@ const appendTransactionAuthorization = (
   owner: EffectOwner,
   collectors: MigrationCompilationCollectors,
 ) => {
-  const encode = (call: typeof request.call, phase: 'prerequisite' | 'cleanup') => ({
+  const encode = (call: MigrationAuthorizationCall, phase: 'prerequisite' | 'cleanup') => ({
     phase,
     chainId: request.chainId,
     to: getAddress(call.to),
     data: encodeFunctionData({ abi: call.abi, functionName: call.functionName, args: call.args }),
     ...(call.value === undefined ? {} : { value: call.value }),
   })
-  const grant = encode(request.call, 'prerequisite')
+  const grant = request.call ? encode(request.call, 'prerequisite') : undefined
   const revocation = request.revocation ? encode(request.revocation, 'cleanup') : undefined
   const authorizationId = canonicalDigest('migration-authorization-pair-v1', toCanonicalValue({
     owner,
     pairIndex: collectors.before.length,
-    grant,
+    grant: grant ?? null,
     revocation: revocation ?? null,
   }))
   const decorate = (call: ReturnType<typeof encode>): AdditionalMaterializedCall => ({
@@ -144,7 +145,7 @@ const appendTransactionAuthorization = (
     owner,
     provenance: { source: 'migration-authorization', mode: 'transaction' },
   })
-  collectors.before.push(decorate(grant))
+  if (grant) collectors.before.push(decorate(grant))
   if (revocation) collectors.after.unshift(decorate(revocation))
 }
 

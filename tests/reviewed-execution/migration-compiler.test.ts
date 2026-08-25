@@ -22,6 +22,11 @@ const transactionRequest = {
   revocation: { to: TOKEN, abi: erc20Abi, functionName: 'approve', args: [SPENDER, 0n] },
 } as unknown as MigrationAuthorizationRequest
 
+const cleanupOnlyTransactionRequest = {
+  ...transactionRequest,
+  call: undefined,
+} as unknown as MigrationAuthorizationRequest
+
 const typedRequest = {
   kind: 'typedData',
   connectorId: 'morpho',
@@ -112,6 +117,27 @@ describe('cross-protocol migration compiler', () => {
     expect(output.stateOverrides).toEqual([{ address: TOKEN, stateDiff: [] }])
     expect(output.plansForSimulation.get('migration:1:1')).toBe(simulationPlan)
     expect(output.migrationAuthorizationRequests).toEqual([])
+  })
+
+  it('materializes cleanup without a prerequisite for an existing authorization', async () => {
+    const output = collectors()
+
+    await expect(compileCrossProtocolMigrationIntent({
+      intent: intentFor(cleanupOnlyTransactionRequest),
+      account,
+      sdk: sdkFor(cleanupOnlyTransactionRequest),
+      collectors: output,
+    })).resolves.toBe(simulationPlan)
+
+    expect(output.before).toEqual([])
+    expect(output.after).toHaveLength(1)
+    expect(output.after[0]).toMatchObject({
+      phase: 'cleanup',
+      chainId: 1,
+      to: TOKEN,
+      owner: { intentId: 'migration:1', intentRevision: 1 },
+      provenance: { source: 'migration-authorization', mode: 'transaction' },
+    })
   })
 
   it('locates typed authorization again in the final reviewed plan', async () => {
