@@ -1,15 +1,15 @@
 import { zeroHash, type Hash } from 'viem'
 import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { canonicalDigest, toCanonicalValue, type CanonicalValue } from '../domain/canonical'
-import type { ReviewedPolicy, ReviewedExecution, PluginSnapshot, ReviewedRequestSet, ReviewedSimulation, SafeAtomicCapabilityStatus, WalletBinding } from '../domain/reviewed-execution'
+import { canonicalDigest, deepFreezeSerializable, toCanonicalValue, type CanonicalValue } from '../domain/canonical'
+import type { ReviewedPolicy, ReviewedExecution, PluginPlanBundle, PluginSnapshot, ReviewedRequestSet, ReviewedSimulation, SafeAtomicCapabilityStatus, WalletBinding } from '../domain/reviewed-execution'
 import type { OperationIntent } from '../domain/intents'
-import { assertReviewedExecutionIntegrity, sealReviewedExecution } from '../domain/seal'
+import { assertPluginPlanBundleIntegrity, assertReviewedExecutionIntegrity, sealReviewedExecution } from '../domain/seal'
 import type { AdditionalMaterializedCall, EffectOwnership, PlanMaterializationSdk, PythPreviewData } from '../materialization/prepared-plan'
 import { reviewedRequestDigest, materializePreparedPlan } from '../materialization/prepared-plan'
 import type { PreparedMigrationSignatureSlot, PreparedPermit2Slot } from '../materialization/signature-slots'
 import type { EulerSimulationProjection } from '../simulation/coverage'
 import { buildReviewedSimulation } from '../simulation/coverage'
-import type { GenerationPublisher, PreparationCache, PreparationCacheIdentity } from './cache'
+import { preparationCacheKey, type GenerationPublisher, type PreparationCache, type PreparationCacheIdentity } from './cache'
 import { collectPlanningRequirements } from './requirements'
 import type { CompiledIntentSet, IntentCompilerRegistry } from './compiler'
 import type { PlanningSnapshot, PlanningSnapshotLoader } from './snapshot-loader'
@@ -53,6 +53,11 @@ export interface PrepareReviewedExecutionRequest {
   adopt?: PreparationCacheIdentity
   /** Rechecks mutable wallet/session context at every asynchronous boundary. */
   assertContext?: () => Promise<void>
+}
+
+export interface PreparedReviewedExecution {
+  execution: Readonly<ReviewedExecution>
+  pluginPlans: Readonly<PluginPlanBundle>
 }
 
 const pluginOwnerMap = (
@@ -128,7 +133,7 @@ export class ReviewedExecutionPreparationService {
     return identity ? { ...identity, accounts: [...identity.accounts], dataSourceVersions: { ...identity.dataSourceVersions } } : undefined
   }
 
-  async prepare(request: PrepareReviewedExecutionRequest): Promise<Readonly<ReviewedExecution>> {
+  async prepare(request: PrepareReviewedExecutionRequest): Promise<PreparedReviewedExecution> {
     const assertCurrent = () => this.generation.assertCurrent(request.cartGeneration)
     const assertContext = async () => {
       assertCurrent()
@@ -136,16 +141,6 @@ export class ReviewedExecutionPreparationService {
       assertCurrent()
     }
     await assertContext()
-    if (request.adopt) {
-      const cached = this.cache.get(request.adopt, this.now())
-      if (cached) {
-        assertReviewedExecutionIntegrity(cached)
-        if (cached.validity.cartGeneration !== request.cartGeneration || cached.validity.policyVersionDigest !== request.policyVersionDigest) throw new Error('Cached reviewed execution identity is incomplete')
-        await assertContext()
-        return cached
-      }
-    }
-
     const requirements = collectPlanningRequirements(request.intents)
     const snapshot = await this.dependencies.snapshotLoader.load(requirements, request.cartGeneration, this.now())
     await assertContext()
@@ -163,6 +158,17 @@ export class ReviewedExecutionPreparationService {
     await assertContext()
     const resolved = await this.dependencies.resolveApprovals(preview, request.wallet, snapshot)
     await assertContext()
+    const rawCanonical = toCanonicalValue(compiled.plan)
+    const previewCanonical = toCanonicalValue(resolved)
+    const pluginPlans = deepFreezeSerializable({
+      rawPlan: rawCanonical,
+      previewPlan: previewCanonical,
+    }) as Readonly<PluginPlanBundle>
+    const plugins: PluginSnapshot = {
+      rawPlanDigest: canonicalDigest('plugin-raw-v1', rawCanonical),
+      previewPlanDigest: canonicalDigest('plugin-preview-v1', previewCanonical),
+      pluginConfigurationDigest: canonicalDigest('plugin-configuration-v1', this.dependencies.pluginConfiguration),
+    }
     const [permit2Slots, migrationSignatureSlots, pythPreviewData] = await Promise.all([
       this.dependencies.preparePermit2Slots(resolved, request.wallet, snapshot),
       this.dependencies.prepareMigrationSignatureSlots(resolved, request.wallet, snapshot),
@@ -192,18 +198,23 @@ export class ReviewedExecutionPreparationService {
     const requestSet = materialize(policy.digest)
     const requestDigest = reviewedRequestDigest(requestSet)
     const adoptionIdentity = cacheIdentity(request, snapshot, 'reviewed-execution', requestDigest)
-    const cachedExecution = this.cache.get(adoptionIdentity, this.now())
+    if (request.adopt && preparationCacheKey(request.adopt) !== preparationCacheKey(adoptionIdentity)) {
+      throw new Error('Cached reviewed execution adoption identity does not match the prepared request')
+    }
+    const cachedExecution = this.cache.get(request.adopt ?? adoptionIdentity, this.now())
     if (cachedExecution) {
       assertReviewedExecutionIntegrity(cachedExecution)
       if (cachedExecution.requestDigest !== requestDigest
         || cachedExecution.validity.cartGeneration !== request.cartGeneration
         || cachedExecution.validity.planningSnapshotDigest !== snapshot.digest
-        || cachedExecution.validity.policyVersionDigest !== request.policyVersionDigest) {
+        || cachedExecution.validity.policyVersionDigest !== request.policyVersionDigest
+        || cachedExecution.pluginSnapshot.pluginConfigurationDigest !== plugins.pluginConfigurationDigest) {
         throw new Error('Cached reviewed execution identity is incomplete')
       }
+      assertPluginPlanBundleIntegrity(cachedExecution.pluginSnapshot, pluginPlans, cachedExecution.requestSet.pythRefreshSlots.length > 0)
       await assertContext()
       this.adoptionIdentities.set(cachedExecution.reviewId, adoptionIdentity)
-      return cachedExecution
+      return { execution: cachedExecution, pluginPlans }
     }
     const simulationIdentity = cacheIdentity(request, snapshot, 'whole-cart-simulation', requestDigest)
     let simulation: ReviewedSimulation
@@ -227,21 +238,13 @@ export class ReviewedExecutionPreparationService {
     }
     if (!simulation.canExecute) throw new Error('Reviewed transaction cannot execute')
 
-    const rawCanonical = toCanonicalValue(compiled.plan)
-    const previewCanonical = toCanonicalValue(resolved)
-    const plugins: PluginSnapshot = {
-      rawPlan: rawCanonical,
-      previewPlan: previewCanonical,
-      rawPlanDigest: canonicalDigest('plugin-raw-v1', rawCanonical),
-      previewPlanDigest: canonicalDigest('plugin-preview-v1', previewCanonical),
-      pluginConfigurationDigest: canonicalDigest('plugin-configuration-v1', this.dependencies.pluginConfiguration),
-    }
     const execution = sealReviewedExecution({
       intents: request.intents,
       requestSet: requestSet,
       policy: policy,
       simulation,
       pluginSnapshot: plugins,
+      pluginPlans,
       validity: {
         createdAt: this.now(),
         cartGeneration: request.cartGeneration,
@@ -254,6 +257,6 @@ export class ReviewedExecutionPreparationService {
     await assertContext()
     this.cache.put(adoptionIdentity, toCanonicalValue(execution))
     this.adoptionIdentities.set(execution.reviewId, adoptionIdentity)
-    return execution
+    return { execution, pluginPlans }
   }
 }

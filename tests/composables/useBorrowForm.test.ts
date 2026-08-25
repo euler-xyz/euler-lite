@@ -1,5 +1,6 @@
 import { computed, nextTick, ref, shallowRef, watch, watchEffect, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Address } from 'viem'
 import type { Account, EVault, IHasVaultAddress, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
@@ -442,7 +443,7 @@ describe('useBorrowForm savings collateral', () => {
     expect(mocks.openReview).toHaveBeenCalled()
   })
 
-  it('recaptures the quote-backed intent after the borrow amount settles', async () => {
+  it('recaptures direct and batch quote-backed intents after the borrow amount settles', async () => {
     const form = makeForm(shallowRef([]))
     const payToken = {
       address: '0x0000000000000000000000000000000000000099' as const,
@@ -469,6 +470,10 @@ describe('useBorrowForm savings collateral', () => {
     form.borrowAmount.value = '5'
     mocks.planSwapAndBorrow.mockResolvedValue([{ type: 'evcBatch', items: [] }])
     mocks.runSimulation.mockResolvedValue(true)
+
+    const batchIntent = form.createBorrowIntent(form.captureBorrowSnapshot(SUB_ACCOUNT_A as Address)) as unknown as { planner: { args: { borrowAmount: bigint } } }
+    expect(batchIntent.planner.args.borrowAmount).toBe(5n)
+    expect(batchIntent).not.toBe(previewIntent)
 
     await form.submit()
 

@@ -523,12 +523,10 @@ const assertValidity = (value: unknown, path: string) => {
 
 const assertPluginSnapshot = (value: unknown, path: string) => {
   assertRecord(value, path)
-  assertExactKeys(value, ['rawPlanDigest', 'previewPlanDigest', 'pluginConfigurationDigest', 'rawPlan', 'previewPlan'], path)
+  assertExactKeys(value, ['rawPlanDigest', 'previewPlanDigest', 'pluginConfigurationDigest'], path)
   assertHash(value.rawPlanDigest, `${path}.rawPlanDigest`)
   assertHash(value.previewPlanDigest, `${path}.previewPlanDigest`)
   assertHash(value.pluginConfigurationDigest, `${path}.pluginConfigurationDigest`)
-  assertCanonicalValue(value.rawPlan, `${path}.rawPlan`)
-  assertCanonicalValue(value.previewPlan, `${path}.previewPlan`)
 }
 
 export function assertOperationIntent(value: unknown): asserts value is OperationIntent {

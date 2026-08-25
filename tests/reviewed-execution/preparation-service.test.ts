@@ -172,11 +172,14 @@ describe('authoritative reviewed execution preparation', () => {
       policyVersionDigest: keccak256(toHex('policy-v1')), freshUntil: 5_000,
     } as const
 
-    const execution = await service.prepare(request)
+    const { execution, pluginPlans } = await service.prepare(request)
     const adoptionIdentity = service.getAdoptionIdentity(execution.reviewId)
     expect(adoptionIdentity).toBeDefined()
     const adopted = await service.prepare(request)
-    expect(adopted.reviewId).toBe(execution.reviewId)
+    expect(adopted.execution.reviewId).toBe(execution.reviewId)
+    expect(adopted.pluginPlans).toEqual(pluginPlans)
+    expect(adopted.execution.pluginSnapshot).not.toHaveProperty('rawPlan')
+    expect(adopted.execution.pluginSnapshot).not.toHaveProperty('previewPlan')
     expect(compilerCall).toHaveBeenCalledTimes(2)
     expect(pluginPrefetch).toHaveBeenCalledOnce()
     expect(simulation).toHaveBeenCalledOnce()
@@ -193,8 +196,8 @@ describe('authoritative reviewed execution preparation', () => {
       presentationKind: 'batch',
       presentationInputs: [{ id: intent.intentId, review: request.presentationInputs }],
     })
-    expect(batchExecution.requestDigest).toBe(execution.requestDigest)
-    expect(batchExecution.requestSet).toEqual(execution.requestSet)
+    expect(batchExecution.execution.requestDigest).toBe(execution.requestDigest)
+    expect(batchExecution.execution.requestSet).toEqual(execution.requestSet)
   })
 
   it('discards every result published after the cart generation advances', async () => {
@@ -251,7 +254,7 @@ describe('authoritative reviewed execution preparation', () => {
     ['batch', 'batch', [{ id: aaveMigrationIntent.intentId, review: { type: 'migration' } }]],
   ] as const)('prepares and revalidates an Aave migration without transaction-time screening for %s review', async (_path, presentationKind, presentationInputs) => {
     const service = createAppPolicyService('cross-protocol-migration')
-    const execution = await service.prepare({
+    const { execution } = await service.prepare({
       intents: [aaveMigrationIntent],
       wallet: aaveWallet,
       cartGeneration: 0,
@@ -333,7 +336,7 @@ describe('authoritative reviewed execution preparation', () => {
   ] as const)('prepares an rEUL unlock without optional token-list metadata for %s review', async (_path, presentationKind, presentationInputs) => {
     const service = createAppPolicyService('reul-unlock')
 
-    const execution = await service.prepare({
+    const { execution } = await service.prepare({
       intents: [reulIntent],
       wallet,
       cartGeneration: 0,

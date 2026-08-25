@@ -7,7 +7,7 @@ import { getSafeAtomicCapability, getSafeWalletProvider, isSafeConnectorIdentity
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { canonicalDigest, toCanonicalValue, type CanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 import { connectorSessionDigest } from '~/features/reviewed-execution/domain/wallet-session'
-import type { ReviewedExecution, WalletBinding, EoaRequest, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
+import type { ReviewedExecution, PluginPlanBundle, WalletBinding, EoaRequest, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { validateIntentSet } from '~/features/reviewed-execution/domain/validators'
 import { rewardClaimId, rewardClaimSetDigest } from '~/features/reviewed-execution/domain/rewards'
@@ -16,6 +16,7 @@ import { PlanningSnapshotLoader } from '~/features/reviewed-execution/planning/s
 import { createAppSnapshotDependencies, assertRuntimeAccountContext } from '~/features/reviewed-execution/planning/app-snapshot'
 import { createLiteIntentCompilerRegistry, asCompilerRuntime, type LiteCompilerRuntime } from '~/features/reviewed-execution/planning/lite-compilers'
 import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
+import { assertPluginPlanBundleIntegrity } from '~/features/reviewed-execution/domain/seal'
 import { collectPythPreviewData, rehydratePluginPrefetch, serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
 import { PYTH_FRESHNESS_POLICY, PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
 import { assertPermit2NonceCurrent, preparePermit2Slots } from '~/features/reviewed-execution/materialization/signature-slots'
@@ -83,6 +84,7 @@ export interface PreparedExecutionReview {
 
 const cache = new PreparationCache()
 const executions = new Map<Hash, Readonly<ReviewedExecution>>()
+const runtimePluginPlans = new Map<Hash, Readonly<PluginPlanBundle>>()
 const reviewGenerations = new Map<Hash, { publisher: GenerationPublisher, generation: number }>()
 
 const currentPolicyVersionDigest = () => canonicalDigest('policy-version-v1', toCanonicalValue({
@@ -410,7 +412,7 @@ export const useReviewedExecution = () => {
       directCallAllowlist,
     }, cache, publisher)
     const policyVersionDigest = currentPolicyVersionDigest()
-    const execution = await service.prepare({
+    const { execution, pluginPlans } = await service.prepare({
       intents,
       wallet,
       cartGeneration,
@@ -426,8 +428,9 @@ export const useReviewedExecution = () => {
       assertContext: assertPreparationContext,
     })
     executions.set(execution.reviewId, execution)
+    runtimePluginPlans.set(execution.reviewId, pluginPlans)
     reviewGenerations.set(execution.reviewId, { publisher, generation: cartGeneration })
-    const previewPlan = execution.pluginSnapshot.previewPlan as unknown as TransactionPlan
+    const previewPlan = pluginPlans.previewPlan as unknown as TransactionPlan
     return {
       execution,
       previewPlan,
@@ -537,7 +540,7 @@ export const useReviewedExecution = () => {
     providedAccount?: Account<IHasVaultAddress>,
   ): Promise<TransactionPlan> => (await compilePreviewForSimulation(intents, providedAccount)).reviewedPlan
 
-  const executionRuntime = async (execution: ReviewedExecution) => {
+  const executionRuntime = async (execution: ReviewedExecution, pluginPlans: Readonly<PluginPlanBundle>) => {
     const sdk = await getEulerSdkFresh()
     const publicClient = sdk.providerService.getProvider(execution.requestSet.wallet.chainId)
     const evcAddress = getAddress(sdk.deploymentService.getDeployment(execution.requestSet.wallet.chainId).addresses.coreAddrs.evc)
@@ -613,8 +616,9 @@ export const useReviewedExecution = () => {
       },
       async refreshPyth(current) {
         if (!current.requestSet.pythRefreshSlots.length) return []
-        const raw = current.pluginSnapshot.rawPlan as unknown as TransactionPlan
-        const sealedPreview = current.pluginSnapshot.previewPlan as unknown as TransactionPlan
+        assertPluginPlanBundleIntegrity(current.pluginSnapshot, pluginPlans, true)
+        const raw = pluginPlans.rawPlan as unknown as TransactionPlan
+        const sealedPreview = pluginPlans.previewPlan as unknown as TransactionPlan
         const prefetch = await sdk.executionService.prefetchPluginDataForPlan(raw, current.requestSet.wallet.account, current.requestSet.wallet.chainId)
         const serialized = serializePluginPrefetch(prefetch)
         const refreshed = await sdk.executionService.processPlanPlugins(raw, current.requestSet.wallet.account, current.requestSet.wallet.chainId, prefetch)
@@ -645,9 +649,12 @@ export const useReviewedExecution = () => {
     generation?.publisher.assertCurrent(generation.generation)
     const execution = executions.get(reviewId)
     if (!execution) throw new Error('Reviewed execution is unavailable')
+    const pluginPlans = runtimePluginPlans.get(reviewId)
+    if (!pluginPlans) throw new Error('Reviewed execution plugin plans are unavailable')
+    assertPluginPlanBundleIntegrity(execution.pluginSnapshot, pluginPlans, execution.requestSet.pythRefreshSlots.length > 0)
     // The coordinator invokes this factory only after acquiring its synchronous
     // guard, so a duplicate callback cannot even initialize a second runtime.
-    const coordinator = new ReviewedExecutionCoordinator(() => executionRuntime(execution))
+    const coordinator = new ReviewedExecutionCoordinator(() => executionRuntime(execution, pluginPlans))
     let result: SubmissionResult | undefined
     try {
       result = await coordinator.execute(execution, { reviewId, reviewDigest })
@@ -663,6 +670,7 @@ export const useReviewedExecution = () => {
     finally {
       if (!result?.canRetry) {
         executions.delete(reviewId)
+        runtimePluginPlans.delete(reviewId)
         reviewGenerations.delete(reviewId)
       }
     }
@@ -670,6 +678,7 @@ export const useReviewedExecution = () => {
 
   const discard = (reviewId: Hash) => {
     executions.delete(reviewId)
+    runtimePluginPlans.delete(reviewId)
     reviewGenerations.delete(reviewId)
   }
 

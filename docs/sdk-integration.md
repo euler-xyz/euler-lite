@@ -8,7 +8,7 @@ This document describes how `@eulerxyz/euler-v2-sdk` is initiated inside Euler L
 |------|---------|
 | `composables/useEulerSdk.ts` | SDK factory (`getEulerSdk`, `getEulerSdkForChain`, `getEulerSdkFresh`) with Map-based instance cache |
 | `utils/sdk-query-policy.ts` | **Single source of truth** — per-query `staleTimeMs` / `formStaleTimeMs` / `invalidateAfterTx`; derived `STALE_TIMES`, `FORM_STALE_TIMES`, `INVALIDATE_AFTER_TX` |
-| `utils/sdk-query-cache.ts` | Runtime: shared `QueryClient`, `buildQuery` wrappers, `invalidateSdkQueries` |
+| `utils/sdk-query-cache.ts` | Runtime: shared `QueryClient`, `buildQuery` wrappers, invalidation, and post-indexer query generations |
 | `composables/useEnvConfig.ts` | Resolves env-derived config (incl. `enableV3Backend`) on server and client |
 | `server/plugins/app-config.ts` | Reads env at server startup and injects `window.__APP_CONFIG__` |
 | `nuxt.config.ts` | Declares the public runtime config keys that mirror env vars |
@@ -44,7 +44,7 @@ The app exposes three SDK entry points, all produced by the same factory in `com
 
 - **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Plan-critical account and vault reads use shorter form-time windows than browsing reads: for example, `queryAccountVaults` uses 1 minute and balance-like migration reads use 15 seconds. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches an `Account` through those onchain adapters.
 
-  Pinning the adapters changes the *data source*, not the cache. `sdkFreshBuildQuery` still runs through the shared `QueryClient`, and `freshPlanContext()` does not invalidate before fetching, so a plan-time `Account` is onchain-backed but only as fresh as its `FORM_STALE_TIMES` rows allow — up to a minute old for `queryAccountVaults`. Post-reviewed execution invalidation (`invalidateAfterTx`) marks those rows stale so a later idle read re-fetches after the user's own state changes; the fresh instance alone does not. Invalidation is not a transport-level freshness boundary: an in-flight `fetchQuery` for the same key is joined. Do not rely on this entry point for a latest-block guarantee.
+  Pinning the adapters changes the *data source*, not the cache. `sdkFreshBuildQuery` still runs through the shared `QueryClient`, and `freshPlanContext()` does not invalidate before fetching, so a plan-time `Account` is onchain-backed but only as fresh as its `FORM_STALE_TIMES` rows allow — up to a minute old for `queryAccountVaults`. Immediate reviewed-execution invalidation (`invalidateAfterTx`) marks those rows stale so a later idle read re-fetches after the user's own state changes; the fresh instance alone does not. Ordinary invalidation joins an in-flight `fetchQuery` for the same key. The post-indexer portfolio refresh uses a new query generation, so reads triggered after the subgraph reaches the confirmed block cannot join the pre-catch-up request. Neither entry point by itself guarantees a latest-block read.
 
 All entry points share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the browsing entry points read from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -136,7 +136,7 @@ cannot introduce a query that silently inherits `DEFAULT_STALE_TIME_MS`.
 interface SdkQueryPolicyEntry {
   staleTimeMs: number              // QueryClient stale time on the browsing SDK
   formStaleTimeMs?: number         // override on the plan-time SDK; defaults to staleTimeMs
-  invalidateAfterTx?: boolean      // invalidated after successful tx
+  invalidateAfterTx?: boolean      // participates in post-transaction invalidation
 }
 ```
 
@@ -193,13 +193,13 @@ export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]               // 
 |---|---|---|
 | `staleTimeMs` | browsing SDK | `QueryClient.fetchQuery({ staleTime: STALE_TIMES[name] ?? DEFAULT_STALE_TIME_MS })`. Cached entries younger than this are returned without re-invoking the SDK. |
 | `formStaleTimeMs` | plan-time SDK | Same mechanism but on the fresh SDK's wrapper. Setting `0` forces re-fetch on every plan-time call regardless of cache age. |
-| `invalidateAfterTx` | shared QueryClient | Names listed are marked stale via `invalidateSdkQueries(INVALIDATE_AFTER_TX)` after plan finalization, subgraph sync, and CoW permit hard-cancellation. Standalone migration grant/revoke receipts do not run this. Matching cache entries stay in place; a later idle `fetchQuery` re-fetches. An in-flight `fetchQuery` for the same key is joined rather than cancelled. |
+| `invalidateAfterTx` | shared QueryClient | Names listed are marked stale via `invalidateSdkQueries(INVALIDATE_AFTER_TX)` after reviewed submission and CoW permit hard-cancellation. After the reviewed submission's subgraph catch-up, `advanceSdkQueryGeneration(INVALIDATE_AFTER_TX)` invalidates again and assigns subsequent reads distinct cache keys. Standalone migration grant/revoke receipts do not run either boundary. |
 
 `formStaleTimeMs` and `invalidateAfterTx` cover different scopes — `formStaleTimeMs` only affects the plan-time SDK per-fetch behaviour, while `invalidateAfterTx` marks entries stale in the shared cache so a later idle matching read re-fetches too. Some queries need only one (V3-only plan reads, Pyth simulation, etc.); some need both.
 
 ## Runtime: `sdk-query-cache.ts`
 
-`utils/sdk-query-cache.ts` is now just runtime — no policy data lives there. It exports:
+`utils/sdk-query-cache.ts` owns the cache runtime; query policy remains in `utils/sdk-query-policy.ts`. It exports:
 
 ```ts
 export const sdkQueryClient = new QueryClient()
@@ -208,9 +208,10 @@ export const sdkBuildQuery      = buildSdkQuery(STALE_TIMES)
 export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 
 export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => { … }
+export const advanceSdkQueryGeneration = (queryNames: EulerSDKQueryName[]) => { … }
 ```
 
-`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? DEFAULT_STALE_TIME_MS })` call. The `DEFAULT_STALE_TIME_MS` fall-through is a runtime backstop only — the completeness test keeps the policy table exhaustive, so no shipped query name actually relies on it.
+`buildSdkQuery(staleTimes)` returns a `BuildQueryFn` that wraps each SDK `query*` method with a `QueryClient.fetchQuery({ queryKey: ['sdk', queryName, generation, serializedArgs], queryFn, staleTime: staleTimes[queryName] ?? DEFAULT_STALE_TIME_MS })` call. The per-name generation defaults to zero and changes only at an explicit post-indexer freshness boundary. The `DEFAULT_STALE_TIME_MS` fall-through is a runtime backstop only — the completeness test keeps the policy table exhaustive, so no shipped query name actually relies on it.
 
 Key properties:
 
@@ -222,23 +223,25 @@ Key properties:
 
 `invalidateSdkQueries(queryNames)` walks the QueryClient and invalidates any cache key whose `queryName` matches. SDK rows use `fetchQuery` with no standing observer, so this marks the entry stale rather than kicking off an immediate refetch. With the locked TanStack Query 5.101.4, invalidating a key that is already fetching sets `isInvalidated=true`, but a matching `fetchQuery` **joins that pending promise**. When the old request resolves it writes the pre-invalidation value and clears the invalidated flag, so even a subsequent read can return that result with the transport count still at 1. Invalidation is therefore a stale-boundary for later idle reads, not a cancel/version of in-flight work.
 
-Two execution boundaries pass the whole `INVALIDATE_AFTER_TX` list:
+`advanceSdkQueryGeneration(queryNames)` increments the cache-key generation synchronously, then invalidates the preceding entries and notifies the same invalidation listeners. An in-flight request can finish for its original caller and write only to its earlier-generation key; any subsequent SDK read uses the new key and starts or joins post-boundary work instead.
 
-- `composables/useReviewedExecution.ts:accept` — fires after a successful reviewed execution dispatch and triggers the portfolio refresh.
+Two execution paths use the whole `INVALIDATE_AFTER_TX` list:
+
+- `features/reviewed-execution/review/post-tx-refresh.ts` — invalidates immediately for terminal reviewed submissions, then advances the generation after confirmed-block subgraph catch-up.
 - `composables/cowswap/useCowSwapExecutionCore.ts:cancelOrder` — the permit **hard-cancellation** branch only. That path plans and executes an EVC nonce write to invalidate the permit, which is a real on-chain state change. CoW order submission and settlement do not invalidate, and neither does the `cow-api` soft-cancellation branch.
 
-Both callers import `INVALIDATE_AFTER_TX` directly from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
+Both paths source `INVALIDATE_AFTER_TX` from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
 
 Other callers pass their own narrower name list for an explicit refresh: `composables/useSdkRewards.ts` (user reward rows before a portfolio rebuild), `composables/useEulerLabels.ts` (the five label queries on `loadLabels(true)`), and the lend withdraw page (wallet token balances after a swap output changes). Those narrower invalidations have the same in-flight join caveat. Nothing invalidates on form mount — a form that opens within a row's stale window reads the cached value.
 
 ### Post-Tx Portfolio Refresh
 
-Successful `useReviewedExecution.accept` invalidates `INVALIDATE_AFTER_TX` and calls `triggerPortfolioRefresh()`. The shared `portfolioRefreshCounter` drives two refreshes:
+Terminal `useReviewedExecution.accept` outcomes immediately invalidate `INVALIDATE_AFTER_TX` and call `triggerPortfolioRefresh()`. When dispatch metadata includes a confirmed block, the post-tx helper waits for the SDK subgraph proxy to index that block, advances the `INVALIDATE_AFTER_TX` query generation, and triggers the portfolio refresh again. The second trigger therefore cannot join SDK queries started by the immediate refresh. The shared `portfolioRefreshCounter` drives these consumers:
 
 - `composables/useFreshAccount.ts` reloads the plan-time account snapshot. It races the fast SDK and fresh SDK account reads; fast can fill an empty ref, but the fresh result always wins for the current load cursor.
 - `pages/portfolio.vue` calls `updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })`. That calls `refreshAllPositions(..., { source: 'fresh', preempt: true })`, so `composables/useEulerAccount.ts` loads the visible portfolio through `getEulerSdkFresh()` for the post-tx refresh. `preempt: true` advances the position race guard and resets the refresh coordinator so preempted fast portfolio reads cannot write stale portfolio data or diagnostics over the fresh result.
 
-Normal portfolio page activation and 60-second polling call `updatePositions()` without options. That leaves `source` undefined, and `useEulerAccount` selects the fast SDK only on an explicit `source === 'fast'` — so routine browsing also reads through `getEulerSdkFresh()`. The post-tx call differs from routine polling only in passing `preempt: true` and in the invalidation that precedes it, not in which SDK instance it uses. `'fast'` is opt-in and no current caller passes it.
+Normal portfolio page activation and 60-second polling call `updatePositions()` without options. That leaves `source` undefined, and `useEulerAccount` selects the fast SDK only on an explicit `source === 'fast'` — so routine browsing also reads through `getEulerSdkFresh()`. Post-tx calls differ by passing `preempt: true` and by applying the immediate invalidation or post-indexer query-generation boundary first, not by which SDK instance they use. `'fast'` is opt-in and no current caller passes it.
 
 ## Plan-Time Fresh Fetch
 
@@ -264,7 +267,7 @@ How fresh that snapshot actually is depends on the path taken:
 |---|---|
 | `freshPlanContext()` fetches it | Onchain adapters, but served from the shared `QueryClient` at each row's `FORM_STALE_TIMES` window — `queryAccountVaults` is 1 minute, so a snapshot up to a minute old can be reused. No invalidation happens first. |
 | Caller passes `input.account` | The `useFreshAccount()` race-replace snapshot, reloaded on wallet/chain change and on `triggerPortfolioRefresh()`. Its fresh task also calls `getEulerSdkFresh()` and then `fetchAccount()`, so those reads go through the shared `QueryClient` as well — bounded by the trigger cadence *and* the applicable `FORM_STALE_TIMES` windows, not by the cadence alone. (A parallel fast task uses the browsing windows; the fresh result wins whenever it lands.) |
-| After a successful reviewed execution | Execution acceptance completion and CoW hard-cancel mark the `invalidateAfterTx` rows stale. They stay in the cache — nothing is removed — and a later idle plan-time read re-fetches instead of reusing them. This is not unconditional: an in-flight `fetchQuery` for the same key is joined rather than replaced. |
+| After a successful reviewed execution | Acceptance immediately marks the `invalidateAfterTx` rows stale. Once the subgraph reaches the confirmed receipt block, the second refresh advances those query generations; subsequent plan-time reads cannot join the pre-catch-up fetch. CoW hard-cancel applies ordinary invalidation only. |
 
 `attachSubAccountSnapshot` re-reads the receiver sub-account before planning, because a stale controller flag makes the planner skip `enableController` and the EVC batch reverts. That re-read goes through the same cache, so it corrects a snapshot carried over from an earlier portfolio load but is itself bounded by the same 1-minute window. A planner that needs a stronger guarantee has to invalidate the relevant rows explicitly.
 ## Where to Extend

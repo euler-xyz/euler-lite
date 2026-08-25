@@ -13,7 +13,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { ltvToPercent } from '~/utils/crypto-utils'
-import { useBorrowForm, type BorrowBatchSnapshot } from '~/composables/borrow/useBorrowForm'
+import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm, type MultiplyBatchSnapshot } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -276,32 +276,16 @@ const canAddBorrowToBatch = computed(() => {
 const addToBatch = async () => {
   if (!canAddBorrowToBatch.value) return
   await guardWithBorrowSwapPriceImpact(async () => {
+    const subAccount = (await resolvePendingSubAccount()) as Address
     const cVault = collateralVault.value
     const bVault = borrowVault.value
     if (!cVault || !bVault) return
-    const subAccount = (await resolvePendingSubAccount()) as Address
     // Capture every input by value NOW — the batch re-simulates asynchronously and
     // we reset the form below, so a lazy read of the reactive refs would see the
     // cleared values (an empty amount builds a no-op borrow).
-    const snap: BorrowBatchSnapshot = {
-      subAccount,
-      // The composable treats collateral as an EVault (see useBorrowForm construction).
-      collateralVault: cVault as EVault,
-      borrowVault: bVault,
-      collateralAmount: borrow.collateralAmount.value,
-      borrowAmount: borrow.borrowAmount.value,
-      needsSwap: borrow.borrowNeedsSwap.value,
-      selectedAsset: borrow.borrowSelectedAsset.value,
-      isSavingCollateral: borrow.isSavingCollateral.value,
-      savingCollateral: borrow.savingCollateral.value,
-      isBorrowNativeWrap: borrow.isBorrowNativeWrap.value,
-      quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
-    }
+    const snap = borrow.captureBorrowSnapshot(subAccount)
     const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-    const quoteIntents = snap.quote
-      ? borrow.borrowSwapQuoteCards.value.find(card => card.quote === snap.quote)?.intents
-      : undefined
-    await addBatchEntry({ intent: quoteIntents?.[0] ?? borrow.createBorrowIntent(snap), label, subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
+    await addBatchEntry({ intent: borrow.createBorrowIntent(snap), label, subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
     borrow.collateralAmount.value = ''
     borrow.borrowAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount })

@@ -10,7 +10,7 @@ import { ReviewedExecutionCoordinator, type CoordinatorDependencies } from '~/fe
 import type { ReviewedExecution } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { finalizeReviewedRequestSet } from '~/features/reviewed-execution/materialization/finalize'
 import { verifyRefreshedPluginPlan } from '~/features/reviewed-execution/materialization/pyth-refresh'
-import { artifactFor, makePythReviewedExecution, makeReviewedExecution, materializedExecutorFor, TEST_ACCOUNT, TEST_EVC, TEST_TOKEN } from './fixtures'
+import { artifactFor, getFixturePluginPlans, makePythReviewedExecution, makeReviewedExecution, materializedExecutorFor, TEST_ACCOUNT, TEST_EVC, TEST_TOKEN } from './fixtures'
 
 const hashFor = (value: number) => `0x${value.toString(16).padStart(64, '0')}` as Hash
 const HASH = hashFor(1)
@@ -318,8 +318,9 @@ describe('reviewed execution coordinator', () => {
     const refreshPyth = vi.fn(async () => {
       events.push(`refresh:${nowMs}`)
       refreshed = true
-      const sealedPreview = execution.pluginSnapshot.previewPlan as unknown as TransactionPlan
-      const raw = execution.pluginSnapshot.rawPlan as unknown as TransactionPlan
+      const pluginPlans = getFixturePluginPlans(execution)
+      const sealedPreview = pluginPlans.previewPlan as unknown as TransactionPlan
+      const raw = pluginPlans.rawPlan as unknown as TransactionPlan
       const sealedBatch = sealedPreview[1]
       if (sealedBatch?.type !== 'evcBatch') throw new Error('Expected reviewed EVC batch')
       const freshPayload = encodeFunctionData({ abi: PYTH_ABI, functionName: 'updatePriceFeeds', args: [['0xaabb']] })

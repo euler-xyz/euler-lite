@@ -78,12 +78,14 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     QueryClient cache that the fast instance fills. Those windows are short,
  *     not zero: pinning the adapters selects the data source, it does not
  *     force a refetch, so this instance bounds staleness rather than
- *     guaranteeing a latest-block read. Post-tx `invalidateAfterTx`
- *     invalidation marks those rows stale for a later idle read; it does
- *     not cancel an in-flight `fetchQuery`. The fresh instance's refetches
- *     write back to the shared cache, so a subsequent fast read sees the
- *     just-refreshed value within its own staleness window. Consumed by
- *     `useEulerTx` planners and simulate/execute.
+ *     guaranteeing a latest-block read. Immediate post-tx
+ *     `invalidateAfterTx` invalidation marks those rows stale for a later idle
+ *     read but does not cancel an in-flight `fetchQuery`. After the subgraph
+ *     reaches the confirmed block, the reviewed-execution refresh advances
+ *     their cache generation so its reads cannot join the earlier fetch. The
+ *     fresh instance's refetches write back to the shared cache, so a
+ *     subsequent fast read sees the just-refreshed value within its own
+ *     staleness window. Consumed by transaction planners and simulation.
  */
 
 type SdkInstance = { sdk: EulerSDK }

@@ -195,6 +195,9 @@ export interface PluginSnapshot {
   rawPlanDigest: Hash
   previewPlanDigest: Hash
   pluginConfigurationDigest: Hash
+}
+
+export interface PluginPlanBundle {
   rawPlan: CanonicalValue
   previewPlan: CanonicalValue
 }

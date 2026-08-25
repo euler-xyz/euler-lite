@@ -1,6 +1,6 @@
 import type { Hash } from 'viem'
 import { canonicalDigest, deepFreezeSerializable, toCanonicalValue, type CanonicalValue } from './canonical'
-import type { ReviewValidity, ReviewedPolicy, ReviewedExecution, PluginSnapshot, ReviewedRequestSet, ReviewedSimulation } from './reviewed-execution'
+import type { ReviewValidity, ReviewedPolicy, ReviewedExecution, PluginPlanBundle, PluginSnapshot, ReviewedRequestSet, ReviewedSimulation } from './reviewed-execution'
 import type { OperationIntent } from './intents'
 import { assertReviewedExecution } from './schemas'
 import { validateReviewedRequestSet } from './validators'
@@ -15,6 +15,7 @@ export const sealReviewedExecution = ({
   simulation,
   validity,
   pluginSnapshot,
+  pluginPlans,
   presentationKind,
   presentationInputs,
 }: {
@@ -24,6 +25,7 @@ export const sealReviewedExecution = ({
   simulation: ReviewedSimulation
   validity: ReviewValidity
   pluginSnapshot: PluginSnapshot
+  pluginPlans: PluginPlanBundle
   presentationKind: string
   presentationInputs: CanonicalValue
 }): Readonly<ReviewedExecution> => {
@@ -31,13 +33,7 @@ export const sealReviewedExecution = ({
   const requestDigest = canonicalDigest('reviewed-request-set-v1', toCanonicalValue(requestSet))
   if (requestSet.policyDigest !== policy.digest) throw new Error('Request-set policy digest does not match its policy')
   if (simulation.requestDigest !== requestDigest) throw new Error('Simulation belongs to another request set')
-  if (
-    canonicalDigest('plugin-plan-content-v1', pluginSnapshot.previewPlan)
-    === canonicalDigest('plugin-plan-content-v1', pluginSnapshot.rawPlan)
-    && requestSet.pythRefreshSlots.length
-  ) {
-    throw new Error('Pyth preview does not contain a processed plugin difference')
-  }
+  assertPluginPlanBundleIntegrity(pluginSnapshot, pluginPlans, requestSet.pythRefreshSlots.length > 0)
   const reviewId = canonicalDigest('reviewed-execution-id-v1', toCanonicalValue({
     requestDigest,
     intents: intents.map(intent => ({ intentId: intent.intentId, revision: intent.revision })),
@@ -76,6 +72,21 @@ export const sealReviewedExecution = ({
 export const digestPluginPlan = (schema: 'raw' | 'preview' | 'configuration', value: CanonicalValue): Hash =>
   canonicalDigest(`plugin-${schema}-v1`, value)
 
+export const assertPluginPlanBundleIntegrity = (
+  snapshot: PluginSnapshot,
+  plans: PluginPlanBundle,
+  hasPythRefreshSlots = false,
+) => {
+  const rawPlan = toCanonicalValue(plans.rawPlan)
+  const previewPlan = toCanonicalValue(plans.previewPlan)
+  if (snapshot.rawPlanDigest !== digestPluginPlan('raw', rawPlan)) throw new Error('Runtime raw plugin plan does not match its reviewed digest')
+  if (snapshot.previewPlanDigest !== digestPluginPlan('preview', previewPlan)) throw new Error('Runtime preview plugin plan does not match its reviewed digest')
+  if (
+    hasPythRefreshSlots
+    && canonicalDigest('plugin-plan-content-v1', previewPlan) === canonicalDigest('plugin-plan-content-v1', rawPlan)
+  ) throw new Error('Pyth preview does not contain a processed plugin difference')
+}
+
 /**
  * Recomputes every derivable commitment before an in-memory reviewed
  * execution reaches the wallet boundary. Shape validation alone is
@@ -95,14 +106,6 @@ export function assertReviewedExecutionIntegrity(value: unknown): asserts value 
   if (value.policy.digest !== policyDigest || value.requestSet.policyDigest !== policyDigest) {
     throw new Error('Execution policy result digest is corrupt')
   }
-  if (value.pluginSnapshot.rawPlanDigest !== digestPluginPlan('raw', value.pluginSnapshot.rawPlan)) throw new Error('Reviewed execution raw plugin plan digest is corrupt')
-  if (value.pluginSnapshot.previewPlanDigest !== digestPluginPlan('preview', value.pluginSnapshot.previewPlan)) throw new Error('Reviewed execution preview plugin plan digest is corrupt')
-  if (
-    canonicalDigest('plugin-plan-content-v1', value.pluginSnapshot.previewPlan)
-    === canonicalDigest('plugin-plan-content-v1', value.pluginSnapshot.rawPlan)
-    && value.requestSet.pythRefreshSlots.length
-  ) throw new Error('Pyth preview does not contain a processed plugin difference')
-
   const reviewId = canonicalDigest('reviewed-execution-id-v1', toCanonicalValue({
     requestDigest,
     intents: value.intents.map(intent => ({ intentId: intent.intentId, revision: intent.revision })),

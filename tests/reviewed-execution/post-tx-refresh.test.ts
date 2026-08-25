@@ -3,6 +3,7 @@ import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { refreshPortfolioAfterReviewedSubmission } from '~/features/reviewed-execution/review/post-tx-refresh'
 
 const mocks = vi.hoisted(() => ({
+  advanceSdkQueryGeneration: vi.fn(async () => {}),
   buildSubgraphProxyApiPath: vi.fn((chainId: number) => `/api/internal/proxy/subgraph/${chainId}`),
   invalidateSdkQueries: vi.fn(async () => {}),
   logWarn: vi.fn(),
@@ -13,7 +14,10 @@ vi.mock('~/composables/useEulerSdk', () => ({
   buildSubgraphProxyApiPath: mocks.buildSubgraphProxyApiPath,
 }))
 vi.mock('~/utils/errorHandling', () => ({ logWarn: mocks.logWarn }))
-vi.mock('~/utils/sdk-query-cache', () => ({ invalidateSdkQueries: mocks.invalidateSdkQueries }))
+vi.mock('~/utils/sdk-query-cache', () => ({
+  advanceSdkQueryGeneration: mocks.advanceSdkQueryGeneration,
+  invalidateSdkQueries: mocks.invalidateSdkQueries,
+}))
 vi.mock('~/utils/subgraph', () => ({ waitForSubgraphBlock: mocks.waitForSubgraphBlock }))
 
 describe('refreshPortfolioAfterReviewedSubmission', () => {
@@ -32,10 +36,14 @@ describe('refreshPortfolioAfterReviewedSubmission', () => {
     })
 
     expect(mocks.waitForSubgraphBlock).toHaveBeenCalledWith('/api/internal/proxy/subgraph/1', 123n)
-    expect(mocks.invalidateSdkQueries).toHaveBeenCalledTimes(2)
-    expect(mocks.invalidateSdkQueries).toHaveBeenNthCalledWith(1, [...INVALIDATE_AFTER_TX])
-    expect(mocks.invalidateSdkQueries).toHaveBeenNthCalledWith(2, [...INVALIDATE_AFTER_TX])
+    expect(mocks.invalidateSdkQueries).toHaveBeenCalledOnce()
+    expect(mocks.invalidateSdkQueries).toHaveBeenCalledWith([...INVALIDATE_AFTER_TX])
+    expect(mocks.advanceSdkQueryGeneration).toHaveBeenCalledOnce()
+    expect(mocks.advanceSdkQueryGeneration).toHaveBeenCalledWith([...INVALIDATE_AFTER_TX])
     expect(triggerPortfolioRefresh).toHaveBeenCalledTimes(2)
+    expect(mocks.advanceSdkQueryGeneration.mock.invocationCallOrder[0]).toBeLessThan(
+      triggerPortfolioRefresh.mock.invocationCallOrder[1]!,
+    )
   })
 
   it('keeps the immediate refresh when no confirmed block is available', async () => {
@@ -45,6 +53,7 @@ describe('refreshPortfolioAfterReviewedSubmission', () => {
 
     expect(mocks.waitForSubgraphBlock).not.toHaveBeenCalled()
     expect(mocks.invalidateSdkQueries).toHaveBeenCalledOnce()
+    expect(mocks.advanceSdkQueryGeneration).not.toHaveBeenCalled()
     expect(triggerPortfolioRefresh).toHaveBeenCalledOnce()
   })
 
@@ -59,6 +68,7 @@ describe('refreshPortfolioAfterReviewedSubmission', () => {
     })
 
     expect(mocks.invalidateSdkQueries).toHaveBeenCalledOnce()
+    expect(mocks.advanceSdkQueryGeneration).not.toHaveBeenCalled()
     expect(triggerPortfolioRefresh).toHaveBeenCalledOnce()
     expect(mocks.logWarn).toHaveBeenCalledWith(
       'reviewedExecution/subgraphPoll',

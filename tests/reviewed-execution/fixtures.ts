@@ -2,7 +2,7 @@ import { encodeFunctionData, getAddress, keccak256, toHex, type Hash, type Trans
 import { MaterializedTransactionRevertedError, type EVCBatchItem, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { EVC_ABI } from '~/abis/evc'
 import { PYTH_ABI } from '~/abis/pyth'
-import type { PolicyState, FinalizedRequestSet, ReviewedExecution, PluginSnapshot, WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
+import type { PolicyState, FinalizedRequestSet, ReviewedExecution, PluginPlanBundle, PluginSnapshot, WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { digestPluginPlan, sealReviewedExecution } from '~/features/reviewed-execution/domain/seal'
 import { reviewedRequestDigest, materializePreparedPlan, type AdditionalMaterializedCall } from '~/features/reviewed-execution/materialization/prepared-plan'
@@ -41,6 +41,14 @@ const plan: TransactionPlan = [{
   type: 'evcBatch',
   items: [{ targetContract: TEST_VAULT, onBehalfOfAccount: TEST_ACCOUNT, value: 0n, data: '0x12345678' }],
 }]
+
+const fixturePluginPlans = new WeakMap<ReviewedExecution, Readonly<PluginPlanBundle>>()
+
+export const getFixturePluginPlans = (execution: ReviewedExecution): Readonly<PluginPlanBundle> => {
+  const plans = fixturePluginPlans.get(execution)
+  if (!plans) throw new Error('Fixture plugin plans are unavailable')
+  return plans
+}
 
 const allowed = (): PolicyState => ({ state: 'allowed', version: 'v1', observedAt: 1, expiresAt: 10_000 })
 
@@ -87,23 +95,25 @@ export const makeReviewedExecution = (
   const policy = buildReviewedPolicy({ requestSet: preliminary, results, now: 10 })
   const requestSet = materializePreparedPlan({ intents: [reviewedIntent], plan, wallet, sdk, before: additional.before, after: additional.after, migrationSignatureSlots, safeAtomicCapability, policyDigest: policy.digest })
   const requestDigest = reviewedRequestDigest(requestSet)
+  const pluginPlans: PluginPlanBundle = { rawPlan: plan as never, previewPlan: plan as never }
   const plugins: PluginSnapshot = {
-    rawPlan: plan as never,
-    previewPlan: plan as never,
     rawPlanDigest: digestPluginPlan('raw', plan as never),
     previewPlanDigest: digestPluginPlan('preview', plan as never),
     pluginConfigurationDigest: digestPluginPlan('configuration', { plugins: ['tos', 'keyring', 'pyth'] }),
   }
-  return sealReviewedExecution({
+  const execution = sealReviewedExecution({
     intents: [reviewedIntent],
     requestSet: requestSet,
     policy: policy,
     simulation: buildReviewedSimulation({ requestSet, requestDigest, observedAt: 10, projection: { canExecute: true, simulatedAccounts: [], simulatedVaults: [] } }),
     pluginSnapshot: plugins,
+    pluginPlans,
     validity: { createdAt: 10, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy')) },
     presentationKind: 'supply',
     presentationInputs: { amount: '10', symbol: 'USDC' },
   })
+  fixturePluginPlans.set(execution, pluginPlans)
+  return execution
 }
 
 export const makePythReviewedExecution = ({ includePrerequisite = true }: { includePrerequisite?: boolean } = {}): ReviewedExecution => {
@@ -156,23 +166,25 @@ export const makePythReviewedExecution = ({ includePrerequisite = true }: { incl
   const policy = buildReviewedPolicy({ requestSet: preliminary, results, now: 10 })
   const requestSet = materializePreparedPlan({ intents: [intent], plan: previewPlan, wallet, sdk, pythPreviewData, policyDigest: policy.digest })
   const requestDigest = reviewedRequestDigest(requestSet)
+  const pluginPlans: PluginPlanBundle = { rawPlan: rawPlan as never, previewPlan: previewPlan as never }
   const plugins: PluginSnapshot = {
-    rawPlan: rawPlan as never,
-    previewPlan: previewPlan as never,
     rawPlanDigest: digestPluginPlan('raw', rawPlan as never),
     previewPlanDigest: digestPluginPlan('preview', previewPlan as never),
     pluginConfigurationDigest: digestPluginPlan('configuration', { plugins: ['tos', 'keyring', 'pyth'] }),
   }
-  return sealReviewedExecution({
+  const execution = sealReviewedExecution({
     intents: [intent],
     requestSet,
     policy,
     simulation: buildReviewedSimulation({ requestSet, requestDigest, observedAt: 10, projection: { canExecute: true, simulatedAccounts: [], simulatedVaults: [] } }),
     pluginSnapshot: plugins,
+    pluginPlans,
     validity: { createdAt: 10, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy')) },
     presentationKind: 'supply',
     presentationInputs: { amount: '10', symbol: 'USDC' },
   })
+  fixturePluginPlans.set(execution, pluginPlans)
+  return execution
 }
 
 export const artifactFor = (execution: ReviewedExecution): FinalizedRequestSet => ({

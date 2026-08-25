@@ -1441,6 +1441,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     onRefreshBorrowSwapQuotes,
     submit,
     buildBorrowPlan, // Batch
+    captureBorrowSnapshot,
     createBorrowIntent,
     updateEstimates: () => {
       updateSyncEstimates()

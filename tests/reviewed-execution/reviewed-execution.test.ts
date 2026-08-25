@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { EVC_ABI } from '~/abis/evc'
 import type { PolicyState, PluginSnapshot, WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
-import { digestPluginPlan, sealReviewedExecution } from '~/features/reviewed-execution/domain/seal'
+import { assertPluginPlanBundleIntegrity, digestPluginPlan, sealReviewedExecution } from '~/features/reviewed-execution/domain/seal'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { validateReviewedRequestSet, validateIntentSet } from '~/features/reviewed-execution/domain/validators'
 import { connectorSessionDigest } from '~/features/reviewed-execution/domain/wallet-session'
@@ -193,8 +193,6 @@ describe('reviewed execution semantic kernel', () => {
     })
     const rawPlan = [{ type: 'evcBatch', items: [] }] as const
     const plugins: PluginSnapshot = {
-      rawPlan: rawPlan as never,
-      previewPlan: rawPlan as never,
       rawPlanDigest: digestPluginPlan('raw', rawPlan as never),
       previewPlanDigest: digestPluginPlan('preview', rawPlan as never),
       pluginConfigurationDigest: digestPluginPlan('configuration', { plugins: ['tos', 'keyring', 'pyth'] }),
@@ -205,6 +203,7 @@ describe('reviewed execution semantic kernel', () => {
       policy: policy,
       simulation,
       pluginSnapshot: plugins,
+      pluginPlans: { rawPlan: rawPlan as never, previewPlan: rawPlan as never },
       validity: { createdAt: 10, cartGeneration: 1, planningSnapshotDigest: keccak256(toHex('snapshot')), policyVersionDigest: keccak256(toHex('policy-version')) },
       presentationKind: 'supply',
       presentationInputs: { type: 'supply', amount: '10', symbol: 'USDC' },
@@ -215,6 +214,13 @@ describe('reviewed execution semantic kernel', () => {
     expect(execution.effectMap.requestDigest).toBe(requestDigest)
     expect(execution.binding.reviewId).toBe(execution.reviewId)
     expect(execution.effectMap.entries).toHaveLength(requestSet.effects.length)
+    expect(execution.pluginSnapshot).toEqual(plugins)
+    expect(execution.pluginSnapshot).not.toHaveProperty('rawPlan')
+    expect(execution.pluginSnapshot).not.toHaveProperty('previewPlan')
+    expect(() => assertPluginPlanBundleIntegrity(execution.pluginSnapshot, {
+      rawPlan: rawPlan as never,
+      previewPlan: [{ type: 'evcBatch', items: [{ data: '0x01' }] }] as never,
+    })).toThrow(/preview plugin plan does not match/)
     expect(Object.isFrozen(execution)).toBe(true)
   })
 

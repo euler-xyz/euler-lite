@@ -1,11 +1,14 @@
 import { buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
-import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
+import { advanceSdkQueryGeneration, invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
 
-const triggerRefresh = (triggerPortfolioRefresh: () => void) => {
-  void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
+const triggerRefresh = (triggerPortfolioRefresh: () => void, forceFresh = false) => {
+  const invalidation = forceFresh
+    ? advanceSdkQueryGeneration([...INVALIDATE_AFTER_TX])
+    : invalidateSdkQueries([...INVALIDATE_AFTER_TX])
+  void invalidation
     .catch(error => logWarn('reviewedExecution/queryInvalidation', error))
   triggerPortfolioRefresh()
 }
@@ -38,5 +41,5 @@ export const refreshPortfolioAfterReviewedSubmission = async ({
     )
     return
   }
-  triggerRefresh(triggerPortfolioRefresh)
+  triggerRefresh(triggerPortfolioRefresh, true)
 }
