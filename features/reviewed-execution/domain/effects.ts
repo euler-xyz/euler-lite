@@ -82,6 +82,9 @@ export type TypedEffect
 
 export interface EffectNode {
   effectId: Hash
+  /** Additional provenance when plan merging coalesces multiple prerequisites. */
+  intentRefs?: readonly { intentId: string, intentRevision: number }[]
+  /** Primary intent retained for the one-effect/one-row compatibility map. */
   intentId: string
   intentRevision: number
   dependsOn: readonly Hash[]

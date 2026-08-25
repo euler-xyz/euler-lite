@@ -11,6 +11,8 @@ import { materializePreparedPlan, reviewedRequestDigest } from '~/features/revie
 import { PreparationCache, type PreparationCacheIdentity } from '~/features/reviewed-execution/planning/cache'
 import { assertPolicyVersionsMatch, buildReviewedPolicy, collectPolicyRequirements, collectPolicySubjects, type PolicyResultInput } from '~/features/reviewed-execution/policy/engine'
 import { buildReviewedSimulation, validateSimulationCoverage } from '~/features/reviewed-execution/simulation/coverage'
+import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
+import { makeSwapQuote } from './swap-quote.test-fixture'
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
 const TOKEN = getAddress('0x2000000000000000000000000000000000000000')
@@ -69,6 +71,30 @@ describe('reviewed execution semantic kernel', () => {
       ...intent,
       constraints: [{ kind: 'exact-input', token: TOKEN, amount: 9n }],
     }])).toThrow(/planner-enforced exact-input/)
+  })
+
+  it('rejects a swap-and-borrow intent that would encode a zero borrow', () => {
+    const quote = makeSwapQuote()
+    const zeroBorrow = createOperationIntent({
+      kind: 'borrow',
+      planner: 'swap-and-borrow',
+      args: {
+        swapQuote: quote,
+        amount: 10n,
+        tokenIn: TOKEN,
+        borrowVault: VAULT,
+        collateralVault: quote.tokenOut.address,
+        borrowAmount: 0n,
+        borrowAccount: ACCOUNT,
+      },
+      chainId: 1,
+      account: ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-zero-swap-borrow',
+    })
+
+    expect(() => validateIntentSet([zeroBorrow])).toThrow(/has no borrow amount/)
   })
 
   it('derives policy inputs from every finalized call and fails closed', () => {

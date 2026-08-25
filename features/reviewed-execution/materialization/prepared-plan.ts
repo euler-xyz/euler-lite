@@ -64,6 +64,8 @@ export interface EffectOwner {
   intentRevision: number
 }
 
+export type EffectOwnership = readonly EffectOwner[]
+
 export interface PythPreviewData {
   planItemIndex: number
   batchItemIndex: number
@@ -101,22 +103,32 @@ interface PendingRequest {
 
 const selectorOf = (data: Hex): Hex => data.slice(0, 10) as Hex
 
-const effectOwnerFor = (
+const effectOwnersFor = (
   intents: readonly OperationIntent[],
-  owners: Readonly<Record<string, EffectOwner>>,
+  owners: Readonly<Record<string, EffectOwnership>>,
   planItemIndex: number,
   batchItemIndex?: number,
-): EffectOwner => {
+): EffectOwnership => {
   const keyed = owners[batchItemIndex === undefined ? `${planItemIndex}` : `${planItemIndex}:${batchItemIndex}`]
-  if (keyed) return keyed
+  if (keyed?.length) return keyed
   if (intents.length !== 1) {
     throw new Error(`Effect ownership is missing for ${planItemIndex}${batchItemIndex === undefined ? '' : `:${batchItemIndex}`}`)
   }
-  return { intentId: intents[0].intentId, intentRevision: intents[0].revision }
+  return [{ intentId: intents[0].intentId, intentRevision: intents[0].revision }]
 }
 
-const makeEffectId = (owner: EffectOwner, coordinates: string, effect: TypedEffect): Hash =>
-  canonicalDigest('effect-node-v1', toCanonicalValue({ owner, coordinates, effect }))
+const primaryOwner = (owners: EffectOwnership): EffectOwner => {
+  const owner = owners[0]
+  if (!owner) throw new Error('Effect ownership is empty')
+  return owner
+}
+
+const makeEffectId = (owners: EffectOwnership, coordinates: string, effect: TypedEffect): Hash =>
+  owners.length === 1
+    ? canonicalDigest('effect-node-v1', toCanonicalValue({ owner: owners[0], coordinates, effect }))
+    : canonicalDigest('effect-node-v1', toCanonicalValue({ owners, coordinates, effect }))
+
+const sharedIntentRefs = (owners: EffectOwnership) => owners.length > 1 ? { intentRefs: owners } : {}
 
 const makeRequestId = (request: PendingRequest): Hash =>
   canonicalDigest('execution-request-v1', toCanonicalValue(request))
@@ -200,15 +212,17 @@ const assertSdkMaterializationMatches = ({
   }
 }
 
-const intentSubjects = (intents: readonly OperationIntent[], owner: EffectOwner): EffectPolicySubject[] => {
-  const intent = intents.find(candidate => candidate.intentId === owner.intentId && candidate.revision === owner.intentRevision)
-  if (!intent) throw new Error(`Effect owner ${owner.intentId}:${owner.intentRevision} is missing`)
-  const requirements = collectPlanningRequirements([intent])
-  return [
-    ...requirements.accounts.map(value => ({ kind: 'account' as const, value })),
-    ...requirements.vaults.map(value => ({ kind: 'vault-or-contract' as const, value })),
-    ...requirements.assets.map(value => ({ kind: 'asset' as const, value })),
-  ]
+const intentSubjects = (intents: readonly OperationIntent[], owners: EffectOwnership): EffectPolicySubject[] => {
+  return owners.flatMap((owner) => {
+    const intent = intents.find(candidate => candidate.intentId === owner.intentId && candidate.revision === owner.intentRevision)
+    if (!intent) throw new Error(`Effect owner ${owner.intentId}:${owner.intentRevision} is missing`)
+    const requirements = collectPlanningRequirements([intent])
+    return [
+      ...requirements.accounts.map(value => ({ kind: 'account' as const, value })),
+      ...requirements.vaults.map(value => ({ kind: 'vault-or-contract' as const, value })),
+      ...requirements.assets.map(value => ({ kind: 'asset' as const, value })),
+    ]
+  })
 }
 
 const effectSubjects = (effect: TypedEffect): EffectPolicySubject[] => {
@@ -230,9 +244,9 @@ const effectSubjects = (effect: TypedEffect): EffectPolicySubject[] => {
   return [{ kind: 'vault-or-contract', value: effect.target }]
 }
 
-const policySubjects = (intents: readonly OperationIntent[], owner: EffectOwner, effect: TypedEffect): EffectPolicySubject[] => {
+const policySubjects = (intents: readonly OperationIntent[], owners: EffectOwnership, effect: TypedEffect): EffectPolicySubject[] => {
   const unique = new Map<string, EffectPolicySubject>()
-  for (const subject of [...intentSubjects(intents, owner), ...effectSubjects(effect)]) {
+  for (const subject of [...intentSubjects(intents, owners), ...effectSubjects(effect)]) {
     unique.set(`${subject.kind}:${subject.value.toLowerCase()}`, subject)
   }
   return [...unique.values()].sort((left, right) => `${left.kind}:${left.value.toLowerCase()}`.localeCompare(`${right.kind}:${right.value.toLowerCase()}`))
@@ -301,7 +315,8 @@ const materializeAdditionalCall = (
     data: input.data,
     value: input.value ?? 0n,
   }
-  const effectId = makeEffectId(input.owner, coordinate, typed)
+  const owners = [input.owner]
+  const effectId = makeEffectId(owners, coordinate, typed)
   const effect: EffectNode = {
     effectId,
     intentId: input.owner.intentId,
@@ -311,7 +326,7 @@ const materializeAdditionalCall = (
     effect: typed,
     provenance: input.provenance,
     simulation: { kind: 'modeled-authorization', assumption: 'Migration authorization is modeled before execution.' },
-    policySubjects: policySubjects(intents, input.owner, typed),
+    policySubjects: policySubjects(intents, owners, typed),
   }
   return {
     effect,
@@ -349,7 +364,7 @@ export const materializePreparedPlan = ({
   permit2Slots?: readonly PreparedPermit2Slot[]
   migrationSignatureSlots?: readonly PreparedMigrationSignatureSlot[]
   pythPreviewData?: readonly PythPreviewData[]
-  effectOwners?: Readonly<Record<string, EffectOwner>>
+  effectOwners?: Readonly<Record<string, EffectOwnership>>
   before?: readonly AdditionalMaterializedCall[]
   after?: readonly AdditionalMaterializedCall[]
   directCallAllowlist?: Readonly<Record<string, string>>
@@ -382,7 +397,8 @@ export const materializePreparedPlan = ({
 
     if (item.type === 'requiredApproval') {
       if (!item.resolved) throw new Error(`Approval at plan item ${planItemIndex} is unresolved`)
-      const owner = effectOwnerFor(intents, effectOwners, planItemIndex)
+      const owners = effectOwnersFor(intents, effectOwners, planItemIndex)
+      const owner = primaryOwner(owners)
       for (const [resolvedIndex, resolved] of item.resolved.entries()) {
         const effect: TypedEffect = {
           kind: 'approval',
@@ -392,17 +408,18 @@ export const materializePreparedPlan = ({
           spender: getAddress(resolved.spender),
           amount: resolved.amount,
         }
-        const effectId = makeEffectId(owner, `${planItemIndex}:${resolvedIndex}`, effect)
+        const effectId = makeEffectId(owners, `${planItemIndex}:${resolvedIndex}`, effect)
         effects.push({
           effectId,
           intentId: owner.intentId,
           intentRevision: owner.intentRevision,
+          ...sharedIntentRefs(owners),
           dependsOn: [],
           phase: 'prerequisite',
           effect,
           provenance: { source: 'intent', planner: intents.find(intent => intent.intentId === owner.intentId)?.planner.name ?? 'unknown' },
           simulation: { kind: 'modeled-authorization', assumption: resolved.type === 'approve' ? 'Allowance is modeled with a state override.' : 'Permit2 authorization is modeled with sealed typed data.' },
-          policySubjects: policySubjects(intents, owner, effect),
+          policySubjects: policySubjects(intents, owners, effect),
         })
 
         if (resolved.type === 'approve') {
@@ -429,20 +446,22 @@ export const materializePreparedPlan = ({
       const pythForItem = pythPreviewData.filter(entry => entry.planItemIndex === planItemIndex)
 
       for (const [batchItemIndex, batchItem] of flattened.entries()) {
-        const owner = effectOwnerFor(intents, effectOwners, planItemIndex, batchItemIndex)
+        const owners = effectOwnersFor(intents, effectOwners, planItemIndex, batchItemIndex)
+        const owner = primaryOwner(owners)
         const evidence = pythForItem.find(entry => entry.batchItemIndex === batchItemIndex)
         const classified = classifyBatchEffect({ chainId: wallet.chainId, item: batchItem, pythPreviewData: evidence })
-        const effectId = makeEffectId(owner, `${planItemIndex}:${batchItemIndex}`, classified.effect)
+        const effectId = makeEffectId(owners, `${planItemIndex}:${batchItemIndex}`, classified.effect)
         effects.push({
           effectId,
           intentId: owner.intentId,
           intentRevision: owner.intentRevision,
+          ...sharedIntentRefs(owners),
           dependsOn: [],
           phase: 'core',
           effect: classified.effect,
           provenance: classified.provenance,
           simulation: { kind: 'evc-state' },
-          policySubjects: policySubjects(intents, owner, classified.effect),
+          policySubjects: policySubjects(intents, owners, classified.effect),
         })
         requestEffectIds.push(effectId)
         encodedItems.push(batchItem)
@@ -535,11 +554,12 @@ export const materializePreparedPlan = ({
       continue
     }
 
-    const owner = effectOwnerFor(intents, effectOwners, planItemIndex)
+    const owners = effectOwnersFor(intents, effectOwners, planItemIndex)
+    const owner = primaryOwner(owners)
     if (item.chainId !== wallet.chainId) throw new Error('Direct call targets another chain')
     const data = encodeFunctionData({ abi: item.abi, functionName: item.functionName, args: item.args })
     const directEffect: TypedEffect = { kind: 'direct-call', chainId: item.chainId, target: getAddress(item.to), data, value: item.value, selector: selectorOf(data) }
-    const effectId = makeEffectId(owner, `${planItemIndex}`, directEffect)
+    const effectId = makeEffectId(owners, `${planItemIndex}`, directEffect)
     const simulationMode = (item as typeof item & { simulationMode?: 'independent' }).simulationMode
     let simulation: SimulationCoverage
     if (simulationMode === 'independent') simulation = { kind: 'independent-call' }
@@ -548,7 +568,7 @@ export const materializePreparedPlan = ({
       if (!allowlistId) throw new Error(`Direct call ${item.functionName} has no simulation coverage classification`)
       simulation = { kind: 'not-state-simulated', allowlistId }
     }
-    effects.push({ effectId, intentId: owner.intentId, intentRevision: owner.intentRevision, dependsOn: [], phase: 'core', effect: directEffect, provenance: { source: 'intent', planner: intents.find(intent => intent.intentId === owner.intentId)?.planner.name ?? 'unknown' }, simulation, policySubjects: policySubjects(intents, owner, directEffect) })
+    effects.push({ effectId, intentId: owner.intentId, intentRevision: owner.intentRevision, ...sharedIntentRefs(owners), dependsOn: [], phase: 'core', effect: directEffect, provenance: { source: 'intent', planner: intents.find(intent => intent.intentId === owner.intentId)?.planner.name ?? 'unknown' }, simulation, policySubjects: policySubjects(intents, owners, directEffect) })
     pendingRequests.push({ effectIds: [effectId], phase: 'core', chainId: wallet.chainId, from: wallet.account, to: directEffect.target, data, value: item.value })
   }
 

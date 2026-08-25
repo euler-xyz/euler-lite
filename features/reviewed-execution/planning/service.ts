@@ -4,7 +4,7 @@ import { canonicalDigest, toCanonicalValue, type CanonicalValue } from '../domai
 import type { ReviewedPolicy, ReviewedExecution, PluginSnapshot, ReviewedRequestSet, ReviewedSimulation, SafeAtomicCapabilityStatus, WalletBinding } from '../domain/reviewed-execution'
 import type { OperationIntent } from '../domain/intents'
 import { assertReviewedExecutionIntegrity, sealReviewedExecution } from '../domain/seal'
-import type { AdditionalMaterializedCall, EffectOwner, PlanMaterializationSdk, PythPreviewData } from '../materialization/prepared-plan'
+import type { AdditionalMaterializedCall, EffectOwnership, PlanMaterializationSdk, PythPreviewData } from '../materialization/prepared-plan'
 import { reviewedRequestDigest, materializePreparedPlan } from '../materialization/prepared-plan'
 import type { PreparedMigrationSignatureSlot, PreparedPermit2Slot } from '../materialization/signature-slots'
 import type { EulerSimulationProjection } from '../simulation/coverage'
@@ -58,11 +58,11 @@ export interface PrepareReviewedExecutionRequest {
 const pluginOwnerMap = (
   raw: TransactionPlan,
   preview: TransactionPlan,
-  rawOwners: Readonly<Record<string, EffectOwner>>,
-  fallback: EffectOwner,
-): Readonly<Record<string, EffectOwner>> => {
+  rawOwners: Readonly<Record<string, EffectOwnership>>,
+  fallback: EffectOwnership,
+): Readonly<Record<string, EffectOwnership>> => {
   if (raw.length !== preview.length) throw new Error('Plugin processing changed the top-level plan shape')
-  const result: Record<string, EffectOwner> = {}
+  const result: Record<string, EffectOwnership> = {}
   for (const [previewPlanIndex, previewItem] of preview.entries()) {
     const rawItem = raw[previewPlanIndex]
     if (!rawItem || rawItem.type !== previewItem.type) throw new Error('Plugin processing reordered static plan items')
@@ -169,7 +169,7 @@ export class ReviewedExecutionPreparationService {
       this.dependencies.collectPythEvidence(resolved, request.wallet, snapshot, prefetched),
     ])
     await assertContext()
-    const fallbackOwner = { intentId: request.intents[0].intentId, intentRevision: request.intents[0].revision }
+    const fallbackOwner = [{ intentId: request.intents[0].intentId, intentRevision: request.intents[0].revision }]
     const effectOwners = pluginOwnerMap(compiled.plan, resolved, compiled.effectOwners, fallbackOwner)
     const materialize = (policyDigest: Hash) => materializePreparedPlan({
       intents: request.intents,

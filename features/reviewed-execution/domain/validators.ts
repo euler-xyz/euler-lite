@@ -77,6 +77,12 @@ export const validateIntentSet = (intents: readonly OperationIntent[]) => {
     if (intent.kind === 'reul-unlock' && !intent.constraints.some(constraint => constraint.kind === 'remainder-loss')) {
       throw new Error(`rEUL intent ${identity} does not bound remainder loss`)
     }
+    if (intent.planner.name === 'swap-and-borrow') {
+      const borrowAmount = intent.planner.args.borrowAmount
+      if (typeof borrowAmount !== 'bigint' || borrowAmount <= 0n) {
+        throw new Error(`Swap-and-borrow intent ${identity} has no borrow amount`)
+      }
+    }
     assertSemanticConstraints(intent)
   }
 }
@@ -86,21 +92,30 @@ const validateEffectGraph = (effects: readonly EffectNode[], intents: readonly O
   const intentRevisions = new Set(intents.map(intent => `${intent.intentId}:${intent.revision}`))
   for (const [index, node] of effects.entries()) {
     if (ids.has(node.effectId)) throw new Error(`Duplicate effect ID ${node.effectId}`)
-    if (!intentRevisions.has(`${node.intentId}:${node.intentRevision}`)) throw new Error(`Effect ${node.effectId} has no owning intent revision`)
+    if (node.intentRefs && !node.intentRefs.length) throw new Error(`Effect ${node.effectId} has no owning intent revisions`)
+    const intentRefs = node.intentRefs ?? [{ intentId: node.intentId, intentRevision: node.intentRevision }]
+    const ownerKeys = intentRefs.map(owner => `${owner.intentId}:${owner.intentRevision}`)
+    if (new Set(ownerKeys).size !== ownerKeys.length) throw new Error(`Effect ${node.effectId} has duplicate intent owners`)
+    if (node.intentId !== intentRefs[0]!.intentId || node.intentRevision !== intentRefs[0]!.intentRevision) {
+      throw new Error(`Effect ${node.effectId} primary intent differs from its ownership set`)
+    }
+    if (ownerKeys.some(owner => !intentRevisions.has(owner))) throw new Error(`Effect ${node.effectId} has no owning intent revision`)
     for (const dependency of node.dependsOn) {
       if (!ids.has(dependency)) throw new Error(`Effect ${node.effectId} depends on a missing or later effect`)
     }
     if (index > 0 && node.dependsOn.length === 0) throw new Error(`Effect ${node.effectId} is disconnected from the ordered graph`)
     const subjectKeys = node.policySubjects.map(subject => `${subject.kind}:${subject.value.toLowerCase()}`)
     if (new Set(subjectKeys).size !== subjectKeys.length) throw new Error(`Effect ${node.effectId} has duplicate policy subjects`)
-    const intent = intents.find(candidate => candidate.intentId === node.intentId && candidate.revision === node.intentRevision)
-    if (!intent) throw new Error(`Effect ${node.effectId} has no owning intent`)
-    const requirements = collectPlanningRequirements([intent])
-    const required = [
-      ...requirements.accounts.map(value => `account:${value.toLowerCase()}`),
-      ...requirements.vaults.map(value => `vault-or-contract:${value.toLowerCase()}`),
-      ...requirements.assets.map(value => `asset:${value.toLowerCase()}`),
-    ]
+    const required = intentRefs.flatMap((owner) => {
+      const intent = intents.find(candidate => candidate.intentId === owner.intentId && candidate.revision === owner.intentRevision)
+      if (!intent) throw new Error(`Effect ${node.effectId} has no owning intent`)
+      const requirements = collectPlanningRequirements([intent])
+      return [
+        ...requirements.accounts.map(value => `account:${value.toLowerCase()}`),
+        ...requirements.vaults.map(value => `vault-or-contract:${value.toLowerCase()}`),
+        ...requirements.assets.map(value => `asset:${value.toLowerCase()}`),
+      ]
+    })
     const effect = node.effect
     if (effect.kind === 'approval') required.push(`account:${effect.owner.toLowerCase()}`, `asset:${effect.token.toLowerCase()}`, `spender:${effect.spender.toLowerCase()}`)
     else if (effect.kind === 'evc-call' || effect.kind === 'tos-call' || effect.kind === 'keyring-call') required.push(`vault-or-contract:${effect.target.toLowerCase()}`, `account:${effect.onBehalfOfAccount.toLowerCase()}`)

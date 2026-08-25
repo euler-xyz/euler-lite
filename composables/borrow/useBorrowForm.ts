@@ -147,7 +147,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     sortedQuoteCards: borrowSwapQuoteCards,
     selectedProvider: borrowSwapSelectedProvider,
     selectedQuote: borrowSwapSelectedQuote,
-    selectedQuoteCard: borrowSwapSelectedQuoteCard,
     effectiveQuote: borrowSwapEffectiveQuote,
     effectiveQuoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt,
     isLoading: isBorrowSwapQuoteLoading,
@@ -1121,10 +1120,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       if (borrowNeedsSwap.value && borrowSwapEffectiveQuote.value) {
         const subAccount = (await resolvePendingSubAccount()) as Address
         const snapshot = captureBorrowSnapshot(subAccount)
-        const quoteIntents = borrowSwapSelectedQuoteCard.value?.quote === snapshot.quote
-          ? borrowSwapSelectedQuoteCard.value.intents
-          : undefined
-        const intents = quoteIntents?.length ? quoteIntents : [createBorrowIntent(snapshot)]
+        // The quote preview may have been prepared before the quote-derived
+        // borrow amount settled. Re-capture the authoritative submit snapshot;
+        // preview caches are optimizations only, and reviewed execution always
+        // recompiles from this fresh DTO.
+        const intents = [createBorrowIntent(snapshot)]
         try {
           const account = planAccount.value
           await ensureBorrowSubAccountSnapshot(account, subAccount)

@@ -164,6 +164,7 @@ export interface EffectMapEntry {
   effectId: Hash
   intentId: string
   intentRevision: number
+  intentRefs?: readonly { intentId: string, intentRevision: number }[]
   requestId: Hash
   coverage: SimulationEffectResult['coverage']
 }

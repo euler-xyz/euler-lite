@@ -475,10 +475,20 @@ const assertEffectMap = (value: unknown, path: string) => {
   value.entries.forEach((entry, index) => {
     const entryPath = `${path}.entries[${index}]`
     assertRecord(entry, entryPath)
-    assertExactKeys(entry, ['effectId', 'intentId', 'intentRevision', 'requestId', 'coverage'], entryPath)
+    assertExactKeys(entry, ['effectId', 'intentId', 'intentRevision', 'intentRefs', 'requestId', 'coverage'], entryPath)
     assertHash(entry.effectId, `${entryPath}.effectId`)
     assertString(entry.intentId, `${entryPath}.intentId`)
     assertSafeInteger(entry.intentRevision, `${entryPath}.intentRevision`)
+    if (entry.intentRefs !== undefined) {
+      if (!Array.isArray(entry.intentRefs) || !entry.intentRefs.length) throw new Error(`${entryPath}.intentRefs must be non-empty`)
+      entry.intentRefs.forEach((owner, ownerIndex) => {
+        const ownerPath = `${entryPath}.intentRefs[${ownerIndex}]`
+        assertRecord(owner, ownerPath)
+        assertExactKeys(owner, ['intentId', 'intentRevision'], ownerPath)
+        assertString(owner.intentId, `${ownerPath}.intentId`)
+        assertSafeInteger(owner.intentRevision, `${ownerPath}.intentRevision`)
+      })
+    }
     assertHash(entry.requestId, `${entryPath}.requestId`)
     if (!['evc-state', 'modeled-authorization', 'independent-call', 'not-state-simulated'].includes(entry.coverage as string)) throw new Error(`${entryPath}.coverage is unsupported`)
   })
@@ -600,10 +610,20 @@ function assertEffect(value: unknown, path: string): asserts value is TypedEffec
 
 const assertEffectNode = (value: unknown, path: string): asserts value is EffectNode => {
   assertRecord(value, path)
-  assertExactKeys(value, ['effectId', 'intentId', 'intentRevision', 'dependsOn', 'phase', 'effect', 'provenance', 'simulation', 'policySubjects'], path)
+  assertExactKeys(value, ['effectId', 'intentId', 'intentRevision', 'intentRefs', 'dependsOn', 'phase', 'effect', 'provenance', 'simulation', 'policySubjects'], path)
   assertHash(value.effectId, `${path}.effectId`)
   assertString(value.intentId, `${path}.intentId`)
   assertSafeInteger(value.intentRevision, `${path}.intentRevision`)
+  if (value.intentRefs !== undefined) {
+    if (!Array.isArray(value.intentRefs) || !value.intentRefs.length) throw new Error(`${path}.intentRefs must be non-empty`)
+    value.intentRefs.forEach((owner, index) => {
+      const ownerPath = `${path}.intentRefs[${index}]`
+      assertRecord(owner, ownerPath)
+      assertExactKeys(owner, ['intentId', 'intentRevision'], ownerPath)
+      assertString(owner.intentId, `${ownerPath}.intentId`)
+      assertSafeInteger(owner.intentRevision, `${ownerPath}.intentRevision`)
+    })
+  }
   if (!Array.isArray(value.dependsOn)) throw new Error(`${path}.dependsOn must be an array`)
   value.dependsOn.forEach((dependency, index) => assertHash(dependency, `${path}.dependsOn[${index}]`))
   if (!['prerequisite', 'core', 'cleanup'].includes(value.phase as string)) throw new Error(`${path}.phase is unsupported`)

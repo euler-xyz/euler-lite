@@ -18,6 +18,7 @@ export const buildEffectMap = (requestSet: ReviewedRequestSet, requestDigest: Ha
       effectId: effect.effectId,
       intentId: effect.intentId,
       intentRevision: effect.intentRevision,
+      ...(effect.intentRefs ? { intentRefs: effect.intentRefs } : {}),
       requestId,
       coverage: effect.simulation.kind,
     }

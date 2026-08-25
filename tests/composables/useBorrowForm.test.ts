@@ -42,6 +42,7 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
     } as unknown as Account<IHasVaultAddress>,
     mocks: {
       planBorrow: vi.fn(),
+      planSwapAndBorrow: vi.fn(),
       executePlan: vi.fn(),
       prefetchPluginData: vi.fn(),
       preloadSubAccountSnapshot: vi.fn(),
@@ -61,6 +62,9 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
       supplyRewardApy: 0,
       borrowRewardApy: 0,
       borrowEffectiveQuote: undefined as unknown as Ref<unknown>,
+      swapQuoteOptions: undefined as unknown as { createIntentsForQuote?: (quote: unknown) => readonly unknown[] },
+      openReview: vi.fn(async (..._args: unknown[]) => undefined),
+      createIntent: vi.fn(),
       planAccountRef: undefined as unknown as Ref<Account<IHasVaultAddress>>,
     },
   }
@@ -105,13 +109,15 @@ vi.mock('~/composables/useSwapPriceImpact', () => ({
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
-  useSwapQuotesParallel: () => {
+  useSwapQuotesParallel: (options: { createIntentsForQuote?: (quote: unknown) => readonly unknown[] }) => {
+    mocks.swapQuoteOptions = options
     mocks.borrowEffectiveQuote = ref(null)
     return {
       sortedQuoteCards: ref([]),
       selectedProvider: ref(null),
       selectedQuote: ref(null),
       effectiveQuote: mocks.borrowEffectiveQuote,
+      effectiveQuoteFetchedAt: ref(null),
       isLoading: ref(false),
       quoteError: ref(null),
       statusLabel: ref(''),
@@ -249,13 +255,32 @@ describe('useBorrowForm savings collateral', () => {
     vi.stubGlobal('watchEffect', watchEffect)
     vi.stubGlobal('nextTick', nextTick)
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
+    let intentSequence = 0
+    mocks.createIntent.mockImplementation((input: {
+      kind: string
+      planner: string
+      args: Record<string, unknown>
+      source: string
+      subAccounts?: readonly string[]
+    }) => ({
+      schemaVersion: 1,
+      intentId: `intent-${++intentSequence}`,
+      revision: 1,
+      kind: input.kind,
+      chainId: 1,
+      account: USER,
+      subAccounts: input.subAccounts ?? [USER],
+      planner: { name: input.planner, args: input.args },
+      constraints: [],
+      metadata: { createdAt: intentSequence, source: input.source },
+    }))
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
     vi.stubGlobal('useExecutionReview', () => ({
-      open: async () => { mocks.modalOpen() },
+      open: mocks.openReview,
     }))
     vi.stubGlobal('useEulerTx', () => ({
       planBorrow: mocks.planBorrow,
-      planSwapAndBorrow: vi.fn(),
+      planSwapAndBorrow: mocks.planSwapAndBorrow,
       executePlan: mocks.executePlan,
       prefetchPluginData: mocks.prefetchPluginData,
       preloadSubAccountSnapshot: mocks.preloadSubAccountSnapshot,
@@ -414,7 +439,42 @@ describe('useBorrowForm savings collateral', () => {
     await form.submit()
 
     expect(mocks.runSimulation).toHaveBeenCalled()
-    expect(mocks.modalOpen).toHaveBeenCalled()
+    expect(mocks.openReview).toHaveBeenCalled()
+  })
+
+  it('recaptures the quote-backed intent after the borrow amount settles', async () => {
+    const form = makeForm(shallowRef([]))
+    const payToken = {
+      address: '0x0000000000000000000000000000000000000099' as const,
+      name: 'Pay token',
+      symbol: 'PAY',
+      decimals: 0,
+    }
+    const quote = {
+      amountIn: '10',
+      amountInMax: '10',
+      amountOut: '8',
+      amountOutMin: '7',
+      tokenIn: { ...payToken, chainId: 1 },
+      tokenOut: { ...vault.asset, chainId: 1 },
+    }
+    form.borrowSelectedAsset.value = payToken
+    form.collateralAmount.value = '10'
+
+    const previewIntent = mocks.swapQuoteOptions.createIntentsForQuote?.(quote)?.[0] as { planner: { args: { borrowAmount: bigint } } }
+    expect(previewIntent.planner.args.borrowAmount).toBe(0n)
+
+    mocks.borrowEffectiveQuote.value = quote
+    await nextTick()
+    form.borrowAmount.value = '5'
+    mocks.planSwapAndBorrow.mockResolvedValue([{ type: 'evcBatch', items: [] }])
+    mocks.runSimulation.mockResolvedValue(true)
+
+    await form.submit()
+
+    const submittedIntents = mocks.openReview.mock.calls.at(-1)?.[0] as Array<{ planner: { args: { borrowAmount: bigint } } }>
+    expect(submittedIntents[0]?.planner.args.borrowAmount).toBe(5n)
+    expect(submittedIntents[0]).not.toBe(previewIntent)
   })
 
   it('does not project a savings share transfer as new vault cash', async () => {
