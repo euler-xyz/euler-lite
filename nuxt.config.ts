@@ -391,7 +391,16 @@ export default defineNuxtConfig({
   },
 
   vite: {
-    build: { target: 'esnext' },
+    build: {
+      target: 'esnext',
+      rolldownOptions: {
+        output: {
+          // Hex hashes cannot contain the case-insensitive "oast" signature
+          // blocked by edge security rules on static asset request paths.
+          hashCharacters: 'hex',
+        },
+      },
+    },
     server: {
       watch: {
         ignored: [
