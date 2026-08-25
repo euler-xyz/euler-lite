@@ -11,6 +11,8 @@ export interface DispatchCallbacks {
 
 export interface DispatchResult {
   transactionHashes: readonly Hash[]
+  /** Block containing the final confirmed request in this dispatch. */
+  confirmedBlockNumber?: bigint
   callsId?: string
   executionHash?: Hash
   atomic?: true

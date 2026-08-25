@@ -24,13 +24,13 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *     `staleTimeMs`.
  *
  *   - `invalidateAfterTx` (optional, boolean): mark matching cache entries
- *     stale after plan finalization (`finalizeExecution`), the post-tx
- *     subgraph sync, and the CoW permit hard-cancellation that writes the
- *     EVC nonce — not CoW settlement, and not standalone migration
+ *     stale after reviewed-execution submission, again after its post-tx
+ *     subgraph sync, and after the CoW permit hard-cancellation that writes
+ *     the EVC nonce — not CoW settlement, and not standalone migration
  *     authorization grants/revokes sent through `sendPlainTransactions()`.
  *     Those grant/revoke receipts confirm without `invalidateSdkQueries`, so
  *     rows such as `queryGetAuthorization` stay reusable inside their 15 s
- *     form window until a later `finalizeExecution`. `invalidateSdkQueries`
+ *     form window until a later reviewed submission. `invalidateSdkQueries`
  *     calls TanStack's `invalidateQueries`, so data entries are flagged stale
  *     and active observers refetch — they are not removed from the query cache
  *     (the short-lived failure cache is a separate map and is cleared). SDK
@@ -184,7 +184,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
 const policyEntries = (): [EulerSDKQueryName, SdkQueryPolicyEntry][] =>
   Object.entries(SDK_QUERY_POLICY) as [EulerSDKQueryName, SdkQueryPolicyEntry][]
 
-/** Names where `invalidateAfterTx === true` — marked stale after plan finalization / subgraph sync / CoW hard-cancel, not after standalone grant/revoke receipts. */
+/** Names where `invalidateAfterTx === true` — marked stale after reviewed submission / subgraph sync / CoW hard-cancel, not after standalone grant/revoke receipts. */
 export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]
   = policyEntries()
     .filter(([, p]) => p.invalidateAfterTx === true)

@@ -120,12 +120,16 @@ const requestIdentifier = (
 
 const requestIdOf = (request: EoaRequest | SafeCall) => 'requestId' in request ? request.requestId : request.callId
 
-const mergeDispatchResults = (first: DispatchResult | undefined, second: DispatchResult): DispatchResult => ({
-  transactionHashes: [...(first?.transactionHashes ?? []), ...second.transactionHashes],
-  ...(second.callsId ?? first?.callsId ? { callsId: second.callsId ?? first?.callsId } : {}),
-  ...(second.executionHash ?? first?.executionHash ? { executionHash: second.executionHash ?? first?.executionHash } : {}),
-  ...(second.atomic ?? first?.atomic ? { atomic: true } : {}),
-})
+const mergeDispatchResults = (first: DispatchResult | undefined, second: DispatchResult): DispatchResult => {
+  const confirmedBlockNumber = second.confirmedBlockNumber ?? first?.confirmedBlockNumber
+  return {
+    transactionHashes: [...(first?.transactionHashes ?? []), ...second.transactionHashes],
+    ...(confirmedBlockNumber !== undefined ? { confirmedBlockNumber } : {}),
+    ...(second.callsId ?? first?.callsId ? { callsId: second.callsId ?? first?.callsId } : {}),
+    ...(second.executionHash ?? first?.executionHash ? { executionHash: second.executionHash ?? first?.executionHash } : {}),
+    ...(second.atomic ?? first?.atomic ? { atomic: true } : {}),
+  }
+}
 
 interface CleanupFailure {
   status: SubmissionStatus

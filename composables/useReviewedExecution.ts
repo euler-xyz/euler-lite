@@ -30,12 +30,12 @@ import { createAppEoaClients, createAppSafeClients } from '~/features/reviewed-e
 import { finalizeReviewedRequestSet } from '~/features/reviewed-execution/materialization/finalize'
 import { verifyRefreshedPluginPlan } from '~/features/reviewed-execution/materialization/pyth-refresh'
 import type { WalletProviderLike } from '~/utils/safeWalletTransactions'
-import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
-import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { readPreviewCache, readMigrationPreviewCache } from '~/features/reviewed-execution/planning/preview-cache'
 import { buildMigrationSimulationPlan, compileCrossProtocolMigrationIntent, prepareMigrationSignatureSlotsForPlan, type MigrationCompilerSdk } from '~/features/reviewed-execution/planning/migration-compiler'
 import type { AdditionalMaterializedCall } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { projectEulerSimulation } from '~/features/reviewed-execution/simulation/euler-projection'
+import { refreshPortfolioAfterReviewedSubmission } from '~/features/reviewed-execution/review/post-tx-refresh'
+import { logWarn } from '~/utils/errorHandling'
 
 const COMPILER_VERSION = 'lite-reviewed-execution-v2'
 const CLASSIFICATION_VERSION = 'safe-classification-v2'
@@ -652,8 +652,11 @@ export const useReviewedExecution = () => {
     try {
       result = await coordinator.execute(execution, { reviewId, reviewDigest })
       if (!result.canRetry) {
-        void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
-        triggerPortfolioRefresh()
+        void refreshPortfolioAfterReviewedSubmission({
+          chainId: execution.requestSet.wallet.chainId,
+          confirmedBlockNumber: result.dispatch?.confirmedBlockNumber,
+          triggerPortfolioRefresh,
+        }).catch(error => logWarn('reviewedExecution/postTxRefresh', error))
       }
       return result
     }

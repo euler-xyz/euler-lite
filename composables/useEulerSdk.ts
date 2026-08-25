@@ -121,7 +121,7 @@ const buildFuulProxyApiPath = (path = '') =>
 const buildIncentraProxyApiPath = (path: string) =>
   buildAppApiPath(`/api/internal/proxy/incentra/${path.replace(/^\/+/, '')}`)
 const buildTurtleProxyApiPath = () => buildAppApiPath('/api/internal/proxy/turtle')
-// Exported so post-tx subgraph polling (useEulerTx) hits the exact same
+// Exported so reviewed-execution post-tx polling hits the exact same
 // endpoint the SDK's account/vault-type adapters read through. Polling the
 // upstream Goldsky URL directly would measure a different indexer head than
 // the one actually serving queryAccountVaults.

@@ -118,7 +118,11 @@ export class EoaExecutionAdapter implements ExecutionTransportAdapter {
           await callbacks.afterConfirmed(requestIndexes[stepIndex]!)
         },
       })
-      return { transactionHashes: result.hashes }
+      const lastReceipt = result.receipts[result.receipts.length - 1]
+      return {
+        transactionHashes: result.hashes,
+        ...(lastReceipt ? { confirmedBlockNumber: lastReceipt.blockNumber } : {}),
+      }
     }
     catch (error) {
       if (error instanceof MaterializedTransactionRevertedError) throw new AttemptRevertedError()

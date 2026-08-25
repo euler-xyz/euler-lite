@@ -8,6 +8,7 @@ export interface SafeCallsStatus {
   executionHash: Hash
   receiptStatus: 'success' | 'reverted'
   atomic: boolean
+  confirmedBlockNumber?: bigint
 }
 
 export interface SafeAdapterClient {
@@ -66,7 +67,13 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
       if (execution.atomic !== true) throw new DispatchFailedError('Safe call batch was not confirmed atomic')
       if (execution.receiptStatus === 'reverted') throw new AttemptRevertedError('Safe execution reverted')
       await callbacks.afterConfirmed(0)
-      return { transactionHashes: [execution.executionHash], callsId, executionHash: execution.executionHash, atomic: true }
+      return {
+        transactionHashes: [execution.executionHash],
+        callsId,
+        executionHash: execution.executionHash,
+        atomic: true,
+        ...(execution.confirmedBlockNumber !== undefined ? { confirmedBlockNumber: execution.confirmedBlockNumber } : {}),
+      }
     }
     catch (error) {
       if (error instanceof AttemptRevertedError || error instanceof DispatchFailedError) throw error

@@ -5,7 +5,7 @@ import type { SafeAdapterClient } from './safe'
 import { getSafeAtomicCapability, sendSafeAtomicCalls, waitForSafeTransactionExecution, type WalletProviderLike } from '~/utils/safeWalletTransactions'
 
 interface PublicTransactionClient {
-  getTransactionReceipt(args: { hash: Hash }): Promise<{ transactionHash: Hash, status: 'success' | 'reverted' }>
+  getTransactionReceipt(args: { hash: Hash }): Promise<{ transactionHash: Hash, status: 'success' | 'reverted', blockNumber: bigint }>
 }
 
 export const createAppEoaClients = ({
@@ -39,7 +39,12 @@ export const createAppSafeClients = ({
           publicClient: publicClient as never,
           requireAtomic: true,
         })
-        return { executionHash: execution.hash, receiptStatus: execution.receipt.status, atomic: execution.atomic === true }
+        return {
+          executionHash: execution.hash,
+          receiptStatus: execution.receipt.status,
+          confirmedBlockNumber: execution.receipt.blockNumber,
+          atomic: execution.atomic === true,
+        }
       },
     },
   }
