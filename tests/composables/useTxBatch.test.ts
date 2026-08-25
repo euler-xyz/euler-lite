@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address, type StateOverride } from 'viem'
@@ -317,6 +317,10 @@ beforeEach(() => {
   vi.mocked(getEulerSdkFresh).mockResolvedValue(createMockSdk() as never)
   resetBatchPrefetchState()
   useTxBatch().clearBatch()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('stitchAccount', () => {
@@ -1119,6 +1123,72 @@ describe('useTxBatch execution errors', () => {
     // the Execute gate green.
     expect(batch.layers.value[1]?.failed).toBe(false)
     expect(batch.simError.value).toBeDefined()
+  })
+
+  it('simulates a reverting batch on Tenderly from the diagnostic preview when preparation is unavailable', async () => {
+    const baseSdk = createMockSdk()
+    const sdk = {
+      ...baseSdk,
+      deploymentService: {
+        getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: targetVault } } })),
+      },
+      executionService: {
+        ...baseSdk.executionService,
+        encodeBatch: vi.fn(() => '0xfeed'),
+        deriveStateOverrides: vi.fn(async () => []),
+      },
+    }
+    const diagnosticPlan = [{
+      type: 'evcBatch',
+      items: [{
+        targetContract: vault,
+        onBehalfOfAccount: subAccount,
+        value: 0n,
+        data: '0x1234',
+      }],
+    }] as unknown as TransactionPlan
+    sdk.executionService.simulateTransactionPlan.mockResolvedValue({
+      simulatedAccounts: [accountWithPosition(subAccount, subAccount, 2n)],
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+      accountStatusErrors: [{
+        account: subAccount,
+        error: '0x',
+        decoded: [{ signature: 'E_OutstandingDebt()', params: [] }],
+      }],
+    } as never)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const tenderlyFetch = vi.fn(async () => ({ url: 'https://dashboard.tenderly.co/simulator/example' }))
+    vi.stubGlobal('$fetch', tenderlyFetch)
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      intent: intentFor(diagnosticPlan, [subAccount]),
+      label: 'Repay cbBTC',
+      subAccount,
+    })
+    await vi.waitFor(() => expect(batch.simError.value).toContain('OutstandingDebt'))
+    await vi.waitFor(() => expect(executionMocks.prepare).toHaveBeenCalledTimes(1))
+    const preparationCallsBeforeTenderly = executionMocks.prepare.mock.calls.length
+
+    await batch.simulateOnTenderly()
+
+    expect(executionMocks.prepare).toHaveBeenCalledTimes(preparationCallsBeforeTenderly)
+    expect(tenderlyFetch).toHaveBeenCalledWith('/api/internal/tenderly/simulate', {
+      method: 'POST',
+      body: {
+        chainId: 1,
+        from: owner,
+        to: targetVault,
+        data: '0xfeed',
+        value: '0',
+        stateOverrides: [],
+      },
+    })
+    expect(sdk.executionService.deriveStateOverrides).toHaveBeenCalledWith(1, owner, diagnosticPlan)
+    expect(batch.tenderlyUrl.value).toBe('https://dashboard.tenderly.co/simulator/example')
   })
 
   it('selects the last layer of a multi-operation entry (refinance)', async () => {

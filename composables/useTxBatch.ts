@@ -195,8 +195,9 @@ const execError = ref<string | undefined>(undefined)
 // the drawer header toggle the same thing. On laptop this collapses the body; on
 // mobile it shows/hides the whole bottom sheet (the nav item is the entry point).
 const drawerOpen = ref(true)
-// Non-authoritative merged preview from the latest successful layered
-// simulation. It supports form projections and never authorizes execution.
+// Non-authoritative merged preview from the latest completed layered
+// simulation. It supports form projections and diagnostics, and never
+// authorizes execution.
 let lastSimulatedPlan: TransactionPlan | null = null
 let baseAccountSnapshot: Account<IHasVaultAddress> | null = null
 
@@ -2442,19 +2443,23 @@ export const useTxBatch = () => {
   }
 
   /**
-   * Run the whole batch through Tenderly using the preview plan and the SDK's
-   * derived state overrides (so approvals/permits don't make it revert). Returns
-   * a dashboard URL surfaced via `tenderlyUrl`. Works in spy mode too — it's a
-   * read-only simulation, no signature required.
+   * Run the whole batch through Tenderly using the reviewed preview when
+   * preparation succeeds, or the latest layered-simulation plan when the batch
+   * itself reverts. The fallback is diagnostic only and never authorizes copy or
+   * execution. Returns a dashboard URL surfaced via `tenderlyUrl`. Works in spy
+   * mode too — it's a read-only simulation, no signature required.
    */
   const simulateOnTenderly = async (
     prepared?: Awaited<ReturnType<typeof prepareBatchExecutionReview>>,
   ): Promise<void> => {
-    if (!prepared) return
-    const { execution, previewPlan } = prepared
-    const o = execution.requestSet.wallet.account
-    const cid = execution.requestSet.wallet.chainId
     tenderly.clearSimulation()
+    const previewPlan = prepared?.previewPlan ?? lastSimulatedPlan
+    const o = prepared?.execution.requestSet.wallet.account ?? owner.value
+    const cid = prepared?.execution.requestSet.wallet.chainId ?? chainId.value
+    if (!previewPlan || !o || !cid) {
+      tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
+      return
+    }
     try {
       const sdk = await getEulerSdkFresh()
       const extraStateOverrides = mergeStateOverrides(
@@ -2471,10 +2476,10 @@ export const useTxBatch = () => {
         tenderly.simulationError.value = 'Tenderly simulation is not available for this batch.'
         return
       }
-      if (!tenderlyPayloadMatchesReviewedRequests({
+      if (prepared && !tenderlyPayloadMatchesReviewedRequests({
         payload,
-        requests: execution.requestSet.requests,
-        signatureSlots: execution.requestSet.signatureSlots,
+        requests: prepared.execution.requestSet.requests,
+        signatureSlots: prepared.execution.requestSet.signatureSlots,
         sdk,
       })) {
         throw new Error('Tenderly simulation does not match the reviewed requests')
