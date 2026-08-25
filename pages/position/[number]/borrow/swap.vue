@@ -39,6 +39,7 @@ import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
 import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
+import { buildRefinanceIntentArgs } from '~/utils/refinance-intent'
 import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount, resolveRefinanceCollateralLegs } from '~/utils/refinance-apy'
 import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -1058,36 +1059,7 @@ const createRefinanceIntent = (
 ) => createIntent({
   kind: 'refinance',
   planner: 'refinance-position',
-  args: {
-    collateral: input.collateral
-      ? input.collateral.swapQuote
-        ? {
-            planner: 'swap-collateral',
-            args: {
-              swapQuote: input.collateral.swapQuote,
-              swapperMode: input.collateral.swapperMode,
-            },
-          }
-        : {
-            planner: 'migrate-same-asset-collateral',
-            args: input.collateral,
-          }
-      : undefined,
-    debt: input.debt
-      ? input.debt.swapQuote
-        ? {
-            planner: 'swap-debt',
-            args: {
-              swapQuote: input.debt.swapQuote,
-              swapperMode: input.debt.swapperMode,
-            },
-          }
-        : {
-            planner: 'migrate-same-asset-debt',
-            args: input.debt,
-          }
-      : undefined,
-  },
+  args: buildRefinanceIntentArgs(input),
   source,
   subAccounts: [subAccount.value as Address],
 })
