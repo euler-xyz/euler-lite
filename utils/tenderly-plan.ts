@@ -35,7 +35,7 @@ const decodeReviewedBatch = (request: EoaRequest | SafeCall): EVCBatchItem[] | u
   }
 }
 
-/** Permit2 is represented by state overrides in Tenderly, so compare after removing only those declared slots. */
+/** Signature-bearing calls are modeled by Tenderly state overrides, so compare after removing only their declared slots. */
 export const tenderlyPayloadMatchesReviewedRequests = ({
   payload,
   requests,
@@ -51,18 +51,17 @@ export const tenderlyPayloadMatchesReviewedRequests = ({
   if (request.value.toString() === payload.value && request.data === payload.data) return true
 
   const requestId = reviewedRequestId(request)
-  const permit2Indexes = new Set(signatureSlots
-    .filter(slot => slot.kind === 'permit2')
+  const signatureIndexes = new Set(signatureSlots
     .flatMap(slot => slot.insertionPoints
       .filter(point => point.requestId === requestId)
       .map(point => point.batchItemIndex)))
-  if (!permit2Indexes.size) return false
+  if (!signatureIndexes.size) return false
 
   const items = decodeReviewedBatch(request)
-  if (!items || [...permit2Indexes].some(index => !items[index])) return false
+  if (!items || [...signatureIndexes].some(index => !items[index])) return false
   const reviewedValue = items.reduce((sum, item) => sum + item.value, 0n)
   if (request.value !== reviewedValue) return false
-  const simulatedItems = items.filter((_item, index) => !permit2Indexes.has(index))
+  const simulatedItems = items.filter((_item, index) => !signatureIndexes.has(index))
   return sdk.executionService.encodeBatch(simulatedItems) === payload.data
     && simulatedItems.reduce((sum, item) => sum + item.value, 0n).toString() === payload.value
 })

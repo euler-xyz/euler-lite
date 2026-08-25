@@ -167,7 +167,9 @@ describe('Stage A transaction inventory', () => {
     expect(directSource).toContain('const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isBuildingTenderlyPayload.value)')
     expect(directSource).not.toContain('const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)')
     expect(directSource).toContain('tenderlyPayloadMatchesReviewedRequests({')
+    expect(directSource).toContain('tenderlyPrepared?.plan ?? reviewPlan.value ?? tenderlyPlan')
     expect(batchSource).toContain('tenderlyPayloadMatchesReviewedRequests({')
+    expect(batchSource).toContain('const previewPlan = lastSimulatedPlan ?? prepared?.previewPlan')
     expect(`${directSource}\n${batchSource}`).not.toContain('Tenderly projection does not match the reviewed request set')
   })
 

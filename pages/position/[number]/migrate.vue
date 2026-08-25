@@ -870,6 +870,8 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
     const intent = createOutgoingMigrationIntent(preview)
     await openReviewState([intent], {
       presentationKind: 'migration',
+      tenderlyPrepared: preview.tenderlySimulation.prepared,
+      tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
       review: {
         type: 'migration',
         asset: sourceDebtVault.value.asset,

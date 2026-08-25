@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { Account, Portfolio, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getAddress, type Address, type StateOverride } from 'viem'
+import { Account, Portfolio, type EVCBatchItem, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { encodeFunctionData, getAddress, keccak256, toHex, type Address, type StateOverride } from 'viem'
+import { EVC_ABI } from '~/abis/evc'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { awaitFinalPlanningLayer, buildOperationEntryMap, buildWalletBalanceLayers, buildWalletChanges, countPlanOperations, fetchBaseAccountSnapshot, normalizeSimulatedVaultLayers, stitchAccount, useTxBatch } from '~/composables/useTxBatch'
 import {
@@ -12,6 +13,7 @@ import {
 } from '~/composables/batchPrefetchState'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import type { SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 
 vi.mock('~/composables/useEulerSdk', () => ({
@@ -1189,6 +1191,112 @@ describe('useTxBatch execution errors', () => {
     })
     expect(sdk.executionService.deriveStateOverrides).toHaveBeenCalledWith(1, owner, diagnosticPlan)
     expect(batch.tenderlyUrl.value).toBe('https://dashboard.tenderly.co/simulator/example')
+  })
+
+  it('uses the migration simulation projection for Tenderly when a reviewed preview is prepared', async () => {
+    const encodeBatch = (items: EVCBatchItem[]) => encodeFunctionData({ abi: EVC_ABI, functionName: 'batch', args: [items] })
+    const grantItem: EVCBatchItem = {
+      targetContract: vault,
+      onBehalfOfAccount: subAccount,
+      value: 0n,
+      data: '0x11111111',
+    }
+    const coreItem: EVCBatchItem = {
+      targetContract: borrowVault,
+      onBehalfOfAccount: subAccount,
+      value: 0n,
+      data: '0x22222222',
+    }
+    const revokeItem: EVCBatchItem = {
+      targetContract: vault,
+      onBehalfOfAccount: subAccount,
+      value: 0n,
+      data: '0x33333333',
+    }
+    const reviewedPlan = [{ type: 'evcBatch', items: [grantItem, coreItem, revokeItem] }] as unknown as TransactionPlan
+    const simulationPlan = [{ type: 'evcBatch', items: [coreItem] }] as unknown as TransactionPlan
+    const migrationStateOverrides = [{
+      address: vault,
+      stateDiff: [{ slot: toHex(1n, { size: 32 }), value: toHex(2n, { size: 32 }) }],
+    }] as StateOverride
+    executionMocks.compilePreviewForSimulation.mockResolvedValueOnce({
+      reviewedPlan,
+      plan: simulationPlan,
+      migrationStateOverrides,
+    })
+
+    const baseSdk = createMockSdk()
+    const sdk = {
+      ...baseSdk,
+      deploymentService: {
+        getDeployment: vi.fn(() => ({ addresses: { coreAddrs: { evc: targetVault } } })),
+      },
+      executionService: {
+        ...baseSdk.executionService,
+        encodeBatch: vi.fn(encodeBatch),
+        deriveStateOverrides: vi.fn(async () => []),
+      },
+    }
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const tenderlyFetch = vi.fn(async () => ({ url: 'https://dashboard.tenderly.co/simulator/migration' }))
+    vi.stubGlobal('$fetch', tenderlyFetch)
+    const batch = useTxBatch()
+
+    await batch.addEntry({
+      intent: intentFor(reviewedPlan, [subAccount]),
+      label: 'Migrate AERO/USDC',
+      subAccount,
+    })
+    await vi.waitFor(() => expect(batch.getMergedPlan()).toEqual(simulationPlan))
+
+    const requestId = keccak256(toHex('migration-request'))
+    const effectId = keccak256(toHex('migration-effect'))
+    const slotAt = (batchItemIndex: number, suffix: string): SignatureSlot => ({
+      slotId: keccak256(toHex(`migration-slot-${suffix}`)),
+      kind: 'migration',
+      signer: owner,
+      chainId: 1,
+      typedData: {},
+      typedDataHash: keccak256(toHex(`migration-typed-data-${suffix}`)),
+      insertionPoints: [{ requestId, effectId, batchItemIndex, abiArgumentPath: ['signature'] }],
+    })
+    const prepared = {
+      previewPlan: reviewedPlan,
+      execution: {
+        requestSet: {
+          wallet: { account: owner, chainId: 1 },
+          requests: [{
+            requestId,
+            effectIds: [effectId],
+            phase: 'core',
+            chainId: 1,
+            from: owner,
+            to: targetVault,
+            data: encodeBatch([grantItem, coreItem, revokeItem]),
+            value: 0n,
+          }],
+          signatureSlots: [slotAt(0, 'grant'), slotAt(2, 'revoke')],
+        },
+      },
+    }
+
+    await batch.simulateOnTenderly(prepared as never)
+
+    expect(tenderlyFetch).toHaveBeenCalledWith('/api/internal/tenderly/simulate', {
+      method: 'POST',
+      body: {
+        chainId: 1,
+        from: owner,
+        to: targetVault,
+        data: encodeBatch([coreItem]),
+        value: '0',
+        stateOverrides: [{
+          address: vault,
+          stateDiff: [{ slot: toHex(1n, { size: 32 }), value: toHex(2n, { size: 32 }) }],
+        }],
+      },
+    })
+    expect(sdk.executionService.deriveStateOverrides).toHaveBeenCalledWith(1, owner, simulationPlan)
   })
 
   it('selects the last layer of a multi-operation entry (refinance)', async () => {

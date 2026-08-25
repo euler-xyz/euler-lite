@@ -3334,6 +3334,8 @@ const reviewInboundExternalMigration = async () => {
     const intent = createInboundMigrationIntent(preview)
     await openReviewState([intent], {
       presentationKind: 'migration',
+      tenderlyPrepared: preview.tenderlySimulation.prepared,
+      tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
       review: {
         type: 'migration',
         asset: reviewAsset,

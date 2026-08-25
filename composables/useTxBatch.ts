@@ -2443,17 +2443,17 @@ export const useTxBatch = () => {
   }
 
   /**
-   * Run the whole batch through Tenderly using the reviewed preview when
-   * preparation succeeds, or the latest layered-simulation plan when the batch
-   * itself reverts. The fallback is diagnostic only and never authorizes copy or
-   * execution. Returns a dashboard URL surfaced via `tenderlyUrl`. Works in spy
-   * mode too — it's a read-only simulation, no signature required.
+   * Run the whole batch through Tenderly using the latest layered-simulation
+   * projection. The reviewed preview is a fallback when no layered projection
+   * is available; neither plan authorizes copy or execution. Returns a dashboard
+   * URL surfaced via `tenderlyUrl`. Works in spy mode too — it's a read-only
+   * simulation, no signature required.
    */
   const simulateOnTenderly = async (
     prepared?: Awaited<ReturnType<typeof prepareBatchExecutionReview>>,
   ): Promise<void> => {
     tenderly.clearSimulation()
-    const previewPlan = prepared?.previewPlan ?? lastSimulatedPlan
+    const previewPlan = lastSimulatedPlan ?? prepared?.previewPlan
     const o = prepared?.execution.requestSet.wallet.account ?? owner.value
     const cid = prepared?.execution.requestSet.wallet.chainId ?? chainId.value
     if (!previewPlan || !o || !cid) {

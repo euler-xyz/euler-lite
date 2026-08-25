@@ -1,4 +1,5 @@
-import type { Hash } from 'viem'
+import type { Hash, StateOverride } from 'viem'
+import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { ReviewedOperationModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
@@ -12,6 +13,8 @@ export interface ReviewPresentation extends Record<string, unknown> {
 export interface OpenExecutionReviewOptions {
   presentationKind: string
   review: ReviewPresentation
+  tenderlyPrepared?: TransactionPlanPrepared
+  tenderlyStateOverrides?: StateOverride
   onConfirmed?: (result: SubmissionResult) => void | Promise<void>
   onResult?: (result: SubmissionResult) => void | Promise<void>
   onSucceeded?: (result: SubmissionResult) => void | Promise<void>
@@ -47,7 +50,8 @@ export const useExecutionReview = () => {
           plan: undefined,
           prepared: prepared.prepared,
           calldataPrepared: prepared.prepared,
-          tenderlyPrepared: prepared.prepared,
+          tenderlyPrepared: options.tenderlyPrepared ?? prepared.prepared,
+          tenderlyStateOverrides: options.tenderlyStateOverrides,
         },
         onConfirmed: options.onConfirmed,
         onResult: options.onResult,

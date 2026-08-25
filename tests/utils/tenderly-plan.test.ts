@@ -162,4 +162,72 @@ describe('buildTenderlySimulationPayload', () => {
       sdk: evcSdk,
     })).toBe(false)
   })
+
+  it('matches a migration simulation after removing only its reviewed authorization slots', async () => {
+    const grantItem: EVCBatchItem = {
+      targetContract: getAddress(token),
+      onBehalfOfAccount: getAddress(owner),
+      value: 0n,
+      data: '0x11111111',
+    }
+    const coreItem: EVCBatchItem = {
+      targetContract: getAddress(distributor),
+      onBehalfOfAccount: getAddress(owner),
+      value: 0n,
+      data: '0x22222222',
+    }
+    const revokeItem: EVCBatchItem = {
+      targetContract: getAddress(token),
+      onBehalfOfAccount: getAddress(owner),
+      value: 0n,
+      data: '0x33333333',
+    }
+    const encodeBatch = (items: EVCBatchItem[]) => encodeFunctionData({ abi: EVC_ABI, functionName: 'batch', args: [items] })
+    const evcSdk = {
+      deploymentService: { getDeployment: () => ({ addresses: { coreAddrs: { evc } } }) },
+      executionService: {
+        encodeBatch,
+        deriveStateOverrides: vi.fn(async () => []),
+      },
+    } as unknown as EulerSDK
+    const plan = [{ type: 'evcBatch', items: [coreItem] }] as unknown as TransactionPlan
+    const payload = await buildTenderlySimulationPayload({ plan, owner, chainId: 1, sdk: evcSdk })
+    expect(payload).toBeDefined()
+
+    const requestId = keccak256(toHex('migration-request'))
+    const effectId = keccak256(toHex('migration-effect'))
+    const request: EoaRequest = {
+      requestId,
+      effectIds: [effectId],
+      phase: 'core',
+      chainId: 1,
+      from: getAddress(owner),
+      to: getAddress(evc),
+      data: encodeBatch([grantItem, coreItem, revokeItem]),
+      value: 0n,
+    }
+    const slotAt = (batchItemIndex: number, suffix: string): SignatureSlot => ({
+      slotId: keccak256(toHex(`migration-slot-${suffix}`)),
+      kind: 'migration',
+      signer: getAddress(owner),
+      chainId: 1,
+      typedData: {},
+      typedDataHash: keccak256(toHex(`migration-typed-data-${suffix}`)),
+      insertionPoints: [{ requestId, effectId, batchItemIndex, abiArgumentPath: ['signature'] }],
+    })
+    const signatureSlots = [slotAt(0, 'grant'), slotAt(2, 'revoke')]
+
+    expect(tenderlyPayloadMatchesReviewedRequests({
+      payload: payload!,
+      requests: [request],
+      signatureSlots,
+      sdk: evcSdk,
+    })).toBe(true)
+    expect(tenderlyPayloadMatchesReviewedRequests({
+      payload: payload!,
+      requests: [request],
+      signatureSlots: signatureSlots.slice(0, 1),
+      sdk: evcSdk,
+    })).toBe(false)
+  })
 })

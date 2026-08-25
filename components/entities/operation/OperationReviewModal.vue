@@ -124,8 +124,10 @@ const prepareError = computed(() =>
 const tenderlyLocalError = ref('')
 const isBuildingTenderlyPayload = ref(false)
 const isPreparingPlan = ref(false)
-const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
-const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
+// A dedicated Tenderly projection models signature-bearing migration calls
+// with state overrides, so it takes precedence over the executable preview.
+const tenderlyReviewPlan = computed(() => tenderlyPrepared?.plan ?? reviewPlan.value ?? tenderlyPlan)
+const tenderlyChainId = computed(() => tenderlyPrepared?.chainId ?? prepared?.chainId ?? currentChainId.value)
 // calldataPrepared is the dedicated copy-calldata plan (e.g. carrying
 // placeholder signatures) — it must win over the review plan when both exist.
 const calldataPlan = computed(() => calldataPrepared?.plan ?? reviewPlan.value)
