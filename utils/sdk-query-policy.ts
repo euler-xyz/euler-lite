@@ -163,6 +163,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryBlockNumber: { staleTimeMs: 5 * SECOND },
   querySwapQuotes: { staleTimeMs: 5 * SECOND },
   queryBatchSimulation: { staleTimeMs: 15 * SECOND },
+  queryPythUpdateBundle: { staleTimeMs: 30 * SECOND },
   queryPythUpdateData: { staleTimeMs: 30 * SECOND },
   queryPythUpdateFee: { staleTimeMs: 30 * SECOND },
 
