@@ -49,6 +49,7 @@ const knownSymbols = computed(() => {
 
   props.collateralVaults?.forEach((vault) => {
     map.set(vault.address.toLowerCase(), vault.asset.symbol)
+    map.set(vault.asset.address.toLowerCase(), vault.asset.symbol)
   })
 
   return map
@@ -203,7 +204,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
             </button>
           </div>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-12 text-p3">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-12 text-p3">
           <div class="flex flex-col gap-4">
             <span class="text-content-tertiary">Provider</span>
             <div class="flex items-center gap-8">
@@ -221,13 +222,13 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
               <span class="text-content-primary">{{ adapter.provider || 'Unknown' }}</span>
             </div>
           </div>
-          <div class="flex flex-col gap-4 order-3 md:order-2">
+          <div class="flex flex-col gap-4">
             <span class="text-content-tertiary">Methodology</span>
             <span class="text-content-primary">{{ adapter.methodology || 'Unknown' }}</span>
           </div>
           <UiModalPreviewTrigger
             v-if="adapter.checks?.length"
-            class="flex flex-col gap-4 order-4 md:order-3 items-start cursor-default text-left"
+            class="flex flex-col gap-4 items-start cursor-default text-left"
             :component="OracleAdapterChecksModal"
             :modal-data="getChecksModalData(adapter)"
             aria-label="Show oracle adapter checks"
@@ -257,7 +258,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
           </UiModalPreviewTrigger>
           <div
             v-else
-            class="flex flex-col gap-4 order-4 md:order-3"
+            class="flex flex-col gap-4"
           >
             <span class="text-content-tertiary">Checks</span>
             <span
@@ -269,7 +270,13 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
               class="text-content-secondary"
             >N/A</span>
           </div>
-          <div class="flex flex-col gap-4 order-2 md:order-4">
+          <div class="flex flex-col gap-4">
+            <span class="text-content-tertiary">Route</span>
+            <span class="text-content-primary">
+              {{ resolveSymbol(adapter.base) }}/{{ resolveSymbol(adapter.quote) }}
+            </span>
+          </div>
+          <div class="flex flex-col gap-4">
             <span class="text-content-tertiary">Price</span>
             <span
               v-if="isPriceLoading"
