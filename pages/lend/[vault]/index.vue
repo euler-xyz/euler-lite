@@ -29,7 +29,7 @@ import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { reportClientEvent } from '~/utils/client-observability'
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -599,7 +599,9 @@ const submit = async () => {
 // active layer's simulated account inside useTxBatch, so a deposit added on top
 // of a previous batch step composes correctly. Direct (non-swap) deposits only.
 // A CoW swap quote can't be batched (mergePlans/simulate reject cowSwap items).
-const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
+const isCowSwapSelected = computed(() =>
+  needsSwap.value && isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return false
   if (!(+amount.value) || isNativeWrap.value) return false
@@ -1222,6 +1224,7 @@ watch([
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
                 :can-add-to-batch="canAddToBatch"
+                :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addToBatch"
               >
                 {{ reviewSupplyLabel }}

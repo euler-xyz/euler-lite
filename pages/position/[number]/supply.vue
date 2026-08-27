@@ -12,7 +12,7 @@ import { getAddress, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const positionIndex = usePositionIndex()
 const { isConnected } = useWagmi()
@@ -182,7 +182,9 @@ const { name } = useEulerProductOfVault(computed(() => form.collateralVault.valu
 
 // Add this collateral supply to the batch. Direct deposit or non-CoW swap
 // deposit; native-wrap goes through the single-tx review path.
-const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
+const isCowSwapSelected = computed(() =>
+  needsSwap.value && isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isInputAssetBlocked.value) return false
   if (!(+form.amount.value) || isNativeWrap.value || !form.collateralVault.value?.address || !form.position.value) return false
@@ -408,6 +410,7 @@ watch(selectedAsset, async () => {
             :disabled-reason="disabledReasonInfo?.message"
             :disabled-reason-variant="disabledReasonInfo?.variant"
             :can-add-to-batch="canAddToBatch"
+            :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
             @add-to-batch="addToBatch"
           >
             {{ form.submitLabel }}

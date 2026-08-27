@@ -61,6 +61,7 @@ import {
   type MigrationAuthorizationRevoke,
 } from '~/utils/migrationAuthorizationTxs'
 import {
+  COWSWAP_BATCH_UNSUPPORTED_REASON,
   COWSWAP_ORDER_DEADLINE_SECONDS,
   COWSWAP_PROVIDER_EXTRA_DATA,
   buildCollateralSwapQuoteAppData,
@@ -4255,6 +4256,7 @@ function getOperationVaultAddresses(): string[] {
                     :disabled-reason="disabledReasonInfo?.message"
                     :disabled-reason-variant="disabledReasonInfo?.variant"
                     :can-add-to-batch="canAddToBatch"
+                    :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                     @add-to-batch="addToBatch"
                   >
                     {{ reviewRefinanceLabel }}
@@ -4562,6 +4564,7 @@ function getOperationVaultAddresses(): string[] {
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :can-add-to-batch="canAddToBatch"
+                :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addToBatch"
               >
                 {{ reviewRefinanceLabel }}

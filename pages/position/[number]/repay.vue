@@ -19,7 +19,7 @@ import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
-import { isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProvider } from '~/entities/cowswap'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -159,6 +159,18 @@ const walletProjectedYieldDetails = computed(() =>
 
 // Add the current repay (any tab) to the batch. CoW orders can't be merged
 // into an EVC batch, so swap routes via CoW are excluded.
+const isCowSwapSelectedForBatch = computed(() => {
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value && isCowProvider(walletSwap.quotes.selectedProvider.value)
+  }
+  if (formTab.value === 'collateral') {
+    return !collateral.isSameAsset.value && isCowProvider(collateral.quotes.selectedProvider.value)
+  }
+  if (formTab.value === 'savings') {
+    return !savings.isSameAsset.value && isCowProvider(savings.quotes.selectedProvider.value)
+  }
+  return false
+})
 const canAddToBatch = computed(() => {
   if (!borrowVault.value || !position.value) return false
   if (formTab.value === 'wallet') {
@@ -853,6 +865,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -1034,6 +1047,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -1211,6 +1225,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}

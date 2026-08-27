@@ -12,7 +12,7 @@ import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
-import { isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProvider } from '~/entities/cowswap'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { getProjectedRatesBatch } from '~/utils/vault/apy'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -311,7 +311,7 @@ const { redirectAfterAdd } = useBatchRedirect()
 
 // Add this earn-position swap (or same-asset migration) to the batch. CoW
 // orders can't be merged into an EVC batch, so they're excluded.
-const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const isCowSwapSelected = computed(() => !isSameAsset.value && isCowProvider(selectedProvider.value))
 const canAddToBatch = computed(() => {
   if (isGeoBlocked.value) return false
   if (!fromVault.value || !toVault.value || !(+fromAmount.value)) return false
@@ -589,6 +589,7 @@ watch(
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :loading="isSubmitting || isPreparing"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewSwapLabel }}
