@@ -62,6 +62,11 @@ const morphoAuthorizationRequest = (): MigrationAuthorizationRequest => ({
   },
 } as unknown as MigrationAuthorizationRequest)
 
+const morphoCleanupOnlyRequest = (): MigrationAuthorizationRequest => ({
+  ...morphoAuthorizationRequest(),
+  call: undefined,
+} as unknown as MigrationAuthorizationRequest)
+
 const typedDataRequest = (): MigrationAuthorizationRequest => ({
   kind: 'typedData',
   connectorId: 'aave',
@@ -99,6 +104,17 @@ describe('encodeMigrationAuthorizationTxs', () => {
     expect(revokes[0]!.data).toBe(
       encodeFunctionData({ abi: setAuthorizationAbi, functionName: 'setAuthorization', args: [swapVerifier, false] }),
     )
+  })
+
+  it('encodes cleanup without a redundant Morpho grant when already authorized', () => {
+    const { grants, revokes, revokesByGrant } = encodeMigrationAuthorizationTxs(morphoCleanupOnlyRequest())
+
+    expect(grants).toEqual([])
+    expect(revokesByGrant).toEqual([])
+    expect(revokes).toEqual([{
+      to: morphoBlue,
+      data: encodeFunctionData({ abi: setAuthorizationAbi, functionName: 'setAuthorization', args: [swapVerifier, false] }),
+    }])
   })
 
   it('unwinds chained authorizations in reverse grant order', () => {
@@ -155,11 +171,16 @@ describe('buildMigrationAuthorizationTxSteps', () => {
     expect(buildMigrationAuthorizationTxSteps(morphoAuthorizationRequest(), 'revoke', 4)).toEqual([
       {
         index: 4,
-        label: 'Restore previous Morpho authorization',
+        label: 'Remove Morpho authorization',
         isSeparateTx: true,
         txKey: txKeyOf(morphoBlue, encodeFunctionData({ abi: setAuthorizationAbi, functionName: 'setAuthorization', args: [swapVerifier, false] })),
       },
     ])
+  })
+
+  it('renders only cleanup for an already-authorized Morpho request', () => {
+    expect(buildMigrationAuthorizationTxSteps(morphoCleanupOnlyRequest(), 'grant')).toEqual([])
+    expect(buildMigrationAuthorizationTxSteps(morphoCleanupOnlyRequest(), 'revoke')).toHaveLength(1)
   })
 
   it('keys row identity on the encoded transaction, not the label', () => {
@@ -192,7 +213,7 @@ describe('buildMigrationAuthorizationTxSteps', () => {
     } as unknown as MigrationAuthorizationRequest
 
     expect(buildMigrationAuthorizationTxSteps(request, 'revoke').map(step => step.label)).toEqual([
-      'Restore previous Morpho authorization',
+      'Remove Morpho authorization',
       'Restore previous aToken approval',
     ])
   })
@@ -250,6 +271,11 @@ describe('migrationAuthorizationPayloadKey', () => {
       postMigrationAuthorization: morphoAuthorizationRequest(),
     } as unknown as MigrationAuthorizationRequest
     expect(migrationAuthorizationPayloadKey(chained)).not.toBe(base)
+  })
+
+  it('distinguishes cleanup-only authorization from grant plus cleanup', () => {
+    expect(migrationAuthorizationPayloadKey(morphoCleanupOnlyRequest()))
+      .not.toBe(migrationAuthorizationPayloadKey(morphoAuthorizationRequest()))
   })
 
   it('keys typed-data requests without choking on bigint fields', () => {

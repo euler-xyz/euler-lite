@@ -2,9 +2,7 @@ import { getPositionMultiplier } from '~/utils/vault/apy'
 import { isEVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Ref, ComputedRef } from 'vue'
 import { maxUint256, type Address } from 'viem'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
-import { OperationReviewModal } from '#components'
 import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { formatUnits } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -28,7 +26,6 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseWalletRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -66,14 +63,15 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const modal = useModal()
   const { error } = useToast()
-  const { planRepayFromWallet, executePlan } = useEulerTx()
+  const { planRepayFromWallet } = useEulerTx()
+  const { open: openReviewState } = useExecutionReview()
+  const { create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
   const { primeSlotHintsFor } = useStateOverrideOptions()
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
-  const { finalizeTxAndRedirect } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
   const {
     version: rewardsVersion,
@@ -174,15 +172,23 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       const amountNano = valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
       const currentDebt = position.value.borrowed || 0n
       const shouldFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
+      const args = {
+        liabilityVault: borrowVault.value.address as Address,
+        liabilityAsset: borrowVault.value.asset.address as Address,
+        liabilityAmount: shouldFullRepay ? maxUint256 : amountNano,
+        receiver: position.value.subAccount as Address,
+        cleanupOnMax: shouldFullRepay,
+      }
+      const intent = createIntent({
+        kind: 'repay',
+        planner: 'repay-from-wallet',
+        args,
+        source: 'position/repay-wallet:review',
+        subAccounts: [args.receiver],
+      })
 
       try {
-        plan.value = await planRepayFromWallet({
-          liabilityVault: borrowVault.value.address as Address,
-          liabilityAmount: shouldFullRepay ? maxUint256 : amountNano,
-          receiver: position.value.subAccount as Address,
-          cleanupOnMax: shouldFullRepay,
-          account: planAccount.value,
-        })
+        plan.value = await planRepayFromWallet({ ...args, account: planAccount.value })
       }
       catch (e) {
         logWarn('walletRepay/buildPlan', e)
@@ -194,50 +200,26 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         if (!ok) return
       }
 
-      modal.open(OperationReviewModal, {
-        props: {
+      if (!plan.value) return
+      await openReviewState([intent], {
+        presentationKind: 'repay',
+        review: {
           type: 'repay',
           asset: borrowVault.value.asset,
           amount: amount.value,
-          plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async (execution) => {
-            await send(execution)
-          },
           submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => finalizeExecutionUi(),
+        onFailed: (cause) => {
+          error('Transaction failed')
+          logWarn('walletRepay/send', cause)
         },
       })
     }
     finally {
       isPreparing.value = false
-    }
-  }
-
-  const send = async (execution: TrackedExecutionScope) => {
-    try {
-      isSubmitting.value = true
-      if (!position.value || !borrowVault.value || !collateralVault.value) return
-
-      const amountNano = valueToNano(amount.value, borrowVault.value.asset.decimals)
-      const currentDebt = position.value.borrowed || 0n
-      const isFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
-      const txPlan = await planRepayFromWallet({
-        liabilityVault: borrowVault.value.address as Address,
-        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
-        receiver: position.value.subAccount as Address,
-        cleanupOnMax: isFullRepay,
-        account: planAccount.value,
-      })
-      await executePlan(txPlan)
-      await finalizeTxAndRedirect({ scope: execution })
-    }
-    catch (e) {
-      error('Transaction failed')
-      logWarn('walletRepay/send', e)
-    }
-    finally {
-      isSubmitting.value = false
     }
   }
 
@@ -566,7 +548,6 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     suppliedFixed,
     priceFixed,
     submit,
-    send,
     onWalletRepayPercentInput,
     onSourceMax,
     initEstimates,

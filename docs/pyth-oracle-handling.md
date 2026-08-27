@@ -65,19 +65,19 @@ Both builders group feeds by Pyth contract, fetch update data, read `getUpdateFe
 
 ## Transaction Path
 
-Transaction planning goes through SDK `TransactionPlan` helpers in `useEulerTx.ts`. Before simulation, review preparation, and execution, Lite applies operation guards and then delegates to SDK execution service methods:
+Transaction planning goes through SDK `TransactionPlan` helpers in `useEulerTx.ts`. Reviewed execution applies operation guards and delegates planning, plugin processing, deterministic materialization, and EOA receipt sequencing to the SDK.
 
 - `simulateTransactionPlan(...)`
 - `resolveRequiredApprovals(...)`
-- `executeTransactionPlan(...)`
+- `materializeExecution(...)`, finalization, and `executeMaterialized(...)`
 
-The SDK plugin pipeline processes the plan before runtime work. Pyth update items are inserted into EVC batches by the SDK when the plan and vault/account context require fresh Pyth prices.
+The SDK plugin pipeline inserts Pyth update items into EVC batches when the plan and vault/account context require fresh prices. Lite seals those preview items as bounded dynamic slots. For an EOA sequence with static approval or migration-grant requests before the Pyth-bearing EVC request, the SDK first executes and receipts only that static prefix. Lite then refreshes and structurally verifies Pyth immediately before finalizing the suffix, and hands that suffix back to `executeMaterialized`. The initial schema permits one Pyth-bearing request per execution and rejects a dynamic signature slot in its prefix. Safe has one atomic handoff, so refresh remains immediately before that envelope is sent.
 
 ## Error Handling
 
 Read-path Pyth helpers return empty update sets or `undefined` decoded results when they cannot build or simulate updates. Callers can continue rendering with available data and let the next refresh attempt recover.
 
-Transaction-path errors are surfaced through SDK simulation and execution results. Forms show simulation errors through `useTransactionPlanSimulation()`, and the review modal blocks confirmation when plan preparation fails.
+Transaction-path errors are surfaced through reviewed execution preparation and execution. Forms show eager simulation errors through `useTransactionPlanSimulation()`. The reviewed execution seals bounded Pyth refresh slots, refreshes them only after the synchronous duplicate guard is acquired and any static EOA prefix has confirmed, and blocks the Pyth-bearing wallet handoff if refresh or slot verification fails. Preparation cache expiry controls whether a prepared review may be reused; explicit quote, signature, policy, and Pyth validity checks govern the accepted execution. Pyth remains absent from the user-facing review.
 
 ## Files
 
@@ -86,6 +86,7 @@ Transaction-path errors are surfaced through SDK simulation and execution result
 | `utils/pyth.ts` | Hermes fetching, read-path batch item building, lens simulation helpers |
 | `entities/oracle.ts` | Oracle adapter decoding helpers and Pyth feed types used by UI code |
 | `server/api/internal/pyth/updates.get.ts` | Server-side Hermes proxy endpoint |
-| `composables/useEulerTx.ts` | SDK `TransactionPlan` simulation, preparation, and execution wrapper |
+| `composables/useEulerTx.ts` | SDK `TransactionPlan` planning, preview preparation, and simulation helpers |
+| `composables/useReviewedExecution.ts` | Pyth preview-data collection, execution-time refresh, and slot verification integration |
 | `composables/useTransactionPlanSimulation.ts` | Form-level simulation state and error formatting |
 | `docs/pricing-system.md` | Full pricing architecture and vault/account read flow |

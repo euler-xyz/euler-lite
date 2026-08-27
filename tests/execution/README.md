@@ -86,7 +86,9 @@ Artifacts are written to `artifacts/execution-recordings/<timestamp>/`:
 - `network.jsonl`: raw API/swap network captures.
 - `wallet-requests.jsonl`: injected wallet RPC requests, transaction hashes,
   and receipts. Transaction receipts with a non-success status fail the
-  scenario.
+  scenario. A scenario with a non-empty `covers` list also fails unless at
+  least one wallet transaction reaches a successful receipt and wallet
+  activity has stopped before the final capture.
 - `report.md`: a short human-readable summary with transaction hashes.
 - `report.html`: a drill-down report with scenario details, captures,
   sidecar links, transaction hashes, and embedded videos.
@@ -94,6 +96,10 @@ Artifacts are written to `artifacts/execution-recordings/<timestamp>/`:
   scenario. The recorder keeps the page open for 2500 ms after the final
   capture so the last rendered state is visible in the video. Pass
   `--video-tail-ms <ms>` to adjust that wait or `--no-video` to skip recording.
+
+The recorder raises Anvil's block gas limit only for the large read-only
+Multicall used to load the vault inventory. Wallet transactions remain capped
+at the recorder's separate fork-only transaction gas limit.
 
 `execution:suite` writes a top-level `report.html`, `report.md`, and
 `summary.json` in addition to each group's artifact directory.

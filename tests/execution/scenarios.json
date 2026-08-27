@@ -1308,7 +1308,7 @@
         {
           "type": "click",
           "label": "Select executable collateral repay swap route",
-          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"], [data-id=\"swap-route-list-item\"][data-provider=\"nordstern\"]",
+          "selector": "[data-id=\"swap-route-list-item\"]",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
           ],
@@ -1678,8 +1678,8 @@
           "label": "Open debt refinance form",
           "selector": "[data-id=\"position-action-refinance-debt\"]:not(.is-disabled)",
           "waitFor": [
-            "[data-id=\"asset-input\"][data-label=\"From\"]",
-            "[data-id=\"asset-input\"][data-label=\"To\"]"
+            "[data-id=\"asset-input\"][data-label=\"Collateral vault\"]",
+            "[data-id=\"asset-input\"][data-label=\"Debt vault\"]"
           ],
           "settleMs": 1500,
           "captureTagsAfter": true
@@ -1687,7 +1687,7 @@
         {
           "type": "selectCollateralOption",
           "label": "Select USDT debt target",
-          "assetLabel": "To",
+          "assetLabel": "Debt vault",
           "vaultAddress": "0x313603FA690301b0CaeEf8069c065862f9162162",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"]"
@@ -1698,7 +1698,7 @@
         {
           "type": "click",
           "label": "Select executable debt swap route",
-          "selector": "[data-id=\"swap-route-list-item\"][data-provider=\"magpie\"]",
+          "selector": "[data-id=\"swap-route-list-item\"]",
           "waitFor": [
             "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
           ],
@@ -1707,8 +1707,8 @@
         },
         {
           "type": "click",
-          "label": "Open debt swap review",
-          "selector": "button:has-text(\"Review Swap\")",
+          "label": "Open debt refinance review",
+          "selector": "button:has-text(\"Review Refinance\")",
           "waitFor": [
             "text=Transaction review",
             "[data-id=\"operation-review-confirm\"]"

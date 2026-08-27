@@ -49,16 +49,3 @@ export const refreshREULLockReview = async (
 
   return { status: 'fresh', lock: currentLock }
 }
-
-export const runWithFreshREULLockReview = async (
-  reviewedLock: REULLock,
-  refreshLocks: RefreshREULLocks,
-  execute: (currentLock: REULLock) => Promise<boolean>,
-): Promise<REULLockReviewValidation | { status: 'executed' | 'cancelled' }> => {
-  const validation = await refreshREULLockReview(reviewedLock, refreshLocks)
-  if (validation.status !== 'fresh') return validation
-
-  return await execute(validation.lock)
-    ? { status: 'executed' }
-    : { status: 'cancelled' }
-}

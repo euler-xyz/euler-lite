@@ -19,6 +19,7 @@ import { isCowProviderOrQuote } from '~/entities/cowswap'
 const positionIndex = usePositionIndex()
 const { address } = useWagmi()
 const { planWithdraw, planWithdrawAndSwap, planRedeem } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: cachedAccount } = useFreshAccount()
@@ -120,6 +121,33 @@ const form = useCollateralForm({
     })
   },
 
+  createReviewIntent: (quote?: SwapQuote) => {
+    const vault = form.collateralVault.value
+    const asset = form.asset.value
+    const owner = (form.position.value?.subAccount ?? address.value) as Address | undefined
+    if (!vault || !asset || !owner) throw new Error('Position is not loaded')
+    const assets = valueToNano(form.amount.value || '0', asset.decimals)
+    if (quote) {
+      return createIntent({
+        kind: 'withdraw',
+        planner: 'withdraw-and-swap',
+        args: { swapQuote: quote, vaultAddress: vault.address as Address, assets, owner },
+        source: 'position/withdraw:review',
+        subAccounts: [owner],
+      })
+    }
+    const full = isFullCollateralWithdraw(assets)
+    return createIntent({
+      kind: 'withdraw',
+      planner: full ? 'redeem' : 'withdraw',
+      args: full
+        ? { vaultAddress: vault.address as Address, shares: maxUint256, owner }
+        : { vaultAddress: vault.address as Address, assets, owner },
+      source: 'position/withdraw:review',
+      subAccounts: [owner],
+    })
+  },
+
   requestSwapQuoteParams: ({ userAddr, subAccountAddr, amountNano, slippage, asset, vaultAddress }) => {
     if (!selectedOutputAsset.value) return null
     return {
@@ -194,9 +222,16 @@ const addToBatch = async () => {
     if (needsSwap.value) {
       const quote = form.swapEffectiveQuote.value
       if (!quote) return
+      const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
       await addBatchEntry({
         label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
-        buildPlan: account => planWithdrawAndSwap({ swapQuote: quote, vaultAddress, assets, owner, account }),
+        intent: quoteIntents?.[0] ?? createIntent({
+          kind: 'withdraw',
+          planner: 'withdraw-and-swap',
+          args: { swapQuote: quote, vaultAddress, assets, owner },
+          source: 'position/withdraw:add-to-batch',
+          subAccounts: [owner],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })
@@ -204,7 +239,13 @@ const addToBatch = async () => {
     else if (isFullCollateralWithdraw(assets)) {
       await addBatchEntry({
         label: `Withdraw ${form.amount.value} ${a.symbol}`,
-        buildPlan: account => planRedeem({ vaultAddress, shares: maxUint256, owner, account }),
+        intent: createIntent({
+          kind: 'withdraw',
+          planner: 'redeem',
+          args: { vaultAddress, shares: maxUint256, owner },
+          source: 'position/withdraw:add-to-batch',
+          subAccounts: [owner],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'withdraw', asset: a, amount: form.amount.value },
       })
@@ -212,7 +253,13 @@ const addToBatch = async () => {
     else {
       await addBatchEntry({
         label: `Withdraw ${form.amount.value} ${a.symbol}`,
-        buildPlan: account => planWithdraw({ vaultAddress, assets, owner, account }),
+        intent: createIntent({
+          kind: 'withdraw',
+          planner: 'withdraw',
+          args: { vaultAddress, assets, owner },
+          source: 'position/withdraw:add-to-batch',
+          subAccounts: [owner],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'withdraw', asset: a, amount: form.amount.value },
       })

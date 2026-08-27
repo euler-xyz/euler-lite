@@ -7,6 +7,7 @@ import {
   isNonBlockingApprovalSimulationFailure,
 } from '~/utils/tx-errors'
 import { reportClientEvent } from '~/utils/client-observability'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export const useTransactionPlanSimulation = () => {
   const { simulatePlan, simulatePreparedPlan } = useEulerTx()
@@ -67,11 +68,12 @@ export const useTransactionPlanSimulation = () => {
     prepared: TransactionPlanPrepared,
     stateOverrideOptions?: SimulationStateOverrideOptions,
     extraStateOverrides?: StateOverride,
+    intents?: readonly OperationIntent[],
   ) => {
     clearSimulationError()
     isSimulating.value = true
     try {
-      return handleResult(prepared, await simulatePreparedPlan(prepared, stateOverrideOptions, extraStateOverrides))
+      return handleResult(prepared, await simulatePreparedPlan(prepared, stateOverrideOptions, extraStateOverrides, intents))
     }
     catch (e) {
       if (await isNonBlockingApprovalSimulationError(prepared, e)) return true

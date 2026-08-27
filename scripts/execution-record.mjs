@@ -37,6 +37,8 @@ const MAX_CAPTURED_SWAP_BODY_CHARS = 1_500_000
 const MAX_CAPTURED_API_BODY_CHARS = 250_000
 const MAX_CAPTURED_RPC_BODY_CHARS = 20_000
 const DEFAULT_VIDEO_TAIL_MS = 2_500
+const FORK_TRANSACTION_GAS_LIMIT = 30_000_000n
+const FORK_READ_BLOCK_GAS_LIMIT = 1_000_000_000n
 const EVaultDepositAbi = [
   {
     type: 'function',
@@ -68,6 +70,7 @@ async function main() {
   const vaultSnapshot = vaultSnapshotPath ? await readJson(vaultSnapshotPath) : null
   const appUrl = cleanBaseUrl(args.url ?? DEFAULT_APP_URL)
   const swapApiUrl = args['swap-api-url'] ? cleanBaseUrl(args['swap-api-url']) : null
+  const pythUpdatesUrl = args['pyth-updates-url'] ? cleanBaseUrl(args['pyth-updates-url']) : null
   const anvilRpcUrl = String(args['anvil-rpc'] ?? fixture.anvil?.rpcUrl ?? DEFAULT_ANVIL_RPC_URL)
   const runId = new Date().toISOString().replace(/[:.]/g, '-')
   const outputDir = path.resolve(ROOT_DIR, args['output-dir'] ?? path.join('artifacts/execution-recordings', runId))
@@ -107,6 +110,7 @@ async function main() {
     scenariosPath: path.relative(ROOT_DIR, scenariosPath),
     vaultSnapshotPath: vaultSnapshotPath ? path.relative(ROOT_DIR, vaultSnapshotPath) : null,
     swapApiUrl,
+    pythUpdatesUrl,
     appUrl,
     anvilRpcUrl,
     fork: {
@@ -137,7 +141,6 @@ async function main() {
     run.setup = await setupFork(fixture, anvilRpcUrl)
   }
   run.fork.observedBlockNumber = await rpc(anvilRpcUrl, 'eth_blockNumber', [])
-
   const browser = await chromium.launch({
     headless: Boolean(args.headless),
     args: ['--disable-blink-features=AutomationControlled'],
@@ -165,15 +168,20 @@ async function main() {
     const activeScenarioState = {
       scenario: null,
       successfulWalletTransactions: 0,
+      pendingWalletTransactions: 0,
+      lastWalletTransactionAt: 0,
     }
 
     await context.addInitScript(installSdkQueryRecorder)
     await installWalletStub(context, fixture, anvilRpcUrl, run.walletRequests, () => {
       activeScenarioState.successfulWalletTransactions += 1
     }, () => activeScenarioState)
+    await installForkTransactionStatusRoute(context, fixture, anvilRpcUrl, Boolean(args['all-browser-rpc-to-anvil']))
+    await installTokenListRoute(context, fixture)
     await installVaultSnapshotRoute(context, vaultSnapshot)
     await installV3VaultResolveRoute(context, vaultSnapshot)
     await installSwapApiRoute(context, swapApiUrl)
+    await installPythUpdatesRoute(context, pythUpdatesUrl)
     await installScenarioSubgraphDiscoveryRoute(context, fixture, () => activeScenarioState)
     await context.route('**/api/internal/screen-address', route => route.fulfill({
       status: 200,
@@ -182,8 +190,11 @@ async function main() {
     }))
 
     for (const scenario of scenarios) {
+      await syncForkClock(anvilRpcUrl)
       activeScenarioState.scenario = scenario
       activeScenarioState.successfulWalletTransactions = 0
+      activeScenarioState.pendingWalletTransactions = 0
+      activeScenarioState.lastWalletTransactionAt = 0
       console.log(`[execution-record] ▶ ${scenario.id} — ${scenario.label ?? ''}`)
       const page = await context.newPage()
       attachNetworkRecorder(page, run.network)
@@ -206,6 +217,11 @@ async function main() {
         variables: run.variables,
         videoTailMs,
         fixture,
+        getWalletTransactionState: () => ({
+          successful: activeScenarioState.successfulWalletTransactions,
+          pending: activeScenarioState.pendingWalletTransactions,
+          lastActivityAt: activeScenarioState.lastWalletTransactionAt,
+        }),
       })
 
       if (!args['keep-open']) {
@@ -460,10 +476,28 @@ async function rpc(url, method, params) {
   return json.result
 }
 
+async function syncForkClock(anvilRpcUrl) {
+  const latest = await rpc(anvilRpcUrl, 'eth_getBlockByNumber', ['latest', false])
+  const latestTimestamp = Number(BigInt(latest.timestamp))
+  const wallClockTimestamp = Math.floor(Date.now() / 1000)
+  const nextTimestamp = Math.max(latestTimestamp + 1, wallClockTimestamp)
+  await rpc(anvilRpcUrl, 'evm_setNextBlockTimestamp', [nextTimestamp])
+  await rpc(anvilRpcUrl, 'evm_mine', [])
+}
+
 async function setupFork(fixture, anvilRpcUrl) {
-  const setup = { skipped: false, transfers: [] }
+  const setup = {
+    skipped: false,
+    transfers: [],
+    blockGasLimit: FORK_READ_BLOCK_GAS_LIMIT.toString(),
+  }
   const wallet = getAddress(fixture.wallet.address)
   const ethBalance = fixture.wallet.ethBalance ?? '1000'
+  // Loading the complete vault inventory batches many read-only Lens calls.
+  // Give that fork-only Multicall enough block gas without changing the fixed
+  // gas limit applied to transactions submitted by the wallet stub.
+  await rpc(anvilRpcUrl, 'anvil_setBlockGasLimit', [toQuantity(FORK_READ_BLOCK_GAS_LIMIT)])
+  await rpc(anvilRpcUrl, 'evm_mine', [])
   await rpc(anvilRpcUrl, 'anvil_setBalance', [wallet, toQuantity(parseEther(ethBalance))])
 
   for (const token of fixture.tokens ?? []) {
@@ -576,6 +610,12 @@ async function waitForReceipt(anvilRpcUrl, hash) {
   for (let i = 0; i < 120; i++) {
     const receipt = await rpc(anvilRpcUrl, 'eth_getTransactionReceipt', [hash])
     if (receipt) return receipt
+    if (i === 1) {
+      // Anvil can leave a valid transaction pending while the fork is serving
+      // a large concurrent read burst even with automine enabled. Mine one
+      // block only after observing that pending state twice.
+      await rpc(anvilRpcUrl, 'evm_mine', []).catch(() => null)
+    }
     await new Promise(resolve => setTimeout(resolve, 250))
   }
   throw new Error(`Timed out waiting for receipt ${hash}`)
@@ -666,14 +706,18 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, 
   const chainId = Number(fixture.chainId)
   const account = privateKeyToAccount(fixture.wallet.privateKey)
   const walletClient = createWalletClient({ account, chain: mainnet, transport: http(anvilRpcUrl) })
-  const fundedImpersonations = new Set()
-
   if (getAddress(account.address) !== getAddress(fixture.wallet.address)) {
     throw new Error(`Fixture wallet address ${fixture.wallet.address} does not match private key ${account.address}`)
   }
 
   await context.exposeBinding('__EULER_STUB_WALLET_RPC__', async (_source, payload) => {
     const method = payload?.method
+    const activeState = getActiveState?.()
+    const tracksTransaction = method === 'eth_sendTransaction'
+    if (tracksTransaction && activeState) {
+      activeState.pendingWalletTransactions += 1
+      activeState.lastWalletTransactionAt = Date.now()
+    }
     // Scenarios may connect AS an existing on-chain holder instead of the
     // fixture wallet (e.g. to exercise rEUL unlock against real locks). Anvil
     // runs with --auto-impersonate, so transactions from that holder execute
@@ -688,10 +732,9 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, 
       params: sanitizeForJson(payload?.params),
     }
     try {
-      if (impersonate && method === 'eth_sendTransaction' && !fundedImpersonations.has(impersonate)) {
+      if (impersonate && method === 'eth_sendTransaction') {
         // Ensure the impersonated holder can cover gas on the fork.
         await rpc(anvilRpcUrl, 'anvil_setBalance', [impersonate, toQuantity(parseEther('1000'))]).catch(() => null)
-        fundedImpersonations.add(impersonate)
       }
       const result = await handleWalletRpc({ payload, chainId, account, walletClient, anvilRpcUrl, impersonate })
       if (method === 'eth_sendTransaction') {
@@ -721,6 +764,9 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, 
           receipt: sanitizeForJson(receipt),
         })
         onTransactionSuccess?.({ hash: result, receipt })
+        setTimeout(() => {
+          void rpc(anvilRpcUrl, 'evm_mine', []).catch(() => null)
+        }, 1_000)
         return result
       }
 
@@ -730,6 +776,12 @@ async function installWalletStub(context, fixture, anvilRpcUrl, walletRequests, 
     catch (error) {
       walletRequests.push({ ...record, status: 'error', error: sanitizeForJson(error) })
       throw error
+    }
+    finally {
+      if (tracksTransaction && activeState) {
+        activeState.pendingWalletTransactions = Math.max(0, activeState.pendingWalletTransactions - 1)
+        activeState.lastWalletTransactionAt = Date.now()
+      }
     }
   })
 
@@ -811,6 +863,85 @@ async function installVaultSnapshotRoute(context, vaultSnapshot) {
         ...vaultSnapshot,
         fetchedAt: Date.now(),
       }),
+    })
+  })
+}
+
+async function installTokenListRoute(context, fixture) {
+  const tokens = (fixture.tokens ?? []).map(token => ({
+    chainId: fixture.chainId,
+    address: getAddress(token.address),
+    name: token.name ?? token.symbol,
+    symbol: token.symbol,
+    decimals: Number(token.decimals),
+    tags: token.tags ?? [],
+  }))
+
+  await context.route('**/api/internal/token-list**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ tokens }),
+  }))
+}
+
+async function installForkTransactionStatusRoute(context, fixture, anvilRpcUrl, routeAllRpcToAnvil = false) {
+  const pathPattern = new RegExp(`/api/internal/rpc/${Number(fixture.chainId)}(?:\\?|$)`)
+  const forkMethods = new Set([
+    'eth_getTransactionByHash',
+    'eth_getTransactionReceipt',
+  ])
+
+  await context.route(pathPattern, async (route) => {
+    const request = route.request()
+    if (request.method().toUpperCase() !== 'POST') return route.fallback()
+
+    let body
+    try {
+      body = request.postDataJSON()
+    }
+    catch {
+      return route.fallback()
+    }
+
+    const calls = Array.isArray(body) ? body : [body]
+    if (!calls.length || (!routeAllRpcToAnvil && calls.some(call => !forkMethods.has(call?.method)))) {
+      return route.fallback()
+    }
+
+    if (routeAllRpcToAnvil) {
+      const response = await fetch(anvilRpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return route.fulfill({
+        status: response.status,
+        contentType: 'application/json',
+        body: await response.text(),
+      })
+    }
+
+    const responses = await Promise.all(calls.map(async (call) => {
+      try {
+        const result = await rpc(anvilRpcUrl, call.method, call.params ?? [])
+        return { jsonrpc: '2.0', id: call.id, result }
+      }
+      catch (error) {
+        return {
+          jsonrpc: '2.0',
+          id: call.id,
+          error: {
+            code: -32000,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }
+      }
+    }))
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(Array.isArray(body) ? responses : responses[0]),
     })
   })
 }
@@ -960,6 +1091,25 @@ async function installSwapApiRoute(context, swapApiUrl) {
       contentType: upstream.headers.get('content-type') ?? 'application/json',
       headers: {
         'access-control-allow-origin': '*',
+        'cache-control': upstream.headers.get('cache-control') ?? 'no-store',
+      },
+      body,
+    })
+  })
+}
+
+async function installPythUpdatesRoute(context, pythUpdatesUrl) {
+  if (!pythUpdatesUrl) return
+
+  await context.route(/\/api\/internal\/pyth\/updates(?:\?|$)/, async (route) => {
+    const request = route.request()
+    const incoming = new URL(request.url())
+    const upstream = await fetch(`${pythUpdatesUrl}${incoming.search}`)
+    const body = await upstream.text()
+    return route.fulfill({
+      status: upstream.status,
+      contentType: upstream.headers.get('content-type') ?? 'application/json',
+      headers: {
         'cache-control': upstream.headers.get('cache-control') ?? 'no-store',
       },
       body,
@@ -1161,8 +1311,19 @@ async function handleWalletRpc({ payload, chainId, account, walletClient, anvilR
     case 'eth_sendTransaction':
       // When impersonating, send the raw transaction straight to anvil with the
       // holder as `from`; --auto-impersonate executes it without a signature.
+      // Real wallets add a safety margin to eth_estimateGas. Anvil otherwise
+      // uses the bare estimate for unlocked-account transactions, which can run
+      // out of gas after cold/warm access differences even when eth_call passes.
       if (impersonate) {
-        return rpc(anvilRpcUrl, 'eth_sendTransaction', [{ ...(params?.[0] ?? {}), from: impersonate }])
+        const tx = { ...(params?.[0] ?? {}), from: impersonate }
+        if (tx.gas === undefined) {
+          // Avoid executing complex batches twice on a lazy mainnet fork
+          // (once for estimation and once for the transaction). The fork has
+          // a generous block gas limit and this fixed ceiling is never sent to a
+          // production wallet.
+          tx.gas = toQuantity(FORK_TRANSACTION_GAS_LIMIT)
+        }
+        return rpc(anvilRpcUrl, 'eth_sendTransaction', [tx])
       }
       return sendTransaction(walletClient, params?.[0] ?? {})
     case 'eth_signTypedData_v4':
@@ -1187,7 +1348,9 @@ async function sendTransaction(walletClient, tx) {
     to: tx.to,
     data: tx.data,
     value: tx.value ? BigInt(tx.value) : 0n,
-    gas: tx.gas ? BigInt(tx.gas) : undefined,
+    // This wallet exists only inside the recorder. Skip Anvil's bare estimate
+    // for the same lazy-fork reason as the impersonated path above.
+    gas: tx.gas ? BigInt(tx.gas) : FORK_TRANSACTION_GAS_LIMIT,
     maxFeePerGas: tx.maxFeePerGas ? BigInt(tx.maxFeePerGas) : undefined,
     maxPriorityFeePerGas: tx.maxPriorityFeePerGas ? BigInt(tx.maxPriorityFeePerGas) : undefined,
     nonce: tx.nonce ? Number(BigInt(tx.nonce)) : undefined,
@@ -1327,7 +1490,7 @@ function shouldCaptureUrl(rawUrl) {
   }
 }
 
-async function runScenario({ page, appUrl, defaults, scenario, outputDir, variables, videoTailMs, fixture }) {
+async function runScenario({ page, appUrl, defaults, scenario, outputDir, variables, videoTailMs, fixture, getWalletTransactionState }) {
   const result = {
     id: scenario.id,
     label: scenario.label,
@@ -1355,6 +1518,16 @@ async function runScenario({ page, appUrl, defaults, scenario, outputDir, variab
           tags: await captureVisibleTags(page),
         })
       }
+    }
+
+    if (result.covers.length) {
+      await waitForWalletTransactions({
+        page,
+        getWalletTransactionState,
+        minimum: Number(scenario.minimumWalletTransactions ?? 1),
+        quietMs: Number(scenario.walletQuietMs ?? 2_000),
+        timeout: Number(scenario.walletTimeoutMs ?? defaults.actionTimeoutMs ?? 30_000),
+      })
     }
 
     result.captures.push({
@@ -1430,6 +1603,19 @@ async function waitForSelectors(page, selectors, timeoutMs = 30_000) {
   }
 }
 
+async function waitForWalletTransactions({ page, getWalletTransactionState, minimum, quietMs, timeout }) {
+  const startedAt = Date.now()
+  while (true) {
+    const state = getWalletTransactionState()
+    const quietForMs = state.lastActivityAt ? Date.now() - state.lastActivityAt : 0
+    if (state.successful >= minimum && state.pending === 0 && quietForMs >= quietMs) return
+    if (Date.now() - startedAt >= timeout) {
+      throw new Error(`Expected at least ${minimum} successful wallet transaction${minimum === 1 ? '' : 's'} and ${quietMs}ms of wallet quiet; observed ${state.successful} successful and ${state.pending} pending`)
+    }
+    await page.waitForTimeout(250)
+  }
+}
+
 async function performAction(page, action, variables, defaults = {}, fixture) {
   const startedAt = Date.now()
   const label = action.label ?? action.type
@@ -1443,14 +1629,14 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
     }
     else if (action.type === 'click') {
       const locator = page.locator(action.selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
     }
     else if (action.type === 'clickButton') {
       const locator = page.getByRole('button', { name: action.text, exact: action.exact ?? true }).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
@@ -1461,14 +1647,14 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
         throw new Error('clickTab requires tab')
       }
       const locator = page.locator(`[data-id="tab"][data-value=${cssString(tabLabel)}] button`).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
     }
     else if (action.type === 'fill') {
       const locator = page.locator(action.selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await locator.fill('', { timeout }).catch(() => null)
       await locator.type(String(action.value ?? ''), { delay: Number(action.delayMs ?? 30), timeout })
@@ -1482,7 +1668,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
       }
       const selector = `[data-id="asset-input"][data-label=${cssString(assetLabel)}] [data-id="asset-input-field"]`
       const locator = page.locator(selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await locator.fill('', { timeout }).catch(() => null)
       await locator.type(String(action.value ?? ''), { delay: Number(action.delayMs ?? 30), timeout })
@@ -1496,7 +1682,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
       }
       const selector = `[data-id="asset-input"][data-label=${cssString(assetLabel)}] [data-id="asset-input-max"]`
       const locator = page.locator(selector).nth(Number(action.index ?? 0))
-      await waitForOptional(locator, action)
+      await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
@@ -1507,7 +1693,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
         throw new Error('clickRangeStep requires rangeLabel')
       }
       const range = page.locator(`[data-id="ui-range"][data-label=${cssString(rangeLabel)}]`).nth(Number(action.rangeIndex ?? 0))
-      await waitForOptional(range, action)
+      await waitForOptional(range, action, timeout)
       const track = range.locator('[data-id="ui-range-track"]').first()
       await track.waitFor({ state: 'visible', timeout })
       const min = Number(await range.getAttribute('data-min') ?? 0)
@@ -1536,7 +1722,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
       const trigger = action.triggerSelector
         ? page.locator(action.triggerSelector).nth(Number(action.triggerIndex ?? 0))
         : page.locator(`xpath=//span[normalize-space()=${xpathString(action.triggerLabel ?? 'Pay with')}]/following-sibling::button[1]`).nth(Number(action.triggerIndex ?? 0))
-      await waitForOptional(trigger, action)
+      await waitForOptional(trigger, action, timeout)
       await trigger.click({ timeout })
 
       const search = action.search ?? action.address ?? action.symbol
@@ -1560,7 +1746,7 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
         throw new Error('selectCollateralOption requires assetLabel')
       }
       const trigger = page.locator(`[data-id="asset-input"][data-label=${cssString(assetLabel)}] [data-id="asset-input-asset-selector"]`).nth(Number(action.triggerIndex ?? 0))
-      await waitForOptional(trigger, action)
+      await waitForOptional(trigger, action, timeout)
 
       const search = action.search ?? action.vaultAddress ?? action.assetAddress ?? action.symbol
       const searchInput = page.locator('input[placeholder="Search by name or symbol"]').first()
@@ -1655,9 +1841,9 @@ function getCollateralOptionSelector(action) {
   return selector
 }
 
-async function waitForOptional(locator, action) {
+async function waitForOptional(locator, action, timeout) {
   try {
-    await locator.waitFor({ state: 'visible', timeout: Number(action.optional ? action.probeMs ?? 2_500 : action.timeoutMs ?? 30_000) })
+    await locator.waitFor({ state: 'visible', timeout: Number(action.optional ? action.probeMs ?? 2_500 : timeout) })
   }
   catch (error) {
     if (action.optional) throw error

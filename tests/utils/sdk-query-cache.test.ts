@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clearSdkQueryFailureCacheForTest, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
+import { advanceSdkQueryGeneration, clearSdkQueryFailureCacheForTest, clearSdkQueryGenerationsForTest, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
 import { queryClient } from '~/utils/query-client'
 
 describe('sdkBuildQuery', () => {
   afterEach(() => {
     sdkQueryClient.clear()
     clearSdkQueryFailureCacheForTest()
+    clearSdkQueryGenerationsForTest()
     vi.useRealTimers()
   })
 
@@ -39,6 +40,32 @@ describe('sdkBuildQuery', () => {
     expect(query).toHaveBeenCalledTimes(1)
     resolveQuery('ok')
     await expect(Promise.all([first, second])).resolves.toEqual(['ok', 'ok'])
+  })
+
+  it('starts a fresh query after advancing past an in-flight generation', async () => {
+    let resolveFirst: (value: string) => void = () => {}
+    const firstResult = new Promise<string>((resolve) => {
+      resolveFirst = resolve
+    })
+    const query = vi.fn()
+      .mockImplementationOnce(async () => firstResult)
+      .mockResolvedValueOnce('post-catch-up')
+    const wrapped = sdkBuildQuery('queryAccountVaults', query, {})
+    const args = { owner: '0x0000000000000000000000000000000000000001' }
+
+    const first = wrapped(args)
+    expect(query).toHaveBeenCalledTimes(1)
+
+    advanceSdkQueryGeneration(['queryAccountVaults'])
+    const second = wrapped(args)
+
+    expect(query).toHaveBeenCalledTimes(2)
+    await expect(second).resolves.toBe('post-catch-up')
+
+    resolveFirst('pre-catch-up')
+    await expect(first).resolves.toBe('pre-catch-up')
+    await expect(wrapped(args)).resolves.toBe('post-catch-up')
+    expect(query).toHaveBeenCalledTimes(2)
   })
 
   it('uses SDK-provided cache keys when query metadata supplies one', async () => {

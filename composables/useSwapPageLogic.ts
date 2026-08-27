@@ -1,7 +1,7 @@
 import type { SecuritizeCollateralVault, EVault, TransactionPlan, TransactionPlanPrepared, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, formatUnits, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
-import { OperationReviewModal, SlippageSettingsModal } from '#components'
+import { SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -15,7 +15,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { isSameUnderlyingAsset, isSameVault as isSameVaultCheck } from '~/utils/vault-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export interface UseSwapPageLogicOptions {
   /** Which quote field the swap engine optimises for ('amountIn' = min cost, 'amountOut' = max output) */
@@ -42,6 +42,8 @@ export interface UseSwapPageLogicOptions {
   buildQuoteRequest: (amount: bigint) => { params: SwapQuoteInput } | null
   /** Build the TransactionPlan for the current swap (same-asset or quote-based). Must throw on failure. */
   buildPlan: (quote?: SwapQuote, context?: SwapQuotePlanContext) => Promise<TransactionPlan>
+  /** Capture the immutable operation DTO from the same form snapshot used by buildPlan. */
+  createReviewIntent: (quote?: SwapQuote) => Readonly<OperationIntent>
   /** Page-specific balance validation error. Receives the parsed nano amount. */
   getBalanceError: (amountNano: bigint) => string | null
   /** Vault addresses to check for geo-blocking */
@@ -80,6 +82,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     quoteDiffPrefix,
     buildQuoteRequest,
     buildPlan,
+    createReviewIntent,
     getBalanceError,
     getGeoBlockedAddresses,
     redirectPath,
@@ -99,7 +102,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const route = useRoute()
   const { isConnected } = useWagmi()
   const { isSpyMode } = useSpyMode()
-  const { executePlan, executePreparedPlan, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
+  const { open: openReviewState } = useExecutionReview()
   const modal = useModal()
   const { error: showError } = useToast()
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -147,12 +151,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     // its own buildPlan. We just forward the candidate quote so the parallel
     // engine can build a plan per quote for gas estimation.
     buildTxPlanForQuote: (quote, _provider, context) => buildPlan(quote, context),
+    createIntentsForQuote: quote => [createReviewIntent(quote)],
     getPlanAccount: () => getPlanAccount?.() ?? defaultPlanAccount.value,
     getStateOverrideOptions: () => buildSwapStateOverrideOptions(),
     // Sweep-scoped prefetch — Pyth Hermes / keyring vault gating resolved once
     // per fetch instead of per-quote.
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
-    prepareTransactionPlan: (plan, account, prefetch) => prepareTransactionPlan(plan, { account, prefetch }),
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
+    prepareTransactionPlan: (plan, account, prefetch, intents) => prepareTransactionPlan(plan, { account, prefetch, intents }),
   })
   // ── Vault products & price invert ──────────────────────────────────────
   const fromProduct = useEulerProductOfVault(computed(() => fromVault.value?.address || ''))
@@ -504,6 +509,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return {
       plan: card.plan ?? card.preparedPlan.plan,
       prepared: card.preparedPlan as TransactionPlanPrepared,
+      intents: card.intents,
     }
   }
 
@@ -525,15 +531,20 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
         preparedPlan.value = null
         plan.value = null
+        let intents: readonly OperationIntent[]
         try {
           const preparedQuotePlan = getSelectedPreparedQuotePlan()
           if (preparedQuotePlan) {
             plan.value = preparedQuotePlan.plan
             preparedPlan.value = preparedQuotePlan.prepared
+            intents = preparedQuotePlan.intents?.length
+              ? preparedQuotePlan.intents
+              : [createReviewIntent(selectedQuote.value ?? undefined)]
           }
           else {
+            intents = [createReviewIntent(isSameAsset.value ? undefined : selectedQuote.value ?? undefined)]
             plan.value = await buildPlan(undefined, currentPlanContext())
-            preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount() })
+            preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount(), intents })
           }
         }
         catch (e) {
@@ -545,7 +556,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         }
 
         if (preparedPlan.value) {
-          const ok = await runPreparedSimulation(preparedPlan.value, buildSwapStateOverrideOptions())
+          const ok = await runPreparedSimulation(preparedPlan.value, buildSwapStateOverrideOptions(), undefined, intents)
           if (!ok) return
         }
         else if (plan.value) {
@@ -554,8 +565,10 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
         }
 
         const showSwapAmounts = sameAssetModalType === 'transfer' || !isSameAsset.value
-        modal.open(OperationReviewModal, {
-          props: {
+        if (!plan.value) return
+        await openReviewState(intents, {
+          presentationKind: isSameAsset.value ? sameAssetModalType : 'swap',
+          review: {
             type: isSameAsset.value ? sameAssetModalType : 'swap',
             asset: fromVault.value.asset,
             amount: fromAmount.value,
@@ -563,51 +576,23 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
             swapToAmount: showSwapAmounts ? toAmount.value : undefined,
             swapMode: showSwapAmounts ? swapperMode : undefined,
             swapEstimatedSide: showSwapAmounts ? reviewSwapEstimatedSide : undefined,
-            plan: preparedPlan.value ? undefined : (plan.value || undefined),
-            prepared: preparedPlan.value || undefined,
             quoteFetchedAt: !isSameAsset.value ? effectiveQuoteFetchedAt.value : null,
-            onConfirm: async (execution) => {
-              await send(execution)
-            },
             submittingLabel: 'Submitting...',
+          },
+          onSucceeded: () => {
+            setTimeout(() => {
+              router.replace({ path: redirectPath, query: { network: route.query.network } })
+            }, 400)
+          },
+          onFailed: (cause) => {
+            showError('Transaction failed')
+            logWarn('swap/send', cause)
           },
         })
       })
     }
     finally {
       isPreparing.value = false
-    }
-  }
-
-  const send = async (execution: TrackedExecutionScope) => {
-    if (!fromVault.value || !toVault.value) return
-    if (!isSameAsset.value && !selectedQuote.value) return
-
-    isSubmitting.value = true
-    try {
-      if (preparedPlan.value) {
-        await executePreparedPlan(preparedPlan.value)
-      }
-      else {
-        const txPlan = await buildPlan(undefined, currentPlanContext())
-        await executePlan(txPlan)
-      }
-      // Success signal for a detached Safe completion toast; a proposal that
-      // confirmed after its modal was closed must not redirect mid-flow.
-      execution.markSucceeded()
-      if (!execution.suppressPostTxUi()) {
-        modal.close()
-        setTimeout(() => {
-          router.replace({ path: redirectPath, query: { network: route.query.network } })
-        }, 400)
-      }
-    }
-    catch (e) {
-      showError('Transaction failed')
-      logWarn('swap/send', e)
-    }
-    finally {
-      isSubmitting.value = false
     }
   }
 

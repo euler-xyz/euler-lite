@@ -1,228 +1,130 @@
 # Safe Wallet Compatibility
 
-How Euler Lite detects Gnosis Safe / Safe{Wallet} multisigs and adapts planning,
-review, and execution so co-signers get one coherent proposal instead of a
-fragile multi-tx ceremony.
+How Euler Lite detects Safe multisigs and binds them to the centralized reviewed execution so co-signers receive one reviewed atomic proposal.
 
 ## Why Safe is special
 
-EOA flows can:
+EOA flows can collect typed-data signatures and send prerequisite, main, and cleanup transactions sequentially. A Safe needs contract-signature handling and one coherent multisig proposal. The SDK's CoW executor accepts ECDSA signature encodings rather than Safe contract-signature payloads, so Lite also excludes CoW quotes while Safe detection is unresolved or positive.
 
-- collect Permit2 / typed-data signatures in the wallet UI
-- send approve → wait → EVC `batch()` as separate transactions
-- place CoW orders that require a recoverable ECDSA signature (65-byte
-  standard or 64-byte EIP-2098 compact)
+Lite therefore:
 
-A Safe cannot do those things the same way. Message signatures need EIP-1271
-collection across owners, Permit2 still needs an on-chain approval to the
-Permit2 contract, and the SDK's CoW executor (`normalizeCowSignature` in
-`@eulerxyz/euler-v2-sdk@2.0.0`) accepts only a standard 65-byte ECDSA
-signature (`0x` length 132) or an EIP-2098 compact 64-byte ECDSA signature
-(`0x` length 130). Safe contract-signature payloads use other lengths and
-are rejected **after** approvals may already have been sent. Lite therefore:
-
-1. Detects Safe connectors reliably (including WalletConnect peer metadata).
-2. Force-disables message signatures while a Safe (or unresolved detection) is active.
-3. Submits approve + EVC calls as **one** EIP-5792 `wallet_sendCalls` bundle
-   (`forceAtomic: true`) so Safe wraps them in a single MultiSend proposal.
-4. Removes CoW from the quote pipeline for Safe wallets.
-5. Bundles migration / batch prerequisites into that same proposal when every
-   cart entry supports it.
-6. Lets review modals close while co-signers finish. Lite tracks that
-   execution until confirmation or the five-minute polling timeout; after
-   timeout, verify execution in Safe. Account/connector switch abandons
-   tracking so success is never attributed to the next wallet.
+1. Detects Safe connectors, including WalletConnect peer metadata.
+2. Force-disables Permit2 and migration message-signature modes for a Safe.
+3. Seals `walletKind: 'safe'`, the account, chain, connector identity/session, Safe address, and approval mode before review.
+4. Requires per-chain EIP-5792 atomic capability to be `supported` or `ready`, then seals the complete `wallet_sendCalls` envelope with `atomicRequired: true`.
+5. Guards duplicate confirmation before wallet handoff, then uses the established in-memory Safe detachment/status flow while co-signers act.
 
 ## Detection
 
 | Module | Role |
 |--------|------|
-| `utils/safeWalletTransactions.ts` | `isSafeConnectorIdentity`, `getSafeWalletProvider`, Safe status polling |
-| `composables/useSafeWallet.ts` | App-wide reactive `isSafeWallet` + `isSafeWalletResolved` |
+| `utils/safeWalletTransactions.ts` | Connector identity, provider acquisition, and Safe status helpers |
+| `composables/useSafeWallet.ts` | App-wide reactive `isSafeWallet` and `isSafeWalletResolved` |
+| `composables/useReviewedExecution.ts` | Captures and twice verifies the connector session before sealing the wallet binding |
 
 A wallet is Safe when any of these hold:
 
 - wagmi connector `id === 'safe'` (iframe Safe App)
-- connector name compact-equals `safe` / `safewallet`
-- WalletConnect peer metadata name/URL matches Safe (`app.safe.global`)
+- connector name compact-equals `safe` or `safewallet`
+- WalletConnect peer metadata name or URL matches Safe (`app.safe.global`)
 
-`getSafeWalletProvider` only returns a provider for those cases. WalletConnect
-needs the provider's peer metadata, so detection is async.
+`getSafeWalletProvider` only returns a provider for those cases. WalletConnect detection is asynchronous because it depends on peer metadata.
 
 ### Fail-closed resolution
 
-`useSafeWallet` clears `isSafeWallet` and sets `isSafeWalletResolved = false`
-on every connector change until the probe finishes. Consumers that must not act
-on a stale answer (signatures, CoW eligibility) treat **unresolved as forced
-off**.
+`useSafeWallet` clears `isSafeWallet` and sets `isSafeWalletResolved = false` on every connector change until the probe finishes. Signature and CoW eligibility treat unresolved detection as forced off.
 
-If the connector is identifiably Safe by id/name but provider acquisition
-fails, Lite still classifies it as Safe — signatures must not silently
-re-enable.
+Executable reviewed execution preparation is stricter. It captures account, chain, connector UID, connector session digest, wallet kind, and approval mode, then reads them again after asynchronous Safe classification. An identifiable Safe without an available provider cannot produce a reviewed execution. Preparation also calls `wallet_getCapabilities` for that account and chain; missing or `unsupported` atomic capability blocks review, while `supported` and `ready` are admitted and sealed. Acceptance rechecks the wallet binding after policy validation, every signature, Pyth refresh, and immediately before dispatch, and revalidates atomic capability before handoff.
 
 ## Signatures and Permit2
 
-`composables/useSignaturePreference.ts`:
+`composables/useSignaturePreference.ts` computes:
 
 ```ts
 signaturesForcedOff = isSafeWallet || !isSafeWalletResolved
 signaturesEnabled = userPreference && !signaturesForcedOff
 ```
 
-- Stored preference (`signatures-enabled`, seeded once from legacy
-  `permit2-enabled`) is **not** overwritten.
-- Settings UI disables the toggle while forced off.
-- `useEulerTx` passes `usePermit2: options?.usePermit2 ?? signaturesEnabled`.
-- Known-Safe execute paths also force `usePermit2: false` and repair any plan
-  that still resolved Permit2 signatures before bundling.
+- The stored preference (`signatures-enabled`, seeded once from `permit2-enabled`) is not overwritten.
+- Settings disables the toggle while signatures are forced off.
+- Execution preparation seals `approvalMode: 'permit2'` only for an eligible EOA; a Safe uses `approvalMode: 'approve'`.
+- Approval strategy never changes after review. Any wallet-kind, session, account, chain, or approval-mode drift invalidates acceptance.
+- CoW order and CoW EVC-permit signatures are outside this setting and are gated by `useCowSwapEligibility`.
 
-## Atomic bundle execution
+## Atomic reviewed execution dispatch
 
-`useEulerTx.executePlan` / `executePreparedPlan` prefer the Safe bundle when a
-Safe provider is present:
+The reviewed execution records every call before review. Approvals, migration authorization grants, the main Euler action, and authorization restorations are explicit prerequisite, main, and cleanup calls. That ordered call list produces transport-specific requests:
 
-1. Resolve approvals / run plugins so the plan is fully encoded.
-2. `transactionPlanToCalls(plan, sdk, chainId)` → ordered `{ to, data, value }`.
-3. Optionally wrap with `extraCalls.before` / `extraCalls.after` (migration
-   grants / restorations).
-4. `sendCalls({ forceAtomic: true, connector, … })` pinned to the connector that
-   was identified as Safe.
-5. Poll `waitForSafeTransactionExecution` — Safe returns `safeTxHash` as the
-   bundle id; the poller resolves the executed on-chain hash. Polling stops
-   after five minutes — the default `timeoutMs` of
-   `waitForSafeTransactionExecution` — and throws
-   `SafeTransactionStatusUnknownError`; passing an already-aborted or later
-   aborted `signal` stops it early with the same error. Lite does not keep
-   watching after that.
+- EOA: an ordered sequence of exact requests, each checked before the wallet prompt and advanced by the SDK only after a successful receipt.
+- Safe: one ordered envelope containing version, from, chain, `atomicRequired: true`, exact calls, request capabilities, and the admitted atomic-capability snapshot. The reviewed Safe provider receives those exact serialized `wallet_sendCalls` fields directly, without a client layer injecting unreviewed capabilities.
 
-### Bundleability rules
+`SafeExecutionAdapter` verifies and hands the exact finalized envelope to `wallet_sendCalls`, keeps the returned calls ID in the active invocation, and uses the established current-session status poller to resolve the execution hash and receipt. A successful result additionally requires `wallet_getCallsStatus.atomic === true`; explicit non-atomic execution fails the reviewed guarantee, while missing atomic evidence cannot become success. Off-chain cancellation and on-chain revert are terminal. Missing or ambiguous status is reported as unknown; it never triggers a fallback EOA, sequential send, automatic retry, or durable reconciliation.
 
-`utils/transaction-plan-calls.ts` throws `PlanNotBundleableError` (caller falls
-back to sequential sends) when the plan contains:
+The coordinator synchronously guards the accepted review ID before signatures or dispatch so overlapping callbacks for that reviewed execution cannot open duplicate wallet requests. The guard is process-local and is not restored after reload. Once the Safe request is handed off, `useSafeExecutionDetachment` retains the existing single tracked-execution UI slot: the modal may close while co-signers act, confirmations remain gated in that session, and completion is attributed to the captured context. Detachment suppresses modal, navigation, and visible in-flow success effects only. Confirmed completion still removes the exact captured batch revisions, preserves newer revisions, and schedules any captured external-migration refreshes.
 
-- unresolved `requiredApproval` items
-- Permit2 signature resolutions (nothing to encode before signing)
-- CoW swap plan items (order book, not chain calls)
-- `contractCall` items whose `chainId` differs from the bundle chain (hard error
-  — sequential path would misroute identically)
+### Batch and migration
 
-`executePlanAsSafeBundle` in `composables/useEulerTx.ts` layers the shape rules
-on top of that: an empty plan with non-empty wrapper calls throws (never submit
-`[grant, revoke]` around a no-op migration), an empty plan with no wrappers
-returns `undefined`, and single-call bundles also return `undefined`
-("no benefit") unless the caller sets `allowSingleCall: true` — latched batch /
-migration ceremonies use that so "no Safe context" is never confused with
-"single call".
+Batch drafts contain only serializable intents and revisions. Review preparation recompiles or deeply validates the current generation and seals one request vector. The visible batch review and calldata/Tenderly actions project from that vector; `lastSimulatedPlan` is only a preview form-layer projection.
 
-Sequential execution remains the path for non-Safe wallets and for plans that
-cannot be bundled.
+Migration authorization grants and revocations/restorations use the same reviewed execution. For a Safe they are calls inside the atomic proposal, so a reverted proposal reverts them together. Typed-data migration authorization is not used for a Safe. For an EOA, the SDK advances from a successful migration receipt to the reviewed revocation request. A revocation problem is reported separately and does not turn the migration into a failure or block a fresh operation.
 
 ## CoW Swap gating
 
-`composables/useCowSwapEligibility.ts`:
+`composables/useCowSwapEligibility.ts` computes:
 
 ```ts
 cowSwapForcedOff = isSafeWallet || !isSafeWalletResolved
 ```
 
-AND-ed into `includeCowSwap` at multiply / collateral-swap repay / borrow-swap
-sites. `useSwapQuotesParallel` re-evaluates the gate per sweep: when it flips
-off mid-session, CoW cards are evicted; when detection finishes on a regular
-wallet (`cowGatedOff` → eligible), the last quote request is replayed so CoW
-cards can reappear.
+Quote consumers AND this into `includeCowSwap`. `useSwapQuotesParallel` re-evaluates the gate per sweep: when it becomes forced off, CoW cards are evicted; when a regular-wallet classification resolves, the last quote request is replayed.
 
-Defence in depth: `useCowSwapExecutionCore.assertTransactionsEnabled` throws
-before any CoW transaction if a Safe (or unresolved) wallet reaches submit.
-The gating conclusion is the contract-signature incompatibility, not a
-65-byte-only length check: compact EIP-2098 ECDSA signatures from a regular
-wallet are accepted.
+Defence in depth: `useCowSwapExecutionCore.assertTransactionsEnabled` throws before any CoW wallet write if Safe detection is positive or unresolved. CoW solver-order execution remains an explicitly excluded wallet-write boundary outside reviewed execution V2.
 
-## Batch cart: latched bundled ceremony
+## Current-session detachment
 
-When the connected wallet is Safe **and** every prerequisite-bearing cart entry
-exposes `buildBundledExecution` (no mixed sequential/bundled cart),
-`useTxBatch` builds one atomic proposal:
+`useSafeExecutionDetachment` lets the review modal close while the Safe request waits for co-signers. Its module-scoped tracked execution records whether the flow reached its success point and whether the original wallet context was abandoned.
 
-| Phase | Behavior |
-|-------|----------|
-| Review open | `prepareBundledExecution()` resolves plans + grants + revokes **once** into `latchedBundledExecution` |
-| Display / copy | `BatchReviewModal` + `utils/batchReviewDisplay.ts` derive bundled styling from the **latch**, not live Safe detection |
-| Confirm | `executeBatch` submits that exact payload via `executePreparedPlanWithPlainCalls` — never silently degrades to sequential |
-| Cart edit / wallet change | Latch cleared; user must re-review |
+The active Safe flow distinguishes:
 
-Fail-closed cases:
+- confirmed success,
+- proven off-chain cancellation,
+- proven on-chain revert,
+- pending or unavailable status in the current session.
 
-- Wallet is no longer Safe at confirm → throw and re-review.
-- Safe provider unavailable for a latched ceremony → throw (do not fall back).
-- Empty grants still submit the latched proposal (atomicity removes grant unwind
-  bookkeeping; a failed proposal reverts its grants with it).
-
-Restorations inside the proposal (`isSeparateTx: false`) group under
-**Authorization restorations**. Standalone post-execution restorations
-(`isSeparateTx: true`) group under **After execution**, consolidated by
-encoded `txKey` so sequential duplicates collapse.
-
-Migration pages (`position/.../migrate`, borrow/swap) use the same latch +
-`migrationAuthorizationPayloadKey` so confirmation revalidates that the
-reviewed authorization payload still matches.
-
-## Detached Safe execution
-
-`composables/useSafeExecutionDetachment.ts` tracks **at most one** live
-execution:
-
-- Review modals may close while a Safe proposal awaits co-signers (`detach`).
-- Tracking continues until confirmation or the five-minute polling timeout
-  (`waitForSafeTransactionExecution`'s default `timeoutMs`). After
-  timeout Lite reports unknown status, releases the tracking slot, and a later
-  on-chain execution will **not** produce a success toast — verify in Safe.
-- Completion surfaces as a toast: success only if the flow called
-  `scope.markSucceeded()` before the waiter settled, warning if the promise
-  resolved without finalize, error if it rejected (including the timeout
-  unknown-status error).
-- `scope.suppressPostTxUi()` skips navigation / unscoped modal teardown for
-  detached or abandoned executions.
-- Account or connector switch calls `abandonTrackedExecution()` — gate and
-  suppression reset; the abandoned continuation stays silent.
-- `beginTrackedExecution` returns `null` while any execution is live
-  (attended or detached) so attribution cannot cross executions.
-
-Direct flows (lend/earn/borrow/multiply/repay/rewards) and batch review all
-thread the scope through finalize / redirect helpers.
+Detachment suppresses stale modal closure and navigation while still allowing a context-scoped completion toast. An account or connector change abandons the tracked UI record so a late completion cannot affect the newly connected context. This state is intentionally in-memory: reload restores no reviewed execution, submission record, or application lock.
 
 ## Related UI
 
-- `components/entities/safe/SafeAccountBadge.vue` — Safe badge on vault overview
-  address rows (asset, vault, governor, Earn management), rendered through
-  `VaultOverviewAddressValue.vue`
-- `composables/useSafeAddressInfo.ts` + `utils/safe-account.ts` — on-chain Safe
-  owner/threshold lookup for address rows
-- `components/BatchReviewModal.vue` — batch ceremony presentation
-- Settings → signatures toggle — disabled copy while `signaturesForcedOff`
+- `components/entities/safe/SafeAccountBadge.vue` — Safe badge on vault overview address rows
+- `composables/useSafeAddressInfo.ts` and `utils/safe-account.ts` — Safe owner/threshold lookup
+- `components/BatchReviewModal.vue` — unchanged handcrafted batch presentation
+- `components/entities/operation/OperationReviewModal.vue` — presentation-only operation review
+- `composables/useSafeExecutionDetachment.ts` — current-session modal detachment, confirmation gate, and completion toasts
+- Settings → signatures toggle — disabled while `signaturesForcedOff`
 
 ## Pitfalls
 
 | Symptom | Likely cause |
-|---------|----------------|
-| Permit2 still offered on Safe | Detection unresolved race — check `isSafeWalletResolved`; force-off should apply |
-| Multiple Safe proposals for one action | Plan not bundleable (Permit2/CoW leftover) or sequential prerequisites path |
-| "Batch simulation not loaded" on fresh Safe | Plugin prefix layers (ToS) — see [Transaction Building](./transaction-building.md#batch-simulation-plugin-layers) |
-| CoW quotes flash then vanish | Detection landing after first sweep — expected eviction; replay restores CoW for EOAs |
-| Success toast on wrong wallet | Fixed by abandon-on-switch; do not reintroduce global success flags |
-| Detached success toast never appears | Co-signers took longer than five minutes — polling timed out and tracking was released; check Safe |
-| Review said one proposal, confirm sent many | Latch missing / cart edited after review — re-open review |
+|---------|--------------|
+| Permit2 appears for a Safe | Detection/binding regression; Safe reviewed executions must seal `approvalMode: 'approve'` |
+| More than one Safe proposal appears | A wallet-write path bypassed the reviewed execution or the request vector changed after sealing |
+| Review succeeds but acceptance fails | Cart generation, connector session, account, chain, wallet kind, approval mode, policy, or reviewed execution freshness changed |
+| Safe review is unavailable | The wallet did not advertise per-chain atomic capability as `supported` or `ready` |
+| Safe proposal remains pending after reload | Check the Safe UI; Lite does not restore the old reviewed execution or tracked status after reload |
+| Review said one proposal but execution attempted many | Transport was not derived from the sealed wallet binding |
+| CoW quotes flash then vanish | Safe detection resolved after the first sweep; forced-off eviction is expected |
 
 ## Tests
 
 - `tests/composables/useSafeWallet.test.ts`
-- `tests/composables/useSafeExecutionDetachment.test.ts`
 - `tests/composables/useSafeAddressInfo.test.ts`
 - `tests/utils/safeWalletTransactions.test.ts`
 - `tests/utils/safe-account.test.ts`
 - `tests/utils/batchReviewDisplay.test.ts`
-- `tests/utils/migrationAuthorizationTxs.test.ts`
-- `tests/composables/useTxBatch.test.ts` (bundled ceremony, plugin layers)
-- `tests/composables/useSwapQuotesParallel.test.ts` (CoW gate replay)
+- `tests/composables/useTxBatch.test.ts`
+- `tests/composables/useSwapQuotesParallel.test.ts`
+- `tests/reviewed-execution/coordinator.test.ts`
+- `tests/composables/useSafeExecutionDetachment.test.ts`
 
 ## Files
 
@@ -231,10 +133,8 @@ thread the scope through finalize / redirect helpers.
 | `composables/useSafeWallet.ts` | Reactive Safe detection |
 | `composables/useSignaturePreference.ts` | Force-off signatures for Safe |
 | `composables/useCowSwapEligibility.ts` | Force-off CoW for Safe |
-| `composables/useSafeExecutionDetachment.ts` | Detached proposal tracking |
-| `composables/useEulerTx.ts` | Bundle submit + Safe receipt polling |
-| `composables/useTxBatch.ts` | Latched batch ceremony |
-| `utils/safeWalletTransactions.ts` | Provider identity + status poll |
-| `utils/transaction-plan-calls.ts` | Plan → EIP-5792 calls |
-| `utils/migrationAuthorizationTxs.ts` | Grant/revoke encode + payload identity |
-| `utils/batchReviewDisplay.ts` | Bundled vs post-execution display helpers |
+| `composables/useReviewedExecution.ts` | Wallet binding, reviewed execution preparation, acceptance, and current-session outcome integration |
+| `features/reviewed-execution/adapters/safe.ts` | Exact Safe call-vector dispatch and verification |
+| `features/reviewed-execution/coordinator/coordinator.ts` | Synchronous duplicate guard, revalidation, bounded finalization, phase outcomes, and transport selection |
+| `composables/useSafeExecutionDetachment.ts` | In-memory post-handoff Safe tracking and context-scoped UI effects |
+| `utils/safeWalletTransactions.ts` | Provider identity and Safe status helpers |

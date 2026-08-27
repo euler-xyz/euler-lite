@@ -1,6 +1,7 @@
 import { computed, provide, reactive, ref, watch, onUnmounted, type ComputedRef } from 'vue'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
+import { recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
 
 export interface UnverifiedVaultGuardState {
   isAcknowledgmentRequired: boolean
@@ -27,6 +28,7 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
   )
 
   const acknowledgeRisk = () => {
+    recordUnverifiedVaultAcknowledgement(vaultAddresses.value)
     sessionAccepted.value = true
   }
 
@@ -43,8 +45,11 @@ export const useUnverifiedVaultGuard = (vaultAddresses: ComputedRef<string[]>) =
     unregisterOperationBlocker('unverified-vault')
   })
 
-  provide('unverified-vault-guard', reactive({
+  const guardState = reactive({
     isAcknowledgmentRequired,
     acknowledgeRisk,
-  }))
+  })
+  provide('unverified-vault-guard', guardState)
+
+  return guardState
 }
