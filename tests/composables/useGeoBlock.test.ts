@@ -85,12 +85,10 @@ const resetState = () => {
 describe('isAssetBlockedByCountry — loading & sentinel states', () => {
   beforeEach(resetState)
 
-  it('returns false while the country is still loading (undefined)', () => {
+  it('fails closed while the country is still loading (undefined)', () => {
     setCountry(undefined)
-    // Even with a matching rule, a still-loading country is treated as "no decision yet"
-    // so the UI doesn't flicker into a Restricted state on the first paint.
     assetBlocks[USDC.toLowerCase()] = ['DE']
-    expect(isAssetBlockedByCountry(USDC)).toBe(false)
+    expect(isAssetBlockedByCountry(USDC)).toBe(true)
   })
 
   it('returns true once loading completes but country could not be detected (null)', () => {
@@ -345,12 +343,22 @@ describe('isVaultBlockedByCountry — asset-level OR', () => {
     expect(isVaultBlockedByCountry(vault)).toBe(true)
   })
 
-  it('does not block a vault whose registry lookup returns no asset', () => {
+  it('fails closed when a vault asset cannot be resolved', () => {
     setCountry('DE')
     assetBlocks['0xdeadbeef'] = ['DE']
     const vault = '0x3333333333333333333333333333333333333333'
     getVaultMock.mockReturnValue(undefined)
-    expect(isVaultBlockedByCountry(vault)).toBe(false)
+    expect(isVaultBlockedByCountry(vault)).toBe(true)
+  })
+
+  it('uses a caller-supplied chain-scoped asset when the registry is not hydrated', () => {
+    setCountry('DE')
+    getVaultMock.mockReturnValue(undefined)
+    const vault = '0x3333333333333333333333333333333333333333'
+
+    expect(isVaultBlockedByCountry(vault, {
+      asset: { address: WETH, symbol: 'WETH', name: 'Wrapped Ether' },
+    })).toBe(false)
   })
 
   it('propagates sanctioned-country blocks even without any vault rule', () => {
