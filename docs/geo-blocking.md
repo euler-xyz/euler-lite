@@ -2,6 +2,8 @@
 
 This document explains how Euler Lite restricts vault access based on the user's geographic location, covering country detection, blocking rules, per-vault overrides, soft restrictions, and UI enforcement.
 
+Wallet-address compliance screening (connect-time, fail-closed) is a separate subsystem — see [Address Screening](./address-screening.md).
+
 ## Overview
 
 Certain jurisdictions are prohibited from interacting with specific vaults (or all vaults) due to regulatory requirements. The geo-blocking system:
