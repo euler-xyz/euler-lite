@@ -11,7 +11,7 @@ import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { isRoeStateApplicable, mergeRoeCollateralVaults, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer, computeNextHealth, computeLiquidationPrice } from '~/utils/repayUtils'
@@ -845,13 +845,16 @@ async function buildMultiplyPlanFromQuote(quote: SwapQuote, account = planAccoun
 // authoritative (no on-chain sub-account re-fetch that would clobber a
 // simulated earlier batch step). Same-asset multiply (no swap) routes through
 // planMultiplySameAsset; cross-asset needs a non-CoW quote (CoW can't merge).
+const isCowSwapSelectedForBatch = computed(() =>
+  !multiplyIsSameAsset.value
+  && isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value),
+)
 const canAddMultiplyToBatch = computed(() => {
   if (isGeoBlocked.value || isMultiplyRestricted.value) return false
   if (multiplyDebtAmountNano.value <= 0n) return false
   if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value || !multiplySubAccount.value) return false
   if (multiplyIsSameAsset.value) return true
-  return !!multiplyEffectiveQuote.value
-    && !isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)
+  return !!multiplyEffectiveQuote.value && !isCowSwapSelectedForBatch.value
 })
 const addToBatch = async () => {
   if (!canAddMultiplyToBatch.value) return
@@ -1268,6 +1271,7 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddMultiplyToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               Review Multiply

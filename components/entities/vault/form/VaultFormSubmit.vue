@@ -35,6 +35,8 @@ const props = defineProps<{
   /** When defined, the form supports batching: a "+" segment is shown next to the
    *  main button, enabled when `canAddToBatch` is true, emitting `add-to-batch`. */
   canAddToBatch?: boolean
+  /** Explanation shown when this operation cannot be added to a batch. */
+  addToBatchDisabledReason?: string
 }>()
 const emit = defineEmits<{ (e: 'add-to-batch'): void }>()
 const { settings } = useUserSettings()
@@ -216,12 +218,16 @@ const addToBatchDisabledReason = computed(() => {
   if (!hasActiveSession.value) return 'Connect a wallet before adding this operation to the batch.'
   if (showTosFlow.value && nonTosOperationBlockReason.value) return nonTosOperationBlockReason.value
   if (operationBlockReason.value) return operationBlockReason.value
+  if (props.addToBatchDisabledReason) return props.addToBatchDisabledReason
   if (props.disabledReason) return props.disabledReason
   if (isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
   return undefined
 })
 
 const tooltipText = computed(() => {
+  if (batchBlocksDirect.value && supportsBatch.value) {
+    return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
+  }
   if (!isPlusHover.value) return effectiveDisabledReason.value
   return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
 })

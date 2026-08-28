@@ -26,7 +26,7 @@ import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { createRaceGuard } from '~/utils/race-guard'
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 import {
   getProjectedYieldState,
   mergeProjectedRewardCampaigns,
@@ -566,7 +566,9 @@ const submit = async () => {
 // current batch end-state, so withdrawing on top of a simulated deposit works
 // even though the on-chain share balance shown by the form is still zero. Direct
 // (non-swap), non-max withdraw by asset amount.
-const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
+const isCowSwapSelected = computed(() =>
+  needsSwap.value && isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return false
@@ -920,6 +922,7 @@ watch(swapSelectedQuote, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               Review Withdraw

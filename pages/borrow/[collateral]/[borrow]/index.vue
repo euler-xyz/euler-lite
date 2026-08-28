@@ -21,7 +21,7 @@ import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#componen
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
-import { isCowProvider, isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const router = useRouter()
 const route = useRoute()
@@ -255,6 +255,10 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
 // effective quote is captured into the fixed batch plan at add-time.
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
+const isBorrowCowSwapSelected = computed(() =>
+  borrow.borrowNeedsSwap.value
+  && isCowProviderOrQuote(borrow.borrowSwapSelectedProvider.value, borrow.borrowSwapEffectiveQuote.value),
+)
 const canAddBorrowToBatch = computed(() => {
   // Region/geo blocks are hard legal restrictions, so they still gate the batch.
   // Real-wallet guards (insufficient balance, vault liquidity) are intentionally
@@ -269,7 +273,7 @@ const canAddBorrowToBatch = computed(() => {
   // Savings-sourced collateral needs a resolved position, else plan capture throws.
   if (borrow.isSavingCollateral.value && !borrow.savingCollateral.value) return false
   if (borrow.borrowNeedsSwap.value) {
-    return !!borrow.borrowSwapEffectiveQuote.value && !isCowProvider(borrow.borrowSwapSelectedProvider.value)
+    return !!borrow.borrowSwapEffectiveQuote.value && !isBorrowCowSwapSelected.value
   }
   return true
 })
@@ -295,12 +299,16 @@ const addToBatch = async () => {
 // --- Multiply tab → batch ---
 // Same-asset multiply needs no quote; cross-asset needs a non-CoW quote (CoW
 // can't merge into an EVC batch). Region/geo blocks gate it like direct execute.
+const isMultiplyCowSwapSelected = computed(() =>
+  !multiply.multiplyIsSameAsset.value
+  && isCowProviderOrQuote(multiply.multiplySelectedProvider.value, multiply.multiplyEffectiveQuote.value),
+)
 const canAddMultiplyToBatch = computed(() => {
   if (isGeoBlocked.value || isMultiplyRestricted.value) return false
   if (multiply.multiplyDebtAmountNano.value <= 0n) return false
   if (!multiply.multiplySupplyVault.value || !multiply.multiplyLongVault.value || !multiply.multiplyShortVault.value) return false
   if (multiply.multiplyIsSameAsset.value) return true
-  return !!multiply.multiplyEffectiveQuote.value && !isCowProviderOrQuote(multiply.multiplySelectedProvider.value, multiply.multiplyEffectiveQuote.value)
+  return !!multiply.multiplyEffectiveQuote.value && !isMultiplyCowSwapSelected.value
 })
 const addMultiplyToBatch = async () => {
   if (!canAddMultiplyToBatch.value) return
@@ -1072,6 +1080,7 @@ watch(
                 :disabled-reason-variant="borrowDisabledReasonInfo?.variant"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
                 :can-add-to-batch="canAddBorrowToBatch"
+                :add-to-batch-disabled-reason="isBorrowCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addToBatch"
               >
                 {{ reviewBorrowLabel }}
@@ -1083,6 +1092,7 @@ watch(
                 :disabled-reason-variant="multiplyDisabledReasonInfo?.variant"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
                 :can-add-to-batch="canAddMultiplyToBatch"
+                :add-to-batch-disabled-reason="isMultiplyCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addMultiplyToBatch"
               >
                 {{ reviewMultiplyLabel }}

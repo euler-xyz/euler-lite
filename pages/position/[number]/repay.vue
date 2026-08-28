@@ -19,7 +19,7 @@ import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
-import { isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -159,25 +159,46 @@ const walletProjectedYieldDetails = computed(() =>
 
 // Add the current repay (any tab) to the batch. CoW orders can't be merged
 // into an EVC batch, so swap routes via CoW are excluded.
+const isCowSwapSelectedForBatch = computed(() => {
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value && isCowProviderOrQuote(
+      walletSwap.quotes.selectedProvider.value,
+      walletSwap.quotes.selectedQuote.value,
+    )
+  }
+  if (formTab.value === 'collateral') {
+    return !collateral.isSameAsset.value && isCowProviderOrQuote(
+      collateral.quotes.selectedProvider.value,
+      collateral.quotes.selectedQuote.value,
+    )
+  }
+  if (formTab.value === 'savings') {
+    return !savings.isSameAsset.value && isCowProviderOrQuote(
+      savings.quotes.selectedProvider.value,
+      savings.quotes.selectedQuote.value,
+    )
+  }
+  return false
+})
 const canAddToBatch = computed(() => {
   if (!borrowVault.value || !position.value) return false
   if (formTab.value === 'wallet') {
     if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
     if (walletSwap.needsSwap.value) {
       if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return false
-      return !!walletSwap.quotes.selectedQuote.value && !isCowProvider(walletSwap.quotes.selectedProvider.value)
+      return !!walletSwap.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
     }
     return !!(+wallet.amount.value)
   }
   if (formTab.value === 'collateral') {
     if (!collateral.sourceVault.value || !(+collateral.amount.value || +collateral.debtAmount.value)) return false
     if (collateral.isSameAsset.value) return true
-    return !!collateral.quotes.selectedQuote.value && !isCowProvider(collateral.quotes.selectedProvider.value)
+    return !!collateral.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
   }
   if (formTab.value === 'savings') {
     if (!savings.sourceVault.value || !(+savings.amount.value || +savings.debtAmount.value)) return false
     if (savings.isSameAsset.value) return true
-    return !!savings.quotes.selectedQuote.value && !isCowProvider(savings.quotes.selectedProvider.value)
+    return !!savings.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
   }
   return false
 })
@@ -862,6 +883,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -1043,6 +1065,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -1220,6 +1243,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
