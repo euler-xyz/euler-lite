@@ -13,14 +13,15 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
-import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal } from '#components'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
+import { VaultUnverifiedDisclaimerModal, VaultApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
 const modal = useModal()
 const { error } = useToast()
-const { planDeposit, executePlan } = useEulerTx()
+const { planDeposit } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { open: openReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -158,13 +159,21 @@ const submit = async () => {
       return
     }
 
+    const capturedAmount = amount.value
+    const plannerArgs = {
+      vaultAddress: vaultAddress as Address,
+      assetAddress: asset.value.address as Address,
+      amount: valueToNano(capturedAmount || '0', asset.value.decimals),
+    }
+    const intent = createIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: plannerArgs,
+      source: 'pages/earn/[vault]/index.vue',
+    })
+
     try {
-      plan.value = await planDeposit({
-        vaultAddress: vaultAddress as Address,
-        assetAddress: asset.value.address as Address,
-        amount: valueToNano(amount.value || '0', asset.value.decimals),
-        account: planAccount.value,
-      })
+      plan.value = await planDeposit({ ...plannerArgs, account: planAccount.value })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -178,16 +187,23 @@ const submit = async () => {
       }
     }
 
-    modal.open(OperationReviewModal, {
-      props: {
+    await openReviewState([intent], {
+      presentationKind: 'supply',
+      review: {
         type: 'supply',
         asset: asset.value,
-        amount: amount.value,
-        plan: plan.value || undefined,
+        amount: capturedAmount,
         submittingLabel: 'Submitting...',
-        onConfirm: async (execution) => {
-          await send(execution)
-        },
+      },
+      onSucceeded: async () => {
+        await updateEstimates()
+        setTimeout(() => {
+          router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+        }, 400)
+      },
+      onFailed: (cause) => {
+        error('Transaction failed')
+        console.warn(cause)
       },
     })
   }
@@ -201,48 +217,21 @@ const addToBatch = async () => {
   const assetAddr = asset.value.address as Address
   const amt = valueToNano(amount.value, asset.value.decimals)
   const label = `Earn deposit ${amount.value} ${asset.value.symbol}`
+  const intent = createIntent({
+    kind: 'deposit',
+    planner: 'deposit',
+    args: { vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: amt },
+    source: 'pages/earn/[vault]/index.vue#batch',
+  })
   await addBatchEntry({
+    intent,
     label,
-    buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: amt, account }),
     review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
   })
   amount.value = ''
   redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
 }
 
-const send = async (execution: TrackedExecutionScope) => {
-  try {
-    isSubmitting.value = true
-    if (!asset.value?.address) {
-      return
-    }
-    const txPlan = plan.value ?? await planDeposit({
-      vaultAddress: vaultAddress as Address,
-      assetAddress: asset.value.address as Address,
-      amount: valueToNano(amount.value || '0', asset.value.decimals),
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
-
-    // Success signal for a detached Safe completion toast; a proposal that
-    // confirmed after its modal was closed must not redirect mid-flow.
-    execution.markSucceeded()
-    await updateEstimates()
-    if (!execution.suppressPostTxUi()) {
-      modal.close()
-      setTimeout(() => {
-        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-      }, 400)
-    }
-  }
-  catch (e) {
-    error('Transaction failed')
-    console.warn(e)
-  }
-  finally {
-    isSubmitting.value = false
-  }
-}
 const updateEstimates = async () => {
   if (!vault.value) return
   try {

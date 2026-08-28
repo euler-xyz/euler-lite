@@ -230,6 +230,8 @@ const position = {
 
 describe('useSavingsRepay', () => {
   beforeEach(() => {
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
+    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
     vi.clearAllMocks()
     mocks.swapQuoteOptions.length = 0
     mocks.swapQuoteInstances.length = 0

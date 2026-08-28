@@ -24,23 +24,25 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *     `staleTimeMs`.
  *
  *   - `invalidateAfterTx` (optional, boolean): mark matching cache entries
- *     stale after plan finalization (`finalizeExecution`), the post-tx
- *     subgraph sync, and the CoW permit hard-cancellation that writes the
- *     EVC nonce — not CoW settlement, and not standalone migration
+ *     stale after reviewed-execution submission, again after its post-tx
+ *     subgraph sync, and after the CoW permit hard-cancellation that writes
+ *     the EVC nonce — not CoW settlement, and not standalone migration
  *     authorization grants/revokes sent through `sendPlainTransactions()`.
  *     Those grant/revoke receipts confirm without `invalidateSdkQueries`, so
  *     rows such as `queryGetAuthorization` stay reusable inside their 15 s
- *     form window until a later `finalizeExecution`. `invalidateSdkQueries`
+ *     form window until a later reviewed submission. `invalidateSdkQueries`
  *     calls TanStack's `invalidateQueries`, so data entries are flagged stale
  *     and active observers refetch — they are not removed from the query cache
  *     (the short-lived failure cache is a separate map and is cleared). SDK
  *     queries run through `fetchQuery` and have no standing observers, so a
- *     later idle read re-fetches instead of reusing the entry. Invalidation
- *     does not cancel or version an in-flight `fetchQuery` for the same key:
- *     TanStack joins that pending promise, and when it resolves it clears the
- *     invalidated flag, so concurrent callers can still receive the
- *     pre-invalidation value. Nothing is invalidated at form mount — a form
- *     opened inside a row's window reads the cached value. Used by display
+ *     later idle read re-fetches instead of reusing the entry. Ordinary
+ *     invalidation does not cancel or version an in-flight `fetchQuery` for
+ *     the same key: TanStack joins that pending promise, and when it resolves
+ *     it clears the invalidated flag, so concurrent callers can still receive
+ *     the pre-invalidation value. The reviewed post-tx subgraph sync advances
+ *     the matching query generations before its second refresh, ensuring
+ *     those reads use distinct cache keys. Nothing is invalidated at form
+ *     mount — a form opened inside a row's window reads the cached value. Used by display
  *     surfaces (vault list, portfolio etc.) that read via the browsing SDK
  *     with a long staleTime — without this they would serve pre-tx data for
  *     up to `staleTimeMs`. Combined with `formStaleTimeMs`, this is the
@@ -184,7 +186,7 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
 const policyEntries = (): [EulerSDKQueryName, SdkQueryPolicyEntry][] =>
   Object.entries(SDK_QUERY_POLICY) as [EulerSDKQueryName, SdkQueryPolicyEntry][]
 
-/** Names where `invalidateAfterTx === true` — marked stale after plan finalization / subgraph sync / CoW hard-cancel, not after standalone grant/revoke receipts. */
+/** Names where `invalidateAfterTx === true` — marked stale after reviewed submission / subgraph sync / CoW hard-cancel, not after standalone grant/revoke receipts. */
 export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]
   = policyEntries()
     .filter(([, p]) => p.invalidateAfterTx === true)

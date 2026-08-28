@@ -1,4 +1,5 @@
 import { SwapperMode, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 export type SwapQuoteAmountField = 'amountIn' | 'amountOut' | 'amountInMax' | 'amountOutMin'
 export type SwapQuoteCompare = 'max' | 'min'
@@ -20,6 +21,8 @@ export type SwapQuoteCard = {
    *  Review-click can skip `prepareTransactionPlan` (plugin pipeline) and go
    *  straight to simulate/execute against this envelope. */
   preparedPlan?: TransactionPlanPrepared
+  /** Explicit immutable operation DTOs captured with this preview. */
+  intents?: readonly OperationIntent[]
 }
 
 /** Whether the gas cost on a card is trustworthy (known-zero for gasless

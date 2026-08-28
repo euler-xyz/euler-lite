@@ -194,6 +194,8 @@ const makeCollateralSnapshot = (projected: boolean) => ({
 
 describe('useWalletSwapRepay', () => {
   beforeEach(() => {
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
+    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
     vi.clearAllMocks()
     mocks.swapQuoteOptions.length = 0
     mocks.quoteStates.length = 0

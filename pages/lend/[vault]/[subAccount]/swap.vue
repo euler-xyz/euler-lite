@@ -12,7 +12,7 @@ import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
-import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { getProjectedRatesBatch } from '~/utils/vault/apy'
 import { nanoToValue } from '~/utils/crypto-utils'
@@ -30,6 +30,7 @@ const { getVault, getSecuritizeVault } = useVaults()
 const { effectiveAddress } = useEffectiveAddress()
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -206,6 +207,39 @@ const swap = useSwapPageLogic({
     })
   },
 
+  createReviewIntent(quote?: SwapQuote) {
+    const from = fromVault.value
+    const to = toVault.value
+    const positionAccount = subAccount.value ?? effectiveAddress.value
+    if (!from || !to || !positionAccount) throw new Error('Position is not loaded')
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+    if (quote) {
+      return createIntent({
+        kind: 'collateral',
+        planner: 'swap-collateral',
+        args: { swapQuote: quote, swapperMode: SwapperMode.EXACT_IN },
+        source: 'lend/swap:review',
+        subAccounts: [positionAccount as Address],
+      })
+    }
+    return createIntent({
+      kind: 'refinance',
+      planner: 'migrate-same-asset-collateral',
+      args: {
+        fromVault: from.address as Address,
+        toVault: to.address as Address,
+        amount,
+        positionAccount: positionAccount as Address,
+        toAsset: to.asset.address as Address,
+        isMax,
+        maxShares: isMax ? savingPosition.value?.shares : undefined,
+      },
+      source: 'lend/swap:review',
+      subAccounts: [positionAccount as Address],
+    })
+  },
+
   getBalanceError: (amountNano) => {
     if (assetsBalance.value < amountNano) return 'Not enough balance'
     if (balance.value < amountNano) return 'Not enough liquidity in vault'
@@ -219,7 +253,7 @@ const {
   isSameAsset, sameVaultError, errorText,
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
-  effectiveQuoteFetchedAt,
+  quoteCardsSorted, effectiveQuoteFetchedAt,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
@@ -311,7 +345,9 @@ const { redirectAfterAdd } = useBatchRedirect()
 
 // Add this earn-position swap (or same-asset migration) to the batch. CoW
 // orders can't be merged into an EVC batch, so they're excluded.
-const isCowSwapSelected = computed(() => !isSameAsset.value && isCowProvider(selectedProvider.value))
+const isCowSwapSelected = computed(() =>
+  !isSameAsset.value && isCowProviderOrQuote(selectedProvider.value, selectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (isGeoBlocked.value) return false
   if (!fromVault.value || !toVault.value || !(+fromAmount.value)) return false
@@ -342,22 +378,22 @@ const addToBatch = async () => {
     const maxShares = isMax ? savingPosition.value?.shares : undefined
     const sameAsset = isSameAsset.value
     const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    const quoteIntents = swapQuote
+      ? quoteCardsSorted.value.find(card => card.quote === swapQuote)?.intents
+      : undefined
     const label = sameAsset
       ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
       : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
     await addBatchEntry({
       label,
-      buildPlan: account => planCollateralChange({
-        fromVault: fromAddr,
-        toVault: toAddr,
-        amount,
-        positionAccount,
-        toAsset: toAssetAddr,
-        isMax,
-        maxShares,
-        swapQuote,
-        swapperMode: SwapperMode.EXACT_IN,
-        account,
+      intent: quoteIntents?.[0] ?? createIntent({
+        kind: sameAsset ? 'refinance' : 'collateral',
+        planner: sameAsset ? 'migrate-same-asset-collateral' : 'swap-collateral',
+        args: sameAsset
+          ? { fromVault: fromAddr, toVault: toAddr, amount, positionAccount, toAsset: toAssetAddr, isMax, maxShares }
+          : { swapQuote, swapperMode: SwapperMode.EXACT_IN },
+        source: 'lend/swap:add-to-batch',
+        subAccounts: [positionAccount],
       }),
       subAccount: positionAccount,
       review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },

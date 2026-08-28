@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { encodeFunctionData, getAddress, type Address, type StateOverride } from 'viem'
+import { encodeFunctionData, getAddress, type Address, type Hash, type StateOverride } from 'viem'
 import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext, type StepKnownAsset, type StepKnownSwapOutput } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -13,8 +13,8 @@ import { useStateOverrideResolution } from '~/composables/useStateOverrideOption
 import { hasPermit2Signature, hasPermit2TokenApproval } from '~/utils/transactionPlanApprovals'
 import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
-import type { TrackedExecutionHandle, TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
-import { buildTenderlySimulationPayload } from '~/utils/tenderly-plan'
+import { buildTenderlySimulationPayload, tenderlyPayloadMatchesReviewedRequests } from '~/utils/tenderly-plan'
+import type { EoaRequest, SafeCall, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -25,15 +25,14 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedAccount, reviewedWalletKind, reviewedRequests, reviewedSignatureSlots, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
   amount: number | string
-  /** Raw plan, prepared inside the modal when no prepared envelope is provided. */
+  /** Raw plan used only by read-only batch-entry reviews. */
   plan?: TransactionPlan
-  /** Pre-prepared envelope. When set, the modal renders immediately — no
-   *  in-modal plugin/approval-resolution round-trip. */
+  /** Coordinator-prepared executable envelope. */
   prepared?: TransactionPlanPrepared
   /** Tenderly-only prepared plan. Used for display-only reviews that need a pre-signature simulation path. */
   tenderlyPrepared?: TransactionPlanPrepared
@@ -67,7 +66,14 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
   swapMode?: SwapperMode
   swapEstimatedSide?: 'input' | 'output'
   reulUnlockInfo?: REULUnlockInfo
-  onConfirm?: (execution: TrackedExecutionScope) => void | Promise<void>
+  /** Opaque acceptance identity. This presentation never receives execution authority. */
+  reviewId?: Hash
+  reviewDigest?: Hash
+  reviewedAccount?: Address
+  reviewedWalletKind?: 'eoa' | 'safe'
+  reviewedRequests?: readonly (EoaRequest | SafeCall)[]
+  reviewedSignatureSlots?: readonly SignatureSlot[]
+  externalSubmitting?: boolean
   subAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
@@ -89,7 +95,6 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, onConfirm, plan, prep
 const { address: walletAddress, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId: currentChainId } = useWagmi()
 const { getVault } = useVaultRegistry()
-const { prepareTransactionPlan } = useEulerTx()
 const { isSafeWallet } = useSafeWallet()
 const { eulerCoreAddresses } = useEulerAddresses()
 const { isResolvingStateOverrideHints } = useStateOverrideResolution()
@@ -108,22 +113,27 @@ const hasCopiedCalldata = ref(false)
 const nowMs = ref(Date.now())
 const staleQuoteThresholdMs = 3 * 60 * 1000
 let nowTimer: ReturnType<typeof setInterval> | undefined
-// `preparedPlan` is either the caller-provided prepared envelope's plan or the
-// result of preparing a raw plan inside this modal.
-const preparedPlan = shallowRef<TransactionPlan | undefined>()
-const prepareError = ref('')
+// Executable reviews receive an already prepared preview from the reviewed execution
+// coordinator. A raw plan is accepted only for the read-only batch row peek.
+const reviewPlan = computed(() => prepared?.plan ?? (hideExecute ? plan : undefined))
+const prepareError = computed(() =>
+  !hideExecute && !reviewPlan.value?.length && !allowConfirmWithoutPlan
+    ? 'Transaction preparation is unavailable. Close this review and try again.'
+    : '',
+)
 const tenderlyLocalError = ref('')
+const isBuildingTenderlyPayload = ref(false)
 const isPreparingPlan = ref(false)
-const reviewPlan = computed(() => preparedPlan.value)
-const tenderlyReviewPlan = computed(() => reviewPlan.value ?? tenderlyPrepared?.plan ?? tenderlyPlan)
-const tenderlyChainId = computed(() => prepared?.chainId ?? tenderlyPrepared?.chainId ?? currentChainId.value)
+// A dedicated Tenderly projection models signature-bearing migration calls
+// with state overrides, so it takes precedence over the executable preview.
+const tenderlyReviewPlan = computed(() => tenderlyPrepared?.plan ?? reviewPlan.value ?? tenderlyPlan)
+const tenderlyChainId = computed(() => tenderlyPrepared?.chainId ?? prepared?.chainId ?? currentChainId.value)
 // calldataPrepared is the dedicated copy-calldata plan (e.g. carrying
 // placeholder signatures) — it must win over the review plan when both exist.
 const calldataPlan = computed(() => calldataPrepared?.plan ?? reviewPlan.value)
 const calldataChainId = computed(() => calldataPrepared?.chainId ?? prepared?.chainId ?? currentChainId.value)
 const displayReviewPlan = computed(() => displayPlan ?? reviewPlan.value ?? calldataPrepared?.plan ?? tenderlyPrepared?.plan ?? tenderlyPlan)
 const canCopyCalldata = computed(() => !!calldataPlan.value?.length)
-let prepareRequestId = 0
 
 fetchTenderlyEnabled().then((enabled) => {
   tenderlyEnabled.value = enabled
@@ -141,62 +151,19 @@ onUnmounted(() => {
   }
 })
 
-watch(
-  () => [prepared, plan, walletAddress.value, currentChainId.value, allowConfirmWithoutPlan] as const,
-  async () => {
-    const requestId = ++prepareRequestId
-    hasCopiedCalldata.value = false
-    prepareError.value = ''
-    preparedPlan.value = undefined
-
-    // Preferred path: caller pre-prepared the envelope. No async work — modal
-    // renders the prepared plan synchronously.
-    if (prepared?.plan?.length) {
-      preparedPlan.value = prepared.plan
-      isPreparingPlan.value = false
-      return
-    }
-
-    if (!plan?.length) {
-      isPreparingPlan.value = false
-      if (allowConfirmWithoutPlan) return
-      prepareError.value = 'Transaction plan is unavailable. Close this review and try again.'
-      return
-    }
-
-    // Raw plans are prepared here so the displayed rows use resolved approvals.
-    isPreparingPlan.value = true
-    try {
-      const envelope = await prepareTransactionPlan(plan)
-      if (requestId === prepareRequestId) {
-        preparedPlan.value = envelope.plan
-        prepareError.value = ''
-      }
-    }
-    catch (err) {
-      logWarn('OperationReviewModal/prepareTransactionPlan', err)
-      if (requestId === prepareRequestId) {
-        preparedPlan.value = undefined
-        prepareError.value = 'Transaction preparation failed. Close this review and try again.'
-      }
-    }
-    finally {
-      if (requestId === prepareRequestId) {
-        isPreparingPlan.value = false
-      }
-    }
-  },
-  { immediate: true },
-)
+watch(() => [prepared, plan] as const, () => {
+  hasCopiedCalldata.value = false
+})
 
 const handleTenderlySimulate = async () => {
   const currentPlan = tenderlyReviewPlan.value
-  if (!currentPlan || !walletAddress.value) return
+  const owner = reviewedAccount ?? walletAddress.value as Address | undefined
+  if (!currentPlan || !owner || isTenderlyPreparing.value) return
   tenderlyLocalError.value = ''
   clearTenderly()
+  isBuildingTenderlyPayload.value = true
 
   try {
-    const owner = walletAddress.value as Address
     // Capture the plan's chain id once so the SDK backend selection and the
     // payload can't diverge if the user switches chains mid-await. Uses the
     // tenderly plan chain (not the wallet chain) so cross-chain migration
@@ -216,63 +183,35 @@ const handleTenderlySimulate = async () => {
       return
     }
 
+    if (reviewedRequests?.length && !tenderlyPayloadMatchesReviewedRequests({
+      payload,
+      requests: reviewedRequests,
+      signatureSlots: reviewedSignatureSlots ?? [],
+      sdk,
+    })) {
+      throw new Error('Tenderly simulation does not match the reviewed requests')
+    }
+
     await tenderlySimulate(payload)
   }
   catch (err) {
     logWarn('OperationReviewModal/tenderly', err)
+    tenderlyLocalError.value = err instanceof Error ? err.message : 'Tenderly simulation failed'
+  }
+  finally {
+    isBuildingTenderlyPayload.value = false
   }
 }
 
-const internalSubmitting = ref(false)
-const { beginTrackedExecution, hasPendingDetachedExecution } = useSafeExecutionDetachment()
+const internalSubmitting = computed(() => externalSubmitting === true)
+const { hasPendingDetachedExecution } = useSafeExecutionDetachment()
 
-let pendingExecution: Promise<void> | null = null
-let executionHandle: TrackedExecutionHandle | null = null
-
-const handleConfirm = async () => {
-  if (isConfirmDisabled.value || !onConfirm) return
-  // Latch the wallet classification at submission time — detachability must
-  // not follow a mid-flight connector switch.
-  const handle = beginTrackedExecution({ safeAtSubmit: isSafeWallet.value })
-  // Single-slot gate: while a detached proposal is pending, no new
-  // submission may start (isConfirmDisabled also reflects this).
-  if (!handle) return
-  const result = onConfirm(handle.scope)
-  if (result && typeof (result as Promise<void>).then === 'function') {
-    internalSubmitting.value = true
-    pendingExecution = result as Promise<void>
-    executionHandle = handle
-    try {
-      await result
-    }
-    finally {
-      internalSubmitting.value = false
-      pendingExecution = null
-      executionHandle?.release()
-      executionHandle = null
-    }
-  }
-  else {
-    handle.release()
-    emits('close')
-  }
+const handleConfirm = () => {
+  if (isConfirmDisabled.value || !reviewId || !reviewDigest) return
+  emits('confirm', { reviewId, reviewDigest })
 }
-
-// Safe proposals can wait on co-signers for minutes to days — the modal must
-// not hold the app hostage. Closing hands the execution to background
-// completion toasts and suppresses the flow's post-transaction navigation.
-// Uses the classification latched at submit, not live detection.
-const canDetachExecution = computed(() =>
-  internalSubmitting.value && executionHandle?.safeAtSubmit === true)
 
 const onCloseRequested = () => {
-  if (internalSubmitting.value) {
-    if (!canDetachExecution.value) return
-    if (pendingExecution && executionHandle) {
-      executionHandle.detach(pendingExecution)
-      executionHandle = null
-    }
-  }
   emits('close')
 }
 
@@ -288,7 +227,7 @@ const rawDisplaySteps = computed((): DisplayStep[] => {
     swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs,
     // Bundle eligibility mirrors execution: Safe wallet AND a plan that can
     // actually submit as one bundle — otherwise approves stay "Separate tx".
-    bundledApprovals: isSafeWallet.value && isPlanBundleable(currentPlan),
+    bundledApprovals: (reviewedWalletKind ? reviewedWalletKind === 'safe' : isSafeWallet.value) && isPlanBundleable(currentPlan),
   }
   return buildTransactionPlanDisplaySteps(currentPlan, ctx, getVault, getAssetLogoUrl)
 })
@@ -342,6 +281,15 @@ const copyCalldata = async () => {
   const currentPlan = calldataPlan.value
   if (!currentPlan?.length) return
   try {
+    if (reviewedRequests?.length) {
+      await copyToClipboard(JSON.stringify(reviewedRequests.map(request => ({
+        to: request.to,
+        data: request.data,
+        value: request.value.toString(),
+      })), null, 2), 'calldata')
+      hasCopiedCalldata.value = true
+      return
+    }
     const cid = calldataChainId.value
     const sdk = await getEulerSdkForChain(cid)
     const entries: { to: string, data: string, value: string }[] = []
@@ -467,7 +415,7 @@ const isSwapQuoteStale = computed(() => {
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
 const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
-const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isResolvingStateOverrideHints.value)
+const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isBuildingTenderlyPayload.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
   if (hasPendingDetachedExecution.value && !internalSubmitting.value) return 'Awaiting Safe signatures…'

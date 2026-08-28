@@ -2,6 +2,8 @@ import type { Hash, TransactionReceipt } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 import {
   getSafeWalletProvider,
+  getSafeAtomicCapability,
+  sendSafeAtomicCalls,
   SafeTransactionStatusUnknownError,
   waitForSafeTransactionExecution,
   type ReceiptClientLike,
@@ -59,6 +61,63 @@ describe('getSafeWalletProvider', () => {
   })
 })
 
+describe('getSafeAtomicCapability', () => {
+  it.each(['supported', 'ready'] as const)('accepts per-chain atomic status %s', async (status) => {
+    const provider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({ '0x1': { atomic: { status } } }),
+    }
+    await expect(getSafeAtomicCapability(provider, SAFE_HASH.slice(0, 42) as `0x${string}`, 1)).resolves.toEqual({ status })
+  })
+
+  it('rejects missing or unsupported atomic capability before review', async () => {
+    const provider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({ '0x1': { atomic: { status: 'unsupported' } } }),
+    }
+    await expect(getSafeAtomicCapability(provider, SAFE_HASH.slice(0, 42) as `0x${string}`, 1)).rejects.toThrow(/unsupported/)
+  })
+
+  it('rejects a global-only atomic capability because atomic support is chain-specific', async () => {
+    const provider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({
+        '0x0': { atomic: { status: 'supported' } },
+        '0x1': { paymasterService: { supported: true } },
+      }),
+    }
+    await expect(getSafeAtomicCapability(provider, SAFE_HASH.slice(0, 42) as `0x${string}`, 1)).rejects.toThrow(/does not advertise atomic execution/)
+  })
+})
+
+describe('sendSafeAtomicCalls', () => {
+  it('serializes the complete sealed EIP-5792 envelope without injected capabilities', async () => {
+    const account = SAFE_HASH.slice(0, 42) as `0x${string}`
+    const target = EXECUTION_HASH.slice(0, 42) as `0x${string}`
+    const request = vi.fn().mockResolvedValue({ id: SAFE_HASH })
+
+    await expect(sendSafeAtomicCalls({ request }, {
+      schemaVersion: 1,
+      version: '2.0.0',
+      from: account,
+      chainId: 1,
+      atomicRequired: true,
+      calls: [{ to: target, data: '0x1234', value: 0n }],
+      capabilities: {},
+      atomicCapability: { status: 'supported' },
+    })).resolves.toBe(SAFE_HASH)
+
+    expect(request).toHaveBeenCalledWith({
+      method: 'wallet_sendCalls',
+      params: [{
+        version: '2.0.0',
+        from: account,
+        chainId: '0x1',
+        atomicRequired: true,
+        calls: [{ to: target, data: '0x1234', value: '0x0' }],
+        capabilities: {},
+      }],
+    })
+  })
+})
+
 describe('waitForSafeTransactionExecution', () => {
   it('returns an immediately mined on-chain hash without Safe status data', async () => {
     const walletProvider: WalletProviderLike = { request: vi.fn() }
@@ -104,6 +163,47 @@ describe('waitForSafeTransactionExecution', () => {
       method: 'wallet_getCallsStatus',
       params: [SAFE_HASH],
     })
+  })
+
+  it('requires confirmed atomic status for a reviewed Safe batch', async () => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({
+        status: 200,
+        atomic: true,
+        receipts: [{ transactionHash: EXECUTION_HASH }],
+      }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn(async ({ hash }) => {
+        if (hash === EXECUTION_HASH) return receipt(EXECUTION_HASH)
+        throw new Error('Transaction receipt not found')
+      }),
+    }
+
+    await expect(waitForSafeTransactionExecution({
+      submittedHash: SAFE_HASH,
+      walletProvider,
+      publicClient,
+      pollingIntervalMs: 0,
+      requireAtomic: true,
+    })).resolves.toEqual({ hash: EXECUTION_HASH, receipt: receipt(EXECUTION_HASH), atomic: true })
+  })
+
+  it('rejects a confirmed non-atomic Safe batch', async () => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({ status: 200, atomic: false }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('Transaction receipt not found')),
+    }
+
+    await expect(waitForSafeTransactionExecution({
+      submittedHash: SAFE_HASH,
+      walletProvider,
+      publicClient,
+      pollingIntervalMs: 0,
+      requireAtomic: true,
+    })).rejects.toThrow(/not atomic/)
   })
 
   it('retries while Safe has not indexed the submitted hash yet', async () => {

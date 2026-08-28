@@ -5,6 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
+import { PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
 // useEulerSdk -> sdk-keyring -> eulerLabelsUtils -> useEulerLabels ->
@@ -77,12 +78,14 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     QueryClient cache that the fast instance fills. Those windows are short,
  *     not zero: pinning the adapters selects the data source, it does not
  *     force a refetch, so this instance bounds staleness rather than
- *     guaranteeing a latest-block read. Post-tx `invalidateAfterTx`
- *     invalidation marks those rows stale for a later idle read; it does
- *     not cancel an in-flight `fetchQuery`. The fresh instance's refetches
- *     write back to the shared cache, so a subsequent fast read sees the
- *     just-refreshed value within its own staleness window. Consumed by
- *     `useEulerTx` planners and simulate/execute.
+ *     guaranteeing a latest-block read. Immediate post-tx
+ *     `invalidateAfterTx` invalidation marks those rows stale for a later idle
+ *     read but does not cancel an in-flight `fetchQuery`. After the subgraph
+ *     reaches the confirmed block, the reviewed-execution refresh advances
+ *     their cache generation so its reads cannot join the earlier fetch. The
+ *     fresh instance's refetches write back to the shared cache, so a
+ *     subsequent fast read sees the just-refreshed value within its own
+ *     staleness window. Consumed by transaction planners and simulation.
  */
 
 type SdkInstance = { sdk: EulerSDK }
@@ -120,7 +123,7 @@ const buildFuulProxyApiPath = (path = '') =>
 const buildIncentraProxyApiPath = (path: string) =>
   buildAppApiPath(`/api/internal/proxy/incentra/${path.replace(/^\/+/, '')}`)
 const buildTurtleProxyApiPath = () => buildAppApiPath('/api/internal/proxy/turtle')
-// Exported so post-tx subgraph polling (useEulerTx) hits the exact same
+// Exported so reviewed-execution post-tx polling hits the exact same
 // endpoint the SDK's account/vault-type adapters read through. Polling the
 // upstream Goldsky URL directly would measure a different indexer head than
 // the one actually serving queryAccountVaults.
@@ -338,7 +341,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
     },
     servicesOverrides: { intrinsicApyService },
     plugins: [
-      createPythPlugin({ buildQuery, fetchFn: pythProxyFetch }),
+      createPythPlugin({ buildQuery, fetchFn: pythProxyFetch, maxUpdateFee: PYTH_MAX_UPDATE_FEE }),
       createKeyringPlugin({
         hookTargets: keyringHookTargets,
         getCredentialData: getSdkKeyringCredential,

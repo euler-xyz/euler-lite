@@ -12,14 +12,13 @@ import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/compos
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
 import { DateTime } from 'luxon'
-import { VaultOverviewModal, OperationReviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
+import { VaultOverviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 const _route = useRoute()
 const router = useRouter()
@@ -34,7 +33,9 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
-const { planTransfer, executePlan } = useEulerTx()
+const { planTransfer } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { open: openReviewState } = useExecutionReview()
 const { account: planAccount } = usePlanAccount()
 const {
   runSimulation: runDisableCollateralSimulation,
@@ -677,77 +678,57 @@ const disableCollateral = async (vault: EVault) => {
     try {
       const subAccount = position.value!.subAccount as Address
       const owner = address.value as Address
-      plan = await planTransfer({
+      const plannerArgs = {
         vaultAddress: vault.address as Address,
         from: subAccount,
         to: owner,
         amount: maxUint256,
         disableCollateralFrom: true,
-        account: planAccount.value,
+      }
+      const intent = createIntent({
+        kind: 'collateral',
+        planner: 'transfer',
+        args: plannerArgs,
+        source: 'pages/position/[number]/index.vue',
+        subAccounts: [subAccount, owner],
+      })
+      plan = await planTransfer({ ...plannerArgs, account: planAccount.value })
+
+      if (plan) {
+        const ok = await runDisableCollateralSimulation(plan)
+        if (!ok) {
+          disableCollateralErrorVault.value = getAddress(vault.address)
+          return
+        }
+      }
+
+      await openReviewState([intent], {
+        presentationKind: 'disableCollateral',
+        review: {
+          type: 'disableCollateral',
+          asset: borrowVault.value!.asset,
+          amount: '0',
+          subAccount: position.value?.subAccount,
+          hasBorrows: (position.value?.borrowed || 0n) > 0n,
+          submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => {
+          setTimeout(() => {
+            router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+          }, 400)
+        },
+        onFailed: (cause) => {
+          error('Transaction failed')
+          console.warn(cause)
+        },
       })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
     }
-
-    if (plan) {
-      const ok = await runDisableCollateralSimulation(plan)
-      if (!ok) {
-        disableCollateralErrorVault.value = getAddress(vault.address)
-        return
-      }
-    }
-
-    modal.open(OperationReviewModal, {
-      props: {
-        type: 'disableCollateral',
-        asset: borrowVault.value!.asset,
-        amount: '0',
-        plan: plan || undefined,
-        subAccount: position.value?.subAccount,
-        hasBorrows: (position.value?.borrowed || 0n) > 0n,
-        submittingLabel: 'Submitting...',
-        onConfirm: async (execution) => {
-          await send(execution, vault.address)
-        },
-      },
-    })
   }
   finally {
     isPreparing.value = false
-  }
-}
-const send = async (execution: TrackedExecutionScope, collateralAddress: string) => {
-  try {
-    isSubmitting.value = true
-    const subAccount = position.value!.subAccount as Address
-    const owner = address.value as Address
-    const txPlan = await planTransfer({
-      vaultAddress: collateralAddress as Address,
-      from: subAccount,
-      to: owner,
-      amount: maxUint256,
-      disableCollateralFrom: true,
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
-
-    // Success signal for a detached Safe completion toast; a proposal that
-    // confirmed after its modal was closed must not redirect mid-flow.
-    execution.markSucceeded()
-    if (!execution.suppressPostTxUi()) {
-      modal.close()
-      setTimeout(() => {
-        router.replace({ path: '/portfolio', query: { network: _route.query.network } })
-      }, 400)
-    }
-  }
-  catch (e) {
-    error('Transaction failed')
-    console.warn(e)
-  }
-  finally {
-    isSubmitting.value = false
   }
 }
 const load = async () => {

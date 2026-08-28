@@ -207,9 +207,12 @@ export const useTosGuard = () => {
     unregisterOperationBlocker('tos')
   })
 
-  provide('tos-guard', reactive({
+  const guardState = reactive({
     isTermsRequired,
     tosLoadFailed,
     acceptTerms,
-  }))
+  })
+  provide('tos-guard', guardState)
+
+  return guardState
 }
