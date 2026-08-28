@@ -10,6 +10,7 @@ const ORACLE_PROVIDER_LOGOS: Record<string, string> = {
   'Mev': '/oracles/mev.svg',
   'Midas': '/oracles/midas.svg',
   'Pendle': '/oracles/pendle.svg',
+  'Poppie': '/oracles/poppie.svg',
   'Pyth': '/oracles/pyth.svg',
   'Redstone': '/oracles/redstone.svg',
   'RedStone': '/oracles/redstone.svg',

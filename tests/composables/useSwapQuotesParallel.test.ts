@@ -3,12 +3,17 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
-const { getTokenUsdValueMock } = vi.hoisted(() => ({
+const { getTokenUsdValueMock, getEulerSdkFreshMock } = vi.hoisted(() => ({
   getTokenUsdValueMock: vi.fn(),
+  getEulerSdkFreshMock: vi.fn(),
 }))
 
 vi.mock('~/utils/sdk-prices', () => ({
   getTokenUsdValue: getTokenUsdValueMock,
+}))
+
+vi.mock('~/composables/useEulerSdk', () => ({
+  getEulerSdkFresh: getEulerSdkFreshMock,
 }))
 
 const makeQuote = (amountIn: string, amountOut: string): SwapQuote =>
@@ -48,6 +53,12 @@ describe('useSwapQuotesParallel', () => {
   beforeEach(() => {
     getSwapProviders = vi.fn()
     getSwapQuotes = vi.fn()
+    getEulerSdkFreshMock.mockReset()
+    getEulerSdkFreshMock.mockResolvedValue({
+      executionService: {
+        estimateGasForPreparedTransactionPlan: vi.fn().mockResolvedValue(100_000n),
+      },
+    })
     getTokenUsdValueMock.mockReset()
     getTokenUsdValueMock.mockImplementation(async (amount: bigint, decimals: number) =>
       Number(amount) / 10 ** decimals,
@@ -92,6 +103,48 @@ describe('useSwapQuotesParallel', () => {
     expect(quotes.selectedProvider.value).toBe('first')
     expect(quotes.selectedQuote.value).toBe(quotes.effectiveQuote.value)
     expect(changes).toEqual([])
+  })
+
+  it('carries the exact preview intent through prefetch, preparation, and the quote card', async () => {
+    const quote = makeUsdcOutQuote('2000000')
+    const intent = { intentId: 'intent:quote-preview' }
+    const plan = []
+    const prepared = {
+      __prepared: true,
+      plan,
+      chainId: 1,
+      account: requestParams.accountIn,
+      usePermit2: true,
+      unlimitedApproval: false,
+    }
+    const prefetch = { pyth: { entries: [] } }
+    const prefetchPluginData = vi.fn().mockResolvedValue(prefetch)
+    const prepareTransactionPlan = vi.fn().mockResolvedValue(prepared)
+    vi.stubGlobal('useRpcClient', () => ({
+      client: ref({
+        estimateFeesPerGas: vi.fn().mockResolvedValue({ maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }),
+        getBlock: vi.fn().mockResolvedValue({ baseFeePerGas: 1n }),
+      }),
+    }))
+    getSwapProviders.mockResolvedValue(['router'])
+    getSwapQuotes.mockResolvedValue([quote])
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      buildTxPlanForQuote: vi.fn().mockResolvedValue(plan),
+      createIntentsForQuote: vi.fn().mockReturnValue([intent]),
+      prefetchPluginData,
+      prepareTransactionPlan,
+      getPlanAccount: () => requestParams.accountIn,
+    } as never)
+
+    await quotes.requestQuotes(requestParams)
+    await vi.waitFor(() => expect(quotes.sortedQuoteCards.value).toHaveLength(1))
+
+    expect(prefetchPluginData).toHaveBeenCalledWith(plan, requestParams.accountIn, [intent])
+    expect(prepareTransactionPlan).toHaveBeenCalledWith(plan, requestParams.accountIn, prefetch, [intent])
+    expect(quotes.sortedQuoteCards.value[0]?.intents).toBe(prepareTransactionPlan.mock.calls[0]?.[3])
   })
 
   it('updates effectiveQuote when selecting a non-best provider', async () => {

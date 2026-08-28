@@ -7,6 +7,7 @@ import { buildOracleAdapterView, collectOracleRouteSteps } from '~/utils/oracle-
 
 const oracle = '0x000000000000000000000000000000000000A111' as Address
 const weth = '0x000000000000000000000000000000000000E711' as Address
+const psUsdc = '0x000000000000000000000000000000000000C011' as Address
 const usd = '0x0000000000000000000000000000000000000051' as Address
 
 const adapterStep = (overrides: Partial<OracleRouteStep> = {}): OracleRouteStep => ({
@@ -52,6 +53,24 @@ describe('buildOracleAdapterView', () => {
     expect(view.logo).toBeUndefined()
     expect(view.label).toBeUndefined()
     expect(view.checksStatus).toBeNull()
+  })
+
+  it('keeps the configured route separate from a proxy feed label', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: {
+        oracle,
+        base: psUsdc,
+        quote: usd,
+        provider: 'Chainlink',
+        methodology: 'Market Price',
+        label: 'USDC / USD (0.25%, 82800s)',
+      },
+    }
+    const view = buildOracleAdapterView(adapterStep({ base: psUsdc }), meta)
+
+    expect(view.label).toEqual({ primary: 'USDC / USD', suffix: '(0.25%, 82800s)' })
+    expect(view.base).toBe(psUsdc)
+    expect(view.quote).toBe(usd)
   })
 
   it('keeps the decoded name and "Exchange Rate" methodology for vault (ERC-4626) steps', () => {

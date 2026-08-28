@@ -12,13 +12,14 @@ import { getAddress, type Address, zeroAddress } from 'viem'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const positionIndex = usePositionIndex()
 const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { getBalance } = useWallets()
 const { planDeposit, planDepositWithSwap } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { chainId } = useEulerAddresses()
@@ -121,6 +122,52 @@ const form = useCollateralForm({
     })
   },
 
+  createReviewIntent: (quote?: SwapQuote) => {
+    const vault = form.collateralVault.value
+    const asset = form.asset.value
+    const receiver = form.position.value?.subAccount as Address | undefined
+    if (!vault || !asset || !receiver) throw new Error('Position is not loaded')
+    if (quote) {
+      const selected = selectedAsset.value
+      if (!selected) throw new Error('No selected asset')
+      const amount = valueToNano(form.amount.value || '0', selected.decimals)
+      const isNative = isNativeCurrencyAddress(selected.address)
+      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+      if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+      return createIntent({
+        kind: 'deposit',
+        planner: 'deposit-with-swap',
+        args: {
+          swapQuote: quote,
+          amount,
+          tokenIn: (wrappedAddress || selected.address) as Address,
+          wrappedNativeInfo: isNative && wrappedAddress
+            ? { wrappedTokenAddress: wrappedAddress, nativeAmount: amount }
+            : undefined,
+        },
+        source: 'position/supply:review',
+        subAccounts: [receiver],
+      })
+    }
+    const amount = valueToNano(form.amount.value || '0', asset.decimals)
+    const wrappedAddress = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
+    return createIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: {
+        vaultAddress: vault.address as Address,
+        assetAddress: asset.address as Address,
+        amount,
+        receiver,
+        wrappedNativeInfo: isNativeWrap.value && wrappedAddress
+          ? { wrappedTokenAddress: wrappedAddress, nativeAmount: amount }
+          : undefined,
+      },
+      source: 'position/supply:review',
+      subAccounts: [receiver],
+    })
+  },
+
   requestSwapQuoteParams: ({ userAddr, subAccountAddr, amountNano: _amountNano, slippage }) => {
     if (!selectedAsset.value || !form.asset.value || !form.collateralVault.value) return null
     const isNative = isNativeCurrencyAddress(selectedAsset.value.address)
@@ -182,7 +229,9 @@ const { name } = useEulerProductOfVault(computed(() => form.collateralVault.valu
 
 // Add this collateral supply to the batch. Direct deposit or non-CoW swap
 // deposit; native-wrap goes through the single-tx review path.
-const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
+const isCowSwapSelected = computed(() =>
+  needsSwap.value && isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isInputAssetBlocked.value) return false
   if (!(+form.amount.value) || isNativeWrap.value || !form.collateralVault.value?.address || !form.position.value) return false
@@ -213,9 +262,16 @@ const addToBatch = async () => {
       if (isNative && !wrappedAddress) return
       const tokenIn = (wrappedAddress || sel.address) as Address
       const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
+      const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
       await addBatchEntry({
         label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
-        buildPlan: account => planDepositWithSwap({ swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo, account }),
+        intent: quoteIntents?.[0] ?? createIntent({
+          kind: 'deposit',
+          planner: 'deposit-with-swap',
+          args: { swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo },
+          source: 'position/supply:add-to-batch',
+          subAccounts: [pos.subAccount as Address],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })
@@ -226,7 +282,13 @@ const addToBatch = async () => {
       const amount = valueToNano(form.amount.value, a.decimals)
       await addBatchEntry({
         label: `Supply ${form.amount.value} ${a.symbol}`,
-        buildPlan: account => planDeposit({ vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address, account }),
+        intent: createIntent({
+          kind: 'deposit',
+          planner: 'deposit',
+          args: { vaultAddress, assetAddress, amount, receiver: pos.subAccount as Address },
+          source: 'position/supply:add-to-batch',
+          subAccounts: [pos.subAccount as Address],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'supply', asset: a, amount: form.amount.value },
       })
@@ -408,6 +470,7 @@ watch(selectedAsset, async () => {
             :disabled-reason="disabledReasonInfo?.message"
             :disabled-reason-variant="disabledReasonInfo?.variant"
             :can-add-to-batch="canAddToBatch"
+            :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
             @add-to-batch="addToBatch"
           >
             {{ form.submitLabel }}

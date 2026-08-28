@@ -12,6 +12,7 @@ import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { createRaceGuard } from '~/utils/race-guard'
 import { type Address, formatUnits, zeroAddress } from 'viem'
 import type { Ref, ComputedRef } from 'vue'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 interface QuoteAccounts {
   accountIn: Address
@@ -34,8 +35,13 @@ export interface UseRepaySwapCoreOptions {
   onQuoteReceived?: (amountOut: bigint, direction: SwapperMode) => boolean
   includeCowSwap?: SwapQuoteIncludeCowSwap
   buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
+  createIntentsForQuote?: (quote: SwapQuote, provider: string) => readonly OperationIntent[]
   buildGasEstimatePlan?: (candidatePlan: TransactionPlan) => Promise<TransactionPlan> | TransactionPlan
-  prefetchPluginData?: (plan: TransactionPlan, account: SwapQuotePlanAccount) => Promise<PluginPrefetchData>
+  prefetchPluginData?: (
+    plan: TransactionPlan,
+    account: SwapQuotePlanAccount,
+    intents: readonly OperationIntent[] | undefined,
+  ) => Promise<PluginPrefetchData>
   getPlanAccount?: () => SwapQuotePlanAccount | undefined
 }
 
@@ -74,6 +80,7 @@ export const useRepaySwapCore = (options: UseRepaySwapCoreOptions) => {
     direction,
     includeCowSwap: shouldIncludeCowSwap,
     buildTxPlanForQuote: options.buildTxPlanForQuote,
+    createIntentsForQuote: options.createIntentsForQuote,
     buildGasEstimatePlan: options.buildGasEstimatePlan,
     prefetchPluginData: options.prefetchPluginData,
     getPlanAccount: options.getPlanAccount,

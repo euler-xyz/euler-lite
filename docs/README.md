@@ -57,12 +57,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Gasless-signature preference (`useSignaturePreference`), Safe forced-off override, and sequential vs atomic Safe migration authorization paths
 - Sub-accounts and position isolation
 - Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
+- [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
 
 ### 🔐 [Safe Wallet Compatibility](./safe-wallets.md)
 
 - Safe detection (iframe connector, named wallet, WalletConnect peer metadata)
 - Force-disabled signatures and CoW quotes while Safe / detection-pending
-- EIP-5792 atomic bundles, latched batch ceremonies, detached co-signer waits
+- EIP-5792 atomic request vectors, sealed wallet bindings, and current-session Safe detachment/status handling
 
 ### 🔄 [External Migration Discovery](./external-migration.md)
 

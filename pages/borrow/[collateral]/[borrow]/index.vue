@@ -13,7 +13,7 @@ import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/stri
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { ltvToPercent } from '~/utils/crypto-utils'
-import { useBorrowForm, type BorrowBatchSnapshot } from '~/composables/borrow/useBorrowForm'
+import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm, type MultiplyBatchSnapshot } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -21,7 +21,7 @@ import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#componen
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
-import { isCowProvider, isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const router = useRouter()
 const route = useRoute()
@@ -255,6 +255,10 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
 // effective quote is captured into the fixed batch plan at add-time.
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
+const isBorrowCowSwapSelected = computed(() =>
+  borrow.borrowNeedsSwap.value
+  && isCowProviderOrQuote(borrow.borrowSwapSelectedProvider.value, borrow.borrowSwapEffectiveQuote.value),
+)
 const canAddBorrowToBatch = computed(() => {
   // Region/geo blocks are hard legal restrictions, so they still gate the batch.
   // Real-wallet guards (insufficient balance, vault liquidity) are intentionally
@@ -269,36 +273,23 @@ const canAddBorrowToBatch = computed(() => {
   // Savings-sourced collateral needs a resolved position, else plan capture throws.
   if (borrow.isSavingCollateral.value && !borrow.savingCollateral.value) return false
   if (borrow.borrowNeedsSwap.value) {
-    return !!borrow.borrowSwapEffectiveQuote.value && !isCowProvider(borrow.borrowSwapSelectedProvider.value)
+    return !!borrow.borrowSwapEffectiveQuote.value && !isBorrowCowSwapSelected.value
   }
   return true
 })
 const addToBatch = async () => {
   if (!canAddBorrowToBatch.value) return
   await guardWithBorrowSwapPriceImpact(async () => {
+    const subAccount = (await resolvePendingSubAccount()) as Address
     const cVault = collateralVault.value
     const bVault = borrowVault.value
     if (!cVault || !bVault) return
-    const subAccount = (await resolvePendingSubAccount()) as Address
     // Capture every input by value NOW — the batch re-simulates asynchronously and
     // we reset the form below, so a lazy read of the reactive refs would see the
     // cleared values (an empty amount builds a no-op borrow).
-    const snap: BorrowBatchSnapshot = {
-      subAccount,
-      // The composable treats collateral as an EVault (see useBorrowForm construction).
-      collateralVault: cVault as EVault,
-      borrowVault: bVault,
-      collateralAmount: borrow.collateralAmount.value,
-      borrowAmount: borrow.borrowAmount.value,
-      needsSwap: borrow.borrowNeedsSwap.value,
-      selectedAsset: borrow.borrowSelectedAsset.value,
-      isSavingCollateral: borrow.isSavingCollateral.value,
-      savingCollateral: borrow.savingCollateral.value,
-      isBorrowNativeWrap: borrow.isBorrowNativeWrap.value,
-      quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
-    }
+    const snap = borrow.captureBorrowSnapshot(subAccount)
     const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-    await addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
+    await addBatchEntry({ intent: borrow.createBorrowIntent(snap), label, subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
     borrow.collateralAmount.value = ''
     borrow.borrowAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount })
@@ -308,12 +299,16 @@ const addToBatch = async () => {
 // --- Multiply tab → batch ---
 // Same-asset multiply needs no quote; cross-asset needs a non-CoW quote (CoW
 // can't merge into an EVC batch). Region/geo blocks gate it like direct execute.
+const isMultiplyCowSwapSelected = computed(() =>
+  !multiply.multiplyIsSameAsset.value
+  && isCowProviderOrQuote(multiply.multiplySelectedProvider.value, multiply.multiplyEffectiveQuote.value),
+)
 const canAddMultiplyToBatch = computed(() => {
   if (isGeoBlocked.value || isMultiplyRestricted.value) return false
   if (multiply.multiplyDebtAmountNano.value <= 0n) return false
   if (!multiply.multiplySupplyVault.value || !multiply.multiplyLongVault.value || !multiply.multiplyShortVault.value) return false
   if (multiply.multiplyIsSameAsset.value) return true
-  return !!multiply.multiplyEffectiveQuote.value && !isCowProviderOrQuote(multiply.multiplySelectedProvider.value, multiply.multiplyEffectiveQuote.value)
+  return !!multiply.multiplyEffectiveQuote.value && !isMultiplyCowSwapSelected.value
 })
 const addMultiplyToBatch = async () => {
   if (!canAddMultiplyToBatch.value) return
@@ -338,7 +333,10 @@ const addMultiplyToBatch = async () => {
       savingShares: multiply.multiplySavingBalance.value,
       quote: sameAsset ? undefined : multiply.multiplyEffectiveQuote.value ?? undefined,
     }
-    await addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
+    const quoteIntents = snap.quote
+      ? multiply.multiplyQuoteCardsSorted.value.find(card => card.quote === snap.quote)?.intents
+      : undefined
+    await addBatchEntry({ intent: quoteIntents?.[0] ?? multiply.createMultiplyIntent(snap), label: `Multiply → ${longVault.asset.symbol}`, subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
     redirectAfterAdd('/portfolio', { subAccount })
   })
 }
@@ -1082,6 +1080,7 @@ watch(
                 :disabled-reason-variant="borrowDisabledReasonInfo?.variant"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
                 :can-add-to-batch="canAddBorrowToBatch"
+                :add-to-batch-disabled-reason="isBorrowCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addToBatch"
               >
                 {{ reviewBorrowLabel }}
@@ -1093,6 +1092,7 @@ watch(
                 :disabled-reason-variant="multiplyDisabledReasonInfo?.variant"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
                 :can-add-to-batch="canAddMultiplyToBatch"
+                :add-to-batch-disabled-reason="isMultiplyCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addMultiplyToBatch"
               >
                 {{ reviewMultiplyLabel }}

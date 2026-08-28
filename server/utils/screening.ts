@@ -95,9 +95,9 @@ function isAllowedScreeningUri(uri: string): boolean {
  * timeouts, redirects, malformed or ambiguous verdicts, and verdicts echoing
  * a different address included.
  *
- * `chain` is deliberately omitted from the request: the upstream defaults to
- * `ethereum`, and unknown chain names would only trigger its provider
- * fallback path.
+ * `chain` is sent as `all` explicitly: TRM screens the address across every
+ * chain it supports in one request, and the explicit value keeps that
+ * coverage independent of the upstream's default.
  */
 export async function screenAddressUpstream(
   address: string,
@@ -146,7 +146,7 @@ export async function screenAddressUpstream(
         'Content-Type': 'application/json',
         'X-API-Key': apiKey,
       },
-      body: JSON.stringify({ address, vpnIsUsed }),
+      body: JSON.stringify({ address, chain: 'all', vpnIsUsed }),
       redirect: 'error',
     })
 

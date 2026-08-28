@@ -15,10 +15,8 @@ import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
-import { OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
 import { isNativeCurrencyAddress, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -34,7 +32,6 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
 
 interface UseWalletSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -78,9 +75,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const modal = useModal()
   const { error } = useToast()
-  const { planSwapAndRepay, executePlan, prefetchPluginData } = useEulerTx()
+  const { planSwapAndRepay, prefetchPluginData } = useEulerTx()
+  const { create: createIntent } = useOperationIntentFactory()
+  const { open: openReviewState } = useExecutionReview()
   // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
   // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
   // than forging it. Skip balance overrides + keep slot hints + wallet
@@ -91,7 +89,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
   const { getBalance } = useWallets()
-  const { finalizeTxAndRedirect } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
   const {
@@ -119,7 +117,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const quotes = useSwapRepayQuotes({
     direction,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    createIntentsForQuote: quote => [createRepayIntent(quote)],
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
     getPlanAccount: () => planAccount.value,
   })
   // --- Derived ---
@@ -914,6 +913,42 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     })
   }
 
+  function createRepayIntent(
+    quote?: SwapQuote,
+    snapshot: WalletSwapRepayPlanSnapshot = {},
+  ) {
+    const swapQuote = quote || quotes.selectedQuote.value
+    const repaymentAsset = snapshot.selectedAsset ?? selectedAsset.value
+    if (!position.value || !borrowVault.value || !swapQuote || !repaymentAsset) {
+      throw new Error('Missing data for swap repay intent')
+    }
+    const swapMode = snapshot.direction ?? direction.value
+    const inputAmount = getSwapInputAmount(swapQuote, swapMode)
+    const isNative = isNativeCurrencyAddress(repaymentAsset.address)
+    const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+    if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+    const repayAccount = (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address
+    const repayAll = snapshot.isFullRepay ?? isFullRepay.value
+    return createIntent({
+      kind: 'repay',
+      planner: 'swap-and-repay',
+      args: {
+        swapQuote,
+        amount: inputAmount,
+        tokenIn: (wrappedAddress || repaymentAsset.address) as Address,
+        liabilityVault: borrowVault.value.address as Address,
+        repayAccount,
+        isMax: repayAll,
+        cleanupOnMax: repayAll,
+        wrappedNativeInfo: isNative && wrappedAddress
+          ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
+          : undefined,
+      },
+      source: 'position/repay-wallet-swap',
+      subAccounts: [repayAccount],
+    })
+  }
+
   // --- Submit ---
   const submit = async () => {
     if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !collateralVault.value) {
@@ -923,6 +958,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
     isPreparing.value = true
     try {
+      const quoteIntents = quotes.selectedQuoteCard.value?.quote === quotes.selectedQuote.value
+        ? quotes.selectedQuoteCard.value.intents
+        : undefined
+      const intents = quoteIntents?.length ? quoteIntents : [createRepayIntent()]
       try {
         plan.value = await buildRepayPlan()
       }
@@ -950,8 +989,9 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const reviewAsset = isNativeRepay
         ? (resolveWrappedNativeAsset(chainId.value!) || selectedAsset.value)
         : selectedAsset.value
-      modal.open(OperationReviewModal, {
-        props: {
+      await openReviewState(intents, {
+        presentationKind: 'repay',
+        review: {
           type: 'repay',
           asset: reviewAsset,
           amount: inputDisplay,
@@ -959,36 +999,19 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
           swapToAsset: borrowVault.value.asset,
           swapToAmount: direction.value === SwapperMode.TARGET_DEBT ? debtAmount.value : swapEstimatedOutput.value,
           swapMode: direction.value,
-          plan: plan.value || undefined,
           subAccount: position.value?.subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async (execution) => {
-            await send(execution)
-          },
           submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => finalizeExecutionUi(),
+        onFailed: (cause) => {
+          error('Transaction failed')
+          logWarn('walletSwapRepay/send', cause)
         },
       })
     }
     finally {
       isPreparing.value = false
-    }
-  }
-
-  const send = async (execution: TrackedExecutionScope) => {
-    try {
-      isSubmitting.value = true
-      if (!position.value || !borrowVault.value || !collateralVault.value || !quotes.selectedQuote.value || !selectedAsset.value) return
-
-      const txPlan = await buildRepayPlan()
-      await executePlan(txPlan)
-      await finalizeTxAndRedirect({ scope: execution })
-    }
-    catch (e) {
-      error('Transaction failed')
-      logWarn('walletSwapRepay/send', e)
-    }
-    finally {
-      isSubmitting.value = false
     }
   }
 
@@ -1052,10 +1075,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     onSelectSwapAsset,
     onRefreshSwapQuotes,
     submit,
-    send,
     resetOnTabSwitch,
     initEstimates,
     // Batch
     buildRepayPlan,
+    createRepayIntent,
   }
 }

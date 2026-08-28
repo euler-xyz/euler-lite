@@ -33,6 +33,8 @@ useExternalMigrationPositions()
 // Instantiate the batch store at app root so its simulation watchers stay
 // alive across navigation (mirrors useEulerAccount above).
 useTxBatch()
+// Owns all in-scope reviewed execution preparation and acceptance handlers.
+useReviewedExecution()
 
 const { theme } = useTheme()
 

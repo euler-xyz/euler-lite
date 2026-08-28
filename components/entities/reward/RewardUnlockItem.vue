@@ -1,28 +1,25 @@
 <script setup lang="ts">
 import { DateTime } from 'luxon'
-import { OperationReviewModal } from '#components'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { REULLock } from '~/entities/reul'
 import { logWarn } from '~/utils/errorHandling'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
-import type { TrackedExecutionScope } from '~/composables/useSafeExecutionDetachment'
+import type { Address } from 'viem'
 import {
   prepareREULUnlockPlan,
   refreshREULLockReview,
-  runWithFreshREULLockReview,
   type REULLockReviewValidation,
 } from '~/components/entities/reward/reulUnlockReview'
 
-const modal = useModal()
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
 const { entryCount, clearBatch } = useTxBatch()
-const { executePlan } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { open: openReviewState } = useExecutionReview()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
@@ -99,69 +96,6 @@ const showPreparationError = async (cause: unknown) => {
   error('Unable to prepare rEUL unlock', { description })
 }
 
-const unlock = async (execution: TrackedExecutionScope, reviewedLock: REULLock) => {
-  if (isBatchActive.value) {
-    error('Clear the current batch before unlocking rEUL')
-    return
-  }
-
-  try {
-    isUnlocking.value = true
-
-    const result = await runWithFreshREULLockReview(
-      reviewedLock,
-      () => refreshLocks(true),
-      async (currentLock) => {
-        if (isBatchActive.value) {
-          // Unscoped close pops the top of the modal stack; if the review
-          // submission was detached the user may be in a different modal.
-          if (!execution.suppressPostTxUi()) {
-            modal.close()
-          }
-          error('Clear the current batch before unlocking rEUL')
-          return false
-        }
-
-        const unlockPlan = await buildUnlockREULPlan([currentLock.timestamp])
-        if (isBatchActive.value) {
-          // Unscoped close pops the top of the modal stack; if the review
-          // submission was detached the user may be in a different modal.
-          if (!execution.suppressPostTxUi()) {
-            modal.close()
-          }
-          error('Clear the current batch before unlocking rEUL')
-          return false
-        }
-
-        await executePlan(unlockPlan)
-        // Success signal for a detached Safe completion toast — always mark.
-        execution.markSucceeded()
-        // Unscoped modal.close() pops the top of the modal stack; after
-        // detachment the user may have opened a different modal, so global
-        // UI teardown is suppressed like navigation.
-        if (!execution.suppressPostTxUi()) {
-          modal.close()
-        }
-        await refreshLocks(true)
-        return true
-      },
-    )
-    if (result.status === 'changed' || result.status === 'missing' || result.status === 'unavailable') {
-      if (!execution.suppressPostTxUi()) {
-        modal.close()
-      }
-      showReviewRefreshError(result.status)
-    }
-  }
-  catch (e) {
-    error('Transaction failed')
-    logWarn('RewardUnlockItem/unlock', e)
-  }
-  finally {
-    isUnlocking.value = false
-  }
-}
-
 const getReviewProps = (reviewedLock: REULLock) => ({
   type: 'reul-unlock',
   asset: {
@@ -200,6 +134,19 @@ const onUnlockClick = async () => {
       return
     }
     const reviewedLock = validation.lock
+    const tokenAddress = reulTokenContractAddress.value
+    if (!tokenAddress) throw new Error('rEUL token address is unavailable')
+    const intent = createIntent({
+      kind: 'reul-unlock',
+      planner: 'reul-unlock',
+      args: {
+        lockTimestamps: [Number(reviewedLock.timestamp)],
+        lockAmounts: [reviewedLock.amount],
+        remainderLossMaximum: reviewedLock.amountToBeBurned,
+      },
+      constraints: [{ kind: 'remainder-loss', token: tokenAddress as Address, maximumLoss: reviewedLock.amountToBeBurned }],
+      source: 'components/entities/reward/RewardUnlockItem.vue',
+    })
 
     const preparation = await prepareREULUnlockPlan(
       reviewedLock,
@@ -222,14 +169,17 @@ const onUnlockClick = async () => {
       return
     }
 
-    // Open the operation review modal (same pattern as reward claims)
-    modal.open(OperationReviewModal, {
-      props: {
+    await openReviewState([intent], {
+      presentationKind: 'reul-unlock',
+      review: {
         ...getReviewProps(reviewedLock),
-        plan: preparation.plan,
-        onConfirm: async (execution) => {
-          await unlock(execution, reviewedLock)
-        },
+      },
+      onSucceeded: async () => {
+        await refreshLocks(true)
+      },
+      onFailed: (cause) => {
+        error('Transaction failed')
+        logWarn('RewardUnlockItem/unlock', cause)
       },
     })
   }

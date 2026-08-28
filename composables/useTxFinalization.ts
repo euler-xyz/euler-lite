@@ -30,5 +30,11 @@ export const useTxFinalization = () => {
     setTimeout(() => router.replace('/portfolio'), MODAL_CLOSE_REDIRECT_DELAY_MS)
   }
 
-  return { finalizeTxAndRedirect }
+  /** UI-only completion for the reviewed execution adapter, which owns modal closure. */
+  const finalizeExecutionUi = async (onAfterClose?: () => void | Promise<void>) => {
+    if (onAfterClose) await onAfterClose()
+    setTimeout(() => router.replace('/portfolio'), MODAL_CLOSE_REDIRECT_DELAY_MS)
+  }
+
+  return { finalizeTxAndRedirect, finalizeExecutionUi }
 }
