@@ -62,10 +62,10 @@ Browser → HEAD / → cors.ts strips client x-country-code
         ← x-country-code: DE ← stored as "DE"
 ```
 
-**Fail-closed**: When country detection fails or the country cannot be determined, the detected country is stored as `null`. All blocking and restriction checks treat `null` as blocked (fail-closed). Only the intermediate loading state (`undefined`, before the initial HEAD request completes) leaves checks permissive.
+**Fail-closed**: When country detection is pending, fails, or cannot determine a country, transaction-eligibility checks deny acquisition and swap actions. The UI does not display a misleading "Restricted" badge during the intermediate `undefined` state; it keeps the action disabled as policy-pending.
 
 **Initialization**: `app.vue` calls `useGeoBlock().loadCountry()` on startup. The detected country is stored in a module-level `ref` in `composables/useGeoBlock.ts`:
-- `undefined` — not yet loaded (checks return `false`, permissive during initial load)
+- `undefined` — not yet loaded (eligibility checks return `true`, fail-closed; presentation suppresses the badge)
 - `null` — loaded, country unknown or detection failed (checks return `true`, fail-closed)
 - `string` — loaded with a known country code
 
@@ -283,7 +283,7 @@ Group aliases can be mixed with individual codes: `["EU", "CH", "US"]` blocks al
 
 ### `isVaultBlockedByCountry(address): boolean`
 
-The core hard-block check. Returns `true` if the vault is blocked for the detected country.
+The core hard-block check. Returns `true` if the vault is blocked for the detected country or its underlying asset cannot be resolved. Callers that already hold a chain-scoped vault can pass its asset through `opts.asset`.
 
 ### `isAnyVaultBlockedByCountry(...addresses): boolean`
 
@@ -291,7 +291,7 @@ Returns `true` if **any** of the provided vault addresses are blocked. Used on a
 
 ### `isVaultRestrictedByCountry(address): boolean`
 
-The soft-restriction check. Returns `true` if the vault has a `restricted` entry matching the user's country. Only checks vault-level overrides and earn vault restrictions (no product-level fallback).
+The soft-restriction check. Returns `true` if the vault has a `restricted` entry matching the user's country or its underlying asset cannot be resolved. Only checks vault-level overrides and earn vault restrictions (no product-level fallback).
 
 ### `isAnyVaultRestrictedByCountry(...addresses): boolean`
 
@@ -438,7 +438,7 @@ Server-Side (every API request):
 
 Runtime Check: isVaultBlockedByCountry("0x1234...")
   │
-  ├─ country === undefined (loading) → false (permissive)
+  ├─ country === undefined (loading) → true (policy pending, fail-closed)
   ├─ country === null (unknown, fail-closed) → true (blocked)
   │
   ├─ 1. SANCTIONED_COUNTRIES includes "DE"?  ─► yes → blocked
@@ -452,6 +452,7 @@ Runtime Check: isVaultBlockedByCountry("0x1234...")
   │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → blocked
   │
   ├─ 4. Asset-level: resolve vault.asset via vault registry
+  │     ├─ unresolved asset → blocked
   │     └─ isAssetBlockedByCountry({ address, symbol, name })
   │           ├─ assetBlocks[asset.address.toLowerCase()] includes "DE"? ─► blocked
   │           └─ iterate assetPatternRules (with block list):
@@ -464,7 +465,7 @@ Runtime Check: isVaultBlockedByCountry("0x1234...")
 
 Runtime Check: isVaultRestrictedByCountry("0x1234...")
   │
-  ├─ country === undefined (loading) → false (permissive)
+  ├─ country === undefined (loading) → true (policy pending, fail-closed)
   ├─ country === null (unknown, fail-closed) → true (restricted)
   │
   ├─ 1. getVaultRestricted("0x1234...")
@@ -476,6 +477,7 @@ Runtime Check: isVaultRestrictedByCountry("0x1234...")
   │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → restricted
   │
   ├─ 3. Asset-level: resolve vault.asset via vault registry
+  │     ├─ unresolved asset → restricted
   │     └─ isAssetRestrictedByCountry({ address, symbol, name })
   │           ├─ assetRestrictions[asset.address.toLowerCase()] → restricted
   │           └─ iterate assetPatternRules (with restricted list):

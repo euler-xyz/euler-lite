@@ -38,9 +38,32 @@ describe('reviewed execution confirmation metadata', () => {
 
   it('returns the confirmed Safe execution block', async () => {
     const execution = makeReviewedExecution('safe')
+    const events: string[] = []
     const adapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
-      sendCalls: async () => HASH,
+      reserveSubmission: async (identity) => {
+        expect(identity).toMatchObject({
+          reviewId: execution.reviewId,
+          reviewDigest: execution.reviewDigest,
+          requestDigest: execution.requestDigest,
+          account: execution.requestSet.wallet.account,
+          chainId: execution.requestSet.wallet.chainId,
+        })
+        events.push('reserved')
+        return 'reservation-1'
+      },
+      sendCalls: async () => {
+        events.push('sent')
+        return HASH
+      },
+      recordCallsId: async (reservationId, callsId) => {
+        expect([reservationId, callsId]).toEqual(['reservation-1', HASH])
+        events.push('recorded')
+      },
+      clearSubmission: async (reservationId) => {
+        expect(reservationId).toBe('reservation-1')
+        events.push('cleared')
+      },
       waitForExecution: async () => ({
         executionHash: HASH,
         receiptStatus: 'success',
@@ -57,5 +80,22 @@ describe('reviewed execution confirmation metadata', () => {
       confirmedBlockNumber: 456n,
       atomic: true,
     })
+    expect(events).toEqual(['reserved', 'sent', 'recorded', 'cleared'])
+  })
+
+  it('retains the durable reservation when Safe status is unknown', async () => {
+    const execution = makeReviewedExecution('safe')
+    const clearSubmission = vi.fn()
+    const adapter = new SafeExecutionAdapter({
+      assertAtomicCapability: async () => {},
+      reserveSubmission: async () => 'reservation-1',
+      sendCalls: async () => HASH,
+      recordCallsId: async () => {},
+      clearSubmission,
+      waitForExecution: async () => { throw new Error('gateway unavailable') },
+    })
+
+    await expect(adapter.dispatch(execution, artifactFor(execution), callbacks())).rejects.toThrow(/status is unknown/i)
+    expect(clearSubmission).not.toHaveBeenCalled()
   })
 })

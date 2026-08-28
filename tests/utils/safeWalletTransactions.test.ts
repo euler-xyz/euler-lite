@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   getSafeWalletProvider,
   getSafeAtomicCapability,
+  reconcileSafeTransactionExecution,
   sendSafeAtomicCalls,
   SafeTransactionStatusUnknownError,
   waitForSafeTransactionExecution,
@@ -115,6 +116,54 @@ describe('sendSafeAtomicCalls', () => {
         capabilities: {},
       }],
     })
+  })
+})
+
+describe('reconcileSafeTransactionExecution', () => {
+  it('returns terminal success only with a mined receipt and atomic evidence', async () => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({
+        status: 200,
+        atomic: true,
+        receipts: [{ transactionHash: EXECUTION_HASH }],
+      }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn(async ({ hash }) => {
+        if (hash === EXECUTION_HASH) return receipt(EXECUTION_HASH)
+        throw new Error('not mined')
+      }),
+    }
+
+    await expect(reconcileSafeTransactionExecution({ submittedHash: SAFE_HASH, walletProvider, publicClient }))
+      .resolves.toEqual({ state: 'success', hash: EXECUTION_HASH, atomic: true })
+  })
+
+  it('keeps incomplete gateway evidence pending', async () => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({ status: 100 }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not mined')),
+    }
+
+    await expect(reconcileSafeTransactionExecution({ submittedHash: SAFE_HASH, walletProvider, publicClient }))
+      .resolves.toEqual({ state: 'pending' })
+  })
+
+  it.each([
+    [400, 'cancelled'],
+    [500, 'failed'],
+  ] as const)('recognizes terminal status %s as %s', async (status, state) => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({ status }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not mined')),
+    }
+
+    await expect(reconcileSafeTransactionExecution({ submittedHash: SAFE_HASH, walletProvider, publicClient }))
+      .resolves.toEqual({ state })
   })
 })
 

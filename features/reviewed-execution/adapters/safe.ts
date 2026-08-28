@@ -13,8 +13,19 @@ export interface SafeCallsStatus {
 
 export interface SafeAdapterClient {
   assertAtomicCapability(envelope: SafeTransportEnvelope): Promise<void>
+  reserveSubmission?(identity: SafeSubmissionIdentity): Promise<string>
+  recordCallsId?(reservationId: string, callsId: Hash): Promise<void>
+  clearSubmission?(reservationId: string): Promise<void>
   sendCalls(envelope: SafeTransportEnvelope): Promise<string>
   waitForExecution(callsId: Hash): Promise<SafeCallsStatus>
+}
+
+export interface SafeSubmissionIdentity {
+  reviewId: Hash
+  reviewDigest: Hash
+  requestDigest: Hash
+  account: `0x${string}`
+  chainId: number
 }
 
 const isUserRejected = (error: unknown) => {
@@ -49,23 +60,50 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
     await this.client.assertAtomicCapability(envelope)
     await callbacks.beforeDispatch(0)
 
+    const identity: SafeSubmissionIdentity = {
+      reviewId: execution.reviewId,
+      reviewDigest: execution.reviewDigest,
+      requestDigest: execution.requestDigest,
+      account: execution.requestSet.wallet.account,
+      chainId: execution.requestSet.wallet.chainId,
+    }
+    const reservationId = await this.client.reserveSubmission?.(identity)
+
     let callsId: string
     try {
       callsId = await this.client.sendCalls(envelope)
     }
     catch (error) {
-      if (isUserRejected(error)) throw new ProvenPreDispatchCancellationError()
+      if (isUserRejected(error)) {
+        if (reservationId) await this.client.clearSubmission?.(reservationId)
+        throw new ProvenPreDispatchCancellationError()
+      }
       throw new DispatchStatusUnknownError()
     }
     if (!isHash(callsId)) throw new DispatchStatusUnknownError('Safe returned no valid calls ID')
+    if (reservationId) {
+      try {
+        await this.client.recordCallsId?.(reservationId, callsId)
+      }
+      catch {
+        throw new DispatchStatusUnknownError('Safe returned a calls ID that could not be persisted. Verify the proposal before retrying.')
+      }
+    }
     await callbacks.recordExternalId(0, 'calls-id', callsId)
 
     await callbacks.markConfirming(0)
     try {
       const execution = await this.client.waitForExecution(callsId)
       await callbacks.recordExternalId(0, 'execution-hash', execution.executionHash)
-      if (execution.atomic !== true) throw new DispatchFailedError('Safe call batch was not confirmed atomic')
-      if (execution.receiptStatus === 'reverted') throw new AttemptRevertedError('Safe execution reverted')
+      if (execution.atomic !== true) {
+        if (reservationId) await this.client.clearSubmission?.(reservationId)
+        throw new DispatchFailedError('Safe call batch was not confirmed atomic')
+      }
+      if (execution.receiptStatus === 'reverted') {
+        if (reservationId) await this.client.clearSubmission?.(reservationId)
+        throw new AttemptRevertedError('Safe execution reverted')
+      }
+      if (reservationId) await this.client.clearSubmission?.(reservationId)
       await callbacks.afterConfirmed(0)
       return {
         transactionHashes: [execution.executionHash],
@@ -78,12 +116,15 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
     catch (error) {
       if (error instanceof AttemptRevertedError || error instanceof DispatchFailedError) throw error
       if (error instanceof Error && error.message === 'Safe transaction was cancelled') {
+        if (reservationId) await this.client.clearSubmission?.(reservationId)
         throw new ProvenOffchainCancellationError(error.message)
       }
       if (error instanceof Error && error.message === 'Safe transaction failed') {
+        if (reservationId) await this.client.clearSubmission?.(reservationId)
         throw new DispatchFailedError(error.message)
       }
       if (error instanceof Error && error.message === 'Safe call batch was not atomic') {
+        if (reservationId) await this.client.clearSubmission?.(reservationId)
         throw new DispatchFailedError(error.message)
       }
       throw new DispatchStatusUnknownError('Safe proposal status is unknown. Check your Safe for the latest status.')
