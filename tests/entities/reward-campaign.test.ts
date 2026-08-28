@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCampaignEligibleForAddress, rewardCampaignDisplay } from '~/entities/reward-campaign'
+import { isCampaignEligibleForAddress, rewardCampaignDisplay, rewardCampaignEligibilityLabel } from '~/entities/reward-campaign'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 
 const USER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa'
@@ -96,5 +96,52 @@ describe('rewardCampaignDisplay', () => {
       campaignId: '557af9e9-88e8-4233-95e1-630b8b37b613',
       source: 'turtle',
     }).sourceUrl).toBe('https://dashboard.turtle.xyz/organizations/52974bc3-2c43-4576-ac18-107d92b6e0c7/incentives/streams/557af9e9-88e8-4233-95e1-630b8b37b613')
+  })
+
+  it('formats token-holding eligibility criteria from base units', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      eligibilityRequirements: [{
+        type: 'token-holding',
+        chainId: 1,
+        tokenAddress: USER,
+        minimumAmount: '100000000000000000000000',
+        minimumDurationSeconds: 10,
+        tokenSymbol: 'EDEN',
+        tokenDecimals: 18,
+      }],
+    }).eligibilityLabel).toBe('requires holding at least 100,000 EDEN')
+  })
+
+  it('omits sub-minute holding durations from the display copy', () => {
+    expect(rewardCampaignEligibilityLabel({
+      eligibilityRequirements: [{
+        type: 'token-holding',
+        chainId: 1,
+        tokenAddress: USER,
+        minimumAmount: '1',
+        minimumDurationSeconds: 59,
+      }],
+    })).toBe('requires a token holding condition')
+  })
+
+  it.each([
+    [60, '1 minute'],
+    [7_200, '2 hours'],
+    [172_800, '2 days'],
+  ])('formats an exact %d-second duration as %s', (minimumDurationSeconds, duration) => {
+    expect(rewardCampaignEligibilityLabel({
+      eligibilityRequirements: [{
+        type: 'token-holding',
+        chainId: 1,
+        tokenAddress: USER,
+        minimumAmount: '1',
+        minimumDurationSeconds,
+      }],
+    })).toBe(`requires a token holding condition for ${duration}`)
+  })
+
+  it('omits eligibility copy when the campaign has no requirements', () => {
+    expect(rewardCampaignEligibilityLabel(baseCampaign)).toBeUndefined()
   })
 })

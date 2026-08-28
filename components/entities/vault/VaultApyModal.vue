@@ -230,6 +230,12 @@ const handleClose = () => {
                 data-field="borrow-apy-reward-type"
                 data-value="collateral bonus"
               >, collateral bonus</span><span
+                v-if="reward.eligibilityLabel"
+                data-id="data-point"
+                :data-key="reward.parityKey"
+                :data-field="`${prefix}-apy-reward-eligibility`"
+                :data-value="reward.eligibilityLabel"
+              >, {{ reward.eligibilityLabel }}</span><span
                 v-if="reward.endDate"
                 data-id="data-point"
                 :data-key="reward.parityKey"

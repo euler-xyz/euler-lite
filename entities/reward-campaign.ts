@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon'
-import type { Address } from 'viem'
+import { formatUnits, type Address } from 'viem'
 import type {
   RewardAction,
   RewardCampaign as SdkRewardCampaign,
@@ -7,13 +7,25 @@ import type {
   UserReward as SdkUserReward,
 } from '@eulerxyz/euler-v2-sdk'
 import { safeExternalHttpUrl } from '~/utils/external-url'
+import { formatNumber } from '~/utils/string-utils'
 
 export type { RewardAction }
 
 export type RewardSource = SdkRewardSource | 'turtle'
 
-export type RewardCampaign = Omit<SdkRewardCampaign, 'source'> & {
+export interface TokenHoldingEligibilityRequirement {
+  type: 'token-holding'
+  chainId: number
+  tokenAddress: Address
+  minimumAmount: string
+  minimumDurationSeconds: number
+  tokenSymbol?: string
+  tokenDecimals?: number
+}
+
+export type RewardCampaign = Omit<SdkRewardCampaign, 'source' | 'eligibilityRequirements'> & {
   source: RewardSource
+  eligibilityRequirements?: TokenHoldingEligibilityRequirement[]
 }
 
 export type UserReward = Omit<SdkUserReward, 'provider'> & {
@@ -36,6 +48,7 @@ export interface RewardCampaignDisplay {
   }
   source: RewardCampaign['source']
   sourceUrl?: string
+  eligibilityLabel?: string
   isCollateralSpecific: boolean
   minMultiplier?: number
   maxMultiplier?: number
@@ -113,6 +126,50 @@ export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | unde
     : PROVIDER_SOURCE_URLS[campaign.source]
 }
 
+const formatEligibilityDuration = (seconds: number): string => {
+  const units = [
+    { seconds: 86_400, label: 'day' },
+    { seconds: 3_600, label: 'hour' },
+    { seconds: 60, label: 'minute' },
+  ]
+  const unit = units.find(item => seconds >= item.seconds && seconds % item.seconds === 0)
+  const value = unit ? seconds / unit.seconds : seconds
+  const label = unit?.label ?? 'second'
+  return `${value} ${label}${value === 1 ? '' : 's'}`
+}
+
+const MIN_ELIGIBILITY_DURATION_TO_DISPLAY_SECONDS = 60
+
+export const rewardCampaignEligibilityLabel = (
+  campaign: Pick<RewardCampaign, 'eligibilityRequirements'>,
+): string | undefined => {
+  if (!campaign.eligibilityRequirements?.length) return undefined
+
+  const labels = campaign.eligibilityRequirements.map((requirement) => {
+    const duration = requirement.minimumDurationSeconds >= MIN_ELIGIBILITY_DURATION_TO_DISPLAY_SECONDS
+      ? ` for ${formatEligibilityDuration(requirement.minimumDurationSeconds)}`
+      : ''
+    if (requirement.tokenSymbol && Number.isInteger(requirement.tokenDecimals)) {
+      try {
+        const amount = formatNumber(
+          formatUnits(BigInt(requirement.minimumAmount), requirement.tokenDecimals),
+          6,
+          0,
+        )
+        if (amount !== '-') {
+          return `requires holding at least ${amount} ${requirement.tokenSymbol}${duration}`
+        }
+      }
+      catch {
+        // The campaign source remains linked for exact provider details.
+      }
+    }
+    return `requires a token holding condition${duration}`
+  })
+
+  return labels.join('; ')
+}
+
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
   const parts = [
     prefix,
@@ -142,6 +199,7 @@ export const rewardCampaignDisplay = (
 ): RewardCampaignDisplay => {
   const endTimestamp = normalizeRewardEndTimestamp(campaign.endTimestamp)
   const sourceUrl = rewardCampaignSourceUrl(campaign)
+  const eligibilityLabel = rewardCampaignEligibilityLabel(campaign)
   return {
     id: rewardCampaignKey(campaign, prefix),
     parityKey: rewardCampaignParityKey(campaign, vaultAddress),
@@ -151,6 +209,7 @@ export const rewardCampaignDisplay = (
     source: campaign.source,
     isCollateralSpecific: campaign.action === 'BORROW_COLLATERAL',
     ...(sourceUrl ? { sourceUrl } : {}),
+    ...(eligibilityLabel ? { eligibilityLabel } : {}),
     ...(campaign.minMultiplier !== undefined ? { minMultiplier: campaign.minMultiplier } : {}),
     ...(campaign.maxMultiplier !== undefined ? { maxMultiplier: campaign.maxMultiplier } : {}),
   }

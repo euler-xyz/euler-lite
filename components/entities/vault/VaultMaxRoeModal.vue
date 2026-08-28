@@ -178,7 +178,7 @@ const handleClose = () => {
                   class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                   :alt="PROVIDER_LABELS[campaign.source]"
                 >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}
-              </template>{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+              </template>{{ campaign.eligibilityLabel ? `, ${campaign.eligibilityLabel}` : '' }}{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
             </p>
           </div>
           <div class="text-p2">
@@ -250,7 +250,7 @@ const handleClose = () => {
                   class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                   :alt="PROVIDER_LABELS[campaign.source]"
                 >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}
-              </template>{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+              </template>{{ campaign.eligibilityLabel ? `, ${campaign.eligibilityLabel}` : '' }}{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
             </p>
           </div>
           <div class="text-p2">
@@ -311,7 +311,7 @@ const handleClose = () => {
                       class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                       :alt="PROVIDER_LABELS[campaign.source]"
                     >{{ PROVIDER_LABELS[campaign.source] || campaign.source }}
-                  </template>{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+                  </template>{{ campaign.eligibilityLabel ? `, ${campaign.eligibilityLabel}` : '' }}{{ campaign.endDate ? `, ends ${campaign.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
                 </p>
               </div>
               <div class="text-p2">
