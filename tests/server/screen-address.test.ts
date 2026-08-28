@@ -228,7 +228,7 @@ describe('POST /api/internal/screen-address', () => {
     expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(USER)
   })
 
-  it('derives vpnIsUsed from trusted request headers, never the body, and reports null when unmeasured', async () => {
+  it('preserves positive VPN signals from either the client or trusted headers', async () => {
     stubScreeningEnv()
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => cleanVerdict())
     vi.stubGlobal('fetch', fetchMock)
@@ -253,7 +253,8 @@ describe('POST /api/internal/screen-address', () => {
       { address: USER, vpnIsUsed: false },
       { 'x-is-vpn': 'false' },
     ))
-    // No edge headers at all: unknown, not false.
+    // A strict client true is an additional positive signal when edge headers
+    // are absent or empty.
     await handler(makeEvent(
       { address: USER, vpnIsUsed: true },
       {},
@@ -267,6 +268,6 @@ describe('POST /api/internal/screen-address', () => {
     const bodies = fetchMock.mock.calls.map(([, init]) =>
       JSON.parse(String(init?.body)) as { vpnIsUsed: boolean | null },
     )
-    expect(bodies.map(body => body.vpnIsUsed)).toEqual([true, true, true, true, false, null, null])
+    expect(bodies.map(body => body.vpnIsUsed)).toEqual([true, true, true, true, false, true, true])
   })
 })

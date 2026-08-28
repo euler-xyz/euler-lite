@@ -34,7 +34,7 @@ export const resolveAppPolicy = async (requestSet: ReviewedRequestSet, now = Dat
     let version = 'policy'
     if (requirement.subject === 'global') {
       if (requirement.concern === 'tos') {
-        if (operationBlockerEntries.value.some(([key]) => key === 'tos')) throw new Error('Terms-of-use policy remains unresolved')
+        if (operationBlockerEntries.value.some(([key]) => key.startsWith('tos:'))) throw new Error('Terms-of-use policy remains unresolved')
         version = `tos:${tosEffectDigest}`
       }
       else if (requirement.concern === 'unverified-acknowledgement') {
