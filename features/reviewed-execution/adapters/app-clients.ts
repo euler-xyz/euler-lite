@@ -10,6 +10,7 @@ import {
   findPendingSafeReviewedSubmission,
   reservePendingSafeReviewedSubmission,
 } from '~/utils/pending-safe-reviewed-submission'
+import { withSafeReviewedSubmissionLock } from '~/utils/safe-reviewed-submission-lock'
 
 interface PublicTransactionClient {
   getTransactionReceipt(args: { hash: Hash }): Promise<{ transactionHash: Hash, status: 'success' | 'reverted', blockNumber: bigint }>
@@ -49,44 +50,46 @@ export const createAppSafeClients = ({
         await getSafeAtomicCapability(provider, envelope.from, envelope.chainId)
       },
       reserveSubmission: async (identity) => {
-        const storage = getStorage()
-        const pending = findPendingSafeReviewedSubmission(storage, identity.account, identity.chainId)
-        if (pending?.callsId) {
-          const reconciliation = await reconcileSafeTransactionExecution({
-            submittedHash: pending.callsId,
-            walletProvider: provider,
-            publicClient: publicClient as never,
-          })
-          if (reconciliation.state === 'success' || reconciliation.state === 'reverted'
-            || reconciliation.state === 'cancelled' || reconciliation.state === 'failed') {
-            clearPendingSafeReviewedSubmission(storage, pending.reservationId)
-            if (reconciliation.state === 'success' || reconciliation.state === 'reverted') await onReconciled?.()
+        return await withSafeReviewedSubmissionLock(async () => {
+          const storage = getStorage()
+          const pending = findPendingSafeReviewedSubmission(storage, identity.account, identity.chainId)
+          if (pending?.callsId) {
+            const reconciliation = await reconcileSafeTransactionExecution({
+              submittedHash: pending.callsId,
+              walletProvider: provider,
+              publicClient: publicClient as never,
+            })
+            if (reconciliation.state === 'success' || reconciliation.state === 'reverted'
+              || reconciliation.state === 'cancelled' || reconciliation.state === 'failed') {
+              clearPendingSafeReviewedSubmission(storage, pending.reservationId)
+              if (reconciliation.state === 'success' || reconciliation.state === 'reverted') await onReconciled?.()
+            }
+            else {
+              throw new Error('A previous Safe proposal is still pending or could not be reconciled. Check Safe before retrying.')
+            }
           }
-          else {
-            throw new Error('A previous Safe proposal is still pending or could not be reconciled. Check Safe before retrying.')
+          else if (pending) {
+            throw new Error('A previous Safe wallet handoff has no recoverable calls ID. Confirm in Safe that no proposal exists before clearing the lock.')
           }
-        }
-        else if (pending) {
-          throw new Error('A previous Safe wallet handoff has no recoverable calls ID. Confirm in Safe that no proposal exists before clearing the lock.')
-        }
 
-        const reservationId = createSafeReservationId()
-        reservePendingSafeReviewedSubmission(storage, {
-          reservationId,
-          reviewId: identity.reviewId,
-          reviewDigest: identity.reviewDigest,
-          requestDigest: identity.requestDigest,
-          account: identity.account,
-          chainId: identity.chainId,
-          createdAt: Date.now(),
+          const reservationId = createSafeReservationId()
+          reservePendingSafeReviewedSubmission(storage, {
+            reservationId,
+            reviewId: identity.reviewId,
+            reviewDigest: identity.reviewDigest,
+            requestDigest: identity.requestDigest,
+            account: identity.account,
+            chainId: identity.chainId,
+            createdAt: Date.now(),
+          })
+          return reservationId
         })
-        return reservationId
       },
       recordCallsId: async (reservationId, callsId) => {
-        attachPendingSafeCallsId(getStorage(), reservationId, callsId)
+        await withSafeReviewedSubmissionLock(() => attachPendingSafeCallsId(getStorage(), reservationId, callsId))
       },
       clearSubmission: async (reservationId) => {
-        clearPendingSafeReviewedSubmission(getStorage(), reservationId)
+        await withSafeReviewedSubmissionLock(() => clearPendingSafeReviewedSubmission(getStorage(), reservationId))
       },
       sendCalls: envelope => sendSafeAtomicCalls(provider, envelope),
       waitForExecution: async (callsId) => {

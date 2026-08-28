@@ -32,6 +32,7 @@ export const resolveAppPolicy = async (
   const { get, getOrFetch, getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
   const labelsVersion = getEulerLabelsVersion()
+  const { country } = useGeoBlock()
   const approvalSpenders = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'approval' ? [getAddress(node.effect.spender).toLowerCase()] : []))
   const migrationAuthorities = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'migration-authorization' ? [getAddress(node.effect.target).toLowerCase()] : []))
   const pythFeeds = new Set(requestSet.pythRefreshSlots.flatMap(slot => slot.requiredFeedIds.map(feed => feed.toLowerCase())))
@@ -60,10 +61,10 @@ export const resolveAppPolicy = async (
       || intent.planner.name.includes('migration')
       || intent.planner.name === 'transfer',
     )
-    if ((hardGeoRequired || softGeoRequired) && useGeoBlock().country.value === undefined) {
+    if ((hardGeoRequired || softGeoRequired) && country.value === undefined) {
       throw new Error('Regional availability is still loading')
     }
-    if ((hardGeoRequired || softGeoRequired) && useGeoBlock().country.value === null) {
+    if ((hardGeoRequired || softGeoRequired) && country.value === null) {
       throw new Error('Regional availability could not be determined')
     }
     if (hardGeoRequired && exactVaults.some(entry => isVaultBlockedByCountry(entry.address, { asset: entry.vault.asset }))) {

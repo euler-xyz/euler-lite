@@ -17,11 +17,11 @@ const onToggle = (value: boolean | undefined) => {
   setSignaturesEnabled(value ?? false)
 }
 
-const clearHashlessReservation = () => {
+const clearHashlessReservation = async () => {
   const pending = pendingSafeSubmission.value
   if (!pending || pending.callsId) return
   try {
-    clearConfirmedAbsent(pending)
+    await clearConfirmedAbsent(pending)
     success('Safe submission lock cleared')
   }
   catch (cause) {

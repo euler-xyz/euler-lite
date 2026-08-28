@@ -87,11 +87,14 @@ const executions = new Map<Hash, Readonly<ReviewedExecution>>()
 const runtimePluginPlans = new Map<Hash, Readonly<PluginPlanBundle>>()
 const reviewGenerations = new Map<Hash, { publisher: GenerationPublisher, generation: number }>()
 
-const currentPolicyVersionDigest = () => canonicalDigest('policy-version-v1', toCanonicalValue({
-  version: POLICY_VERSION,
-  country: useGeoBlock().country.value ?? (useGeoBlock().country.value === null ? 'unknown' : 'pending'),
-  labelsVersion: getEulerLabelsVersion(),
-}))
+const currentPolicyVersionDigest = () => {
+  const { country } = useGeoBlock()
+  return canonicalDigest('policy-version-v1', toCanonicalValue({
+    version: POLICY_VERSION,
+    country: country.value ?? (country.value === null ? 'unknown' : 'pending'),
+    labelsVersion: getEulerLabelsVersion(),
+  }))
+}
 
 export const canonicalReviewPresentation = (value: unknown, path = '$'): CanonicalValue => {
   if (typeof value === 'number' && Number.isFinite(value) && !Number.isSafeInteger(value)) return value.toString()

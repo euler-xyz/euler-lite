@@ -75,6 +75,7 @@ export const useTosGuard = () => {
     hasSigned.value = null
     sessionAccepted.value = false
     tosLoadFailed.value = false
+    tosData.value = null
   }
 
   // Shared state survives navigation. Rebind it synchronously when a guard
@@ -161,11 +162,22 @@ export const useTosGuard = () => {
 
   const prefetchTosData = async () => {
     if (!enableTosSignature || tosData.value) return
+    syncAcceptanceContext()
+    const generation = checkGeneration.value
+    const prefetchedAddress = address.value
+    const prefetchedChainId = chainId.value
+    const isCurrentPrefetch = () =>
+      generation === checkGeneration.value
+      && address.value === prefetchedAddress
+      && chainId.value === prefetchedChainId
     try {
-      tosData.value = await getTosData()
+      const data = await getTosData()
+      if (!isCurrentPrefetch()) return
+      tosData.value = data
       tosLoadFailed.value = false
     }
     catch (e) {
+      if (!isCurrentPrefetch()) return
       logWarn('tosGuard/prefetchTos', e)
       tosLoadFailed.value = true
     }

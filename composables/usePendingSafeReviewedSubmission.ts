@@ -5,6 +5,7 @@ import {
   PENDING_SAFE_REVIEWED_SUBMISSION_KEY,
   type PendingSafeReviewedSubmission,
 } from '~/utils/pending-safe-reviewed-submission'
+import { withSafeReviewedSubmissionLock } from '~/utils/safe-reviewed-submission-lock'
 
 const pending = ref<PendingSafeReviewedSubmission[]>([])
 const storageError = ref('')
@@ -43,14 +44,16 @@ export const usePendingSafeReviewedSubmission = () => {
     && record.account.toLowerCase() === address.value?.toLowerCase(),
   ))
 
-  const clearConfirmedAbsent = (record: PendingSafeReviewedSubmission) => {
-    const storage = getStorage()
-    if (!storage) throw new Error('Durable Safe submission storage is unavailable.')
-    clearHashlessPendingSafeReviewedSubmission(storage, {
-      reservationId: record.reservationId,
-      account: record.account as Address,
-      chainId: record.chainId,
-      confirmedAbsent: true,
+  const clearConfirmedAbsent = async (record: PendingSafeReviewedSubmission) => {
+    await withSafeReviewedSubmissionLock(() => {
+      const storage = getStorage()
+      if (!storage) throw new Error('Durable Safe submission storage is unavailable.')
+      clearHashlessPendingSafeReviewedSubmission(storage, {
+        reservationId: record.reservationId,
+        account: record.account as Address,
+        chainId: record.chainId,
+        confirmedAbsent: true,
+      })
     })
     refresh()
   }
