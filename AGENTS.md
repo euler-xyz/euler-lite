@@ -108,9 +108,11 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   Note: `internal/screen-address` is additionally consumed cross-origin by first-party
   `*.euler.finance` SPAs via a path-scoped CORS exception in `cors.ts` — keep its contract
   backward-compatible.
-- **Server middleware:** `geo-gate.ts` (451 for sanctioned countries via Cloudflare `CF-IPCountry`;
-  set `DEV_GEO_COUNTRY` locally since there's no CF header), `cors.ts`, `security-headers.ts`,
-  `body-limit.ts`, `ensure-vault.ts`.
+- **Server middleware:** `geo-gate.ts` (451 for sanctioned countries via the country from
+  `getEdgeContext` — trusted-header mapping per `EDGE_PROVIDER` preset in `utils/edge-presets.ts`;
+  set `DEV_GEO_COUNTRY` locally since there's no edge header), `cors.ts`, `security-headers.ts`,
+  `body-limit.ts`, `ensure-vault.ts`. Middleware and routes stay vendor-neutral: edge header
+  names live only in the presets file, consumed through `server/utils/edge.ts`.
 - **Server plugins (load order matters):** `app-config.ts` / `chain-config.ts` inject the `window`
   config; `csp.ts` (nonce-based CSP) must run after them; `warm-cache.ts` warms labels/token-list/
   vault caches in the background. Caching internals are in `docs/server-side-caching.md`.

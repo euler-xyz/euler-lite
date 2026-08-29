@@ -343,9 +343,9 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 |---|---|
 | **CORS** (`server/middleware/cors.ts`) | Restricts API access to configured origins |
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
-| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
+| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via the edge-provided country (`getEdgeContext`); fails closed (HTTP 451) if a geo-capable edge leaves the country undetermined outside dev |
 | **RPC method whitelist** (`server/api/internal/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
-| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` is absent in prod |
+| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if the edge provides no trusted client identity in prod |
 | **Swap quote contract validation** (`@eulerxyz/euler-v2-sdk` `swapService`) | Validates each fetched quote's swapper and verifier addresses against the chain's canonical deployment allowlist |
 
 #### Rate Limiting
@@ -363,20 +363,32 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 
 - **In-memory state is per-process** — if Nitro spawns multiple workers, each gets its own budget, effectively multiplying the limit.
 
-#### Cloudflare Requirement
+#### Edge Provider
 
-**Production deployments must be behind Cloudflare.** This is a hard requirement, not a recommendation — two independent server features depend on it:
+The server never reads vendor edge headers directly. `getEdgeContext(event)` (`server/utils/edge.ts`) normalizes whatever the fronting infrastructure provides into a single shape — trusted client IP, country, VPN evidence, origin-auth status — and every consumer (geo-gate, rate limiter, CORS country hint, screening audit) reads that. The vendor-specific header mapping lives exclusively in `utils/edge-presets.ts`, selected by the `EDGE_PROVIDER` env var:
 
-1. **Geo-gate** (`server/middleware/geo-gate.ts`) reads `CF-IPCountry` to enforce sanctioned-country blocks. Without Cloudflare, the country cannot be determined and all API requests are rejected with HTTP 451.
-2. **Rate limiter** (`server/utils/rate-limit.ts`) uses `CF-Connecting-IP` as the trusted client IP. Without Cloudflare, `CF-Connecting-IP` is absent and all API requests are rejected with HTTP 403.
+| Preset | Trusted client IP | Country | VPN evidence |
+|---|---|---|---|
+| `cloudflare` | `cf-connecting-ip` | `cf-ipcountry` | `x-is-vpn` / `x-is-proxy-or-vpn` |
+| `google` | `x-forwarded-for` second-to-last entry (LB-appended) | `x-client-geo` (LB custom header) | — |
+| `cloudfront` | `cloudfront-viewer-address` (port stripped) | `cloudfront-viewer-country` | — |
+| `none` (default) | rightmost `x-forwarded-for` entry, else socket | — | — |
 
-Bypass behaviour per environment:
+**Production deployments must set `EDGE_PROVIDER` explicitly** — the server refuses to boot in `prd` without it (`server/plugins/edge-guard.ts`), because the `none` default runs with geo-blocking off. `none` is intended for forks and previews that have no fronting edge.
+
+**Origin auth** (`EDGE_ORIGIN_SECRET`): when set, every request must carry a matching `x-edge-origin-auth` header, stamped by the edge (e.g. a request-header transform rule). Requests without it are treated as having bypassed the edge: their trusted inputs are voided and the fail-closed paths below apply. The secret is optional for the `cloudflare` and `none` presets — until it is set, the edge headers are trusted on the historical assumption that the origin is only reachable through the edge. It is **required** for `google` and `cloudfront` (the server refuses to boot without it): those edges forward client headers untouched, so without origin auth their trusted inputs would be forgeable by anyone who can reach the origin. Configuring the secret is what closes direct-to-origin spoofing in every preset.
+
+**Internal fetches** (`server/utils/internal-headers.ts`): server-internal `$fetch` calls (warm-cache, vaults-cache, labels) authenticate with an `x-edge-internal` marker whose value is the origin-auth secret or, when none is configured, a random per-process value — unforgeable under every preset with zero configuration. The container healthcheck does not use it: it probes `/healthz`, which lives outside `/api/` and is deliberately independent of edge configuration.
+
+Fail-closed behaviour per environment (geo-capable presets):
 
 | Environment | Geo-gate | Rate limiter |
 |---|---|---|
-| `prd` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF required; fail-closed (HTTP 403) if absent. |
-| `stg` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF **not** required; falls back to `X-Forwarded-For`. |
-| `dev` | CF not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | CF not required; falls back to `X-Forwarded-For`. |
+| `prd` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | Trusted identity required; fail-closed (HTTP 403) if absent. |
+| `stg` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | Trusted identity **not** required; falls back to `X-Forwarded-For`. |
+| `dev` | Country not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | Trusted identity not required; falls back to `X-Forwarded-For`. |
+
+Under the `none` preset the geo-gate does not fail closed (there is no geo evidence by design) and the rate limiter keys budgets on the rightmost `x-forwarded-for` entry.
 
 ### Clickjacking & Framing Defenses
 

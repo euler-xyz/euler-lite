@@ -293,7 +293,7 @@ describe('cors internal API boundary', () => {
     expect(event.headers['X-API-Stability']).toBe('internal; may-break-without-notice')
   })
 
-  it('rejects loopback requests without a first-party cookie or internal sentinel', async () => {
+  it('rejects loopback requests without a first-party cookie or internal marker', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     const handler = await loadHandler()
 
@@ -309,12 +309,66 @@ describe('cors internal API boundary', () => {
     }
   })
 
-  it('allows same-process internal requests with the internal sentinel', async () => {
+  it('allows same-process internal requests with the internal marker', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     const handler = await loadHandler()
-    const internalEvent = makeEvent('/api/internal/vaults', { 'cf-connecting-ip': '127.0.0.1' })
+    // Import AFTER loadHandler's vi.resetModules() so the test reads the
+    // same per-process marker instance the reloaded middleware verifies.
+    const { getInternalFetchHeaders } = await import('~/server/utils/internal-headers')
+    const internalEvent = makeEvent('/api/internal/vaults', { ...getInternalFetchHeaders() })
 
     expect(handler(internalEvent)).toBeUndefined()
     expect(internalEvent.headers['X-API-Stability']).toBe('internal; may-break-without-notice')
+  })
+
+  it('rejects a forged legacy loopback sentinel on no-Origin internal requests', async () => {
+    // Reproduces the review finding: the sentinel used to satisfy the
+    // internal-request exception below, letting header-forging clients
+    // through the no-Origin rejection.
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    const handler = await loadHandler()
+
+    try {
+      handler(makeEvent('/api/internal/vaults', { 'cf-connecting-ip': '127.0.0.1' }))
+      throw new Error('Expected internal API call to be rejected')
+    }
+    catch (err) {
+      expect(err).toMatchObject({
+        statusCode: 403,
+        statusMessage: 'Forbidden',
+      })
+    }
+  })
+
+  it('derives x-country-code from the edge and strips the client-supplied value', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('EDGE_PROVIDER', 'cloudflare')
+    const handler = await loadHandler()
+    const event = makeEvent('/', { 'cf-ipcountry': 'DE', 'x-country-code': 'US' })
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['x-country-code']).toBe('DE')
+    expect(event.node.req.headers['x-country-code']).toBeUndefined()
+  })
+
+  it('omits x-country-code when a geo-capable edge leaves the country undetermined in prod', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('EDGE_PROVIDER', 'cloudflare')
+    vi.stubEnv('DEV_GEO_COUNTRY', '')
+    const handler = await loadHandler()
+    const event = makeEvent('/')
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['x-country-code']).toBeUndefined()
+  })
+
+  it('sends the "--" placeholder under the none preset so clients do not fail closed', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('DEV_GEO_COUNTRY', '')
+    const handler = await loadHandler()
+    const event = makeEvent('/')
+
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['x-country-code']).toBe('--')
   })
 })

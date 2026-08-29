@@ -1,4 +1,3 @@
-import type { H3Event } from 'h3'
 import { fetchWithTimeout, UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
 import { hashIdentifier } from '~/server/utils/observability'
@@ -42,32 +41,6 @@ export function isValidScreeningAddress(value: unknown): value is string {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
 }
 
-function isTruthyHeader(value: string | string[] | undefined): boolean {
-  const headers = Array.isArray(value) ? value : [value]
-  return headers
-    .filter((header): header is string => typeof header === 'string')
-    .flatMap(header => header.split(','))
-    .some(token => token.trim().toLowerCase() === 'true')
-}
-
-function hasHeader(value: string | string[] | undefined): boolean {
-  const values = Array.isArray(value) ? value : [value]
-  return values.some(entry => typeof entry === 'string' && entry.trim() !== '')
-}
-
-// The VPN verdict comes from edge-set request headers, never from the client
-// body — a client could otherwise clear its own flag. When neither header is
-// present the measurement is unknown and reported as null (the upstream
-// stores it as "not measured"), never as a fabricated false.
-export function deriveVpnIsUsed(event: H3Event): boolean | null {
-  const vpn = event.node.req.headers['x-is-vpn']
-  const proxyOrVpn = event.node.req.headers['x-is-proxy-or-vpn']
-  if (!hasHeader(vpn) && !hasHeader(proxyOrVpn)) {
-    return null
-  }
-  return isTruthyHeader(vpn) || isTruthyHeader(proxyOrVpn)
-}
-
 // The restricted API key must only travel over TLS, and never follow a
 // redirect (Node preserves request headers across cross-origin redirects).
 // Plain http is tolerated for loopback targets only, so local dev against
@@ -88,6 +61,10 @@ function isAllowedScreeningUri(uri: string): boolean {
 /**
  * Screen an address against the data-v3 compliance API
  * (`POST /v3/compliance/address-screening`).
+ *
+ * `vpnIsUsed` is the edge-derived VPN evidence from the request context
+ * (`getEdgeContext(event).vpnIsUsed`) — never a client-reported value, and
+ * `null` when the deployment's edge measures none.
  *
  * Fail-closed: every branch other than an HTTP 200 carrying an explicit
  * `data.addressIsSuspicious: false` **for the requested address** reports the

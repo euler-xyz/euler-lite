@@ -71,6 +71,7 @@ describe('POST /api/internal/screen-address', () => {
   afterEach(() => {
     delete process.env.ADDRESS_SCREENING_URI
     delete process.env.ADDRESS_SCREENING_API_KEY
+    delete process.env.EDGE_PROVIDER
     vi.unstubAllGlobals()
     vi.clearAllMocks()
   })
@@ -230,6 +231,9 @@ describe('POST /api/internal/screen-address', () => {
 
   it('derives vpnIsUsed from trusted request headers, never the body, and reports null when unmeasured', async () => {
     stubScreeningEnv()
+    // VPN evidence is a cloudflare-preset capability; other presets always
+    // report null (see the edge-presets tests).
+    process.env.EDGE_PROVIDER = 'cloudflare'
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => cleanVerdict())
     vi.stubGlobal('fetch', fetchMock)
 
@@ -268,5 +272,17 @@ describe('POST /api/internal/screen-address', () => {
       JSON.parse(String(init?.body)) as { vpnIsUsed: boolean | null },
     )
     expect(bodies.map(body => body.vpnIsUsed)).toEqual([true, true, true, true, false, null, null])
+  })
+
+  it('reports vpnIsUsed as null under presets without VPN evidence, even when headers are present', async () => {
+    stubScreeningEnv()
+    // Default preset is `none`: the VPN headers are not trusted evidence.
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => cleanVerdict())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await handler(makeEvent({ address: USER }, { 'x-is-vpn': 'true' }))
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(String(init?.body)).vpnIsUsed).toBeNull()
   })
 })
