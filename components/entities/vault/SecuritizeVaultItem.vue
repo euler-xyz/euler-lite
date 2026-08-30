@@ -4,7 +4,6 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
@@ -29,10 +28,6 @@ const entityName = computed(() => {
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
-})
-const entityLogos = computed(() => {
-  if (!entityName.value || entities.length === 0) return []
-  return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
 const displayName = computed(() => product.name || vault.shares.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
@@ -198,18 +193,14 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
+          <ManagerEntityLink
+            :entities="entities"
             :label="entityName"
-            :src="entityLogos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
+            span-link
+            text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
             :data-key="vault.address.toLowerCase()"
             data-field="risk-manager"
-            :data-value="entityName"
-          >{{ entityName }}</span>
+          />
         </div>
         <div
           v-else
@@ -275,12 +266,12 @@ watchEffect(async () => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <BaseAvatar
-              class="icon--20"
+            <ManagerEntityLink
+              :entities="entities"
               :label="entityName"
-              :src="entityLogos"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
             />
-            <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
           </div>
           <div
             v-else
