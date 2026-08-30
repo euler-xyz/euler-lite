@@ -153,6 +153,11 @@ const v3AdapterConfig: Partial<EulerSDKConfig> = {
 
 const onchainAdapterConfig: Partial<EulerSDKConfig> = {
   accountServiceAdapter: 'onchain',
+  // Discover sub-accounts/positions purely over RPC (deployless brute-force
+  // lens) instead of the subgraph. Applies to the plan-time/fresh instance and
+  // to fast reads pinned onchain. Set EULER_SDK_ACCOUNT_POSITION_DISCOVERY (or
+  // this flag) back to 'subgraph' to restore the subgraph discovery path.
+  accountPositionDiscovery: 'onchain',
   eVaultServiceAdapter: 'onchain',
   eulerEarnServiceAdapter: 'onchain',
   vaultTypeAdapter: 'subgraph',
