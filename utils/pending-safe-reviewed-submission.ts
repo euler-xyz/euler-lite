@@ -1,4 +1,5 @@
 import { getAddress, type Address, type Hash } from 'viem'
+import { isSafeCallsId } from '~/utils/safe-calls-id'
 
 export const PENDING_SAFE_REVIEWED_SUBMISSION_KEY = 'euler-lite:pending-safe-reviewed-submissions:v1'
 
@@ -9,7 +10,7 @@ export interface PendingSafeReviewedSubmission {
   requestDigest: Hash
   account: Address
   chainId: number
-  callsId?: Hash
+  callsId?: string
   createdAt: number
 }
 
@@ -30,7 +31,7 @@ const normalize = (value: unknown): PendingSafeReviewedSubmission | undefined =>
     || typeof candidate.account !== 'string'
     || !Number.isSafeInteger(candidate.chainId)
     || candidate.chainId! <= 0
-    || (candidate.callsId !== undefined && !isHash(candidate.callsId))
+    || (candidate.callsId !== undefined && !isSafeCallsId(candidate.callsId))
     || !Number.isSafeInteger(candidate.createdAt)
     || candidate.createdAt! <= 0
   ) return undefined
@@ -105,8 +106,9 @@ export const reservePendingSafeReviewedSubmission = (
 export const attachPendingSafeCallsId = (
   storage: StorageLike,
   reservationId: string,
-  callsId: Hash,
+  callsId: string,
 ) => {
+  if (!isSafeCallsId(callsId)) throw new Error('Safe returned an invalid calls ID.')
   const records = loadPendingSafeReviewedSubmissions(storage)
   const index = records.findIndex(record => record.reservationId === reservationId)
   if (index < 0) throw new Error('The pending Safe reservation disappeared after wallet handoff.')

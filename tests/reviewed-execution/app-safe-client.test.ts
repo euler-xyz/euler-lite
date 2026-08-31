@@ -49,10 +49,16 @@ describe('Safe app-client durable reservation', () => {
       publicClient: { getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not mined')) },
     })
     const reservationId = await adapter.reserveSubmission!(identity('first'))
-    await adapter.recordCallsId!(reservationId, hash('calls'))
+    await adapter.recordCallsId!(reservationId, 'safe-call-batch-123')
 
     await expect(adapter.reserveSubmission!(identity('second'))).rejects.toThrow('still pending')
-    expect(loadPendingSafeReviewedSubmissions(storage)).toHaveLength(1)
+    expect(loadPendingSafeReviewedSubmissions(storage)).toEqual([
+      expect.objectContaining({ callsId: 'safe-call-batch-123' }),
+    ])
+    expect(provider.request).toHaveBeenCalledWith({
+      method: 'wallet_getCallsStatus',
+      params: ['safe-call-batch-123'],
+    })
   })
 
   it('clears conclusive cancellation before reserving a new review', async () => {

@@ -1,8 +1,9 @@
-import { isHash, type Hash } from 'viem'
+import type { Hash } from 'viem'
 import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { FinalizedRequestSet, SafeCall, SafeTransportEnvelope, ReviewedExecution } from '../domain/reviewed-execution'
 import { AttemptRevertedError, DispatchFailedError, DispatchStatusUnknownError, ProvenOffchainCancellationError, ProvenPreDispatchCancellationError } from '../coordinator/errors'
 import type { ExecutionTransportAdapter, DispatchCallbacks, DispatchResult } from './types'
+import { isSafeCallsId } from '~/utils/safe-calls-id'
 
 export interface SafeCallsStatus {
   executionHash: Hash
@@ -14,10 +15,10 @@ export interface SafeCallsStatus {
 export interface SafeAdapterClient {
   assertAtomicCapability(envelope: SafeTransportEnvelope): Promise<void>
   reserveSubmission(identity: SafeSubmissionIdentity): Promise<string>
-  recordCallsId(reservationId: string, callsId: Hash): Promise<void>
+  recordCallsId(reservationId: string, callsId: string): Promise<void>
   clearSubmission(reservationId: string): Promise<void>
   sendCalls(envelope: SafeTransportEnvelope): Promise<string>
-  waitForExecution(callsId: Hash): Promise<SafeCallsStatus>
+  waitForExecution(callsId: string): Promise<SafeCallsStatus>
 }
 
 export interface SafeSubmissionIdentity {
@@ -80,7 +81,7 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
       }
       throw new DispatchStatusUnknownError()
     }
-    if (!isHash(callsId)) throw new DispatchStatusUnknownError('Safe returned no valid calls ID')
+    if (!isSafeCallsId(callsId)) throw new DispatchStatusUnknownError('Safe returned no valid calls ID')
     try {
       await this.client.recordCallsId(reservationId, callsId)
     }

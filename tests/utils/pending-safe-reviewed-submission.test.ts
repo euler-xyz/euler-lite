@@ -37,7 +37,7 @@ describe('pending Safe reviewed submission storage', () => {
 
   it('reserves before handoff and binds the returned calls ID to the same context', () => {
     reservePendingSafeReviewedSubmission(storage, record())
-    const callsId = hash('calls-id')
+    const callsId = 'safe-call-batch-123'
     attachPendingSafeCallsId(storage, 'reservation-1', callsId)
 
     expect(findPendingSafeReviewedSubmission(storage, ACCOUNT, 1)).toMatchObject({

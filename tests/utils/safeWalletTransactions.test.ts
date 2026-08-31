@@ -117,6 +117,36 @@ describe('sendSafeAtomicCalls', () => {
       }],
     })
   })
+
+  it('accepts an opaque bounded calls ID', async () => {
+    const request = vi.fn().mockResolvedValue({ id: 'safe-call-batch-123' })
+
+    await expect(sendSafeAtomicCalls({ request }, {
+      schemaVersion: 1,
+      version: '2.0.0',
+      from: SAFE_HASH.slice(0, 42) as `0x${string}`,
+      chainId: 1,
+      atomicRequired: true,
+      calls: [],
+      capabilities: {},
+      atomicCapability: { status: 'supported' },
+    })).resolves.toBe('safe-call-batch-123')
+  })
+
+  it('rejects a calls ID larger than 4096 bytes', async () => {
+    const request = vi.fn().mockResolvedValue({ id: 'a'.repeat(4097) })
+
+    await expect(sendSafeAtomicCalls({ request }, {
+      schemaVersion: 1,
+      version: '2.0.0',
+      from: SAFE_HASH.slice(0, 42) as `0x${string}`,
+      chainId: 1,
+      atomicRequired: true,
+      calls: [],
+      capabilities: {},
+      atomicCapability: { status: 'supported' },
+    })).rejects.toThrow('no valid calls ID')
+  })
 })
 
 describe('reconcileSafeTransactionExecution', () => {
@@ -135,7 +165,7 @@ describe('reconcileSafeTransactionExecution', () => {
       }),
     }
 
-    await expect(reconcileSafeTransactionExecution({ submittedHash: SAFE_HASH, walletProvider, publicClient }))
+    await expect(reconcileSafeTransactionExecution({ callsId: SAFE_HASH, walletProvider, publicClient }))
       .resolves.toEqual({ state: 'success', hash: EXECUTION_HASH, atomic: true })
   })
 
@@ -147,8 +177,29 @@ describe('reconcileSafeTransactionExecution', () => {
       getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not mined')),
     }
 
-    await expect(reconcileSafeTransactionExecution({ submittedHash: SAFE_HASH, walletProvider, publicClient }))
+    await expect(reconcileSafeTransactionExecution({ callsId: SAFE_HASH, walletProvider, publicClient }))
       .resolves.toEqual({ state: 'pending' })
+  })
+
+  it('does not interpret an opaque calls ID as a transaction hash for receipt fallback', async () => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockRejectedValue(Object.assign(new Error('Method not found'), { code: -32601 })),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn(),
+    }
+
+    await expect(reconcileSafeTransactionExecution({
+      callsId: 'safe-call-batch-123',
+      walletProvider,
+      publicClient,
+    })).resolves.toEqual({ state: 'unknown' })
+    expect(walletProvider.request).toHaveBeenCalledOnce()
+    expect(walletProvider.request).toHaveBeenCalledWith({
+      method: 'wallet_getCallsStatus',
+      params: ['safe-call-batch-123'],
+    })
+    expect(publicClient.getTransactionReceipt).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -162,12 +213,41 @@ describe('reconcileSafeTransactionExecution', () => {
       getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not mined')),
     }
 
-    await expect(reconcileSafeTransactionExecution({ submittedHash: SAFE_HASH, walletProvider, publicClient }))
+    await expect(reconcileSafeTransactionExecution({ callsId: SAFE_HASH, walletProvider, publicClient }))
       .resolves.toEqual({ state })
   })
 })
 
 describe('waitForSafeTransactionExecution', () => {
+  it('resolves an opaque calls ID through calls status', async () => {
+    const walletProvider: WalletProviderLike = {
+      request: vi.fn().mockResolvedValue({
+        status: 200,
+        atomic: true,
+        receipts: [{ transactionHash: EXECUTION_HASH }],
+      }),
+    }
+    const publicClient: ReceiptClientLike = {
+      getTransactionReceipt: vi.fn(async ({ hash }) => {
+        if (hash === EXECUTION_HASH) return receipt(EXECUTION_HASH)
+        throw new Error('Transaction receipt not found')
+      }),
+    }
+
+    await expect(waitForSafeTransactionExecution({
+      callsId: 'safe-call-batch-123',
+      walletProvider,
+      publicClient,
+      pollingIntervalMs: 0,
+      requireAtomic: true,
+    })).resolves.toEqual({ hash: EXECUTION_HASH, receipt: receipt(EXECUTION_HASH), atomic: true })
+    expect(walletProvider.request).toHaveBeenCalledWith({
+      method: 'wallet_getCallsStatus',
+      params: ['safe-call-batch-123'],
+    })
+    expect(publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: EXECUTION_HASH })
+  })
+
   it('returns an immediately mined on-chain hash without Safe status data', async () => {
     const walletProvider: WalletProviderLike = { request: vi.fn() }
     const publicClient: ReceiptClientLike = {
@@ -175,7 +255,7 @@ describe('waitForSafeTransactionExecution', () => {
     }
 
     await expect(waitForSafeTransactionExecution({
-      submittedHash: SAFE_HASH,
+      callsId: SAFE_HASH,
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
@@ -200,7 +280,7 @@ describe('waitForSafeTransactionExecution', () => {
     }
 
     await expect(waitForSafeTransactionExecution({
-      submittedHash: SAFE_HASH,
+      callsId: SAFE_HASH,
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
@@ -230,7 +310,7 @@ describe('waitForSafeTransactionExecution', () => {
     }
 
     await expect(waitForSafeTransactionExecution({
-      submittedHash: SAFE_HASH,
+      callsId: SAFE_HASH,
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
@@ -247,7 +327,7 @@ describe('waitForSafeTransactionExecution', () => {
     }
 
     await expect(waitForSafeTransactionExecution({
-      submittedHash: SAFE_HASH,
+      callsId: SAFE_HASH,
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
@@ -272,7 +352,7 @@ describe('waitForSafeTransactionExecution', () => {
     }
 
     await expect(waitForSafeTransactionExecution({
-      submittedHash: SAFE_HASH,
+      callsId: SAFE_HASH,
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
@@ -301,7 +381,7 @@ describe('waitForSafeTransactionExecution', () => {
     }
 
     await expect(waitForSafeTransactionExecution({
-      submittedHash: SAFE_HASH,
+      callsId: SAFE_HASH,
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
@@ -325,7 +405,7 @@ describe('waitForSafeTransactionExecution', () => {
     }
 
     await expect(waitForSafeTransactionExecution({
-      submittedHash: SAFE_HASH,
+      callsId: SAFE_HASH,
       walletProvider,
       publicClient,
       pollingIntervalMs: 0,
@@ -343,7 +423,7 @@ describe('waitForSafeTransactionExecution', () => {
 
     try {
       const pending = waitForSafeTransactionExecution({
-        submittedHash: SAFE_HASH,
+        callsId: SAFE_HASH,
         walletProvider,
         publicClient,
         pollingIntervalMs: 1_000,

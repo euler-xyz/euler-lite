@@ -55,7 +55,7 @@ export const createAppSafeClients = ({
           const pending = findPendingSafeReviewedSubmission(storage, identity.account, identity.chainId)
           if (pending?.callsId) {
             const reconciliation = await reconcileSafeTransactionExecution({
-              submittedHash: pending.callsId,
+              callsId: pending.callsId,
               walletProvider: provider,
               publicClient: publicClient as never,
             })
@@ -94,7 +94,7 @@ export const createAppSafeClients = ({
       sendCalls: envelope => sendSafeAtomicCalls(provider, envelope),
       waitForExecution: async (callsId) => {
         const execution = await waitForSafeTransactionExecution({
-          submittedHash: callsId,
+          callsId,
           walletProvider: provider,
           publicClient: publicClient as never,
           requireAtomic: true,

@@ -54,10 +54,10 @@ describe('reviewed execution confirmation metadata', () => {
       },
       sendCalls: async () => {
         events.push('sent')
-        return HASH
+        return 'safe-call-batch-123'
       },
       recordCallsId: async (reservationId, callsId) => {
-        expect([reservationId, callsId]).toEqual(['reservation-1', HASH])
+        expect([reservationId, callsId]).toEqual(['reservation-1', 'safe-call-batch-123'])
         events.push('recorded')
       },
       clearSubmission: async (reservationId) => {
