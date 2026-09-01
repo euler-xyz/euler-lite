@@ -2,7 +2,7 @@
 
 This document describes how euler-lite handles Pyth Network prices in visible read paths and transaction paths.
 
-For the broader pricing pipeline, see [Pricing System](./pricing-system.md).
+For the broader pricing pipeline, see [Pricing System](./pricing-system.md). For how oracle route steps are shown in the UI (label vs route, custom adapters), see [Oracle Adapter Display](./oracle-adapter-display.md).
 
 ## Overview
 

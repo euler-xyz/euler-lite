@@ -19,9 +19,9 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 
 All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are reported through `reportStatus`, which logs on *transitions* rather than once per refresh: the first observation of a given status warns, an unchanged status stays silent on later refreshes, and a return to `ok` logs a recovery. A persistent outage therefore surfaces once and then goes quiet until it changes.
 
-Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/internal/oracle-adapter?chainId=X&address=0x...`.
+Oracle adapter and recognized-router metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default. Lite’s UI loads the **whole per-chain map** via `GET /api/internal/oracle-adapters?chainId=X` (`sdk.oracleAdapterService.fetchOracleAdapterMap`). Recognized EulerRouter addresses load from `GET /api/internal/oracle-routers?chainId=X`. A leftover per-address route (`GET /api/internal/oracle-adapter?chainId=X&address=0x...`) still exists; no Lite UI caller uses it.
 
-**Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels and `{baseUrl}/{chainId}/adapters/{address}.json` for oracle adapters.
+**Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels, `{baseUrl}/{chainId}/adapters/all.json` (and optional `{baseUrl}/{chainId}/adapters/{address}.json`) for adapters, and `{baseUrl}/{chainId}/routers/all.json` for recognized routers.
 
 **Server caching**: The server keeps one 5-minute TTL cache keyed by `chainId:file`, plus an in-flight map so concurrent callers collapse onto a single upstream fetch per key. On upstream failure, stale cached data is served. `server/plugins/warm-cache.ts` pre-populates the cache at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
 
@@ -235,20 +235,26 @@ Classification markers use a clean-cut tags schema. Earn-vault `recentlyAdded` i
 
 ### Oracle Adapter Files (oracle-checks repo)
 
-Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github.com/euler-xyz/oracle-checks) repository. Each adapter has its own file at `data/{chainId}/adapters/{checksummedAddress}.json`.
+Oracle adapter metadata is loaded **per chain as a whole map** from [oracle-checks](https://github.com/euler-xyz/oracle-checks) (`data/{chainId}/adapters/all.json` via `GET /api/internal/oracle-adapters`). After that map is in memory, a missing address means the adapter is not in the dataset — do not refetch (rewriting the store re-triggers every subscriber and froze Explore for custom-oracle markets). Per-address files still exist at `data/{chainId}/adapters/{checksummedAddress}.json` and can be fetched with `GET /api/internal/oracle-adapter`, but Lite UI does not call that route.
+
+Recognized EulerRouter addresses (factory-deployed) are a flat array at `data/{chainId}/routers/all.json`, proxied by `GET /api/internal/oracle-routers`. An empty allowlist must not render an “unrecognized router” warning.
 
 ```jsonc
 {
   "oracle": "0xOracleAdapter...",                 // Oracle adapter address
-  "base": "0xBaseAsset...",                       // Base asset address
-  "quote": "0xQuoteAsset...",                     // Quote asset address
-  "name": "Chainlink ETH/USD",                   // Oracle name
-  "provider": "Chainlink",                        // Oracle provider (used for logo)
+  "base": "0xBaseAsset...",                       // Adapter's wired base (used for price inversion)
+  "quote": "0xQuoteAsset...",                     // Adapter's wired quote
+  "name": "Chainlink ETH/USD",                   // Display name (curated; never fall back to on-chain name() for adapters)
+  "provider": "Chainlink",                        // Provider key for logo + identity
   "methodology": "TWAP 30min",                   // Pricing methodology
-  "label": "ETH/USD Feed",                       // Custom label (stored but not displayed)
-  "checks": ["heartbeat", "deviation"]            // Security check names (stored but not displayed)
+  "label": "ETH/USD (Primary)",                  // Card title; split at first '(' into primary + suffix. Route column still uses the step pair.
+  "checks": [                                    // Rendered as traffic-light + failed-check list
+    { "id": "staleness", "message": "ok", "pass": true, "severity": "INFO" }
+  ]
 }
 ```
+
+How those fields render on the borrow Oracles block and Explore matrix: [Oracle Adapter Display](./oracle-adapter-display.md).
 
 ---
 

@@ -29,6 +29,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Pyth oracle simulation for price reads
 - SDK/V3-populated intrinsic APY for yield-bearing assets
 
+### 🛰️ [Oracle Adapter Display](./oracle-adapter-display.md)
+
+- Shared route-step collection for borrow Oracles block and Explore matrix
+- Feed `label` vs configured `Route` pair (do not conflate)
+- Custom-adapter identity (never trust on-chain `name()`)
+- Read-path adapter quotes, price inversion, and recognized-router warning
+
 ### 📐 [Projected Yield](./projected-yield.md)
 
 - Utilization-aware supply and borrow rate projections
@@ -126,6 +133,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Asset-level pattern matching (exact `symbols`/`names` + `symbolRegex`/`nameRegex`) and cross-chain `all/assets.json`
 - Country group aliases (EU, EEA, EFTA)
 - UI enforcement across browse, detail, action, and modal pages, plus the arbitrary-asset swap selector
+
+### 🛡️ [Address Screening](./address-screening.md)
+
+- Connect-time wallet screening (wagmi gate; reviewed execution does not re-screen)
+- Fail-closed data-v3 proxy, `chain: "all"` coverage, TLS/config rules
+- VPN from Cloudflare request headers (body `vpnIsUsed` is ignored)
+- First-party CORS exception, no-store cache, and operator troubleshooting
 
 ### 🌐 [Public API](./public-api.md)
 
