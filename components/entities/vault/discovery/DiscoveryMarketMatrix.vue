@@ -251,11 +251,9 @@ const onCellClick = (collateralAddr: string, liabilityAddr: string) => {
   emit('selectCell', collateralAddr, liabilityAddr)
 }
 
-// Bulk-load adapter metadata for the chain. Heavy call (1+ MB JSON); the
-// `metric !== 'oracle'` guard short-circuits the immediate run on mount and
-// every re-evaluation while a non-oracle metric is selected — so the network
-// request only fires the first time the user picks the Oracles view.
-// loadAllOracleAdapters is per-chain idempotent (cached by useEulerLabels).
+// Bulk-load adapter assessments while the Oracles view is active. The SDK owns
+// bounded caching, so returning to this view reuses fresh data within its TTL
+// and revalidates after expiry.
 watch(
   [() => props.dotMetric, chainId],
   ([metric, currentChainId]) => {

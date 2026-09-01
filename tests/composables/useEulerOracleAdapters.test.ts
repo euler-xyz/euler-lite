@@ -18,6 +18,17 @@ vi.mock('~/composables/useEulerSdk', () => ({
 const KNOWN_ADAPTER = '0x0000000000000000000000000000000000000001'
 const UNLISTED_ADAPTER = '0x0000000000000000000000000000000000000002'
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+
+  return { promise, resolve, reject }
+}
+
 const assessment = (address = KNOWN_ADAPTER) => ({
   chainId: 1,
   address,
@@ -51,10 +62,14 @@ describe('useEulerOracleAdapters', () => {
     vi.clearAllMocks()
   })
 
-  it('loads single V3 assessments lazily and caches missing addresses', async () => {
+  it('loads single V3 assessments lazily and re-enters the SDK on later loads', async () => {
     fetchOracleAdapterAssessment
       .mockResolvedValueOnce(assessment())
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        ...assessment(),
+        checksStatus: 'negative',
+        policyVersion: 4,
+      })
     const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
     const { loadOracleAdapter } = useEulerOracleAdapters()
 
@@ -67,21 +82,62 @@ describe('useEulerOracleAdapters', () => {
     })
     expect(known?.checks[0]?.outcome).toBe('unknown')
 
+    const refreshed = await loadOracleAdapter(1, KNOWN_ADAPTER)
+    expect(refreshed).toMatchObject({ checksStatus: 'negative', policyVersion: 4 })
+    expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not permanently cache a missing assessment', async () => {
+    fetchOracleAdapterAssessment.mockResolvedValue(undefined)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter } = useEulerOracleAdapters()
+
     expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toBeUndefined()
     expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toBeUndefined()
     expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(2)
   })
 
-  it('loads the paginated assessment catalogue once per chain', async () => {
-    fetchOracleAdapterAssessments.mockResolvedValue([assessment()])
+  it('removes displayed metadata when a later assessment lookup returns missing', async () => {
+    fetchOracleAdapterAssessment
+      .mockResolvedValueOnce(assessment())
+      .mockResolvedValueOnce(undefined)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter, oracleAdapters } = useEulerOracleAdapters()
+
+    await loadOracleAdapter(1, KNOWN_ADAPTER)
+    expect(oracleAdapters[KNOWN_ADAPTER]).toBeDefined()
+
+    expect(await loadOracleAdapter(1, KNOWN_ADAPTER)).toBeUndefined()
+    expect(oracleAdapters[KNOWN_ADAPTER]).toBeUndefined()
+  })
+
+  it('deduplicates concurrent single-assessment loads', async () => {
+    const request = deferred<ReturnType<typeof assessment>>()
+    fetchOracleAdapterAssessment.mockReturnValue(request.promise)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter } = useEulerOracleAdapters()
+
+    const first = loadOracleAdapter(1, KNOWN_ADAPTER)
+    const second = loadOracleAdapter(1, KNOWN_ADAPTER)
+
+    await vi.waitFor(() => expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1))
+    request.resolve(assessment())
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toBe(secondResult)
+  })
+
+  it('re-enters the SDK when the assessment catalogue is loaded again', async () => {
+    fetchOracleAdapterAssessments
+      .mockResolvedValueOnce([assessment()])
+      .mockResolvedValueOnce([{ ...assessment(), provider: 'Pyth' }])
     const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
     const { loadAllOracleAdapters, oracleAdapters } = useEulerOracleAdapters()
 
     await loadAllOracleAdapters(1)
     await loadAllOracleAdapters(1)
 
-    expect(fetchOracleAdapterAssessments).toHaveBeenCalledTimes(1)
-    expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Chainlink')
+    expect(fetchOracleAdapterAssessments).toHaveBeenCalledTimes(2)
+    expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Pyth')
   })
 
   it('reloads when the chain changes', async () => {

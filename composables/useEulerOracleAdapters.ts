@@ -11,9 +11,9 @@ import {
 
 const oracleAdaptersRef = shallowRef<Record<string, OracleAdapterMeta>>({})
 const oracleAdaptersChainId = ref<number | null>(null)
+// Retain per-chain display state, but let the SDK own bounded result freshness.
+// Only concurrent requests are deduplicated here; later loads re-enter the SDK.
 const oracleAdaptersByChain = new Map<number, Record<string, OracleAdapterMeta>>()
-const fullyLoadedChains = new Set<number>()
-const loadedAdapterKeysByChain = new Map<number, Set<string>>()
 const pendingOracleAdapterLoads = new Map<string, Promise<OracleAdapterMeta | undefined>>()
 const pendingOracleAdapterListLoads = new Map<number, Promise<Record<string, OracleAdapterMeta>>>()
 
@@ -67,7 +67,6 @@ const activateChain = (chainId: number) => {
 const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return
   activateChain(chainId)
-  if (fullyLoadedChains.has(chainId)) return
 
   const inflight = pendingOracleAdapterListLoads.get(chainId)
   if (inflight) {
@@ -80,8 +79,6 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
     const assessments = await sdk.oracleAdapterService.fetchOracleAdapterAssessments(chainId)
     const map = normalizeOracleAdapterMap(assessments)
     oracleAdaptersByChain.set(chainId, map)
-    loadedAdapterKeysByChain.set(chainId, new Set(Object.keys(map)))
-    fullyLoadedChains.add(chainId)
     if (oracleAdaptersChainId.value === chainId) {
       oracleAdaptersRef.value = map
     }
@@ -105,10 +102,6 @@ const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
   activateChain(chainId)
   const address = normalizeAddress(oracleAddress)
   const key = address.toLowerCase()
-  const loaded = oracleAdaptersRef.value[key]
-  if (loaded) return loaded
-  if (fullyLoadedChains.has(chainId)) return undefined
-  if (loadedAdapterKeysByChain.get(chainId)?.has(key)) return undefined
 
   const requestKey = `${chainId}:${key}`
   const inflight = pendingOracleAdapterLoads.get(requestKey)
@@ -117,10 +110,19 @@ const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
   const promise = (async () => {
     const sdk = await getEulerSdk()
     const assessment = await sdk.oracleAdapterService.fetchOracleAdapterAssessment(chainId, address)
-    const loadedKeys = loadedAdapterKeysByChain.get(chainId) ?? new Set<string>()
-    loadedKeys.add(key)
-    loadedAdapterKeysByChain.set(chainId, loadedKeys)
-    if (!assessment) return undefined
+    if (!assessment) {
+      const currentMap = oracleAdaptersByChain.get(chainId)
+      if (currentMap && Object.hasOwn(currentMap, key)) {
+        const nextMap = Object.fromEntries(
+          Object.entries(currentMap).filter(([address]) => address !== key),
+        )
+        oracleAdaptersByChain.set(chainId, nextMap)
+        if (oracleAdaptersChainId.value === chainId) {
+          oracleAdaptersRef.value = nextMap
+        }
+      }
+      return undefined
+    }
     const meta = toOracleAdapterMeta(assessment)
     const chainMap = {
       ...(oracleAdaptersByChain.get(chainId) ?? {}),

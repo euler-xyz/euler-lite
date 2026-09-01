@@ -54,4 +54,35 @@ describe('useEulerOracleRouters', () => {
     expect(routers.indexedRoutersChainId.value).toBe(1)
     expect(routers.indexedRouters.value.has('0xaaa0000000000000000000000000000000000001')).toBe(true)
   })
+
+  it('deduplicates concurrent loads but re-enters the SDK after completion', async () => {
+    const firstRequest = deferred<Array<{ router: string }>>()
+    const secondRequest = deferred<Array<{ router: string }>>()
+    const fetchOracleRouters = vi.fn()
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(secondRequest.promise)
+
+    vi.doMock('~/composables/useEulerSdk', () => ({
+      getEulerSdk: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+    }))
+
+    const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
+    const routers = useEulerOracleRouters()
+
+    const firstLoad = routers.loadIndexedRouters(1)
+    const concurrentLoad = routers.loadIndexedRouters(1)
+    await vi.waitFor(() => expect(fetchOracleRouters).toHaveBeenCalledTimes(1))
+
+    firstRequest.resolve([{ router: '0xAaA0000000000000000000000000000000000001' }])
+    await Promise.all([firstLoad, concurrentLoad])
+    expect(routers.indexedRouters.value.has('0xaaa0000000000000000000000000000000000001')).toBe(true)
+
+    const refreshedLoad = routers.loadIndexedRouters(1)
+    await vi.waitFor(() => expect(fetchOracleRouters).toHaveBeenCalledTimes(2))
+    secondRequest.resolve([{ router: '0xBbB0000000000000000000000000000000000002' }])
+    await refreshedLoad
+
+    expect(routers.indexedRouters.value.has('0xbbb0000000000000000000000000000000000002')).toBe(true)
+    expect(routers.indexedRouters.value.has('0xaaa0000000000000000000000000000000000001')).toBe(false)
+  })
 })

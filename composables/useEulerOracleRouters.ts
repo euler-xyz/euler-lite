@@ -6,21 +6,16 @@ import { logWarn } from '~/utils/errorHandling'
 // separate security assessment of every configured route.
 const indexedRoutersRef = shallowRef<Set<string>>(new Set())
 const indexedRoutersChainId = ref<number | null>(null)
-const indexedRoutersByChain = new Map<number, Set<string>>()
+// The SDK owns bounded result freshness; Lite only deduplicates concurrent loads.
 const pendingRouterLoads = new Map<number, Promise<Set<string>>>()
 
 const loadIndexedRouters = async (chainId: number): Promise<Set<string>> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return new Set()
 
-  indexedRoutersChainId.value = chainId
-
-  const cached = indexedRoutersByChain.get(chainId)
-  if (cached) {
-    indexedRoutersRef.value = cached
-    return cached
+  if (indexedRoutersChainId.value !== chainId) {
+    indexedRoutersChainId.value = chainId
+    indexedRoutersRef.value = new Set()
   }
-
-  indexedRoutersRef.value = new Set()
 
   const inflight = pendingRouterLoads.get(chainId)
   if (inflight) return inflight
@@ -29,7 +24,6 @@ const loadIndexedRouters = async (chainId: number): Promise<Set<string>> => {
     const sdk = await getEulerSdk()
     const routers = await sdk.oracleAdapterService.fetchOracleRouters(chainId)
     const set = new Set(routers.map(router => router.router.toLowerCase()))
-    indexedRoutersByChain.set(chainId, set)
     if (indexedRoutersChainId.value === chainId) {
       indexedRoutersRef.value = set
     }
