@@ -1,45 +1,37 @@
+import { getEulerSdk } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 
-// Recognized EulerRouter addresses (deployed by the recognized EulerRouterFactory)
-// are published per chain at `{oracle-checks}/{chainId}/routers/all.json` as a flat
-// array of addresses. We proxy + cache them through `/api/internal/oracle-routers` and keep a
-// lowercased Set per chain so router-recognition lookups are O(1).
-const recognizedRoutersRef = shallowRef<Set<string>>(new Set())
-const recognizedRoutersChainId = ref<number | null>(null)
-const recognizedRoutersByChain = new Map<number, Set<string>>()
+// Data V3 derives this set from indexed EulerRouter deployment and state
+// events. Presence means the router is indexed as an Euler router; it is not a
+// separate security assessment of every configured route.
+const indexedRoutersRef = shallowRef<Set<string>>(new Set())
+const indexedRoutersChainId = ref<number | null>(null)
+const indexedRoutersByChain = new Map<number, Set<string>>()
 const pendingRouterLoads = new Map<number, Promise<Set<string>>>()
 
-const toRecognizedSet = (data: unknown): Set<string> => {
-  if (!Array.isArray(data)) return new Set()
-  return new Set(
-    data
-      .filter((entry): entry is string => typeof entry === 'string')
-      .map(entry => entry.toLowerCase()),
-  )
-}
-
-const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
+const loadIndexedRouters = async (chainId: number): Promise<Set<string>> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return new Set()
 
-  recognizedRoutersChainId.value = chainId
+  indexedRoutersChainId.value = chainId
 
-  const cached = recognizedRoutersByChain.get(chainId)
+  const cached = indexedRoutersByChain.get(chainId)
   if (cached) {
-    recognizedRoutersRef.value = cached
+    indexedRoutersRef.value = cached
     return cached
   }
 
-  recognizedRoutersRef.value = new Set()
+  indexedRoutersRef.value = new Set()
 
   const inflight = pendingRouterLoads.get(chainId)
   if (inflight) return inflight
 
   const promise = (async () => {
-    const data = await $fetch('/api/internal/oracle-routers', { query: { chainId } })
-    const set = toRecognizedSet(data)
-    recognizedRoutersByChain.set(chainId, set)
-    if (recognizedRoutersChainId.value === chainId) {
-      recognizedRoutersRef.value = set
+    const sdk = await getEulerSdk()
+    const routers = await sdk.oracleAdapterService.fetchOracleRouters(chainId)
+    const set = new Set(routers.map(router => router.router.toLowerCase()))
+    indexedRoutersByChain.set(chainId, set)
+    if (indexedRoutersChainId.value === chainId) {
+      indexedRoutersRef.value = set
     }
     return set
   })()
@@ -49,7 +41,7 @@ const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
     return await promise
   }
   catch (err) {
-    logWarn('useEulerOracleRouters', `Failed to load recognized routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+    logWarn('useEulerOracleRouters', `Failed to load indexed routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
     return new Set()
   }
   finally {
@@ -58,7 +50,7 @@ const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
 }
 
 export const useEulerOracleRouters = () => ({
-  recognizedRouters: computed(() => recognizedRoutersRef.value),
-  recognizedRoutersChainId: readonly(recognizedRoutersChainId),
-  loadRecognizedRouters,
+  indexedRouters: computed(() => indexedRoutersRef.value),
+  indexedRoutersChainId: readonly(indexedRoutersChainId),
+  loadIndexedRouters,
 })

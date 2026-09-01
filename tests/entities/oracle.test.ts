@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Address } from 'viem'
 import {
-  getChecksStatus,
-  getRouterRecognition,
+  getRouterIndexStatus,
   normalizeOracleAdapterCheckSeverity,
   resolveOracleAdapterIdentity,
   type OracleAdapterMeta,
@@ -13,6 +12,10 @@ const oracle = '0x0000000000000000000000000000000000000001' as Address
 
 const makeMeta = (overrides: Partial<OracleAdapterMeta> = {}): OracleAdapterMeta => ({
   oracle,
+  recognized: true,
+  checksStatus: null,
+  inActiveRoute: false,
+  checks: [],
   ...overrides,
 })
 
@@ -42,8 +45,21 @@ describe('resolveOracleAdapterIdentity', () => {
 
     expect(identity.name).toBeUndefined()
     expect(identity.provider).toBeUndefined()
-    // A curated entry exists, so it is recognized — not a custom adapter.
+    // A recognized assessment exists, so it is not a custom adapter.
     expect(identity.isCustomAdapter).toBe(false)
+  })
+
+  it('withholds self-reported identity when V3 assessed but did not recognize the adapter', () => {
+    const meta = makeMeta({
+      recognized: false,
+      name: 'SpoofedOracle',
+      provider: 'Spoofed provider',
+    })
+    const identity = resolveOracleAdapterIdentity({ name: 'SpoofedOracle' }, meta, true)
+
+    expect(identity.name).toBeUndefined()
+    expect(identity.provider).toBeUndefined()
+    expect(identity.isCustomAdapter).toBe(true)
   })
 
   it('keeps the decoded name for non-adapter structural steps (e.g. ERC-4626 exchange rate)', () => {
@@ -57,43 +73,43 @@ describe('resolveOracleAdapterIdentity', () => {
   })
 })
 
-describe('getRouterRecognition (LITE-236)', () => {
+describe('getRouterIndexStatus (LITE-236)', () => {
   const router = '0xabc0000000000000000000000000000000000001'
   const otherRouter = '0xdef0000000000000000000000000000000000002'
 
   it('returns null when the allowlist is unavailable (empty set)', () => {
-    expect(getRouterRecognition([router], new Set())).toBeNull()
+    expect(getRouterIndexStatus([router], new Set())).toBeNull()
   })
 
   it('returns null when there are no router addresses to check', () => {
     const recognized = new Set([router])
-    expect(getRouterRecognition([], recognized)).toBeNull()
-    expect(getRouterRecognition([undefined, null], recognized)).toBeNull()
+    expect(getRouterIndexStatus([], recognized)).toBeNull()
+    expect(getRouterIndexStatus([undefined, null], recognized)).toBeNull()
   })
 
-  it('returns "recognized" when every router is in the allowlist', () => {
+  it('returns "indexed" when every router is in the V3 router set', () => {
     const recognized = new Set([router, otherRouter])
-    expect(getRouterRecognition([router, otherRouter], recognized)).toBe('recognized')
+    expect(getRouterIndexStatus([router, otherRouter], recognized)).toBe('indexed')
   })
 
   it('matches addresses case-insensitively', () => {
     const recognized = new Set([router])
-    expect(getRouterRecognition([router.toUpperCase()], recognized)).toBe('recognized')
+    expect(getRouterIndexStatus([router.toUpperCase()], recognized)).toBe('indexed')
   })
 
   it('ignores nullish entries when classifying', () => {
     const recognized = new Set([router])
-    expect(getRouterRecognition([undefined, router, null], recognized)).toBe('recognized')
+    expect(getRouterIndexStatus([undefined, router, null], recognized)).toBe('indexed')
   })
 
-  it('returns "unrecognized" when any router is missing from the allowlist', () => {
+  it('returns "not-indexed" when any router is missing from the V3 set', () => {
     const recognized = new Set([router])
-    expect(getRouterRecognition([router, otherRouter], recognized)).toBe('unrecognized')
+    expect(getRouterIndexStatus([router, otherRouter], recognized)).toBe('not-indexed')
   })
 })
 
 describe('normalizeOracleAdapterCheckSeverity', () => {
-  it('accepts oracle-checks wire casing', () => {
+  it('accepts V3 severity casing', () => {
     expect(normalizeOracleAdapterCheckSeverity('High')).toBe(OracleAdapterCheckSeverity.High)
     expect(normalizeOracleAdapterCheckSeverity('Med')).toBe(OracleAdapterCheckSeverity.Medium)
     expect(normalizeOracleAdapterCheckSeverity('Info')).toBe(OracleAdapterCheckSeverity.Info)
@@ -103,16 +119,5 @@ describe('normalizeOracleAdapterCheckSeverity', () => {
     expect(normalizeOracleAdapterCheckSeverity(OracleAdapterCheckSeverity.High)).toBe(OracleAdapterCheckSeverity.High)
     expect(normalizeOracleAdapterCheckSeverity('wat')).toBe(OracleAdapterCheckSeverity.Info)
     expect(normalizeOracleAdapterCheckSeverity(undefined)).toBe(OracleAdapterCheckSeverity.Info)
-  })
-})
-
-describe('getChecksStatus', () => {
-  it('treats normalized high-severity failures as negative', () => {
-    expect(getChecksStatus([{
-      id: 'Source code provenance',
-      message: 'Contract metadata hash is not recognized.',
-      pass: false,
-      severity: normalizeOracleAdapterCheckSeverity('High'),
-    }])).toBe('negative')
   })
 })

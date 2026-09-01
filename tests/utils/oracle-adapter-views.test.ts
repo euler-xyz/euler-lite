@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Address } from 'viem'
 import type { EVault, OracleRouteStep } from '@eulerxyz/euler-v2-sdk'
 import type { OracleAdapterMeta } from '~/entities/oracle'
-import { OracleAdapterCheckSeverity } from '~/entities/oracle'
+import { OracleAdapterCheckOutcome, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { buildOracleAdapterView, collectOracleRouteSteps } from '~/utils/oracle-adapter-views'
 
 const oracle = '0x000000000000000000000000000000000000A111' as Address
@@ -19,19 +19,28 @@ const adapterStep = (overrides: Partial<OracleRouteStep> = {}): OracleRouteStep 
   ...overrides,
 } as OracleRouteStep)
 
+const assessed = (overrides: Partial<OracleAdapterMeta> = {}): OracleAdapterMeta => ({
+  oracle,
+  recognized: true,
+  checksStatus: null,
+  inActiveRoute: true,
+  checks: [],
+  ...overrides,
+})
+
 describe('buildOracleAdapterView', () => {
   it('enriches a recognized adapter from curated metadata', () => {
     const meta: Record<string, OracleAdapterMeta> = {
-      [oracle.toLowerCase()]: {
-        oracle,
+      [oracle.toLowerCase()]: assessed({
         base: weth,
         quote: usd,
         name: 'Chainlink WETH/USD',
         provider: 'Chainlink',
         methodology: 'Market price',
         label: 'Chainlink WETH/USD (Primary)',
-        checks: [{ id: 'staleness', message: 'ok', pass: true, severity: OracleAdapterCheckSeverity.Info }],
-      },
+        checksStatus: 'positive',
+        checks: [{ id: 'staleness', message: 'ok', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.Info }],
+      }),
     }
     const view = buildOracleAdapterView(adapterStep(), meta)
 
@@ -55,16 +64,35 @@ describe('buildOracleAdapterView', () => {
     expect(view.checksStatus).toBeNull()
   })
 
+  it('does not let unrecognized decoded config influence labels or price direction', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        recognized: false,
+        base: usd,
+        quote: weth,
+        label: 'Spoofed feed',
+        provider: 'Spoofed provider',
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.isCustomAdapter).toBe(true)
+    expect(view.label).toBeUndefined()
+    expect(view.invertPrice).toBe(false)
+    expect(view.assessmentPairMatchesRoute).toBeNull()
+    expect(view.checks).toBeUndefined()
+    expect(view.checksStatus).toBeNull()
+  })
+
   it('keeps the configured route separate from a proxy feed label', () => {
     const meta: Record<string, OracleAdapterMeta> = {
-      [oracle.toLowerCase()]: {
-        oracle,
+      [oracle.toLowerCase()]: assessed({
         base: psUsdc,
         quote: usd,
         provider: 'Chainlink',
         methodology: 'Market Price',
         label: 'USDC / USD (0.25%, 82800s)',
-      },
+      }),
     }
     const view = buildOracleAdapterView(adapterStep({ base: psUsdc }), meta)
 
@@ -83,16 +111,50 @@ describe('buildOracleAdapterView', () => {
 
   it('marks a high-severity failing check as a negative status', () => {
     const meta: Record<string, OracleAdapterMeta> = {
-      [oracle.toLowerCase()]: {
-        oracle,
+      [oracle.toLowerCase()]: assessed({
         provider: 'Chainlink',
-        checks: [{ id: 'staleness', message: 'stale', pass: false, severity: OracleAdapterCheckSeverity.High }],
-      },
+        checksStatus: 'negative',
+        checks: [{ id: 'staleness', message: 'stale', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High }],
+      }),
     }
     const view = buildOracleAdapterView(adapterStep(), meta)
 
     expect(view.checksStatus).toBe('negative')
     expect(view.failedChecks).toHaveLength(1)
+  })
+
+  it('uses the V3 aggregate for unknown outcomes instead of treating them as failures', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        provider: 'Chainlink',
+        checksStatus: 'warning',
+        checks: [{ id: 'liveness', message: 'inconclusive', outcome: OracleAdapterCheckOutcome.Unknown, severity: OracleAdapterCheckSeverity.Medium }],
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.checksStatus).toBe('warning')
+    expect(view.failedChecks).toHaveLength(0)
+    expect(view.unknownChecks).toHaveLength(1)
+  })
+
+  it('does not apply an assessment health verdict to an unrelated route pair', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        base: psUsdc,
+        quote: usd,
+        label: 'psUSDC / USD',
+        checksStatus: 'negative',
+        checks: [{ id: 'quote-liveness', message: 'failed', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High }],
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.assessmentPairMatchesRoute).toBe(false)
+    expect(view.label).toBeUndefined()
+    expect(view.checks).toBeUndefined()
+    expect(view.checksStatus).toBeNull()
+    expect(view.failedChecks).toHaveLength(0)
   })
 })
 

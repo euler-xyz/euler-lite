@@ -4,7 +4,7 @@ import type {
   EVault,
   OracleRouteStep,
 } from '@eulerxyz/euler-v2-sdk'
-import { getRouterRecognition, OracleAdapterCheckSeverity } from '~/entities/oracle'
+import { getRouterIndexStatus, OracleAdapterCheckOutcome, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
 import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
@@ -21,7 +21,7 @@ const props = defineProps<{
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
-const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
+const { indexedRouters, indexedRoutersChainId, loadIndexedRouters } = useEulerOracleRouters()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -74,18 +74,18 @@ watch(
 watch(
   chainId,
   (id) => {
-    if (id) loadRecognizedRouters(id)
+    if (id) loadIndexedRouters(id)
   },
   { immediate: true },
 )
 
-// LITE-236: flag whether the vault's price oracle (EulerRouter) was deployed by the
-// recognized EulerRouterFactory. Null while the allowlist is still loading for the
-// active chain or unavailable, so we never show a false "unrecognized" warning.
-const routerRecognition = computed(() => {
-  if (recognizedRoutersChainId.value !== chainId.value) return null
+// Flag whether Data V3 has indexed the vault's EulerRouter. This is an index
+// membership signal, not an independent security verdict. Null while the
+// active chain is loading or the router index is unavailable.
+const routerIndexStatus = computed(() => {
+  if (indexedRoutersChainId.value !== chainId.value) return null
   const routerAddresses = sourceVaults.value.map(vault => vault.oracle?.oracle)
-  return getRouterRecognition(routerAddresses, recognizedRouters.value)
+  return getRouterIndexStatus(routerAddresses, indexedRouters.value)
 })
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
@@ -124,6 +124,8 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
   props: {
     modalTitle: 'Checks',
     checks: adapter.checks ?? [],
+    policyVersion: adapter.policyVersion,
+    lastCheckedAt: adapter.lastCheckedAt,
   },
 })
 </script>
@@ -136,22 +138,22 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
   >
     <template #actions>
       <UiHoverPreviewTooltip
-        v-if="routerRecognition === 'unrecognized'"
-        title="Unrecognized oracle router"
-        text="The vault's price oracle was not deployed by the recognized EulerRouterFactory. Verify the oracle configuration before trusting its prices."
+        v-if="routerIndexStatus === 'not-indexed'"
+        title="Oracle router not indexed"
+        text="Data V3 does not currently include this price oracle in its indexed Euler router set. Verify the router and oracle configuration independently."
         placement="top-start"
       >
         <span
           class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
           data-id="data-point"
-          data-field="oracle-router-recognition"
-          data-value="unrecognized"
+          data-field="oracle-router-index-status"
+          data-value="not-indexed"
         >
           <SvgIcon
             name="warning"
             class="!w-12 !h-12"
           />
-          Unrecognized router
+          Router not indexed
         </span>
       </UiHoverPreviewTooltip>
     </template>
@@ -244,14 +246,21 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
                   'bg-success-500': adapter.checksStatus === 'positive',
                   'bg-warning-500': adapter.checksStatus === 'warning',
                   'bg-error-500': adapter.checksStatus === 'negative',
+                  'bg-content-muted': adapter.checksStatus === null,
                 }"
               />
               <span class="text-content-primary">
                 <template v-if="adapter.checksStatus === 'positive'">
-                  {{ adapter.checks.length }} passed
+                  {{ adapter.checks.filter(check => check.outcome === OracleAdapterCheckOutcome.Pass).length }} passed
+                </template>
+                <template v-else-if="adapter.failedChecks.length">
+                  {{ adapter.failedChecks.length }} failed
+                </template>
+                <template v-else-if="adapter.unknownChecks.length">
+                  {{ adapter.unknownChecks.length }} unknown
                 </template>
                 <template v-else>
-                  {{ adapter.failedChecks.length }} failed
+                  No health verdict
                 </template>
               </span>
             </span>
@@ -299,11 +308,23 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
           </div>
         </div>
         <div
-          v-if="adapter.failedChecks.length"
+          v-if="adapter.assessmentPairMatchesRoute === false"
+          class="flex items-start gap-8 border-t border-line-subtle pt-12 text-p3"
+        >
+          <SvgIcon
+            name="warning"
+            class="!w-16 !h-16 mt-1 flex-shrink-0 text-warning-500"
+          />
+          <span class="text-content-secondary">
+            The assessed adapter pair differs from this configured route, so its health verdict is not applied here.
+          </span>
+        </div>
+        <div
+          v-if="adapter.failedChecks.length || adapter.unknownChecks.length"
           class="flex flex-col gap-6 border-t border-line-subtle pt-12 text-p3"
         >
           <div
-            v-for="(check, i) in adapter.failedChecks"
+            v-for="(check, i) in [...adapter.failedChecks, ...adapter.unknownChecks]"
             :key="`${check.id}-${i}`"
             class="flex items-start gap-8"
           >
@@ -311,8 +332,8 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
               name="warning"
               class="!w-16 !h-16 mt-1 flex-shrink-0"
               :class="{
-                'text-error-500': check.severity === OracleAdapterCheckSeverity.High,
-                'text-warning-500': check.severity !== OracleAdapterCheckSeverity.High,
+                'text-error-500': check.outcome === OracleAdapterCheckOutcome.Fail && check.severity === OracleAdapterCheckSeverity.High,
+                'text-warning-500': check.outcome !== OracleAdapterCheckOutcome.Fail || check.severity !== OracleAdapterCheckSeverity.High,
               }"
             />
             <div>

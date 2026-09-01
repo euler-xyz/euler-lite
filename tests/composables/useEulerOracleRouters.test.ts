@@ -14,41 +14,44 @@ function deferred<T>() {
 describe('useEulerOracleRouters', () => {
   afterEach(() => {
     vi.resetModules()
-    vi.unstubAllGlobals()
+    vi.doUnmock('~/composables/useEulerSdk')
   })
 
   it('does not let a stale chain response overwrite the active chain allowlist', async () => {
-    const chainOne = deferred<string[]>()
-    const chainTwo = deferred<string[]>()
+    const chainOne = deferred<Array<{ router: string }>>()
+    const chainTwo = deferred<Array<{ router: string }>>()
 
-    vi.stubGlobal('$fetch', vi.fn((_url: string, options?: { query?: { chainId?: number } }) => {
-      if (options?.query?.chainId === 1) return chainOne.promise
-      if (options?.query?.chainId === 2) return chainTwo.promise
+    const fetchOracleRouters = vi.fn((chainId: number) => {
+      if (chainId === 1) return chainOne.promise
+      if (chainId === 2) return chainTwo.promise
       throw new Error('unexpected chain')
+    })
+    vi.doMock('~/composables/useEulerSdk', () => ({
+      getEulerSdk: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
     }))
 
     const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
     const routers = useEulerOracleRouters()
 
-    const firstLoad = routers.loadRecognizedRouters(1)
-    const secondLoad = routers.loadRecognizedRouters(2)
+    const firstLoad = routers.loadIndexedRouters(1)
+    const secondLoad = routers.loadIndexedRouters(2)
 
-    chainTwo.resolve(['0xBbB0000000000000000000000000000000000002'])
+    chainTwo.resolve([{ router: '0xBbB0000000000000000000000000000000000002' }])
     await secondLoad
 
-    expect(routers.recognizedRoutersChainId.value).toBe(2)
-    expect(routers.recognizedRouters.value.has('0xbbb0000000000000000000000000000000000002')).toBe(true)
+    expect(routers.indexedRoutersChainId.value).toBe(2)
+    expect(routers.indexedRouters.value.has('0xbbb0000000000000000000000000000000000002')).toBe(true)
 
-    chainOne.resolve(['0xAaA0000000000000000000000000000000000001'])
+    chainOne.resolve([{ router: '0xAaA0000000000000000000000000000000000001' }])
     await firstLoad
 
-    expect(routers.recognizedRoutersChainId.value).toBe(2)
-    expect(routers.recognizedRouters.value.has('0xbbb0000000000000000000000000000000000002')).toBe(true)
-    expect(routers.recognizedRouters.value.has('0xaaa0000000000000000000000000000000000001')).toBe(false)
+    expect(routers.indexedRoutersChainId.value).toBe(2)
+    expect(routers.indexedRouters.value.has('0xbbb0000000000000000000000000000000000002')).toBe(true)
+    expect(routers.indexedRouters.value.has('0xaaa0000000000000000000000000000000000001')).toBe(false)
 
-    await routers.loadRecognizedRouters(1)
+    await routers.loadIndexedRouters(1)
 
-    expect(routers.recognizedRoutersChainId.value).toBe(1)
-    expect(routers.recognizedRouters.value.has('0xaaa0000000000000000000000000000000000001')).toBe(true)
+    expect(routers.indexedRoutersChainId.value).toBe(1)
+    expect(routers.indexedRouters.value.has('0xaaa0000000000000000000000000000000000001')).toBe(true)
   })
 })

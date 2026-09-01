@@ -1,16 +1,49 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computed } from 'vue'
 
-const { fetchOracleAdapterMap } = vi.hoisted(() => ({
-  fetchOracleAdapterMap: vi.fn(),
+const { fetchOracleAdapterAssessment, fetchOracleAdapterAssessments } = vi.hoisted(() => ({
+  fetchOracleAdapterAssessment: vi.fn(),
+  fetchOracleAdapterAssessments: vi.fn(),
 }))
 
 vi.mock('~/composables/useEulerSdk', () => ({
-  getEulerSdk: async () => ({ oracleAdapterService: { fetchOracleAdapterMap } }),
+  getEulerSdk: async () => ({
+    oracleAdapterService: {
+      fetchOracleAdapterAssessment,
+      fetchOracleAdapterAssessments,
+    },
+  }),
 }))
 
 const KNOWN_ADAPTER = '0x0000000000000000000000000000000000000001'
 const UNLISTED_ADAPTER = '0x0000000000000000000000000000000000000002'
+
+const assessment = (address = KNOWN_ADAPTER) => ({
+  chainId: 1,
+  address,
+  recognized: true,
+  checksStatus: 'warning',
+  reason: null,
+  inActiveRoute: true,
+  adapterClass: 'ChainlinkOracle',
+  label: 'Known',
+  provider: 'Chainlink',
+  methodology: 'Market Price',
+  model: 'Push',
+  config: { base: KNOWN_ADAPTER, quote: UNLISTED_ADAPTER },
+  findings: [{
+    key: 'quote-liveness',
+    outcome: 'unknown',
+    severity: 'medium',
+    description: 'Quote result is inconclusive',
+  }],
+  summary: { passed: 0, failed: 0, unknown: 1, notApplicable: 0 },
+  policyId: 'oracle-adapter-policy',
+  policyVersion: 3,
+  blockNumber: '123',
+  evaluatedAt: '2026-09-01T12:00:00.000Z',
+  lastCheckedAt: '2026-09-01T12:01:00.000Z',
+})
 
 describe('useEulerOracleAdapters', () => {
   afterEach(() => {
@@ -18,50 +51,51 @@ describe('useEulerOracleAdapters', () => {
     vi.clearAllMocks()
   })
 
-  it('loads the adapter map once per chain and serves later misses from the loaded map', async () => {
-    fetchOracleAdapterMap.mockResolvedValue({
-      [KNOWN_ADAPTER]: { oracle: KNOWN_ADAPTER, name: 'Known' },
-    })
+  it('loads single V3 assessments lazily and caches missing addresses', async () => {
+    fetchOracleAdapterAssessment
+      .mockResolvedValueOnce(assessment())
+      .mockResolvedValueOnce(undefined)
     const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
     const { loadOracleAdapter } = useEulerOracleAdapters()
 
     const known = await loadOracleAdapter(1, KNOWN_ADAPTER)
-    expect(known?.name).toBe('Known')
-    expect(fetchOracleAdapterMap).toHaveBeenCalledTimes(1)
+    expect(known).toMatchObject({
+      name: 'ChainlinkOracle',
+      recognized: true,
+      checksStatus: 'warning',
+      policyVersion: 3,
+    })
+    expect(known?.checks[0]?.outcome).toBe('unknown')
 
-    // A miss on an already-loaded chain must not refetch: the dataset is
-    // fetched whole per chain, so reloading cannot surface an unlisted
-    // adapter — and the rewrite of the store would re-trigger every
-    // subscriber (regression: infinite update loop freezing the explore page
-    // for markets whose custom adapters are absent from the dataset).
-    const missing = await loadOracleAdapter(1, UNLISTED_ADAPTER)
-    expect(missing).toBeUndefined()
-    expect(fetchOracleAdapterMap).toHaveBeenCalledTimes(1)
+    expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toBeUndefined()
+    expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toBeUndefined()
+    expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(2)
+  })
+
+  it('loads the paginated assessment catalogue once per chain', async () => {
+    fetchOracleAdapterAssessments.mockResolvedValue([assessment()])
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, oracleAdapters } = useEulerOracleAdapters()
+
+    await loadAllOracleAdapters(1)
+    await loadAllOracleAdapters(1)
+
+    expect(fetchOracleAdapterAssessments).toHaveBeenCalledTimes(1)
+    expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Chainlink')
   })
 
   it('reloads when the chain changes', async () => {
-    fetchOracleAdapterMap.mockResolvedValue({})
+    fetchOracleAdapterAssessments.mockResolvedValue([])
     const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
     const { loadAllOracleAdapters } = useEulerOracleAdapters()
 
     await loadAllOracleAdapters(1)
-    await loadAllOracleAdapters(1)
-    expect(fetchOracleAdapterMap).toHaveBeenCalledTimes(1)
-
     await loadAllOracleAdapters(2)
-    expect(fetchOracleAdapterMap).toHaveBeenCalledTimes(2)
+    expect(fetchOracleAdapterAssessments).toHaveBeenCalledTimes(2)
   })
 
-  it('does not subscribe the calling effect to adapter loads', async () => {
-    // Calling useEulerOracleAdapters() inside a computed (e.g. via
-    // useEulerLabels() deep in the market-groups pipeline) must not make that
-    // computed a subscriber of the adapter store. The shared reactive view is
-    // built once at module scope because toReactive()'s reactive() wrapper
-    // performs a property read through the proxy at construction time, which
-    // would otherwise register the currently-running effect as a dependent.
-    fetchOracleAdapterMap.mockResolvedValue({
-      [KNOWN_ADAPTER]: { oracle: KNOWN_ADAPTER, name: 'Known' },
-    })
+  it('does not subscribe the calling effect to assessment loads', async () => {
+    fetchOracleAdapterAssessments.mockResolvedValue([assessment()])
     const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
 
     let evaluations = 0
@@ -74,8 +108,7 @@ describe('useEulerOracleAdapters', () => {
     await useEulerOracleAdapters().loadAllOracleAdapters(1)
     expect(bystander.value).toBe(1)
 
-    // Actual readers of the map still react to the load.
     const { oracleAdapters } = useEulerOracleAdapters()
-    expect(oracleAdapters[KNOWN_ADAPTER]?.name).toBe('Known')
+    expect(oracleAdapters[KNOWN_ADAPTER]?.name).toBe('ChainlinkOracle')
   })
 })

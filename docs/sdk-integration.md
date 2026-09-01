@@ -67,7 +67,7 @@ On a cache miss, `buildInstance({ backend, buildQuery })` does:
 1. Resolves `rpcUrls` from `useEulerAddresses()`. RPC routes through `/api/internal/rpc/<chainId>`, absolute on the server and relative on the client.
 2. Builds the static config (see below). For `backend === 'fast'` it picks one of `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` from `browserVaultSource`; for `backend === 'onchain'` it forces `onchainAdapterConfig`.
 3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()] })`.
-4. Wires app-side proxy callbacks via `configureAppProxies` — currently `oracleAdapterService.setQueryOracleAdapters` for `/api/internal/oracle-adapters`. The proxy callback is wrapped in `buildQuery('queryOracleAdapters', …)` so its results land in the same shared cache as native SDK queries.
+4. Wires app-side proxy callbacks via `configureAppProxies` for SDK services that do not natively use the shared V3 base, currently the ABI service. Oracle assessment and router queries use the SDK's native V3 methods and `/api/internal/v3/...` allowlist.
 
 If `buildEulerSDK` rejects, the map entry is cleared so the next caller retries instead of being stuck on a poisoned promise.
 
@@ -215,7 +215,7 @@ export const advanceSdkQueryGeneration = (queryNames: EulerSDKQueryName[]) => { 
 
 Key properties:
 
-- **One `QueryClient` for everything.** Both SDK instances, the Pyth plugin, and the app-side oracle-adapters proxy all write into the same cache.
+- **One `QueryClient` for everything.** Both SDK instances and the Pyth plugin write into the same cache, including native oracle assessment and router queries.
 - **Args serialized via the SDK's `serializeQueryArgs`** (or per-call `context.getCacheKey`). Non-serializable args throw.
 - **`undefined` is rewritten to `null` in / `undefined` out** because vue-query refuses to cache `undefined`.
 

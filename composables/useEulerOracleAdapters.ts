@@ -1,50 +1,75 @@
-import type { OracleAdapterMetadata } from '@eulerxyz/euler-v2-sdk'
+import type { OracleAdapterAssessment } from '@eulerxyz/euler-v2-sdk'
 import { toReactive } from '@vueuse/core'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { getEulerSdk } from '~/composables/useEulerSdk'
-import { type OracleAdapterMeta, normalizeOracleAdapterCheckSeverity } from '~/entities/oracle'
+import {
+  type OracleAdapterCheckOutcome,
+  type OracleAdapterMeta,
+  normalizeOracleAdapterCheckSeverity,
+} from '~/entities/oracle'
 
 const oracleAdaptersRef = shallowRef<Record<string, OracleAdapterMeta>>({})
 const oracleAdaptersChainId = ref<number | null>(null)
-const pendingOracleAdapterLoads = new Map<number, Promise<Record<string, OracleAdapterMeta>>>()
+const oracleAdaptersByChain = new Map<number, Record<string, OracleAdapterMeta>>()
+const fullyLoadedChains = new Set<number>()
+const loadedAdapterKeysByChain = new Map<number, Set<string>>()
+const pendingOracleAdapterLoads = new Map<string, Promise<OracleAdapterMeta | undefined>>()
+const pendingOracleAdapterListLoads = new Map<number, Promise<Record<string, OracleAdapterMeta>>>()
 
-const toOracleAdapterMeta = (metadata: OracleAdapterMetadata): OracleAdapterMeta => ({
-  oracle: metadata.oracle,
-  base: metadata.base,
-  quote: metadata.quote,
-  name: typeof metadata.name === 'string' ? metadata.name : undefined,
-  provider: typeof metadata.provider === 'string' ? metadata.provider : undefined,
-  methodology: typeof metadata.methodology === 'string' ? metadata.methodology : undefined,
-  label: typeof metadata.label === 'string' ? metadata.label : undefined,
-  checks: metadata.checks?.map(check => ({
-    id: typeof check.id === 'string' ? check.id : '',
-    message: typeof check.message === 'string' ? check.message : '',
-    pass: check.pass === true,
-    severity: normalizeOracleAdapterCheckSeverity(check.severity),
+const toOptionalAddress = (value: unknown) =>
+  typeof value === 'string' ? normalizeAddress(value) : undefined
+
+const toOracleAdapterMeta = (assessment: OracleAdapterAssessment): OracleAdapterMeta => ({
+  oracle: assessment.address,
+  base: toOptionalAddress(assessment.config?.base),
+  quote: toOptionalAddress(assessment.config?.quote),
+  name: assessment.adapterClass ?? undefined,
+  provider: assessment.provider ?? undefined,
+  methodology: assessment.methodology ?? undefined,
+  label: assessment.label ?? undefined,
+  model: assessment.model ?? undefined,
+  recognized: assessment.recognized,
+  checksStatus: assessment.checksStatus,
+  reason: assessment.reason ?? undefined,
+  inActiveRoute: assessment.inActiveRoute,
+  checks: assessment.findings.map(finding => ({
+    id: finding.key,
+    message: finding.description,
+    outcome: finding.outcome as OracleAdapterCheckOutcome,
+    severity: normalizeOracleAdapterCheckSeverity(finding.severity),
+    expected: finding.expected,
+    observed: finding.observed,
   })),
+  summary: assessment.summary ?? undefined,
+  policyId: assessment.policyId ?? undefined,
+  policyVersion: assessment.policyVersion ?? undefined,
+  blockNumber: assessment.blockNumber ?? undefined,
+  evaluatedAt: assessment.evaluatedAt ?? undefined,
+  lastCheckedAt: assessment.lastCheckedAt ?? undefined,
 })
 
 const normalizeOracleAdapterMap = (
-  map: Record<string, OracleAdapterMetadata>,
+  assessments: OracleAdapterAssessment[],
 ): Record<string, OracleAdapterMeta> => Object.fromEntries(
-  Object.values(map).map((metadata) => {
-    const meta = toOracleAdapterMeta(metadata)
+  assessments.map((assessment) => {
+    const meta = toOracleAdapterMeta(assessment)
     return [meta.oracle.toLowerCase(), meta]
   }),
 )
 
+const activateChain = (chainId: number) => {
+  if (oracleAdaptersChainId.value === chainId) return
+  oracleAdaptersChainId.value = chainId
+  oracleAdaptersRef.value = oracleAdaptersByChain.get(chainId) ?? {}
+}
+
 const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return
+  activateChain(chainId)
+  if (fullyLoadedChains.has(chainId)) return
 
-  // The dataset is fetched whole per chain, so once it's loaded a lookup miss
-  // means the adapter genuinely isn't in it — reloading cannot surface it and
-  // would replace oracleAdaptersRef with a fresh object, re-triggering every
-  // subscriber (see the loadOracleAdapter miss path, which lands here on each
-  // call for an unlisted adapter).
-  if (oracleAdaptersChainId.value === chainId) return
-
-  const inflight = pendingOracleAdapterLoads.get(chainId)
+  const inflight = pendingOracleAdapterListLoads.get(chainId)
   if (inflight) {
     await inflight
     return
@@ -52,32 +77,73 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
 
   const promise = (async () => {
     const sdk = await getEulerSdk()
-    const map = normalizeOracleAdapterMap(await sdk.oracleAdapterService.fetchOracleAdapterMap(chainId))
-    oracleAdaptersRef.value = map
-    oracleAdaptersChainId.value = chainId
+    const assessments = await sdk.oracleAdapterService.fetchOracleAdapterAssessments(chainId)
+    const map = normalizeOracleAdapterMap(assessments)
+    oracleAdaptersByChain.set(chainId, map)
+    loadedAdapterKeysByChain.set(chainId, new Set(Object.keys(map)))
+    fullyLoadedChains.add(chainId)
+    if (oracleAdaptersChainId.value === chainId) {
+      oracleAdaptersRef.value = map
+    }
     return map
   })()
 
-  pendingOracleAdapterLoads.set(chainId, promise)
+  pendingOracleAdapterListLoads.set(chainId, promise)
   try {
     await promise
   }
   catch (err) {
-    logWarn('useEulerOracleAdapters', `Failed to load oracle adapters for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+    logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessments for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
   }
   finally {
-    pendingOracleAdapterLoads.delete(chainId)
+    pendingOracleAdapterListLoads.delete(chainId)
   }
 }
 
 const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
-  const key = normalizeAddress(oracleAddress).toLowerCase()
-  if (oracleAdaptersChainId.value === chainId && oracleAdaptersRef.value[key]) {
-    return oracleAdaptersRef.value[key]
-  }
+  if (!Number.isInteger(chainId) || chainId <= 0) return undefined
+  activateChain(chainId)
+  const address = normalizeAddress(oracleAddress)
+  const key = address.toLowerCase()
+  const loaded = oracleAdaptersRef.value[key]
+  if (loaded) return loaded
+  if (fullyLoadedChains.has(chainId)) return undefined
+  if (loadedAdapterKeysByChain.get(chainId)?.has(key)) return undefined
 
-  await loadAllOracleAdapters(chainId)
-  return oracleAdaptersChainId.value === chainId ? oracleAdaptersRef.value[key] : undefined
+  const requestKey = `${chainId}:${key}`
+  const inflight = pendingOracleAdapterLoads.get(requestKey)
+  if (inflight) return inflight
+
+  const promise = (async () => {
+    const sdk = await getEulerSdk()
+    const assessment = await sdk.oracleAdapterService.fetchOracleAdapterAssessment(chainId, address)
+    const loadedKeys = loadedAdapterKeysByChain.get(chainId) ?? new Set<string>()
+    loadedKeys.add(key)
+    loadedAdapterKeysByChain.set(chainId, loadedKeys)
+    if (!assessment) return undefined
+    const meta = toOracleAdapterMeta(assessment)
+    const chainMap = {
+      ...(oracleAdaptersByChain.get(chainId) ?? {}),
+      [key]: meta,
+    }
+    oracleAdaptersByChain.set(chainId, chainMap)
+    if (oracleAdaptersChainId.value === chainId) {
+      oracleAdaptersRef.value = chainMap
+    }
+    return meta
+  })()
+
+  pendingOracleAdapterLoads.set(requestKey, promise)
+  try {
+    return await promise
+  }
+  catch (err) {
+    logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessment ${address} on chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+    return undefined
+  }
+  finally {
+    pendingOracleAdapterLoads.delete(requestKey)
+  }
 }
 
 const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
@@ -87,11 +153,8 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
 
 // Module-level singleton: toReactive() wraps the computed in reactive(), whose
 // isReadonly() probe reads a property through the proxy — a reactive read of
-// the computed at construction time. Built per-call inside useEulerOracleAdapters,
-// that read would subscribe whatever effect is currently running (e.g. a computed
-// that reaches useEulerLabels() mid-evaluation) to oracleAdaptersRef, coupling
-// unrelated reactive state to oracle-adapter loads. Constructing it once at
-// module init (no active effect) keeps the subscription surface to actual readers.
+// the computed at construction time. Constructing it once with no active effect
+// keeps the subscription surface limited to actual assessment readers.
 const oracleAdapters = toReactive(computed(() => oracleAdaptersRef.value))
 
 export const useEulerOracleAdapters = () => ({

@@ -1,7 +1,7 @@
 import type { Address } from 'viem'
 import type { EVault, OracleRouteStep, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import {
-  getChecksStatus,
+  OracleAdapterCheckOutcome,
   resolveOracleAdapterIdentity,
   type OracleAdapterCheck,
   type OracleAdapterMeta,
@@ -34,6 +34,10 @@ export type OracleAdapterView = {
   checks?: OracleAdapterCheck[]
   checksStatus: 'positive' | 'warning' | 'negative' | null
   failedChecks: OracleAdapterCheck[]
+  unknownChecks: OracleAdapterCheck[]
+  assessmentPairMatchesRoute: boolean | null
+  policyVersion?: number
+  lastCheckedAt?: string
 }
 
 // Collects the deduped oracle route steps that price the given liability
@@ -66,8 +70,24 @@ const parseAdapterLabel = (label: string | undefined): { primary: string, suffix
       }
     : undefined
 
-// Enriches one oracle route step into a display view, resolving its identity
-// from the curated oracle-checks dataset (see resolveOracleAdapterIdentity).
+const assessmentPairMatchesRoute = (
+  step: OracleRouteStep,
+  meta: OracleAdapterMeta | undefined,
+): boolean | null => {
+  if (!meta?.base || !meta.quote) return null
+  const stepBase = step.base.toLowerCase()
+  const stepQuote = step.quote.toLowerCase()
+  const metaBase = meta.base.toLowerCase()
+  const metaQuote = meta.quote.toLowerCase()
+  return (
+    (stepBase === metaBase && stepQuote === metaQuote)
+    || (stepBase === metaQuote && stepQuote === metaBase)
+  )
+}
+
+// Enriches one oracle route step into a display view, resolving adapter
+// identity and health from Data V3 while keeping the live decoded route as a
+// separate input.
 export const buildOracleAdapterView = (
   step: OracleRouteStep,
   oracleAdapters: Record<string, OracleAdapterMeta>,
@@ -75,30 +95,37 @@ export const buildOracleAdapterView = (
   const isAdapter = isOracleAdapterRouteStep(step)
   const meta = isAdapter ? oracleAdapters[step.oracle.toLowerCase()] : undefined
   const { name, provider, isCustomAdapter } = resolveOracleAdapterIdentity(step, meta, isAdapter)
-  const checks = meta?.checks
+  const trustedMeta = meta?.recognized ? meta : undefined
+  const pairMatches = assessmentPairMatchesRoute(step, trustedMeta)
+  const assessmentApplies = pairMatches !== false
+  const checks = assessmentApplies ? trustedMeta?.checks : undefined
   return {
     key: getOracleRouteStepKey(step),
     kind: step.kind,
     oracle: step.oracle,
     base: step.base,
     quote: step.quote,
-    metaBase: meta?.base,
-    metaQuote: meta?.quote,
+    metaBase: trustedMeta?.base,
+    metaQuote: trustedMeta?.quote,
     name,
     provider,
     isCustomAdapter,
-    methodology: meta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
+    methodology: trustedMeta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name),
-    label: parseAdapterLabel(meta?.label),
+    label: parseAdapterLabel(assessmentApplies ? trustedMeta?.label : undefined),
     invertPrice: shouldInvertOraclePrice({
-      metaBase: meta?.base,
-      metaQuote: meta?.quote,
+      metaBase: trustedMeta?.base,
+      metaQuote: trustedMeta?.quote,
       callerBase: step.base,
       callerQuote: step.quote,
     }),
     checks,
-    checksStatus: getChecksStatus(checks),
-    failedChecks: checks?.filter(c => !c.pass) ?? [],
+    checksStatus: trustedMeta && assessmentApplies ? trustedMeta.checksStatus : null,
+    failedChecks: checks?.filter(c => c.outcome === OracleAdapterCheckOutcome.Fail) ?? [],
+    unknownChecks: checks?.filter(c => c.outcome === OracleAdapterCheckOutcome.Unknown) ?? [],
+    assessmentPairMatchesRoute: pairMatches,
+    policyVersion: assessmentApplies ? trustedMeta?.policyVersion : undefined,
+    lastCheckedAt: assessmentApplies ? trustedMeta?.lastCheckedAt : undefined,
   }
 }
 

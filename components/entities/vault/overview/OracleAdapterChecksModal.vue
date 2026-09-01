@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
+import { OracleAdapterCheckOutcome, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
 
 defineEmits(['close'])
 
 const {
   modalTitle = 'Checks',
   checks,
+  policyVersion,
+  lastCheckedAt,
   inline = false,
   close = true,
 } = defineProps<{
   modalTitle?: string
   checks: OracleAdapterCheck[]
+  policyVersion?: number
+  lastCheckedAt?: string
   inline?: boolean
   close?: boolean
 }>()
@@ -79,6 +83,12 @@ const getCheckMessageParts = (message: string): CheckMessagePart[] => {
 const copyAddress = (address: string) => {
   copyToClipboard(address, getAddressCopyKey(address)).catch(() => {})
 }
+
+const formattedLastCheckedAt = computed(() => {
+  if (!lastCheckedAt) return undefined
+  const date = new Date(lastCheckedAt)
+  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString()
+})
 </script>
 
 <template>
@@ -90,6 +100,14 @@ const copyAddress = (address: string) => {
     @close="$emit('close')"
   >
     <div class="flex flex-col gap-10">
+      <p
+        v-if="policyVersion != null || formattedLastCheckedAt"
+        class="text-p4 text-content-tertiary"
+      >
+        <span v-if="policyVersion != null">Policy v{{ policyVersion }}</span>
+        <span v-if="policyVersion != null && formattedLastCheckedAt"> · </span>
+        <span v-if="formattedLastCheckedAt">Checked {{ formattedLastCheckedAt }}</span>
+      </p>
       <div
         v-for="(check, i) in checks"
         :key="`${check.id}-${i}`"
@@ -98,13 +116,14 @@ const copyAddress = (address: string) => {
         <span
           class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
           :class="{
-            'bg-success-500': check.pass,
-            'bg-error-500': !check.pass && check.severity === OracleAdapterCheckSeverity.High,
-            'bg-warning-500': !check.pass && check.severity !== OracleAdapterCheckSeverity.High,
+            'bg-success-500': check.outcome === OracleAdapterCheckOutcome.Pass,
+            'bg-error-500': check.outcome === OracleAdapterCheckOutcome.Fail && check.severity === OracleAdapterCheckSeverity.High,
+            'bg-warning-500': check.outcome === OracleAdapterCheckOutcome.Unknown || (check.outcome === OracleAdapterCheckOutcome.Fail && check.severity !== OracleAdapterCheckSeverity.High),
+            'bg-content-muted': check.outcome === OracleAdapterCheckOutcome.NotApplicable,
           }"
         >
           <SvgIcon
-            :name="check.pass ? 'check' : 'close'"
+            :name="check.outcome === OracleAdapterCheckOutcome.Pass ? 'check' : check.outcome === OracleAdapterCheckOutcome.Fail ? 'close' : check.outcome === OracleAdapterCheckOutcome.Unknown ? 'warning' : 'info-circle'"
             class="!w-10 !h-10 text-white"
           />
         </span>
