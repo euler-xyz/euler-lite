@@ -20,6 +20,9 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
   if (!assetInfo || amount === undefined || amount === 'max' || amount === 'remaining') return undefined
   return `${String(amount)} ${assetInfo.symbol}`
 }
+
+const getDisplayAmount = (assetInfo: NonNullable<DisplayStep['assetInfo']>) =>
+  assetInfo.rawAmount ? String(assetInfo.amount) : formatNumber(assetInfo.amount, 8, 0)
 </script>
 
 <template>
@@ -50,7 +53,7 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
               :exact="getFullAmountText(step.assetInfo)!"
               :placement="step.index === 1 ? 'bottom' : 'top'"
             >
-              {{ step.assetInfo.estimated ? '~' : '' }}{{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;{{ step.assetInfo.symbol }}
+              {{ step.assetInfo.estimated ? '~' : '' }}{{ getDisplayAmount(step.assetInfo) }}&nbsp;{{ step.assetInfo.symbol }}
             </UiExactAmount>
           </template>
           <template v-else>
@@ -85,7 +88,7 @@ const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
               :exact="getFullAmountText(step.toAssetInfo)!"
               :placement="step.index === 1 ? 'bottom' : 'top'"
             >
-              {{ step.toAssetInfo.estimated ? '~' : '' }}{{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;{{ step.toAssetInfo.symbol }}
+              {{ step.toAssetInfo.estimated ? '~' : '' }}{{ getDisplayAmount(step.toAssetInfo) }}&nbsp;{{ step.toAssetInfo.symbol }}
             </UiExactAmount>
           </template>
           <template v-else>

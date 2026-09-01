@@ -1,9 +1,9 @@
 const SAFE_REVIEWED_SUBMISSION_LOCK_NAME = 'euler-lite:safe-reviewed-submission-storage'
 
 /**
- * Serialize the read-modify-write sections of Safe submission persistence
- * across browser tabs. Durable records survive reloads; the Web Lock closes
- * the live-tab race where two tabs could otherwise both observe no record.
+ * Serialize Safe submission persistence across browser tabs. The dispatch
+ * adapter retains the acquired lock across its wallet handoff, while smaller
+ * reconciliation and manual-clear mutations use it for one operation.
  */
 export const acquireSafeReviewedSubmissionLock = async (): Promise<() => void> => {
   if (typeof navigator === 'undefined' || !navigator.locks) {

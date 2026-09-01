@@ -15,7 +15,10 @@ export interface SafeCallsStatus {
 export interface SafeAdapterClient {
   assertAtomicCapability(envelope: SafeTransportEnvelope): Promise<void>
   reserveSubmission(identity: SafeSubmissionIdentity): Promise<string>
+  /** Persist the calls ID and release the live handoff lock. */
   recordCallsId(reservationId: string, callsId: string): Promise<void>
+  /** Release the live handoff lock while retaining its unresolved reservation. */
+  releaseSubmission(reservationId: string): Promise<void>
   clearSubmission(reservationId: string): Promise<void>
   sendCalls(envelope: SafeTransportEnvelope): Promise<string>
   waitForExecution(callsId: string): Promise<SafeCallsStatus>
@@ -69,6 +72,13 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
       chainId: execution.requestSet.wallet.chainId,
     }
     const reservationId = await this.client.reserveSubmission(identity)
+    try {
+      await callbacks.beforeDispatch(0)
+    }
+    catch (error) {
+      await this.client.clearSubmission(reservationId)
+      throw error
+    }
 
     let callsId: string
     try {
@@ -79,13 +89,18 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
         await this.client.clearSubmission(reservationId)
         throw new ProvenPreDispatchCancellationError()
       }
+      await this.client.releaseSubmission(reservationId)
       throw new DispatchStatusUnknownError()
     }
-    if (!isSafeCallsId(callsId)) throw new DispatchStatusUnknownError('Safe returned no valid calls ID')
+    if (!isSafeCallsId(callsId)) {
+      await this.client.releaseSubmission(reservationId)
+      throw new DispatchStatusUnknownError('Safe returned no valid calls ID')
+    }
     try {
       await this.client.recordCallsId(reservationId, callsId)
     }
     catch {
+      await this.client.releaseSubmission(reservationId)
       throw new DispatchStatusUnknownError('Safe returned a calls ID that could not be persisted. Verify the proposal before retrying.')
     }
     await callbacks.recordExternalId(0, 'calls-id', callsId)

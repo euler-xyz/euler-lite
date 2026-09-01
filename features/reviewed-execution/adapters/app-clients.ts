@@ -10,7 +10,7 @@ import {
   findPendingSafeReviewedSubmission,
   reservePendingSafeReviewedSubmission,
 } from '~/utils/pending-safe-reviewed-submission'
-import { withSafeReviewedSubmissionLock } from '~/utils/safe-reviewed-submission-lock'
+import { acquireSafeReviewedSubmissionLock, withSafeReviewedSubmissionLock } from '~/utils/safe-reviewed-submission-lock'
 
 interface PublicTransactionClient {
   getTransactionReceipt(args: { hash: Hash }): Promise<{ transactionHash: Hash, status: 'success' | 'reverted', blockNumber: bigint }>
@@ -36,6 +36,8 @@ export const createAppSafeClients = ({
   publicClient: PublicTransactionClient
   onReconciled?: () => void | Promise<void>
 }): { adapter: SafeAdapterClient } => {
+  const activeHandoffs = new Map<string, { storage: Storage, release: () => void }>()
+
   const getStorage = (): Storage => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) return window.localStorage
@@ -44,13 +46,21 @@ export const createAppSafeClients = ({
     throw new Error('Durable Safe submission storage is unavailable. Verify the Safe before retrying.')
   }
 
+  const releaseActiveHandoff = (reservationId: string) => {
+    const active = activeHandoffs.get(reservationId)
+    if (!active) return
+    activeHandoffs.delete(reservationId)
+    active.release()
+  }
+
   return {
     adapter: {
       assertAtomicCapability: async (envelope) => {
         await getSafeAtomicCapability(provider, envelope.from, envelope.chainId)
       },
       reserveSubmission: async (identity) => {
-        return await withSafeReviewedSubmissionLock(async () => {
+        const release = await acquireSafeReviewedSubmissionLock()
+        try {
           const storage = getStorage()
           const pending = findPendingSafeReviewedSubmission(storage, identity.account, identity.chainId)
           if (pending?.callsId) {
@@ -63,6 +73,9 @@ export const createAppSafeClients = ({
               || reconciliation.state === 'cancelled' || reconciliation.state === 'failed') {
               clearPendingSafeReviewedSubmission(storage, pending.reservationId)
               if (reconciliation.state === 'success' || reconciliation.state === 'reverted') await onReconciled?.()
+              if (reconciliation.state === 'success') {
+                throw new Error('The previous Safe proposal succeeded. Refresh, prepare, and review the operation again before submitting.')
+              }
             }
             else {
               throw new Error('A previous Safe proposal is still pending or could not be reconciled. Check Safe before retrying.')
@@ -82,13 +95,41 @@ export const createAppSafeClients = ({
             chainId: identity.chainId,
             createdAt: Date.now(),
           })
+          activeHandoffs.set(reservationId, { storage, release })
           return reservationId
-        })
+        }
+        catch (error) {
+          release()
+          throw error
+        }
       },
       recordCallsId: async (reservationId, callsId) => {
+        const active = activeHandoffs.get(reservationId)
+        if (active) {
+          try {
+            attachPendingSafeCallsId(active.storage, reservationId, callsId)
+          }
+          finally {
+            releaseActiveHandoff(reservationId)
+          }
+          return
+        }
         await withSafeReviewedSubmissionLock(() => attachPendingSafeCallsId(getStorage(), reservationId, callsId))
       },
+      releaseSubmission: async (reservationId) => {
+        releaseActiveHandoff(reservationId)
+      },
       clearSubmission: async (reservationId) => {
+        const active = activeHandoffs.get(reservationId)
+        if (active) {
+          try {
+            clearPendingSafeReviewedSubmission(active.storage, reservationId)
+          }
+          finally {
+            releaseActiveHandoff(reservationId)
+          }
+          return
+        }
         await withSafeReviewedSubmissionLock(() => clearPendingSafeReviewedSubmission(getStorage(), reservationId))
       },
       sendCalls: envelope => sendSafeAtomicCalls(provider, envelope),

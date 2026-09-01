@@ -370,6 +370,7 @@ describe('buildTransactionPlanDisplaySteps approval rows', () => {
       symbol: unknownToken,
       address: unknownToken,
       amount: '123 base units',
+      rawAmount: true,
     })
     expect(step?.assetInfo?.address).not.toBe(usdcAsset)
     expect(step?.labelSuffix).toBe(`for spender ${verifier}`)

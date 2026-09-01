@@ -12,6 +12,8 @@ export interface StepAssetInfo {
   /** Optional address used only for the displayed asset logo. */
   iconAddress?: string
   amount?: number | string
+  /** Render an already structured amount verbatim instead of coercing it to a number. */
+  rawAmount?: boolean
   iconUrl?: string
   /** When true, the displayed amount is an estimate (rendered with a "~" prefix). */
   estimated?: boolean
@@ -1181,6 +1183,7 @@ export function buildTransactionPlanDisplaySteps(
               symbol: token,
               address: token,
               amount: `${r.amount.toString()} base units`,
+              rawAmount: true,
             }
         if (r.type === 'approve') {
           steps.push({

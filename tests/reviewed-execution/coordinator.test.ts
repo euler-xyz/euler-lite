@@ -32,10 +32,11 @@ const unusedSafeAdapter: ExecutionTransportAdapter = {
 }
 
 const safeAdapterFor = (
-  client: Omit<SafeAdapterClient, 'reserveSubmission' | 'recordCallsId' | 'clearSubmission'>,
+  client: Omit<SafeAdapterClient, 'reserveSubmission' | 'recordCallsId' | 'releaseSubmission' | 'clearSubmission'>,
 ) => new SafeExecutionAdapter({
   reserveSubmission: async () => 'test-reservation',
   recordCallsId: async () => {},
+  releaseSubmission: async () => {},
   clearSubmission: async () => {},
   ...client,
 })
