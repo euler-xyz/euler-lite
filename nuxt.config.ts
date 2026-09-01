@@ -273,13 +273,6 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
         },
       },
-      '/oracles/**': {
-        headers: {
-          'Cache-Control': 'public, max-age=86400',
-          'CDN-Cache-Control': 'public, max-age=604800',
-          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
-        },
-      },
       '/favicons/**': {
         headers: {
           'Cache-Control': 'public, max-age=86400',
