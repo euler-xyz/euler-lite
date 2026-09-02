@@ -129,7 +129,7 @@ describe('normalizeOracleAdapterCheckSeverity', () => {
 describe('formatOracleCheckTitle', () => {
   it('turns a V3 rule key into a sentence-case title', () => {
     expect(formatOracleCheckTitle('quote-liveness')).toBe('Quote liveness')
-    expect(formatOracleCheckTitle('source-provenance')).toBe('Implementation verification')
+    expect(formatOracleCheckTitle('source-provenance')).toBe('Source provenance')
     expect(formatOracleCheckTitle('cross-legs-recognized')).toBe('Cross legs recognized')
   })
 
@@ -149,7 +149,7 @@ describe('formatOracleCheckTitle', () => {
 describe('formatOracleAssessmentReason', () => {
   it('re-titles the leading rule key', () => {
     expect(formatOracleAssessmentReason('source-provenance: Runtime bytecode does not match any known adapter build.'))
-      .toBe('Implementation verification: Runtime bytecode does not match any known adapter build.')
+      .toBe('Source provenance: Runtime bytecode does not match any known adapter build.')
   })
 
   it('passes through reasons without a key prefix', () => {

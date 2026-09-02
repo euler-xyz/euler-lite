@@ -108,7 +108,7 @@ describe('buildOracleAdapterView', () => {
     expect(view.checksStatus).toBeNull()
     expect(view.failedChecks).toHaveLength(0)
     expect(view.passedChecks).toBe(0)
-    expect(view.reason).toBe('Implementation verification: Runtime bytecode does not match any known adapter build.')
+    expect(view.reason).toBe('Source provenance: Runtime bytecode does not match any known adapter build.')
     expect(view.lastCheckedAt).toBe('2026-09-01T12:00:00.000Z')
   })
 

@@ -156,16 +156,10 @@ const CHECK_TITLE_WORDS: Record<string, string> = {
   xstocks: 'xStocks',
 }
 
-const CHECK_TITLES: Record<string, string> = {
-  'source-provenance': 'Implementation verification',
-}
-
 // Turns a V3 rule key (`pyth-feed-recognized`) into a display title
 // ("Pyth feed recognized"). Keys are stable machine identifiers; deriving the
 // title here lets a new V3 rule render readably without a Lite release.
 export function formatOracleCheckTitle(key: string): string {
-  if (Object.hasOwn(CHECK_TITLES, key)) return CHECK_TITLES[key]
-
   return key
     .split('-')
     .filter(Boolean)
@@ -178,7 +172,7 @@ export function formatOracleCheckTitle(key: string): string {
 }
 
 // V3 formats `reason` as "<rule-key>: <description>". Re-title the key so the
-// line reads like the check list ("Implementation verification: Runtime bytecode …").
+// line reads like the check list ("Source provenance: Runtime bytecode …").
 export function formatOracleAssessmentReason(reason: string): string {
   const match = /^([a-z0-9]+(?:-[a-z0-9]+)*): (.+)$/s.exec(reason)
   if (!match) return reason
