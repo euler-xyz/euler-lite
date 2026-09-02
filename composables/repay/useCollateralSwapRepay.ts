@@ -466,7 +466,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
-    if (isCrossPositionSource.value) return true
     if (isInsufficientSource.value) return true
     if (isInsufficientVaultLiquidity.value) return true
     if (core.isSameAsset.value) {
@@ -481,9 +480,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
 
   const disabledReason = computed(() => {
-    if (isCrossPositionSource.value) {
-      return 'Cross-position collateral repayments must be added to a batch.'
-    }
     if (core.isRepayExceedsDebt.value) {
       return 'Repay amount exceeds outstanding debt'
     }
@@ -826,7 +822,6 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const submit = async () => {
     if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !sourceVault.value) return
-    if (isCrossPositionSource.value) return
     if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
 
     // CowSwap path: skip plan building and simulation

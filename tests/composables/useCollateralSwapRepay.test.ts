@@ -189,6 +189,7 @@ vi.mock('~/composables/useSwapQuotesParallel', () => ({
     })
     return {
       sortedQuoteCards: ref([]),
+      selectedQuoteCard: ref(null),
       selectedProvider: ref(null),
       selectedQuote,
       effectiveQuote,
@@ -325,7 +326,7 @@ describe('useCollateralSwapRepay', () => {
     ))
   })
 
-  it('builds an exact-vault cross-position share repayment without liquidity or early cleanup', async () => {
+  it('builds and simulates an exact-vault cross-position share repayment without liquidity or early cleanup', async () => {
     const selectionId = `${SOURCE_ACCOUNT.toLowerCase()}:${borrowVault.address.toLowerCase()}`
     mocks.crossPositionItems.push({
       id: selectionId,
@@ -343,6 +344,7 @@ describe('useCollateralSwapRepay', () => {
       },
     })
 
+    const runSimulation = vi.fn(async () => false)
     const repay = scope.run(() => useCollateralSwapRepay({
       position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
       borrowVault: computed(() => borrowVault),
@@ -353,7 +355,7 @@ describe('useCollateralSwapRepay', () => {
       isPreparing: ref(false),
       slippage: ref(0.5),
       clearSimulationError: vi.fn(),
-      runSimulation: vi.fn(async () => true),
+      runSimulation,
       getCurrentDebt: () => position.borrowed,
       isEligibleForLiquidation: computed(() => false),
     }))!
@@ -369,10 +371,14 @@ describe('useCollateralSwapRepay', () => {
     expect(repay.sourceBalance.value).toBe(2_500n)
     expect(repay.isSameVaultRepay.value).toBe(true)
     expect(repay.isCrossPositionSource.value).toBe(true)
-    expect(repay.isSubmitDisabled.value).toBe(true)
-    expect(repay.disabledReason.value).toBe('Cross-position collateral repayments must be added to a batch.')
 
     repay.debtAmount.value = '2000'
+    expect(repay.isSubmitDisabled.value).toBe(false)
+    expect(repay.disabledReason.value).toBeUndefined()
+
+    await repay.submit()
+    expect(runSimulation).toHaveBeenCalledWith([], {})
+
     const built = await repay.buildRepayPlan()
 
     expect(built).toEqual([])
