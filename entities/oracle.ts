@@ -133,7 +133,7 @@ export function getOracleAssessmentState(meta: OracleAdapterMeta | undefined): O
 }
 
 // Recognition (identity) rule keys, mirroring Data V3's RECOGNITION_RULE_KEYS
-// plus the custom-adapter adjudication rule (policy v4): when an adjudicated
+// plus the custom-adapter recognition rule (policy v4): when a reviewed
 // custom adapter's deployed bytecode stops matching the pinned fingerprint,
 // the high-severity mismatch finding is the actual explanation of the
 // unrecognized verdict and must not be filtered out of the modal.
@@ -145,7 +145,7 @@ export const ORACLE_IDENTITY_CHECK_KEYS: ReadonlySet<string> = new Set([
   'adapter-exists',
   'adapter-class-known',
   'source-provenance',
-  'custom-adapter-adjudicated',
+  'custom-adapter-recognized',
 ])
 
 export const isOracleIdentityCheck = (check: Pick<OracleAdapterCheck, 'id'>): boolean =>
