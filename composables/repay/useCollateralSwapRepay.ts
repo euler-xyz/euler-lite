@@ -15,6 +15,7 @@ import { getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-p
 import { getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { maxUint256 } from 'viem'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
+import { useCrossPositionRepayCollateralOptions, type CrossPositionRepayCollateralItem } from '~/composables/useCrossPositionRepayCollateralOptions'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useRepaySwapCore } from '~/composables/repay/useRepaySwapCore'
 import { useRepaySwapDetails } from '~/composables/repay/useRepaySwapDetails'
@@ -50,6 +51,7 @@ interface UseCollateralSwapRepayOptions {
 
 interface CollateralSwapRepayPlanSnapshot {
   sourceVault?: EVault
+  sourceAccount?: Address
   amount?: string
   debtAmount?: string
   direction?: SwapperMode
@@ -85,7 +87,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const buildRepayStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { chainId: currentChainId } = useEulerAddresses()
   const { finalizeExecutionUi } = useTxFinalization()
-  const { refreshAllPositions } = useEulerAccount()
+  const { borrowPositions, depositPositions, refreshAllPositions } = useEulerAccount()
   const { account: planAccount } = usePlanAccount()
   const { client: rpcClient } = useRpcClient()
   const { entryCount: batchEntryCount, getMergedPlan } = useTxBatch()
@@ -97,11 +99,20 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   // --- Source vault state ---
   const sourceVault: Ref<EVault | undefined> = ref()
+  const selectedSourceAccount = ref<Address>()
+  const selectedSourceId = ref<string>()
   const sourceAssets = ref(0n)
   const sourceShares = ref(0n)
+  const targetAccount = computed(() => position.value?.subAccount as Address | undefined)
+  const isCrossPositionSource = computed(() => !!selectedSourceAccount.value
+    && !!targetAccount.value
+    && normalizeAddressOrEmpty(selectedSourceAccount.value) !== normalizeAddressOrEmpty(targetAccount.value))
+  const isSameVaultRepay = computed(() => !!sourceVault.value
+    && !!borrowVault.value
+    && normalizeAddressOrEmpty(sourceVault.value.address) === normalizeAddressOrEmpty(borrowVault.value.address))
   const sourceBalance = computed(() => getCashLimitedWithdrawAmount(
     sourceAssets.value,
-    sourceVault.value,
+    isSameVaultRepay.value ? undefined : sourceVault.value,
   ))
   const debtBalance = computed(() => position.value?.borrowed || 0n)
 
@@ -124,7 +135,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     tagContext: 'supply-source',
   })
 
-  const repayCollateralVaults = computed(() => {
+  const currentRepayCollateralVaults = computed<EVault[]>(() => {
     if (!position.value) return []
     const collateralAddresses = position.value.collateralVaults
     const allowed = collateralAddresses.length
@@ -134,16 +145,50 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const filtered = allowed
       ? candidates.filter(vault => allowed.has(normalizeAddressOrEmpty(vault.address)))
       : candidates
-    if (!filtered.length && collateralVault.value) {
+    if (!filtered.length && collateralVault.value && isEVault(collateralVault.value)) {
       return [collateralVault.value]
     }
     return filtered
   })
 
-  const repayCollateralOptions = computed(() => {
-    const allowed = new Set(repayCollateralVaults.value.map(vault => normalizeAddressOrEmpty(vault.address)))
+  const currentRepayCollateralOptions = computed(() => {
+    const allowed = new Set(currentRepayCollateralVaults.value.map(vault => normalizeAddressOrEmpty(vault.address)))
     return swapCollateralOptions.value.filter(option => allowed.has(normalizeAddressOrEmpty(option.vaultAddress)))
   })
+
+  const currentRepayCollateralItems = computed<CrossPositionRepayCollateralItem[]>(() => {
+    const currentPosition = position.value
+    if (!currentPosition) return []
+    const sourceAccount = currentPosition.subAccount as Address
+    return currentRepayCollateralVaults.value.flatMap((vault) => {
+      const option = currentRepayCollateralOptions.value.find(candidate =>
+        normalizeAddressOrEmpty(candidate.vaultAddress) === normalizeAddressOrEmpty(vault.address))
+      if (!option) return []
+      const collateral = currentPosition.collaterals.find(candidate =>
+        normalizeAddressOrEmpty(candidate.vaultAddress) === normalizeAddressOrEmpty(vault.address))
+      const id = `${sourceAccount.toLowerCase()}:${vault.address.toLowerCase()}`
+      return [{
+        id,
+        vault,
+        sourceAccount,
+        assets: collateral?.assets ?? 0n,
+        shares: collateral?.shares ?? 0n,
+        option: { ...option, selectionId: id },
+      }]
+    })
+  })
+
+  const { items: crossPositionRepayCollateralItems } = useCrossPositionRepayCollateralOptions({
+    targetPosition: position,
+    liabilityVault: borrowVault,
+  })
+
+  const repayCollateralItems = computed(() => [
+    ...currentRepayCollateralItems.value,
+    ...crossPositionRepayCollateralItems.value,
+  ])
+  const repayCollateralOptions = computed(() => repayCollateralItems.value.map(item => item.option))
+  const repayCollateralVaults = computed(() => repayCollateralItems.value.map(item => item.vault))
 
   // --- Core swap logic ---
   const core = useRepaySwapCore({
@@ -158,15 +203,16 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     slippage,
     clearSimulationError,
     getCurrentDebt,
-    includeCowSwap: () => !cowSwapForcedOff.value && batchEntryCount.value === 0,
+    includeCowSwap: () => !isCrossPositionSource.value && !cowSwapForcedOff.value && batchEntryCount.value === 0,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
     createIntentsForQuote: quote => [createRepayIntent(quote)],
     buildGasEstimatePlan: buildBatchAwareGasEstimatePlan,
     prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
     getPlanAccount: () => planAccount.value,
     getQuoteAccounts: () => {
-      const subAccount = (position.value?.subAccount || effectiveAddress.value || zeroAddress) as Address
-      return { accountIn: subAccount, accountOut: subAccount }
+      const accountOut = (position.value?.subAccount || effectiveAddress.value || zeroAddress) as Address
+      const accountIn = (selectedSourceAccount.value || accountOut) as Address
+      return { accountIn, accountOut }
     },
   })
 
@@ -207,6 +253,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   // --- Price ratio ---
   const priceRatio = computed(() => {
+    if (isCrossPositionSource.value) return null
     if (!sourceVault.value || !borrowVault.value) return null
     const collateralPrice = getAssetOraclePrice(sourceVault.value)
     const borrowPrice = getAssetOraclePrice(borrowVault.value)
@@ -216,12 +263,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   // --- Collateral-specific computeds ---
   const collateralAmountAfter = computed(() => {
+    if (isCrossPositionSource.value) return null
     if (!sourceVault.value || core.spent.value === null) return null
     const nextAssets = sourceAssets.value - core.spent.value
     return nanoToValue(nextAssets > 0n ? nextAssets : 0n, sourceVault.value.shares.decimals)
   })
 
   const nextLiquidationLtv = computed(() => {
+    if (isCrossPositionSource.value) return null
     if (!borrowVault.value || !sourceVault.value) return null
     const match = borrowVault.value.collaterals.find(
       ltv => normalizeAddressOrEmpty(ltv.address) === normalizeAddressOrEmpty(sourceVault.value?.address),
@@ -280,12 +329,14 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const [currentSnapshot, nextSnapshot] = await Promise.all([
       getCollateralApySnapshot(currentPosition, currentBorrowVault),
       getCollateralApySnapshot(currentPosition, currentBorrowVault, {
-        deltas: [{
-          vaultAddress: currentSourceVault.address,
-          assetsDelta: -spent,
-          cashDelta: sourceIsLiability ? 0n : -spent,
-          projectRates: spent > 0n,
-        }],
+        deltas: isCrossPositionSource.value
+          ? []
+          : [{
+              vaultAddress: currentSourceVault.address,
+              assetsDelta: -spent,
+              cashDelta: sourceIsLiability ? 0n : -spent,
+              projectRates: spent > 0n,
+            }],
         ...(repayAmount !== null
           ? {
               liabilityRateDelta: {
@@ -347,9 +398,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     return health.nextHealth.value < 1
   })
 
-  // Collateral-swap repay. Same-asset path: source.WITHDRAW + liability.SKIM
-  // + liability.REPAY_WITH_SHARES. Cross-asset path: source.WITHDRAW + swap +
-  // liability.REPAY (done by swapper). Full repay: + collateral.TRANSFER.
+  // Collateral-swap repay. Exact-vault path: liability.REPAY_WITH_SHARES only.
+  // Same-asset cross-vault path: source.WITHDRAW + liability.SKIM +
+  // liability.REPAY_WITH_SHARES. Cross-asset path: source.WITHDRAW + swap +
+  // liability.REPAY (done by swapper). Same-position full repay: + collateral.TRANSFER.
   // Heuristic: for cross-asset paths, core.debtRepaid uses the quote's
   // amountOut (pre-slippage). See useSavingsRepay for the precision note.
   const isEffectivelyFullRepay = computed(() => {
@@ -360,10 +412,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const collateralSwapRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
-    if (sourceVault.value) steps.push({ vault: sourceVault.value as EVault, op: OP_WITHDRAW })
+    if (sourceVault.value && !isSameVaultRepay.value) steps.push({ vault: sourceVault.value as EVault, op: OP_WITHDRAW })
     if (borrowVault.value) {
-      if (core.isSameAsset.value) {
-        // Same-asset: withdraw → skim → repayWithShares
+      if (isSameVaultRepay.value) {
+        steps.push({ vault: borrowVault.value as EVault, op: OP_REPAY_WITH_SHARES })
+      }
+      else if (core.isSameAsset.value) {
         steps.push({ vault: borrowVault.value as EVault, op: OP_SKIM })
         steps.push({ vault: borrowVault.value as EVault, op: OP_REPAY_WITH_SHARES })
       }
@@ -372,8 +426,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         steps.push({ vault: borrowVault.value as EVault, op: OP_REPAY })
       }
     }
-    if (isEffectivelyFullRepay.value) {
-      for (const vault of repayCollateralVaults.value) {
+    if (isEffectivelyFullRepay.value && !isCrossPositionSource.value) {
+      for (const vault of currentRepayCollateralVaults.value) {
         if (isEVault(vault)) {
           steps.push({ vault, op: OP_TRANSFER })
         }
@@ -397,10 +451,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
   const isInsufficientSource = computed(() => requiredInput.value > 0n && requiredInput.value > sourceAssets.value)
   const isInsufficientVaultLiquidity = computed(() =>
-    requiredInput.value > 0n && requiredInput.value > (sourceVault.value?.availableLiquidity ?? 0n),
+    !isSameVaultRepay.value
+    && requiredInput.value > 0n
+    && requiredInput.value > (sourceVault.value?.availableLiquidity ?? 0n),
   )
   const liquidityWarning = computed<VaultWarning | null>(() => {
-    if (!sourceVault.value) return null
+    if (!sourceVault.value || isSameVaultRepay.value) return null
     return getUtilisationWarning(sourceVault.value, 'repay')
   })
 
@@ -410,6 +466,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     if (findBlockingDisabledOp(collateralSwapRepayPlannedOps.value)) return true
     if (!sourceVault.value || !borrowVault.value) return true
     if (!core.debtAmount.value && !core.amount.value) return true
+    if (isCrossPositionSource.value) return true
     if (isInsufficientSource.value) return true
     if (isInsufficientVaultLiquidity.value) return true
     if (core.isSameAsset.value) {
@@ -424,6 +481,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   })
 
   const disabledReason = computed(() => {
+    if (isCrossPositionSource.value) {
+      return 'Cross-position collateral repayments must be added to a batch.'
+    }
     if (core.isRepayExceedsDebt.value) {
       return 'Repay amount exceeds outstanding debt'
     }
@@ -446,17 +506,37 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       sourceShares.value = 0n
       return
     }
-    const primaryAddress = normalizeAddressOrEmpty(position.value.collateralVault?.address)
+    let sourcePosition = borrowPositions.value.find(candidate =>
+      normalizeAddressOrEmpty(candidate.subAccount) === normalizeAddressOrEmpty(selectedSourceAccount.value))
+    if (!sourcePosition && normalizeAddressOrEmpty(position.value.subAccount) === normalizeAddressOrEmpty(selectedSourceAccount.value)) {
+      sourcePosition = position.value
+    }
+    const sourceSaving = depositPositions.value.find(candidate =>
+      candidate.position.isCollateral
+      && normalizeAddressOrEmpty(candidate.subAccount) === normalizeAddressOrEmpty(selectedSourceAccount.value)
+      && normalizeAddressOrEmpty(candidate.position.vaultAddress) === normalizeAddressOrEmpty(sourceVault.value?.address))
+    if (!sourcePosition && !sourceSaving) {
+      sourceAssets.value = 0n
+      sourceShares.value = 0n
+      return
+    }
+    if (sourceSaving) {
+      sourceAssets.value = sourceSaving.assets
+      sourceShares.value = sourceSaving.shares
+      return
+    }
+    if (!sourcePosition) return
+    const primaryAddress = normalizeAddressOrEmpty(sourcePosition.collateralVault?.address)
     const targetAddress = normalizeAddressOrEmpty(sourceVault.value.address)
     // Source collateral assets/shares from the (layer-aware) position rather than
     // a direct lens read, so it reflects the active batch layer. Unheld ⇒ 0.
-    const match = position.value.collaterals.find(c =>
+    const match = sourcePosition.collaterals.find(c =>
       normalizeAddressOrEmpty(c.vaultAddress) === targetAddress)
-    sourceAssets.value = match?.assets ?? (targetAddress === primaryAddress ? (position.value.supplied || 0n) : 0n)
+    sourceAssets.value = match?.assets ?? (targetAddress === primaryAddress ? (sourcePosition.supplied || 0n) : 0n)
     sourceShares.value = match?.shares ?? 0n
   }
 
-  watch([sourceVault, position], () => {
+  watch([sourceVault, selectedSourceAccount, position, borrowPositions, depositPositions], () => {
     void updateSourceBalance()
   }, { immediate: true })
 
@@ -511,6 +591,11 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     }
 
     const subAccount = position.value.subAccount as Address
+    const sourceAccount = snapshot.sourceAccount ?? selectedSourceAccount.value ?? subAccount
+    const isCrossPosition = normalizeAddressOrEmpty(sourceAccount) !== normalizeAddressOrEmpty(subAccount)
+    if (isCrossPosition && normalizeAddressOrEmpty(source.address) !== normalizeAddressOrEmpty(borrowVault.value.address)) {
+      throw new Error('Cross-position collateral repayment requires the exact liability vault')
+    }
     const sameAsset = snapshot.isSameAsset ?? core.isSameAsset.value
     const amountInput = snapshot.amount ?? core.amount.value
     const debtAmountInput = snapshot.debtAmount ?? core.debtAmount.value
@@ -547,10 +632,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
       liabilityAmount,
       receiver: subAccount,
       fromVault: source.address as Address,
-      fromAccount: subAccount,
+      fromAccount: sourceAccount,
       swapQuote: sameAsset ? undefined : (quote || core.quotes.selectedQuote.value!),
       swapperMode: swapMode,
-      cleanupOnMax: isFullRepay,
+      cleanupOnMax: isFullRepay && !isCrossPosition,
       account,
     })
   }
@@ -562,6 +647,11 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const source = snapshot.sourceVault ?? sourceVault.value
     if (!position.value || !borrowVault.value || !source) throw new Error('Position or vaults not loaded')
     const subAccount = position.value.subAccount as Address
+    const sourceAccount = snapshot.sourceAccount ?? selectedSourceAccount.value ?? subAccount
+    const isCrossPosition = normalizeAddressOrEmpty(sourceAccount) !== normalizeAddressOrEmpty(subAccount)
+    if (isCrossPosition && normalizeAddressOrEmpty(source.address) !== normalizeAddressOrEmpty(borrowVault.value.address)) {
+      throw new Error('Cross-position collateral repayment requires the exact liability vault')
+    }
     const sameAsset = snapshot.isSameAsset ?? core.isSameAsset.value
     const amountInput = snapshot.amount ?? core.amount.value
     const debtAmountInput = snapshot.debtAmount ?? core.debtAmount.value
@@ -579,11 +669,11 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           liabilityAmount: isFullRepay ? maxUint256 : debtNano,
           receiver: subAccount,
           fromVault: source.address as Address,
-          fromAccount: subAccount,
-          cleanupOnMax: isFullRepay,
+          fromAccount: sourceAccount,
+          cleanupOnMax: isFullRepay && !isCrossPosition,
         },
         source: 'position/repay-collateral',
-        subAccounts: [subAccount],
+        subAccounts: isCrossPosition ? [subAccount, sourceAccount] : [subAccount],
       })
     }
     const swapQuote = quote || core.quotes.selectedQuote.value
@@ -736,6 +826,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const submit = async () => {
     if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !sourceVault.value) return
+    if (isCrossPositionSource.value) return
     if (!core.isSameAsset.value && !core.quotes.selectedQuote.value) return
 
     // CowSwap path: skip plan building and simulation
@@ -799,7 +890,18 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
   const initVault = (vault: EVault | undefined) => {
     sourceVault.value = vault
+    selectedSourceAccount.value = position.value?.subAccount as Address | undefined
+    selectedSourceId.value = vault && selectedSourceAccount.value
+      ? `${selectedSourceAccount.value.toLowerCase()}:${vault.address.toLowerCase()}`
+      : undefined
   }
+
+  watch(repayCollateralItems, (items) => {
+    if (!isCrossPositionSource.value || !selectedSourceId.value) return
+    if (items.some(item => item.id === selectedSourceId.value)) return
+    initVault(collateralVault.value && isEVault(collateralVault.value) ? collateralVault.value : undefined)
+    core.resetCore()
+  })
 
   const resetOnTabSwitch = () => {
     core.resetCore()
@@ -807,7 +909,16 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   }
 
   const onSourceVaultChange = (selectedIndex: number) => {
-    core.onSourceVaultChange(selectedIndex, repayCollateralVaults)
+    const next = repayCollateralItems.value[selectedIndex]
+    if (!next) return
+    const changed = selectedSourceId.value !== next.id
+    selectedSourceId.value = next.id
+    selectedSourceAccount.value = next.sourceAccount
+    sourceVault.value = next.vault
+    if (changed) {
+      clearSimulationError()
+      core.resetCore()
+    }
   }
 
   return {
@@ -817,6 +928,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     direction: core.direction,
     debtPercent: core.debtPercent,
     sourceVault,
+    selectedSourceAccount,
+    selectedSourceId,
     sourceAssets,
     sourceBalance,
     debtBalance,
@@ -826,6 +939,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     repayCollateralVaults,
     quotes: core.quotes,
     isSameAsset: core.isSameAsset,
+    isSameVaultRepay,
+    isCrossPositionSource,
     spent: core.spent,
     debtRepaid: core.debtRepaid,
     // Health metrics

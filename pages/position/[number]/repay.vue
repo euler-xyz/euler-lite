@@ -292,6 +292,7 @@ const addToBatchWithoutWarnings = async () => {
   if (formTab.value === 'collateral') {
     const quote = collateral.isSameAsset.value ? undefined : collateral.quotes.selectedQuote.value ?? undefined
     const sourceVault = collateral.sourceVault.value
+    const sourceAccount = collateral.selectedSourceAccount.value
     const sourceAmount = collateral.amount.value
     const sourceDebtAmount = collateral.debtAmount.value
     const sourceDirection = collateral.direction.value
@@ -306,18 +307,21 @@ const addToBatchWithoutWarnings = async () => {
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
       intent: quoteIntents?.[0] ?? collateral.createRepayIntent(quote, {
         sourceVault,
+        sourceAccount,
         amount: sourceAmount,
         debtAmount: sourceDebtAmount,
         direction: sourceDirection,
         isSameAsset,
       }),
       subAccount: position.value.subAccount as Address,
-      affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
+      affectedSubAccounts: collateral.isCrossPositionSource.value
+        ? getAffectedSubAccounts(position.value.subAccount, sourceAccount)
+        : getFullRepayAffectedSubAccounts(isClosing),
       review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : collateral.quotes.effectiveQuoteFetchedAt.value },
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
-    redirectAfterRepayAdd(isClosing)
+    redirectAfterRepayAdd(isClosing && !collateral.isCrossPositionSource.value)
     return
   }
 
@@ -910,6 +914,7 @@ watch(formTab, () => {
                 :asset="collateral.sourceVault.value.asset"
                 :vault="collateral.sourceVault.value"
                 :collateral-options="collateral.repayCollateralOptions.value"
+                :selected-option-id="collateral.selectedSourceId.value"
                 :balance="collateral.sourceBalance.value"
                 :max-handler="collateral.onSourceMax"
                 maxable

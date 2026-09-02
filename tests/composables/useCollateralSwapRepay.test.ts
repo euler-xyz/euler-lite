@@ -4,8 +4,9 @@ import { SwapperMode, type Account, type EVault, type IHasVaultAddress, type Por
 import type { Address } from 'viem'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 
-const { USER, SOURCE_VAULT, sourceVault, borrowVault, position, planAccount, mocks } = vi.hoisted(() => {
+const { USER, SOURCE_ACCOUNT, SOURCE_VAULT, sourceVault, borrowVault, position, sourcePosition, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001' as Address
+  const SOURCE_ACCOUNT = '0x0000000000000000000000000000000000000006' as Address
   const SOURCE_VAULT = '0x0000000000000000000000000000000000000002' as Address
   const SOURCE_ASSET = '0x0000000000000000000000000000000000000003' as Address
   const BORROW_VAULT = '0x0000000000000000000000000000000000000004' as Address
@@ -55,15 +56,33 @@ const { USER, SOURCE_VAULT, sourceVault, borrowVault, position, planAccount, moc
     }],
   } as unknown as PortfolioBorrowPosition<VaultEntity>
 
+  const sourcePosition = {
+    subAccount: SOURCE_ACCOUNT,
+    borrowed: 1_000n,
+    supplied: 2_500n,
+    collateralVault: borrowVault,
+    collateralVaults: [BORROW_VAULT],
+    collaterals: [{
+      vaultAddress: BORROW_VAULT,
+      assets: 2_500n,
+      shares: 2_500n,
+    }],
+  } as unknown as PortfolioBorrowPosition<VaultEntity>
+
   return {
     USER,
+    SOURCE_ACCOUNT,
     SOURCE_VAULT,
     sourceVault,
     borrowVault,
     position,
+    sourcePosition,
     planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
     mocks: {
       getCollateralApySnapshot: vi.fn(),
+      createIntent: vi.fn(),
+      planRepayFromSource: vi.fn(),
+      crossPositionItems: [] as Array<Record<string, unknown>>,
       quoteInstances: [] as Array<{
         amountField: 'amountIn' | 'amountOut'
         selectedQuote: { value: SwapQuote | null }
@@ -101,6 +120,12 @@ vi.mock('~/composables/useSwapCollateralOptions', () => ({
   useSwapCollateralOptions: () => ({
     collateralOptions: ref([]),
     collateralVaults: ref([sourceVault]),
+  }),
+}))
+
+vi.mock('~/composables/useCrossPositionRepayCollateralOptions', () => ({
+  useCrossPositionRepayCollateralOptions: () => ({
+    items: ref(mocks.crossPositionItems),
   }),
 }))
 
@@ -184,10 +209,13 @@ describe('useCollateralSwapRepay', () => {
   let scope: EffectScope
 
   beforeEach(() => {
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
     vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
     vi.clearAllMocks()
     mocks.quoteInstances.length = 0
+    mocks.crossPositionItems.length = 0
+    mocks.createIntent.mockImplementation(input => input)
+    mocks.planRepayFromSource.mockResolvedValue([])
     mocks.getCollateralApySnapshot.mockResolvedValue({
       supplyUsd: 1_000,
       weightedSupplyApy: 1,
@@ -207,13 +235,17 @@ describe('useCollateralSwapRepay', () => {
       effectiveAddress: ref(USER),
     }))
     vi.stubGlobal('useEulerTx', () => ({
-      planRepayFromSource: vi.fn(),
+      planRepayFromSource: mocks.planRepayFromSource,
       executePlan: vi.fn(),
       prefetchPluginData: vi.fn(),
     }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeTxAndRedirect: vi.fn() }))
-    vi.stubGlobal('useEulerAccount', () => ({ refreshAllPositions: vi.fn() }))
+    vi.stubGlobal('useEulerAccount', () => ({
+      borrowPositions: ref([position, sourcePosition]),
+      depositPositions: ref([]),
+      refreshAllPositions: vi.fn(),
+    }))
     vi.stubGlobal('usePlanAccount', () => ({ account: shallowRef(planAccount) }))
     vi.stubGlobal('useRpcClient', () => ({ client: ref(null) }))
     vi.stubGlobal('useTxBatch', () => ({
@@ -222,7 +254,7 @@ describe('useCollateralSwapRepay', () => {
     }))
     vi.stubGlobal('useCowSwapEligibility', () => ({ cowSwapForcedOff: ref(false) }))
     vi.stubGlobal('useUserSettings', () => ({
-      settings: ref({ enableIntrinsicApy: false }),
+      settings: ref({ enableIntrinsicApy: false, enableRewardsApy: false, enableAdvancedMode: true }),
     }))
     vi.stubGlobal('useRewardsApy', () => ({
       getSupplyRewardApy: vi.fn(() => 0),
@@ -291,5 +323,76 @@ describe('useCollateralSwapRepay', () => {
         },
       },
     ))
+  })
+
+  it('builds an exact-vault cross-position share repayment without liquidity or early cleanup', async () => {
+    const selectionId = `${SOURCE_ACCOUNT.toLowerCase()}:${borrowVault.address.toLowerCase()}`
+    mocks.crossPositionItems.push({
+      id: selectionId,
+      vault: borrowVault,
+      sourceAccount: SOURCE_ACCOUNT,
+      assets: 2_500n,
+      shares: 2_500n,
+      option: {
+        selectionId,
+        type: 'vault',
+        amount: 2_500,
+        price: 2_500,
+        vaultAddress: borrowVault.address,
+      },
+    })
+
+    const repay = scope.run(() => useCollateralSwapRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sourceVault),
+      formTab: ref('collateral'),
+      plan: ref<TransactionPlan | null>(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      clearSimulationError: vi.fn(),
+      runSimulation: vi.fn(async () => true),
+      getCurrentDebt: () => position.borrowed,
+      isEligibleForLiquidation: computed(() => false),
+    }))!
+
+    repay.initVault(sourceVault)
+    repay.onSourceVaultChange(0)
+    await nextTick()
+
+    expect(repay.selectedSourceAccount.value).toBe(SOURCE_ACCOUNT)
+    expect(repay.sourceVault.value?.address).toBe(borrowVault.address)
+    expect(repay.sourceAssets.value).toBe(2_500n)
+    expect(repay.sourceBalance.value).toBe(2_500n)
+    expect(repay.isSameVaultRepay.value).toBe(true)
+    expect(repay.isCrossPositionSource.value).toBe(true)
+    expect(repay.isSubmitDisabled.value).toBe(true)
+    expect(repay.disabledReason.value).toBe('Cross-position collateral repayments must be added to a batch.')
+
+    repay.debtAmount.value = '2000'
+    const built = await repay.buildRepayPlan()
+
+    expect(built).toEqual([])
+    expect(mocks.planRepayFromSource).toHaveBeenCalledWith(expect.objectContaining({
+      liabilityVault: borrowVault.address,
+      liabilityAmount: (2n ** 256n) - 1n,
+      receiver: USER,
+      fromVault: borrowVault.address,
+      fromAccount: SOURCE_ACCOUNT,
+      cleanupOnMax: false,
+    }))
+
+    repay.createRepayIntent()
+    expect(mocks.createIntent).toHaveBeenCalledWith(expect.objectContaining({
+      planner: 'repay-from-deposit',
+      args: expect.objectContaining({
+        receiver: USER,
+        fromVault: borrowVault.address,
+        fromAccount: SOURCE_ACCOUNT,
+        cleanupOnMax: false,
+      }),
+      subAccounts: [USER, SOURCE_ACCOUNT],
+    }))
   })
 })
