@@ -29,7 +29,11 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 rm -rf "$SDK_DIR" "$SDK_PACK_DIR"
-git clone --filter=blob:none --depth=1 --branch "$EULER_SDK_BRANCH" "$SDK_REPO" "$SDK_DIR"
+if ! git clone --filter=blob:none --depth=1 --branch "$EULER_SDK_BRANCH" "$SDK_REPO" "$SDK_DIR"; then
+  echo "Filtered SDK clone failed; retrying without partial-clone filtering."
+  rm -rf "$SDK_DIR"
+  git clone --depth=1 --branch "$EULER_SDK_BRANCH" "$SDK_REPO" "$SDK_DIR"
+fi
 
 cd "$SDK_DIR"
 if [ -n "$APP_SDK_VERSION" ]; then
