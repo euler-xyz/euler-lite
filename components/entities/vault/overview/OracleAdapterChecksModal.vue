@@ -28,6 +28,7 @@ const {
 // Data V3 re-evaluates every adapter hourly; a verdict older than this means
 // the assessment runner is behind, so the reader should not lean on it.
 const STALE_ASSESSMENT_MS = 3 * 60 * 60 * 1000
+const ORACLE_SOURCE_REPOSITORY_URL = 'https://github.com/euler-xyz/euler-price-oracle'
 
 const addressPattern = /\b0x[a-fA-F0-9]{40}\b/g
 
@@ -204,37 +205,47 @@ const isStale = computed(() => (checkedAt.value ? openedAt.getTime() - checkedAt
           <p class="text-p3 font-medium text-content-primary break-words">
             {{ formatOracleCheckTitle(check.id) }}
           </p>
-          <p
+          <template
             v-for="line in getCheckLines(check)"
             :key="`${check.id}-${i}-${line.key}`"
-            class="break-words"
-            :class="line.muted ? 'text-p4 text-content-tertiary' : 'text-p3 text-content-secondary'"
           >
-            <template
-              v-for="(part, partIndex) in getCheckMessageParts(line.text)"
-              :key="`${check.id}-${i}-${line.key}-${partIndex}`"
+            <p
+              class="break-words"
+              :class="line.muted ? 'text-p4 text-content-tertiary' : 'text-p3 text-content-secondary'"
             >
-              <button
-                v-if="part.address"
-                type="button"
-                class="group inline-flex max-w-full items-center gap-4 rounded-4 border border-line-subtle bg-surface-secondary px-5 py-1 align-baseline font-mono text-[13px] leading-[18px] text-accent-600 outline-none transition-colors hover:border-line-default hover:text-accent-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                :aria-label="`Copy address ${part.address}`"
-                @mousedown.stop.prevent
-                @click.stop.prevent="copyAddress(part.address)"
-                @keydown.enter.stop.prevent="copyAddress(part.address)"
-                @keydown.space.stop.prevent="copyAddress(part.address)"
+              <template
+                v-for="(part, partIndex) in getCheckMessageParts(line.text)"
+                :key="`${check.id}-${i}-${line.key}-${partIndex}`"
               >
-                <span class="min-w-0 break-all">{{ part.text }}</span>
-                <SvgIcon
-                  class="!w-12 !h-12 shrink-0 opacity-70 transition-opacity group-hover:opacity-100"
-                  :name="isCopied(getAddressCopyKey(part.address)) ? 'check' : 'copy'"
-                />
-              </button>
-              <template v-else>
-                {{ part.text }}
+                <button
+                  v-if="part.address"
+                  type="button"
+                  class="group inline-flex max-w-full items-center gap-4 rounded-4 border border-line-subtle bg-surface-secondary px-5 py-1 align-baseline font-mono text-[13px] leading-[18px] text-accent-600 outline-none transition-colors hover:border-line-default hover:text-accent-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                  :aria-label="`Copy address ${part.address}`"
+                  @mousedown.stop.prevent
+                  @click.stop.prevent="copyAddress(part.address)"
+                  @keydown.enter.stop.prevent="copyAddress(part.address)"
+                  @keydown.space.stop.prevent="copyAddress(part.address)"
+                >
+                  <span class="min-w-0 break-all">{{ part.text }}</span>
+                  <SvgIcon
+                    class="!w-12 !h-12 shrink-0 opacity-70 transition-opacity group-hover:opacity-100"
+                    :name="isCopied(getAddressCopyKey(part.address)) ? 'check' : 'copy'"
+                  />
+                </button>
+                <template v-else>
+                  {{ part.text }}
+                </template>
               </template>
-            </template>
-          </p>
+            </p>
+            <a
+              v-if="line.key === 'message' && check.id === 'source-provenance'"
+              :href="ORACLE_SOURCE_REPOSITORY_URL"
+              class="inline-block text-p4 text-accent-600 underline transition-colors hover:text-accent-500"
+              target="_blank"
+              rel="noopener noreferrer"
+            >View source on GitHub ↗</a>
+          </template>
         </div>
       </div>
     </div>
