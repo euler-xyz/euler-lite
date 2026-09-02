@@ -112,6 +112,33 @@ describe('buildOracleAdapterView', () => {
     expect(view.lastCheckedAt).toBe('2026-09-01T12:00:00.000Z')
   })
 
+  it('keeps the adjudication-mismatch finding visible for a de-recognized custom adapter', () => {
+    // Shape emitted by Data V3 policy v4 when an adjudicated custom adapter's
+    // deployed bytecode no longer matches the pinned fingerprint.
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        recognized: false,
+        reason: 'custom-adapter-adjudicated: The deployed runtime bytecode does not match the adjudicated fingerprint.',
+        checks: [
+          { id: 'adapter-exists', message: 'has code', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.High },
+          { id: 'custom-adapter-adjudicated', message: 'fingerprint mismatch', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High },
+          { id: 'adapter-class-known', message: 'not a known class', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High },
+          { id: 'source-provenance', message: 'no known build', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High },
+        ],
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.assessmentState).toBe('unrecognized')
+    expect(view.checks?.map(check => check.id)).toEqual([
+      'adapter-exists',
+      'custom-adapter-adjudicated',
+      'adapter-class-known',
+      'source-provenance',
+    ])
+    expect(view.reason).toBe('Custom adapter adjudicated: The deployed runtime bytecode does not match the adjudicated fingerprint.')
+  })
+
   it('counts only passing health findings for a positive verdict', () => {
     const meta: Record<string, OracleAdapterMeta> = {
       [oracle.toLowerCase()]: assessed({
