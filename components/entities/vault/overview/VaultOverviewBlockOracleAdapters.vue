@@ -224,7 +224,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
             </button>
           </div>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-12 text-p3">
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,140px),1fr))] gap-8 text-p3">
           <div class="flex min-w-0 flex-col gap-4">
             <span class="text-content-tertiary">Provider</span>
             <div class="flex min-w-0 items-center gap-8">
