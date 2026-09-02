@@ -111,6 +111,7 @@ export const useCrossPositionRepayCollateralOptions = ({
             enableRewardsApy: enableRewardsApy.value,
           }),
           tagContext: 'supply-source',
+          subAccount: candidate.sourceAccount,
         }),
         selectionId: candidate.id,
       },

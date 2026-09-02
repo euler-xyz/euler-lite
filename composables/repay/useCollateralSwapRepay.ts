@@ -173,7 +173,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         sourceAccount,
         assets: collateral?.assets ?? 0n,
         shares: collateral?.shares ?? 0n,
-        option: { ...option, selectionId: id },
+        option: { ...option, selectionId: id, subAccount: sourceAccount },
       }]
     })
   })

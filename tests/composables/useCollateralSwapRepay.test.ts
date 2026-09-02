@@ -339,6 +339,7 @@ describe('useCollateralSwapRepay', () => {
         amount: 2_500,
         price: 2_500,
         vaultAddress: borrowVault.address,
+        subAccount: SOURCE_ACCOUNT,
       },
     })
 
@@ -362,6 +363,7 @@ describe('useCollateralSwapRepay', () => {
     await nextTick()
 
     expect(repay.selectedSourceAccount.value).toBe(SOURCE_ACCOUNT)
+    expect(repay.repayCollateralOptions.value[0]?.subAccount).toBe(SOURCE_ACCOUNT)
     expect(repay.sourceVault.value?.address).toBe(borrowVault.address)
     expect(repay.sourceAssets.value).toBe(2_500n)
     expect(repay.sourceBalance.value).toBe(2_500n)
