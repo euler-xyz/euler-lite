@@ -191,7 +191,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
         class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle"
       >
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-8">
-          <div class="p2 text-content-primary">
+          <div class="p2 min-w-0 break-words text-content-primary">
             <template v-if="adapter.label">
               {{ adapter.label.primary }}
               <span
@@ -225,30 +225,30 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
           </div>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-5 gap-12 text-p3">
-          <div class="flex flex-col gap-4">
+          <div class="flex min-w-0 flex-col gap-4">
             <span class="text-content-tertiary">Provider</span>
-            <div class="flex items-center gap-8">
+            <div class="flex min-w-0 items-center gap-8">
               <BaseAvatar
                 v-if="adapter.logo"
                 :src="adapter.logo"
                 :label="adapter.name"
-                class="icon--20"
+                class="icon--20 flex-shrink-0"
               />
               <SvgIcon
                 v-else
                 name="question-circle"
-                class="!w-20 !h-20 text-content-tertiary"
+                class="!w-20 !h-20 flex-shrink-0 text-content-tertiary"
               />
-              <span class="text-content-primary">{{ adapter.provider || 'Unknown' }}</span>
+              <span class="min-w-0 break-words text-content-primary">{{ adapter.provider || 'Unknown' }}</span>
             </div>
           </div>
-          <div class="flex flex-col gap-4">
+          <div class="flex min-w-0 flex-col gap-4">
             <span class="text-content-tertiary">Methodology</span>
-            <span class="text-content-primary">{{ adapter.methodology || 'Unknown' }}</span>
+            <span class="min-w-0 break-words text-content-primary">{{ adapter.methodology || 'Unknown' }}</span>
           </div>
           <UiModalPreviewTrigger
             v-if="adapter.checks?.length"
-            class="flex flex-col gap-4 items-start cursor-default text-left"
+            class="flex min-w-0 flex-col gap-4 items-start cursor-default text-left"
             :component="OracleAdapterChecksModal"
             :modal-data="getChecksModalData(adapter)"
             aria-label="Show oracle adapter checks"
@@ -257,7 +257,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
             popover-width="wide"
           >
             <span class="text-content-tertiary">Checks</span>
-            <span class="flex items-center gap-6 cursor-default">
+            <span class="flex min-w-0 items-center gap-6 cursor-default">
               <span
                 class="inline-block w-8 h-8 rounded-full flex-shrink-0"
                 :class="{
@@ -267,23 +267,23 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
                   'bg-content-muted': adapter.checksStatus === null,
                 }"
               />
-              <span class="text-content-primary">{{ getChecksSummary(adapter) }}</span>
+              <span class="min-w-0 break-words text-content-primary">{{ getChecksSummary(adapter) }}</span>
             </span>
           </UiModalPreviewTrigger>
           <div
             v-else
-            class="flex flex-col gap-4"
+            class="flex min-w-0 flex-col gap-4"
           >
             <span class="text-content-tertiary">Checks</span>
-            <span class="text-content-secondary">{{ getChecksSummary(adapter) }}</span>
+            <span class="min-w-0 break-words text-content-secondary">{{ getChecksSummary(adapter) }}</span>
           </div>
-          <div class="flex flex-col gap-4">
+          <div class="flex min-w-0 flex-col gap-4">
             <span class="text-content-tertiary">Route</span>
-            <span class="text-content-primary">
+            <span class="min-w-0 break-words text-content-primary">
               {{ resolveSymbol(adapter.base) }}/{{ resolveSymbol(adapter.quote) }}
             </span>
           </div>
-          <div class="flex flex-col gap-4">
+          <div class="flex min-w-0 flex-col gap-4">
             <span class="text-content-tertiary">Price</span>
             <span
               v-if="isPriceLoading"
@@ -301,7 +301,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
             </span>
             <span
               v-else
-              class="text-content-primary"
+              class="min-w-0 break-words text-content-primary"
             >{{ formatAdapterPrice(adapter) }}</span>
           </div>
         </div>
