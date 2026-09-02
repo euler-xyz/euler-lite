@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   getSafeWalletProvider,
   getSafeAtomicCapability,
-  reconcileSafeTransactionExecution,
   sendSafeAtomicCalls,
   SafeTransactionStatusUnknownError,
   waitForSafeTransactionExecution,
@@ -146,75 +145,6 @@ describe('sendSafeAtomicCalls', () => {
       capabilities: {},
       atomicCapability: { status: 'supported' },
     })).rejects.toThrow('no valid calls ID')
-  })
-})
-
-describe('reconcileSafeTransactionExecution', () => {
-  it('returns terminal success only with a mined receipt and atomic evidence', async () => {
-    const walletProvider: WalletProviderLike = {
-      request: vi.fn().mockResolvedValue({
-        status: 200,
-        atomic: true,
-        receipts: [{ transactionHash: EXECUTION_HASH }],
-      }),
-    }
-    const publicClient: ReceiptClientLike = {
-      getTransactionReceipt: vi.fn(async ({ hash }) => {
-        if (hash === EXECUTION_HASH) return receipt(EXECUTION_HASH)
-        throw new Error('not mined')
-      }),
-    }
-
-    await expect(reconcileSafeTransactionExecution({ callsId: SAFE_HASH, walletProvider, publicClient }))
-      .resolves.toEqual({ state: 'success', hash: EXECUTION_HASH, atomic: true })
-  })
-
-  it('keeps incomplete gateway evidence pending', async () => {
-    const walletProvider: WalletProviderLike = {
-      request: vi.fn().mockResolvedValue({ status: 100 }),
-    }
-    const publicClient: ReceiptClientLike = {
-      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not mined')),
-    }
-
-    await expect(reconcileSafeTransactionExecution({ callsId: SAFE_HASH, walletProvider, publicClient }))
-      .resolves.toEqual({ state: 'pending' })
-  })
-
-  it('does not interpret an opaque calls ID as a transaction hash for receipt fallback', async () => {
-    const walletProvider: WalletProviderLike = {
-      request: vi.fn().mockRejectedValue(Object.assign(new Error('Method not found'), { code: -32601 })),
-    }
-    const publicClient: ReceiptClientLike = {
-      getTransactionReceipt: vi.fn(),
-    }
-
-    await expect(reconcileSafeTransactionExecution({
-      callsId: 'safe-call-batch-123',
-      walletProvider,
-      publicClient,
-    })).resolves.toEqual({ state: 'unknown' })
-    expect(walletProvider.request).toHaveBeenCalledOnce()
-    expect(walletProvider.request).toHaveBeenCalledWith({
-      method: 'wallet_getCallsStatus',
-      params: ['safe-call-batch-123'],
-    })
-    expect(publicClient.getTransactionReceipt).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    [400, 'cancelled'],
-    [500, 'failed'],
-  ] as const)('recognizes terminal status %s as %s', async (status, state) => {
-    const walletProvider: WalletProviderLike = {
-      request: vi.fn().mockResolvedValue({ status }),
-    }
-    const publicClient: ReceiptClientLike = {
-      getTransactionReceipt: vi.fn().mockRejectedValue(new Error('not mined')),
-    }
-
-    await expect(reconcileSafeTransactionExecution({ callsId: SAFE_HASH, walletProvider, publicClient }))
-      .resolves.toEqual({ state })
   })
 })
 

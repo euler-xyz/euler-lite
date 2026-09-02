@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { EVC_ABI } from '~/abis/evc'
 import { PYTH_ABI } from '~/abis/pyth'
 import { EoaExecutionAdapter, type EoaAdapterClient } from '~/features/reviewed-execution/adapters/eoa'
-import { SafeExecutionAdapter, type SafeAdapterClient } from '~/features/reviewed-execution/adapters/safe'
+import { SafeExecutionAdapter } from '~/features/reviewed-execution/adapters/safe'
 import type { ExecutionTransportAdapter } from '~/features/reviewed-execution/adapters/types'
 import { ReviewedExecutionCoordinator, type CoordinatorDependencies } from '~/features/reviewed-execution/coordinator/coordinator'
 import type { ReviewedExecution } from '~/features/reviewed-execution/domain/reviewed-execution'
@@ -30,16 +30,6 @@ const unusedSafeAdapter: ExecutionTransportAdapter = {
   transport: 'safe',
   dispatch: async () => { throw new Error('not used') },
 }
-
-const safeAdapterFor = (
-  client: Omit<SafeAdapterClient, 'reserveSubmission' | 'recordCallsId' | 'releaseSubmission' | 'clearSubmission'>,
-) => new SafeExecutionAdapter({
-  reserveSubmission: async () => 'test-reservation',
-  recordCallsId: async () => {},
-  releaseSubmission: async () => {},
-  clearSubmission: async () => {},
-  ...client,
-})
 
 const setup = ({
   execution = makeReviewedExecution(),
@@ -479,7 +469,7 @@ describe('reviewed execution coordinator', () => {
     const execution = makeReviewedExecution('safe')
     const callsId = hashFor(2)
     const sendCalls = vi.fn(async () => callsId)
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls,
       waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: true }),
@@ -499,7 +489,7 @@ describe('reviewed execution coordinator', () => {
   it('reports inconclusive Safe status as unknown without retrying', async () => {
     const execution = makeReviewedExecution('safe')
     const sendCalls = vi.fn(async () => hashFor(2))
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls,
       waitForExecution: async () => { throw new Error('provider unavailable') },
@@ -515,7 +505,7 @@ describe('reviewed execution coordinator', () => {
   it('revalidates Safe atomic capability before wallet handoff', async () => {
     const execution = makeReviewedExecution('safe')
     const sendCalls = vi.fn(async () => hashFor(2))
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => { throw new Error('Safe wallet atomic execution is unsupported on chain 1') },
       sendCalls,
       waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: true }),
@@ -529,7 +519,7 @@ describe('reviewed execution coordinator', () => {
   it('rejects finalized Safe envelope drift before wallet handoff', async () => {
     const execution = makeReviewedExecution('safe')
     const sendCalls = vi.fn(async () => hashFor(2))
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls,
       waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: true }),
@@ -549,7 +539,7 @@ describe('reviewed execution coordinator', () => {
 
   it('does not report success unless Safe confirms atomic execution', async () => {
     const execution = makeReviewedExecution('safe')
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls: async () => hashFor(2),
       waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'success', atomic: false }),
@@ -561,7 +551,7 @@ describe('reviewed execution coordinator', () => {
 
   it('reports current-session Safe cancellation as rejected', async () => {
     const execution = makeReviewedExecution('safe')
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls: async () => hashFor(2),
       waitForExecution: async () => { throw new Error('Safe transaction was cancelled') },
@@ -573,7 +563,7 @@ describe('reviewed execution coordinator', () => {
 
   it('reports a reverted Safe receipt as failed', async () => {
     const execution = makeReviewedExecution('safe')
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls: async () => hashFor(2),
       waitForExecution: async () => ({ executionHash: HASH, receiptStatus: 'reverted', atomic: true }),
@@ -585,7 +575,7 @@ describe('reviewed execution coordinator', () => {
 
   it('preserves a conclusive current-session Safe failure', async () => {
     const execution = makeReviewedExecution('safe')
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls: async () => hashFor(2),
       waitForExecution: async () => { throw new Error('Safe transaction failed') },
@@ -620,7 +610,7 @@ describe('reviewed execution coordinator', () => {
       }],
     })
     const sendCalls = vi.fn(async () => hashFor(2))
-    const safeAdapter = safeAdapterFor({
+    const safeAdapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
       sendCalls,
       waitForExecution: async () => { throw new Error('provider unavailable') },

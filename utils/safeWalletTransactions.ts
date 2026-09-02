@@ -42,11 +42,6 @@ export interface SafeTransactionExecution {
   atomic?: true
 }
 
-export type SafeTransactionReconciliation
-  = | { state: 'pending' | 'unknown' }
-    | { state: 'cancelled' | 'failed' }
-    | { state: 'success' | 'reverted', hash: Hash, atomic: true }
-
 export class SafeTransactionStatusUnknownError extends Error {
   readonly submittedId: string
 
@@ -258,75 +253,6 @@ const waitForNextPoll = (pollingIntervalMs: number) =>
   pollingIntervalMs > 0
     ? new Promise(resolve => setTimeout(resolve, pollingIntervalMs))
     : Promise.resolve()
-
-/**
- * Perform one non-blocking reconciliation pass for a persisted Safe calls ID.
- * Only conclusive terminal evidence is returned as terminal; gateway errors,
- * indexing lag, and missing atomic evidence remain locked as unknown/pending.
- */
-export const reconcileSafeTransactionExecution = async ({
-  callsId,
-  walletProvider,
-  publicClient,
-}: {
-  callsId: string
-  walletProvider: WalletProviderLike
-  publicClient: ReceiptClientLike
-}): Promise<SafeTransactionReconciliation> => {
-  const submittedHash = isHash(callsId) ? callsId : undefined
-  let executionHash = submittedHash
-  const directReceipt = submittedHash
-    ? await getPublicReceipt(publicClient, submittedHash)
-    : undefined
-
-  try {
-    const rawStatus = await walletProvider.request({
-      method: 'wallet_getCallsStatus',
-      params: [callsId],
-    })
-    const callsStatus = parseCallsStatus(rawStatus)
-    const status = parseStatus(callsStatus?.status)
-    if (status === 400) return { state: 'cancelled' }
-    if (status !== undefined && status >= 500) return { state: 'failed' }
-    if (callsStatus?.atomic === false) return { state: 'failed' }
-
-    const resolvedHash = callsStatus?.receipts?.map(item => item.transactionHash).find(isHash)
-    if (resolvedHash) executionHash = resolvedHash
-    const receipt = resolvedHash
-      ? await getPublicReceipt(publicClient, resolvedHash)
-      : directReceipt
-    if (receipt && callsStatus?.atomic === true) {
-      return {
-        state: receipt.status === 'success' ? 'success' : 'reverted',
-        hash: executionHash!,
-        atomic: true,
-      }
-    }
-    return status !== undefined && status >= 100 && status < 300
-      ? { state: 'pending' }
-      : { state: 'unknown' }
-  }
-  catch (error) {
-    if (!isUnsupportedMethodError(error)) return { state: 'unknown' }
-  }
-
-  if (!submittedHash) return { state: 'unknown' }
-
-  try {
-    const walletReceipt = await walletProvider.request({
-      method: 'eth_getTransactionReceipt',
-      params: [submittedHash],
-    })
-    const resolvedHash = await getExecutionHashFromWalletReceipt(walletReceipt, submittedHash, publicClient)
-    if (!resolvedHash) return { state: directReceipt ? 'unknown' : 'pending' }
-    // The legacy receipt path cannot prove atomic wallet_sendCalls semantics;
-    // retain the lock instead of clearing on incomplete evidence.
-    return { state: 'unknown' }
-  }
-  catch {
-    return { state: 'unknown' }
-  }
-}
 
 /**
  * Wait for Safe calls and resolve the opaque calls ID to the on-chain execution

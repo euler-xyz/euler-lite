@@ -568,10 +568,6 @@ export const useReviewedExecution = () => {
     const safe = createAppSafeClients({
       provider: safeProvider ?? unavailableSafeProvider,
       publicClient: publicClient as never,
-      onReconciled: () => refreshPortfolioAfterReviewedSubmission({
-        chainId: execution.requestSet.wallet.chainId,
-        triggerPortfolioRefresh,
-      }),
     })
     return {
       adapters: {
