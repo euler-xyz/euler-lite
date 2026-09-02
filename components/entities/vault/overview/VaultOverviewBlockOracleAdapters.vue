@@ -4,7 +4,7 @@ import type {
   EVault,
   OracleRouteStep,
 } from '@eulerxyz/euler-v2-sdk'
-import { getRouterIndexStatus, OracleAdapterCheckOutcome, OracleAdapterCheckSeverity } from '~/entities/oracle'
+import { formatOracleCheckTitle, getRouterRecognition, OracleAdapterCheckOutcome, OracleAdapterCheckSeverity } from '~/entities/oracle'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { formatNumber } from '~/utils/string-utils'
 import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/useOracleAdapterPrices'
@@ -21,7 +21,7 @@ const props = defineProps<{
 const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
-const { indexedRouters, indexedRoutersChainId, loadIndexedRouters } = useEulerOracleRouters()
+const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
 
 const sourceVaults = computed(() => {
   if (props.vaults?.length) {
@@ -74,18 +74,19 @@ watch(
 watch(
   chainId,
   (id) => {
-    if (id) loadIndexedRouters(id)
+    if (id) loadRecognizedRouters(id)
   },
   { immediate: true },
 )
 
-// Flag whether Data V3 has indexed the vault's EulerRouter. This is an index
-// membership signal, not an independent security verdict. Null while the
-// active chain is loading or the router index is unavailable.
-const routerIndexStatus = computed(() => {
-  if (indexedRoutersChainId.value !== chainId.value) return null
+// LITE-236: flag whether the vault's price oracle (EulerRouter) was deployed by the
+// recognized EulerRouterFactory (Data V3 only indexes factory deployments). Null
+// while the set is still loading for the active chain or unavailable, so we never
+// show a false "unrecognized" warning.
+const routerRecognition = computed(() => {
+  if (recognizedRoutersChainId.value !== chainId.value) return null
   const routerAddresses = sourceVaults.value.map(vault => vault.oracle?.oracle)
-  return getRouterIndexStatus(routerAddresses, indexedRouters.value)
+  return getRouterRecognition(routerAddresses, recognizedRouters.value)
 })
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
@@ -120,12 +121,29 @@ const formatAdapterPrice = (adapter: RouteStepKeyInput & { invertPrice: boolean 
   return formatNumber(rate, 4)
 }
 
+// One-line summary for the Checks cell. Recognized adapters count their health
+// findings; adapters V3 assessed but could not identify say so (the reason
+// renders below the card); adapters V3 has no row for are "Not assessed";
+// structural steps and withheld verdicts get "N/A".
+const getChecksSummary = (adapter: OracleAdapterView): string => {
+  if (adapter.assessmentState === 'unrecognized') return 'Unrecognized'
+  if (adapter.assessmentState === 'unassessed') return adapter.isCustomAdapter ? 'Not assessed' : 'N/A'
+  if (adapter.checksStatus === 'positive') return `${adapter.passedChecks} passed`
+  const parts = [
+    adapter.failedChecks.length ? `${adapter.failedChecks.length} failed` : '',
+    adapter.unknownChecks.length ? `${adapter.unknownChecks.length} unknown` : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : 'N/A'
+}
+
 const getChecksModalData = (adapter: OracleAdapterView) => ({
   props: {
-    modalTitle: 'Checks',
+    modalTitle: adapter.assessmentState === 'unrecognized' ? 'Identity checks' : 'Checks',
     checks: adapter.checks ?? [],
-    policyVersion: adapter.policyVersion,
     lastCheckedAt: adapter.lastCheckedAt,
+    note: adapter.assessmentState === 'unrecognized'
+      ? 'This adapter could not be identified, so no health checks are reported for it.'
+      : undefined,
   },
 })
 </script>
@@ -138,22 +156,22 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
   >
     <template #actions>
       <UiHoverPreviewTooltip
-        v-if="routerIndexStatus === 'not-indexed'"
-        title="Oracle router not indexed"
-        text="Data V3 does not currently include this price oracle in its indexed Euler router set. Verify the router and oracle configuration independently."
+        v-if="routerRecognition === 'unrecognized'"
+        title="Unrecognized oracle router"
+        text="The vault's price oracle was not deployed by the recognized EulerRouterFactory. Verify the oracle configuration before trusting its prices."
         placement="top-start"
       >
         <span
           class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-error-100 text-error-500 text-p5"
           data-id="data-point"
-          data-field="oracle-router-index-status"
-          data-value="not-indexed"
+          data-field="oracle-router-recognition"
+          data-value="unrecognized"
         >
           <SvgIcon
             name="warning"
             class="!w-12 !h-12"
           />
-          Router not indexed
+          Unrecognized router
         </span>
       </UiHoverPreviewTooltip>
     </template>
@@ -249,20 +267,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
                   'bg-content-muted': adapter.checksStatus === null,
                 }"
               />
-              <span class="text-content-primary">
-                <template v-if="adapter.checksStatus === 'positive'">
-                  {{ adapter.checks.filter(check => check.outcome === OracleAdapterCheckOutcome.Pass).length }} passed
-                </template>
-                <template v-else-if="adapter.failedChecks.length">
-                  {{ adapter.failedChecks.length }} failed
-                </template>
-                <template v-else-if="adapter.unknownChecks.length">
-                  {{ adapter.unknownChecks.length }} unknown
-                </template>
-                <template v-else>
-                  No health verdict
-                </template>
-              </span>
+              <span class="text-content-primary">{{ getChecksSummary(adapter) }}</span>
             </span>
           </UiModalPreviewTrigger>
           <div
@@ -270,14 +275,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
             class="flex flex-col gap-4"
           >
             <span class="text-content-tertiary">Checks</span>
-            <span
-              v-if="adapter.isCustomAdapter"
-              class="text-content-secondary"
-            >Custom — set by risk manager</span>
-            <span
-              v-else
-              class="text-content-secondary"
-            >N/A</span>
+            <span class="text-content-secondary">{{ getChecksSummary(adapter) }}</span>
           </div>
           <div class="flex flex-col gap-4">
             <span class="text-content-tertiary">Route</span>
@@ -306,6 +304,16 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
               class="text-content-primary"
             >{{ formatAdapterPrice(adapter) }}</span>
           </div>
+        </div>
+        <div
+          v-if="adapter.reason"
+          class="flex items-start gap-8 border-t border-line-subtle pt-12 text-p3"
+        >
+          <SvgIcon
+            name="info-circle"
+            class="!w-16 !h-16 mt-1 flex-shrink-0 text-content-tertiary"
+          />
+          <span class="text-content-secondary">{{ adapter.reason }}</span>
         </div>
         <div
           v-if="adapter.assessmentPairMatchesRoute === false"
@@ -337,7 +345,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
               }"
             />
             <div>
-              <span class="text-content-primary font-medium">{{ check.id }}: </span>
+              <span class="text-content-primary font-medium">{{ formatOracleCheckTitle(check.id) }}: </span>
               <span class="text-content-secondary">{{ check.message }}</span>
             </div>
           </div>

@@ -121,6 +121,64 @@ export function normalizeOracleAdapterCheckSeverity(severity: unknown): OracleAd
   }
 }
 
+// Three-way assessment state of an adapter step. 'recognized': identity proven
+// by V3, health verdict applies. 'unrecognized': V3 assessed the contract but
+// could not identify it (unknown bytecode or class). 'unassessed': V3 has no
+// row for it at all.
+export type OracleAssessmentState = 'recognized' | 'unrecognized' | 'unassessed'
+
+export function getOracleAssessmentState(meta: OracleAdapterMeta | undefined): OracleAssessmentState {
+  if (!meta) return 'unassessed'
+  return meta.recognized ? 'recognized' : 'unrecognized'
+}
+
+// Recognition (identity) rule keys, mirroring Data V3's RECOGNITION_RULE_KEYS.
+// These findings are the policy's own bytecode/provenance evaluation and are
+// safe to show for unrecognized adapters; every other finding of an
+// unrecognized adapter was read through getters recognition refused to trust
+// and is withheld.
+export const ORACLE_IDENTITY_CHECK_KEYS: ReadonlySet<string> = new Set([
+  'adapter-exists',
+  'adapter-class-known',
+  'source-provenance',
+])
+
+export const isOracleIdentityCheck = (check: Pick<OracleAdapterCheck, 'id'>): boolean =>
+  ORACLE_IDENTITY_CHECK_KEYS.has(check.id)
+
+// Words in V3 rule keys that keep their own casing inside a sentence-case title.
+const CHECK_TITLE_WORDS: Record<string, string> = {
+  chronicle: 'Chronicle',
+  lido: 'Lido',
+  pendle: 'Pendle',
+  pt: 'PT',
+  pyth: 'Pyth',
+  xstocks: 'xStocks',
+}
+
+// Turns a V3 rule key (`pyth-feed-recognized`) into a display title
+// ("Pyth feed recognized"). Keys are stable machine identifiers; deriving the
+// title here lets a new V3 rule render readably without a Lite release.
+export function formatOracleCheckTitle(key: string): string {
+  return key
+    .split('-')
+    .filter(Boolean)
+    .map((word, index) => {
+      const lower = word.toLowerCase()
+      if (Object.hasOwn(CHECK_TITLE_WORDS, lower)) return CHECK_TITLE_WORDS[lower]
+      return index === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower
+    })
+    .join(' ')
+}
+
+// V3 formats `reason` as "<rule-key>: <description>". Re-title the key so the
+// line reads like the check list ("Source provenance: Runtime bytecode …").
+export function formatOracleAssessmentReason(reason: string): string {
+  const match = /^([a-z0-9]+(?:-[a-z0-9]+)*): (.+)$/s.exec(reason)
+  if (!match) return reason
+  return `${formatOracleCheckTitle(match[1])}: ${match[2]}`
+}
+
 export type OracleAdapterIdentity = {
   name?: string
   provider?: string
@@ -155,20 +213,24 @@ export function resolveOracleAdapterIdentity(
   }
 }
 
-// Classifies a vault's oracle router(s) against Data V3's indexed Euler router
-// universe. This is an indexing signal, not a separate security assessment.
-// Returns null when the index is unavailable (empty) or there are no routers to
-// check, so an unavailable response never produces a false warning.
-export function getRouterIndexStatus(
+// Classifies a vault's oracle router(s) against the recognized-router set.
+// Data V3's `/v3/oracles/routers` is built from indexed `EulerRouterFactory`
+// deployments, so every router it lists was deployed by the recognized factory
+// — the same set the legacy oracle-checks `routers/all.json` was generated
+// from. Membership is therefore a provenance verdict, not a "seen by the
+// indexer" signal. Returns null — i.e. show nothing — when the set is
+// unavailable (empty) or there are no routers to check, so a missing dataset
+// never produces a false "unrecognized" warning.
+export function getRouterRecognition(
   routerAddresses: ReadonlyArray<string | undefined | null>,
-  indexed: ReadonlySet<string>,
-): 'indexed' | 'not-indexed' | null {
-  if (!indexed.size) return null
+  recognized: ReadonlySet<string>,
+): 'recognized' | 'unrecognized' | null {
+  if (!recognized.size) return null
   const addresses = routerAddresses
     .filter((address): address is string => typeof address === 'string' && address.length > 0)
     .map(address => address.toLowerCase())
   if (!addresses.length) return null
-  return addresses.every(address => indexed.has(address)) ? 'indexed' : 'not-indexed'
+  return addresses.every(address => recognized.has(address)) ? 'recognized' : 'unrecognized'
 }
 
 type OracleAdapterOptions = {

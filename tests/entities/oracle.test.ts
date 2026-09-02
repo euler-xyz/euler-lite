@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Address } from 'viem'
 import {
-  getRouterIndexStatus,
+  formatOracleAssessmentReason,
+  formatOracleCheckTitle,
+  getOracleAssessmentState,
+  getRouterRecognition,
+  isOracleIdentityCheck,
   normalizeOracleAdapterCheckSeverity,
   resolveOracleAdapterIdentity,
   type OracleAdapterMeta,
@@ -73,38 +77,38 @@ describe('resolveOracleAdapterIdentity', () => {
   })
 })
 
-describe('getRouterIndexStatus (LITE-236)', () => {
+describe('getRouterRecognition (LITE-236)', () => {
   const router = '0xabc0000000000000000000000000000000000001'
   const otherRouter = '0xdef0000000000000000000000000000000000002'
 
   it('returns null when the allowlist is unavailable (empty set)', () => {
-    expect(getRouterIndexStatus([router], new Set())).toBeNull()
+    expect(getRouterRecognition([router], new Set())).toBeNull()
   })
 
   it('returns null when there are no router addresses to check', () => {
     const recognized = new Set([router])
-    expect(getRouterIndexStatus([], recognized)).toBeNull()
-    expect(getRouterIndexStatus([undefined, null], recognized)).toBeNull()
+    expect(getRouterRecognition([], recognized)).toBeNull()
+    expect(getRouterRecognition([undefined, null], recognized)).toBeNull()
   })
 
-  it('returns "indexed" when every router is in the V3 router set', () => {
+  it('returns "recognized" when every router is in the recognized set', () => {
     const recognized = new Set([router, otherRouter])
-    expect(getRouterIndexStatus([router, otherRouter], recognized)).toBe('indexed')
+    expect(getRouterRecognition([router, otherRouter], recognized)).toBe('recognized')
   })
 
   it('matches addresses case-insensitively', () => {
     const recognized = new Set([router])
-    expect(getRouterIndexStatus([router.toUpperCase()], recognized)).toBe('indexed')
+    expect(getRouterRecognition([router.toUpperCase()], recognized)).toBe('recognized')
   })
 
   it('ignores nullish entries when classifying', () => {
     const recognized = new Set([router])
-    expect(getRouterIndexStatus([undefined, router, null], recognized)).toBe('indexed')
+    expect(getRouterRecognition([undefined, router, null], recognized)).toBe('recognized')
   })
 
-  it('returns "not-indexed" when any router is missing from the V3 set', () => {
+  it('returns "unrecognized" when any router is missing from the recognized set', () => {
     const recognized = new Set([router])
-    expect(getRouterIndexStatus([router, otherRouter], recognized)).toBe('not-indexed')
+    expect(getRouterRecognition([router, otherRouter], recognized)).toBe('unrecognized')
   })
 })
 
@@ -119,5 +123,51 @@ describe('normalizeOracleAdapterCheckSeverity', () => {
     expect(normalizeOracleAdapterCheckSeverity(OracleAdapterCheckSeverity.High)).toBe(OracleAdapterCheckSeverity.High)
     expect(normalizeOracleAdapterCheckSeverity('wat')).toBe(OracleAdapterCheckSeverity.Info)
     expect(normalizeOracleAdapterCheckSeverity(undefined)).toBe(OracleAdapterCheckSeverity.Info)
+  })
+})
+
+describe('formatOracleCheckTitle', () => {
+  it('turns a V3 rule key into a sentence-case title', () => {
+    expect(formatOracleCheckTitle('quote-liveness')).toBe('Quote liveness')
+    expect(formatOracleCheckTitle('source-provenance')).toBe('Source provenance')
+    expect(formatOracleCheckTitle('cross-legs-recognized')).toBe('Cross legs recognized')
+  })
+
+  it('keeps proper nouns and acronyms cased', () => {
+    expect(formatOracleCheckTitle('pyth-feed-recognized')).toBe('Pyth feed recognized')
+    expect(formatOracleCheckTitle('linear-discount-pt-correspondence')).toBe('Linear discount PT correspondence')
+    expect(formatOracleCheckTitle('xstocks-pause-config')).toBe('xStocks pause config')
+    expect(formatOracleCheckTitle('chronicle-feed-recognized')).toBe('Chronicle feed recognized')
+  })
+
+  it('tolerates keys that are not kebab-case', () => {
+    expect(formatOracleCheckTitle('Staleness')).toBe('Staleness')
+    expect(formatOracleCheckTitle('')).toBe('')
+  })
+})
+
+describe('formatOracleAssessmentReason', () => {
+  it('re-titles the leading rule key', () => {
+    expect(formatOracleAssessmentReason('source-provenance: Runtime bytecode does not match any known adapter build.'))
+      .toBe('Source provenance: Runtime bytecode does not match any known adapter build.')
+  })
+
+  it('passes through reasons without a key prefix', () => {
+    expect(formatOracleAssessmentReason('The adapter could not be recognized.')).toBe('The adapter could not be recognized.')
+  })
+})
+
+describe('getOracleAssessmentState / isOracleIdentityCheck', () => {
+  it('classifies absent, unrecognized and recognized assessments', () => {
+    expect(getOracleAssessmentState(undefined)).toBe('unassessed')
+    expect(getOracleAssessmentState(makeMeta({ recognized: false }))).toBe('unrecognized')
+    expect(getOracleAssessmentState(makeMeta())).toBe('recognized')
+  })
+
+  it('only treats the three V3 recognition rules as identity checks', () => {
+    expect(isOracleIdentityCheck({ id: 'adapter-exists' })).toBe(true)
+    expect(isOracleIdentityCheck({ id: 'adapter-class-known' })).toBe(true)
+    expect(isOracleIdentityCheck({ id: 'source-provenance' })).toBe(true)
+    expect(isOracleIdentityCheck({ id: 'quote-liveness' })).toBe(false)
   })
 })

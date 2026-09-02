@@ -1,29 +1,45 @@
 <script setup lang="ts">
-import { OracleAdapterCheckOutcome, OracleAdapterCheckSeverity, type OracleAdapterCheck } from '~/entities/oracle'
+import {
+  formatOracleCheckTitle,
+  OracleAdapterCheckOutcome,
+  OracleAdapterCheckSeverity,
+  type OracleAdapterCheck,
+} from '~/entities/oracle'
+import { getRelativeTimeBetweenDates } from '~/utils/time-utils'
 
 defineEmits(['close'])
 
 const {
   modalTitle = 'Checks',
   checks,
-  policyVersion,
   lastCheckedAt,
+  note,
   inline = false,
   close = true,
 } = defineProps<{
   modalTitle?: string
   checks: OracleAdapterCheck[]
-  policyVersion?: number
   lastCheckedAt?: string
+  note?: string
   inline?: boolean
   close?: boolean
 }>()
+
+// Data V3 re-evaluates every adapter hourly; a verdict older than this means
+// the assessment runner is behind, so the reader should not lean on it.
+const STALE_ASSESSMENT_MS = 3 * 60 * 60 * 1000
 
 const addressPattern = /\b0x[a-fA-F0-9]{40}\b/g
 
 type CheckMessagePart = {
   text: string
   address?: string
+}
+
+type CheckLine = {
+  key: string
+  text: string
+  muted: boolean
 }
 
 const getAddressCopyKey = (address: string) => `oracle-check-address-${address.toLowerCase()}`
@@ -80,15 +96,65 @@ const getCheckMessageParts = (message: string): CheckMessagePart[] => {
   return parts.length ? parts : [{ text: message }]
 }
 
+const formatDetailValue = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return String(value)
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)))
+  }
+  return undefined
+}
+
+// Renders a finding's `expected` / `observed` evidence when it is a primitive,
+// a short list of primitives, or a small flat object (e.g. the implied vs
+// reference price behind quote-price-consistency). Deeper shapes stay in the
+// API payload only.
+const formatCheckDetail = (value: unknown): string | undefined => {
+  const primitive = formatDetailValue(value)
+  if (primitive !== undefined) return primitive
+  if (!value || typeof value !== 'object') return undefined
+
+  if (Array.isArray(value)) {
+    if (!value.length || value.length > 4) return undefined
+    const items = value.map(formatDetailValue)
+    return items.every((item): item is string => item !== undefined) ? items.join(', ') : undefined
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (!entries.length || entries.length > 4) return undefined
+  const parts: string[] = []
+  for (const [key, entry] of entries) {
+    const text = formatDetailValue(entry)
+    if (text === undefined) return undefined
+    parts.push(`${key} ${text}`)
+  }
+  return parts.join(' · ')
+}
+
+const getCheckLines = (check: OracleAdapterCheck): CheckLine[] => {
+  const lines: CheckLine[] = [{ key: 'message', text: check.message, muted: false }]
+  const expected = formatCheckDetail(check.expected)
+  if (expected !== undefined) lines.push({ key: 'expected', text: `Expected: ${expected}`, muted: true })
+  const observed = formatCheckDetail(check.observed)
+  if (observed !== undefined) lines.push({ key: 'observed', text: `Observed: ${observed}`, muted: true })
+  return lines
+}
+
 const copyAddress = (address: string) => {
   copyToClipboard(address, getAddressCopyKey(address)).catch(() => {})
 }
 
-const formattedLastCheckedAt = computed(() => {
+const openedAt = new Date()
+
+const checkedAt = computed(() => {
   if (!lastCheckedAt) return undefined
   const date = new Date(lastCheckedAt)
-  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? undefined : date
 })
+
+const checkedAgo = computed(() => (checkedAt.value ? getRelativeTimeBetweenDates(openedAt, checkedAt.value) : undefined))
+
+const isStale = computed(() => (checkedAt.value ? openedAt.getTime() - checkedAt.value.getTime() > STALE_ASSESSMENT_MS : false))
 </script>
 
 <template>
@@ -101,12 +167,19 @@ const formattedLastCheckedAt = computed(() => {
   >
     <div class="flex flex-col gap-10">
       <p
-        v-if="policyVersion != null || formattedLastCheckedAt"
+        v-if="note"
+        class="text-p4 text-content-secondary"
+      >
+        {{ note }}
+      </p>
+      <p
+        v-if="checkedAgo"
         class="text-p4 text-content-tertiary"
       >
-        <span v-if="policyVersion != null">Policy v{{ policyVersion }}</span>
-        <span v-if="policyVersion != null && formattedLastCheckedAt"> · </span>
-        <span v-if="formattedLastCheckedAt">Checked {{ formattedLastCheckedAt }}</span>
+        Checked {{ checkedAgo }}<span
+          v-if="isStale"
+          class="text-warning-500"
+        > · may be out of date</span>
       </p>
       <div
         v-for="(check, i) in checks"
@@ -129,12 +202,17 @@ const formattedLastCheckedAt = computed(() => {
         </span>
         <div class="min-w-0">
           <p class="text-p3 font-medium text-content-primary break-words">
-            {{ check.id }}
+            {{ formatOracleCheckTitle(check.id) }}
           </p>
-          <p class="text-p3 text-content-secondary break-words">
+          <p
+            v-for="line in getCheckLines(check)"
+            :key="`${check.id}-${i}-${line.key}`"
+            class="break-words"
+            :class="line.muted ? 'text-p4 text-content-tertiary' : 'text-p3 text-content-secondary'"
+          >
             <template
-              v-for="(part, partIndex) in getCheckMessageParts(check.message)"
-              :key="`${check.id}-${i}-${partIndex}`"
+              v-for="(part, partIndex) in getCheckMessageParts(line.text)"
+              :key="`${check.id}-${i}-${line.key}-${partIndex}`"
             >
               <button
                 v-if="part.address"

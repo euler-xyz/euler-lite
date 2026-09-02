@@ -62,6 +62,8 @@ describe('buildOracleAdapterView', () => {
     expect(view.logo).toBeUndefined()
     expect(view.label).toBeUndefined()
     expect(view.checksStatus).toBeNull()
+    expect(view.assessmentState).toBe('unassessed')
+    expect(view.reason).toBeUndefined()
   })
 
   it('does not let unrecognized decoded config influence labels or price direction', () => {
@@ -77,11 +79,55 @@ describe('buildOracleAdapterView', () => {
     const view = buildOracleAdapterView(adapterStep(), meta)
 
     expect(view.isCustomAdapter).toBe(true)
+    expect(view.assessmentState).toBe('unrecognized')
     expect(view.label).toBeUndefined()
     expect(view.invertPrice).toBe(false)
     expect(view.assessmentPairMatchesRoute).toBeNull()
-    expect(view.checks).toBeUndefined()
+    expect(view.checks).toEqual([])
     expect(view.checksStatus).toBeNull()
+  })
+
+  it('exposes only the identity findings and the reason for an unrecognized assessment', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        recognized: false,
+        reason: 'source-provenance: Runtime bytecode does not match any known adapter build.',
+        lastCheckedAt: '2026-09-01T12:00:00.000Z',
+        checks: [
+          { id: 'adapter-exists', message: 'has code', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.High },
+          { id: 'source-provenance', message: 'unknown build', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High },
+          { id: 'quote-liveness', message: 'quotes', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.Medium },
+        ],
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.assessmentState).toBe('unrecognized')
+    expect(view.isCustomAdapter).toBe(true)
+    expect(view.checks?.map(check => check.id)).toEqual(['adapter-exists', 'source-provenance'])
+    expect(view.checksStatus).toBeNull()
+    expect(view.failedChecks).toHaveLength(0)
+    expect(view.passedChecks).toBe(0)
+    expect(view.reason).toBe('Source provenance: Runtime bytecode does not match any known adapter build.')
+    expect(view.lastCheckedAt).toBe('2026-09-01T12:00:00.000Z')
+  })
+
+  it('counts only passing health findings for a positive verdict', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        provider: 'Pendle',
+        checksStatus: 'positive',
+        checks: [
+          { id: 'adapter-exists', message: 'ok', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.High },
+          { id: 'pendle-market-expired', message: 'matured', outcome: OracleAdapterCheckOutcome.NotApplicable, severity: OracleAdapterCheckSeverity.Info },
+        ],
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.assessmentState).toBe('recognized')
+    expect(view.passedChecks).toBe(1)
+    expect(view.checks).toHaveLength(2)
   })
 
   it('keeps the configured route separate from a proxy feed label', () => {
@@ -151,10 +197,12 @@ describe('buildOracleAdapterView', () => {
     const view = buildOracleAdapterView(adapterStep(), meta)
 
     expect(view.assessmentPairMatchesRoute).toBe(false)
+    expect(view.assessmentState).toBe('recognized')
     expect(view.label).toBeUndefined()
     expect(view.checks).toBeUndefined()
     expect(view.checksStatus).toBeNull()
     expect(view.failedChecks).toHaveLength(0)
+    expect(view.lastCheckedAt).toBeUndefined()
   })
 })
 

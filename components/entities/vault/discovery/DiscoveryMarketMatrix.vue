@@ -457,13 +457,16 @@ watch(
                       name="question-circle"
                       class="!w-16 !h-16 text-content-tertiary"
                     />
+                    <!-- Grey marks an adapter V3 assessed but could not identify,
+                         so it stays distinguishable from a checked, healthy one. -->
                     <span
-                      v-if="adapter.checksStatus"
+                      v-if="adapter.checksStatus || adapter.assessmentState === 'unrecognized'"
                       class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
                       :class="{
                         'bg-success-500': adapter.checksStatus === 'positive',
                         'bg-warning-500': adapter.checksStatus === 'warning',
                         'bg-error-500': adapter.checksStatus === 'negative',
+                        'bg-content-muted': adapter.assessmentState === 'unrecognized',
                       }"
                     />
                   </span>

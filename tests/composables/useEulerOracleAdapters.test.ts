@@ -137,7 +137,41 @@ describe('useEulerOracleAdapters', () => {
     await loadAllOracleAdapters(1)
 
     expect(fetchOracleAdapterAssessments).toHaveBeenCalledTimes(2)
+    expect(fetchOracleAdapterAssessments).toHaveBeenCalledWith(1, { active: true })
     expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Pyth')
+  })
+
+  it('serves single lookups from a fresh catalogue without re-entering the SDK', async () => {
+    fetchOracleAdapterAssessments.mockResolvedValueOnce([assessment()])
+    fetchOracleAdapterAssessment.mockResolvedValueOnce(assessment(UNLISTED_ADAPTER))
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, loadOracleAdapter } = useEulerOracleAdapters()
+
+    await loadAllOracleAdapters(1)
+    expect(await loadOracleAdapter(1, KNOWN_ADAPTER)).toMatchObject({ provider: 'Chainlink' })
+    expect(fetchOracleAdapterAssessment).not.toHaveBeenCalled()
+
+    // The catalogue is filtered to active-route adapters, so a miss still asks the SDK.
+    expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toMatchObject({ oracle: UNLISTED_ADAPTER })
+    expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1)
+  })
+
+  it('goes back to the SDK once the catalogue is older than its freshness window', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchOracleAdapterAssessments.mockResolvedValueOnce([assessment()])
+      fetchOracleAdapterAssessment.mockResolvedValueOnce({ ...assessment(), checksStatus: 'negative' })
+      const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+      const { loadAllOracleAdapters, loadOracleAdapter } = useEulerOracleAdapters()
+
+      await loadAllOracleAdapters(1)
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+      expect(await loadOracleAdapter(1, KNOWN_ADAPTER)).toMatchObject({ checksStatus: 'negative' })
+      expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1)
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reloads when the chain changes', async () => {

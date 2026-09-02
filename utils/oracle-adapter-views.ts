@@ -1,10 +1,14 @@
 import type { Address } from 'viem'
 import type { EVault, OracleRouteStep, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import {
+  formatOracleAssessmentReason,
+  getOracleAssessmentState,
+  isOracleIdentityCheck,
   OracleAdapterCheckOutcome,
   resolveOracleAdapterIdentity,
   type OracleAdapterCheck,
   type OracleAdapterMeta,
+  type OracleAssessmentState,
 } from '~/entities/oracle'
 import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
@@ -31,12 +35,17 @@ export type OracleAdapterView = {
   logo?: string
   label?: { primary: string, suffix?: string }
   invertPrice: boolean
+  // Recognized adapters: the health findings (when the assessed pair is the
+  // routed one). Unrecognized adapters: the identity findings only.
   checks?: OracleAdapterCheck[]
   checksStatus: 'positive' | 'warning' | 'negative' | null
+  assessmentState: OracleAssessmentState
+  // Display-ready explanation of why V3 could not identify the adapter.
+  reason?: string
+  passedChecks: number
   failedChecks: OracleAdapterCheck[]
   unknownChecks: OracleAdapterCheck[]
   assessmentPairMatchesRoute: boolean | null
-  policyVersion?: number
   lastCheckedAt?: string
 }
 
@@ -95,10 +104,18 @@ export const buildOracleAdapterView = (
   const isAdapter = isOracleAdapterRouteStep(step)
   const meta = isAdapter ? oracleAdapters[step.oracle.toLowerCase()] : undefined
   const { name, provider, isCustomAdapter } = resolveOracleAdapterIdentity(step, meta, isAdapter)
-  const trustedMeta = meta?.recognized ? meta : undefined
+  const assessmentState = getOracleAssessmentState(meta)
+  const trustedMeta = assessmentState === 'recognized' ? meta : undefined
   const pairMatches = assessmentPairMatchesRoute(step, trustedMeta)
   const assessmentApplies = pairMatches !== false
-  const checks = assessmentApplies ? trustedMeta?.checks : undefined
+  // Health findings only ever come from a recognized assessment of the routed
+  // pair. An unrecognized adapter still shows the identity findings that
+  // explain the verdict — those are V3's own bytecode/provenance evaluation,
+  // not values read through the contract's untrusted getters.
+  const healthChecks = trustedMeta && assessmentApplies ? trustedMeta.checks : []
+  const checks = assessmentState === 'unrecognized'
+    ? meta?.checks.filter(isOracleIdentityCheck)
+    : trustedMeta && assessmentApplies ? trustedMeta.checks : undefined
   return {
     key: getOracleRouteStepKey(step),
     kind: step.kind,
@@ -121,11 +138,15 @@ export const buildOracleAdapterView = (
     }),
     checks,
     checksStatus: trustedMeta && assessmentApplies ? trustedMeta.checksStatus : null,
-    failedChecks: checks?.filter(c => c.outcome === OracleAdapterCheckOutcome.Fail) ?? [],
-    unknownChecks: checks?.filter(c => c.outcome === OracleAdapterCheckOutcome.Unknown) ?? [],
+    assessmentState,
+    reason: assessmentState === 'unrecognized' && meta?.reason
+      ? formatOracleAssessmentReason(meta.reason)
+      : undefined,
+    passedChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Pass).length,
+    failedChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Fail),
+    unknownChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Unknown),
     assessmentPairMatchesRoute: pairMatches,
-    policyVersion: assessmentApplies ? trustedMeta?.policyVersion : undefined,
-    lastCheckedAt: assessmentApplies ? trustedMeta?.lastCheckedAt : undefined,
+    lastCheckedAt: checks?.length ? meta?.lastCheckedAt : undefined,
   }
 }
 

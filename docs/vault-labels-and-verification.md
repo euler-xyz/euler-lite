@@ -253,7 +253,9 @@ Data V3 serves adapter assessments at `/v3/oracles/adapter-assessments` and `/v3
 }
 ```
 
-Lite compares the assessed base/quote pair with the decoded route before applying the health verdict. Router presence comes from `/v3/oracles/routers` and is presented as an indexing signal, not a separate recognition or security verdict.
+Lite compares the assessed base/quote pair with the decoded route before applying the health verdict. The Checks cell distinguishes three states: recognized adapters show the health verdict and counts; adapters V3 assessed but could not identify show "Unrecognized" with the failing identity rule (`reason`) and expose only the identity findings; adapters with no assessment row show "Not assessed". Rule keys are rendered as sentence-case titles client-side (`formatOracleCheckTitle`).
+
+Router recognition comes from `/v3/oracles/routers`, which lists exactly the routers deployed by the recognized `EulerRouterFactory` (the indexer only tracks factory deployments); it is the same set the legacy oracle-checks `routers/all.json` was generated from.
 
 ---
 
