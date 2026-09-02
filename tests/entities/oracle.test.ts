@@ -3,12 +3,14 @@ import type { Address } from 'viem'
 import {
   formatOracleAssessmentReason,
   formatOracleCheckTitle,
+  getOracleCheckEvidenceLines,
   getOracleAssessmentState,
   getRouterRecognition,
   isOracleIdentityCheck,
   normalizeOracleAdapterCheckSeverity,
   resolveOracleAdapterIdentity,
   type OracleAdapterMeta,
+  OracleAdapterCheckOutcome,
   OracleAdapterCheckSeverity,
 } from '~/entities/oracle'
 
@@ -154,6 +156,51 @@ describe('formatOracleAssessmentReason', () => {
 
   it('passes through reasons without a key prefix', () => {
     expect(formatOracleAssessmentReason('The adapter could not be recognized.')).toBe('The adapter could not be recognized.')
+  })
+})
+
+describe('getOracleCheckEvidenceLines', () => {
+  const check = (id: string, observed?: unknown) => ({
+    id,
+    message: 'Evidence',
+    outcome: OracleAdapterCheckOutcome.Pass,
+    severity: OracleAdapterCheckSeverity.Medium,
+    observed,
+  })
+
+  const quoteContext = {
+    baseSymbol: 'mGLOBAL',
+    quoteSymbol: 'USD',
+  }
+
+  it('omits raw source provenance fingerprints', () => {
+    expect(getOracleCheckEvidenceLines(check('source-provenance', '0x1234'))).toEqual([])
+  })
+
+  it('formats price deviation evidence with readable labels and units', () => {
+    expect(getOracleCheckEvidenceLines(check('quote-price-consistency', {
+      deviationPct: 0.439,
+      impliedPrice: 0.13702916392355638,
+      referencePrice: 0.13763385,
+    }), quoteContext)).toEqual([
+      { key: 'deviation', text: 'Deviation: 0.439%' },
+      { key: 'oracle-price', text: 'Oracle price: 0.1370292 USD per mGLOBAL' },
+      { key: 'reference-price', text: 'Reference price: 0.1376339 USD per mGLOBAL' },
+    ])
+  })
+
+  it('omits the raw quote amount because the normalized price is rendered by the consistency check', () => {
+    expect(getOracleCheckEvidenceLines(check('quote-liveness', '1016646090000000000'))).toEqual([])
+  })
+
+  it('keeps generic primitive evidence for other checks', () => {
+    expect(getOracleCheckEvidenceLines({
+      ...check('push-staleness-buffer', '432000'),
+      expected: '>= 88200',
+    })).toEqual([
+      { key: 'expected', text: 'Expected: >= 88200' },
+      { key: 'observed', text: 'Observed: 432000' },
+    ])
   })
 })
 

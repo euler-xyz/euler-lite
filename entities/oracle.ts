@@ -4,6 +4,7 @@ import {
   EULER_ROUTER_COMPONENTS,
   PYTH_ORACLE_COMPONENTS,
 } from '~/entities/constants'
+import { formatNumber } from '~/utils/string-utils'
 
 export type OracleDetailedInfo = {
   oracle: Address
@@ -74,6 +75,101 @@ export type OracleAdapterCheck = {
   severity: OracleAdapterCheckSeverity
   expected?: unknown
   observed?: unknown
+}
+
+export type OracleCheckQuoteContext = {
+  baseSymbol?: string
+  quoteSymbol?: string
+}
+
+export type OracleCheckEvidenceLine = {
+  key: string
+  text: string
+}
+
+const formatOracleCheckPrimitive = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return String(value)
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)))
+  }
+  return undefined
+}
+
+const formatOracleCheckDetail = (value: unknown): string | undefined => {
+  const primitive = formatOracleCheckPrimitive(value)
+  if (primitive !== undefined) return primitive
+  if (!value || typeof value !== 'object') return undefined
+
+  if (Array.isArray(value)) {
+    if (!value.length || value.length > 4) return undefined
+    const items = value.map(formatOracleCheckPrimitive)
+    return items.every((item): item is string => item !== undefined) ? items.join(', ') : undefined
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (!entries.length || entries.length > 4) return undefined
+  const parts: string[] = []
+  for (const [key, entry] of entries) {
+    const text = formatOracleCheckPrimitive(entry)
+    if (text === undefined) return undefined
+    parts.push(`${key} ${text}`)
+  }
+  return parts.join(' · ')
+}
+
+const formatOraclePrice = (value: unknown): string | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return new Intl.NumberFormat('en-US', {
+    maximumSignificantDigits: 7,
+    useGrouping: true,
+  }).format(value)
+}
+
+const formatOraclePriceWithPair = (value: unknown, context?: OracleCheckQuoteContext): string | undefined => {
+  const price = formatOraclePrice(value)
+  if (!price) return undefined
+  if (!context?.baseSymbol || !context.quoteSymbol) return price
+  return `${price} ${context.quoteSymbol} per ${context.baseSymbol}`
+}
+
+/**
+ * Converts V3's machine-readable finding evidence into concise display lines.
+ * Raw provenance fingerprints remain available in the API but are deliberately
+ * omitted here; they do not help a user interpret a successful source match.
+ */
+export function getOracleCheckEvidenceLines(
+  check: OracleAdapterCheck,
+  quoteContext?: OracleCheckQuoteContext,
+): OracleCheckEvidenceLine[] {
+  if (check.id === 'source-provenance') return []
+
+  // The raw quote is an integer amount. Its normalized value is already
+  // supplied as `impliedPrice` by quote-price-consistency below.
+  if (check.id === 'quote-liveness') return []
+
+  if (check.id === 'quote-price-consistency' && check.observed && typeof check.observed === 'object') {
+    const observed = check.observed as Record<string, unknown>
+    const lines: OracleCheckEvidenceLine[] = []
+    if (typeof observed.deviationPct === 'number' && Number.isFinite(observed.deviationPct)) {
+      lines.push({
+        key: 'deviation',
+        text: `Deviation: ${formatNumber(observed.deviationPct, 3, 0)}%`,
+      })
+    }
+    const impliedPrice = formatOraclePriceWithPair(observed.impliedPrice, quoteContext)
+    if (impliedPrice) lines.push({ key: 'oracle-price', text: `Oracle price: ${impliedPrice}` })
+    const referencePrice = formatOraclePriceWithPair(observed.referencePrice, quoteContext)
+    if (referencePrice) lines.push({ key: 'reference-price', text: `Reference price: ${referencePrice}` })
+    if (lines.length) return lines
+  }
+
+  const lines: OracleCheckEvidenceLine[] = []
+  const expected = formatOracleCheckDetail(check.expected)
+  if (expected !== undefined) lines.push({ key: 'expected', text: `Expected: ${expected}` })
+  const observed = formatOracleCheckDetail(check.observed)
+  if (observed !== undefined) lines.push({ key: 'observed', text: `Observed: ${observed}` })
+  return lines
 }
 
 export type OracleAdapterMeta = {

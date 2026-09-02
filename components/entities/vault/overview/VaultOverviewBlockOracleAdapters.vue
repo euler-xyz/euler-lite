@@ -144,6 +144,10 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
     note: adapter.assessmentState === 'unrecognized'
       ? 'This adapter could not be identified, so no health checks are reported for it.'
       : undefined,
+    quoteContext: {
+      baseSymbol: resolveSymbol(adapter.metaBase ?? adapter.base),
+      quoteSymbol: resolveSymbol(adapter.metaQuote ?? adapter.quote),
+    },
   },
 })
 </script>
