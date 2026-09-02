@@ -12,8 +12,6 @@ export interface StepAssetInfo {
   /** Optional address used only for the displayed asset logo. */
   iconAddress?: string
   amount?: number | string
-  /** Render an already structured amount verbatim instead of coercing it to a number. */
-  rawAmount?: boolean
   iconUrl?: string
   /** When true, the displayed amount is an estimate (rendered with a "~" prefix). */
   estimated?: boolean
@@ -38,10 +36,6 @@ export interface DisplayStep {
   isSeparateTx: boolean
   assetInfo?: StepAssetInfo
   toAssetInfo?: StepAssetInfo
-  /** Fuul claim fee taken directly from the reviewed payable call. */
-  nativeValue?: bigint
-  /** Payable call destination associated with `nativeValue`. */
-  nativeValueTarget?: string
   iconOnly?: boolean
   /**
    * Identity of the underlying encoded transaction, present when the step
@@ -837,8 +831,6 @@ const buildPlanAssetMap = (
 ): KnownAssetMap => {
   const assets: KnownAssetMap = {}
   addKnownAsset(assets, ctx.asset)
-  addKnownAsset(assets, ctx.supplyingAssetForBorrow)
-  addKnownAsset(assets, ctx.swapFromAsset)
   addKnownAsset(assets, ctx.swapToAsset)
   for (const asset of ctx.knownAssets ?? []) addKnownAsset(assets, asset)
 
@@ -1175,23 +1167,13 @@ export function buildTransactionPlanDisplaySteps(
       const resolved = item.resolved ?? []
       for (const r of resolved) {
         index++
-        const token = r.token ?? item.token
-        const approvalAsset = getKnownAsset(token, ctx, getVault, knownAssets)
-        const assetInfo: StepAssetInfo = approvalAsset
-          ? buildAssetInfo(approvalAsset, r.amount)
-          : {
-              symbol: token,
-              address: token,
-              amount: `${r.amount.toString()} base units`,
-              rawAmount: true,
-            }
         if (r.type === 'approve') {
           steps.push({
             index,
             label: 'Approve',
-            labelSuffix: `for spender ${r.spender}`,
+            labelSuffix: 'for vault',
             isSeparateTx: !ctx.bundledApprovals,
-            assetInfo,
+            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
           })
         }
         else {
@@ -1199,9 +1181,8 @@ export function buildTransactionPlanDisplaySteps(
           steps.push({
             index,
             label: 'Sign permit2 message',
-            labelSuffix: `for spender ${r.spender}`,
             isSeparateTx: false,
-            assetInfo,
+            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
           })
         }
       }
@@ -1354,9 +1335,6 @@ export function buildTransactionPlanDisplaySteps(
             index--
             continue
           }
-          const isPayableFuulClaim = ctx.type === 'fuul-reward'
-            && action.data.slice(0, 10).toLowerCase() === FUUL_CLAIM_SELECTOR
-            && action.value > 0n
           const step: DisplayStep = {
             index,
             label: displayLabel,
@@ -1364,8 +1342,6 @@ export function buildTransactionPlanDisplaySteps(
             isSeparateTx: false,
             assetInfo,
             toAssetInfo,
-            nativeValue: isPayableFuulClaim ? action.value : undefined,
-            nativeValueTarget: isPayableFuulClaim ? action.targetContract : undefined,
             iconOnly: label === 'Update price feeds',
           }
           steps.push(step)
@@ -1453,12 +1429,6 @@ export function buildTransactionPlanDisplaySteps(
               amount: ctx.amount,
               iconUrl: rewardIconUrl,
             }
-          : undefined,
-        nativeValue: ctx.type === 'fuul-reward' && item.functionName === 'claim' && item.value > 0n
-          ? item.value
-          : undefined,
-        nativeValueTarget: ctx.type === 'fuul-reward' && item.functionName === 'claim' && item.value > 0n
-          ? item.to
           : undefined,
       })
       continue

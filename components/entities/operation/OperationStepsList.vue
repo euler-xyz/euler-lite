@@ -1,28 +1,16 @@
 <script setup lang="ts">
 import type { DisplayStep } from '~/utils/stepDecoding'
-import { formatUnits } from 'viem'
-import { formatNumber, shortenAddress } from '~/utils/string-utils'
-import { getChainById } from '~/entities/chainRegistry'
+import { formatNumber } from '~/utils/string-utils'
 
 defineProps<{
   steps: DisplayStep[]
 }>()
-
-const { chainId } = useEulerAddresses()
-const nativeCurrency = computed(() => getChainById(chainId.value)?.nativeCurrency)
-const nativeSymbol = computed(() => nativeCurrency.value?.symbol ?? 'ETH')
-const nativeDecimals = computed(() => nativeCurrency.value?.decimals ?? 18)
-const formatNativeValue = (value: bigint) => formatUnits(value, nativeDecimals.value)
-const formatNativeValueWithSymbol = (value: bigint) => `${formatNativeValue(value)} ${nativeSymbol.value}`
 
 const getFullAmountText = (assetInfo?: DisplayStep['assetInfo']) => {
   const amount = assetInfo?.amount
   if (!assetInfo || amount === undefined || amount === 'max' || amount === 'remaining') return undefined
   return `${String(amount)} ${assetInfo.symbol}`
 }
-
-const getDisplayAmount = (assetInfo: NonNullable<DisplayStep['assetInfo']>) =>
-  assetInfo.rawAmount ? String(assetInfo.amount) : formatNumber(assetInfo.amount, 8, 0)
 </script>
 
 <template>
@@ -53,7 +41,7 @@ const getDisplayAmount = (assetInfo: NonNullable<DisplayStep['assetInfo']>) =>
               :exact="getFullAmountText(step.assetInfo)!"
               :placement="step.index === 1 ? 'bottom' : 'top'"
             >
-              {{ step.assetInfo.estimated ? '~' : '' }}{{ getDisplayAmount(step.assetInfo) }}&nbsp;{{ step.assetInfo.symbol }}
+              {{ step.assetInfo.estimated ? '~' : '' }}{{ formatNumber(step.assetInfo.amount, 8, 0) }}&nbsp;{{ step.assetInfo.symbol }}
             </UiExactAmount>
           </template>
           <template v-else>
@@ -88,7 +76,7 @@ const getDisplayAmount = (assetInfo: NonNullable<DisplayStep['assetInfo']>) =>
               :exact="getFullAmountText(step.toAssetInfo)!"
               :placement="step.index === 1 ? 'bottom' : 'top'"
             >
-              {{ step.toAssetInfo.estimated ? '~' : '' }}{{ getDisplayAmount(step.toAssetInfo) }}&nbsp;{{ step.toAssetInfo.symbol }}
+              {{ step.toAssetInfo.estimated ? '~' : '' }}{{ formatNumber(step.toAssetInfo.amount, 8, 0) }}&nbsp;{{ step.toAssetInfo.symbol }}
             </UiExactAmount>
           </template>
           <template v-else>
@@ -96,25 +84,6 @@ const getDisplayAmount = (assetInfo: NonNullable<DisplayStep['assetInfo']>) =>
           </template>
         </p>
       </template>
-      <p
-        v-if="step.nativeValue !== undefined && step.nativeValueTarget"
-        class="basis-full text-p4 text-content-tertiary"
-      >
-        Fuul claim fee:
-        <UiExactAmount
-          :exact="formatNativeValueWithSymbol(step.nativeValue)"
-          :placement="step.index === 1 ? 'bottom' : 'top'"
-        >
-          {{ formatNativeValue(step.nativeValue) }}&nbsp;{{ nativeSymbol }}
-        </UiExactAmount>
-        to
-        <UiExactAmount
-          :exact="step.nativeValueTarget"
-          :placement="step.index === 1 ? 'bottom' : 'top'"
-        >
-          {{ shortenAddress(step.nativeValueTarget) }}
-        </UiExactAmount>
-      </p>
     </div>
     <span
       v-if="step.isSeparateTx"

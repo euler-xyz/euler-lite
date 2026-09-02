@@ -27,9 +27,6 @@ const irm = '0x0000000000000000000000000000000000000034' as Address
 const aToken = '0x0000000000000000000000000000000000000035' as Address
 const variableDebtToken = '0x0000000000000000000000000000000000000036' as Address
 const metamorphoVault = '0x0000000000000000000000000000000000000037' as Address
-const fuulManager = '0x0000000000000000000000000000000000000041' as Address
-const fuulProjectA = '0x0000000000000000000000000000000000000042' as Address
-const fuulProjectB = '0x0000000000000000000000000000000000000043' as Address
 const bytes32Zero = `0x${'00'.repeat(32)}` as Hex
 const genericHandler = '0x47656e6572696300000000000000000000000000000000000000000000000000' as Hex
 const wbtcAsset = '0x0000000000000000000000000000000000000026' as Address
@@ -76,28 +73,6 @@ const aaveAuthAbi = parseAbi([
   'function delegationWithSig(address delegator,address delegatee,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
   'function permit(address owner,address spender,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
 ])
-const fuulManagerAbi = [{
-  type: 'function',
-  name: 'claim',
-  stateMutability: 'payable',
-  inputs: [{
-    name: 'claimChecks',
-    type: 'tuple[]',
-    components: [
-      { name: 'projectAddress', type: 'address' },
-      { name: 'to', type: 'address' },
-      { name: 'currency', type: 'address' },
-      { name: 'currencyType', type: 'uint8' },
-      { name: 'amount', type: 'uint256' },
-      { name: 'reason', type: 'uint8' },
-      { name: 'tokenId', type: 'uint256' },
-      { name: 'deadline', type: 'uint256' },
-      { name: 'proof', type: 'bytes32' },
-      { name: 'signatures', type: 'bytes[]' },
-    ],
-  }],
-  outputs: [],
-}] as const
 const reulAbi = parseAbi([
   'function withdrawToByLockTimestamp(address account,uint256 lockTimestamp,bool allowRemainderLoss)',
 ])
@@ -179,30 +154,11 @@ const getVault: VaultLookup = (address) => {
 
 const getLogoUrl = () => ''
 
-const batchItem = (data: Hex, targetContract: Address = verifier, value = 0n): EVCBatchItem => ({
+const batchItem = (data: Hex, targetContract: Address = verifier): EVCBatchItem => ({
   targetContract,
   onBehalfOfAccount: account,
-  value,
+  value: 0n,
   data,
-})
-
-const fuulClaimCheck = (projectAddress: Address, amount: bigint) => ({
-  projectAddress,
-  to: account,
-  currency: usdcAsset,
-  currencyType: 0,
-  amount,
-  reason: 0,
-  tokenId: 0n,
-  deadline: 123n,
-  proof: bytes32Zero,
-  signatures: [] as Hex[],
-})
-
-const fuulClaimData = encodeFunctionData({
-  abi: fuulManagerAbi,
-  functionName: 'claim',
-  args: [[fuulClaimCheck(fuulProjectA, 600_000n), fuulClaimCheck(fuulProjectB, 400_000n)]],
 })
 
 const marketParams = {
@@ -307,150 +263,10 @@ const disableController = () => encodeFunctionData({
   args: [],
 })
 
-describe('buildTransactionPlanDisplaySteps approval rows', () => {
-  it('uses the approval token, amount, and spender instead of the operation asset', () => {
-    const collateralAmount = 2n * 10n ** 18n
-    const plan: TransactionPlan = [{
-      type: 'requiredApproval',
-      token: wethAsset,
-      owner: account,
-      spender: wethVault,
-      amount: collateralAmount,
-      resolved: [{
-        type: 'approve',
-        token: wethAsset,
-        owner: account,
-        spender: wethVault,
-        amount: collateralAmount,
-        data: '0x',
-      }],
-    }]
-
-    const steps = buildTransactionPlanDisplaySteps(plan, {
-      type: 'borrow',
-      asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
-      amount: '1',
-      supplyingAssetForBorrow: { symbol: 'WETH', address: wethAsset, decimals: 18 },
-      supplyingAmount: '2',
-    }, getVault, () => '')
-
-    expect(steps).toEqual([{
-      index: 1,
-      label: 'Approve',
-      labelSuffix: `for spender ${wethVault}`,
-      isSeparateTx: true,
-      assetInfo: {
-        symbol: 'WETH',
-        address: wethAsset,
-        amount: '2',
-      },
-    }])
-  })
-
-  it('does not fall back to the primary asset when approval token metadata is unknown', () => {
-    const unknownToken = '0x0000000000000000000000000000000000000041' as Address
-    const plan: TransactionPlan = [{
-      type: 'requiredApproval',
-      token: unknownToken,
-      owner: account,
-      spender: verifier,
-      amount: 123n,
-      resolved: [{
-        type: 'permit2',
-        token: unknownToken,
-        owner: account,
-        spender: verifier,
-        amount: 123n,
-      }],
-    }]
-
-    const [step] = buildTransactionPlanDisplaySteps(plan, ctx, getVault, () => '')
-
-    expect(step?.assetInfo).toEqual({
-      symbol: unknownToken,
-      address: unknownToken,
-      amount: '123 base units',
-      rawAmount: true,
-    })
-    expect(step?.assetInfo?.address).not.toBe(usdcAsset)
-    expect(step?.labelSuffix).toBe(`for spender ${verifier}`)
-  })
-})
-
 const swapperMulticall = (calls: Hex[]) => encodeFunctionData({
   abi: swapperAbi,
   functionName: 'multicall',
   args: [calls],
-})
-
-describe('buildTransactionPlanDisplaySteps Fuul claim fee', () => {
-  const fuulContext: StepDecodingContext = {
-    type: 'fuul-reward',
-    asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
-    amount: '1',
-  }
-
-  it('shows the exact aggregated native fee and destination from an EVC claim action', () => {
-    const aggregatedFee = 246n
-    const steps = buildTransactionPlanDisplaySteps(
-      [{
-        type: 'evcBatch',
-        items: [batchItem(fuulClaimData, fuulManager, aggregatedFee)],
-      }] satisfies TransactionPlan,
-      fuulContext,
-      getVault,
-      getLogoUrl,
-    )
-
-    expect(steps).toHaveLength(1)
-    expect(steps[0]).toMatchObject({
-      label: 'Claim',
-      assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1' },
-      nativeValue: aggregatedFee,
-      nativeValueTarget: fuulManager,
-    })
-  })
-
-  it('shows the exact native fee and destination from a direct Fuul claim', () => {
-    const claimFee = 123n
-    const steps = buildTransactionPlanDisplaySteps(
-      [{
-        type: 'contractCall',
-        chainId: 1,
-        to: fuulManager,
-        abi: fuulManagerAbi,
-        functionName: 'claim',
-        args: [[fuulClaimCheck(fuulProjectA, 1_000_000n)]],
-        value: claimFee,
-      }] satisfies TransactionPlan,
-      fuulContext,
-      getVault,
-      getLogoUrl,
-    )
-
-    expect(steps).toHaveLength(1)
-    expect(steps[0]).toMatchObject({
-      label: 'Claim',
-      assetInfo: { symbol: 'USDC', address: usdcAsset, amount: '1' },
-      nativeValue: claimFee,
-      nativeValueTarget: fuulManager,
-    })
-  })
-
-  it('does not expose payable values for non-Fuul reward reviews', () => {
-    const steps = buildTransactionPlanDisplaySteps(
-      [{
-        type: 'evcBatch',
-        items: [batchItem(fuulClaimData, fuulManager, 246n)],
-      }] satisfies TransactionPlan,
-      { ...fuulContext, type: 'reward' },
-      getVault,
-      getLogoUrl,
-    )
-
-    expect(steps[0]?.nativeValue).toBeUndefined()
-    expect(steps[0]?.nativeValueTarget).toBeUndefined()
-  })
 })
 
 describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
