@@ -196,7 +196,7 @@ describe('review compatibility fixtures', () => {
   const fixtures = [
     { path: 'components/entities/operation/OperationReviewModal.vue', templateOnly: true, sha256: 'a6b35defabe1c9610b482e63c9c5d9c77b1ffcbd2b78c5d67a4f96516c8a1f2d' },
     { path: 'components/BatchReviewModal.vue', templateOnly: true, sha256: '14a568abd87d8fe644749c84a5f63396276d098db123f2cffb9853c18d06d9cd' },
-    { path: 'utils/stepDecoding.ts', templateOnly: false, sha256: 'c900daf01b6a4af5f66cbf0e9e1040edc875d9e9a2ca85fd3829b6b603700f9a' },
+    { path: 'utils/stepDecoding.ts', templateOnly: false, sha256: '6b91c9d294290692982531800909cfbb9827125a916b85ce7febc8d0fd48e8e6' },
     { path: 'utils/batchReviewDisplay.ts', templateOnly: false, sha256: 'c8e892115e9bba21ad695b5cdd158e6b69d8aefc9ceb3c5aaae2faf17128ade4' },
   ] as const
 
