@@ -128,6 +128,7 @@ export const REVIEW_SOURCE_INVENTORY: readonly SourceCountInventoryRow[] = [
   { source: 'composables/repay/useSavingsRepay.ts', expectedOccurrences: 1 },
   { source: 'composables/repay/useWalletRepay.ts', expectedOccurrences: 1 },
   { source: 'composables/repay/useWalletSwapRepay.ts', expectedOccurrences: 1 },
+  { source: 'composables/useExecutionReview.ts', expectedOccurrences: 1 },
   { source: 'composables/useSwapPageLogic.ts', expectedOccurrences: 1 },
   { source: 'pages/earn/[vault]/[subAccount]/withdraw.vue', expectedOccurrences: 1 },
   { source: 'pages/earn/[vault]/index.vue', expectedOccurrences: 1 },

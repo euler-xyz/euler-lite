@@ -1,6 +1,6 @@
 import type { Hash, StateOverride } from 'viem'
 import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { ReviewedOperationModal } from '#components'
+import { OperationReviewModal, ReviewedOperationModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import type { SubmissionResult } from '~/features/reviewed-execution/coordinator/coordinator'
@@ -30,11 +30,37 @@ export interface OpenExecutionReviewOptions {
 export const useExecutionReview = () => {
   const modal = useModal()
   const execution = useReviewedExecution()
+  const { isSpyMode } = useEffectiveAddress()
 
   const open = async (
     intents: readonly OperationIntent[],
     options: OpenExecutionReviewOptions,
   ): Promise<{ reviewId: Hash, reviewDigest: Hash }> => {
+    if (isSpyMode.value) {
+      const prepared = await execution.prepareReadOnly(intents, {
+        presentationKind: options.presentationKind,
+        presentationInputs: options.review,
+      })
+      modal.open(OperationReviewModal, {
+        props: {
+          ...options.review,
+          plan: undefined,
+          prepared: prepared.prepared,
+          calldataPrepared: prepared.prepared,
+          tenderlyPrepared: options.tenderlyPrepared ?? prepared.prepared,
+          tenderlyStateOverrides: options.tenderlyStateOverrides,
+          reviewedAccount: prepared.execution.requestSet.wallet.account,
+          reviewedWalletKind: prepared.execution.requestSet.wallet.walletKind,
+          reviewedRequests: prepared.execution.requestSet.requests,
+          reviewedSignatureSlots: prepared.execution.requestSet.signatureSlots,
+          readOnly: true,
+        },
+      })
+      return {
+        reviewId: prepared.execution.reviewId,
+        reviewDigest: prepared.execution.reviewDigest,
+      }
+    }
     const prepared = await execution.prepare(intents, {
       presentationKind: options.presentationKind,
       presentationInputs: options.review,
