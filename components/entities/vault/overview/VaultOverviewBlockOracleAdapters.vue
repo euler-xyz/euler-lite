@@ -20,6 +20,7 @@ const props = defineProps<{
 }>()
 const {
   oracleAdapters,
+  oracleAssessmentsStatus,
   oracleAssessmentsAvailable,
   loadOracleAdapters,
 } = useEulerLabels()
@@ -186,19 +187,19 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
       </UiHoverPreviewTooltip>
     </template>
     <div
-      v-if="!oracleAssessmentsAvailable"
+      v-if="oracleAssessmentsStatus === 'unavailable'"
       class="text-p3 text-content-tertiary"
     >
       Oracle information not available
     </div>
     <div
-      v-else-if="!adapterViews.length"
+      v-else-if="oracleAssessmentsStatus === 'available' && !adapterViews.length"
       class="text-p3 text-content-tertiary"
     >
       No oracle adapters found
     </div>
     <div
-      v-else
+      v-else-if="oracleAssessmentsStatus === 'available'"
       class="flex flex-col items-start gap-16"
     >
       <div

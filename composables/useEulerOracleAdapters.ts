@@ -25,6 +25,7 @@ const oracleAdaptersByChain = new Map<number, Record<string, OracleAdapterMeta>>
 const oracleAssessmentsStatusByChain = new Map<number, OracleAssessmentsStatus>()
 const oracleAdapterCatalogueLoadedAt = new Map<number, number>()
 const oracleAdapterCatalogueKeys = new Map<number, Set<string>>()
+const oracleAdapterPerAddressKeys = new Map<number, Set<string>>()
 type OracleAdapterLoadResult = {
   meta?: OracleAdapterMeta
   backendAvailable: boolean
@@ -110,6 +111,7 @@ const setAdapterMap = (chainId: number, map: Record<string, OracleAdapterMeta>) 
 }
 
 const removeAdapter = (chainId: number, key: string) => {
+  oracleAdapterPerAddressKeys.get(chainId)?.delete(key)
   const current = oracleAdaptersByChain.get(chainId)
   if (!current || !Object.hasOwn(current, key)) return
   setAdapterMap(chainId, Object.fromEntries(
@@ -125,13 +127,13 @@ const applyCatalogue = (chainId: number, assessments: OracleAdapterAssessment[])
     throw new Error(`Oracle adapter catalogue contained an assessment for another chain than ${chainId}`)
   }
   const catalogueMap = normalizeOracleAdapterMap(assessments)
-  const previousCatalogueKeys = oracleAdapterCatalogueKeys.get(chainId) ?? new Set<string>()
+  const perAddressKeys = oracleAdapterPerAddressKeys.get(chainId) ?? new Set<string>()
   const previous = oracleAdaptersByChain.get(chainId) ?? {}
   // The active-route catalogue is not the full assessment set. Keep only
   // entries loaded through the per-address path so catalogue refreshes cannot
   // blank fallback or inactive adapters that are still mounted.
   const extras = Object.fromEntries(
-    Object.entries(previous).filter(([key]) => !previousCatalogueKeys.has(key)),
+    Object.entries(previous).filter(([key]) => perAddressKeys.has(key)),
   )
   setAdapterMap(chainId, { ...extras, ...catalogueMap })
   oracleAdapterCatalogueKeys.set(chainId, new Set(Object.keys(catalogueMap)))
@@ -225,6 +227,9 @@ const loadOracleAdapterResult = async (
         throw new Error(`Oracle adapter assessment did not match chain ${chainId} adapter ${address}`)
       }
       const meta = toOracleAdapterMeta(assessment)
+      const perAddressKeys = oracleAdapterPerAddressKeys.get(chainId) ?? new Set<string>()
+      perAddressKeys.add(key)
+      oracleAdapterPerAddressKeys.set(chainId, perAddressKeys)
       setAdapterMap(chainId, {
         ...(oracleAdaptersByChain.get(chainId) ?? {}),
         [key]: meta,
@@ -261,7 +266,11 @@ const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
 
 const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
   if (!addresses?.length) {
-    if (Number.isInteger(chainId) && chainId > 0) activateChain(chainId)
+    if (!Number.isInteger(chainId) || chainId <= 0) return
+    activateChain(chainId)
+    if (oracleAssessmentsStatusByChain.get(chainId) !== 'available') {
+      await loadAllOracleAdapters(chainId)
+    }
     return
   }
   if (Number.isInteger(chainId) && chainId > 0) {

@@ -271,6 +271,32 @@ describe('useEulerOracleAdapters', () => {
     expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a catalogued adapter after it is refreshed through the per-address path', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchOracleAdapterAssessments
+        .mockResolvedValueOnce([assessment()])
+        .mockResolvedValueOnce([])
+      fetchOracleAdapterAssessment.mockResolvedValueOnce({
+        ...assessment(),
+        provider: 'Pyth',
+      })
+      const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+      const { loadAllOracleAdapters, loadOracleAdapter, oracleAdapters } = useEulerOracleAdapters()
+
+      await loadAllOracleAdapters(1)
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+      await loadOracleAdapter(1, KNOWN_ADAPTER)
+      await loadAllOracleAdapters(1)
+
+      expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Pyth')
+      expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('still re-enters the SDK for a catalogue miss after extras are preserved', async () => {
     fetchOracleAdapterAssessments
       .mockResolvedValueOnce([assessment()])
@@ -346,8 +372,10 @@ describe('useEulerOracleAdapters', () => {
     expect(fetchOracleAdapterAssessment).not.toHaveBeenCalled()
   })
 
-  it('does not carry availability to a different chain with no adapter steps', async () => {
-    fetchOracleAdapterAssessments.mockResolvedValueOnce([assessment()])
+  it('establishes availability for a fresh chain with no adapter steps', async () => {
+    fetchOracleAdapterAssessments
+      .mockResolvedValueOnce([assessment()])
+      .mockResolvedValueOnce([])
     const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
     const { loadAllOracleAdapters, loadOracleAdapters, oracleAssessmentsAvailable } = useEulerOracleAdapters()
 
@@ -356,7 +384,9 @@ describe('useEulerOracleAdapters', () => {
 
     await loadOracleAdapters(2, [])
 
-    expect(oracleAssessmentsAvailable.value).toBe(false)
+    expect(oracleAssessmentsAvailable.value).toBe(true)
+    expect(fetchOracleAdapterAssessments).toHaveBeenCalledTimes(2)
+    expect(fetchOracleAdapterAssessments).toHaveBeenLastCalledWith(2, { active: true })
   })
 
   it('goes back to the SDK once the catalogue is older than its freshness window', async () => {
