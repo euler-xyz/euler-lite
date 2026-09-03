@@ -1,4 +1,4 @@
-import { getAddress, type Address } from 'viem'
+import { getAddress } from 'viem'
 
 export interface UnverifiedVaultAcknowledgementContext {
   chainId: number
@@ -7,12 +7,7 @@ export interface UnverifiedVaultAcknowledgementContext {
   vaults: readonly string[]
 }
 
-const acknowledgedContexts = new Map<string, Readonly<{
-  chainId: number
-  account: string
-  operation: string
-  vaults: readonly string[]
-}>>()
+const acknowledgedContexts = new Set<string>()
 
 const normalizeVaults = (vaults: readonly string[]) =>
   [...new Set(vaults.map(vault => getAddress(vault).toLowerCase()))].sort()
@@ -27,27 +22,11 @@ export const unverifiedVaultAcknowledgementKey = (context: UnverifiedVaultAcknow
 
 /** Session-scoped acknowledgement for one exact UI operation context. */
 export const recordUnverifiedVaultAcknowledgement = (context: UnverifiedVaultAcknowledgementContext) => {
-  const normalized = Object.freeze({
-    chainId: context.chainId,
-    account: getAddress(context.account).toLowerCase(),
-    operation: context.operation,
-    vaults: Object.freeze(normalizeVaults(context.vaults)),
-  })
-  acknowledgedContexts.set(unverifiedVaultAcknowledgementKey(context), normalized)
+  acknowledgedContexts.add(unverifiedVaultAcknowledgementKey(context))
 }
 
-/** Final-plan check: consent cannot cross account or chain boundaries. */
-export const hasUnverifiedVaultAcknowledgement = (
-  vault: Address,
-  context: { chainId: number, account: Address },
-) => {
-  const normalizedVault = getAddress(vault).toLowerCase()
-  const normalizedAccount = getAddress(context.account).toLowerCase()
-  return [...acknowledgedContexts.values()].some(acknowledgement =>
-    acknowledgement.chainId === context.chainId
-    && acknowledgement.account === normalizedAccount
-    && acknowledgement.vaults.includes(normalizedVault),
-  )
-}
+/** Final-plan check: consent must match the exact account, chain, operation, and vault set. */
+export const hasUnverifiedVaultAcknowledgement = (context: UnverifiedVaultAcknowledgementContext) =>
+  acknowledgedContexts.has(unverifiedVaultAcknowledgementKey(context))
 
 export const clearUnverifiedVaultAcknowledgements = () => acknowledgedContexts.clear()

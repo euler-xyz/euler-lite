@@ -26,6 +26,7 @@ export const useOperationIntentFactory = () => {
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: wagmiChainId } = useWagmi()
   const { chainId: browsedChainId } = useEulerAddresses()
+  const route = useRoute()
   const chainId = computed(() => wagmiChainId.value ?? browsedChainId.value)
 
   const create = (input: ConnectedOperationIntentInput): Readonly<OperationIntent> => {
@@ -34,6 +35,7 @@ export const useOperationIntentFactory = () => {
       ...input,
       account: getAddress(effectiveAddress.value),
       chainId: chainId.value,
+      operation: String(route.name ?? route.path),
     })
   }
 

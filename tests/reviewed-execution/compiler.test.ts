@@ -24,7 +24,7 @@ const intentFor = (intentId: string, subAccount: typeof SUB_ACCOUNT_A | typeof S
   subAccounts: [ACCOUNT, subAccount],
   planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 10n } },
   constraints: [{ kind: 'exact-input', token: TOKEN, amount: 10n }],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 })
 
 const intents = [intentFor('intent-a', SUB_ACCOUNT_A), intentFor('intent-b', SUB_ACCOUNT_B)] as const

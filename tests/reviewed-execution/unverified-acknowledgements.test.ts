@@ -32,17 +32,32 @@ describe('unverified vault acknowledgements', () => {
     expect(first).toBe(second)
   })
 
-  it('does not let final-plan consent cross account or chain boundaries', () => {
-    recordUnverifiedVaultAcknowledgement({
+  it('requires the exact account, chain, operation, and vault set', () => {
+    const acknowledgement = {
       chainId: 1,
       account: ACCOUNT,
       operation: 'lend-vault',
       vaults: [VAULT],
-    })
+    }
+    recordUnverifiedVaultAcknowledgement(acknowledgement)
 
-    expect(hasUnverifiedVaultAcknowledgement(VAULT, { chainId: 1, account: ACCOUNT })).toBe(true)
-    expect(hasUnverifiedVaultAcknowledgement(VAULT, { chainId: 8453, account: ACCOUNT })).toBe(false)
-    expect(hasUnverifiedVaultAcknowledgement(VAULT, { chainId: 1, account: OTHER_ACCOUNT })).toBe(false)
-    expect(hasUnverifiedVaultAcknowledgement(OTHER_VAULT, { chainId: 1, account: ACCOUNT })).toBe(false)
+    expect(hasUnverifiedVaultAcknowledgement(acknowledgement)).toBe(true)
+    expect(hasUnverifiedVaultAcknowledgement({ ...acknowledgement, chainId: 8453 })).toBe(false)
+    expect(hasUnverifiedVaultAcknowledgement({ ...acknowledgement, account: OTHER_ACCOUNT })).toBe(false)
+    expect(hasUnverifiedVaultAcknowledgement({ ...acknowledgement, operation: 'position-number-supply' })).toBe(false)
+    expect(hasUnverifiedVaultAcknowledgement({ ...acknowledgement, vaults: [VAULT, OTHER_VAULT] })).toBe(false)
+    expect(hasUnverifiedVaultAcknowledgement({ ...acknowledgement, vaults: [] })).toBe(false)
+  })
+
+  it('does not compose acknowledgements for smaller vault sets', () => {
+    const context = {
+      chainId: 1,
+      account: ACCOUNT,
+      operation: 'lend-vault',
+    }
+    recordUnverifiedVaultAcknowledgement({ ...context, vaults: [VAULT] })
+    recordUnverifiedVaultAcknowledgement({ ...context, vaults: [OTHER_VAULT] })
+
+    expect(hasUnverifiedVaultAcknowledgement({ ...context, vaults: [VAULT, OTHER_VAULT] })).toBe(false)
   })
 })

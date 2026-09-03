@@ -29,7 +29,7 @@ const intent: OperationIntent = {
   subAccounts: [ACCOUNT],
   planner: { name: 'borrow', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 1n, borrowAccount: ACCOUNT } },
   constraints: [{ kind: 'maximum-input', token: TOKEN, amount: 1n }],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 
 const wallet: WalletBinding = {

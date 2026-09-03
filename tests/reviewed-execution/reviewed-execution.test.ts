@@ -29,7 +29,7 @@ const intent: OperationIntent = {
   subAccounts: [ACCOUNT],
   planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 10n } },
   constraints: [{ kind: 'exact-input', token: TOKEN, amount: 10n }],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 
 const wallet: WalletBinding = {

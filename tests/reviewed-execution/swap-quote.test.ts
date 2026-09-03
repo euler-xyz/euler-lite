@@ -40,7 +40,7 @@ const intent = (swapQuote: unknown): OperationIntent => ({
     { kind: 'minimum-output', token: OUT, amount: 98n },
     { kind: 'deadline', timestamp: 1_800_000_000 },
   ],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 })
 
 describe('reviewed execution swap quote DTO', () => {

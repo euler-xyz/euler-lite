@@ -41,7 +41,7 @@ const intentFor = (plan: TransactionPlan, subAccounts: Address[] = [owner]): Ope
     subAccounts,
     planner: { name: 'deposit', args: {} },
     constraints: [],
-    metadata: { createdAt: testIntentSequence, source: 'test' },
+    metadata: { createdAt: testIntentSequence, source: 'test', operation: 'test' },
   }
 }
 const compilePreviewMock = vi.fn(async (intents: readonly OperationIntent[], _account?: Account<IHasVaultAddress>) => testIntentPlans.get(intents[0]!.intentId) ?? [])

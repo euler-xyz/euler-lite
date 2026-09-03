@@ -3,9 +3,13 @@ import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { PolicyState, ReviewedPolicy, ReviewedRequestSet } from '../domain/reviewed-execution'
 import type { OperationIntent } from '../domain/intents'
 import { buildReviewedPolicy, collectPolicyRequirements, type PolicyResultInput } from './engine'
-import { hasUnverifiedVaultAcknowledgement } from './acknowledgements'
+import {
+  hasUnverifiedVaultAcknowledgement,
+  unverifiedVaultAcknowledgementKey,
+  type UnverifiedVaultAcknowledgementContext,
+} from './acknowledgements'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
-import { operationBlockerEntries } from '~/utils/operationGuardRegistry'
+import { isOperationBlockerKey, operationBlockerEntries } from '~/utils/operationGuardRegistry'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
@@ -39,8 +43,15 @@ export const resolveAppPolicy = async (
   const tosEffectDigest = canonicalDigest('tos-policy-effects-v1', toCanonicalValue(requestSet.effects.filter(node => node.effect.kind === 'tos-call').map(node => node.effect)))
 
   let exactVaults: Array<{ address: Address, vault: EVault | EulerEarn | SecuritizeCollateralVault, type: 'evk' | 'earn' | 'securitize' }> | undefined
+  let intentsByOperation: Map<string, OperationIntent[]> | undefined
   if (intents?.length) {
     const requirements = collectPlanningRequirements(intents)
+    intentsByOperation = new Map<string, OperationIntent[]>()
+    for (const intent of intents) {
+      const operationIntents = intentsByOperation.get(intent.metadata.operation) ?? []
+      operationIntents.push(intent)
+      intentsByOperation.set(intent.metadata.operation, operationIntents)
+    }
     exactVaults = []
     for (const address of requirements.vaults) {
       await getOrFetch(address)
@@ -87,7 +98,7 @@ export const resolveAppPolicy = async (
     let version = 'policy'
     if (requirement.subject === 'global') {
       if (requirement.concern === 'tos') {
-        if (operationBlockerEntries.value.some(([key]) => key.startsWith('tos:'))) throw new Error('Terms-of-use policy remains unresolved')
+        if (operationBlockerEntries.value.some(([key]) => isOperationBlockerKey(key, 'tos'))) throw new Error('Terms-of-use policy remains unresolved')
         version = `tos:${tosEffectDigest}`
       }
       else if (requirement.concern === 'unverified-acknowledgement') {
@@ -98,11 +109,24 @@ export const resolveAppPolicy = async (
               .filter(subject => subject.kind === 'vault-or-contract')
               .map(subject => getAddress(subject.value))
               .filter(subject => getVault(subject) && !isVerifiedVault(subject))
-        if (unverified.some(subject => !hasUnverifiedVaultAcknowledgement(subject, {
-          chainId: requestSet.wallet.chainId,
-          account: requestSet.wallet.account,
-        }))) throw new Error('Unverified vault acknowledgement does not cover the execution')
-        version = `unverified:${unverified.map(value => value.toLowerCase()).sort().join(',')}`
+        const unverifiedSet = new Set(unverified.map(value => value.toLowerCase()))
+        const requiredContexts = intentsByOperation
+          ? [...intentsByOperation.entries()]
+              .map(([operation, operationIntents]): UnverifiedVaultAcknowledgementContext => ({
+                chainId: requestSet.wallet.chainId,
+                account: requestSet.wallet.account,
+                operation,
+                vaults: collectPlanningRequirements(operationIntents).vaults.filter(vault =>
+                  unverifiedSet.has(vault.toLowerCase()),
+                ),
+              }))
+              .filter(context => context.vaults.length > 0)
+          : undefined
+        if (unverified.length && (!requiredContexts || requiredContexts.some(context =>
+          !hasUnverifiedVaultAcknowledgement(context),
+        ))) throw new Error('Unverified vault acknowledgement does not cover the execution')
+        const acknowledgementKeys = (requiredContexts ?? []).map(unverifiedVaultAcknowledgementKey).sort()
+        version = `unverified:${canonicalDigest('unverified-vault-acknowledgements-v1', toCanonicalValue(acknowledgementKeys))}`
       }
     }
     else if (requirement.subject.startsWith('vault-or-contract:')) {

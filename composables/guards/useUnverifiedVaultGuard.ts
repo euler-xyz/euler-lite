@@ -32,14 +32,6 @@ export const useUnverifiedVaultGuard = (
   const blockerKey = `unverified-vault:${++unverifiedVaultGuardSequence}`
   let resolutionGeneration = 0
 
-  const acknowledgementContext = computed(() => ({
-    chainId: context.chainId.value ?? 0,
-    account: context.account.value ?? '0x0000000000000000000000000000000000000000',
-    operation: context.operation.value,
-    vaults: vaultAddresses.value,
-  }))
-  const contextKey = computed(() => unverifiedVaultAcknowledgementKey(acknowledgementContext.value))
-
   watch([vaultAddresses, context.chainId], async ([addresses, activeChainId]) => {
     const generation = ++resolutionGeneration
     await Promise.all(addresses.map(address => getOrFetch(address)))
@@ -62,11 +54,20 @@ export const useUnverifiedVaultGuard = (
     }
   }
 
-  const hasUnverifiedVault = computed(() => {
+  const unverifiedVaultAddresses = computed(() => {
     void registryVersion.value
     getEulerLabelsVersion()
-    return vaultAddresses.value.some(address => !hasCanonicalVerification(address))
+    return vaultAddresses.value.filter(address => !hasCanonicalVerification(address))
   })
+  const hasUnverifiedVault = computed(() => unverifiedVaultAddresses.value.length > 0)
+
+  const acknowledgementContext = computed(() => ({
+    chainId: context.chainId.value ?? 0,
+    account: context.account.value ?? '0x0000000000000000000000000000000000000000',
+    operation: context.operation.value,
+    vaults: unverifiedVaultAddresses.value,
+  }))
+  const contextKey = computed(() => unverifiedVaultAcknowledgementKey(acknowledgementContext.value))
 
   const isAcknowledgmentRequired = computed(() =>
     hasUnverifiedVault.value && acknowledgedContextKey.value !== contextKey.value,

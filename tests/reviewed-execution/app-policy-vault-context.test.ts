@@ -30,6 +30,7 @@ const entries = new Map([
   [TEST_VAULT.toLowerCase(), { type: 'evk' as const, vault: sourceVault }],
   [TARGET_VAULT.toLowerCase(), { type: 'evk' as const, vault: targetVault }],
 ])
+const verifyVault = vi.fn()
 
 const swapIntent = () => {
   const quote = makeSwapQuote()
@@ -48,6 +49,7 @@ const swapIntent = () => {
     account: TEST_ACCOUNT,
     subAccounts: [TEST_ACCOUNT],
     source: 'test',
+    operation: 'lend-swap',
     createdAt: 1,
     intentId: 'two-vault-swap',
   })
@@ -59,6 +61,7 @@ describe('final two-vault swap policy', () => {
     geo.country.value = 'US'
     geo.blocked.mockReset().mockReturnValue(false)
     geo.restricted.mockReset().mockReturnValue(false)
+    verifyVault.mockReset().mockImplementation((vault: { address: string }) => getAddress(vault.address) === TEST_VAULT)
     vi.stubGlobal('useVaultRegistry', () => ({
       get: (address: string) => entries.get(address.toLowerCase()),
       getOrFetch: vi.fn(async () => undefined),
@@ -71,7 +74,7 @@ describe('final two-vault swap policy', () => {
         : undefined,
     }))
     vi.stubGlobal('useVaults', () => ({
-      isVaultGovernorVerified: (vault: { address: string }) => getAddress(vault.address) === TEST_VAULT,
+      isVaultGovernorVerified: verifyVault,
       isEarnVaultOwnerVerified: vi.fn(),
       isSecuritizeGovernorVerified: vi.fn(),
     }))
@@ -104,5 +107,27 @@ describe('final two-vault swap policy', () => {
       vaults: [TARGET_VAULT],
     })
     await expect(resolveAppPolicy(requestSet, 100, [intent])).resolves.toBeDefined()
+  })
+
+  it('rejects acknowledgement from another operation or vault set', async () => {
+    verifyVault.mockReturnValue(false)
+    const requestSet = makeReviewedExecution().requestSet
+    const intent = swapIntent()
+    const baseAcknowledgement = {
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      operation: 'lend-swap',
+      vaults: [TEST_VAULT, TARGET_VAULT],
+    }
+
+    recordUnverifiedVaultAcknowledgement({ ...baseAcknowledgement, operation: 'position-number-supply' })
+    await expect(resolveAppPolicy(requestSet, 100, [intent]))
+      .rejects.toThrow('acknowledgement does not cover the execution')
+
+    clearUnverifiedVaultAcknowledgements()
+    recordUnverifiedVaultAcknowledgement({ ...baseAcknowledgement, vaults: [TARGET_VAULT] })
+    recordUnverifiedVaultAcknowledgement({ ...baseAcknowledgement, vaults: [TEST_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [intent]))
+      .rejects.toThrow('acknowledgement does not cover the execution')
   })
 })
