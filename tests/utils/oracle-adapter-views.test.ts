@@ -39,7 +39,7 @@ describe('buildOracleAdapterView', () => {
     expect(view.name).toBe('Chainlink WETH/USD')
     expect(view.isCustomAdapter).toBe(false)
     expect(view.methodology).toBe('Market price')
-    expect(view.logo).toBe('/oracles/chainlink.svg')
+    expect(view.logo).toBe('https://v3.euler.finance/v3/images/oracle-providers/chainlink')
     expect(view.label).toEqual({ primary: 'Chainlink WETH/USD', suffix: '(Primary)' })
     expect(view.checksStatus).toBe('positive')
   })

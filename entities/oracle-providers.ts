@@ -1,53 +1,58 @@
-const ORACLE_PROVIDER_LOGOS: Record<string, string> = {
+import { DEFAULT_V3_API_URL } from '~/utils/api-url-env'
+
+const ORACLE_PROVIDER_IMAGE_BASE_URL = `${DEFAULT_V3_API_URL}/v3/images/oracle-providers`
+
+const ORACLE_PROVIDER_IMAGE_KEYS: Record<string, string> = {
   // API provider names
-  'API3': '/oracles/api3.svg',
-  'Chainlink': '/oracles/chainlink.svg',
-  'Chronicle': '/oracles/chronicle.svg',
-  'eOracle': '/oracles/eoracle.svg',
-  'ERC4626Vault': '/oracles/erc4626.svg',
-  'Idle': '/oracles/idle.svg',
-  'Lido': '/oracles/lido.svg',
-  'Mev': '/oracles/mev.svg',
-  'Midas': '/oracles/midas.svg',
-  'Pendle': '/oracles/pendle.svg',
-  'Poppie': '/oracles/poppie.svg',
-  'Pyth': '/oracles/pyth.svg',
-  'Redstone': '/oracles/redstone.svg',
-  'RedStone': '/oracles/redstone.svg',
-  'Resolv': '/oracles/resolv.svg',
-  'FixedRate': '/oracles/fixed-rate.svg',
-  'Fixed Rate': '/oracles/fixed-rate.svg',
-  'RateProvider': '/oracles/rate-provider.svg',
-  'Rate Provider': '/oracles/rate-provider.svg',
+  'API3': 'api3',
+  'Chainlink': 'chainlink',
+  'Chronicle': 'chronicle',
+  'eOracle': 'eoracle',
+  'ERC4626Vault': 'erc4626',
+  'Idle': 'idle',
+  'Lido': 'lido',
+  'Mev': 'mev',
+  'Midas': 'midas',
+  'Pendle': 'pendle',
+  'Poppie': 'poppie',
+  'Pyth': 'pyth',
+  'Redstone': 'redstone',
+  'RedStone': 'redstone',
+  'Resolv': 'resolv',
+  'FixedRate': 'fixed-rate',
+  'Fixed Rate': 'fixed-rate',
+  'RateProvider': 'rate-provider',
+  'Rate Provider': 'rate-provider',
+  'Uniswap V3': 'uniswap-v3',
   // Oracle tree adapter names (fallback when no API provider metadata)
-  'ChainlinkOracle': '/oracles/chainlink.svg',
-  'ChainlinkInfrequentOracle': '/oracles/chainlink.svg',
-  'PythOracle': '/oracles/pyth.svg',
-  'ChronicleOracle': '/oracles/chronicle.svg',
-  'RedstoneClassicOracle': '/oracles/redstone.svg',
-  'RedstoneCoreOracle': '/oracles/redstone.svg',
-  'RedStonePull': '/oracles/redstone.svg',
-  'PendleOracle': '/oracles/pendle.svg',
-  'PendleUniversalOracle': '/oracles/pendle.svg',
-  'LidoFundamental': '/oracles/lido.svg',
-  'Lido Fundamental': '/oracles/lido.svg',
-  'MEVCapital': '/oracles/mev.svg',
-  'MEVLinearDiscount': '/oracles/mev.svg',
-  'FixedRateOracle': '/oracles/fixed-rate.svg',
-  'RateProviderOracle': '/oracles/rate-provider.svg',
+  'ChainlinkOracle': 'chainlink',
+  'ChainlinkInfrequentOracle': 'chainlink',
+  'PythOracle': 'pyth',
+  'ChronicleOracle': 'chronicle',
+  'RedstoneClassicOracle': 'redstone',
+  'RedstoneCoreOracle': 'redstone',
+  'RedStonePull': 'redstone',
+  'PendleOracle': 'pendle',
+  'PendleUniversalOracle': 'pendle',
+  'LidoFundamental': 'lido',
+  'Lido Fundamental': 'lido',
+  'MEVCapital': 'mev',
+  'MEVLinearDiscount': 'mev',
+  'FixedRateOracle': 'fixed-rate',
+  'RateProviderOracle': 'rate-provider',
+  'UniswapV3Oracle': 'uniswap-v3',
+}
+
+const resolveOracleProviderImage = (identifier: string | undefined): string | undefined => {
+  if (!identifier || !Object.hasOwn(ORACLE_PROVIDER_IMAGE_KEYS, identifier)) return undefined
+  return `${ORACLE_PROVIDER_IMAGE_BASE_URL}/${ORACLE_PROVIDER_IMAGE_KEYS[identifier]}`
 }
 
 export const getOracleProviderLogo = (provider?: string, adapterName?: string): string | undefined => {
   // When provider is known, only use its logo — never fall through to adapter name
   // This prevents e.g. Midas (using ChainlinkOracle) from showing Chainlink's logo
   if (provider) {
-    if (Object.hasOwn(ORACLE_PROVIDER_LOGOS, provider)) {
-      return ORACLE_PROVIDER_LOGOS[provider]
-    }
-    return undefined
+    return resolveOracleProviderImage(provider)
   }
-  if (adapterName && Object.hasOwn(ORACLE_PROVIDER_LOGOS, adapterName)) {
-    return ORACLE_PROVIDER_LOGOS[adapterName]
-  }
-  return undefined
+  return resolveOracleProviderImage(adapterName)
 }
