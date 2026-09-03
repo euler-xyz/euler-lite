@@ -31,7 +31,7 @@ const REUL = getAddress('0x7000000000000000000000000000000000000000')
 const intent: OperationIntent = {
   schemaVersion: 1, intentId: 'intent-1', revision: 1, kind: 'deposit', chainId: 1, account: ACCOUNT,
   subAccounts: [ACCOUNT], planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 10n } },
-  constraints: [{ kind: 'exact-input', token: TOKEN, amount: 10n }], metadata: { createdAt: 1, source: 'test' },
+  constraints: [{ kind: 'exact-input', token: TOKEN, amount: 10n }], metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 const wallet: WalletBinding = {
   chainId: 1, account: ACCOUNT, subAccounts: [ACCOUNT], connectorId: 'injected', connectorSessionId: 'session-1',
@@ -111,7 +111,7 @@ const aaveMigrationIntent: OperationIntent = {
     { kind: 'maximum-input', token: TOKEN, amount: 10n },
     { kind: 'deadline', timestamp: 1_000 },
   ],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 const aaveWallet: WalletBinding = { ...wallet, subAccounts: [ACCOUNT, POSITION_ACCOUNT] }
 const reulIntent: OperationIntent = {
@@ -127,7 +127,7 @@ const reulIntent: OperationIntent = {
     args: { lockTimestamps: [1], lockAmounts: [10n], remainderLossMaximum: 0n },
   },
   constraints: [{ kind: 'remainder-loss', token: REUL, maximumLoss: 0n }],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 
 describe('authoritative reviewed execution preparation', () => {
@@ -307,7 +307,7 @@ describe('authoritative reviewed execution preparation', () => {
         args: { claimIds: ['claim-1'], provider: 'test', rewardsDigest: keccak256(toHex('rewards')) },
       },
       constraints: [{ kind: 'selected-rewards', claimIds: ['claim-1'] }],
-      metadata: { createdAt: 1, source: 'test' },
+      metadata: { createdAt: 1, source: 'test', operation: 'test' },
     }
     const directPlan: TransactionPlan = [{
       type: 'contractCall',

@@ -64,7 +64,7 @@ describe('operation intent schema', () => {
     subAccounts: [ACCOUNT],
     planner: { name: 'deposit', args: { vaultAddress: ACCOUNT, assetAddress: ACCOUNT, amount: 1n } },
     constraints: [{ kind: 'exact-input', token: ACCOUNT, amount: 1n }],
-    metadata: { createdAt: 1, source: 'test' },
+    metadata: { createdAt: 1, source: 'test', operation: 'test' },
   } as const
 
   it('accepts a serializable intent DTO', () => {

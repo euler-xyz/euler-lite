@@ -13,6 +13,7 @@ export interface CreateOperationIntentInput {
   account: Address
   subAccounts?: readonly Address[]
   source: string
+  operation?: string
   constraints?: readonly IntentConstraint[]
   intentId?: string
   revision?: number
@@ -129,6 +130,7 @@ const createIntentId = (body: CanonicalValue): string => {
 export const createOperationIntent = (input: CreateOperationIntentInput): Readonly<OperationIntent> => {
   const args = normalizeArgs(input.args)
   const createdAt = input.createdAt ?? Date.now()
+  const operation = input.operation ?? input.source
   const idBody = toCanonicalValue({
     kind: input.kind,
     planner: input.planner,
@@ -136,6 +138,7 @@ export const createOperationIntent = (input: CreateOperationIntentInput): Readon
     chainId: input.chainId,
     account: getAddress(input.account),
     source: input.source,
+    operation,
     createdAt,
   })
   const intent: OperationIntent = {
@@ -154,6 +157,7 @@ export const createOperationIntent = (input: CreateOperationIntentInput): Readon
     metadata: {
       createdAt,
       source: input.source,
+      operation,
       ...(input.quoteId ? { quoteId: input.quoteId } : {}),
       ...(input.quoteCalldataDigest ? { quoteCalldataDigest: input.quoteCalldataDigest } : {}),
     },

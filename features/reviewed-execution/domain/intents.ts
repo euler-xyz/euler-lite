@@ -75,6 +75,7 @@ export interface OperationIntent {
   metadata: {
     createdAt: number
     source: string
+    operation: string
     quoteId?: string
     quoteCalldataDigest?: Hex
   }

@@ -40,7 +40,7 @@ describe('reviewed execution confirmation metadata', () => {
     const execution = makeReviewedExecution('safe')
     const adapter = new SafeExecutionAdapter({
       assertAtomicCapability: async () => {},
-      sendCalls: async () => HASH,
+      sendCalls: async () => 'safe-call-batch-123',
       waitForExecution: async () => ({
         executionHash: HASH,
         receiptStatus: 'success',

@@ -32,7 +32,7 @@ const intent = (intentId: string, amount: string): OperationIntent => ({
   subAccounts: [owner],
   planner: { name: 'deposit', args: { amount } },
   constraints: [],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 })
 
 describe('useExecutionReview', () => {

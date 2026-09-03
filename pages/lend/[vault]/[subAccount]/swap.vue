@@ -245,7 +245,7 @@ const swap = useSwapPageLogic({
     if (balance.value < amountNano) return 'Not enough liquidity in vault'
     return null
   },
-  getGeoBlockedAddresses: () => [getVaultAddress()],
+  getGeoBlockedAddresses: () => [fromVault.value?.address, toVault.value?.address].filter((address): address is Address => Boolean(address)),
 })
 
 const {

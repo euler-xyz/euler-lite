@@ -26,17 +26,20 @@ export const useOperationIntentFactory = () => {
   const { effectiveAddress } = useEffectiveAddress()
   const { chainId: wagmiChainId } = useWagmi()
   const { chainId: browsedChainId } = useEulerAddresses()
+  const route = useRoute()
   const chainId = computed(() => wagmiChainId.value ?? browsedChainId.value)
 
   const capture = () => {
     if (!effectiveAddress.value || !chainId.value) throw new Error('Wallet is not connected')
     const account = getAddress(effectiveAddress.value)
     const capturedChainId = chainId.value
+    const operation = String(route.name ?? route.path)
     return (input: ConnectedOperationIntentInput): Readonly<OperationIntent> =>
       createOperationIntent({
         ...input,
         account,
         chainId: capturedChainId,
+        operation,
       })
   }
 

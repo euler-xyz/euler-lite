@@ -5,7 +5,7 @@ import { SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, getVaultTags } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry, getVaultTags, useGeoBlock } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
@@ -108,6 +108,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const { error: showError } = useToast()
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { account: defaultPlanAccount } = usePlanAccount()
+  const { country } = useGeoBlock()
   // Debt-swap / collateral-swap pages don't consume the user's wallet ERC20
   // balance — the source is an existing position. Safe to skip balance
   // overrides (no balanceOf RPC + no balance-slot probing per estimate).
@@ -199,6 +200,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const resetQuoteState = () => {
     resetQuoteStateInternal()
     toAmount.value = ''
+  }
+
+  const invalidatePreparedSwap = () => {
+    plan.value = null
+    preparedPlan.value = null
   }
 
   const onRefreshQuotes = () => {
@@ -333,6 +339,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   // ── Watchers ───────────────────────────────────────────────────────────
   watch(toVault, () => {
     clearSimulationError()
+    invalidatePreparedSwap()
     if (!toVault.value || isSameVault.value) {
       toAmount.value = ''
       resetQuoteState()
@@ -357,9 +364,16 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   watch([fromVault, slippage], () => {
     clearSimulationError()
+    invalidatePreparedSwap()
     if (fromAmount.value) {
       requestQuote()
     }
+  })
+
+  watch(country, () => {
+    clearSimulationError()
+    invalidatePreparedSwap()
+    resetQuoteState()
   })
 
   watch(selectedQuote, () => {
@@ -405,7 +419,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return additionalErrors.some(err => !!err.value)
   })
 
-  const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...getGeoBlockedAddresses()))
+  const isGeoBlocked = computed(() => {
+    const addresses = getGeoBlockedAddresses().filter(Boolean)
+    return isAnyVaultBlockedByCountry(...addresses)
+      || (!!toVault.value && getVaultTags(toVault.value.address, 'swap-target').disabled)
+  })
 
   const reviewSwapLabel = computed(() => {
     if (isSameAsset.value) return 'Review Transfer'
@@ -587,6 +605,12 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
           if (!ok) return
         }
 
+        // The country or target may change while preparation/simulation is in
+        // flight. Do not open a review for a newly disallowed route.
+        if (isGeoBlocked.value) {
+          invalidatePreparedSwap()
+          return
+        }
         if (!plan.value) return
         await reviewLaunch.open()
       })

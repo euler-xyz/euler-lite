@@ -56,6 +56,7 @@ vi.mock('~/composables/useEulerLabels', () => ({
 vi.mock('~/composables/useGeoBlock', () => ({
   getVaultTags: vi.fn(() => ({ disabled: false })),
   isAnyVaultBlockedByCountry: vi.fn(() => false),
+  useGeoBlock: () => ({ country: ref('GB') }),
 }))
 
 vi.mock('~/composables/useStateOverrideOptions', () => ({

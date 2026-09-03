@@ -2,7 +2,7 @@
 import { inject } from 'vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
-import { isOperationBlocked, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, isOperationBlockerKey, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
@@ -194,7 +194,7 @@ const openTermsModal = () => {
 // acknowledgements. TOS is special: the add path may open the TOS modal, then
 // continue only if no non-TOS blockers remain.
 const nonTosOperationBlockReason = computed(() =>
-  operationBlockerEntries.value.find(([key]) => key !== 'tos')?.[1],
+  operationBlockerEntries.value.find(([key]) => !isOperationBlockerKey(key, 'tos'))?.[1],
 )
 const hasNonTosOperationBlocker = computed(() => !!nonTosOperationBlockReason.value)
 const isAddToBatchBaseDisabled = computed(() =>

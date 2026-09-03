@@ -27,7 +27,7 @@ const intent: OperationIntent = {
   subAccounts: [TEST_ACCOUNT],
   planner: { name: 'deposit', args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 10n } },
   constraints: [{ kind: 'exact-input', token: TEST_TOKEN, amount: 10n }],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 
 const sdk = {

@@ -18,7 +18,7 @@ const signature = `0x${'11'.repeat(65)}` as Hex
 const intent: OperationIntent = {
   schemaVersion: 1, intentId: 'migration-1', revision: 1, kind: 'migration', chainId: 1, account: ACCOUNT,
   subAccounts: [ACCOUNT], planner: { name: 'cross-protocol-migration', args: { direction: 'external-to-euler', connectorId: 'morpho', owner: ACCOUNT, positionRef: 'position-1' } },
-  constraints: [{ kind: 'share-bound', vault: TARGET, maximumShares: 100n }], metadata: { createdAt: 1, source: 'test' },
+  constraints: [{ kind: 'share-bound', vault: TARGET, maximumShares: 100n }], metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 const wallet: WalletBinding = { chainId: 1, account: ACCOUNT, subAccounts: [ACCOUNT], connectorId: 'injected', connectorSessionId: 'session-1', walletKind: 'eoa', classificationVersion: 'v1', approvalMode: 'approve' }
 const encodeBatch = (items: EVCBatchItem[]) => encodeFunctionData({ abi: EVC_ABI, functionName: 'batch', args: [items] })

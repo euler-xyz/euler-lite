@@ -549,9 +549,10 @@ export function assertOperationIntent(value: unknown): asserts value is Operatio
   if (!Array.isArray(value.constraints)) throw new Error('intent.constraints must be an array')
   value.constraints.forEach((constraint, index) => assertIntentConstraint(constraint, `intent.constraints[${index}]`))
   assertRecord(value.metadata, 'intent.metadata')
-  assertExactKeys(value.metadata, ['createdAt', 'source', 'quoteId', 'quoteCalldataDigest'], 'intent.metadata')
+  assertExactKeys(value.metadata, ['createdAt', 'source', 'operation', 'quoteId', 'quoteCalldataDigest'], 'intent.metadata')
   assertSafeInteger(value.metadata.createdAt, 'intent.metadata.createdAt')
   assertString(value.metadata.source, 'intent.metadata.source')
+  assertString(value.metadata.operation, 'intent.metadata.operation')
   if (value.metadata.quoteId !== undefined) assertString(value.metadata.quoteId, 'intent.metadata.quoteId')
   if (value.metadata.quoteCalldataDigest !== undefined) assertHex(value.metadata.quoteCalldataDigest, 'intent.metadata.quoteCalldataDigest')
 }
