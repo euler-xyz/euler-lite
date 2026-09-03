@@ -1,5 +1,6 @@
 import { numberToHex, type Address, type Hash, type Transaction, type TransactionReceipt } from 'viem'
 import type { SafeAtomicCapabilityStatus, SafeTransportEnvelope } from '~/features/reviewed-execution/domain/reviewed-execution'
+import { isSafeCallsId } from '~/utils/safe-calls-id'
 
 const SAFE_STATUS_POLL_INTERVAL_MS = 2_000
 const SAFE_STATUS_POLL_TIMEOUT_MS = 5 * 60_000
@@ -42,14 +43,14 @@ export interface SafeTransactionExecution {
 }
 
 export class SafeTransactionStatusUnknownError extends Error {
-  readonly submittedHash: Hash
+  readonly submittedId: string
 
-  constructor(submittedHash: Hash, reason: 'timeout' | 'aborted') {
+  constructor(submittedId: string, reason: 'timeout' | 'aborted') {
     super(reason === 'timeout'
       ? 'Safe transaction confirmation timed out. Its execution status is unknown; verify it in Safe before retrying.'
       : 'Safe transaction confirmation was interrupted. Its execution status is unknown; verify it in Safe before retrying.')
     this.name = 'SafeTransactionStatusUnknownError'
-    this.submittedHash = submittedHash
+    this.submittedId = submittedId
   }
 }
 
@@ -172,9 +173,11 @@ export const sendSafeAtomicCalls = async (
       capabilities: envelope.capabilities,
     }],
   })
-  if (typeof result === 'string') return result
-  if (isRecord(result) && typeof result.id === 'string') return result.id
-  throw new Error('Safe returned no calls ID')
+  const callsId = typeof result === 'string'
+    ? result
+    : isRecord(result) ? result.id : undefined
+  if (isSafeCallsId(callsId)) return callsId
+  throw new Error('Safe returned no valid calls ID')
 }
 
 const parseStatus = (value: number | string | undefined): number | undefined => {
@@ -252,12 +255,12 @@ const waitForNextPoll = (pollingIntervalMs: number) =>
     : Promise.resolve()
 
 /**
- * Wait for a Safe transaction and resolve its Safe hash to the real execution
- * hash. Safe returns a Safe transaction hash while confirmations are pending;
- * a normal chain RPC can never find a receipt under that hash.
+ * Wait for Safe calls and resolve the opaque calls ID to the on-chain execution
+ * hash. Calls status is authoritative; receipt fallback is available only when
+ * the calls ID itself has transaction-hash shape.
  */
 export const waitForSafeTransactionExecution = async ({
-  submittedHash,
+  callsId,
   walletProvider,
   publicClient,
   pollingIntervalMs = SAFE_STATUS_POLL_INTERVAL_MS,
@@ -265,7 +268,7 @@ export const waitForSafeTransactionExecution = async ({
   requireAtomic = false,
   signal,
 }: {
-  submittedHash: Hash
+  callsId: string
   walletProvider: WalletProviderLike
   publicClient: ReceiptClientLike
   pollingIntervalMs?: number
@@ -277,6 +280,7 @@ export const waitForSafeTransactionExecution = async ({
     throw new RangeError('Safe transaction polling timeout must be a positive finite number')
   }
 
+  const submittedHash = isHash(callsId) ? callsId : undefined
   let executionHash = submittedHash
   let atomicConfirmed = !requireAtomic
   let callsStatusSupported = true
@@ -294,7 +298,7 @@ export const waitForSafeTransactionExecution = async ({
     stopReason = 'timeout'
     stopController.abort()
   }, timeoutMs)
-  const statusUnknownError = () => new SafeTransactionStatusUnknownError(submittedHash, stopReason)
+  const statusUnknownError = () => new SafeTransactionStatusUnknownError(callsId, stopReason)
   const withStopSignal = <T>(promise: Promise<T>): Promise<T> => {
     if (stopController.signal.aborted) return Promise.reject(statusUnknownError())
 
@@ -326,7 +330,9 @@ export const waitForSafeTransactionExecution = async ({
         throw statusUnknownError()
       }
 
-      const receipt = await withStopSignal(getPublicReceipt(publicClient, executionHash))
+      const receipt = executionHash
+        ? await withStopSignal(getPublicReceipt(publicClient, executionHash))
+        : undefined
       if (receipt && atomicConfirmed) {
         return { hash: executionHash, receipt, ...(requireAtomic ? { atomic: true as const } : {}) }
       }
@@ -335,7 +341,7 @@ export const waitForSafeTransactionExecution = async ({
         try {
           const rawStatus = await withStopSignal(walletProvider.request({
             method: 'wallet_getCallsStatus',
-            params: [submittedHash],
+            params: [callsId],
           }))
           const callsStatus = parseCallsStatus(rawStatus)
           const status = parseStatus(callsStatus?.status)
@@ -369,11 +375,11 @@ export const waitForSafeTransactionExecution = async ({
           }
           if (isUnsupportedMethodError(error)) callsStatusSupported = false
           // Safe's gateway can briefly report "Transaction not found" before it
-          // indexes a newly submitted Safe hash. Treat that as pending.
+          // indexes a newly submitted calls ID. Treat that as pending.
         }
       }
 
-      if (!callsStatusSupported) {
+      if (!callsStatusSupported && submittedHash) {
         try {
           const walletReceipt = await withStopSignal(walletProvider.request({
             method: 'eth_getTransactionReceipt',

@@ -1,8 +1,9 @@
-import { isHash, type Hash } from 'viem'
+import type { Hash } from 'viem'
 import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { FinalizedRequestSet, SafeCall, SafeTransportEnvelope, ReviewedExecution } from '../domain/reviewed-execution'
 import { AttemptRevertedError, DispatchFailedError, DispatchStatusUnknownError, ProvenOffchainCancellationError, ProvenPreDispatchCancellationError } from '../coordinator/errors'
 import type { ExecutionTransportAdapter, DispatchCallbacks, DispatchResult } from './types'
+import { isSafeCallsId } from '~/utils/safe-calls-id'
 
 export interface SafeCallsStatus {
   executionHash: Hash
@@ -14,7 +15,7 @@ export interface SafeCallsStatus {
 export interface SafeAdapterClient {
   assertAtomicCapability(envelope: SafeTransportEnvelope): Promise<void>
   sendCalls(envelope: SafeTransportEnvelope): Promise<string>
-  waitForExecution(callsId: Hash): Promise<SafeCallsStatus>
+  waitForExecution(callsId: string): Promise<SafeCallsStatus>
 }
 
 const isUserRejected = (error: unknown) => {
@@ -57,7 +58,7 @@ export class SafeExecutionAdapter implements ExecutionTransportAdapter {
       if (isUserRejected(error)) throw new ProvenPreDispatchCancellationError()
       throw new DispatchStatusUnknownError()
     }
-    if (!isHash(callsId)) throw new DispatchStatusUnknownError('Safe returned no valid calls ID')
+    if (!isSafeCallsId(callsId)) throw new DispatchStatusUnknownError('Safe returned no valid calls ID')
     await callbacks.recordExternalId(0, 'calls-id', callsId)
 
     await callbacks.markConfirming(0)

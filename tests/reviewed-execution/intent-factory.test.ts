@@ -99,4 +99,27 @@ describe('operation intent factory', () => {
       ...requirements.assets,
     ]).not.toContain(zeroAddress)
   })
+
+  it('collects both sides of a retained collateral swap as vault policy dependencies', () => {
+    const targetVault = getAddress('0x5000000000000000000000000000000000000000')
+    const quote = makeSwapQuote()
+    const intent = createOperationIntent({
+      kind: 'collateral',
+      planner: 'swap-collateral',
+      args: {
+        swapQuote: {
+          ...quote,
+          verify: { ...quote.verify, vault: targetVault },
+        },
+        swapperMode: 0,
+      },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-two-vault-swap',
+    })
+
+    expect(collectPlanningRequirements([intent]).vaults).toEqual([TEST_VAULT, targetVault])
+  })
 })

@@ -1,13 +1,32 @@
-import { getAddress, type Address } from 'viem'
+import { getAddress } from 'viem'
 
-const acknowledgedVaults = new Set<string>()
-
-/** Session-scoped data only; execution still seals the exact acknowledged set. */
-export const recordUnverifiedVaultAcknowledgement = (vaults: readonly string[]) => {
-  vaults.forEach(vault => acknowledgedVaults.add(getAddress(vault).toLowerCase()))
+export interface UnverifiedVaultAcknowledgementContext {
+  chainId: number
+  account: string
+  operation: string
+  vaults: readonly string[]
 }
 
-export const hasUnverifiedVaultAcknowledgement = (vault: Address) =>
-  acknowledgedVaults.has(getAddress(vault).toLowerCase())
+const acknowledgedContexts = new Set<string>()
 
-export const clearUnverifiedVaultAcknowledgements = () => acknowledgedVaults.clear()
+const normalizeVaults = (vaults: readonly string[]) =>
+  [...new Set(vaults.map(vault => getAddress(vault).toLowerCase()))].sort()
+
+export const unverifiedVaultAcknowledgementKey = (context: UnverifiedVaultAcknowledgementContext) =>
+  JSON.stringify([
+    context.chainId,
+    getAddress(context.account).toLowerCase(),
+    context.operation,
+    normalizeVaults(context.vaults),
+  ])
+
+/** Session-scoped acknowledgement for one exact UI operation context. */
+export const recordUnverifiedVaultAcknowledgement = (context: UnverifiedVaultAcknowledgementContext) => {
+  acknowledgedContexts.add(unverifiedVaultAcknowledgementKey(context))
+}
+
+/** Final-plan check: consent must match the exact account, chain, operation, and vault set. */
+export const hasUnverifiedVaultAcknowledgement = (context: UnverifiedVaultAcknowledgementContext) =>
+  acknowledgedContexts.has(unverifiedVaultAcknowledgementKey(context))
+
+export const clearUnverifiedVaultAcknowledgements = () => acknowledgedContexts.clear()

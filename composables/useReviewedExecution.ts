@@ -91,9 +91,14 @@ const executions = new Map<Hash, Readonly<ReviewedExecution>>()
 const runtimePluginPlans = new Map<Hash, Readonly<PluginPlanBundle>>()
 const reviewGenerations = new Map<Hash, { publisher: GenerationPublisher, generation: number }>()
 
-const currentPolicyVersionDigest = () => canonicalDigest('policy-version-v1', toCanonicalValue({
-  version: POLICY_VERSION,
-}))
+const currentPolicyVersionDigest = () => {
+  const { country } = useGeoBlock()
+  return canonicalDigest('policy-version-v1', toCanonicalValue({
+    version: POLICY_VERSION,
+    country: country.value ?? (country.value === null ? 'unknown' : 'pending'),
+    labelsVersion: getEulerLabelsVersion(),
+  }))
+}
 
 export const canonicalReviewPresentation = (value: unknown, path = '$'): CanonicalValue => {
   if (typeof value === 'number' && Number.isFinite(value) && !Number.isSafeInteger(value)) return value.toString()
@@ -402,7 +407,7 @@ export const useReviewedExecution = () => {
       async collectPythEvidence(plan, _binding, _snapshot, prefetched) {
         return collectPythPreviewData(plan, prefetched)
       },
-      resolvePolicy: requestSet => resolveAppPolicy(requestSet),
+      resolvePolicy: requestSet => resolveAppPolicy(requestSet, Date.now(), intents),
       async simulate(plan, requestSet, _snapshot, rawPlan, intentPlans, prefetchedPlugins) {
         const stateCovered = requestSet.effects.some(node => node.simulation.kind === 'evc-state' || node.simulation.kind === 'independent-call')
         if (!stateCovered) return undefined
@@ -642,7 +647,7 @@ export const useReviewedExecution = () => {
         if (current.validity.policyVersionDigest !== currentPolicyVersionDigest()) {
           throw new Error('Policy configuration changed after review')
         }
-        const policy = await resolveAppPolicy(current.requestSet)
+        const policy = await resolveAppPolicy(current.requestSet, Date.now(), current.intents)
         assertPolicyVersionsMatch(current.policy, policy)
         const permit2 = getAddress(sdk.deploymentService.getDeployment(current.requestSet.wallet.chainId).addresses.coreAddrs.permit2)
         for (const slot of current.requestSet.signatureSlots.filter(candidate => candidate.kind === 'permit2')) {

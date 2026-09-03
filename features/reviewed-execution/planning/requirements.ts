@@ -13,7 +13,7 @@ export interface PlanningRequirements {
   quotes: readonly string[]
 }
 
-const VAULT_KEYS = new Set(['vaultAddress', 'borrowVault', 'collateralVault', 'liabilityVault', 'fromVault', 'toVault', 'oldLiabilityVault', 'newLiabilityVault', 'longVault', 'vaultIn'])
+const VAULT_KEYS = new Set(['vault', 'vaultAddress', 'borrowVault', 'collateralVault', 'liabilityVault', 'fromVault', 'toVault', 'oldLiabilityVault', 'newLiabilityVault', 'longVault', 'vaultIn'])
 const ASSET_KEYS = new Set(['assetAddress', 'liabilityAsset', 'tokenIn', 'tokenOut', 'collateralAsset', 'debtAsset', 'fromAsset', 'toAsset', 'oldLiabilityAsset', 'newLiabilityAsset', 'wrappedTokenAddress', 'loanToken', 'collateralToken'])
 const ACCOUNT_KEYS = new Set(['owner', 'receiver', 'borrowAccount', 'repayAccount', 'positionAccount', 'liabilityAccount', 'fromAccount', 'from', 'to', 'subAccount', 'accountIn', 'accountOut', 'account', 'eulerAccount'])
 

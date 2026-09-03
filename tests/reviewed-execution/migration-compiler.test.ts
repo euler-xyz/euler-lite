@@ -60,7 +60,7 @@ const intentFor = (request?: MigrationAuthorizationRequest): OperationIntent => 
     },
   },
   constraints: [{ kind: 'deadline', timestamp: 2_000_000_000 }],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 })
 
 const collectors = (): MigrationCompilationCollectors => ({

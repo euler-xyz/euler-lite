@@ -273,7 +273,7 @@ describe('useBorrowForm savings collateral', () => {
       subAccounts: input.subAccounts ?? [USER],
       planner: { name: input.planner, args: input.args },
       constraints: [],
-      metadata: { createdAt: intentSequence, source: input.source },
+      metadata: { createdAt: intentSequence, source: input.source, operation: input.source },
     }))
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
     vi.stubGlobal('useExecutionReview', () => ({
