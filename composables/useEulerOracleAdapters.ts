@@ -19,14 +19,21 @@ const oracleAdaptersChainId = ref<number | null>(null)
 // Only concurrent requests are deduplicated here; later loads re-enter the SDK.
 const oracleAdaptersByChain = new Map<number, Record<string, OracleAdapterMeta>>()
 const oracleAdapterCatalogueLoadedAt = new Map<number, number>()
+const oracleAdapterCatalogueKeys = new Map<number, Set<string>>()
 const pendingOracleAdapterLoads = new Map<string, Promise<OracleAdapterMeta | undefined>>()
 const pendingOracleAdapterListLoads = new Map<number, Promise<Record<string, OracleAdapterMeta>>>()
 
 const toOptionalAddress = (value: unknown) =>
   typeof value === 'string' ? normalizeAddress(value) : undefined
 
+const isAssessmentForRequest = (
+  assessment: OracleAdapterAssessment,
+  chainId: number,
+  key: string,
+) => assessment.chainId === chainId && assessment.address.toLowerCase() === key
+
 const toOracleAdapterMeta = (assessment: OracleAdapterAssessment): OracleAdapterMeta => ({
-  oracle: assessment.address,
+  oracle: normalizeAddress(assessment.address),
   base: toOptionalAddress(assessment.config?.base),
   quote: toOptionalAddress(assessment.config?.quote),
   name: assessment.adapterClass ?? undefined,
@@ -71,6 +78,29 @@ const activateChain = (chainId: number) => {
   oracleAdaptersRef.value = oracleAdaptersByChain.get(chainId) ?? {}
 }
 
+const applyChainMap = (chainId: number, map: Record<string, OracleAdapterMeta>) => {
+  oracleAdaptersByChain.set(chainId, map)
+  if (oracleAdaptersChainId.value === chainId) {
+    oracleAdaptersRef.value = map
+  }
+}
+
+const applyCatalogue = (chainId: number, assessments: OracleAdapterAssessment[]) => {
+  const catalogueMap = normalizeOracleAdapterMap(
+    assessments.filter(assessment => assessment.chainId === chainId),
+  )
+  const previous = oracleAdaptersByChain.get(chainId) ?? {}
+  // The active-route catalogue is not the full assessment set. Keep per-address
+  // extras (fallback oracles, inactive rows) so a later catalogue write cannot
+  // blank a still-mounted overview that already resolved them.
+  const extras = Object.fromEntries(
+    Object.entries(previous).filter(([key]) => !Object.hasOwn(catalogueMap, key)),
+  )
+  applyChainMap(chainId, { ...extras, ...catalogueMap })
+  oracleAdapterCatalogueKeys.set(chainId, new Set(Object.keys(catalogueMap)))
+  oracleAdapterCatalogueLoadedAt.set(chainId, Date.now())
+}
+
 const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return
   activateChain(chainId)
@@ -82,29 +112,27 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
   }
 
   const promise = (async () => {
-    const sdk = await getEulerSdk()
-    // Only adapters in a live vault route. V3 derives `inActiveRoute` from the
-    // full router state plus cross-adapter legs, which is exactly the set the
-    // discovery matrix can render, and it skips the ~15% of rows that only
-    // price deprecated or unreferenced vaults. Adapters reachable solely via a
-    // router's fallback oracle are not flagged active; the per-address path in
-    // loadOracleAdapter still resolves those on demand.
-    const assessments = await sdk.oracleAdapterService.fetchOracleAdapterAssessments(chainId, { active: true })
-    const map = normalizeOracleAdapterMap(assessments)
-    oracleAdaptersByChain.set(chainId, map)
-    oracleAdapterCatalogueLoadedAt.set(chainId, Date.now())
-    if (oracleAdaptersChainId.value === chainId) {
-      oracleAdaptersRef.value = map
+    try {
+      const sdk = await getEulerSdk()
+      // Only adapters in a live vault route. V3 derives `inActiveRoute` from the
+      // full router state plus cross-adapter legs, which is exactly the set the
+      // discovery matrix can render, and it skips the ~15% of rows that only
+      // price deprecated or unreferenced vaults. Adapters reachable solely via a
+      // router's fallback oracle are not flagged active; the per-address path in
+      // loadOracleAdapter still resolves those on demand.
+      const assessments = await sdk.oracleAdapterService.fetchOracleAdapterAssessments(chainId, { active: true })
+      applyCatalogue(chainId, assessments)
+      return oracleAdaptersByChain.get(chainId) ?? {}
     }
-    return map
+    catch (err) {
+      logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessments for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+      return oracleAdaptersByChain.get(chainId) ?? {}
+    }
   })()
 
   pendingOracleAdapterListLoads.set(chainId, promise)
   try {
     await promise
-  }
-  catch (err) {
-    logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessments for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
   }
   finally {
     pendingOracleAdapterListLoads.delete(chainId)
@@ -117,6 +145,7 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
 const readFreshCatalogueEntry = (chainId: number, key: string): OracleAdapterMeta | undefined => {
   const loadedAt = oracleAdapterCatalogueLoadedAt.get(chainId)
   if (loadedAt === undefined || Date.now() - loadedAt > ORACLE_ADAPTER_CATALOGUE_FRESH_MS) return undefined
+  if (!oracleAdapterCatalogueKeys.get(chainId)?.has(key)) return undefined
   return oracleAdaptersByChain.get(chainId)?.[key]
 }
 
@@ -134,40 +163,38 @@ const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
   if (inflight) return inflight
 
   const promise = (async () => {
-    const sdk = await getEulerSdk()
-    const assessment = await sdk.oracleAdapterService.fetchOracleAdapterAssessment(chainId, address)
-    if (!assessment) {
-      const currentMap = oracleAdaptersByChain.get(chainId)
-      if (currentMap && Object.hasOwn(currentMap, key)) {
-        const nextMap = Object.fromEntries(
-          Object.entries(currentMap).filter(([address]) => address !== key),
-        )
-        oracleAdaptersByChain.set(chainId, nextMap)
-        if (oracleAdaptersChainId.value === chainId) {
-          oracleAdaptersRef.value = nextMap
+    try {
+      const sdk = await getEulerSdk()
+      const assessment = await sdk.oracleAdapterService.fetchOracleAdapterAssessment(chainId, address)
+      if (!assessment) {
+        const currentMap = oracleAdaptersByChain.get(chainId)
+        if (currentMap && Object.hasOwn(currentMap, key)) {
+          applyChainMap(chainId, Object.fromEntries(
+            Object.entries(currentMap).filter(([entryAddress]) => entryAddress !== key),
+          ))
         }
+        return undefined
       }
+      if (!isAssessmentForRequest(assessment, chainId, key)) {
+        logWarn('useEulerOracleAdapters', `Ignored oracle adapter assessment that did not match chain ${chainId} adapter ${address}`)
+        return undefined
+      }
+      const meta = toOracleAdapterMeta(assessment)
+      applyChainMap(chainId, {
+        ...(oracleAdaptersByChain.get(chainId) ?? {}),
+        [key]: meta,
+      })
+      return meta
+    }
+    catch (err) {
+      logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessment ${address} on chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
       return undefined
     }
-    const meta = toOracleAdapterMeta(assessment)
-    const chainMap = {
-      ...(oracleAdaptersByChain.get(chainId) ?? {}),
-      [key]: meta,
-    }
-    oracleAdaptersByChain.set(chainId, chainMap)
-    if (oracleAdaptersChainId.value === chainId) {
-      oracleAdaptersRef.value = chainMap
-    }
-    return meta
   })()
 
   pendingOracleAdapterLoads.set(requestKey, promise)
   try {
     return await promise
-  }
-  catch (err) {
-    logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessment ${address} on chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
-    return undefined
   }
   finally {
     pendingOracleAdapterLoads.delete(requestKey)

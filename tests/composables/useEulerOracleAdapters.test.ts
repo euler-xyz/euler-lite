@@ -156,6 +156,73 @@ describe('useEulerOracleAdapters', () => {
     expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps per-address extras when a later catalogue load replaces the active set', async () => {
+    fetchOracleAdapterAssessments
+      .mockResolvedValueOnce([assessment()])
+      .mockResolvedValueOnce([assessment()])
+    fetchOracleAdapterAssessment.mockResolvedValueOnce(assessment(UNLISTED_ADAPTER))
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, loadOracleAdapter, oracleAdapters } = useEulerOracleAdapters()
+
+    await loadAllOracleAdapters(1)
+    expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toMatchObject({ oracle: UNLISTED_ADAPTER })
+
+    await loadAllOracleAdapters(1)
+
+    expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Chainlink')
+    expect(oracleAdapters[UNLISTED_ADAPTER]?.oracle).toBe(UNLISTED_ADAPTER)
+    expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1)
+  })
+
+  it('still re-enters the SDK for a catalogue miss after extras are preserved', async () => {
+    fetchOracleAdapterAssessments
+      .mockResolvedValueOnce([assessment()])
+      .mockResolvedValueOnce([assessment()])
+    fetchOracleAdapterAssessment
+      .mockResolvedValueOnce(assessment(UNLISTED_ADAPTER))
+      .mockResolvedValueOnce({ ...assessment(UNLISTED_ADAPTER), checksStatus: 'negative' })
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, loadOracleAdapter } = useEulerOracleAdapters()
+
+    await loadAllOracleAdapters(1)
+    await loadOracleAdapter(1, UNLISTED_ADAPTER)
+    await loadAllOracleAdapters(1)
+
+    expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toMatchObject({ checksStatus: 'negative' })
+    expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not apply an assessment for a different chain or adapter', async () => {
+    fetchOracleAdapterAssessment
+      .mockResolvedValueOnce({ ...assessment(), chainId: 10 })
+      .mockResolvedValueOnce({ ...assessment(), address: UNLISTED_ADAPTER })
+    fetchOracleAdapterAssessments.mockResolvedValueOnce([{ ...assessment(), chainId: 10 }])
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter, loadAllOracleAdapters, oracleAdapters } = useEulerOracleAdapters()
+
+    expect(await loadOracleAdapter(1, KNOWN_ADAPTER)).toBeUndefined()
+    expect(await loadOracleAdapter(1, KNOWN_ADAPTER)).toBeUndefined()
+    await loadAllOracleAdapters(1)
+
+    expect(oracleAdapters[KNOWN_ADAPTER]).toBeUndefined()
+    expect(oracleAdapters[UNLISTED_ADAPTER]).toBeUndefined()
+  })
+
+  it('resolves concurrent loads to undefined when the SDK request fails', async () => {
+    const request = deferred<ReturnType<typeof assessment>>()
+    fetchOracleAdapterAssessment.mockReturnValue(request.promise)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter } = useEulerOracleAdapters()
+
+    const first = loadOracleAdapter(1, KNOWN_ADAPTER)
+    const second = loadOracleAdapter(1, KNOWN_ADAPTER)
+    await vi.waitFor(() => expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(1))
+    request.reject(new Error('upstream failed'))
+
+    await expect(first).resolves.toBeUndefined()
+    await expect(second).resolves.toBeUndefined()
+  })
+
   it('goes back to the SDK once the catalogue is older than its freshness window', async () => {
     vi.useFakeTimers()
     try {

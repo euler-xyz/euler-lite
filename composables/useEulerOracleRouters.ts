@@ -23,22 +23,30 @@ const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
   if (inflight) return inflight
 
   const promise = (async () => {
-    const sdk = await getEulerSdk()
-    const routers = await sdk.oracleAdapterService.fetchOracleRouters(chainId)
-    const set = new Set(routers.map(router => router.router.toLowerCase()))
-    if (recognizedRoutersChainId.value === chainId) {
-      recognizedRoutersRef.value = set
+    try {
+      const sdk = await getEulerSdk()
+      const routers = await sdk.oracleAdapterService.fetchOracleRouters(chainId)
+      // CREATE2 factory deployments reuse the same router address across chains.
+      // Only count rows that actually belong to the requested chain.
+      const set = new Set(
+        routers
+          .filter(router => router.chainId === chainId)
+          .map(router => router.router.toLowerCase()),
+      )
+      if (recognizedRoutersChainId.value === chainId) {
+        recognizedRoutersRef.value = set
+      }
+      return set
     }
-    return set
+    catch (err) {
+      logWarn('useEulerOracleRouters', `Failed to load recognized routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+      return new Set()
+    }
   })()
 
   pendingRouterLoads.set(chainId, promise)
   try {
     return await promise
-  }
-  catch (err) {
-    logWarn('useEulerOracleRouters', `Failed to load recognized routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
-    return new Set()
   }
   finally {
     pendingRouterLoads.delete(chainId)
