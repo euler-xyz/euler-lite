@@ -195,11 +195,10 @@ const positionDetailsFallback = computed(() => {
   const search = query.toString()
   return `/position/${positionIndex}${search ? `?${search}` : ''}`
 })
-// Migration authorization must be signed by a real connected wallet. Spy mode
-// stays read-only (discovery/preview) and cannot sign, so it must not satisfy
-// the review/execute gate — otherwise a spy-only user passes "Connect wallet to
-// migrate" and fails later at signing.
-const hasConnectedWallet = computed(() => isConnected.value)
+// A connected wallet can review and execute migrations. Spy mode can prepare
+// the same review through the read-only execution path, while confirmation
+// remains unavailable in the review modal.
+const hasMigrationReviewContext = computed(() => isConnected.value || isSpyMode.value)
 const migrationOwner = computed<Address | undefined>(() => {
   const raw = isSpyMode.value ? spyAddress.value : address.value
   if (!raw) return undefined
@@ -576,7 +575,7 @@ async function loadTargetLiquidityUsd() {
 
 function getTargetDisabledReason(target: OutgoingMigrationTarget | undefined) {
   if (pageDisabledReason.value) return pageDisabledReason.value
-  if (!hasConnectedWallet.value) return 'Connect wallet to migrate'
+  if (!hasMigrationReviewContext.value) return 'Connect wallet to migrate'
   if (isTargetsLoading.value) return 'Loading migration targets'
   if (targetsError.value && !target) return targetsError.value
   if (hasLoadedTargets.value && !target) return 'No compatible migration target'

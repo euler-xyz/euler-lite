@@ -395,11 +395,10 @@ const subAccount = computed<Address>(() =>
 const cowSwapOwner = computed<Address>(() =>
   (address.value || (isSpyMode.value ? spyAddress.value : undefined) || zeroAddress) as Address,
 )
-// Migration authorization must be signed by a real connected wallet. Spy mode
-// stays read-only (discovery/preview) and cannot sign, so it must not satisfy
-// the review/execute gate — otherwise a spy-only user passes "Connect wallet to
-// migrate" and fails later at signing.
-const hasConnectedWallet = computed(() => isConnected.value)
+// A connected wallet can review and execute migrations. Spy mode can prepare
+// the same review through the read-only execution path, while confirmation
+// remains unavailable in the review modal.
+const hasMigrationReviewContext = computed(() => isConnected.value || isSpyMode.value)
 
 const hasDebtChange = computed(() =>
   isExternalSourceRoute.value ? !!targetDebtVault.value && !!externalDebtAsset.value : !!targetDebtVault.value && !!sourceDebtVault.value,
@@ -2452,7 +2451,7 @@ const canAddToBatch = computed(() => {
   return true
 })
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!hasMigrationReviewContext.value) return false
   if (isLoading.value || isExternalPositionsLoading.value || isSubmitting.value) return true
   if (validationError.value) return true
   if (!hasAllRequiredQuotes.value) return true
@@ -2583,7 +2582,7 @@ const effectiveQuoteFetchedAt = computed(() => {
 
 const inboundMigrationDisabledReason = computed(() => {
   if (!isExternalSourceRoute.value) return null
-  if (!hasConnectedWallet.value) return 'Connect wallet to migrate'
+  if (!hasMigrationReviewContext.value) return 'Connect wallet to migrate'
   if (isExternalPositionsLoading.value) return 'Loading external position'
   if (externalPositionsError.value && !externalPosition.value) return externalPositionsError.value
   if (!externalPosition.value) return 'External position not found'
@@ -2625,6 +2624,7 @@ type InboundExternalMigrationInput = {
   owner: Address
   position: MigrationPosition
   eulerTarget: EulerMigrationTarget
+  deadline: bigint
   collateralSwapQuote?: SwapQuote
   debtSwapQuote?: SwapQuote
 }
@@ -2673,6 +2673,12 @@ const swapQuotePreviewKey = (quote: SwapQuote | null | undefined): string => {
     quote.amountOut,
     quote.amountOutMin,
     quote.slippage,
+    quote.swap.swapperAddress,
+    quote.swap.swapperData,
+    quote.verify.verifierAddress,
+    quote.verify.verifierData,
+    quote.verify.deadline,
+    String(quote.transferOutputToReceiver ?? false),
     selectedQuoteProviderKey(quote),
   ].join(':')
 }
@@ -2748,7 +2754,15 @@ const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigr
       ? getSwapInputAmount(debtSwapQuote, SwapperMode.TARGET_DEBT)
       : inboundBorrowAmountWithBuffer.value
   }
-  const input: InboundExternalMigrationInput = { source, owner, position, eulerTarget }
+  // The connector uses one deadline for authorization and final verification.
+  // A skim collateral quote commits its exact deadline inside verifierData, so
+  // that value must also be used when the migration intent is recompiled.
+  const deadline = BigInt(
+    collateralSwapQuote?.verify.deadline
+    ?? debtSwapQuote?.verify.deadline
+    ?? Math.floor(Date.now() / 1000) + 60 * 60,
+  )
+  const input: InboundExternalMigrationInput = { source, owner, position, eulerTarget, deadline }
   if (collateralSwapQuote) input.collateralSwapQuote = collateralSwapQuote
   if (debtSwapQuote) input.debtSwapQuote = debtSwapQuote
   return input
@@ -2767,7 +2781,6 @@ const getInboundExternalMigrationAuthorizationRequest = async (
     throw new Error('Migration inputs are incomplete')
   }
   const migrationChainId = input.position.chainId
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'external-to-euler',
     connectorId: input.source.connectorId,
@@ -2780,7 +2793,7 @@ const getInboundExternalMigrationAuthorizationRequest = async (
     // Without signatures the connectors return msg.sender grants to send as
     // their own transactions instead of an EIP-712 message to sign.
     authorizationKind: useSignatures ? 'typedData' : 'transaction',
-    deadline,
+    deadline: input.deadline,
   })
 }
 
@@ -2807,6 +2820,7 @@ const buildInboundExternalMigrationCalldataPreview = async (
     positionRef: input.source.ref,
     target: input.eulerTarget,
     authorization,
+    deadline: input.deadline,
     removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId, useSignatures),
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
@@ -2839,6 +2853,7 @@ const buildInboundExternalMigrationSimulationResult = async (
     positionRef: input.source.ref,
     target: input.eulerTarget,
     authorizationRequest,
+    deadline: input.deadline,
     removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId, useSignatures),
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
@@ -3395,6 +3410,7 @@ const createInboundMigrationIntent = (preview: InboundExternalMigrationPreview) 
       target: input.eulerTarget,
       collateralSwapQuote: input.collateralSwapQuote,
       debtSwapQuote: input.debtSwapQuote,
+      deadline: input.deadline,
       removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId, useSignatures),
       operationName: `${input.source.connectorId}ToEulerMigration`,
       authorizationKind: useSignatures ? 'typedData' : 'transaction',

@@ -161,6 +161,24 @@ describe('Stage A transaction inventory', () => {
     expect(source).not.toMatch(/reviewingTargetId\.value\s*\|\|\s*isOperationBlocked\.value/)
   })
 
+  it('allows migration review preparation in spy mode while execution stays read-only', () => {
+    const inbound = read('pages/position/[number]/borrow/swap.vue')
+    const outbound = read('pages/position/[number]/migrate.vue')
+    const directReview = read('composables/useExecutionReview.ts')
+    const batchReview = read('composables/useTxBatch.ts')
+
+    for (const source of [inbound, outbound]) {
+      expect(source).toContain('const hasMigrationReviewContext = computed(() => isConnected.value || isSpyMode.value)')
+      expect(source).toContain('if (!hasMigrationReviewContext.value) return \'Connect wallet to migrate\'')
+    }
+    expect(inbound).toContain('collateralSwapQuote?.verify.deadline')
+    expect(inbound).toContain('deadline: input.deadline')
+    expect(inbound).toContain('quote.verify.verifierData')
+    expect(inbound).toContain('quote.verify.deadline')
+    expect(directReview).toContain('const prepared = await execution.prepareReadOnly(intents, {')
+    expect(batchReview).toContain('const prepare = readOnly ? executionService.prepareReadOnly : executionService.prepare')
+  })
+
   it('keeps a conclusively cancelled review retryable and closes other failed reviews', () => {
     const modalSource = read('components/entities/reviewed-execution/ReviewedOperationModal.vue')
     const executionSource = read('composables/useReviewedExecution.ts')
