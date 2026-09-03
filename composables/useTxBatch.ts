@@ -33,8 +33,9 @@ import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { BatchDraftEntry, OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { deepFreezeSerializable } from '~/features/reviewed-execution/domain/canonical'
 import { GenerationPublisher } from '~/features/reviewed-execution/planning/cache'
-import { intentSetDigest } from '~/features/reviewed-execution/planning/requirements'
+import { intentSetDigest, selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 
 export interface BatchWalletChange {
   token: string
@@ -117,7 +118,10 @@ export interface CapturedBatchCompletion {
 }
 
 type BatchEntryInputBase = Omit<BatchEntry, 'id' | 'plan' | 'preparing' | 'preparationError'>
-export type BatchEntryInput = BatchEntryInputBase
+export type BatchEntryInput = BatchEntryInputBase & {
+  /** Optional warmed DTO; adopted only when it matches the fresh intent exactly. */
+  preparedIntent?: OperationIntent
+}
 
 export interface BatchLayer {
   /** Simulated account snapshot after this layer's entry (layer 0 = real). */
@@ -2197,8 +2201,13 @@ export const useTxBatch = () => {
     if (pendingAddSignatures.has(signature)) return
     pendingAddSignatures.add(signature)
 
-    const { intent, ...presentation } = entry
-    const entryId = entry.intent.intentId
+    const { intent: currentIntent, preparedIntent, ...presentation } = entry
+    const selectedIntent = selectMatchingPreparedIntents(
+      preparedIntent ? [preparedIntent] : undefined,
+      [currentIntent],
+    )[0]!
+    const intent = deepFreezeSerializable(selectedIntent) as OperationIntent
+    const entryId = intent.intentId
     const capturedOwner = owner.value
     const capturedChainId = chainId.value
     registerReviewAssetMeta(presentation.review)
@@ -2215,7 +2224,7 @@ export const useTxBatch = () => {
       logBatchDiag('addEntry:building', {
         label: entry.label,
         subAccount: entry.subAccount,
-        intentId: entry.intent.intentId,
+        intentId: intent.intentId,
       })
       // Account-free entries never reach `getEntryPlanningAccount`, so seed layer 0
       // from the prefetched base here too — otherwise resimulate would refetch it.
@@ -2231,7 +2240,7 @@ export const useTxBatch = () => {
           // The simulator will surface the normal account-loading error later.
         }
       }
-      const preview = await compilePreviewForSimulation([entry.intent], await getEntryPlanningAccount())
+      const preview = await compilePreviewForSimulation([intent], await getEntryPlanningAccount())
       const plan = preview.plan
       const cid = chainId.value
       if (cid) {

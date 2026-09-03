@@ -67,9 +67,9 @@ describe('Stage A transaction inventory', () => {
     expect(production).not.toMatch(/executionService\s*\.\s*planLiquidation\s*\(/)
   })
 
-  it('freezes the current review launch inventory', () => {
+  it('freezes the current review launch inventory at synchronous capture boundaries', () => {
     const candidates = ['pages', 'components', 'composables'].flatMap(listProductionSources)
-    const pattern = /modal\.open\((?:OperationReviewModal|BatchReviewModal)|\bopen(?:Eager)?ReviewState\s*\(/g
+    const pattern = /modal\.open\((?:OperationReviewModal|BatchReviewModal)|\bcaptureReviewState\s*\(/g
     const discovered = candidates
       .map(source => ({ source, expectedOccurrences: count(read(source), pattern) }))
       .filter(row => row.expectedOccurrences > 0)
@@ -84,6 +84,14 @@ describe('Stage A transaction inventory', () => {
       const actual = count(source, pattern)
       expect(actual, row.source).toBe(row.expectedOccurrences)
     }
+
+    const directReviewSources = REVIEW_SOURCE_INVENTORY
+      .map(row => row.source)
+      .filter(source => source !== 'components/BatchContents.vue' && source !== 'composables/useExecutionReview.ts')
+    for (const source of directReviewSources) {
+      expect(read(source), source).toMatch(/\{\s*capture:\s*captureReviewState\s*\}\s*=\s*useExecutionReview\(\)/)
+    }
+    expect(read('composables/useExecutionReview.ts')).not.toMatch(/return\s*\{\s*capture\s*,\s*open\s*\}/)
   })
 
   it('keeps operation authority explicit and independent of SDK object identity', () => {

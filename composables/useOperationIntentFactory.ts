@@ -28,14 +28,19 @@ export const useOperationIntentFactory = () => {
   const { chainId: browsedChainId } = useEulerAddresses()
   const chainId = computed(() => wagmiChainId.value ?? browsedChainId.value)
 
-  const create = (input: ConnectedOperationIntentInput): Readonly<OperationIntent> => {
+  const capture = () => {
     if (!effectiveAddress.value || !chainId.value) throw new Error('Wallet is not connected')
-    return createOperationIntent({
-      ...input,
-      account: getAddress(effectiveAddress.value),
-      chainId: chainId.value,
-    })
+    const account = getAddress(effectiveAddress.value)
+    const capturedChainId = chainId.value
+    return (input: ConnectedOperationIntentInput): Readonly<OperationIntent> =>
+      createOperationIntent({
+        ...input,
+        account,
+        chainId: capturedChainId,
+      })
   }
 
-  return { create }
+  const create = (input: ConnectedOperationIntentInput): Readonly<OperationIntent> => capture()(input)
+
+  return { capture, create }
 }

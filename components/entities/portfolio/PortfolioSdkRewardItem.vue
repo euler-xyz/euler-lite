@@ -40,7 +40,7 @@ const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
 const { refreshLocks } = useREULLocks()
 const { addEntry: addBatchEntry, entries: batchEntries, entryCount, clearBatch } = useTxBatch()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const { settings } = useUserSettings()
@@ -164,26 +164,8 @@ const onClaimClick = async () => {
   try {
     await ensureWalletOnClaimChain()
 
-    try {
-      plan.value = await buildClaimRewardPlan(reward)
-    }
-    catch (e) {
-      logWarn('PortfolioSdkRewardItem/buildPlan', e)
-      plan.value = null
-    }
-
-    if (plan.value) {
-      const ok = await runSimulation(plan.value)
-      if (!ok) return
-    }
-    if (isREULBatchBlocked.value) {
-      error('Clear the current batch before claiming rEUL')
-      return
-    }
-
     const intent = createRewardIntent()
-
-    await openReviewState([intent], {
+    const reviewLaunch = captureReviewState([intent], {
       presentationKind: planKind.value,
       review: {
         type: planKind.value,
@@ -205,6 +187,25 @@ const onClaimClick = async () => {
         logWarn('PortfolioSdkRewardItem/claim', cause)
       },
     })
+
+    try {
+      plan.value = await buildClaimRewardPlan(reward)
+    }
+    catch (e) {
+      logWarn('PortfolioSdkRewardItem/buildPlan', e)
+      plan.value = null
+    }
+
+    if (plan.value) {
+      const ok = await runSimulation(plan.value)
+      if (!ok) return
+    }
+    if (isREULBatchBlocked.value) {
+      error('Clear the current batch before claiming rEUL')
+      return
+    }
+
+    await reviewLaunch.open()
   }
   catch (e) {
     logWarn('PortfolioSdkRewardItem/onClaimClick', e)

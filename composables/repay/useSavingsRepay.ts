@@ -21,7 +21,6 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { findBlockingDisabledOp, OP_REPAY_WITH_SHARES, OP_SKIM, OP_TRANSFER, OP_WITHDRAW, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning, getUtilisationWarning, type VaultWarning } from '~/composables/useVaultWarnings'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
-import { selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 
 interface UseSavingsRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -77,7 +76,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { open: openReviewState } = useExecutionReview()
+  const { capture: captureReviewState } = useExecutionReview()
   const { account: planAccount } = usePlanAccount()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { finalizeExecutionUi } = useTxFinalization()
@@ -543,7 +542,6 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
         ? core.quotes.selectedQuoteCard.value.intents
         : undefined
       const currentIntents = [createRepayIntent(quote, snapshot)]
-      const intents = selectMatchingPreparedIntents(quoteIntents, currentIntents)
       const transferAmounts: Record<string, string> = {}
       if (collateralSnapshot && positionSupplied) {
         const addr = collateralSnapshot.address.toLowerCase()
@@ -555,21 +553,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
         sourceDecimals: snapshot.sourceVault!.asset.decimals,
         swapperMode: snapshot.direction!,
       })
-      try {
-        plan.value = await buildRepayPlan(quote, planAccountSnapshot, snapshot)
-      }
-      catch (e) {
-        logWarn('savingsRepay/buildPlan', e)
-        plan.value = null
-      }
-
-      if (plan.value) {
-        const ok = await runSimulation(plan.value)
-        if (!ok) return
-      }
-
-      if (!plan.value) return
-      await openReviewState(intents, {
+      const reviewLaunch = captureReviewState(currentIntents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',
@@ -590,7 +574,22 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
           error('Transaction failed')
           logWarn('savingsRepay/send', cause)
         },
-      })
+      }, quoteIntents)
+      try {
+        plan.value = await buildRepayPlan(quote, planAccountSnapshot, snapshot)
+      }
+      catch (e) {
+        logWarn('savingsRepay/buildPlan', e)
+        plan.value = null
+      }
+
+      if (plan.value) {
+        const ok = await runSimulation(plan.value)
+        if (!ok) return
+      }
+
+      if (!plan.value) return
+      await reviewLaunch.open()
     }
     finally {
       isPreparing.value = false

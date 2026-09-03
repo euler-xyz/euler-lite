@@ -3,6 +3,8 @@ import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { OperationReviewModal, ReviewedOperationModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { deepFreezeSerializable } from '~/features/reviewed-execution/domain/canonical'
+import { selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 import type { SubmissionResult } from '~/features/reviewed-execution/coordinator/coordinator'
 
 export interface ReviewPresentation extends Record<string, unknown> {
@@ -19,6 +21,14 @@ export interface OpenExecutionReviewOptions {
   onResult?: (result: SubmissionResult) => void | Promise<void>
   onSucceeded?: (result: SubmissionResult) => void | Promise<void>
   onFailed?: (cause: unknown) => void | Promise<void>
+}
+
+export interface CapturedExecutionReview {
+  /** Immutable click-time intent set used for authoritative preparation. */
+  intents: readonly OperationIntent[]
+  /** True only when the warmed intent set was semantically identical. */
+  usesPreparedIntents: boolean
+  open: () => Promise<{ reviewId: Hash, reviewDigest: Hash }>
 }
 
 const clonePresentationValue = (value: unknown): unknown => {
@@ -47,29 +57,23 @@ export const useExecutionReview = () => {
   const execution = useReviewedExecution()
   const { isSpyMode } = useEffectiveAddress()
 
-  const open = async (
+  const openCaptured = async (
     intents: readonly OperationIntent[],
     options: OpenExecutionReviewOptions,
   ): Promise<{ reviewId: Hash, reviewDigest: Hash }> => {
-    // Callers may keep editing reactive form state while preparation awaits.
-    // Only this synchronous copy is bound to and rendered by the review.
-    const capturedOptions: OpenExecutionReviewOptions = {
-      ...options,
-      review: captureReviewPresentation(options.review),
-    }
     if (isSpyMode.value) {
       const prepared = await execution.prepareReadOnly(intents, {
-        presentationKind: capturedOptions.presentationKind,
-        presentationInputs: capturedOptions.review,
+        presentationKind: options.presentationKind,
+        presentationInputs: options.review,
       })
       modal.open(OperationReviewModal, {
         props: {
-          ...capturedOptions.review,
+          ...options.review,
           plan: undefined,
           prepared: prepared.prepared,
           calldataPrepared: prepared.prepared,
-          tenderlyPrepared: capturedOptions.tenderlyPrepared ?? prepared.prepared,
-          tenderlyStateOverrides: capturedOptions.tenderlyStateOverrides,
+          tenderlyPrepared: options.tenderlyPrepared ?? prepared.prepared,
+          tenderlyStateOverrides: options.tenderlyStateOverrides,
           reviewedAccount: prepared.execution.requestSet.wallet.account,
           reviewedWalletKind: prepared.execution.requestSet.wallet.walletKind,
           reviewedRequests: prepared.execution.requestSet.requests,
@@ -83,8 +87,8 @@ export const useExecutionReview = () => {
       }
     }
     const prepared = await execution.prepare(intents, {
-      presentationKind: capturedOptions.presentationKind,
-      presentationInputs: capturedOptions.review,
+      presentationKind: options.presentationKind,
+      presentationInputs: options.review,
     })
     const reviewId = prepared.execution.reviewId
     const reviewDigest = prepared.execution.reviewDigest
@@ -93,23 +97,46 @@ export const useExecutionReview = () => {
         reviewId,
         reviewDigest,
         review: {
-          ...capturedOptions.review,
+          ...options.review,
           plan: undefined,
           prepared: prepared.prepared,
           calldataPrepared: prepared.prepared,
-          tenderlyPrepared: capturedOptions.tenderlyPrepared ?? prepared.prepared,
-          tenderlyStateOverrides: capturedOptions.tenderlyStateOverrides,
+          tenderlyPrepared: options.tenderlyPrepared ?? prepared.prepared,
+          tenderlyStateOverrides: options.tenderlyStateOverrides,
         },
-        onConfirmed: capturedOptions.onConfirmed,
-        onResult: capturedOptions.onResult,
+        onConfirmed: options.onConfirmed,
+        onResult: options.onResult,
         onSucceeded: async (result: SubmissionResult) => {
-          await capturedOptions.onSucceeded?.(result)
+          await options.onSucceeded?.(result)
         },
-        onFailed: capturedOptions.onFailed,
+        onFailed: options.onFailed,
       },
     })
     return { reviewId, reviewDigest }
   }
 
-  return { open }
+  /**
+   * Seal intent and presentation state synchronously at the trusted form-action
+   * boundary. Warmed intent DTOs are retained only when their transaction
+   * semantics exactly match the freshly captured click-time intents.
+   */
+  const capture = (
+    currentIntents: readonly OperationIntent[],
+    options: OpenExecutionReviewOptions,
+    preparedIntents?: readonly OperationIntent[],
+  ): CapturedExecutionReview => {
+    const selectedIntents = selectMatchingPreparedIntents(preparedIntents, currentIntents)
+    const intents = deepFreezeSerializable(selectedIntents) as readonly OperationIntent[]
+    const capturedOptions: OpenExecutionReviewOptions = Object.freeze({
+      ...options,
+      review: captureReviewPresentation(options.review),
+    })
+    return Object.freeze({
+      intents,
+      usesPreparedIntents: preparedIntents !== undefined && selectedIntents === preparedIntents,
+      open: () => openCaptured(intents, capturedOptions),
+    })
+  }
+
+  return { capture }
 }

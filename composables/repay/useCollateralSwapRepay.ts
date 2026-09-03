@@ -33,7 +33,6 @@ import { COWSWAP_ORDER_DEADLINE_SECONDS, getCowSwapChainConfig, getCowSwapQuoteO
 import { type CowSwapClosePositionExecuteParams, useCowSwapClosePositionExecution, useCowSwapOrderStatus, openCowSwapReviewModal } from '~/composables/cowswap'
 import { formatNumber, trimTrailingZeros } from '~/utils/string-utils'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
-import { selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 
 interface UseCollateralSwapRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
@@ -83,7 +82,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { open: openReviewState } = useExecutionReview()
+  const { capture: captureReviewState } = useExecutionReview()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
@@ -862,28 +861,13 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         ? core.quotes.selectedQuoteCard.value.intents
         : undefined
       const currentIntents = [createRepayIntent(quote, snapshot)]
-      const intents = selectMatchingPreparedIntents(quoteIntents, currentIntents)
       const inputDisplay = getRepaySwapReviewInputAmount({
         amount: snapshot.amount!,
         quote,
         sourceDecimals: snapshot.sourceVault!.asset.decimals,
         swapperMode: snapshot.direction!,
       })
-      try {
-        plan.value = await buildRepayPlan(quote, planAccountSnapshot, snapshot)
-      }
-      catch (e) {
-        logWarn('collateralSwapRepay/buildPlan', e)
-        plan.value = null
-      }
-
-      if (plan.value) {
-        const ok = await runSimulation(plan.value, buildRepayStateOverrideOptions())
-        if (!ok) return
-      }
-
-      if (!plan.value) return
-      await openReviewState(intents, {
+      const reviewLaunch = captureReviewState(currentIntents, {
         presentationKind: 'repay',
         review: {
           type: 'repay',
@@ -903,7 +887,22 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
           error('Transaction failed')
           logWarn('collateralSwapRepay/send', cause)
         },
-      })
+      }, quoteIntents)
+      try {
+        plan.value = await buildRepayPlan(quote, planAccountSnapshot, snapshot)
+      }
+      catch (e) {
+        logWarn('collateralSwapRepay/buildPlan', e)
+        plan.value = null
+      }
+
+      if (plan.value) {
+        const ok = await runSimulation(plan.value, buildRepayStateOverrideOptions())
+        if (!ok) return
+      }
+
+      if (!plan.value) return
+      await reviewLaunch.open()
     }
     finally {
       isPreparing.value = false

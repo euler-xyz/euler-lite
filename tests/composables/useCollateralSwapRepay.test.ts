@@ -214,7 +214,13 @@ describe('useCollateralSwapRepay', () => {
 
   beforeEach(() => {
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: mocks.openReview }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (currentIntents: unknown[], options: unknown, preparedIntents?: unknown[]) => ({
+        intents: preparedIntents ?? currentIntents,
+        usesPreparedIntents: !!preparedIntents,
+        open: () => mocks.openReview(preparedIntents ?? currentIntents, options),
+      }),
+    }))
     vi.clearAllMocks()
     mocks.quoteInstances.length = 0
     mocks.crossPositionItems.length = 0

@@ -336,7 +336,7 @@ const addMultiplyToBatch = async () => {
     const quoteIntents = snap.quote
       ? multiply.multiplyQuoteCardsSorted.value.find(card => card.quote === snap.quote)?.intents
       : undefined
-    await addBatchEntry({ intent: quoteIntents?.[0] ?? multiply.createMultiplyIntent(snap), label: `Multiply → ${longVault.asset.symbol}`, subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
+    await addBatchEntry({ intent: multiply.createMultiplyIntent(snap), preparedIntent: quoteIntents?.[0], label: `Multiply → ${longVault.asset.symbol}`, subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
     redirectAfterAdd('/portfolio', { subAccount })
   })
 }

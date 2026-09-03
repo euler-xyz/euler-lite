@@ -20,7 +20,6 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
-import { selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -258,7 +257,8 @@ const addToBatchWithoutWarnings = async () => {
       })
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
-        intent: selectMatchingPreparedIntents(quoteIntents, [currentIntent])[0]!,
+        intent: currentIntent,
+        preparedIntent: quoteIntents?.[0],
         subAccount: position.value.subAccount as Address,
         affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
         nameOverride: `Repay ${borrowSymbol}`,
@@ -315,7 +315,8 @@ const addToBatchWithoutWarnings = async () => {
     })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
-      intent: selectMatchingPreparedIntents(quoteIntents, [currentIntent])[0]!,
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
       sourceSubAccount: sourceAccount,
       affectedSubAccounts: collateral.isCrossPositionSource.value
@@ -353,7 +354,8 @@ const addToBatchWithoutWarnings = async () => {
     })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
-      intent: selectMatchingPreparedIntents(quoteIntents, [currentIntent])[0]!,
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
       sourceSubAccount: sourceSubAccount as Address | undefined,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing, sourceSubAccount),

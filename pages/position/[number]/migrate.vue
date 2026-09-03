@@ -126,7 +126,7 @@ const {
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
 const { simulationError, clearSimulationError } = useTransactionPlanSimulation()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { createMigrationIntent } = useMigrationIntentFactory()
 
 const positionIndex = usePositionIndex()
@@ -863,19 +863,21 @@ watch([targets, outgoingPreviewBaseKey], ([targetList, baseKey]) => {
 
 async function reviewMigration(target: OutgoingMigrationTarget) {
   if (reviewingTargetId.value || !canReviewTarget(target) || !sourceDebtVault.value) return
+  const sourceDebtVaultSnapshot = sourceDebtVault.value
+  const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVaultSnapshot)
   reviewingTargetId.value = target.id
   clearSimulationError()
   try {
     const preview = await prepareOutgoingMigrationPreview(target)
     const intent = createOutgoingMigrationIntent(preview)
-    await openReviewState([intent], {
+    const reviewLaunch = captureReviewState([intent], {
       presentationKind: 'migration',
       tenderlyPrepared: preview.tenderlySimulation.prepared,
       tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
       review: {
         type: 'migration',
-        asset: sourceDebtVault.value.asset,
-        amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
+        asset: sourceDebtVaultSnapshot.asset,
+        amount: debtAmount,
         signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
@@ -895,6 +897,7 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
       },
       onFailed: (cause) => { showError(cause instanceof Error ? cause.message : 'Migration failed') },
     })
+    await reviewLaunch.open()
   }
   catch (err) {
     logWarn('positionMigration/review', err)

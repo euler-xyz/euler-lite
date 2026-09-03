@@ -42,7 +42,7 @@ const { error } = useToast()
 useFullBalances()
 const { planWithdrawOrRedeem, prepareTransactionPlan, prefetchPluginData } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: cachedAccount } = useFreshAccount()
@@ -484,21 +484,52 @@ const updateBalance = () => {
 const submit = async () => {
   if (isOperationBlocked.value) return
   if (isPreparing.value || isOutputAssetBlocked.value || isOutputAssetRestricted.value) return
+  if (!asset.value?.address) return
+  const capturedAsset = asset.value
+  const capturedAmount = amount.value
+  const isMax = FixedPoint.fromValue(assetsBalance.value, capturedAsset.decimals).lte(amountFixed.value)
+  const owner = (subAccount.value ?? effectiveAddress.value!) as Address
+  const needsSwapSnapshot = needsSwap.value
+  const swapQuote = needsSwapSnapshot ? (swapSelectedQuote.value ?? undefined) : undefined
+  if (needsSwapSnapshot && !swapQuote) return
+  const quoteIntents = swapQuote && !isMax && swapSelectedQuoteCard.value?.quote === swapQuote
+    ? swapSelectedQuoteCard.value.intents
+    : undefined
+  const currentIntents = [createWithdrawIntent(swapQuote, isMax)]
+  const reviewType = needsSwapSnapshot ? 'swap-withdraw' as const : 'withdraw' as const
+  const planAccountSnapshot = cachedAccount.value
+  const sharesSnapshot = sharesBalance.value
+  const assetsSnapshot = amountFixed.value.value
+  const reviewLaunch = captureReviewState(currentIntents, {
+    presentationKind: reviewType,
+    review: {
+      type: reviewType,
+      asset: capturedAsset,
+      amount: capturedAmount,
+      quoteFetchedAt: needsSwapSnapshot ? swapEffectiveQuoteFetchedAt.value : null,
+      swapToAsset: needsSwapSnapshot ? selectedOutputAsset.value : undefined,
+      swapToAmount: needsSwapSnapshot ? swapEstimatedOutput.value : undefined,
+      swapMode: needsSwapSnapshot ? SwapperMode.EXACT_IN : undefined,
+      submittingLabel: 'Submitting...',
+    },
+    onSucceeded: async () => {
+      await invalidateSdkQueries(['queryTokenBalances', 'queryBalanceOf', 'queryNativeBalance'])
+      updateBalance()
+      amount.value = ''
+      preparedPlan.value = null
+      resetSwapQuoteState()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+      }, 400)
+    },
+    onFailed: (cause) => {
+      error('Transaction failed')
+      console.warn(cause)
+    },
+  }, quoteIntents)
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
-      if (!asset.value?.address) {
-        return
-      }
-
-      const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
-      const owner = (subAccount.value ?? effectiveAddress.value!) as Address
-      const swapQuote = needsSwap.value ? (swapSelectedQuote.value ?? undefined) : undefined
-      const quoteIntents = swapQuote && !isMax && swapSelectedQuoteCard.value?.quote === swapQuote
-        ? swapSelectedQuoteCard.value.intents
-        : undefined
-      const intents = quoteIntents?.length ? quoteIntents : [createWithdrawIntent(swapQuote, isMax)]
-
       preparedPlan.value = null
       let rawPlan: TransactionPlan
       try {
@@ -506,17 +537,17 @@ const submit = async () => {
           vaultAddress: vaultAddress as Address,
           owner,
           isMax,
-          shares: sharesBalance.value,
-          assets: amountFixed.value.value,
+          shares: sharesSnapshot,
+          assets: assetsSnapshot,
           swapQuote,
           // Pass the race-replaced cached Account so planWithdraw/planRedeem
           // skip the per-click freshPlanContext.fetchAccount round-trip.
-          account: cachedAccount.value,
+          account: planAccountSnapshot,
         })
         // Run plugins + approval resolution ONCE so simulate/execute (and the
         // modal's display steps) all see the same enriched plan. Without this
         // the SDK would re-run plugins inside simulate, the modal, and execute.
-        preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: cachedAccount.value, intents })
+        preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: planAccountSnapshot, intents: reviewLaunch.intents })
       }
       catch (e) {
         console.warn('[lend/withdraw] failed to build/prepare plan', e)
@@ -525,37 +556,10 @@ const submit = async () => {
       }
 
       // `preparedPlan.value` is non-null here — the try block either set it or returned.
-      const ok = await runPreparedSimulation(preparedPlan.value!, undefined, undefined, intents)
+      const ok = await runPreparedSimulation(preparedPlan.value!, undefined, undefined, reviewLaunch.intents)
       if (!ok) return
 
-      const reviewType = needsSwap.value ? 'swap-withdraw' as const : 'withdraw' as const
-      await openReviewState(intents, {
-        presentationKind: reviewType,
-        review: {
-          type: reviewType,
-          asset: asset.value,
-          amount: amount.value,
-          quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
-          swapToAsset: needsSwap.value ? selectedOutputAsset.value : undefined,
-          swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
-          swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-          submittingLabel: 'Submitting...',
-        },
-        onSucceeded: async () => {
-          await invalidateSdkQueries(['queryTokenBalances', 'queryBalanceOf', 'queryNativeBalance'])
-          updateBalance()
-          amount.value = ''
-          preparedPlan.value = null
-          resetSwapQuoteState()
-          setTimeout(() => {
-            router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-          }, 400)
-        },
-        onFailed: (cause) => {
-          error('Transaction failed')
-          console.warn(cause)
-        },
-      })
+      await reviewLaunch.open()
     })
   }
   finally {
@@ -594,7 +598,8 @@ const addToBatch = async () => {
         : undefined
       await addBatchEntry({
         label: `Withdraw-swap ${amountLabel} ${asset.value.symbol} → ${outputAsset?.symbol ?? ''}`,
-        intent: quoteIntents?.[0] ?? createWithdrawIntent(quote, false),
+        intent: createWithdrawIntent(quote, false),
+        preparedIntent: quoteIntents?.[0],
         subAccount: ownerAddr,
         review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })

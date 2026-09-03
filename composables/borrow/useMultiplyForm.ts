@@ -88,8 +88,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   const { error } = useToast()
   const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-  const { open: openReviewState } = useExecutionReview()
-  const { create: createIntent } = useOperationIntentFactory()
+  const { capture: captureReviewState } = useExecutionReview()
+  const { capture: captureIntentFactory, create: createIntent } = useOperationIntentFactory()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   // State-override knobs: skip balance probing (form validates "Not enough
   // balance"), pass current wallet snapshot, and pre-prime slot hints when the
@@ -264,7 +264,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     })
   }
 
-  const createMultiplyIntent = (snap: MultiplyBatchSnapshot) => {
+  const createMultiplyIntent = (
+    snap: MultiplyBatchSnapshot,
+    createCapturedIntent = createIntent,
+  ) => {
     const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyVault.asset.decimals)
     let supplyShares: bigint | undefined
     if (snap.isSavingCollateral && snap.savingFrom) {
@@ -281,7 +284,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       collateralAsset: snap.supplyVault.asset.address as Address,
       collateralShareSource,
     }
-    return createIntent({
+    return createCapturedIntent({
       kind: 'borrow',
       planner: snap.quote ? 'multiply-with-swap' : 'multiply-same-asset',
       args: snap.quote
@@ -1264,18 +1267,31 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return
       if (multiplyErrorText.value) return
 
-      const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
+      const supplyVaultSnapshot = multiplySupplyVault.value
+      const longVaultSnapshot = multiplyLongVault.value
+      const shortVaultSnapshot = multiplyShortVault.value
+      const inputAmountSnapshot = multiplyInputAmount.value
+      const shortAmountSnapshot = multiplyShortAmount.value
+      const longAmountSnapshot = multiplyLongAmount.value
+      const isSavingCollateralSnapshot = isMultiplySavingCollateral.value
+      const savingPositionSnapshot = multiplySavingPosition.value
+      const savingBalanceSnapshot = multiplySavingBalance.value
+      const planAccountSnapshot = planAccount.value
+      const quoteFetchedAt = multiplyEffectiveQuoteFetchedAt.value
+      const selectedQuoteCardSnapshot = multiplySelectedQuoteCard.value
+      const createSubmitIntent = captureIntentFactory()
+      const supplyAmountNano = valueToNano(inputAmountSnapshot || '0', supplyVaultSnapshot.asset.decimals)
       let supplySharesAmount: bigint | undefined
-      if (isMultiplySavingCollateral.value) {
-        if (!multiplySavingPosition.value) {
+      if (isSavingCollateralSnapshot) {
+        if (!savingPositionSnapshot) {
           error('No savings balance for selected collateral')
           return
         }
-        if (multiplySavingPosition.value.assets === supplyAmountNano) {
-          supplySharesAmount = multiplySavingBalance.value
+        if (savingPositionSnapshot.assets === supplyAmountNano) {
+          supplySharesAmount = savingBalanceSnapshot
         }
         else {
-          supplySharesAmount = multiplySupplyVault.value.convertToShares(supplyAmountNano)
+          supplySharesAmount = supplyVaultSnapshot.convertToShares(supplyAmountNano)
         }
         if (!supplySharesAmount || supplySharesAmount <= 0n) {
           error('Unable to resolve savings amount')
@@ -1285,7 +1301,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       const debtAmount = multiplyDebtAmountNano.value
       if (!supplyAmountNano || debtAmount <= 0n) return
 
-      const isSameAsset = normalizeAddress(multiplyLongVault.value.asset.address) === normalizeAddress(multiplyShortVault.value.asset.address)
+      const isSameAsset = normalizeAddress(longVaultSnapshot.asset.address) === normalizeAddress(shortVaultSnapshot.asset.address)
       const quote = isSameAsset ? null : multiplySelectedQuote.value
       if (!isSameAsset && !quote) return
 
@@ -1300,98 +1316,44 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         return
       }
 
-      const collateralShareSource = isMultiplySavingCollateral.value
+      const collateralShareSource = isSavingCollateralSnapshot
         && supplySharesAmount
-        && multiplySavingPosition.value
+        && savingPositionSnapshot
         ? {
-            from: multiplySavingPosition.value.subAccount as Address,
+            from: savingPositionSnapshot.subAccount as Address,
             shares: supplySharesAmount,
           }
         : undefined
-      const collateralAmount = isMultiplySavingCollateral.value ? 0n : supplyAmountNano
+      const collateralAmount = isSavingCollateralSnapshot ? 0n : supplyAmountNano
       const snapshot: MultiplyBatchSnapshot = {
         subAccount: subAccount as Address,
-        supplyVault: multiplySupplyVault.value,
-        longVault: multiplyLongVault.value,
-        shortVault: multiplyShortVault.value,
-        inputAmount: multiplyInputAmount.value,
+        supplyVault: supplyVaultSnapshot,
+        longVault: longVaultSnapshot,
+        shortVault: shortVaultSnapshot,
+        inputAmount: inputAmountSnapshot,
         debtAmount,
-        isSavingCollateral: isMultiplySavingCollateral.value,
-        savingFrom: multiplySavingPosition.value?.subAccount as Address | undefined,
-        savingAssets: multiplySavingPosition.value?.assets,
-        savingShares: multiplySavingPosition.value?.shares,
+        isSavingCollateral: isSavingCollateralSnapshot,
+        savingFrom: savingPositionSnapshot?.subAccount as Address | undefined,
+        savingAssets: savingPositionSnapshot?.assets,
+        savingShares: savingPositionSnapshot?.shares,
         quote: quote ?? undefined,
       }
-      const matchingCard = quote && multiplySelectedQuoteCard.value?.quote === quote
+      const matchingCard = quote && selectedQuoteCardSnapshot?.quote === quote
         && quote.accountIn?.toLowerCase() === subAccount.toLowerCase()
-        ? multiplySelectedQuoteCard.value
+        ? selectedQuoteCardSnapshot
         : null
-      const intents = matchingCard?.intents?.length
-        ? matchingCard.intents
-        : [createMultiplyIntent(snapshot)]
-
-      try {
-        // Best case: the selected quote was lazily prepared in the background
-        // when the user picked it, so we already have an envelope on the card.
-        // Skip planMultiply + prepareTransactionPlan entirely.
-        if (planAccount.value) {
-          try {
-            await preloadSubAccountSnapshot(planAccount.value, subAccount as Address)
-          }
-          catch (e) {
-            logWarn('multiply/review/preloadSubAccountSnapshot', e)
-          }
-        }
-        if (matchingCard?.preparedPlan) {
-          // Lazy-prepared envelope is available — short-circuit prepare entirely.
-          multiplyPlan.value = matchingCard.plan ?? null
-          preparedMultiplyPlan.value = matchingCard.preparedPlan as TransactionPlanPrepared
-        }
-        else {
-          // Reuse the raw plan from the selected quote card when possible.
-          const cachedPlan = matchingCard?.plan
-          const account = planAccount.value
-          multiplyPlan.value = cachedPlan ?? await profAsync('review', 'planMultiply', () => planMultiply({
-            collateralVault: multiplySupplyVault.value!.address as Address,
-            collateralAmount,
-            collateralAsset: multiplySupplyVault.value!.asset.address as Address,
-            collateralShareSource,
-            longVault: multiplyLongVault.value!.address as Address,
-            liabilityVault: multiplyShortVault.value!.address as Address,
-            liabilityAmount: debtAmount,
-            receiver: subAccount as Address,
-            swapQuote: quote ?? undefined,
-            swapperMode: SwapperMode.EXACT_IN,
-            account,
-            subAccountSnapshotApplied: Boolean(account),
-          }))
-          preparedMultiplyPlan.value = await profAsync('review', 'prepareTransactionPlan', () => prepareTransactionPlan(multiplyPlan.value!, { account, intents }))
-        }
-      }
-      catch (e) {
-        logWarn('multiply/buildPlan', e)
-        multiplyPlan.value = null
-        preparedMultiplyPlan.value = null
-      }
-
-      if (preparedMultiplyPlan.value) {
-        const ok = await profAsync('review', 'runPreparedSimulation', () => runMultiplySimulation(preparedMultiplyPlan.value!, buildMultiplyStateOverrideOptions(), undefined, intents))
-        if (!ok) return
-      }
-
-      profMark('review', 'submitMultiply.modalOpen')
-      if (!multiplyPlan.value) return
-      await openReviewState(intents, {
+      const currentIntents = [createMultiplyIntent(snapshot, createSubmitIntent)]
+      const reviewLaunch = captureReviewState(currentIntents, {
         presentationKind: 'borrow',
         review: {
           type: 'borrow',
-          asset: multiplyShortVault.value.asset,
-          amount: multiplyShortAmount.value || formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)),
-          quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
-          supplyingAssetForBorrow: multiplySupplyVault.value.asset,
-          supplyingAmount: multiplyInputAmount.value,
-          swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
-          swapToAmount: quote ? multiplyLongAmount.value : undefined,
+          asset: shortVaultSnapshot.asset,
+          amount: shortAmountSnapshot || formatUnits(debtAmount, Number(shortVaultSnapshot.asset.decimals)),
+          quoteFetchedAt: quote ? quoteFetchedAt : null,
+          supplyingAssetForBorrow: supplyVaultSnapshot.asset,
+          supplyingAmount: inputAmountSnapshot,
+          swapToAsset: quote ? longVaultSnapshot.asset : undefined,
+          swapToAmount: quote ? longAmountSnapshot : undefined,
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
           submittingLabel: 'Submitting...',
@@ -1401,7 +1363,60 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           logWarn('multiply/send', cause)
           error('Transaction failed')
         },
-      })
+      }, matchingCard?.intents)
+
+      try {
+        // Best case: the selected quote was lazily prepared in the background
+        // when the user picked it, so we already have an envelope on the card.
+        // Skip planMultiply + prepareTransactionPlan entirely.
+        if (planAccountSnapshot) {
+          try {
+            await preloadSubAccountSnapshot(planAccountSnapshot, subAccount as Address)
+          }
+          catch (e) {
+            logWarn('multiply/review/preloadSubAccountSnapshot', e)
+          }
+        }
+        if (matchingCard?.preparedPlan && reviewLaunch.usesPreparedIntents) {
+          // Lazy-prepared envelope is available — short-circuit prepare entirely.
+          multiplyPlan.value = matchingCard.plan ?? null
+          preparedMultiplyPlan.value = matchingCard.preparedPlan as TransactionPlanPrepared
+        }
+        else {
+          // Reuse the raw plan from the selected quote card when possible.
+          const cachedPlan = reviewLaunch.usesPreparedIntents ? matchingCard?.plan : undefined
+          const account = planAccountSnapshot
+          multiplyPlan.value = cachedPlan ?? await profAsync('review', 'planMultiply', () => planMultiply({
+            collateralVault: supplyVaultSnapshot.address as Address,
+            collateralAmount,
+            collateralAsset: supplyVaultSnapshot.asset.address as Address,
+            collateralShareSource,
+            longVault: longVaultSnapshot.address as Address,
+            liabilityVault: shortVaultSnapshot.address as Address,
+            liabilityAmount: debtAmount,
+            receiver: subAccount as Address,
+            swapQuote: quote ?? undefined,
+            swapperMode: SwapperMode.EXACT_IN,
+            account,
+            subAccountSnapshotApplied: Boolean(account),
+          }))
+          preparedMultiplyPlan.value = await profAsync('review', 'prepareTransactionPlan', () => prepareTransactionPlan(multiplyPlan.value!, { account, intents: reviewLaunch.intents }))
+        }
+      }
+      catch (e) {
+        logWarn('multiply/buildPlan', e)
+        multiplyPlan.value = null
+        preparedMultiplyPlan.value = null
+      }
+
+      if (preparedMultiplyPlan.value) {
+        const ok = await profAsync('review', 'runPreparedSimulation', () => runMultiplySimulation(preparedMultiplyPlan.value!, buildMultiplyStateOverrideOptions(), undefined, reviewLaunch.intents))
+        if (!ok) return
+      }
+
+      profMark('review', 'submitMultiply.modalOpen')
+      if (!multiplyPlan.value) return
+      await reviewLaunch.open()
     }
     finally {
       isMultiplyPreparing.value = false

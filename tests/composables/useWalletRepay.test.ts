@@ -67,7 +67,9 @@ const position = {
 describe('useWalletRepay projected Net APY', () => {
   beforeEach(() => {
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (intents: unknown[]) => ({ intents, usesPreparedIntents: false, open: vi.fn() }),
+    }))
     vi.clearAllMocks()
     rewardsVersion.value = 0
     getCollateralApySnapshot.mockImplementation(async (_position, _vault, options?: { liabilityRateDelta?: unknown }) => ({
