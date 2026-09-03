@@ -14,13 +14,15 @@ import {
 // before they go back to the SDK. Matches the SDK's own assessment cache window.
 const ORACLE_ADAPTER_CATALOGUE_FRESH_MS = 5 * 60 * 1000
 
+export type OracleAssessmentsStatus = 'idle' | 'loading' | 'available' | 'unavailable'
+
 const oracleAdaptersRef = shallowRef<Record<string, OracleAdapterMeta>>({})
-const oracleAssessmentsAvailableRef = ref(false)
+const oracleAssessmentsStatusRef = ref<OracleAssessmentsStatus>('idle')
 const oracleAdaptersChainId = ref<number | null>(null)
 // Retain per-chain display state, but let the SDK own bounded result freshness.
 // Only concurrent requests are deduplicated here; later loads re-enter the SDK.
 const oracleAdaptersByChain = new Map<number, Record<string, OracleAdapterMeta>>()
-const oracleAssessmentsAvailableByChain = new Map<number, boolean>()
+const oracleAssessmentsStatusByChain = new Map<number, OracleAssessmentsStatus>()
 const oracleAdapterCatalogueLoadedAt = new Map<number, number>()
 const oracleAdapterCatalogueKeys = new Map<number, Set<string>>()
 type OracleAdapterLoadResult = {
@@ -83,12 +85,23 @@ const activateChain = (chainId: number) => {
   if (oracleAdaptersChainId.value === chainId) return
   oracleAdaptersChainId.value = chainId
   oracleAdaptersRef.value = oracleAdaptersByChain.get(chainId) ?? {}
-  oracleAssessmentsAvailableRef.value = oracleAssessmentsAvailableByChain.get(chainId) ?? false
+  oracleAssessmentsStatusRef.value = oracleAssessmentsStatusByChain.get(chainId) ?? 'idle'
 }
 
-const setAssessmentsAvailable = (chainId: number, available: boolean) => {
-  oracleAssessmentsAvailableByChain.set(chainId, available)
-  if (oracleAdaptersChainId.value === chainId) oracleAssessmentsAvailableRef.value = available
+const setAssessmentsStatus = (chainId: number, status: OracleAssessmentsStatus) => {
+  oracleAssessmentsStatusByChain.set(chainId, status)
+  if (oracleAdaptersChainId.value === chainId) oracleAssessmentsStatusRef.value = status
+}
+
+const setAssessmentsAvailable = (chainId: number, available: boolean) =>
+  setAssessmentsStatus(chainId, available ? 'available' : 'unavailable')
+
+// Keep already-rendered assessment data visible while it revalidates. Loading
+// is an initial/retry state, not a reason to flash established content away.
+const markAssessmentsLoading = (chainId: number) => {
+  if (oracleAssessmentsStatusByChain.get(chainId) !== 'available') {
+    setAssessmentsStatus(chainId, 'loading')
+  }
 }
 
 const setAdapterMap = (chainId: number, map: Record<string, OracleAdapterMeta>) => {
@@ -132,6 +145,8 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
     setAssessmentsAvailable(chainId, false)
     return
   }
+
+  markAssessmentsLoading(chainId)
 
   const inflight = pendingOracleAdapterListLoads.get(chainId)
   if (inflight) {
@@ -233,6 +248,10 @@ const loadOracleAdapterResult = async (
 }
 
 const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
+  if (Number.isInteger(chainId) && chainId > 0) {
+    activateChain(chainId)
+    markAssessmentsLoading(chainId)
+  }
   const result = await loadOracleAdapterResult(chainId, oracleAddress)
   if (Number.isInteger(chainId) && chainId > 0) {
     setAssessmentsAvailable(chainId, result.backendAvailable)
@@ -245,6 +264,10 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
     if (Number.isInteger(chainId) && chainId > 0) activateChain(chainId)
     return
   }
+  if (Number.isInteger(chainId) && chainId > 0) {
+    activateChain(chainId)
+    markAssessmentsLoading(chainId)
+  }
   const results = await Promise.all(addresses.map(address => loadOracleAdapterResult(chainId, address)))
   setAssessmentsAvailable(chainId, results.every(result => result.backendAvailable))
 }
@@ -254,10 +277,12 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
 // the computed at construction time. Constructing it once with no active effect
 // keeps the subscription surface limited to actual assessment readers.
 const oracleAdapters = toReactive(computed(() => oracleAdaptersRef.value))
-const oracleAssessmentsAvailable = computed(() => oracleAssessmentsAvailableRef.value)
+const oracleAssessmentsStatus = computed(() => oracleAssessmentsStatusRef.value)
+const oracleAssessmentsAvailable = computed(() => oracleAssessmentsStatusRef.value === 'available')
 
 export const useEulerOracleAdapters = () => ({
   oracleAdapters,
+  oracleAssessmentsStatus,
   oracleAssessmentsAvailable,
   loadOracleAdapter,
   loadOracleAdapters,

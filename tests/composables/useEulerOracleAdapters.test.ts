@@ -190,6 +190,35 @@ describe('useEulerOracleAdapters', () => {
     expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Pyth')
   })
 
+  it('distinguishes an initial catalogue load from an unavailable response', async () => {
+    const request = deferred<ReturnType<typeof assessment>[]>()
+    fetchOracleAdapterAssessments.mockReturnValue(request.promise)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, oracleAssessmentsStatus } = useEulerOracleAdapters()
+
+    expect(oracleAssessmentsStatus.value).toBe('idle')
+    const load = loadAllOracleAdapters(1)
+    expect(oracleAssessmentsStatus.value).toBe('loading')
+
+    request.resolve([assessment()])
+    await load
+    expect(oracleAssessmentsStatus.value).toBe('available')
+  })
+
+  it('marks a failed catalogue load unavailable after loading completes', async () => {
+    const request = deferred<ReturnType<typeof assessment>[]>()
+    fetchOracleAdapterAssessments.mockReturnValue(request.promise)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, oracleAssessmentsStatus } = useEulerOracleAdapters()
+
+    const load = loadAllOracleAdapters(1)
+    expect(oracleAssessmentsStatus.value).toBe('loading')
+
+    request.reject(new Error('upstream failed'))
+    await load
+    expect(oracleAssessmentsStatus.value).toBe('unavailable')
+  })
+
   it('hides preserved catalogue metadata when a refresh fails', async () => {
     fetchOracleAdapterAssessments
       .mockResolvedValueOnce([assessment()])

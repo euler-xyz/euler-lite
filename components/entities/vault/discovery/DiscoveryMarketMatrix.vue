@@ -31,6 +31,7 @@ const {
 } = useRewardsApy()
 const {
   oracleAdapters,
+  oracleAssessmentsStatus,
   oracleAssessmentsAvailable,
   loadAllOracleAdapters,
 } = useEulerLabels()
@@ -278,6 +279,7 @@ watch(
     :data-field="dotMetric"
     :data-row-count="matrix.rows.length"
     :data-column-count="matrix.columns.length"
+    :aria-busy="dotMetric === 'oracle' && oracleAssessmentsStatus === 'loading'"
   >
     <div
       class="relative isolate max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
@@ -552,6 +554,15 @@ watch(
       </table>
     </div>
 
+    <p
+      v-if="dotMetric === 'oracle' && oracleAssessmentsStatus === 'unavailable'"
+      class="text-p4 text-content-muted text-center px-16"
+      data-id="oracle-assessments-unavailable"
+      aria-live="polite"
+    >
+      Oracle information not available
+    </p>
+
     <div
       v-if="hasRewardMetricCells"
       class="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-p5 text-content-muted"
@@ -571,7 +582,11 @@ watch(
   </div>
 
   <p
-    v-if="!selectedCell && !selectedHeader"
+    v-if="
+      !selectedCell
+        && !selectedHeader
+        && (dotMetric !== 'oracle' || oracleAssessmentsStatus === 'available')
+    "
     class="text-h6 text-content-primary text-center leading-relaxed px-16 pb-12"
   >
     Tap a cell, row, or column header to see lending/borrowing options below.
