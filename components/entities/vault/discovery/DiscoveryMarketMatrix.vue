@@ -29,7 +29,11 @@ const {
   hasSupplyRewards,
   hasBorrowRewards,
 } = useRewardsApy()
-const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
+const {
+  oracleAdapters,
+  oracleAssessmentsAvailable,
+  loadAllOracleAdapters,
+} = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { getTokenCategoryTags } = useTokenList()
 
@@ -214,7 +218,7 @@ const metricRange = computed((): { min: number, max: number } => {
 // oracle already appears in every cell of its column.
 const cellAdapterViews = computed((): Map<string, OracleAdapterView[]> => {
   const result = new Map<string, OracleAdapterView[]>()
-  if (props.dotMetric !== 'oracle') return result
+  if (props.dotMetric !== 'oracle' || !oracleAssessmentsAvailable.value) return result
 
   for (const [collateralAddr, rowCells] of props.matrix.cells) {
     for (const [liabilityAddr] of rowCells) {

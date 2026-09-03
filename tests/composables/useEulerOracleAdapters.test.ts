@@ -1,18 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computed } from 'vue'
+import { OracleAdapterUnavailableError } from '@eulerxyz/euler-v2-sdk'
 
-const { fetchOracleAdapterAssessment, fetchOracleAdapterAssessments } = vi.hoisted(() => ({
+const { fetchOracleAdapterAssessment, fetchOracleAdapterAssessments, isV3EnabledForChain } = vi.hoisted(() => ({
   fetchOracleAdapterAssessment: vi.fn(),
   fetchOracleAdapterAssessments: vi.fn(),
+  isV3EnabledForChain: vi.fn(() => true),
 }))
 
 vi.mock('~/composables/useEulerSdk', () => ({
-  getEulerSdk: async () => ({
+  getEulerSdkForChain: async () => ({
     oracleAdapterService: {
       fetchOracleAdapterAssessment,
       fetchOracleAdapterAssessments,
     },
   }),
+}))
+
+vi.mock('~/composables/useV3ChainGate', () => ({
+  useV3ChainGate: () => ({ isV3EnabledForChain }),
 }))
 
 const KNOWN_ADAPTER = '0x0000000000000000000000000000000000000001'
@@ -60,6 +66,7 @@ describe('useEulerOracleAdapters', () => {
   afterEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    isV3EnabledForChain.mockReturnValue(true)
   })
 
   it('loads single V3 assessments lazily and re-enters the SDK on later loads', async () => {
@@ -95,6 +102,48 @@ describe('useEulerOracleAdapters', () => {
     expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toBeUndefined()
     expect(await loadOracleAdapter(1, UNLISTED_ADAPTER)).toBeUndefined()
     expect(fetchOracleAdapterAssessment).toHaveBeenCalledTimes(2)
+  })
+
+  it('marks V3-gated chains unavailable without calling the SDK', async () => {
+    isV3EnabledForChain.mockReturnValue(false)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter, oracleAssessmentsAvailable } = useEulerOracleAdapters()
+
+    await expect(loadOracleAdapter(80094, UNLISTED_ADAPTER)).resolves.toBeUndefined()
+    expect(oracleAssessmentsAvailable.value).toBe(false)
+    expect(fetchOracleAdapterAssessment).not.toHaveBeenCalled()
+  })
+
+  it('keeps the section available when the backend reports a missing adapter', async () => {
+    fetchOracleAdapterAssessment.mockResolvedValue(undefined)
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter, oracleAssessmentsAvailable } = useEulerOracleAdapters()
+
+    await loadOracleAdapter(1, UNLISTED_ADAPTER)
+    expect(oracleAssessmentsAvailable.value).toBe(true)
+  })
+
+  it.each(['chain-not-supported', 'v3-disabled'] as const)(
+    'marks SDK %s responses unavailable',
+    async (reason) => {
+      fetchOracleAdapterAssessment.mockRejectedValue(
+        new OracleAdapterUnavailableError(reason),
+      )
+      const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+      const { loadOracleAdapter, oracleAssessmentsAvailable } = useEulerOracleAdapters()
+
+      await loadOracleAdapter(80094, UNLISTED_ADAPTER)
+      expect(oracleAssessmentsAvailable.value).toBe(false)
+    },
+  )
+
+  it('marks malformed assessment responses unavailable', async () => {
+    fetchOracleAdapterAssessment.mockRejectedValue(new Error('Malformed assessment'))
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapter, oracleAssessmentsAvailable } = useEulerOracleAdapters()
+
+    await loadOracleAdapter(1, UNLISTED_ADAPTER)
+    expect(oracleAssessmentsAvailable.value).toBe(false)
   })
 
   it('removes displayed metadata when a later assessment lookup returns missing', async () => {
@@ -139,6 +188,25 @@ describe('useEulerOracleAdapters', () => {
     expect(fetchOracleAdapterAssessments).toHaveBeenCalledTimes(2)
     expect(fetchOracleAdapterAssessments).toHaveBeenCalledWith(1, { active: true })
     expect(oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Pyth')
+  })
+
+  it('hides preserved catalogue metadata when a refresh fails', async () => {
+    fetchOracleAdapterAssessments
+      .mockResolvedValueOnce([assessment()])
+      .mockRejectedValueOnce(new Error('Malformed assessment'))
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const {
+      loadAllOracleAdapters,
+      oracleAdapters,
+      oracleAssessmentsAvailable,
+    } = useEulerOracleAdapters()
+
+    await loadAllOracleAdapters(1)
+    expect(oracleAdapters[KNOWN_ADAPTER]).toBeDefined()
+
+    await loadAllOracleAdapters(1)
+    expect(oracleAdapters[KNOWN_ADAPTER]).toBeDefined()
+    expect(oracleAssessmentsAvailable.value).toBe(false)
   })
 
   it('serves single lookups from a fresh catalogue without re-entering the SDK', async () => {
@@ -221,6 +289,18 @@ describe('useEulerOracleAdapters', () => {
 
     await expect(first).resolves.toBeUndefined()
     await expect(second).resolves.toBeUndefined()
+  })
+
+  it('keeps the whole section unavailable when any batched adapter request fails', async () => {
+    fetchOracleAdapterAssessment
+      .mockResolvedValueOnce(assessment())
+      .mockRejectedValueOnce(new Error('upstream failed'))
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadOracleAdapters, oracleAssessmentsAvailable } = useEulerOracleAdapters()
+
+    await loadOracleAdapters(1, [KNOWN_ADAPTER, UNLISTED_ADAPTER])
+
+    expect(oracleAssessmentsAvailable.value).toBe(false)
   })
 
   it('goes back to the SDK once the catalogue is older than its freshness window', async () => {

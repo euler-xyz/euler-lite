@@ -15,6 +15,7 @@ describe('useEulerOracleRouters', () => {
   afterEach(() => {
     vi.resetModules()
     vi.doUnmock('~/composables/useEulerSdk')
+    vi.doUnmock('~/composables/useV3ChainGate')
   })
 
   it('does not let a stale chain response overwrite the active chain allowlist', async () => {
@@ -27,7 +28,10 @@ describe('useEulerOracleRouters', () => {
       throw new Error('unexpected chain')
     })
     vi.doMock('~/composables/useEulerSdk', () => ({
-      getEulerSdk: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+      getEulerSdkForChain: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+    }))
+    vi.doMock('~/composables/useV3ChainGate', () => ({
+      useV3ChainGate: () => ({ isV3EnabledForChain: () => true }),
     }))
 
     const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
@@ -63,7 +67,10 @@ describe('useEulerOracleRouters', () => {
       .mockReturnValueOnce(secondRequest.promise)
 
     vi.doMock('~/composables/useEulerSdk', () => ({
-      getEulerSdk: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+      getEulerSdkForChain: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+    }))
+    vi.doMock('~/composables/useV3ChainGate', () => ({
+      useV3ChainGate: () => ({ isV3EnabledForChain: () => true }),
     }))
 
     const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
@@ -92,7 +99,10 @@ describe('useEulerOracleRouters', () => {
       { chainId: 10, router: '0xBbB0000000000000000000000000000000000002' },
     ])
     vi.doMock('~/composables/useEulerSdk', () => ({
-      getEulerSdk: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+      getEulerSdkForChain: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+    }))
+    vi.doMock('~/composables/useV3ChainGate', () => ({
+      useV3ChainGate: () => ({ isV3EnabledForChain: () => true }),
     }))
 
     const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
@@ -107,7 +117,10 @@ describe('useEulerOracleRouters', () => {
     const request = deferred<Array<{ chainId: number, router: string }>>()
     const fetchOracleRouters = vi.fn().mockReturnValue(request.promise)
     vi.doMock('~/composables/useEulerSdk', () => ({
-      getEulerSdk: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+      getEulerSdkForChain: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+    }))
+    vi.doMock('~/composables/useV3ChainGate', () => ({
+      useV3ChainGate: () => ({ isV3EnabledForChain: () => true }),
     }))
 
     const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
@@ -119,5 +132,22 @@ describe('useEulerOracleRouters', () => {
 
     await expect(first).resolves.toEqual(new Set())
     await expect(second).resolves.toEqual(new Set())
+  })
+
+  it('does not request recognized routers for a V3-gated chain', async () => {
+    const fetchOracleRouters = vi.fn()
+    vi.doMock('~/composables/useEulerSdk', () => ({
+      getEulerSdkForChain: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+    }))
+    vi.doMock('~/composables/useV3ChainGate', () => ({
+      useV3ChainGate: () => ({ isV3EnabledForChain: () => false }),
+    }))
+
+    const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
+    const routers = useEulerOracleRouters()
+
+    await expect(routers.loadRecognizedRouters(80094)).resolves.toEqual(new Set())
+    expect(fetchOracleRouters).not.toHaveBeenCalled()
+    expect(routers.recognizedRoutersChainId.value).toBe(80094)
   })
 })

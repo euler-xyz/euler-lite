@@ -217,10 +217,8 @@ export function normalizeOracleAdapterCheckSeverity(severity: unknown): OracleAd
   }
 }
 
-// Three-way assessment state of an adapter step. 'recognized': identity proven
-// by V3, health verdict applies. 'unrecognized': V3 assessed the contract but
-// could not identify it (unknown bytecode or class). 'unassessed': V3 has no
-// row for it at all.
+// Three-way assessment state of an adapter step. Backend availability is kept
+// at section level so a failed trust source cannot look like an adapter verdict.
 export type OracleAssessmentState = 'recognized' | 'unrecognized' | 'unassessed'
 
 export function getOracleAssessmentState(meta: OracleAdapterMeta | undefined): OracleAssessmentState {
@@ -317,11 +315,10 @@ export function resolveOracleAdapterIdentity(
 // Classifies a vault's oracle router(s) against the recognized-router set.
 // Data V3's `/v3/oracles/routers` is built from indexed `EulerRouterFactory`
 // deployments, so every router it lists was deployed by the recognized factory
-// — the same set the legacy oracle-checks `routers/all.json` was generated
-// from. Membership is therefore a provenance verdict, not a "seen by the
-// indexer" signal. Returns null — i.e. show nothing — when the set is
-// unavailable (empty) or there are no routers to check, so a missing dataset
-// never produces a false "unrecognized" warning.
+// and membership is a provenance verdict, not a "seen by the indexer" signal.
+// Returns null — i.e. show nothing — when the set is unavailable (empty) or
+// there are no routers to check, so a missing dataset never produces a false
+// "unrecognized" warning.
 export function getRouterRecognition(
   routerAddresses: ReadonlyArray<string | undefined | null>,
   recognized: ReadonlySet<string>,

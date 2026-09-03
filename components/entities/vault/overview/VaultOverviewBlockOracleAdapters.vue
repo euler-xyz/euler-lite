@@ -18,7 +18,11 @@ const props = defineProps<{
   collateralVaults?: (EVault | SecuritizeCollateralVault)[]
   defaultOpen?: boolean
 }>()
-const { oracleAdapters, loadOracleAdapter } = useEulerLabels()
+const {
+  oracleAdapters,
+  oracleAssessmentsAvailable,
+  loadOracleAdapters,
+} = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
 const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
@@ -55,18 +59,20 @@ const knownSymbols = computed(() => {
   return map
 })
 
-const adapterViews = computed(() => buildOracleAdapterViews(routeSteps.value, oracleAdapters))
+const trustedRouteSteps = computed(() => oracleAssessmentsAvailable.value ? routeSteps.value : [])
+const adapterViews = computed(() => buildOracleAdapterViews(trustedRouteSteps.value, oracleAdapters))
 
 watch(
   () => routeSteps.value,
   async (stepList) => {
-    if (!chainId.value || !stepList.length) return
+    if (!chainId.value) return
 
-    await Promise.all(
+    const adapterAddresses = [...new Set(
       stepList
         .filter(isOracleAdapterRouteStep)
-        .map(step => loadOracleAdapter(chainId.value, step.oracle)),
-    )
+        .map(step => step.oracle),
+    )]
+    await loadOracleAdapters(chainId.value, adapterAddresses)
   },
   { immediate: true },
 )
@@ -84,6 +90,7 @@ watch(
 // while the set is still loading for the active chain or unavailable, so we never
 // show a false "unrecognized" warning.
 const routerRecognition = computed(() => {
+  if (!oracleAssessmentsAvailable.value) return null
   if (recognizedRoutersChainId.value !== chainId.value) return null
   const routerAddresses = sourceVaults.value.map(vault => vault.oracle?.oracle)
   return getRouterRecognition(routerAddresses, recognizedRouters.value)
@@ -100,7 +107,7 @@ const onCopyClick = (address: string) => {
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
 
 const { prices: adapterPrices, isLoading: isPriceLoading } = useOracleAdapterPrices(
-  routeSteps,
+  trustedRouteSteps,
   sourceVaults,
   computed(() => props.collateralVaults ?? []),
 )
@@ -122,9 +129,8 @@ const formatAdapterPrice = (adapter: RouteStepKeyInput & { invertPrice: boolean 
 }
 
 // One-line summary for the Checks cell. Recognized adapters count their health
-// findings; adapters V3 assessed but could not identify say so (the reason
-// renders below the card); adapters V3 has no row for are "Not assessed";
-// structural steps and withheld verdicts get "N/A".
+// findings; adapters V3 assessed but could not identify say so, and adapters
+// V3 has no row for are "Not assessed". Backend availability is section-wide.
 const getChecksSummary = (adapter: OracleAdapterView): string => {
   if (adapter.assessmentState === 'unrecognized') return 'Unrecognized'
   if (adapter.assessmentState === 'unassessed') return adapter.isCustomAdapter ? 'Not assessed' : 'N/A'
@@ -160,7 +166,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
   >
     <template #actions>
       <UiHoverPreviewTooltip
-        v-if="routerRecognition === 'unrecognized'"
+        v-if="oracleAssessmentsAvailable && routerRecognition === 'unrecognized'"
         title="Unrecognized oracle router"
         text="The vault's price oracle was not deployed by the recognized EulerRouterFactory. Verify the oracle configuration before trusting its prices."
         placement="top-start"
@@ -180,7 +186,13 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
       </UiHoverPreviewTooltip>
     </template>
     <div
-      v-if="!adapterViews.length"
+      v-if="!oracleAssessmentsAvailable"
+      class="text-p3 text-content-tertiary"
+    >
+      Oracle information not available
+    </div>
+    <div
+      v-else-if="!adapterViews.length"
       class="text-p3 text-content-tertiary"
     >
       No oracle adapters found

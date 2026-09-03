@@ -103,8 +103,8 @@ export const buildOracleAdapterView = (
 ): OracleAdapterView => {
   const isAdapter = isOracleAdapterRouteStep(step)
   const meta = isAdapter ? oracleAdapters[step.oracle.toLowerCase()] : undefined
-  const { name, provider, isCustomAdapter } = resolveOracleAdapterIdentity(step, meta, isAdapter)
   const assessmentState = getOracleAssessmentState(meta)
+  const { name, provider, isCustomAdapter } = resolveOracleAdapterIdentity(step, meta, isAdapter)
   const trustedMeta = assessmentState === 'recognized' ? meta : undefined
   const pairMatches = assessmentPairMatchesRoute(step, trustedMeta)
   const assessmentApplies = pairMatches !== false

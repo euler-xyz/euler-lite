@@ -1,10 +1,10 @@
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
+import { useV3ChainGate } from '~/composables/useV3ChainGate'
 import { logWarn } from '~/utils/errorHandling'
 
 // Recognized EulerRouter addresses. Data V3's `/v3/oracles/routers` is built
 // from indexed `EulerRouterFactory` deployments, so every router it lists was
-// deployed by the recognized factory — the same set the legacy oracle-checks
-// `routers/all.json` was generated from. Kept as a lowercased Set per chain so
+// deployed by the recognized factory. Kept as a lowercased Set per chain so
 // router-recognition lookups are O(1).
 const recognizedRoutersRef = shallowRef<Set<string>>(new Set())
 const recognizedRoutersChainId = ref<number | null>(null)
@@ -18,17 +18,18 @@ const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
     recognizedRoutersChainId.value = chainId
     recognizedRoutersRef.value = new Set()
   }
+  if (!useV3ChainGate().isV3EnabledForChain(chainId)) return new Set()
 
   const inflight = pendingRouterLoads.get(chainId)
   if (inflight) return inflight
 
   const promise = (async () => {
     try {
-      const sdk = await getEulerSdk()
+      const sdk = await getEulerSdkForChain(chainId)
       const routers = await sdk.oracleAdapterService.fetchOracleRouters(chainId)
       // CREATE2 factory deployments reuse the same router address across chains.
       // Only count rows that actually belong to the requested chain.
-      const set = new Set(
+      const set = new Set<string>(
         routers
           .filter(router => router.chainId === chainId)
           .map(router => router.router.toLowerCase()),
@@ -40,7 +41,7 @@ const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
     }
     catch (err) {
       logWarn('useEulerOracleRouters', `Failed to load recognized routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
-      return new Set()
+      return new Set<string>()
     }
   })()
 
