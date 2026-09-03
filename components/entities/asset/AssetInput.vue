@@ -32,6 +32,7 @@ const props = withDefaults(defineProps<{
   assetSelectorPlaceholder?: string
   assetSelectorSelected?: boolean
   selectedSource?: string // Matches CollateralOption.type (e.g. 'wallet' / 'saving' / 'vault') for the source-chip indicator
+  selectedOptionId?: string // Stable internal identity for otherwise identical modal rows
   selectedSubAccount?: string // Disambiguates between multiple savings positions on different sub-accounts
   selectedVaultAddress?: string // Disambiguates same sub-account positions across different vaults (e.g. wallet rows)
   maxHandler?: () => void // When provided, replaces the default "Max" button behavior
@@ -81,6 +82,10 @@ const matchesSelectedVault = (a?: string, b?: string) => {
   return a.toLowerCase() === b.toLowerCase()
 }
 const getSelectedIdx = () => {
+  if (props.selectedOptionId && props.collateralOptions?.length) {
+    const exact = props.collateralOptions.findIndex(option => option.selectionId === props.selectedOptionId)
+    if (exact >= 0) return exact
+  }
   if (props.selectedSource && props.collateralOptions?.length) {
     // Prefer the option that matches BOTH type and the optional disambiguators
     // (sub-account for savings rows, vault address for wallet rows). Without
@@ -99,7 +104,7 @@ const getSelectedIdx = () => {
 }
 const selectedIdx = ref(getSelectedIdx())
 watch(
-  [() => props.selectedSource, () => props.selectedSubAccount, () => props.selectedVaultAddress, () => props.collateralOptions],
+  [() => props.selectedOptionId, () => props.selectedSource, () => props.selectedSubAccount, () => props.selectedVaultAddress, () => props.collateralOptions],
   () => { selectedIdx.value = getSelectedIdx() },
 )
 const friendlyBalance = computed(() => nanoToValue(props.balance ?? 0n, props.asset?.decimals || 18))

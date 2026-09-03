@@ -25,7 +25,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedAccount, reviewedWalletKind, reviewedRequests, reviewedSignatureSlots, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedAccount, reviewedWalletKind, reviewedRequests, reviewedSignatureSlots, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, readOnly, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -86,6 +86,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDiges
   quoteFetchedAt?: number | null
   /** Read-only review (e.g. opened from a batch item): hides the execute button. */
   hideExecute?: boolean
+  /** Prepared without a live wallet binding; it can be inspected but not submitted. */
+  readOnly?: boolean
   /** Overrides the inferred Euler product name for non-product contexts, such as Earn vaults. */
   marketLabel?: string
   /** Allow display-step-only reviews when the executable plan needs a confirm-time wallet authorization first. */
@@ -414,10 +416,11 @@ const isSwapQuoteStale = computed(() => {
 
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
-const isConfirmDisabled = computed(() => isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
+const isConfirmDisabled = computed(() => readOnly || isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
 const isTenderlyPreparing = computed(() => isTenderlySimulating.value || isBuildingTenderlyPayload.value)
 const confirmLabel = computed(() => {
   if (isSpyMode.value) return 'Spy mode (read-only)'
+  if (readOnly) return 'Read-only review'
   if (hasPendingDetachedExecution.value && !internalSubmitting.value) return 'Awaiting Safe signatures…'
   if (isPreparingPlan.value || isResolvingStateOverrideHints.value) return 'Preparing...'
   return internalSubmitting.value && submittingLabel ? submittingLabel : (providedConfirmLabel || btnLabel.value)

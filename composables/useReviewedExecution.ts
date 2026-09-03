@@ -42,6 +42,8 @@ const COMPILER_VERSION = 'lite-reviewed-execution-v2'
 const CLASSIFICATION_VERSION = 'safe-classification-v2'
 const POLICY_VERSION = 'lite-policy-v2'
 const PREPARATION_CACHE_TTL_MS = 60_000
+const READ_ONLY_CONNECTOR_ID = 'spy-mode-read-only'
+const READ_ONLY_CLASSIFICATION_VERSION = 'spy-mode-read-only-v1'
 
 const PERMIT2_ALLOWANCE_ABI = [{
   type: 'function',
@@ -80,6 +82,8 @@ export interface PreparedExecutionReview {
   execution: Readonly<ReviewedExecution>
   previewPlan: TransactionPlan
   prepared: TransactionPlanPrepared
+  /** Read-only previews are never registered as execution authority. */
+  readOnly?: true
 }
 
 const cache = new PreparationCache()
@@ -157,6 +161,32 @@ const captureWalletBinding = async (
   }
 }
 
+export const createReadOnlyWalletBinding = ({
+  account,
+  chainId,
+  subAccounts,
+}: {
+  account: Address
+  chainId: number
+  subAccounts: readonly Address[]
+}): WalletBinding => {
+  const normalizedAccount = getAddress(account)
+  const normalizedSubAccounts = subAccounts.map(getAddress)
+  return {
+    chainId,
+    account: normalizedAccount,
+    subAccounts: normalizedSubAccounts,
+    connectorId: READ_ONLY_CONNECTOR_ID,
+    connectorSessionId: canonicalDigest('spy-mode-read-only-session-v1', toCanonicalValue({
+      account: normalizedAccount,
+      chainId,
+    })),
+    walletKind: 'eoa',
+    classificationVersion: READ_ONLY_CLASSIFICATION_VERSION,
+    approvalMode: 'approve',
+  }
+}
+
 const loadPlanningAccount = async (owner: Address, chainId: number): Promise<Account<IHasVaultAddress>> => {
   const warmed = useFreshAccount().account.value
   if (warmed) {
@@ -201,20 +231,39 @@ export const useReviewedExecution = () => {
   const { signTypedDataAsync } = useSignTypedData()
   const { signaturesEnabled } = useSignaturePreference()
   const { triggerPortfolioRefresh } = usePortfolioRefresh()
+  const { isSpyMode, effectiveAddress } = useEffectiveAddress()
+  const { chainId: browsedChainId } = useEulerAddresses()
 
-  const prepare = async (intents: readonly OperationIntent[], options: PrepareReviewedExecutionOptions): Promise<PreparedExecutionReview> => {
+  const prepareForMode = async (
+    intents: readonly OperationIntent[],
+    options: PrepareReviewedExecutionOptions,
+    readOnly: boolean,
+  ): Promise<PreparedExecutionReview> => {
     validateIntentSet(intents)
     const publisher = options.generation ?? new GenerationPublisher()
     const cartGeneration = options.cartGeneration ?? publisher.advance()
     if (options.cartGeneration !== undefined) publisher.assertCurrent(cartGeneration)
-    const captured = await captureWalletBinding(config, signaturesEnabled.value)
-    publisher.assertCurrent(cartGeneration)
     const requirements = collectPlanningRequirements(intents)
+    const capturePreparationBinding = async (): Promise<WalletBinding> => {
+      if (!readOnly) return captureWalletBinding(config, signaturesEnabled.value)
+      const currentAccount = effectiveAddress.value
+      const currentChainId = browsedChainId.value
+      if (!isSpyMode.value || !currentAccount || !currentChainId) {
+        throw new Error('Spy-mode review context is unavailable')
+      }
+      return createReadOnlyWalletBinding({
+        account: getAddress(currentAccount),
+        chainId: currentChainId,
+        subAccounts: requirements.accounts,
+      })
+    }
+    const captured = await capturePreparationBinding()
+    publisher.assertCurrent(cartGeneration)
     if (requirements.chainId !== captured.chainId || requirements.owner !== captured.account) throw new Error('Intent context does not match the connected wallet')
     const wallet: WalletBinding = { ...captured, subAccounts: requirements.accounts }
     const assertPreparationContext = async () => {
       publisher.assertCurrent(cartGeneration)
-      const current = await captureWalletBinding(config, signaturesEnabled.value)
+      const current = await capturePreparationBinding()
       publisher.assertCurrent(cartGeneration)
       assertExactWalletBinding(wallet, { ...current, subAccounts: wallet.subAccounts })
     }
@@ -427,11 +476,8 @@ export const useReviewedExecution = () => {
       after: migrationAfter,
       assertContext: assertPreparationContext,
     })
-    executions.set(execution.reviewId, execution)
-    runtimePluginPlans.set(execution.reviewId, pluginPlans)
-    reviewGenerations.set(execution.reviewId, { publisher, generation: cartGeneration })
     const previewPlan = pluginPlans.previewPlan as unknown as TransactionPlan
-    return {
+    const preparedReview: PreparedExecutionReview = {
       execution,
       previewPlan,
       prepared: {
@@ -443,7 +489,22 @@ export const useReviewedExecution = () => {
         unlimitedApproval: false,
       },
     }
+    if (readOnly) return { ...preparedReview, readOnly: true }
+    executions.set(execution.reviewId, execution)
+    runtimePluginPlans.set(execution.reviewId, pluginPlans)
+    reviewGenerations.set(execution.reviewId, { publisher, generation: cartGeneration })
+    return preparedReview
   }
+
+  const prepare = (
+    intents: readonly OperationIntent[],
+    options: PrepareReviewedExecutionOptions,
+  ): Promise<PreparedExecutionReview> => prepareForMode(intents, options, false)
+
+  const prepareReadOnly = (
+    intents: readonly OperationIntent[],
+    options: PrepareReviewedExecutionOptions,
+  ): Promise<PreparedExecutionReview> => prepareForMode(intents, options, true)
 
   const getReviewedExecution = (reviewId: Hash) => executions.get(reviewId)
 
@@ -684,6 +745,7 @@ export const useReviewedExecution = () => {
 
   return {
     prepare,
+    prepareReadOnly,
     compilePreview,
     compilePreviewForSimulation,
     accept,

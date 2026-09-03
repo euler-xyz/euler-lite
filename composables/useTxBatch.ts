@@ -259,6 +259,7 @@ let batchExecutionPreparation: {
   generation: number
   intentSetHash: `0x${string}`
   presentationDigest: `0x${string}`
+  readOnly: boolean
   promise: Promise<PreparedExecutionReview>
 } | undefined
 
@@ -1680,7 +1681,7 @@ export const useTxBatch = () => {
   const { compilePreviewForSimulation } = executionService
   const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
   const { chainId: wagmiChainId } = useWagmi()
-  const { effectiveAddress } = useEffectiveAddress()
+  const { effectiveAddress, isSpyMode } = useEffectiveAddress()
   const { chainId: addressesChainId } = useEulerAddresses()
 
   const owner = computed(
@@ -2352,19 +2353,22 @@ export const useTxBatch = () => {
     const presentationInputs = batchPresentationInputs()
     const intentSetHash = intentSetDigest(intents)
     const presentationDigest = reviewPresentationCacheDigest('batch', presentationInputs)
+    const readOnly = isSpyMode.value
     if (batchExecutionPreparation
       && batchExecutionPreparation.generation === cartGeneration
       && batchExecutionPreparation.intentSetHash === intentSetHash
-      && batchExecutionPreparation.presentationDigest === presentationDigest) {
+      && batchExecutionPreparation.presentationDigest === presentationDigest
+      && batchExecutionPreparation.readOnly === readOnly) {
       return batchExecutionPreparation.promise
     }
-    const promise = executionService.prepare(intents, {
+    const prepare = readOnly ? executionService.prepareReadOnly : executionService.prepare
+    const promise = prepare(intents, {
       presentationKind: 'batch',
       presentationInputs,
       generation: batchGenerationPublisher,
       cartGeneration,
     })
-    batchExecutionPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, promise }
+    batchExecutionPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, readOnly, promise }
     void promise.catch(() => {
       if (batchExecutionPreparation?.promise === promise) batchExecutionPreparation = undefined
     })
