@@ -242,7 +242,7 @@ const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
 
 const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
   if (!addresses?.length) {
-    setAssessmentsAvailable(chainId, false)
+    if (Number.isInteger(chainId) && chainId > 0) activateChain(chainId)
     return
   }
   const results = await Promise.all(addresses.map(address => loadOracleAdapterResult(chainId, address)))

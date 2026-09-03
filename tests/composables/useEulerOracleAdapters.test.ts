@@ -303,6 +303,33 @@ describe('useEulerOracleAdapters', () => {
     expect(oracleAssessmentsAvailable.value).toBe(false)
   })
 
+  it('keeps established chain availability when a batch has no adapter steps', async () => {
+    fetchOracleAdapterAssessments.mockResolvedValueOnce([assessment()])
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, loadOracleAdapters, oracleAssessmentsAvailable } = useEulerOracleAdapters()
+
+    await loadAllOracleAdapters(1)
+    expect(oracleAssessmentsAvailable.value).toBe(true)
+
+    await loadOracleAdapters(1, [])
+
+    expect(oracleAssessmentsAvailable.value).toBe(true)
+    expect(fetchOracleAdapterAssessment).not.toHaveBeenCalled()
+  })
+
+  it('does not carry availability to a different chain with no adapter steps', async () => {
+    fetchOracleAdapterAssessments.mockResolvedValueOnce([assessment()])
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const { loadAllOracleAdapters, loadOracleAdapters, oracleAssessmentsAvailable } = useEulerOracleAdapters()
+
+    await loadAllOracleAdapters(1)
+    expect(oracleAssessmentsAvailable.value).toBe(true)
+
+    await loadOracleAdapters(2, [])
+
+    expect(oracleAssessmentsAvailable.value).toBe(false)
+  })
+
   it('goes back to the SDK once the catalogue is older than its freshness window', async () => {
     vi.useFakeTimers()
     try {
