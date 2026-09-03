@@ -1473,8 +1473,17 @@ describe('useTxBatch execution errors', () => {
     const warmed = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
     executionMocks.prepare.mockResolvedValue(warmed as never)
 
-    await batch.addEntry({ intent, label: 'Supply USDC', subAccount, review: { type: 'supply' } })
+    await batch.addEntry({ intent, label: 'Supply USDC', subAccount, sourceSubAccount: owner, review: { type: 'supply' } })
     await vi.waitFor(() => expect(executionMocks.prepare).toHaveBeenCalledOnce())
+
+    expect(executionMocks.prepare).toHaveBeenCalledWith([intent], expect.objectContaining({
+      presentationInputs: [{
+        id: intent.intentId,
+        review: { type: 'supply' },
+        subAccount,
+        sourceSubAccount: owner,
+      }],
+    }))
 
     await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
     expect(executionMocks.prepare).toHaveBeenCalledOnce()

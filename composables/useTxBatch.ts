@@ -86,6 +86,8 @@ export interface BatchEntry {
    *  batch rows show the same "Position N" tag as the portfolio. New positions
    *  (fresh deposits) leave this undefined and render no tag. */
   subAccount?: Address
+  /** Distinct Euler account supplying assets or shares for the operation. */
+  sourceSubAccount?: Address
   /** Additional sub-accounts intentionally modified by this entry. Used when a
    *  position-scoped operation also moves balances to the owner account. */
   affectedSubAccounts?: Address[]
@@ -2345,7 +2347,12 @@ export const useTxBatch = () => {
   const getBatchIntents = (): readonly OperationIntent[] =>
     draftEntries.value.map(entry => entry.intent)
 
-  const batchPresentationInputs = () => entries.value.map(entry => ({ id: entry.id, review: entry.review }))
+  const batchPresentationInputs = () => entries.value.map(entry => ({
+    id: entry.id,
+    review: entry.review,
+    subAccount: entry.subAccount,
+    sourceSubAccount: entry.sourceSubAccount,
+  }))
 
   const startBatchExecutionPreparation = (cartGeneration: number): Promise<PreparedExecutionReview> => {
     batchGenerationPublisher.assertCurrent(cartGeneration)

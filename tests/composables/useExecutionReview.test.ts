@@ -59,7 +59,7 @@ describe('useExecutionReview', () => {
 
     expect(prepare).toHaveBeenCalledWith([], {
       presentationKind: 'migration',
-      presentationInputs: review,
+      presentationInputs: expect.objectContaining(review),
     })
     expect(modalOpen).toHaveBeenCalledOnce()
     expect(modalOpen.mock.calls[0]?.[1].props.review).toMatchObject({
@@ -68,6 +68,47 @@ describe('useExecutionReview', () => {
       calldataPrepared: executablePrepared,
       tenderlyPrepared,
       tenderlyStateOverrides,
+    })
+  })
+
+  it('captures presentation inputs before asynchronous preparation', async () => {
+    let resolvePrepare: ((value: {
+      execution: { reviewId: Hash, reviewDigest: Hash }
+      prepared: TransactionPlanPrepared
+    }) => void) | undefined
+    const executablePrepared = { chainId: 1, plan: [{ type: 'executable' }] } as unknown as TransactionPlanPrepared
+    const prepare = vi.fn(() => new Promise<{
+      execution: { reviewId: Hash, reviewDigest: Hash }
+      prepared: TransactionPlanPrepared
+    }>((resolve) => {
+      resolvePrepare = resolve
+    }))
+    vi.stubGlobal('useReviewedExecution', () => ({ prepare }))
+    const review = {
+      asset: { address: '0x2000000000000000000000000000000000000000', symbol: 'USDC', decimals: 6 },
+      amount: '1',
+      type: 'repay',
+    }
+
+    const opening = useExecutionReview().open([], {
+      presentationKind: 'repay',
+      review,
+    })
+    review.amount = '2'
+    review.asset.symbol = 'DAI'
+    resolvePrepare?.({ execution: { reviewId, reviewDigest }, prepared: executablePrepared })
+    await opening
+
+    expect(prepare).toHaveBeenCalledWith([], {
+      presentationKind: 'repay',
+      presentationInputs: expect.objectContaining({
+        amount: '1',
+        asset: expect.objectContaining({ symbol: 'USDC' }),
+      }),
+    })
+    expect(modalOpen.mock.calls[0]?.[1].props.review).toMatchObject({
+      amount: '1',
+      asset: { symbol: 'USDC' },
     })
   })
 

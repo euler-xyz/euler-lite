@@ -194,8 +194,8 @@ describe('Stage A transaction inventory', () => {
 
 describe('review compatibility fixtures', () => {
   const fixtures = [
-    { path: 'components/entities/operation/OperationReviewModal.vue', templateOnly: true, sha256: 'a6b35defabe1c9610b482e63c9c5d9c77b1ffcbd2b78c5d67a4f96516c8a1f2d' },
-    { path: 'components/BatchReviewModal.vue', templateOnly: true, sha256: '14a568abd87d8fe644749c84a5f63396276d098db123f2cffb9853c18d06d9cd' },
+    { path: 'components/entities/operation/OperationReviewModal.vue', templateOnly: true, sha256: 'a440cb822e6dd8d581a30b3ae6f1dc81cbbe1131c092396bfba16b43e52e147c' },
+    { path: 'components/BatchReviewModal.vue', templateOnly: true, sha256: 'ab044f518c5fec9e2e47cd2b8765d5cbc96b56991b81ad0d21f2110fb77f538e' },
     { path: 'utils/stepDecoding.ts', templateOnly: false, sha256: '6b91c9d294290692982531800909cfbb9827125a916b85ce7febc8d0fd48e8e6' },
     { path: 'utils/batchReviewDisplay.ts', templateOnly: false, sha256: 'c8e892115e9bba21ad695b5cdd158e6b69d8aefc9ceb3c5aaae2faf17128ade4' },
   ] as const
@@ -215,5 +215,13 @@ describe('review compatibility fixtures', () => {
     ].map(source => source.match(/<template>[\s\S]*<\/template>/)?.[0] ?? '').join('\n')
 
     expect(templates).not.toMatch(/pyth|feed\s*id|payload\s*hash|max(?:imum)?\s*fee|freshness/i)
+  })
+
+  it('shows a distinct supplying position in direct and batch review', () => {
+    const direct = read('components/entities/operation/OperationReviewModal.vue')
+    const batch = read('components/BatchReviewModal.vue')
+
+    expect(direct).toContain('{{ sourcePositionTag }}')
+    expect(batch).toContain('sourcePositionTag(entry.sourceSubAccount, entry.subAccount)')
   })
 })

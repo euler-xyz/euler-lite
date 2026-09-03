@@ -21,6 +21,21 @@ export interface OpenExecutionReviewOptions {
   onFailed?: (cause: unknown) => void | Promise<void>
 }
 
+const clonePresentationValue = (value: unknown): unknown => {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return Object.freeze(value.map(clonePresentationValue))
+  const captured: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === undefined || typeof entry === 'function' || key === 'onConfirm') continue
+    captured[key] = clonePresentationValue(entry)
+  }
+  return Object.freeze(captured)
+}
+
+/** Snapshot presentation data synchronously at the review-launch boundary. */
+export const captureReviewPresentation = (review: ReviewPresentation): ReviewPresentation =>
+  clonePresentationValue(review) as ReviewPresentation
+
 /**
  * The only operation-review launcher for in-scope transaction plans. It binds
  * the unchanged handcrafted presentation to an opaque reviewed execution identity; the
@@ -36,19 +51,25 @@ export const useExecutionReview = () => {
     intents: readonly OperationIntent[],
     options: OpenExecutionReviewOptions,
   ): Promise<{ reviewId: Hash, reviewDigest: Hash }> => {
+    // Callers may keep editing reactive form state while preparation awaits.
+    // Only this synchronous copy is bound to and rendered by the review.
+    const capturedOptions: OpenExecutionReviewOptions = {
+      ...options,
+      review: captureReviewPresentation(options.review),
+    }
     if (isSpyMode.value) {
       const prepared = await execution.prepareReadOnly(intents, {
-        presentationKind: options.presentationKind,
-        presentationInputs: options.review,
+        presentationKind: capturedOptions.presentationKind,
+        presentationInputs: capturedOptions.review,
       })
       modal.open(OperationReviewModal, {
         props: {
-          ...options.review,
+          ...capturedOptions.review,
           plan: undefined,
           prepared: prepared.prepared,
           calldataPrepared: prepared.prepared,
-          tenderlyPrepared: options.tenderlyPrepared ?? prepared.prepared,
-          tenderlyStateOverrides: options.tenderlyStateOverrides,
+          tenderlyPrepared: capturedOptions.tenderlyPrepared ?? prepared.prepared,
+          tenderlyStateOverrides: capturedOptions.tenderlyStateOverrides,
           reviewedAccount: prepared.execution.requestSet.wallet.account,
           reviewedWalletKind: prepared.execution.requestSet.wallet.walletKind,
           reviewedRequests: prepared.execution.requestSet.requests,
@@ -62,8 +83,8 @@ export const useExecutionReview = () => {
       }
     }
     const prepared = await execution.prepare(intents, {
-      presentationKind: options.presentationKind,
-      presentationInputs: options.review,
+      presentationKind: capturedOptions.presentationKind,
+      presentationInputs: capturedOptions.review,
     })
     const reviewId = prepared.execution.reviewId
     const reviewDigest = prepared.execution.reviewDigest
@@ -72,19 +93,19 @@ export const useExecutionReview = () => {
         reviewId,
         reviewDigest,
         review: {
-          ...options.review,
+          ...capturedOptions.review,
           plan: undefined,
           prepared: prepared.prepared,
           calldataPrepared: prepared.prepared,
-          tenderlyPrepared: options.tenderlyPrepared ?? prepared.prepared,
-          tenderlyStateOverrides: options.tenderlyStateOverrides,
+          tenderlyPrepared: capturedOptions.tenderlyPrepared ?? prepared.prepared,
+          tenderlyStateOverrides: capturedOptions.tenderlyStateOverrides,
         },
-        onConfirmed: options.onConfirmed,
-        onResult: options.onResult,
+        onConfirmed: capturedOptions.onConfirmed,
+        onResult: capturedOptions.onResult,
         onSucceeded: async (result: SubmissionResult) => {
-          await options.onSucceeded?.(result)
+          await capturedOptions.onSucceeded?.(result)
         },
-        onFailed: options.onFailed,
+        onFailed: capturedOptions.onFailed,
       },
     })
     return { reviewId, reviewDigest }

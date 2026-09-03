@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
-import { encodeFunctionData, getAddress, type Address, type Hash, type StateOverride } from 'viem'
-import { flattenBatchEntries, getEulerLabelProductByVault, getSubAccountId, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { encodeFunctionData, type Address, type Hash, type StateOverride } from 'viem'
+import { flattenBatchEntries, getEulerLabelProductByVault, type SwapperMode, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { buildPlanMarketLabel, buildTransactionPlanDisplaySteps, type DisplayStep, type StepDecodingContext, type StepKnownAsset, type StepKnownSwapOutput } from '~/utils/stepDecoding'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
@@ -15,6 +15,7 @@ import type { PlainTxRequest } from '~/utils/migrationAuthorizationTxs'
 import { isPlanBundleable } from '~/utils/transaction-plan-calls'
 import { buildTenderlySimulationPayload, tenderlyPayloadMatchesReviewedRequests } from '~/utils/tenderly-plan'
 import type { EoaRequest, SafeCall, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
+import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
 
 const emits = defineEmits(['close', 'confirm'])
 
@@ -25,7 +26,7 @@ interface REULUnlockInfo {
   daysUntilMaturity: number
 }
 
-const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedAccount, reviewedWalletKind, reviewedRequests, reviewedSignatureSlots, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, readOnly, subAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
+const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDigest, reviewedAccount, reviewedWalletKind, reviewedRequests, reviewedSignatureSlots, externalSubmitting, plan, prepared, calldataPrepared, calldataUsesPlaceholderSignatures, calldataWrapCalls, tenderlyPrepared, tenderlyPlan, tenderlyStateOverrides, displayPlan, signatureSteps: providedSignatureSteps, postSteps, swapFromAsset, swapFromAmount, swapToAsset, swapToAmount, swapMode, swapEstimatedSide, supplyingAssetForBorrow, supplyingAmount, transferAmounts, vaultAmounts, knownAssets, swapQuoteOutputs, confirmLabel: providedConfirmLabel, submittingLabel, quoteFetchedAt, hideExecute, readOnly, subAccount, sourceSubAccount, marketLabel, allowConfirmWithoutPlan } = defineProps<{
   type?: 'supply' | 'withdraw' | 'borrow' | 'repay' | 'swap' | 'transfer' | 'refinance' | 'migration' | 'reward' | 'brevis-reward' | 'fuul-reward' | 'turtle-reward' | 'reul-unlock' | 'disableCollateral' | 'swap-supply' | 'swap-withdraw' | 'swap-borrow'
   asset: VaultAsset
   assetIconUrl?: string
@@ -75,6 +76,8 @@ const { type, asset, assetIconUrl, reulUnlockInfo, amount, reviewId, reviewDiges
   reviewedSignatureSlots?: readonly SignatureSlot[]
   externalSubmitting?: boolean
   subAccount?: string
+  /** Distinct Euler account supplying assets or shares for this operation. */
+  sourceSubAccount?: string
   hasBorrows?: boolean
   transferAmounts?: Record<string, string>
   knownAssets?: StepKnownAsset[]
@@ -249,15 +252,13 @@ const market = computed<string | undefined>(() => {
 // main account ("Deposits"); numbered borrow positions are "Position N".
 const positionTag = computed<string | undefined>(() => {
   const ownerAddr = effectiveAddress.value || ''
-  if (!subAccount || !ownerAddr) return undefined
-  try {
-    const idx = getSubAccountId(getAddress(ownerAddr), getAddress(subAccount))
-    return idx === 0 ? 'Deposits' : `Position ${idx}`
-  }
-  catch {
-    return undefined
-  }
+  return getPositionTag(ownerAddr, subAccount)
 })
+const sourcePositionTag = computed(() => getSourcePositionTag(
+  effectiveAddress.value || '',
+  sourceSubAccount,
+  subAccount,
+))
 
 const displaySteps = computed((): DisplayStep[] => {
   // Wallet-signature rows always render in the signature section, never among
@@ -437,18 +438,29 @@ const confirmLabel = computed(() => {
            so the operation reads in the context of the position it acts on. -->
       <div class="flex flex-col gap-10">
         <div
-          v-if="hideExecute && (market || positionTag)"
+          v-if="sourcePositionTag || (hideExecute && (market || positionTag))"
           class="flex items-center justify-between gap-8 px-12"
         >
           <div class="min-w-0 flex-1">
-            <BatchMarketLabel :market="market" />
+            <BatchMarketLabel
+              v-if="hideExecute"
+              :market="market"
+            />
           </div>
-          <span
-            v-if="hideExecute && positionTag"
-            class="shrink-0 text-h6 text-content-secondary bg-card py-2 px-8 rounded-8 border border-line-default"
-          >
-            {{ positionTag }}
-          </span>
+          <div class="flex shrink-0 items-center gap-6">
+            <span
+              v-if="sourcePositionTag"
+              class="text-h6 text-content-secondary bg-card py-2 px-8 rounded-8 border border-line-default"
+            >
+              {{ sourcePositionTag }}
+            </span>
+            <span
+              v-if="positionTag && (hideExecute || sourcePositionTag)"
+              class="text-h6 text-content-secondary bg-card py-2 px-8 rounded-8 border border-line-default"
+            >
+              {{ positionTag }}
+            </span>
+          </div>
         </div>
         <div
           v-if="signatureSteps.length || displaySteps.length || postExecutionSteps.length"

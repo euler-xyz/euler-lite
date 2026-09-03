@@ -148,6 +148,8 @@ The complete reviewed execution and the visible operation review serve different
 
 Operation review components receive only their existing display inputs plus an opaque reviewed execution binding. They do not receive an execution closure and cannot sign or submit. Acceptance binds the current presentation digest and intent revisions to the sealed reviewed execution; submission uses the reviewed execution's materialized request vector through the coordinator.
 
+Position-funded operations show the distinct supplying Euler account as `From Position N` or `From Deposits`, alongside the target position context. Both account labels are captured presentation inputs bound to the reviewed intent set.
+
 Do not synthesize generic rows or expose internal targets, selectors, plugin calls, request digests, simulation classifications, cleanup metadata, or authorization machinery. Existing approval and signature presentation remains operation-specific. Unknown or undecodable production calls fail internal sealing instead of creating a fallback review row.
 
 Pyth updates are completely invisible in review. Preview fees, maximum fees, feed IDs, payload hashes, publish times, freshness rules, execution-time refresh behavior, and refresh failures are internal reviewed execution data. A failed refresh follows the existing transaction-preparation error behavior and does not add a Pyth-specific review field or notice.

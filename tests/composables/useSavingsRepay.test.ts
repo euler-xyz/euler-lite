@@ -61,6 +61,8 @@ const { USER, SAVINGS_USER_B, VAULT, sameVault, borrowVault, planAccount, mocks 
         reset: ReturnType<typeof vi.fn>
       }>,
       getSavingsPosition: vi.fn(),
+      createIntent: vi.fn(),
+      openReview: vi.fn(),
       planRepayFromSource: vi.fn(),
       runSimulation: vi.fn(),
       getCollateralApySnapshot: vi.fn(),
@@ -230,12 +232,14 @@ const position = {
 
 describe('useSavingsRepay', () => {
   beforeEach(() => {
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
+    vi.stubGlobal('useExecutionReview', () => ({ open: mocks.openReview }))
     vi.clearAllMocks()
     mocks.swapQuoteOptions.length = 0
     mocks.swapQuoteInstances.length = 0
     mocks.healthOptions.length = 0
+    mocks.createIntent.mockImplementation(input => input)
+    mocks.openReview.mockResolvedValue({})
     mocks.planRepayFromSource.mockResolvedValue({ type: 'repay-plan' } as unknown as TransactionPlan)
     mocks.getCollateralApySnapshot.mockResolvedValue({
       supplyUsd: 0,
@@ -557,5 +561,59 @@ describe('useSavingsRepay', () => {
         },
       },
     ))
+  })
+
+  it('keeps a selected savings account bound to intent and review during deferred simulation', async () => {
+    let resolveSimulation: ((result: boolean) => void) | undefined
+    mocks.runSimulation.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+      resolveSimulation = resolve
+    }))
+    const repay = useSavingsRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => sameVault),
+      collateralVault: computed(() => sameVault),
+      formTab: ref('savings'),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      oraclePriceRatio: computed(() => 1),
+      clearSimulationError: vi.fn(),
+      runSimulation: mocks.runSimulation,
+      getCurrentDebt: () => position.borrowed,
+      collateralSupplyApy: computed(() => 0),
+      borrowApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+    })
+
+    repay.initVault()
+    repay.onSourceVaultChange(1)
+    repay.amount.value = '100'
+    const submitting = repay.submit()
+    await vi.waitFor(() => expect(mocks.runSimulation).toHaveBeenCalled())
+    repay.onSourceVaultChange(0)
+    repay.amount.value = '50'
+    resolveSimulation?.(true)
+    await submitting
+
+    expect(mocks.planRepayFromSource).toHaveBeenCalledWith(expect.objectContaining({
+      receiver: USER,
+      fromAccount: SAVINGS_USER_B,
+    }))
+    expect(mocks.openReview).toHaveBeenCalledWith([
+      expect.objectContaining({
+        args: expect.objectContaining({
+          receiver: USER,
+          fromAccount: SAVINGS_USER_B,
+        }),
+      }),
+    ], expect.objectContaining({
+      review: expect.objectContaining({
+        amount: '100',
+        subAccount: USER,
+        sourceSubAccount: SAVINGS_USER_B,
+      }),
+    }))
+    expect(repay.selectedSavingSubAccount.value).toBe(USER)
   })
 })
