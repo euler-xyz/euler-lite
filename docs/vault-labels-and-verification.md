@@ -242,7 +242,7 @@ Data V3 serves adapter assessments at `/v3/oracles/adapter-assessments` and `/v3
   "address": "0xOracleAdapter...",
   "recognized": true,
   "checksStatus": "warning",
-  "provider": "Chainlink",
+  "provider": "Chainlink", // V3 logo key; see below
   "methodology": "Market Price",
   "config": { "base": "0xBaseAsset...", "quote": "0xQuoteAsset..." },
   "findings": [
@@ -255,7 +255,21 @@ Data V3 serves adapter assessments at `/v3/oracles/adapter-assessments` and `/v3
 
 Lite compares the assessed base/quote pair with the decoded route before applying the health verdict. The Checks cell distinguishes three states: recognized adapters show the health verdict and counts; adapters V3 assessed but could not identify show "Unrecognized" with the failing identity rule (`reason`) and expose only the identity findings; adapters with no assessment row show "Not assessed". Rule keys are rendered as sentence-case titles client-side (`formatOracleCheckTitle`).
 
-Router recognition comes from `/v3/oracles/routers`, which lists exactly the routers deployed by the recognized `EulerRouterFactory` (the indexer only tracks factory deployments); it is the same set the legacy oracle-checks `routers/all.json` was generated from.
+Router recognition comes from `/v3/oracles/routers`, which lists exactly the routers deployed by the recognized `EulerRouterFactory`; the indexer only tracks factory deployments.
+
+#### Oracle provider logos
+
+Explore and vault oracle rows resolve logos through `getOracleProviderLogo` (`entities/oracle-providers.ts`), not local SVG assets.
+
+The URL is always `https://v3.euler.finance/v3/images/oracle-providers/{key}`. That host is `DEFAULT_V3_API_URL`; it does **not** follow `V3_API_URL` / `EULER_SDK_V3_API_URL`. Custom V3 deployments still load logos from production V3. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
+
+Lookup rules:
+
+1. If `meta.provider` is present, map **only** that string. Do not fall through to the adapter name. A Midas vault priced by `ChainlinkOracle` must show the Midas logo, not Chainlink.
+2. If provider is missing, map `meta.name` / the adapter type name (`ChainlinkOracle`, `PythOracle`, `UniswapV3Oracle`, …).
+3. Unknown identifiers return `undefined` — the UI renders without a logo rather than guessing.
+
+`utils/oracle-adapter-views.ts` assigns `view.logo` from those two fields when it builds the shared adapter view used by the borrow-page Oracles block and the Explore matrix.
 
 ---
 

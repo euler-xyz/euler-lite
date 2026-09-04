@@ -55,11 +55,11 @@ function hasHeader(value: string | string[] | undefined): boolean {
   return values.some(entry => typeof entry === 'string' && entry.trim() !== '')
 }
 
-// The VPN verdict comes from edge-set request headers, never from the client
-// body — a client could otherwise clear its own flag. When neither header is
-// present the measurement is unknown and reported as null (the upstream
-// stores it as "not measured"), never as a fabricated false.
-export function deriveVpnIsUsed(event: H3Event): boolean | null {
+// Edge headers remain authoritative, but a strict client `true` is an
+// additional positive signal. Client false/invalid values cannot clear an
+// edge verdict. With no positive signal and no header the value is unknown.
+export function deriveVpnIsUsed(event: H3Event, clientVpnIsUsed?: unknown): boolean | null {
+  if (clientVpnIsUsed === true) return true
   const vpn = event.node.req.headers['x-is-vpn']
   const proxyOrVpn = event.node.req.headers['x-is-proxy-or-vpn']
   if (!hasHeader(vpn) && !hasHeader(proxyOrVpn)) {

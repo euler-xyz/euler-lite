@@ -153,6 +153,7 @@ The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update reque
 - If the app fails to start, ensure Node 24+ and reinstall deps.
 - If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
 - If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) and, when required by the upstream, `EULER_SDK_V3_API_KEY`. Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.
+- Oracle **provider** logos (Chainlink, Pyth, Midas, …) are a separate client fetch from `https://v3.euler.finance/v3/images/oracle-providers/{key}`. They ignore a custom `V3_API_URL`. Missing or unknown provider names render no logo rather than borrowing the adapter's brand; see [Vault Labels & Verification](./vault-labels-and-verification.md#oracle-provider-logos).
 
 ---
 

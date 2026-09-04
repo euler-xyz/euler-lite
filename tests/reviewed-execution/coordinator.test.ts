@@ -465,7 +465,7 @@ describe('reviewed execution coordinator', () => {
     expect(sendTransaction).not.toHaveBeenCalled()
   })
 
-  it('preserves the established current-session Safe status flow without durable recovery', async () => {
+  it('preserves the Safe status flow through the reviewed adapter', async () => {
     const execution = makeReviewedExecution('safe')
     const callsId = hashFor(2)
     const sendCalls = vi.fn(async () => callsId)

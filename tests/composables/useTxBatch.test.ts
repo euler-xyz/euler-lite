@@ -41,7 +41,7 @@ const intentFor = (plan: TransactionPlan, subAccounts: Address[] = [owner]): Ope
     subAccounts,
     planner: { name: 'deposit', args: {} },
     constraints: [],
-    metadata: { createdAt: testIntentSequence, source: 'test' },
+    metadata: { createdAt: testIntentSequence, source: 'test', operation: 'test' },
   }
 }
 const compilePreviewMock = vi.fn(async (intents: readonly OperationIntent[], _account?: Account<IHasVaultAddress>) => testIntentPlans.get(intents[0]!.intentId) ?? [])
@@ -56,6 +56,7 @@ const executionMocks = {
     return { reviewedPlan: plan, plan }
   }),
   prepare: vi.fn(async () => { throw new Error('authoritative preparation not configured in batch unit test') }),
+  prepareReadOnly: vi.fn(async () => { throw new Error('read-only preparation not configured in batch unit test') }),
 }
 const scheduleExternalMigrationRefreshes = vi.fn()
 const position = (account: Address, shares: bigint) => ({
@@ -312,6 +313,7 @@ beforeEach(() => {
   executionMocks.compilePreview.mockClear()
   executionMocks.compilePreviewForSimulation.mockClear()
   executionMocks.prepare.mockClear()
+  executionMocks.prepareReadOnly.mockClear()
   scheduleExternalMigrationRefreshes.mockReset()
   testIntentPlans.clear()
   testIntentSequence = 0
@@ -1476,6 +1478,31 @@ describe('useTxBatch execution errors', () => {
 
     await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
     expect(executionMocks.prepare).toHaveBeenCalledOnce()
+  })
+
+  it('warms and adopts read-only multi-operation batch preparation in spy mode', async () => {
+    const spyMode = ref(true)
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(undefined),
+      isConnected: ref(false),
+      isSpyMode: spyMode,
+      spyAddress: ref(owner),
+      effectiveAddress: ref(owner),
+    }))
+    const batch = useTxBatch()
+    const firstIntent = intentFor([] as TransactionPlan, [subAccount])
+    const warmed = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {}, readOnly: true }
+    executionMocks.prepareReadOnly.mockResolvedValue(warmed as never)
+
+    await batch.addEntry({ intent: firstIntent, label: 'Repay USDC', subAccount, review: { type: 'repay' } })
+    await vi.waitFor(() => expect(executionMocks.prepareReadOnly).toHaveBeenCalledOnce())
+    const secondIntent = intentFor([] as TransactionPlan, [subAccount])
+    await batch.addEntry({ intent: secondIntent, label: 'Repay RLUSD', subAccount, review: { type: 'repay' } })
+    await vi.waitFor(() => expect(executionMocks.prepareReadOnly).toHaveBeenCalledTimes(2))
+
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
+    expect(executionMocks.prepare).not.toHaveBeenCalled()
+    expect(executionMocks.prepareReadOnly).toHaveBeenCalledTimes(2)
   })
 
   it('clears failed execution messages when the batch is cleared', () => {

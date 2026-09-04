@@ -433,10 +433,11 @@ const hasTenderlyFailed = computed(() => Boolean(tenderlyUrl.value && tenderlyEr
 const simulateOnTenderly = () => simulateBatchOnTenderly(preparedExecution.value ?? undefined)
 
 const isConfirmDisabled = computed(() =>
-  isSpyMode.value || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
+  isSpyMode.value || preparedExecution.value?.readOnly === true || isExecuting.value || hasPendingDetachedExecution.value || isPreparing.value || isSimulating.value || !canExecuteBatch.value || !!prepareError.value,
 )
 const blockedReason = computed(() => {
   if (isSpyMode.value) return 'Connect a wallet to execute — disabled in spy mode'
+  if (preparedExecution.value?.readOnly) return 'This read-only review cannot be executed'
   if (hasFailedOps.value) return 'Resolve the reverting operation to execute'
   if (hasInsufficientBalance.value) return insufficientBalanceMessage.value || 'Not enough balance to execute this batch'
   if (simError.value) return 'This batch would revert — resolve the flagged error'
@@ -451,7 +452,7 @@ let executionHandle: TrackedExecutionHandle | null = null
 const handleExecute = async () => {
   if (isConfirmDisabled.value) return
   const prepared = preparedExecution.value
-  if (!prepared) return
+  if (!prepared || prepared.readOnly) return
   // Latch the wallet classification at submission time; the single-slot gate
   // rejects new submissions while a detached proposal is pending.
   const handle = beginTrackedExecution({ safeAtSubmit: prepared.execution.requestSet.wallet.walletKind === 'safe' })

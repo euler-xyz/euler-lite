@@ -8,6 +8,9 @@ import { shallowRef, computed } from 'vue'
 const blockers = shallowRef<Map<string, string>>(new Map())
 const metadata = shallowRef<Map<string, Record<string, unknown>>>(new Map())
 
+export const isOperationBlockerKey = (key: string, namespace: string): boolean =>
+  key === namespace || key.startsWith(`${namespace}:`)
+
 export const registerOperationBlocker = (key: string, reason: string) => {
   const next = new Map(blockers.value)
   next.set(key, reason)

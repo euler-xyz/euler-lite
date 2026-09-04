@@ -27,7 +27,7 @@ const intent: OperationIntent = {
   subAccounts: [ACCOUNT],
   planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 1n } },
   constraints: [{ kind: 'exact-input', token: TOKEN, amount: 1n }],
-  metadata: { source: 'test', createdAt: 1 },
+  metadata: { source: 'test', operation: 'test', createdAt: 1 },
 }
 const rawPlan = (): TransactionPlan => [{
   type: 'evcBatch',

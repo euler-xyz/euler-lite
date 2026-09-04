@@ -12,6 +12,7 @@ import { PreparationCache, type PreparationCacheIdentity } from '~/features/revi
 import { assertPolicyVersionsMatch, buildReviewedPolicy, collectPolicyRequirements, collectPolicySubjects, type PolicyResultInput } from '~/features/reviewed-execution/policy/engine'
 import { buildReviewedSimulation, validateSimulationCoverage } from '~/features/reviewed-execution/simulation/coverage'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
+import { createReadOnlyWalletBinding } from '~/composables/useReviewedExecution'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
@@ -29,7 +30,7 @@ const intent: OperationIntent = {
   subAccounts: [ACCOUNT],
   planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 10n } },
   constraints: [{ kind: 'exact-input', token: TOKEN, amount: 10n }],
-  metadata: { createdAt: 1, source: 'test' },
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 
 const wallet: WalletBinding = {
@@ -61,6 +62,29 @@ const policyResultsFor = (requestSet: ReturnType<typeof materializePreparedPlan>
   collectPolicyRequirements(requestSet).map(requirement => ({ ...requirement, result: allowed() }))
 
 describe('reviewed execution semantic kernel', () => {
+  it('uses a deterministic approval-only wallet binding for spy previews', () => {
+    const binding = createReadOnlyWalletBinding({
+      account: ACCOUNT,
+      chainId: 1,
+      subAccounts: [ACCOUNT, VAULT],
+    })
+
+    expect(binding).toMatchObject({
+      chainId: 1,
+      account: ACCOUNT,
+      subAccounts: [ACCOUNT, VAULT],
+      connectorId: 'spy-mode-read-only',
+      walletKind: 'eoa',
+      classificationVersion: 'spy-mode-read-only-v1',
+      approvalMode: 'approve',
+    })
+    expect(binding.connectorSessionId).toBe(createReadOnlyWalletBinding({
+      account: ACCOUNT,
+      chainId: 1,
+      subAccounts: [ACCOUNT],
+    }).connectorSessionId)
+  })
+
   it('rejects unbounded variable intents and mixed contexts', () => {
     expect(() => validateIntentSet([{ ...intent, constraints: [] }])).toThrow(/no bounded outcome/)
     expect(() => validateIntentSet([intent, { ...intent, intentId: 'intent-2', account: VAULT }])).toThrow(/mixes wallet/)

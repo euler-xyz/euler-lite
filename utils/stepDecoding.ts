@@ -1148,6 +1148,9 @@ export function buildTransactionPlanDisplaySteps(
 ): DisplayStep[] {
   const steps: DisplayStep[] = []
   const knownAssets = buildPlanAssetMap(plan, ctx, getVault)
+  const approvalAssets = { ...knownAssets }
+  addKnownAsset(approvalAssets, ctx.supplyingAssetForBorrow)
+  addKnownAsset(approvalAssets, ctx.swapFromAsset)
   const morphoVaultShareTokens = collectMorphoVaultShareTokens(plan)
   const isMorphoVaultShareToken = (address: string | undefined) => {
     const key = normalizeAddressKey(address ?? '')
@@ -1167,13 +1170,21 @@ export function buildTransactionPlanDisplaySteps(
       const resolved = item.resolved ?? []
       for (const r of resolved) {
         index++
+        const token = r.token ?? item.token
+        const approvalAsset = getKnownAsset(token, ctx, getVault, approvalAssets)
+        const symbol = approvalAsset?.symbol ?? 'Token'
+        const assetInfo: StepAssetInfo = {
+          symbol,
+          address: token,
+          iconUrl: getLogoUrl(token, symbol),
+        }
         if (r.type === 'approve') {
           steps.push({
             index,
             label: 'Approve',
             labelSuffix: 'for vault',
             isSeparateTx: !ctx.bundledApprovals,
-            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
+            assetInfo,
           })
         }
         else {
@@ -1182,7 +1193,7 @@ export function buildTransactionPlanDisplaySteps(
             index,
             label: 'Sign permit2 message',
             isSeparateTx: false,
-            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
+            assetInfo,
           })
         }
       }

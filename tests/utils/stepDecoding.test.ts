@@ -263,6 +263,63 @@ const disableController = () => encodeFunctionData({
   args: [],
 })
 
+describe('buildTransactionPlanDisplaySteps approval rows', () => {
+  it('uses the approved token for the label and icon without adding approval details', () => {
+    const collateralAmount = 2n * 10n ** 18n
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: wethAsset,
+      owner: account,
+      spender: wethVault,
+      amount: collateralAmount,
+      resolved: [{
+        type: 'approve',
+        token: wethAsset,
+        owner: account,
+        spender: wethVault,
+        amount: collateralAmount,
+        data: '0x',
+      }, {
+        type: 'permit2',
+        token: wethAsset,
+        owner: account,
+        spender: wethVault,
+        amount: collateralAmount,
+      }],
+    }]
+    const approvalLogoUrl = (address: string, symbol: string) => `logo:${address}:${symbol}`
+
+    const steps = buildTransactionPlanDisplaySteps(plan, {
+      type: 'borrow',
+      asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+      amount: '1',
+      supplyingAssetForBorrow: { symbol: 'WETH', address: wethAsset, decimals: 18 },
+      supplyingAmount: '2',
+    }, getVault, approvalLogoUrl)
+
+    expect(steps).toEqual([{
+      index: 1,
+      label: 'Approve',
+      labelSuffix: 'for vault',
+      isSeparateTx: true,
+      assetInfo: {
+        symbol: 'WETH',
+        address: wethAsset,
+        iconUrl: approvalLogoUrl(wethAsset, 'WETH'),
+      },
+    }, {
+      index: 2,
+      label: 'Sign permit2 message',
+      isSeparateTx: false,
+      assetInfo: {
+        symbol: 'WETH',
+        address: wethAsset,
+        iconUrl: approvalLogoUrl(wethAsset, 'WETH'),
+      },
+    }])
+  })
+})
+
 const swapperMulticall = (calls: Hex[]) => encodeFunctionData({
   abi: swapperAbi,
   functionName: 'multicall',
