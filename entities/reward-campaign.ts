@@ -117,8 +117,11 @@ export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | unde
 
 export const rewardCampaignEligibilityLabel = (
   campaign: Pick<RewardCampaign, 'source' | 'eligibilityRequirements'>,
+  hasProviderDetailsUrl = false,
 ): string | undefined => campaign.eligibilityRequirements?.length
-  ? `eligibility requirements apply; see ${PROVIDER_LABELS[campaign.source] || campaign.source} for details`
+  ? hasProviderDetailsUrl
+    ? `eligibility requirements apply; see ${PROVIDER_LABELS[campaign.source] || campaign.source} for details`
+    : 'eligibility requirements apply'
   : undefined
 
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
@@ -150,7 +153,7 @@ export const rewardCampaignDisplay = (
 ): RewardCampaignDisplay => {
   const endTimestamp = normalizeRewardEndTimestamp(campaign.endTimestamp)
   const sourceUrl = rewardCampaignSourceUrl(campaign)
-  const eligibilityLabel = rewardCampaignEligibilityLabel(campaign)
+  const eligibilityLabel = rewardCampaignEligibilityLabel(campaign, Boolean(sourceUrl))
   return {
     id: rewardCampaignKey(campaign, prefix),
     parityKey: rewardCampaignParityKey(campaign, vaultAddress),

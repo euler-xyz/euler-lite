@@ -105,7 +105,7 @@ describe('rewardCampaignDisplay', () => {
         type: 'provider-defined',
         details: { canChangeWithoutLiteSupport: true },
       }],
-    }).eligibilityLabel).toBe('eligibility requirements apply; see Merkl for details')
+    }).eligibilityLabel).toBe('eligibility requirements apply')
   })
 
   it('does not interpret provider-specific eligibility details', () => {
@@ -117,7 +117,7 @@ describe('rewardCampaignDisplay', () => {
         minimumDurationSeconds: 172_800,
         tokenSymbol: 'EDEN',
       }],
-    })).toBe('eligibility requirements apply; see Merkl for details')
+    }, true)).toBe('eligibility requirements apply; see Merkl for details')
   })
 
   it('omits eligibility copy when the campaign has no requirements', () => {
