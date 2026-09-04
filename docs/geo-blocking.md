@@ -400,7 +400,7 @@ When **both** vaults are restricted (`isPairFullyRestricted`), the pair is treat
 
 #### Repay Page (`/position/[number]/repay`)
 
-Uses `useSwapCollateralOptions` with `tagContext: 'supply-source'` so collateral options in the swap-to-repay tab are never disabled by soft restrictions (reducing exposure is always allowed).
+Uses `useSwapCollateralOptions` with `tagContext: 'supply-source'` so collateral options in the swap-to-repay tab are never disabled by soft restrictions (reducing exposure is always allowed). Cross-position exact-vault sources (`useCrossPositionRepayCollateralOptions`) use the same tag context; they remain Advanced-mode gated and do not add a separate geo rule. See [Cross-Position Repay](./cross-position-repay.md).
 
 ### Portfolio Pages
 

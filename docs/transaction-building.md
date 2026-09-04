@@ -60,12 +60,12 @@ The SDK also supports grouped `EVCBatchOperation` entries inside a batch. Lite f
 Combined helpers keep page code simpler where a workflow can use either a same-asset or swap path:
 
 - `planMultiply`
-- `planRepayFromSource`
+- `planRepayFromSource` — no quote → `planRepayFromDeposit` (`fromAccount` may be a different sub-account; see [Cross-Position Repay](./cross-position-repay.md)); quote → `planRepayWithSwap`
 - `planCollateralChange`
 - `planDebtChange`
 - `planWithdrawOrRedeem`
 
-The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and chain id. The quote and vault inputs stay explicit at the page/composable boundary. Forms capture an immutable `OperationIntent` from the same input snapshot used to build each preview; selected quote cards carry that intent alongside their optional plan and prepared result. These helpers may eagerly build and simulate previews, but their results are not wallet-executable authority. The reviewed execution captures the connected wallet/session and seals the effective approval mode before review.
+The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and chain id. The quote and vault inputs stay explicit at the page/composable boundary. Forms capture an immutable `OperationIntent` from the same input snapshot used to build each preview; selected quote cards carry that intent alongside their optional plan and prepared result. These helpers may eagerly build and simulate previews, but their results are not wallet-executable authority. The reviewed execution captures the connected wallet/session and seals the effective approval mode before review. Cross-position repay intents list both the debt sub-account and the source sub-account.
 
 ## Execution Flow
 
@@ -78,6 +78,25 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and ch
 7. EOA receipt sequencing remains SDK-owned. The Safe adapter hands the reviewed atomic envelope to `wallet_sendCalls`, keeps the returned calls ID as an opaque string of at most 4096 bytes in the active invocation, and polls calls status to resolve the execution hash and receipt. It uses the ID as a transaction hash for receipt fallback only when the value has transaction-hash shape. Confirmed completion applies captured state effects even when modal/navigation effects are suppressed: exact submitted revisions are removed, newer revisions survive, and tagged external migrations schedule their refreshes. Conclusive revert, failure, or cancellation is reported as terminal. Unknown status remains unknown for the current invocation and never triggers fallback execution or automatic retry; it is not persisted for later reconciliation.
 
 Every await across preparation and pre-handoff execution is guarded by generation or wallet-binding checks. A stale form, edited cart, changed connector session, expired operation-specific deadline, policy failure, or undeclared effect fails closed. An accepted in-memory review has no separate blanket timeout.
+
+### Spy-mode review preparation
+
+Spy mode (`?spy=` / `useSpyMode`) has no connected connector, so `prepare()` cannot capture a live wallet binding. `useExecutionReview.open` and the batch cart therefore call `useReviewedExecution.prepareReadOnly` instead.
+
+`createReadOnlyWalletBinding` builds a deterministic, approval-only binding:
+
+| Field | Value |
+|---|---|
+| `connectorId` | `spy-mode-read-only` |
+| `classificationVersion` | `spy-mode-read-only-v1` |
+| `walletKind` | `eoa` |
+| `approvalMode` | `approve` |
+| `account` / `chainId` | Spy address and browsed chain |
+| `connectorSessionId` | Digest of `{ account, chainId }` only (sub-accounts do not change the session) |
+
+Single-operation spy review opens `OperationReviewModal` with `readOnly: true` rather than `ReviewedOperationModal`. Confirm is disabled (`Read-only review`). The batch cart stores `readOnly` on the prepared execution and refuses execute (`This read-only review cannot be executed`). Calldata copy and Tenderly remain available because they are read-only.
+
+`prepareReadOnly` still compiles, policies, and simulates the same intent set. It is not a wallet-write path: spy review never calls `accept()` / the coordinator.
 
 ## Approvals and Gasless Signatures
 
@@ -252,7 +271,9 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | File | Purpose |
 |------|---------|
 | `composables/useEulerTx.ts` | Page-facing SDK planning, preview preparation, and simulation helpers; no wallet execution |
-| `composables/useReviewedExecution.ts` | App integration for in-memory prepare/accept, policy revalidation, submission outcomes, and query invalidation |
+| `composables/useReviewedExecution.ts` | App integration for in-memory prepare/accept, spy-mode `prepareReadOnly`, policy revalidation, submission outcomes, and query invalidation |
+| `composables/useExecutionReview.ts` | Single-operation review launcher; spy mode opens a read-only `OperationReviewModal` |
+| `composables/useCrossPositionRepayCollateralOptions.ts` | Advanced-mode exact-vault collateral from other sub-accounts; see [Cross-Position Repay](./cross-position-repay.md) |
 | `features/reviewed-execution/` | Intents, compiler, immutable reviewed execution, policy, simulation, coordinator, finalization, and transport adapters |
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
 | `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |

@@ -243,12 +243,26 @@ Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github
   "base": "0xBaseAsset...",                       // Base asset address
   "quote": "0xQuoteAsset...",                     // Quote asset address
   "name": "Chainlink ETH/USD",                   // Oracle name
-  "provider": "Chainlink",                        // Oracle provider (used for logo)
+  "provider": "Chainlink",                        // Oracle provider (V3 logo key; see below)
   "methodology": "TWAP 30min",                   // Pricing methodology
   "label": "ETH/USD Feed",                       // Custom label (stored but not displayed)
   "checks": ["heartbeat", "deviation"]            // Security check names (stored but not displayed)
 }
 ```
+
+#### Oracle provider logos
+
+Explore and vault oracle rows resolve logos through `getOracleProviderLogo` (`entities/oracle-providers.ts`), not local SVG assets.
+
+The URL is always `https://v3.euler.finance/v3/images/oracle-providers/{key}`. That host is `DEFAULT_V3_API_URL`; it does **not** follow `V3_API_URL` / `EULER_SDK_V3_API_URL`. Custom V3 deployments still load logos from production V3. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
+
+Lookup rules:
+
+1. If `meta.provider` is present, map **only** that string. Do not fall through to the adapter name. A Midas vault priced by `ChainlinkOracle` must show the Midas logo, not Chainlink.
+2. If provider is missing, map `meta.name` / the adapter type name (`ChainlinkOracle`, `PythOracle`, `UniswapV3Oracle`, …).
+3. Unknown identifiers return `undefined` — the UI renders without a logo rather than guessing.
+
+`utils/oracle-adapter-views.ts` assigns `view.logo` from those two fields when it builds the shared adapter view used by the borrow-page Oracles block and the Explore matrix.
 
 ---
 

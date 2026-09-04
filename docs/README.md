@@ -42,6 +42,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Lens contract usage
 - Borrow, deposit, and earn position loading
 - External Aave / Morpho migrate discovery is covered in [External Migration Discovery](./external-migration.md)
+- Cross-position exact-vault repayment is covered in [Cross-Position Repay](./cross-position-repay.md)
 
 ### 🏷️ [Vault Labels & Verification](./vault-labels-and-verification.md)
 
@@ -49,6 +50,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Label data sources and types
 - Unknown vault resolution
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
+- Oracle provider logos from the V3 managed-image namespace (not `V3_API_URL`)
 
 ### 🔧 [Transaction Building](./transaction-building.md)
 
@@ -58,6 +60,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Sub-accounts and position isolation
 - Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
 - [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
+- Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
+
+### 🔁 [Cross-Position Repay](./cross-position-repay.md)
+
+- Exact-vault collateral from another sub-account, gated on Advanced mode
+- Reciprocal-debt batching without withdraw / swap / cleanup
+- Distinct from the repay Savings tab (idle EVK deposits)
 
 ### 🔐 [Safe Wallet Compatibility](./safe-wallets.md)
 
