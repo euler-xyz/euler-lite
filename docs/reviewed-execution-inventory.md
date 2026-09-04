@@ -16,6 +16,8 @@ FeeFlow buy and liquidation execution have no production Lite caller on the inve
 
 The only in-scope wallet-write boundary is `composables/useReviewedExecution.ts`, which supplies app clients to the centralized coordinator. EOA sends and Safe `wallet_sendCalls` are dispatched only through `features/reviewed-execution/adapters/eoa.ts` and `features/reviewed-execution/adapters/safe.ts`. Signature collection, migration prerequisites and revocation, the synchronous duplicate-invocation guard, and request verification all remain inside that reviewed execution boundary. `composables/useEulerTx.ts` is planning and simulation only. After Safe handoff, the established `useSafeExecutionDetachment` flow owns current-session waiting, modal detachment, confirmation gating, and context-scoped completion toasts.
 
+Spy-mode review preparation (`prepareReadOnly` / `createReadOnlyWalletBinding`) compiles the same intent set against a synthetic approval-only binding. It is not a wallet-write owner: `useExecutionReview` opens `OperationReviewModal` with `readOnly: true`, and `BatchReviewModal` refuses execute when the prepared execution is marked `readOnly`. Details: [Transaction Building](./transaction-building.md#spy-mode-review-preparation).
+
 The excluded CoW boundary is `composables/cowswap/useCowSwapExecutionCore.ts`.
 
 ## Preview preparation and cache reuse
