@@ -82,7 +82,7 @@ After the first leg, the repaid borrow is projected as a **savings** position. I
 
 Add-to-batch marks **both** accounts on `affectedSubAccounts` so the cart simulates the source and the target. It does **not** add the owner/portfolio address the way a same-position full repay does.
 
-The golden canary `tests/golden/cross-position-repay.test.ts` pins the merged calldata: two `repayWithShares(maxUint256, receiver)` calls, matching `disableController()` calls, and no withdraw / skim / transferFromMax.
+The golden canary `tests/golden/cross-position-repay.test.ts` verifies the expected merged call shape: two `repayWithShares(maxUint256, receiver)` calls, matching `disableController()` calls, and no withdraw / skim / transferFromMax.
 
 ## Not this path
 

@@ -272,7 +272,7 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 |------|---------|
 | `composables/useEulerTx.ts` | Page-facing SDK planning, preview preparation, and simulation helpers; no wallet execution |
 | `composables/useReviewedExecution.ts` | App integration for in-memory prepare/accept, spy-mode `prepareReadOnly`, policy revalidation, submission outcomes, and query invalidation |
-| `composables/useExecutionReview.ts` | Sole in-scope review launcher; spy mode opens a read-only `OperationReviewModal` |
+| `composables/useExecutionReview.ts` | Single-operation review launcher; spy mode opens a read-only `OperationReviewModal` |
 | `composables/useCrossPositionRepayCollateralOptions.ts` | Advanced-mode exact-vault collateral from other sub-accounts; see [Cross-Position Repay](./cross-position-repay.md) |
 | `features/reviewed-execution/` | Intents, compiler, immutable reviewed execution, policy, simulation, coordinator, finalization, and transport adapters |
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
