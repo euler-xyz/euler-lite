@@ -73,7 +73,7 @@ Configuration is split into two mechanisms:
 
 1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, branding, and deployment announcements. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`, with `NUXT_PUBLIC_*` values as build-time fallbacks. Browser V3 data services use the same-origin `/api/internal/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
 
-2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — social links, feature flags, labels/oracle source URLs, and static deployment fallbacks. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`, `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL`, and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources (GitHub or S3/CDN). All three are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
+2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — social links, feature flags, label source URLs, and static deployment fallbacks. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources. Both are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
 
 3. **Chain config** (`useChainConfig()`) — derived dynamically from `RPC_URL_<chainId>` env vars at server startup, injected via `window.__CHAIN_CONFIG__`.
 
@@ -85,7 +85,7 @@ Announcement modal content can be supplied as runtime `CONFIG_ANNOUNCEMENT_TITLE
 
 ## Server-Side Data Proxies
 
-External metadata (contract addresses, labels, oracle checks) is fetched through Nuxt server proxy endpoints rather than directly from GitHub/CDN. This deduplicates upstream requests across users, adds stale-fallback resilience, and avoids GitHub rate limits.
+External metadata (contract addresses, labels, and Data V3 oracle assessments) is fetched through Nuxt server proxy endpoints rather than directly from upstream hosts.
 
 | Endpoint | Upstream source | Cache TTL | Env var override |
 |----------|----------------|-----------|------------------|
@@ -93,14 +93,13 @@ External metadata (contract addresses, labels, oracle checks) is fetched through
 | `GET /api/internal/abis/:contract` | `abis/{contract}.json` from euler-interfaces (allowlist: `AccountLens`, `VaultLens`, `UtilsLens`; SDK `setQueryABI` target) | 5 min, 7-day stale window | `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` (takes precedence over the branch vars) |
 | `GET /api/internal/labels/:file?chainId=X` | `{chainId}/{file}` from euler-labels (query-shape; used by Lite helpers). Reads through the shared TTL cache — a fresh entry short-circuits without upstream. | 5 min read-through | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
 | `GET /api/internal/labels/:chainId/:file` | `{chainId}/{file}` from euler-labels (path-shape; SDK `eulerLabelsBaseUrl` template). Calls `refreshLabelFile()` directly — bypasses the fresh-cache check and joins any in-flight refresh for the same `scope:file`. Shared cache is write + stale-fallback only on this route. | 5 min shared cache (stale fallback; not read-through) | `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` |
-| `GET /api/internal/oracle-adapter?chainId=X&address=0x...` | Per-adapter JSON from oracle-checks | 5 min | `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` |
 | `GET /api/internal/token-list?chainId=X` | Euler V3 + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/internal/vaults?chainId=X` | Pre-computed chain vault snapshot built by the server-side SDK | 2 min (V3 configured) / 5 min (no V3) | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL` (presence selects cadence) |
 | `GET\|HEAD /api/internal/proxy/merkl/:path` | `api.merkl.xyz/v4` (`opportunities`, `users`, `campaigns` allowlist) | 60 s | — |
 | `GET\|HEAD\|POST /api/internal/proxy/fuul/:path` | `api.fuul.xyz/api/v1` (`incentives`, `totals`, `claim-checks`, `rewards` allowlist) | 30 s | `FUUL_API_URL`, `NUXT_PUBLIC_FUUL_API_URL` |
 | `GET\|HEAD\|POST /api/internal/proxy/incentra/:path` | Incentra API (`sdk/v1/`, `v1/` allowlist) | 30 s | `INCENTRA_API_URL`, `NUXT_PUBLIC_INCENTRA_API_URL` |
 | `POST /api/internal/proxy/subgraph/:chainId` | Per-chain Goldsky subgraph | 30 s | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
-| `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, account positions, activity/liquidations, vault reads, vault batch/resolve) | none — forwards upstream; `503` during failure backoff | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
+| `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, oracle assessments/router state, account positions, activity/liquidations, vault reads, vault batch/resolve) | none — forwards upstream; `503` during failure backoff | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
 | `GET /api/internal/pyth/updates?ids[]=...` | Pyth Hermes (`https://hermes.pyth.network/v2/updates/price/latest`) | No cache | `PYTH_API_KEY` (server-only) |
 
 All listed endpoints use rate limiting. Local-TTL endpoints (everything in the table except `/api/internal/v3/...` and `/api/internal/pyth/updates`) return stale cached data when upstream is unavailable. The euler-chains and ABI manifests keep a 7-day stale window (vs the default 30-minute ceiling) so a running instance outlives any realistic upstream outage; an instance cold-started mid-outage 502s until upstream recovers or the explicit URL env vars repoint it at a mirror. The V3 proxy has no local TTL cache: it forwards the upstream response, or returns `503` during failure backoff / upstream outage with `retry-after`. `/api/internal/pyth/updates` requires real-time data and returns no-store cache headers. The shared caching utility is in `server/utils/cache.ts`; the per-host external proxies share `server/utils/external-proxy.ts`. See [Server-Side Caching](./server-side-caching.md) for V3 allowlist, backoff, and labels handler divergence detail.

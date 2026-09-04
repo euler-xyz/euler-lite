@@ -4,6 +4,7 @@ import {
   EULER_ROUTER_COMPONENTS,
   PYTH_ORACLE_COMPONENTS,
 } from '~/entities/constants'
+import { formatNumber } from '~/utils/string-utils'
 
 export type OracleDetailedInfo = {
   oracle: Address
@@ -60,11 +61,115 @@ export enum OracleAdapterCheckSeverity {
   Info = 'INFO',
 }
 
+export enum OracleAdapterCheckOutcome {
+  Pass = 'pass',
+  Fail = 'fail',
+  Unknown = 'unknown',
+  NotApplicable = 'not_applicable',
+}
+
 export type OracleAdapterCheck = {
   id: string
   message: string
-  pass: boolean
+  outcome: OracleAdapterCheckOutcome
   severity: OracleAdapterCheckSeverity
+  expected?: unknown
+  observed?: unknown
+}
+
+export type OracleCheckQuoteContext = {
+  baseSymbol?: string
+  quoteSymbol?: string
+}
+
+export type OracleCheckEvidenceLine = {
+  key: string
+  text: string
+}
+
+const formatOracleCheckPrimitive = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return String(value)
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)))
+  }
+  return undefined
+}
+
+const formatOracleCheckDetail = (value: unknown): string | undefined => {
+  const primitive = formatOracleCheckPrimitive(value)
+  if (primitive !== undefined) return primitive
+  if (!value || typeof value !== 'object') return undefined
+
+  if (Array.isArray(value)) {
+    if (!value.length || value.length > 4) return undefined
+    const items = value.map(formatOracleCheckPrimitive)
+    return items.every((item): item is string => item !== undefined) ? items.join(', ') : undefined
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (!entries.length || entries.length > 4) return undefined
+  const parts: string[] = []
+  for (const [key, entry] of entries) {
+    const text = formatOracleCheckPrimitive(entry)
+    if (text === undefined) return undefined
+    parts.push(`${key} ${text}`)
+  }
+  return parts.join(' · ')
+}
+
+const formatOraclePrice = (value: unknown): string | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return new Intl.NumberFormat('en-US', {
+    maximumSignificantDigits: 7,
+    useGrouping: true,
+  }).format(value)
+}
+
+const formatOraclePriceWithPair = (value: unknown, context?: OracleCheckQuoteContext): string | undefined => {
+  const price = formatOraclePrice(value)
+  if (!price) return undefined
+  if (!context?.baseSymbol || !context.quoteSymbol) return price
+  return `${price} ${context.quoteSymbol} per ${context.baseSymbol}`
+}
+
+/**
+ * Converts V3's machine-readable finding evidence into concise display lines.
+ * Raw provenance fingerprints remain available in the API but are deliberately
+ * omitted here; they do not help a user interpret a successful source match.
+ */
+export function getOracleCheckEvidenceLines(
+  check: OracleAdapterCheck,
+  quoteContext?: OracleCheckQuoteContext,
+): OracleCheckEvidenceLine[] {
+  if (check.id === 'source-provenance') return []
+
+  // The raw quote is an integer amount. Its normalized value is already
+  // supplied as `impliedPrice` by quote-price-consistency below.
+  if (check.id === 'quote-liveness') return []
+
+  if (check.id === 'quote-price-consistency' && check.observed && typeof check.observed === 'object') {
+    const observed = check.observed as Record<string, unknown>
+    const lines: OracleCheckEvidenceLine[] = []
+    if (typeof observed.deviationPct === 'number' && Number.isFinite(observed.deviationPct)) {
+      lines.push({
+        key: 'deviation',
+        text: `Deviation: ${formatNumber(observed.deviationPct, 3, 0)}%`,
+      })
+    }
+    const impliedPrice = formatOraclePriceWithPair(observed.impliedPrice, quoteContext)
+    if (impliedPrice) lines.push({ key: 'oracle-price', text: `Oracle price: ${impliedPrice}` })
+    const referencePrice = formatOraclePriceWithPair(observed.referencePrice, quoteContext)
+    if (referencePrice) lines.push({ key: 'reference-price', text: `Reference price: ${referencePrice}` })
+    if (lines.length) return lines
+  }
+
+  const lines: OracleCheckEvidenceLine[] = []
+  const expected = formatOracleCheckDetail(check.expected)
+  if (expected !== undefined) lines.push({ key: 'expected', text: `Expected: ${expected}` })
+  const observed = formatOracleCheckDetail(check.observed)
+  if (observed !== undefined) lines.push({ key: 'observed', text: `Observed: ${observed}` })
+  return lines
 }
 
 export type OracleAdapterMeta = {
@@ -75,7 +180,23 @@ export type OracleAdapterMeta = {
   provider?: string
   methodology?: string
   label?: string
-  checks?: OracleAdapterCheck[]
+  model?: string
+  recognized: boolean
+  checksStatus: 'positive' | 'warning' | 'negative' | null
+  reason?: string
+  inActiveRoute: boolean
+  checks: OracleAdapterCheck[]
+  summary?: {
+    passed: number
+    failed: number
+    unknown: number
+    notApplicable: number
+  }
+  policyId?: string
+  policyVersion?: number
+  blockNumber?: string
+  evaluatedAt?: string
+  lastCheckedAt?: string
 }
 
 export function normalizeOracleAdapterCheckSeverity(severity: unknown): OracleAdapterCheckSeverity {
@@ -96,29 +217,84 @@ export function normalizeOracleAdapterCheckSeverity(severity: unknown): OracleAd
   }
 }
 
-export function getChecksStatus(checks: OracleAdapterCheck[] | undefined): 'positive' | 'warning' | 'negative' | null {
-  if (!checks?.length) return null
-  const failed = checks.filter(c => !c.pass)
-  if (!failed.length) return 'positive'
-  if (failed.some(c => c.severity === OracleAdapterCheckSeverity.High)) return 'negative'
-  return 'warning'
+// Three-way assessment state of an adapter step. Backend availability is kept
+// at section level so a failed trust source cannot look like an adapter verdict.
+export type OracleAssessmentState = 'recognized' | 'unrecognized' | 'unassessed'
+
+export function getOracleAssessmentState(meta: OracleAdapterMeta | undefined): OracleAssessmentState {
+  if (!meta) return 'unassessed'
+  return meta.recognized ? 'recognized' : 'unrecognized'
+}
+
+// Recognition (identity) rule keys, mirroring Data V3's RECOGNITION_RULE_KEYS
+// plus the custom-adapter recognition rule (policy v4): when a reviewed
+// custom adapter's deployed bytecode stops matching the pinned fingerprint,
+// the high-severity mismatch finding is the actual explanation of the
+// unrecognized verdict and must not be filtered out of the modal.
+// These findings are the policy's own bytecode/provenance evaluation and are
+// safe to show for unrecognized adapters; every other finding of an
+// unrecognized adapter was read through getters recognition refused to trust
+// and is withheld.
+export const ORACLE_IDENTITY_CHECK_KEYS: ReadonlySet<string> = new Set([
+  'adapter-exists',
+  'adapter-class-known',
+  'source-provenance',
+  'custom-adapter-recognized',
+])
+
+export const isOracleIdentityCheck = (check: Pick<OracleAdapterCheck, 'id'>): boolean =>
+  ORACLE_IDENTITY_CHECK_KEYS.has(check.id)
+
+// Words in V3 rule keys that keep their own casing inside a sentence-case title.
+const CHECK_TITLE_WORDS: Record<string, string> = {
+  chronicle: 'Chronicle',
+  lido: 'Lido',
+  pendle: 'Pendle',
+  pt: 'PT',
+  pyth: 'Pyth',
+  xstocks: 'xStocks',
+}
+
+// Turns a V3 rule key (`pyth-feed-recognized`) into a display title
+// ("Pyth feed recognized"). Keys are stable machine identifiers; deriving the
+// title here lets a new V3 rule render readably without a Lite release.
+export function formatOracleCheckTitle(key: string): string {
+  return key
+    .split('-')
+    .filter(Boolean)
+    .map((word, index) => {
+      const lower = word.toLowerCase()
+      if (Object.hasOwn(CHECK_TITLE_WORDS, lower)) return CHECK_TITLE_WORDS[lower]
+      return index === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower
+    })
+    .join(' ')
+}
+
+// V3 formats `reason` as "<rule-key>: <description>". Re-title the key so the
+// line reads like the check list ("Source provenance: Runtime bytecode …").
+export function formatOracleAssessmentReason(reason: string): string {
+  const match = /^([a-z0-9]+(?:-[a-z0-9]+)*): (.+)$/s.exec(reason)
+  if (!match) return reason
+  return `${formatOracleCheckTitle(match[1])}: ${match[2]}`
 }
 
 export type OracleAdapterIdentity = {
   name?: string
   provider?: string
-  // True when this is an oracle adapter with no entry in the curated oracle-checks
-  // dataset — i.e. a custom oracle configured by the vault's risk manager.
+  // True when Data V3 does not recognize the adapter's identity. This includes
+  // adapters with no assessment and assessed contracts whose provenance could
+  // not be established.
   isCustomAdapter: boolean
 }
 
 // Resolves the display name/provider for an oracle route step.
 //
-// An adapter step (`isAdapter`) only gets a name/provider from the curated
-// oracle-checks dataset (`meta`). When that entry is absent we must NOT fall back
-// to the self-reported onchain `name()` — that value is attacker-controllable and
-// would let an unknown adapter masquerade as a recognized one. Such steps are
-// flagged as custom adapters and rendered as "Unknown".
+// An adapter step (`isAdapter`) only gets a name/provider from a recognized V3
+// assessment. When recognition fails or the assessment is absent we must NOT
+// fall back to the self-reported onchain `name()` — that value is
+// attacker-controllable and would let an unknown adapter masquerade as a
+// recognized one. Such steps are flagged as custom adapters and rendered as
+// "Unknown".
 //
 // Structural steps (e.g. ERC-4626 exchange-rate `vault` steps) are not adapters and
 // keep their decoded name, since it is derived from the route, not self-reported.
@@ -128,17 +304,21 @@ export function resolveOracleAdapterIdentity(
   isAdapter: boolean,
 ): OracleAdapterIdentity {
   const fallback = isAdapter ? undefined : step.name
+  const recognizedMeta = meta?.recognized ? meta : undefined
   return {
-    name: meta?.name || fallback,
-    provider: meta?.provider || fallback,
-    isCustomAdapter: isAdapter && !meta,
+    name: recognizedMeta?.name || fallback,
+    provider: recognizedMeta?.provider || fallback,
+    isCustomAdapter: isAdapter && !recognizedMeta,
   }
 }
 
-// Classifies a vault's oracle router(s) against the recognized-router allowlist
-// (deployed by the recognized EulerRouterFactory). Returns null — i.e. show
-// nothing — when the allowlist is unavailable (empty) or there are no routers to
-// check, so a missing dataset never produces a false "unrecognized" warning.
+// Classifies a vault's oracle router(s) against the recognized-router set.
+// Data V3's `/v3/oracles/routers` is built from indexed `EulerRouterFactory`
+// deployments, so every router it lists was deployed by the recognized factory
+// and membership is a provenance verdict, not a "seen by the indexer" signal.
+// Returns null — i.e. show nothing — when the set is unavailable (empty) or
+// there are no routers to check, so a missing dataset never produces a false
+// "unrecognized" warning.
 export function getRouterRecognition(
   routerAddresses: ReadonlyArray<string | undefined | null>,
   recognized: ReadonlySet<string>,

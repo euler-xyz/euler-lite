@@ -14,6 +14,12 @@ describe('getOracleProviderLogo', () => {
     expect(getOracleProviderLogo('Midas', 'ChainlinkOracle')).toBe(imageUrl('midas'))
   })
 
+  it('maps the provider strings V3 reports with spaces', () => {
+    expect(getOracleProviderLogo('RedStone Pull')).toBe(imageUrl('redstone'))
+    expect(getOracleProviderLogo('MEV Capital')).toBe(imageUrl('mev'))
+    expect(getOracleProviderLogo('Lido Fundamental')).toBe(imageUrl('lido'))
+  })
+
   it('does not infer a logo for an unknown provider', () => {
     expect(getOracleProviderLogo('Unknown provider', 'ChainlinkOracle')).toBeUndefined()
   })

@@ -32,6 +32,8 @@ const ORACLE_PROVIDER_IMAGE_KEYS: Record<string, string> = {
   'RedstoneClassicOracle': 'redstone',
   'RedstoneCoreOracle': 'redstone',
   'RedStonePull': 'redstone',
+  'RedStone Pull': 'redstone',
+  'MEV Capital': 'mev',
   'PendleOracle': 'pendle',
   'PendleUniversalOracle': 'pendle',
   'LidoFundamental': 'lido',
@@ -43,6 +45,11 @@ const ORACLE_PROVIDER_IMAGE_KEYS: Record<string, string> = {
   'UniswapV3Oracle': 'uniswap-v3',
 }
 
+// Providers V3 reports today with no managed image yet (Stork, Curve, Swaap,
+// Cross, DIA, Re Protocol, InfiniFi Custom Oracle) are intentionally unmapped:
+// a missing image degrades to the question-mark icon, whereas a mapped 404
+// would fall back to an initials avatar. Add them here once the image exists
+// under `/v3/images/oracle-providers/`.
 const resolveOracleProviderImage = (identifier: string | undefined): string | undefined => {
   if (!identifier || !Object.hasOwn(ORACLE_PROVIDER_IMAGE_KEYS, identifier)) return undefined
   return `${ORACLE_PROVIDER_IMAGE_BASE_URL}/${ORACLE_PROVIDER_IMAGE_KEYS[identifier]}`

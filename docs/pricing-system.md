@@ -34,7 +34,7 @@ For SDK account and portfolio properties, numerical fields whose names include `
 
 Pricing backend configuration is SDK-owned. Lite builds the SDK without a pricing backend override, so the SDK uses its defaults.
 
-The SDK instance cache key includes RPC URLs, labels URLs, deployment URL, and oracle-checks URL. Changing any of those inputs rebuilds the SDK instance.
+The SDK instance cache key includes RPC URLs, the V3 URL, labels URLs, and the deployment URL. Changing any of those inputs rebuilds the SDK instance.
 
 ## Liability-Vault Collateral Pricing
 
