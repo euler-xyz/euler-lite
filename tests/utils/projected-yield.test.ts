@@ -122,7 +122,7 @@ describe('mergeProjectedRewardCampaigns', () => {
     const lines = mergeProjectedRewardCampaigns([], [{
       campaign: campaign({
         sourceUrl: 'https://app.merkl.xyz/opportunities/ethereum/EULER/example',
-        eligibilityRequirements: [{ type: 'provider-defined' }],
+        eligibilityRequirementsStatus: 'incomplete',
       }),
       vaultAddress: '0x1',
     }])

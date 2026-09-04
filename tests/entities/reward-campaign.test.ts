@@ -108,6 +108,14 @@ describe('rewardCampaignDisplay', () => {
     }).eligibilityLabel).toBe('eligibility requirements apply')
   })
 
+  it.each(['complete', 'incomplete'] as const)('shows a generic notice for %s eligibility metadata without modeled requirements', (eligibilityRequirementsStatus) => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      sourceUrl: 'https://app.merkl.xyz/opportunities/monad/EULER/example',
+      eligibilityRequirementsStatus,
+    }).eligibilityLabel).toBe('eligibility requirements apply; see Merkl for details')
+  })
+
   it('does not interpret provider-specific eligibility details', () => {
     expect(rewardCampaignEligibilityLabel({
       source: 'merkl',
@@ -123,5 +131,10 @@ describe('rewardCampaignDisplay', () => {
   it('omits eligibility copy when the campaign has no requirements', () => {
     expect(rewardCampaignEligibilityLabel(baseCampaign)).toBeUndefined()
     expect(rewardCampaignEligibilityLabel({ source: 'merkl', eligibilityRequirements: [] })).toBeUndefined()
+    expect(rewardCampaignEligibilityLabel({
+      source: 'merkl',
+      eligibilityRequirementsStatus: 'none',
+      eligibilityRequirements: [{ type: 'provider-defined' }],
+    })).toBeUndefined()
   })
 })

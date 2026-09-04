@@ -12,9 +12,12 @@ export type { RewardAction }
 
 export type RewardSource = SdkRewardSource | 'turtle'
 
-export type RewardCampaign = Omit<SdkRewardCampaign, 'source' | 'eligibilityRequirements'> & {
+export type RewardEligibilityRequirementsStatus = 'none' | 'complete' | 'incomplete'
+
+export type RewardCampaign = Omit<SdkRewardCampaign, 'source' | 'eligibilityRequirements' | 'eligibilityRequirementsStatus'> & {
   source: RewardSource
   eligibilityRequirements?: unknown[]
+  eligibilityRequirementsStatus?: RewardEligibilityRequirementsStatus
 }
 
 export type UserReward = Omit<SdkUserReward, 'provider'> & {
@@ -116,13 +119,18 @@ export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | unde
 }
 
 export const rewardCampaignEligibilityLabel = (
-  campaign: Pick<RewardCampaign, 'source' | 'eligibilityRequirements'>,
+  campaign: Pick<RewardCampaign, 'source' | 'eligibilityRequirements' | 'eligibilityRequirementsStatus'>,
   hasProviderDetailsUrl = false,
-): string | undefined => campaign.eligibilityRequirements?.length
-  ? hasProviderDetailsUrl
+): string | undefined => {
+  const hasEligibilityRequirements = campaign.eligibilityRequirementsStatus === 'complete'
+    || campaign.eligibilityRequirementsStatus === 'incomplete'
+    || (campaign.eligibilityRequirementsStatus === undefined && Boolean(campaign.eligibilityRequirements?.length))
+
+  if (!hasEligibilityRequirements) return undefined
+  return hasProviderDetailsUrl
     ? `eligibility requirements apply; see ${PROVIDER_LABELS[campaign.source] || campaign.source} for details`
     : 'eligibility requirements apply'
-  : undefined
+}
 
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
   const parts = [
