@@ -1481,7 +1481,6 @@ function shouldCaptureUrl(rawUrl) {
       || pathName.startsWith('/api/internal/euler-chains')
       || pathName.startsWith('/api/internal/labels')
       || pathName.startsWith('/api/internal/vaults')
-      || pathName.startsWith('/api/internal/oracle-adapters')
       || pathName.startsWith('/api/internal/token-list')
       || url.hostname.includes('swap')
   }

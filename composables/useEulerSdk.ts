@@ -18,11 +18,6 @@ const loadSdkKeyringModule = (): Promise<SdkKeyringModule> => {
   return sdkKeyringModulePromise
 }
 
-type QueryOracleAdapters = (chainId: number) => Promise<unknown>
-type ConfigurableOracleAdapterService = EulerSDK['oracleAdapterService'] & {
-  setQueryOracleAdapters?: (fn: QueryOracleAdapters) => void
-}
-
 type QueryABI = (url: string) => Promise<unknown>
 type ConfigurableAbiService = EulerSDK['abiService'] & {
   setQueryABI?: (fn: QueryABI) => void
@@ -183,7 +178,6 @@ const adapterConfigForFastSource = (source: 'fallback' | 'onchain' | 'v3'): Part
 const buildSdkStaticConfig = (backend: SdkBackend) => {
   const rc = getPublicRuntimeConfig()
   const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
-  const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
   const swapApiUrl = cleanUrl(rc.swapApiUrl)
   const v3ApiUrl = buildV3ProxyApiPath()
   const labelsProxyUrl = buildLabelsProxyApiPath()
@@ -207,7 +201,6 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // fetches upstream, so callers see a single internal hostname. Same
     // pattern as `tokenlistApiBaseUrl` above.
     eulerLabelsBaseUrl: labelsProxyUrl,
-    ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),
     ...(swapApiUrl ? { swapApiUrl } : {}),
     ...(enableMerkl ? { rewardsMerklApiUrl: buildMerklProxyApiPath() } : { rewardsEnableMerkl: false }),
     // Incentra/Brevis: SDK takes the full URL for each endpoint, so map both
@@ -269,19 +262,6 @@ const getRpcCacheKey = (rpcUrls: Record<number, string>) =>
     .join('|')
 
 const configureAppProxies = (sdk: EulerSDK, buildQuery: BuildQueryFn) => {
-  const oracleAdapterService = sdk.oracleAdapterService as ConfigurableOracleAdapterService
-  oracleAdapterService.setQueryOracleAdapters?.(buildQuery(
-    'queryOracleAdapters',
-    async (chainId: number) => {
-      const response = await fetch(`${buildAppApiPath('/api/internal/oracle-adapters')}?chainId=${encodeURIComponent(String(chainId))}`)
-      if (!response.ok) {
-        throw new Error(`Oracle adapters request failed: ${response.status} ${response.statusText}`)
-      }
-      return response.json()
-    },
-    oracleAdapterService,
-  ))
-
   // Runtime ABI fetches (AccountLens for account reads/simulate/rewards,
   // VaultLens/UtilsLens for projected rates and the IRM overview) go through
   // /api/internal/abis/<Contract> — same cache + stale-fallback chain as

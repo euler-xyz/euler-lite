@@ -44,6 +44,9 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest/by-collateral')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/liquidations')).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/oracles/adapter-assessments')).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/oracles/adapter-assessments/${ACCOUNT}`)).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/oracles/routers')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/prices')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/resolve/vaults')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/rewards/breakdown')).toBe(true)
@@ -58,6 +61,9 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/apys/unknown')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/liquidations/admin')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/liquidations-extra')).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/oracles/adapter-assessments/not-an-address')).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/oracles/adapter-assessments/${ACCOUNT}/admin`)).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/oracles/routers/admin')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/resolve')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/activity/accounts/not-an-address/events')).toBe(false)
     expect(isV3ProxyPathAllowed(`/v3/activity/accounts/${ACCOUNT}/events/admin`)).toBe(false)
@@ -106,6 +112,18 @@ describe('v3 proxy utilities', () => {
     expect(validateV3ProxyUrl(
       'GET',
       new URL('https://app.example/api/internal/v3/tokens?chainId=1&limit=500&type=base'),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/oracles/adapter-assessments/${ACCOUNT}?chainId=1`),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL('https://app.example/api/internal/v3/oracles/adapter-assessments?chainId=1&recognized=true&active=true&offset=0&limit=100'),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL('https://app.example/api/internal/v3/oracles/routers?chainId=1&offset=0&limit=100'),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',

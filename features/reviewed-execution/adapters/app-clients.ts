@@ -34,7 +34,7 @@ export const createAppSafeClients = ({
       sendCalls: envelope => sendSafeAtomicCalls(provider, envelope),
       waitForExecution: async (callsId) => {
         const execution = await waitForSafeTransactionExecution({
-          submittedHash: callsId,
+          callsId,
           walletProvider: provider,
           publicClient: publicClient as never,
           requireAtomic: true,

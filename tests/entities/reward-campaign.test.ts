@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCampaignEligibleForAddress, rewardCampaignDisplay } from '~/entities/reward-campaign'
+import { isCampaignEligibleForAddress, rewardCampaignDisplay, rewardCampaignEligibilityLabel } from '~/entities/reward-campaign'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 
 const USER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa'
@@ -96,5 +96,53 @@ describe('rewardCampaignDisplay', () => {
       campaignId: '557af9e9-88e8-4233-95e1-630b8b37b613',
       source: 'turtle',
     }).sourceUrl).toBe('https://dashboard.turtle.xyz/organizations/52974bc3-2c43-4576-ac18-107d92b6e0c7/incentives/streams/557af9e9-88e8-4233-95e1-630b8b37b613')
+  })
+
+  it('shows a generic notice when eligibility requirements are present', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      eligibilityRequirements: [{
+        type: 'provider-defined',
+        details: { canChangeWithoutLiteSupport: true },
+      }],
+    }).eligibilityLabel).toBe('eligibility requirements apply')
+  })
+
+  it('shows a generic notice for complete eligibility metadata without modeled requirements', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      sourceUrl: 'https://app.merkl.xyz/opportunities/monad/EULER/example',
+      eligibilityRequirementsStatus: 'complete',
+    }).eligibilityLabel).toBe('eligibility requirements apply')
+  })
+
+  it('distinguishes incomplete eligibility metadata from confirmed requirements', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      sourceUrl: 'https://app.merkl.xyz/opportunities/monad/EULER/example',
+      eligibilityRequirementsStatus: 'incomplete',
+    }).eligibilityLabel).toBe('eligibility information may be incomplete; additional requirements may apply')
+  })
+
+  it('does not interpret provider-specific eligibility details', () => {
+    expect(rewardCampaignEligibilityLabel({
+      source: 'merkl',
+      eligibilityRequirements: [{
+        type: 'token-holding',
+        minimumAmount: '100000000000000000000000',
+        minimumDurationSeconds: 172_800,
+        tokenSymbol: 'EDEN',
+      }],
+    })).toBe('eligibility requirements apply')
+  })
+
+  it('omits eligibility copy when the campaign has no requirements', () => {
+    expect(rewardCampaignEligibilityLabel(baseCampaign)).toBeUndefined()
+    expect(rewardCampaignEligibilityLabel({ source: 'merkl', eligibilityRequirements: [] })).toBeUndefined()
+    expect(rewardCampaignEligibilityLabel({
+      source: 'merkl',
+      eligibilityRequirementsStatus: 'none',
+      eligibilityRequirements: [{ type: 'provider-defined' }],
+    })).toBeUndefined()
   })
 })

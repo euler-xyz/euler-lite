@@ -17,5 +17,5 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid address' })
   }
 
-  return screenAddressUpstream(body.address, deriveVpnIsUsed(event), 'screen-address')
+  return screenAddressUpstream(body.address, deriveVpnIsUsed(event, body.vpnIsUsed), 'screen-address')
 })

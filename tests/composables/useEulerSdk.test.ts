@@ -3,9 +3,7 @@ import { computed, ref, type Ref } from 'vue'
 
 type MockSdk = {
   id: string
-  oracleAdapterService: {
-    setQueryOracleAdapters: ReturnType<typeof vi.fn>
-  }
+  oracleAdapterService: Record<string, never>
   abiService: {
     setQueryABI: ReturnType<typeof vi.fn>
   }
@@ -17,7 +15,6 @@ type BuildEulerSDKOptions = {
     tokenlistApiBaseUrl?: string
     deploymentsUrl?: string
     eulerLabelsBaseUrl?: string
-    oracleAdaptersBaseUrl?: string
     rewardsMerklApiUrl?: string
     rewardsBrevisApiUrl?: string
     rewardsBrevisProofsApiUrl?: string
@@ -59,9 +56,7 @@ const createDeferred = <T>(): Deferred<T> => {
 
 const createMockSdk = (id: string): MockSdk => ({
   id,
-  oracleAdapterService: {
-    setQueryOracleAdapters: vi.fn(),
-  },
+  oracleAdapterService: {},
   abiService: {
     setQueryABI: vi.fn(),
   },
@@ -157,7 +152,6 @@ describe('useEulerSdk', () => {
       public: {
         configEulerChainsUrl: 'https://example.test/EulerChains.json',
         configLabelsBaseUrl: 'https://labels.example.test/',
-        configOracleChecksBaseUrl: 'https://oracles.example.test/data/',
       },
     }))
 
@@ -174,7 +168,6 @@ describe('useEulerSdk', () => {
       tokenlistApiBaseUrl: '/api/internal',
       deploymentsUrl: '/api/internal/euler-chains',
       eulerLabelsBaseUrl: '/api/internal/labels',
-      oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
     })
     expect(options.rpcUrls).toBeUndefined()
     expect(options.deploymentServiceConfig).toBeUndefined()
@@ -190,7 +183,6 @@ describe('useEulerSdk', () => {
       public: {
         configEulerChainsUrl: '',
         configLabelsBaseUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 
@@ -267,7 +259,6 @@ describe('useEulerSdk', () => {
       public: {
         configEulerChainsUrl: '',
         configLabelsBaseUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 
@@ -301,7 +292,6 @@ describe('useEulerSdk', () => {
       public: {
         configEulerChainsUrl: '',
         configLabelsBaseUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 
@@ -328,7 +318,6 @@ describe('useEulerSdk', () => {
       public: {
         configEulerChainsUrl: '',
         configLabelsBaseUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 

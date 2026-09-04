@@ -91,7 +91,9 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryEulerLabelsPoints: { staleTimeMs: 5 * MINUTE },
   queryEulerLabelsEarnVaults: { staleTimeMs: 5 * MINUTE },
   queryEulerLabelsAssets: { staleTimeMs: 5 * MINUTE },
-  queryOracleAdapters: { staleTimeMs: 5 * MINUTE },
+  queryV3OracleAdapterAssessment: { staleTimeMs: 5 * MINUTE },
+  queryV3OracleAdapterAssessmentsPage: { staleTimeMs: 5 * MINUTE },
+  queryV3OracleRoutersPage: { staleTimeMs: 5 * MINUTE },
   queryV3VaultResolve: { staleTimeMs: 5 * MINUTE },
 
   // === Default / low-volatility reads: 5-minute cache ===
