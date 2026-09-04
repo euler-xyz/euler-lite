@@ -255,6 +255,8 @@ export const useEulerLabels = () => {
     entities,
     points,
     oracleAdapters: oracleAdapters.oracleAdapters,
+    oracleAssessmentsStatus: oracleAdapters.oracleAssessmentsStatus,
+    oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
     earnVaults,
     loadLabels,
     loadOracleAdapter: oracleAdapters.loadOracleAdapter,

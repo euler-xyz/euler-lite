@@ -195,7 +195,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, Data V3 oracle assessments, RPC) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
 
 **Proxy cache strategy**:
 
@@ -204,7 +204,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/internal/labels/{file}` | 5 min | Query-shape labels endpoint (`?chainId=N`); used internally by Lite helpers. 404 → empty shape; stale-fallback on upstream error |
 | `/api/internal/labels/{chainId}/{file}` | 5 min | Path-shape labels endpoint matching the SDK's default `eulerLabelsBaseUrl` template; shares the underlying cache with the query-shape route |
 | `/api/internal/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
-| `/api/internal/oracle-adapter` | 5 min | Lazy per-address fetch |
+| `/api/internal/v3/oracles/adapter-assessments/{address}?chainId={chainId}` | request-scoped | Lazy per-address Data V3 assessment fetch through the exact SDK browser endpoint allowlist |
 | `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo. 7-day stale window so a running instance outlives upstream outages |
 | `/api/internal/abis/{contract}` | 5 min | Runtime ABI documents from `euler-interfaces` (`AccountLens`/`VaultLens`/`UtilsLens` allowlist; SDK `setQueryABI` target). Same 7-day stale window as euler-chains |
 | `/api/internal/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |

@@ -19,9 +19,9 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 
 All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are reported through `reportStatus`, which logs on *transitions* rather than once per refresh: the first observation of a given status warns, an unchanged status stays silent on later refreshes, and a return to `ok` logs a recovery. A persistent outage therefore surfaces once and then goes quiet until it changes.
 
-Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/internal/oracle-adapter?chainId=X&address=0x...`.
+Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
-**Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` overrides the GitHub URL for oracle checks. The expected URL pattern is `{baseUrl}/{chainId}/{file}` for labels and `{baseUrl}/{chainId}/adapters/{address}.json` for oracle adapters.
+**Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). Oracle assessments use the configured V3 API URL and optional server-side V3 API key.
 
 **Server caching**: The server keeps one 5-minute TTL cache keyed by `chainId:file`, plus an in-flight map so concurrent callers collapse onto a single upstream fetch per key. On upstream failure, stale cached data is served. `server/plugins/warm-cache.ts` pre-populates the cache at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
 
@@ -233,22 +233,43 @@ Classification markers use a clean-cut tags schema. Earn-vault `recentlyAdded` i
 
 ---
 
-### Oracle Adapter Files (oracle-checks repo)
+### Oracle Adapter Assessments (Data V3)
 
-Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github.com/euler-xyz/oracle-checks) repository. Each adapter has its own file at `data/{chainId}/adapters/{checksummedAddress}.json`.
+Data V3 serves adapter assessments at `/v3/oracles/adapter-assessments` and `/v3/oracles/adapter-assessments/{address}`. Display identity is populated only for recognized adapters. `checksStatus` is a separate health verdict and must not be recomputed from individual findings.
 
 ```jsonc
 {
-  "oracle": "0xOracleAdapter...",                 // Oracle adapter address
-  "base": "0xBaseAsset...",                       // Base asset address
-  "quote": "0xQuoteAsset...",                     // Quote asset address
-  "name": "Chainlink ETH/USD",                   // Oracle name
-  "provider": "Chainlink",                        // Oracle provider (used for logo)
-  "methodology": "TWAP 30min",                   // Pricing methodology
-  "label": "ETH/USD Feed",                       // Custom label (stored but not displayed)
-  "checks": ["heartbeat", "deviation"]            // Security check names (stored but not displayed)
+  "address": "0xOracleAdapter...",
+  "recognized": true,
+  "checksStatus": "warning",
+  "provider": "Chainlink", // V3 logo key; see below
+  "methodology": "Market Price",
+  "config": { "base": "0xBaseAsset...", "quote": "0xQuoteAsset..." },
+  "findings": [
+    { "key": "quote-liveness", "outcome": "unknown", "severity": "medium", "description": "..." }
+  ],
+  "policyVersion": 3,
+  "lastCheckedAt": "2026-09-01T12:01:00.000Z"
 }
 ```
+
+Lite compares the assessed base/quote pair with the decoded route before applying the health verdict. The Checks cell distinguishes three states: recognized adapters show the health verdict and counts; adapters V3 assessed but could not identify show "Unrecognized" with the failing identity rule (`reason`) and expose only the identity findings; adapters with no assessment row show "Not assessed". Rule keys are rendered as sentence-case titles client-side (`formatOracleCheckTitle`).
+
+Router recognition comes from `/v3/oracles/routers`, which lists exactly the routers deployed by the recognized `EulerRouterFactory`; the indexer only tracks factory deployments.
+
+#### Oracle provider logos
+
+Explore and vault oracle rows resolve logos through `getOracleProviderLogo` (`entities/oracle-providers.ts`), not local SVG assets.
+
+The URL is always `https://v3.euler.finance/v3/images/oracle-providers/{key}`. That host is `DEFAULT_V3_API_URL`; it does **not** follow `V3_API_URL` / `EULER_SDK_V3_API_URL`. Custom V3 deployments still load logos from production V3. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
+
+Lookup rules:
+
+1. If `meta.provider` is present, map **only** that string. Do not fall through to the adapter name. A Midas vault priced by `ChainlinkOracle` must show the Midas logo, not Chainlink.
+2. If provider is missing, map `meta.name` / the adapter type name (`ChainlinkOracle`, `PythOracle`, `UniswapV3Oracle`, …).
+3. Unknown identifiers return `undefined` — the UI renders without a logo rather than guessing.
+
+`utils/oracle-adapter-views.ts` assigns `view.logo` from those two fields when it builds the shared adapter view used by the borrow-page Oracles block and the Explore matrix.
 
 ---
 
