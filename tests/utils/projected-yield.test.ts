@@ -118,6 +118,21 @@ describe('mergeProjectedRewardCampaigns', () => {
     expect(lines.every(line => line.vaultAddress === '0xdebt')).toBe(true)
   })
 
+  it('preserves the generic eligibility notice for projected rewards', () => {
+    const lines = mergeProjectedRewardCampaigns([], [{
+      campaign: campaign({
+        sourceUrl: 'https://app.merkl.xyz/opportunities/ethereum/EULER/example',
+        eligibilityRequirementsStatus: 'incomplete',
+      }),
+      vaultAddress: '0x1',
+    }])
+
+    expect(lines[0]).toMatchObject({
+      sourceUrl: 'https://app.merkl.xyz/opportunities/ethereum/EULER/example',
+      eligibilityLabel: 'eligibility information may be incomplete; additional requirements may apply',
+    })
+  })
+
   it('shows sparkles for rewards that exist in either state', () => {
     const state = getProjectedYieldState('net-apy', {
       supplyUsd: 100,
