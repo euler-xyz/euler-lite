@@ -48,6 +48,7 @@ export interface ProjectedYieldRewardLine {
   }
   source: RewardSource
   sourceUrl?: string
+  eligibilityLabel?: string
   beforeApr?: number | null
   afterApr?: number | null
 }
@@ -236,6 +237,7 @@ export const mergeProjectedRewardCampaigns = (
       rewardToken: display.rewardToken,
       source: display.source,
       ...(display.sourceUrl ? { sourceUrl: display.sourceUrl } : {}),
+      ...(display.eligibilityLabel ? { eligibilityLabel: display.eligibilityLabel } : {}),
       ...current,
       [side]: display.apr,
     })

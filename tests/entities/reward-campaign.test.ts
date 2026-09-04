@@ -98,50 +98,30 @@ describe('rewardCampaignDisplay', () => {
     }).sourceUrl).toBe('https://dashboard.turtle.xyz/organizations/52974bc3-2c43-4576-ac18-107d92b6e0c7/incentives/streams/557af9e9-88e8-4233-95e1-630b8b37b613')
   })
 
-  it('formats token-holding eligibility criteria from base units', () => {
+  it('shows a generic notice when eligibility requirements are present', () => {
     expect(rewardCampaignDisplay({
       ...baseCampaign,
       eligibilityRequirements: [{
+        type: 'provider-defined',
+        details: { canChangeWithoutLiteSupport: true },
+      }],
+    }).eligibilityLabel).toBe('eligibility requirements apply; see Merkl for details')
+  })
+
+  it('does not interpret provider-specific eligibility details', () => {
+    expect(rewardCampaignEligibilityLabel({
+      source: 'merkl',
+      eligibilityRequirements: [{
         type: 'token-holding',
-        chainId: 1,
-        tokenAddress: USER,
         minimumAmount: '100000000000000000000000',
-        minimumDurationSeconds: 10,
+        minimumDurationSeconds: 172_800,
         tokenSymbol: 'EDEN',
-        tokenDecimals: 18,
       }],
-    }).eligibilityLabel).toBe('requires holding at least 100,000 EDEN')
-  })
-
-  it('omits sub-minute holding durations from the display copy', () => {
-    expect(rewardCampaignEligibilityLabel({
-      eligibilityRequirements: [{
-        type: 'token-holding',
-        chainId: 1,
-        tokenAddress: USER,
-        minimumAmount: '1',
-        minimumDurationSeconds: 59,
-      }],
-    })).toBe('requires a token holding condition')
-  })
-
-  it.each([
-    [60, '1 minute'],
-    [7_200, '2 hours'],
-    [172_800, '2 days'],
-  ])('formats an exact %d-second duration as %s', (minimumDurationSeconds, duration) => {
-    expect(rewardCampaignEligibilityLabel({
-      eligibilityRequirements: [{
-        type: 'token-holding',
-        chainId: 1,
-        tokenAddress: USER,
-        minimumAmount: '1',
-        minimumDurationSeconds,
-      }],
-    })).toBe(`requires a token holding condition for ${duration}`)
+    })).toBe('eligibility requirements apply; see Merkl for details')
   })
 
   it('omits eligibility copy when the campaign has no requirements', () => {
     expect(rewardCampaignEligibilityLabel(baseCampaign)).toBeUndefined()
+    expect(rewardCampaignEligibilityLabel({ source: 'merkl', eligibilityRequirements: [] })).toBeUndefined()
   })
 })
