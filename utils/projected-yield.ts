@@ -227,7 +227,8 @@ export const mergeProjectedRewardCampaigns = (
     const id = campaignLineKey(input)
     const display = rewardCampaignDisplay(input.campaign, undefined, input.vaultAddress)
     const current = lines.get(id)
-    lines.set(id, {
+    const line: ProjectedYieldRewardLine = {
+      ...current,
       id,
       action: input.campaign.action,
       ...(input.vaultAddress ? { vaultAddress: input.vaultAddress } : {}),
@@ -238,9 +239,13 @@ export const mergeProjectedRewardCampaigns = (
       source: display.source,
       ...(display.sourceUrl ? { sourceUrl: display.sourceUrl } : {}),
       ...(display.eligibilityLabel ? { eligibilityLabel: display.eligibilityLabel } : {}),
-      ...current,
       [side]: display.apr,
-    })
+    }
+
+    if (!display.sourceUrl) delete line.sourceUrl
+    if (!display.eligibilityLabel) delete line.eligibilityLabel
+
+    lines.set(id, line)
   }
 
   before.forEach(input => add(input, 'beforeApr'))

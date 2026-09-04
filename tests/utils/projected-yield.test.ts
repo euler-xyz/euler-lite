@@ -133,6 +133,50 @@ describe('mergeProjectedRewardCampaigns', () => {
     })
   })
 
+  it('clears an incomplete eligibility notice when the after snapshot confirms none', () => {
+    const lines = mergeProjectedRewardCampaigns(
+      [{
+        campaign: campaign({
+          campaignId: 'same',
+          eligibilityRequirementsStatus: 'incomplete',
+        }),
+        vaultAddress: '0x1',
+      }],
+      [{
+        campaign: campaign({
+          campaignId: 'same',
+          eligibilityRequirementsStatus: 'none',
+        }),
+        vaultAddress: '0x1',
+      }],
+    )
+
+    expect(lines[0]).not.toHaveProperty('eligibilityLabel')
+  })
+
+  it('uses an incomplete after-state notice over a complete before-state notice', () => {
+    const lines = mergeProjectedRewardCampaigns(
+      [{
+        campaign: campaign({
+          campaignId: 'same',
+          eligibilityRequirementsStatus: 'complete',
+        }),
+        vaultAddress: '0x1',
+      }],
+      [{
+        campaign: campaign({
+          campaignId: 'same',
+          eligibilityRequirementsStatus: 'incomplete',
+        }),
+        vaultAddress: '0x1',
+      }],
+    )
+
+    expect(lines[0]?.eligibilityLabel).toBe(
+      'eligibility information may be incomplete; additional requirements may apply',
+    )
+  })
+
   it('shows sparkles for rewards that exist in either state', () => {
     const state = getProjectedYieldState('net-apy', {
       supplyUsd: 100,
