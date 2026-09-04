@@ -263,15 +263,17 @@ const addToBatch = async () => {
       const tokenIn = (wrappedAddress || sel.address) as Address
       const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
       const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
+      const intent = createIntent({
+        kind: 'deposit',
+        planner: 'deposit-with-swap',
+        args: { swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo },
+        source: 'position/supply:add-to-batch',
+        subAccounts: [pos.subAccount as Address],
+      })
       await addBatchEntry({
         label: `Swap-supply ${form.amount.value} ${sel.symbol} → ${a.symbol}`,
-        intent: quoteIntents?.[0] ?? createIntent({
-          kind: 'deposit',
-          planner: 'deposit-with-swap',
-          args: { swapQuote: quote, amount: inputAmount, tokenIn, wrappedNativeInfo },
-          source: 'position/supply:add-to-batch',
-          subAccounts: [pos.subAccount as Address],
-        }),
+        intent,
+        preparedIntent: quoteIntents?.[0],
         subAccount: pos.subAccount as Address,
         review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })

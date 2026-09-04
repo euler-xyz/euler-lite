@@ -164,7 +164,13 @@ describe('useSwapPageLogic', () => {
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
     vi.stubGlobal('formatSmartAmount', (value: string) => value)
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: captured.reviewOpen }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (currentIntents: unknown[], options: unknown, preparedIntents?: unknown[]) => ({
+        intents: preparedIntents ?? currentIntents,
+        usesPreparedIntents: !!preparedIntents,
+        open: () => captured.reviewOpen(preparedIntents ?? currentIntents, options),
+      }),
+    }))
   })
 
   afterEach(() => {
@@ -323,7 +329,7 @@ describe('useSwapPageLogic', () => {
 
     expect(buildPlan).toHaveBeenCalledTimes(1)
     expect(captured.prepareTransactionPlan).toHaveBeenCalledTimes(1)
-    expect(buildPlan).toHaveBeenCalledWith(undefined, { account: captured.planAccount })
+    expect(buildPlan).toHaveBeenCalledWith(captured.selectedQuote.value, { account: captured.planAccount })
     expect(captured.prepareTransactionPlan).toHaveBeenCalledWith(rawPlan, { account: captured.planAccount, intents: [intent] })
     expect(captured.runPreparedSimulation).toHaveBeenCalledWith(prepared, {}, undefined, [intent])
     expect(captured.reviewOpen).toHaveBeenCalledWith([intent], expect.objectContaining({ presentationKind: 'swap' }))

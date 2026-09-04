@@ -126,7 +126,7 @@ const {
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
 const { simulationError, clearSimulationError } = useTransactionPlanSimulation()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { createMigrationIntent } = useMigrationIntentFactory()
 
 const positionIndex = usePositionIndex()
@@ -195,11 +195,10 @@ const positionDetailsFallback = computed(() => {
   const search = query.toString()
   return `/position/${positionIndex}${search ? `?${search}` : ''}`
 })
-// Migration authorization must be signed by a real connected wallet. Spy mode
-// stays read-only (discovery/preview) and cannot sign, so it must not satisfy
-// the review/execute gate — otherwise a spy-only user passes "Connect wallet to
-// migrate" and fails later at signing.
-const hasConnectedWallet = computed(() => isConnected.value)
+// A connected wallet can review and execute migrations. Spy mode can prepare
+// the same review through the read-only execution path, while confirmation
+// remains unavailable in the review modal.
+const hasMigrationReviewContext = computed(() => isConnected.value || isSpyMode.value)
 const migrationOwner = computed<Address | undefined>(() => {
   const raw = isSpyMode.value ? spyAddress.value : address.value
   if (!raw) return undefined
@@ -576,7 +575,7 @@ async function loadTargetLiquidityUsd() {
 
 function getTargetDisabledReason(target: OutgoingMigrationTarget | undefined) {
   if (pageDisabledReason.value) return pageDisabledReason.value
-  if (!hasConnectedWallet.value) return 'Connect wallet to migrate'
+  if (!hasMigrationReviewContext.value) return 'Connect wallet to migrate'
   if (isTargetsLoading.value) return 'Loading migration targets'
   if (targetsError.value && !target) return targetsError.value
   if (hasLoadedTargets.value && !target) return 'No compatible migration target'
@@ -863,19 +862,21 @@ watch([targets, outgoingPreviewBaseKey], ([targetList, baseKey]) => {
 
 async function reviewMigration(target: OutgoingMigrationTarget) {
   if (reviewingTargetId.value || !canReviewTarget(target) || !sourceDebtVault.value) return
+  const sourceDebtVaultSnapshot = sourceDebtVault.value
+  const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVaultSnapshot)
   reviewingTargetId.value = target.id
   clearSimulationError()
   try {
     const preview = await prepareOutgoingMigrationPreview(target)
     const intent = createOutgoingMigrationIntent(preview)
-    await openReviewState([intent], {
+    const reviewLaunch = captureReviewState([intent], {
       presentationKind: 'migration',
       tenderlyPrepared: preview.tenderlySimulation.prepared,
       tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
       review: {
         type: 'migration',
-        asset: sourceDebtVault.value.asset,
-        amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
+        asset: sourceDebtVaultSnapshot.asset,
+        amount: debtAmount,
         signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
         calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
@@ -895,6 +896,7 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
       },
       onFailed: (cause) => { showError(cause instanceof Error ? cause.message : 'Migration failed') },
     })
+    await reviewLaunch.open()
   }
   catch (err) {
     logWarn('positionMigration/review', err)

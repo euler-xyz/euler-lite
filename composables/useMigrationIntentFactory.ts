@@ -46,9 +46,12 @@ export const useMigrationIntentFactory = () => {
     const rawDeadline = typedDeadline?.kind === 'typedData'
       ? (typedDeadline.typedData.message as Record<string, unknown>).deadline
       : undefined
+    const plannerDeadline = input.args.deadline
     const deadline = typeof rawDeadline === 'bigint'
       ? rawDeadline
-      : BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
+      : typeof plannerDeadline === 'bigint'
+        ? plannerDeadline
+        : BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
     if (deadline > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Migration deadline is out of range')
     const args = {
       ...input.args,

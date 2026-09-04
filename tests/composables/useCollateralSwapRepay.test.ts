@@ -4,9 +4,10 @@ import { SwapperMode, type Account, type EVault, type IHasVaultAddress, type Por
 import type { Address } from 'viem'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 
-const { USER, SOURCE_ACCOUNT, SOURCE_VAULT, sourceVault, borrowVault, position, sourcePosition, planAccount, mocks } = vi.hoisted(() => {
+const { USER, SOURCE_ACCOUNT, SECOND_SOURCE_ACCOUNT, SOURCE_VAULT, sourceVault, borrowVault, position, sourcePosition, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001' as Address
   const SOURCE_ACCOUNT = '0x0000000000000000000000000000000000000006' as Address
+  const SECOND_SOURCE_ACCOUNT = '0x0000000000000000000000000000000000000007' as Address
   const SOURCE_VAULT = '0x0000000000000000000000000000000000000002' as Address
   const SOURCE_ASSET = '0x0000000000000000000000000000000000000003' as Address
   const BORROW_VAULT = '0x0000000000000000000000000000000000000004' as Address
@@ -72,6 +73,7 @@ const { USER, SOURCE_ACCOUNT, SOURCE_VAULT, sourceVault, borrowVault, position, 
   return {
     USER,
     SOURCE_ACCOUNT,
+    SECOND_SOURCE_ACCOUNT,
     SOURCE_VAULT,
     sourceVault,
     borrowVault,
@@ -81,6 +83,7 @@ const { USER, SOURCE_ACCOUNT, SOURCE_VAULT, sourceVault, borrowVault, position, 
     mocks: {
       getCollateralApySnapshot: vi.fn(),
       createIntent: vi.fn(),
+      openReview: vi.fn(),
       planRepayFromSource: vi.fn(),
       crossPositionItems: [] as Array<Record<string, unknown>>,
       quoteInstances: [] as Array<{
@@ -211,11 +214,18 @@ describe('useCollateralSwapRepay', () => {
 
   beforeEach(() => {
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (currentIntents: unknown[], options: unknown, preparedIntents?: unknown[]) => ({
+        intents: preparedIntents ?? currentIntents,
+        usesPreparedIntents: !!preparedIntents,
+        open: () => mocks.openReview(preparedIntents ?? currentIntents, options),
+      }),
+    }))
     vi.clearAllMocks()
     mocks.quoteInstances.length = 0
     mocks.crossPositionItems.length = 0
     mocks.createIntent.mockImplementation(input => input)
+    mocks.openReview.mockResolvedValue({})
     mocks.planRepayFromSource.mockResolvedValue([])
     mocks.getCollateralApySnapshot.mockResolvedValue({
       supplyUsd: 1_000,
@@ -402,5 +412,84 @@ describe('useCollateralSwapRepay', () => {
       }),
       subAccounts: [USER, SOURCE_ACCOUNT],
     }))
+  })
+
+  it('keeps intent, preflight, and review on one source snapshot when selection changes mid-preparation', async () => {
+    const selectionId = `${SOURCE_ACCOUNT.toLowerCase()}:${borrowVault.address.toLowerCase()}`
+    const secondSelectionId = `${SECOND_SOURCE_ACCOUNT.toLowerCase()}:${borrowVault.address.toLowerCase()}`
+    for (const [id, sourceAccount] of [
+      [selectionId, SOURCE_ACCOUNT],
+      [secondSelectionId, SECOND_SOURCE_ACCOUNT],
+    ] as const) {
+      mocks.crossPositionItems.push({
+        id,
+        vault: borrowVault,
+        sourceAccount,
+        assets: 2_500n,
+        shares: 2_500n,
+        option: {
+          selectionId: id,
+          type: 'vault',
+          amount: 2_500,
+          price: 2_500,
+          vaultAddress: borrowVault.address,
+          subAccount: sourceAccount,
+        },
+      })
+    }
+
+    let resolveSimulation: ((result: boolean) => void) | undefined
+    const runSimulation = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveSimulation = resolve
+    }))
+    const repay = scope.run(() => useCollateralSwapRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => sourceVault),
+      formTab: ref('collateral'),
+      plan: ref<TransactionPlan | null>(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      slippage: ref(0.5),
+      clearSimulationError: vi.fn(),
+      runSimulation,
+      getCurrentDebt: () => position.borrowed,
+      isEligibleForLiquidation: computed(() => false),
+    }))!
+
+    repay.initVault(sourceVault)
+    repay.onSourceVaultChange(0)
+    repay.amount.value = '2000'
+    await nextTick()
+    expect(repay.amount.value).toBe('2000')
+    const submitting = repay.submit()
+    await vi.waitFor(() => expect(runSimulation).toHaveBeenCalled())
+    repay.onSourceVaultChange(1)
+    repay.amount.value = '1000'
+    await nextTick()
+    resolveSimulation?.(true)
+    await submitting
+
+    expect(mocks.planRepayFromSource).toHaveBeenCalledWith(expect.objectContaining({
+      receiver: USER,
+      fromVault: borrowVault.address,
+      fromAccount: SOURCE_ACCOUNT,
+    }))
+    expect(mocks.openReview).toHaveBeenCalledWith([
+      expect.objectContaining({
+        args: expect.objectContaining({
+          receiver: USER,
+          fromVault: borrowVault.address,
+          fromAccount: SOURCE_ACCOUNT,
+        }),
+      }),
+    ], expect.objectContaining({
+      review: expect.objectContaining({
+        amount: '2000',
+        subAccount: USER,
+        sourceSubAccount: SOURCE_ACCOUNT,
+      }),
+    }))
+    expect(repay.selectedSourceAccount.value).toBe(SECOND_SOURCE_ACCOUNT)
   })
 })

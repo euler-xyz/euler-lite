@@ -1,7 +1,7 @@
 import { getAddress, isAddress, zeroAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
-import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
+import { collectPlanningRequirements, selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 import { TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './fixtures'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 
@@ -98,6 +98,25 @@ describe('operation intent factory', () => {
       ...requirements.vaults,
       ...requirements.assets,
     ]).not.toContain(zeroAddress)
+  })
+
+  it('adopts warmed intents only when their execution semantics match the clicked form', () => {
+    const create = (amount: bigint, createdAt: number, intentId: string) => createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt,
+      intentId,
+    })
+    const warmed = [create(12n, 1, 'intent-warmed')]
+    const equivalentClick = [create(12n, 2, 'intent-click')]
+    const changedClick = [create(13n, 3, 'intent-changed')]
+
+    expect(selectMatchingPreparedIntents(warmed, equivalentClick)).toBe(warmed)
+    expect(selectMatchingPreparedIntents(warmed, changedClick)).toBe(changedClick)
   })
 
   it('collects both sides of a retained collateral swap as vault policy dependencies', () => {

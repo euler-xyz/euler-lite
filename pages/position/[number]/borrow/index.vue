@@ -46,7 +46,7 @@ const _route = useRoute()
 const { error } = useToast()
 const { planBorrow } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -438,6 +438,27 @@ const submit = async () => {
       source: 'pages/position/[number]/borrow/index.vue',
       subAccounts: [plannerArgs.borrowAccount],
     })
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'borrow',
+      review: {
+        type: 'borrow',
+        asset: borrowVault.value.asset,
+        amount: capturedAmount,
+        subAccount: plannerArgs.borrowAccount,
+        hasBorrows: (position.value?.borrowed || 0n) > 0n,
+        submittingLabel: 'Submitting...',
+      },
+      onSucceeded: () => {
+        updateBalance()
+        setTimeout(() => {
+          router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+        }, 400)
+      },
+      onFailed: (cause) => {
+        console.warn(cause)
+        error('Transaction failed')
+      },
+    })
     try {
       plan.value = await planBorrow({ ...plannerArgs, account: planAccount.value })
     }
@@ -453,27 +474,7 @@ const submit = async () => {
       }
     }
 
-    await openReviewState([intent], {
-      presentationKind: 'borrow',
-      review: {
-        type: 'borrow',
-        asset: borrowVault.value?.asset,
-        amount: capturedAmount,
-        subAccount: position.value?.subAccount,
-        hasBorrows: (position.value?.borrowed || 0n) > 0n,
-        submittingLabel: 'Submitting...',
-      },
-      onSucceeded: () => {
-        updateBalance()
-        setTimeout(() => {
-          router.replace({ path: '/portfolio', query: { network: _route.query.network } })
-        }, 400)
-      },
-      onFailed: (cause) => {
-        console.warn(cause)
-        error('Transaction failed')
-      },
-    })
+    await reviewLaunch.open()
   }
   finally {
     isPreparing.value = false

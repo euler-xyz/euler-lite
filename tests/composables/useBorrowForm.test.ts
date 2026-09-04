@@ -275,9 +275,16 @@ describe('useBorrowForm savings collateral', () => {
       constraints: [],
       metadata: { createdAt: intentSequence, source: input.source, operation: input.source },
     }))
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
+    vi.stubGlobal('useOperationIntentFactory', () => ({
+      capture: () => mocks.createIntent,
+      create: mocks.createIntent,
+    }))
     vi.stubGlobal('useExecutionReview', () => ({
-      open: mocks.openReview,
+      capture: (intents: unknown[], options: unknown) => ({
+        intents,
+        usesPreparedIntents: false,
+        open: () => mocks.openReview(intents, options),
+      }),
     }))
     vi.stubGlobal('useEulerTx', () => ({
       planBorrow: mocks.planBorrow,

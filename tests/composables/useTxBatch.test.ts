@@ -1467,14 +1467,65 @@ describe('useTxBatch execution errors', () => {
     expect(batch.entries.value[0]?.preparing).toBe(false)
   })
 
+  it('adopts a warmed batch intent only when it matches the add-time intent', async () => {
+    const batch = useTxBatch()
+    const preparedIntent = intentFor([] as TransactionPlan, [subAccount])
+    const currentIntent = intentFor([] as TransactionPlan, [subAccount])
+
+    await batch.addEntry({
+      intent: currentIntent,
+      preparedIntent,
+      label: 'Supply USDC',
+      subAccount,
+    })
+
+    expect(batch.draftEntries.value[0]).toMatchObject({
+      intentId: preparedIntent.intentId,
+      intent: preparedIntent,
+    })
+    expect(executionMocks.compilePreview).toHaveBeenCalledWith([preparedIntent], expect.anything())
+  })
+
+  it('rebuilds a batch entry from the add-time intent when warmed semantics are stale', async () => {
+    const batch = useTxBatch()
+    const preparedIntent = intentFor([] as TransactionPlan, [subAccount])
+    const currentBase = intentFor([] as TransactionPlan, [subAccount])
+    const currentIntent: OperationIntent = {
+      ...currentBase,
+      planner: { ...currentBase.planner, args: { amount: '2' } },
+    }
+
+    await batch.addEntry({
+      intent: currentIntent,
+      preparedIntent,
+      label: 'Supply USDC',
+      subAccount,
+    })
+
+    expect(batch.draftEntries.value[0]).toMatchObject({
+      intentId: currentIntent.intentId,
+      intent: currentIntent,
+    })
+    expect(executionMocks.compilePreview).toHaveBeenCalledWith([currentIntent], expect.anything())
+  })
+
   it('adopts the exact generation-bound whole-cart preparation warmed after add', async () => {
     const batch = useTxBatch()
     const intent = intentFor([] as TransactionPlan, [subAccount])
     const warmed = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
     executionMocks.prepare.mockResolvedValue(warmed as never)
 
-    await batch.addEntry({ intent, label: 'Supply USDC', subAccount, review: { type: 'supply' } })
+    await batch.addEntry({ intent, label: 'Supply USDC', subAccount, sourceSubAccount: owner, review: { type: 'supply' } })
     await vi.waitFor(() => expect(executionMocks.prepare).toHaveBeenCalledOnce())
+
+    expect(executionMocks.prepare).toHaveBeenCalledWith([intent], expect.objectContaining({
+      presentationInputs: [{
+        id: intent.intentId,
+        review: { type: 'supply' },
+        subAccount,
+        sourceSubAccount: owner,
+      }],
+    }))
 
     await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
     expect(executionMocks.prepare).toHaveBeenCalledOnce()

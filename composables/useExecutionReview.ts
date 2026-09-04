@@ -3,6 +3,8 @@ import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { OperationReviewModal, ReviewedOperationModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { deepFreezeSerializable } from '~/features/reviewed-execution/domain/canonical'
+import { selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 import type { SubmissionResult } from '~/features/reviewed-execution/coordinator/coordinator'
 
 export interface ReviewPresentation extends Record<string, unknown> {
@@ -21,6 +23,29 @@ export interface OpenExecutionReviewOptions {
   onFailed?: (cause: unknown) => void | Promise<void>
 }
 
+export interface CapturedExecutionReview {
+  /** Immutable click-time intent set used for authoritative preparation. */
+  intents: readonly OperationIntent[]
+  /** True only when the warmed intent set was semantically identical. */
+  usesPreparedIntents: boolean
+  open: () => Promise<{ reviewId: Hash, reviewDigest: Hash }>
+}
+
+const clonePresentationValue = (value: unknown): unknown => {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return Object.freeze(value.map(clonePresentationValue))
+  const captured: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === undefined || typeof entry === 'function' || key === 'onConfirm') continue
+    captured[key] = clonePresentationValue(entry)
+  }
+  return Object.freeze(captured)
+}
+
+/** Snapshot presentation data synchronously at the review-launch boundary. */
+export const captureReviewPresentation = (review: ReviewPresentation): ReviewPresentation =>
+  clonePresentationValue(review) as ReviewPresentation
+
 /**
  * The only operation-review launcher for in-scope transaction plans. It binds
  * the unchanged handcrafted presentation to an opaque reviewed execution identity; the
@@ -32,7 +57,7 @@ export const useExecutionReview = () => {
   const execution = useReviewedExecution()
   const { isSpyMode } = useEffectiveAddress()
 
-  const open = async (
+  const openCaptured = async (
     intents: readonly OperationIntent[],
     options: OpenExecutionReviewOptions,
   ): Promise<{ reviewId: Hash, reviewDigest: Hash }> => {
@@ -90,5 +115,28 @@ export const useExecutionReview = () => {
     return { reviewId, reviewDigest }
   }
 
-  return { open }
+  /**
+   * Seal intent and presentation state synchronously at the trusted form-action
+   * boundary. Warmed intent DTOs are retained only when their transaction
+   * semantics exactly match the freshly captured click-time intents.
+   */
+  const capture = (
+    currentIntents: readonly OperationIntent[],
+    options: OpenExecutionReviewOptions,
+    preparedIntents?: readonly OperationIntent[],
+  ): CapturedExecutionReview => {
+    const selectedIntents = selectMatchingPreparedIntents(preparedIntents, currentIntents)
+    const intents = deepFreezeSerializable(selectedIntents) as readonly OperationIntent[]
+    const capturedOptions: OpenExecutionReviewOptions = Object.freeze({
+      ...options,
+      review: captureReviewPresentation(options.review),
+    })
+    return Object.freeze({
+      intents,
+      usesPreparedIntents: preparedIntents !== undefined && selectedIntents === preparedIntents,
+      open: () => openCaptured(intents, capturedOptions),
+    })
+  }
+
+  return { capture }
 }

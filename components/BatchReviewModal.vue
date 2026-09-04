@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getAddress } from 'viem'
-import { flattenBatchEntries, getSubAccountId, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -18,6 +18,7 @@ import type { PreparedExecutionReview } from '~/composables/useReviewedExecution
 import { submissionResultMessage } from '~/features/reviewed-execution/coordinator/coordinator'
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 import { useToast } from '~/components/ui/composables/useToast'
+import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -74,15 +75,10 @@ const ownerSubAccountKey = computed(() => {
 // Sub-account → tag. Sub-account 0 is the main account (Earn deposits / base
 // collateral), labelled "Deposits"; numbered borrow positions are "Position N".
 const positionTag = (subAccount?: string): string | undefined => {
-  if (!subAccount || !owner.value) return undefined
-  try {
-    const idx = getSubAccountId(getAddress(owner.value), getAddress(subAccount))
-    return idx === 0 ? 'Deposits' : `Position ${idx}`
-  }
-  catch {
-    return undefined
-  }
+  return getPositionTag(owner.value, subAccount)
 }
+const sourcePositionTag = (sourceSubAccount?: string, targetSubAccount?: string): string | undefined =>
+  getSourcePositionTag(owner.value, sourceSubAccount, targetSubAccount)
 
 type ReviewWithSteps = StepDecodingContext & {
   displayPlan?: TransactionPlan
@@ -629,6 +625,12 @@ const onCloseRequested = () => {
                   :failed="!!layers[index + 1]?.failed"
                 />
                 <BatchOperationLabel :entry="entry" />
+                <span
+                  v-if="sourcePositionTag(entry.sourceSubAccount, entry.subAccount)"
+                  class="shrink-0 text-h6 text-content-secondary bg-card py-2 px-8 rounded-8 border border-line-default"
+                >
+                  {{ sourcePositionTag(entry.sourceSubAccount, entry.subAccount) }}
+                </span>
                 <span
                   v-if="positionTag(entry.subAccount)"
                   class="shrink-0 text-h6 text-content-secondary bg-card py-2 px-8 rounded-8 border border-line-default"

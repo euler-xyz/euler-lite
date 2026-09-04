@@ -225,15 +225,17 @@ const addToBatch = async () => {
       const quote = form.swapEffectiveQuote.value
       if (!quote) return
       const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
+      const intent = createIntent({
+        kind: 'withdraw',
+        planner: 'withdraw-and-swap',
+        args: { swapQuote: quote, vaultAddress, assets, owner },
+        source: 'position/withdraw:add-to-batch',
+        subAccounts: [owner],
+      })
       await addBatchEntry({
         label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
-        intent: quoteIntents?.[0] ?? createIntent({
-          kind: 'withdraw',
-          planner: 'withdraw-and-swap',
-          args: { swapQuote: quote, vaultAddress, assets, owner },
-          source: 'position/withdraw:add-to-batch',
-          subAccounts: [owner],
-        }),
+        intent,
+        preparedIntent: quoteIntents?.[0],
         subAccount: pos.subAccount as Address,
         review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })

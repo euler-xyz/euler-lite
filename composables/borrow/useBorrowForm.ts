@@ -37,6 +37,7 @@ import { getLayeredVault } from '~/composables/useLayeredVaults'
 // re-simulates asynchronously (after the form may have been reset), so the plan
 // must be built from these captured values rather than the live reactive refs.
 export interface BorrowBatchSnapshot {
+  chainId: number
   subAccount: Address
   collateralVault: EVault
   borrowVault: EVault
@@ -49,6 +50,8 @@ export interface BorrowBatchSnapshot {
   isBorrowNativeWrap: boolean
   quote?: SwapQuote
 }
+
+type BorrowFormSnapshot = Omit<BorrowBatchSnapshot, 'subAccount'>
 
 export interface UseBorrowFormOptions {
   pair: Ref<AnyBorrowVaultPair | undefined>
@@ -97,8 +100,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const modal = useModal()
   const { error } = useToast()
   const { planBorrow, planSwapAndBorrow, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-  const { open: openReviewState } = useExecutionReview()
-  const { create: createIntent } = useOperationIntentFactory()
+  const { capture: captureReviewState } = useExecutionReview()
+  const { capture: captureIntentFactory, create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
@@ -952,7 +955,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       if (!snap.quote || !snap.selectedAsset) throw new Error('No swap quote available')
       const isNative = isNativeCurrencyAddress(snap.selectedAsset.address)
       const inputAmount = valueToNano(snap.collateralAmount || '0', snap.selectedAsset.decimals)
-      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+      const wrappedAddress = isNative ? resolveWrappedNativeAddress(snap.chainId) : null
       if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
       const borrowAmountNano = valueToNano(snap.borrowAmount || '0', snap.borrowVault.shares.decimals)
       return planSwapAndBorrow({
@@ -1014,21 +1017,24 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
             asset: snap.collateralVault.asset.address as Address,
             amount: collateralAmountForPlan,
             wrappedNativeInfo: snap.isBorrowNativeWrap
-              ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmountForPlan }
+              ? { wrappedTokenAddress: resolveWrappedNativeAddress(snap.chainId)!, nativeAmount: collateralAmountForPlan }
               : undefined,
           },
         })
   }
 
-  const createBorrowIntent = (snap: BorrowBatchSnapshot) => {
+  const createBorrowIntent = (
+    snap: BorrowBatchSnapshot,
+    createCapturedIntent = createIntent,
+  ) => {
     const subAccount = snap.subAccount
     if (snap.needsSwap) {
       if (!snap.quote || !snap.selectedAsset) throw new Error('No swap quote available')
       const isNative = isNativeCurrencyAddress(snap.selectedAsset.address)
       const inputAmount = valueToNano(snap.collateralAmount || '0', snap.selectedAsset.decimals)
-      const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+      const wrappedAddress = isNative ? resolveWrappedNativeAddress(snap.chainId) : null
       if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
-      return createIntent({
+      return createCapturedIntent({
         kind: 'borrow',
         planner: 'swap-and-borrow',
         args: {
@@ -1058,7 +1064,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
         ? snap.savingCollateral.shares
         : snap.collateralVault.convertToShares(collateralAmount)
     }
-    return createIntent({
+    return createCapturedIntent({
       kind: 'borrow',
       planner: 'borrow',
       args: {
@@ -1076,7 +1082,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
               asset: snap.collateralVault.asset.address as Address,
               amount: collateralAmount,
               wrappedNativeInfo: snap.isBorrowNativeWrap
-                ? { wrappedTokenAddress: resolveWrappedNativeAddress(chainId.value!)!, nativeAmount: collateralAmount }
+                ? { wrappedTokenAddress: resolveWrappedNativeAddress(snap.chainId)!, nativeAmount: collateralAmount }
                 : undefined,
             },
       },
@@ -1085,10 +1091,10 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     })
   }
 
-  const captureBorrowSnapshot = (subAccount: Address): BorrowBatchSnapshot => {
+  const captureBorrowFormSnapshot = (): BorrowFormSnapshot => {
     if (!collateralVault.value || !borrowVault.value) throw new Error('Borrow vaults are not loaded')
     return {
-      subAccount,
+      chainId: chainId.value!,
       collateralVault: collateralVault.value,
       borrowVault: borrowVault.value,
       collateralAmount: collateralAmount.value,
@@ -1101,6 +1107,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       quote: borrowNeedsSwap.value ? borrowSwapEffectiveQuote.value ?? undefined : undefined,
     }
   }
+
+  const captureBorrowSnapshot = (
+    subAccount: Address,
+    formSnapshot: BorrowFormSnapshot = captureBorrowFormSnapshot(),
+  ): BorrowBatchSnapshot => ({ subAccount, ...formSnapshot })
 
   const submit = async () => {
     if (isOperationBlocked.value) return
@@ -1115,20 +1126,47 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       if (!borrowVault.value || !collateralVault.value) {
         return
       }
+      const formSnapshot = captureBorrowFormSnapshot()
+      const planAccountSnapshot = planAccount.value
+      const capturedChainId = chainId.value!
+      const createSubmitIntent = captureIntentFactory()
+      const quoteFetchedAt = borrowSwapEffectiveQuoteFetchedAt.value
+      const estimatedCollateral = borrowSwapEstimatedCollateral.value
 
       // Swap & borrow path
-      if (borrowNeedsSwap.value && borrowSwapEffectiveQuote.value) {
+      if (formSnapshot.needsSwap && formSnapshot.quote) {
         const subAccount = (await resolvePendingSubAccount()) as Address
-        const snapshot = captureBorrowSnapshot(subAccount)
+        const snapshot = captureBorrowSnapshot(subAccount, formSnapshot)
         // The quote preview may have been prepared before the quote-derived
         // borrow amount settled. Re-capture the authoritative submit snapshot;
         // preview caches are optimizations only, and reviewed execution always
         // recompiles from this fresh DTO.
-        const intents = [createBorrowIntent(snapshot)]
+        const intents = [createBorrowIntent(snapshot, createSubmitIntent)]
+        const isNativeSwap = snapshot.selectedAsset && isNativeCurrencyAddress(snapshot.selectedAsset.address)
+        const reviewAsset = isNativeSwap
+          ? (resolveWrappedNativeAsset(capturedChainId) || snapshot.selectedAsset!)
+          : (snapshot.selectedAsset || snapshot.collateralVault.asset)
+        const reviewLaunch = captureReviewState(intents, {
+          presentationKind: 'swap-borrow',
+          review: {
+            type: 'swap-borrow' as const,
+            asset: reviewAsset,
+            amount: snapshot.collateralAmount,
+            quoteFetchedAt,
+            swapToAsset: snapshot.collateralVault.asset,
+            swapToAmount: estimatedCollateral,
+            swapMode: SwapperMode.EXACT_IN,
+            submittingLabel: 'Submitting...',
+          },
+          onSucceeded: () => finalizeExecutionUi(),
+          onFailed: (cause) => {
+            logWarn('borrow/send', cause)
+            error('Transaction failed')
+          },
+        })
         try {
-          const account = planAccount.value
-          await ensureBorrowSubAccountSnapshot(account, subAccount)
-          plan.value = await buildBorrowPlan(snapshot, account)
+          await ensureBorrowSubAccountSnapshot(planAccountSnapshot, subAccount)
+          plan.value = await buildBorrowPlan(snapshot, planAccountSnapshot)
         }
         catch (e) {
           logWarn('borrow/buildSwapPlan', e)
@@ -1142,40 +1180,34 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           }
         }
 
-        const isNativeSwap = borrowSelectedAsset.value && isNativeCurrencyAddress(borrowSelectedAsset.value.address)
-        const reviewAsset = isNativeSwap
-          ? (resolveWrappedNativeAsset(chainId.value!) || borrowSelectedAsset.value!)
-          : (borrowSelectedAsset.value || collateralVault.value.asset)
         if (!plan.value) return
-        await openReviewState(intents, {
-          presentationKind: 'swap-borrow',
-          review: {
-            type: 'swap-borrow' as const,
-            asset: reviewAsset,
-            amount: collateralAmount.value,
-            quoteFetchedAt: borrowSwapEffectiveQuoteFetchedAt.value,
-            swapToAsset: collateralVault.value.asset,
-            swapToAmount: borrowSwapEstimatedCollateral.value,
-            swapMode: SwapperMode.EXACT_IN,
-            submittingLabel: 'Submitting...',
-          },
-          onSucceeded: () => finalizeExecutionUi(),
-          onFailed: (cause) => {
-            logWarn('borrow/send', cause)
-            error('Transaction failed')
-          },
-        })
+        await reviewLaunch.open()
         return
       }
 
       // Standard borrow path
       const subAccountAddr = (await resolvePendingSubAccount()) as Address
-      const snapshot = captureBorrowSnapshot(subAccountAddr)
-      const intent = createBorrowIntent(snapshot)
+      const snapshot = captureBorrowSnapshot(subAccountAddr, formSnapshot)
+      const intent = createBorrowIntent(snapshot, createSubmitIntent)
+      const reviewLaunch = captureReviewState([intent], {
+        presentationKind: 'borrow',
+        review: {
+          type: 'borrow',
+          asset: snapshot.borrowVault.asset,
+          amount: snapshot.borrowAmount,
+          supplyingAssetForBorrow: snapshot.collateralVault.asset,
+          supplyingAmount: snapshot.collateralAmount,
+          submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => finalizeExecutionUi(),
+        onFailed: (cause) => {
+          logWarn('borrow/send', cause)
+          error('Transaction failed')
+        },
+      })
       try {
-        const account = planAccount.value
-        await ensureBorrowSubAccountSnapshot(account, subAccountAddr)
-        plan.value = await buildBorrowPlan(snapshot, account)
+        await ensureBorrowSubAccountSnapshot(planAccountSnapshot, subAccountAddr)
+        plan.value = await buildBorrowPlan(snapshot, planAccountSnapshot)
       }
       catch (e) {
         logWarn('borrow/buildPlan', e)
@@ -1190,22 +1222,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       }
 
       if (!plan.value) return
-      await openReviewState([intent], {
-        presentationKind: 'borrow',
-        review: {
-          type: 'borrow',
-          asset: borrowVault.value?.asset,
-          amount: borrowAmount.value,
-          supplyingAssetForBorrow: collateralVault.value?.asset,
-          supplyingAmount: collateralAmount.value,
-          submittingLabel: 'Submitting...',
-        },
-        onSucceeded: () => finalizeExecutionUi(),
-        onFailed: (cause) => {
-          logWarn('borrow/send', cause)
-          error('Transaction failed')
-        },
-      })
+      await reviewLaunch.open()
     }
     finally {
       isPreparing.value = false

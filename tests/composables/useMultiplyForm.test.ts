@@ -222,8 +222,18 @@ const makeForm = (vault: EVault) => useMultiplyForm({
 
 describe('useMultiplyForm cap validation', () => {
   beforeEach(() => {
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
+    const createIntent = vi.fn()
+    vi.stubGlobal('useOperationIntentFactory', () => ({
+      capture: () => createIntent,
+      create: createIntent,
+    }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (currentIntents: unknown[], _options: unknown, preparedIntents?: unknown[]) => ({
+        intents: preparedIntents ?? currentIntents,
+        usesPreparedIntents: !!preparedIntents,
+        open: vi.fn(),
+      }),
+    }))
     vi.clearAllMocks()
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n })))
     mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
