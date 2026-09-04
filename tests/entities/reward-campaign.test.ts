@@ -108,12 +108,20 @@ describe('rewardCampaignDisplay', () => {
     }).eligibilityLabel).toBe('eligibility requirements apply')
   })
 
-  it.each(['complete', 'incomplete'] as const)('shows a generic notice for %s eligibility metadata without modeled requirements', (eligibilityRequirementsStatus) => {
+  it('shows a generic notice for complete eligibility metadata without modeled requirements', () => {
     expect(rewardCampaignDisplay({
       ...baseCampaign,
       sourceUrl: 'https://app.merkl.xyz/opportunities/monad/EULER/example',
-      eligibilityRequirementsStatus,
-    }).eligibilityLabel).toBe('eligibility requirements apply; see Merkl for details')
+      eligibilityRequirementsStatus: 'complete',
+    }).eligibilityLabel).toBe('eligibility requirements apply')
+  })
+
+  it('distinguishes incomplete eligibility metadata from confirmed requirements', () => {
+    expect(rewardCampaignDisplay({
+      ...baseCampaign,
+      sourceUrl: 'https://app.merkl.xyz/opportunities/monad/EULER/example',
+      eligibilityRequirementsStatus: 'incomplete',
+    }).eligibilityLabel).toBe('eligibility information may be incomplete; additional requirements may apply')
   })
 
   it('does not interpret provider-specific eligibility details', () => {
@@ -125,7 +133,7 @@ describe('rewardCampaignDisplay', () => {
         minimumDurationSeconds: 172_800,
         tokenSymbol: 'EDEN',
       }],
-    }, true)).toBe('eligibility requirements apply; see Merkl for details')
+    })).toBe('eligibility requirements apply')
   })
 
   it('omits eligibility copy when the campaign has no requirements', () => {

@@ -120,16 +120,15 @@ export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | unde
 
 export const rewardCampaignEligibilityLabel = (
   campaign: Pick<RewardCampaign, 'source' | 'eligibilityRequirements' | 'eligibilityRequirementsStatus'>,
-  hasProviderDetailsUrl = false,
 ): string | undefined => {
-  const hasEligibilityRequirements = campaign.eligibilityRequirementsStatus === 'complete'
-    || campaign.eligibilityRequirementsStatus === 'incomplete'
-    || (campaign.eligibilityRequirementsStatus === undefined && Boolean(campaign.eligibilityRequirements?.length))
-
-  if (!hasEligibilityRequirements) return undefined
-  return hasProviderDetailsUrl
-    ? `eligibility requirements apply; see ${PROVIDER_LABELS[campaign.source] || campaign.source} for details`
-    : 'eligibility requirements apply'
+  if (campaign.eligibilityRequirementsStatus === 'none') return undefined
+  if (campaign.eligibilityRequirementsStatus === 'incomplete') {
+    return 'eligibility information may be incomplete; additional requirements may apply'
+  }
+  if (campaign.eligibilityRequirementsStatus === 'complete' || campaign.eligibilityRequirements?.length) {
+    return 'eligibility requirements apply'
+  }
+  return undefined
 }
 
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
@@ -161,7 +160,7 @@ export const rewardCampaignDisplay = (
 ): RewardCampaignDisplay => {
   const endTimestamp = normalizeRewardEndTimestamp(campaign.endTimestamp)
   const sourceUrl = rewardCampaignSourceUrl(campaign)
-  const eligibilityLabel = rewardCampaignEligibilityLabel(campaign, Boolean(sourceUrl))
+  const eligibilityLabel = rewardCampaignEligibilityLabel(campaign)
   return {
     id: rewardCampaignKey(campaign, prefix),
     parityKey: rewardCampaignParityKey(campaign, vaultAddress),

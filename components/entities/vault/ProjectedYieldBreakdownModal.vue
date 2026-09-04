@@ -195,9 +195,11 @@ const rewardAprPresentation = (reward: ProjectedYieldRewardLine) =>
                 :alt="PROVIDER_LABELS[reward.source]"
               >{{ PROVIDER_LABELS[reward.source] || reward.source }}</a><template v-else>
                 {{ PROVIDER_LABELS[reward.source] || reward.source }}
-              </template><template v-if="reward.eligibilityLabel">
-                · {{ reward.eligibilityLabel }}
-              </template>
+              </template><RewardEligibilityNotice
+                :label="reward.eligibilityLabel"
+                :source-url="reward.sourceUrl"
+                separator="·"
+              />
             </p>
           </div>
         </div>

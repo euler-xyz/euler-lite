@@ -129,7 +129,7 @@ describe('mergeProjectedRewardCampaigns', () => {
 
     expect(lines[0]).toMatchObject({
       sourceUrl: 'https://app.merkl.xyz/opportunities/ethereum/EULER/example',
-      eligibilityLabel: 'eligibility requirements apply; see Merkl for details',
+      eligibilityLabel: 'eligibility information may be incomplete; additional requirements may apply',
     })
   })
 
