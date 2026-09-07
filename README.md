@@ -129,7 +129,7 @@ These settings use `NUXT_PUBLIC_CONFIG_*` env vars. Branding and announcement va
 | `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL` | `https://tokens.uniswap.org`               | Uniswap token list for swap selector                  |
 | `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` | `https://d3g10bzo9rdluh.cloudfront.net`  | DefiLlama token list for swap selector                |
 
-At server startup, short `CONFIG_ANNOUNCEMENT_*` names take precedence over the corresponding `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` names. Both are read at runtime and can change after a server restart without rebuilding static assets. To disable an announcement, clear both naming forms for all four content fields. See [Announcement Modal](./docs/announcement-modal.md) for rollout and dismissal behavior.
+At server startup, short `CONFIG_ANNOUNCEMENT_*` names take precedence over the corresponding `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` names. In Nitro-served deployments, both naming forms are read at server startup, so updates require a server restart without rebuilding client assets. Generated/static deployments must rebuild when `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` fallback values change. To disable an announcement, clear both naming forms for all four content fields. See [Announcement Modal](./docs/announcement-modal.md) for rollout and dismissal behavior.
 
 #### Chain Configuration
 
