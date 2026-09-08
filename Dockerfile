@@ -43,7 +43,7 @@ ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN npm run build
 
 # ── Production stage (distroless: no shell, no tools, non-root) ──
-FROM gcr.io/distroless/nodejs24-debian12:nonroot AS production
+FROM gcr.io/distroless/nodejs24-debian13:nonroot AS production
 
 ENV MODE=production
 ENV NODE_ENV=production
