@@ -287,7 +287,7 @@ The full "is this vault verified?" verdict (used by the UI to render markets, an
 
 Operation guards verify vaults against the app's selected chain and the shared governor/owner rules. Wallet connection and chain switching remain available before other form gates. While labels or vault metadata are unresolved, operations remain blocked with a loading state or a retry action.
 
-The Earn deposit page opens its automatic disclaimer only for a resolved unverified vault when the wallet is connected to the selected chain. Accepting it records the same account, chain, operation, and vault-set acknowledgment used by the submit button and final execution policy. The popup closes when acknowledgment is no longer required or the page unmounts. Final execution policy also requires available verification labels for operations involving vaults.
+The Earn deposit page opens its automatic disclaimer only for a resolved unverified vault when the wallet is connected to the selected chain. Clicking Yes dismisses the browsing notice. The form's explicit risk button records the account, chain, operation, and vault-set acknowledgment required by final execution policy. The popup closes when acknowledgment is no longer required or the page unmounts. Final execution policy also requires available verification labels for operations involving vaults.
 
 ### Governance hydration guard (SDK 2.0)
 

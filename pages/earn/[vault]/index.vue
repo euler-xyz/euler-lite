@@ -116,7 +116,7 @@ watch(
         isNotClosable: true,
         onClose: () => { warningModalId = undefined },
         props: {
-          acceptAction: unverifiedVaultGuard.acknowledgeRisk,
+          // The form collects risk acknowledgment separately from this browsing notice.
           cancelAction: () => router.replace('/'),
         },
       })
