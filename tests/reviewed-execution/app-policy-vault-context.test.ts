@@ -94,6 +94,34 @@ describe('final two-vault swap policy', () => {
       .rejects.toThrow('Vault verification is unavailable')
   })
 
+  it.each([
+    ['omitted', true],
+    ['empty', true],
+    ['omitted', false],
+    ['empty', false],
+  ] as const)('requires ready labels with %s intents and metadata present=%s', async (intentMode, metadataPresent) => {
+    if (!metadataPresent) {
+      vi.stubGlobal('useVaultRegistry', () => ({
+        getVault: () => undefined,
+        isVerifiedVault: () => false,
+      }))
+    }
+    const requestSet = makeReviewedExecution().requestSet
+    const resolve = () => intentMode === 'omitted'
+      ? resolveAppPolicy(requestSet, 100)
+      : resolveAppPolicy(requestSet, 100, [])
+
+    geo.labelsReady.value = false
+    await expect(resolve()).rejects.toThrow('Vault verification is unavailable')
+
+    geo.labelsReady.value = true
+    await expect(resolve()).resolves.toMatchObject({
+      results: expect.arrayContaining([
+        expect.objectContaining({ concern: 'vault-metadata', result: expect.objectContaining({ state: 'allowed' }) }),
+      ]),
+    })
+  })
+
   it('applies the regional restriction to the quote target vault', async () => {
     geo.restricted.mockImplementation((address: string) => getAddress(address) === TARGET_VAULT)
 

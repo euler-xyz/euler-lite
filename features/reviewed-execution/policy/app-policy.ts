@@ -41,6 +41,16 @@ export const resolveAppPolicy = async (
   const pythFeeds = new Set(requestSet.pythRefreshSlots.flatMap(slot => slot.requiredFeedIds.map(feed => feed.toLowerCase())))
   const tosEffectDigest = canonicalDigest('tos-policy-effects-v1', toCanonicalValue(requestSet.effects.filter(node => node.effect.kind === 'tos-call').map(node => node.effect)))
 
+  // Allowlisted direct-call targets alone do not establish vault dependencies.
+  const vaultLabelSubjects = new Set(requestSet.effects.flatMap(node => node.policySubjects
+    .filter(subject => subject.kind === 'vault-or-contract'
+      && !(node.effect.kind === 'direct-call' && node.simulation.kind === 'not-state-simulated'
+        && getAddress(subject.value) === getAddress(node.effect.target)))
+    .map(subject => getAddress(subject.value))))
+  for (const constraint of requestSet.constraints) {
+    if ('vault' in constraint) vaultLabelSubjects.add(getAddress(constraint.vault))
+  }
+
   let exactVaults: Array<{ address: Address, vault: EVault | EulerEarn | SecuritizeCollateralVault, type: 'evk' | 'earn' | 'securitize' }> | undefined
   let intentsByOperation: Map<string, OperationIntent[]> | undefined
   if (intents?.length) {
@@ -137,6 +147,9 @@ export const resolveAppPolicy = async (
       const address = addressOfSubject(requirement.subject)
       if (!address) throw new Error('Vault/contract policy subject is malformed')
       const vault = getVault(address)
+      if ((vault || vaultLabelSubjects.has(address)) && !useEulerLabels().isReady.value) {
+        throw new Error('Vault verification is unavailable')
+      }
       if (vault) {
         if (!vault.asset?.address || !vault.type) throw new Error(`Vault metadata is incomplete for ${address}`)
         if (!labelsVersion) throw new Error('Euler labels policy metadata is unavailable')
