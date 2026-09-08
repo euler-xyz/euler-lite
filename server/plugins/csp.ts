@@ -158,6 +158,11 @@ const CONNECT_SRC_BASE = [
   'wss://www.walletlink.org',
   'wss://relay.walletconnect.com',
   'wss://relay.walletconnect.org',
+  // Freshdesk support widget (loaded from euler.freshdesk.com, see
+  // freshdesk-widget script in nuxt.config.ts)
+  'https://euler.freshdesk.com',
+  'https://*.freshdesk.com',
+  'wss://*.freshdesk.com',
 ]
 
 export function buildCsp(
@@ -177,18 +182,21 @@ export function buildCsp(
   const directives = [
     'default-src \'self\'',
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' https://static.cloudflareinsights.com`,
-    'style-src \'unsafe-inline\' \'self\'',
+    // euler.freshdesk.com: the Freshdesk widget loads its stylesheet, fonts,
+    // and chat iframe from there. object-src stays 'none' — the widget iframe
+    // is covered by frame-src.
+    'style-src \'unsafe-inline\' \'self\' https://euler.freshdesk.com',
     'object-src \'none\'',
     'base-uri \'self\'',
     `connect-src ${connectSrc.join(' ')}`,
-    'font-src \'self\' https://fonts.reown.com',
-    'frame-src \'self\' https://verify.walletconnect.org https://verify.walletconnect.com',
+    'font-src \'self\' data: https://fonts.reown.com https://euler.freshdesk.com',
+    'frame-src \'self\' https://verify.walletconnect.org https://verify.walletconnect.com https://euler.freshdesk.com',
     'frame-ancestors \'none\'',
     // Token logos come from arbitrary CDNs (CoinGecko, DefiLlama, Uniswap, etc.)
     // that cannot be whitelisted upfront. Images are passive content — no script execution risk.
     'img-src \'self\' data: blob: https:',
     'manifest-src \'self\'',
-    'media-src \'self\'',
+    'media-src \'self\' https://euler.freshdesk.com',
     'worker-src \'self\' blob:',
     'form-action \'self\'',
     ...(isDev ? [] : ['upgrade-insecure-requests']),
