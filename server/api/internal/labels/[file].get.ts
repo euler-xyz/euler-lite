@@ -16,10 +16,8 @@ export type LabelFile = typeof LABEL_FILES[number]
 /** Scope for a label fetch: a chain ID for per-chain files, or 'all' for cross-chain rules. */
 export type LabelScope = number | 'all'
 
-// All label files are optional: any chain may legitimately ship without a given
-// file (new chains, test deployments, etc.). Missing or failing upstream fetches
-// resolve to a type-appropriate empty payload so clients degrade to "no data"
-// uniformly rather than splitting into a required/optional matrix.
+// Missing files resolve to a type-appropriate empty payload. Transient failures
+// require a usable cached response or return an error so verification can retry.
 const EMPTY_SHAPES: Record<LabelFile, unknown> = {
   'products.json': {},
   'entities.json': {},
@@ -137,9 +135,8 @@ function getUpstreamUrl(scope: LabelScope, file: string): string {
  * requests skip upstream entirely. Reserved for the absent-file cases
  * (404 and 403 — see below), where the file is legitimately not published
  * for this scope. For other failures (transient 5xx, network errors,
- * JSON parse, validation) return empty but DON'T persist — otherwise a
- * single upstream blip pins the empty allowlist for 5 minutes, making
- * every verified vault appear unverified.
+ * JSON parse, validation), serve stale data if available or return HTTP 503.
+ * A transient failure must not become a successful empty verification list.
  */
 export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<unknown> {
   const key = `${scope}:${file}`
@@ -148,7 +145,8 @@ export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<un
     const stale = cache.getStale(key)
     if (stale) return stale
     const empty = EMPTY_SHAPES[file]
-    if (persist) cache.set(key, empty)
+    if (!persist) throw createError({ statusCode: 503, statusMessage: 'Vault labels are temporarily unavailable' })
+    cache.set(key, empty)
     return empty
   }
 
@@ -168,9 +166,7 @@ export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<un
           reportStatus('labels', statusKey, `absent-${resp.status}`)
           return fallback(true)
         }
-        reportStatus('labels', statusKey, `http-${resp.status}`,
-          `${file} upstream returned ${resp.status} for scope ${scope}; treating as absent`)
-        return fallback(false)
+        throw new Error(`${file} upstream returned ${resp.status} for scope ${scope}`)
       }
 
       const data: unknown = await resp.json()

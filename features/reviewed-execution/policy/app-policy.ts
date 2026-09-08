@@ -8,7 +8,7 @@ import {
   unverifiedVaultAcknowledgementKey,
   type UnverifiedVaultAcknowledgementContext,
 } from './acknowledgements'
-import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
+import { getEulerLabelsVersion, useEulerLabels } from '~/composables/useEulerLabels'
 import { isOperationBlockerKey, operationBlockerEntries } from '~/utils/operationGuardRegistry'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
@@ -35,12 +35,21 @@ export const resolveAppPolicy = async (
   const expiresAt = now + 5 * 60_000
   const { get, getOrFetch, getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
-  const labelsVersion = getEulerLabelsVersion()
   const { country } = useGeoBlock()
   const approvalSpenders = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'approval' ? [getAddress(node.effect.spender).toLowerCase()] : []))
   const migrationAuthorities = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'migration-authorization' ? [getAddress(node.effect.target).toLowerCase()] : []))
   const pythFeeds = new Set(requestSet.pythRefreshSlots.flatMap(slot => slot.requiredFeedIds.map(feed => feed.toLowerCase())))
   const tosEffectDigest = canonicalDigest('tos-policy-effects-v1', toCanonicalValue(requestSet.effects.filter(node => node.effect.kind === 'tos-call').map(node => node.effect)))
+
+  // Allowlisted direct-call targets alone do not establish vault dependencies.
+  const vaultLabelSubjects = new Set(requestSet.effects.flatMap(node => node.policySubjects
+    .filter(subject => subject.kind === 'vault-or-contract'
+      && !(node.effect.kind === 'direct-call' && node.simulation.kind === 'not-state-simulated'
+        && getAddress(subject.value) === getAddress(node.effect.target)))
+    .map(subject => getAddress(subject.value))))
+  for (const constraint of requestSet.constraints) {
+    if ('vault' in constraint) vaultLabelSubjects.add(getAddress(constraint.vault))
+  }
 
   let exactVaults: Array<{ address: Address, vault: EVault | EulerEarn | SecuritizeCollateralVault, type: 'evk' | 'earn' | 'securitize' }> | undefined
   let intentsByOperation: Map<string, OperationIntent[]> | undefined
@@ -60,6 +69,10 @@ export const resolveAppPolicy = async (
         throw new Error(`Vault metadata is unavailable on the reviewed chain for ${address}`)
       }
       exactVaults.push({ address, vault: entry.vault as EVault | EulerEarn | SecuritizeCollateralVault, type: entry.type })
+    }
+
+    if (requirements.vaults.length && !useEulerLabels().isReady.value) {
+      throw new Error('Vault verification is unavailable')
     }
 
     const simpleExitPlanners = new Set(['withdraw', 'redeem', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'])
@@ -93,6 +106,7 @@ export const resolveAppPolicy = async (
     return isVaultGovernorVerified(entry.vault as EVault)
   }
 
+  const labelsVersion = getEulerLabelsVersion()
   const results: PolicyResultInput[] = []
   for (const requirement of collectPolicyRequirements(requestSet)) {
     let version = 'policy'
@@ -133,6 +147,9 @@ export const resolveAppPolicy = async (
       const address = addressOfSubject(requirement.subject)
       if (!address) throw new Error('Vault/contract policy subject is malformed')
       const vault = getVault(address)
+      if ((vault || vaultLabelSubjects.has(address)) && !useEulerLabels().isReady.value) {
+        throw new Error('Vault verification is unavailable')
+      }
       if (vault) {
         if (!vault.asset?.address || !vault.type) throw new Error(`Vault metadata is incomplete for ${address}`)
         if (!labelsVersion) throw new Error('Euler labels policy metadata is unavailable')

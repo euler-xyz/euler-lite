@@ -19,7 +19,11 @@ import { screenAddress } from '~/services/screening'
 
 vi.mock('~/services/vpn', () => ({ detectVpn: vi.fn(async () => false) }))
 vi.mock('~/services/screening', () => ({ screenAddress: vi.fn(async () => false) }))
-vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsVersion: vi.fn(() => 1) }))
+const labelsState = vi.hoisted(() => ({ isReady: { value: true } }))
+vi.mock('~/composables/useEulerLabels', () => ({
+  getEulerLabelsVersion: vi.fn(() => 1),
+  useEulerLabels: () => labelsState,
+}))
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
 const TOKEN = getAddress('0x2000000000000000000000000000000000000000')
@@ -43,6 +47,7 @@ const allowed = (): PolicyState => ({ state: 'allowed', version: 'v1', observedA
 let currentVault: { address: typeof VAULT, type?: string, asset?: { address?: typeof TOKEN, symbol?: string, decimals?: number } } | undefined
 
 beforeEach(() => {
+  labelsState.isReady.value = true
   currentVault = { address: VAULT, type: 'evault', asset: { address: TOKEN, symbol: 'TEST', decimals: 18 } }
   vi.mocked(getEulerLabelsVersion).mockReturnValue(1)
   vi.mocked(detectVpn).mockReset().mockResolvedValue(false)
@@ -293,6 +298,7 @@ describe('authoritative reviewed execution preparation', () => {
   })
 
   it('does not require Euler labels for a reviewed direct call with no vault subject', async () => {
+    labelsState.isReady.value = false
     vi.mocked(getEulerLabelsVersion).mockReturnValue(0)
     const rewardIntent: OperationIntent = {
       schemaVersion: 1,
@@ -328,6 +334,12 @@ describe('authoritative reviewed execution preparation', () => {
     })
 
     await expect(resolveAppPolicy(requestSet, 100)).resolves.toMatchObject({ schemaVersion: 1 })
+
+    const withVaultConstraint = {
+      ...requestSet,
+      constraints: [...requestSet.constraints, { kind: 'share-bound' as const, vault: AAVE_POOL, maximumShares: 1n }],
+    }
+    await expect(resolveAppPolicy(withVaultConstraint, 100)).rejects.toThrow('Vault verification is unavailable')
   })
 
   it.each([

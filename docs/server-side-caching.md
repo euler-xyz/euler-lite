@@ -76,6 +76,8 @@ Two endpoints, same `refreshLabelFile` engine:
 
 Both endpoints write to and fall back on the same in-memory TTL cache, but only the query-shape handler reads through it. It checks `cache.get()` first (and uses the `getOrRefresh` helper for the `assets.json` union), so a fresh entry short-circuits without touching upstream. The path-shape handler calls `refreshLabelFile` directly, and that function is the force-refresh primitive — it skips the fresh-entry check and only deduplicates while a fetch is in flight. Every path-shape request therefore reaches upstream unless it coincides with an in-flight fetch for the same key, so the warm-cache entry acts as a stale fallback on that route rather than as a read-through cache. Since the SDK's default template targets the path shape, that is the route most label traffic takes. Warm callers (`warm-cache.ts`, `vaults-cache.ts`) use `refreshLabelFile` intentionally — see [Warm-Cache Plugin](#warm-cache-plugin) for why. The path handler's file header documents the shared TTL cache / upstream-fetch pipeline and that this route force-refreshes rather than reading through.
 
+Missing label files (HTTP 403/404) return a cached empty payload. Transient failures serve stale labels when available or return HTTP 503; they never turn an unavailable verification list into a successful empty result.
+
 Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
 
 ### V3 proxy

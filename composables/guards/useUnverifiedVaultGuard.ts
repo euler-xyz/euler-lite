@@ -6,6 +6,9 @@ import { recordUnverifiedVaultAcknowledgement, unverifiedVaultAcknowledgementKey
 
 export interface UnverifiedVaultGuardState {
   isAcknowledgmentRequired: boolean
+  isVerificationLoading: boolean
+  verificationError: string | undefined
+  retryVerification: () => Promise<void>
   acknowledgeRisk: () => void
 }
 
@@ -28,15 +31,47 @@ export const useUnverifiedVaultGuard = (
     isEarnVaultOwnerVerified,
   } = useVaults()
 
+  const { isReady: labelsReady, loadError: labelsError, retryLabels } = useEulerLabels()
+  const isResolvingVaults = ref(false)
   const acknowledgedContextKey = ref('')
   const blockerKey = `unverified-vault:${++unverifiedVaultGuardSequence}`
   let resolutionGeneration = 0
 
-  watch([vaultAddresses, context.chainId], async ([addresses, activeChainId]) => {
+  const resolveVaults = async () => {
     const generation = ++resolutionGeneration
-    await Promise.all(addresses.map(address => getOrFetch(address)))
-    if (generation !== resolutionGeneration || context.chainId.value !== activeChainId) return
-  }, { immediate: true })
+    const activeChainId = context.chainId.value
+    isResolvingVaults.value = true
+    try {
+      await Promise.all(vaultAddresses.value.map(address => getOrFetch(address)))
+    }
+    finally {
+      if (generation === resolutionGeneration && context.chainId.value === activeChainId) {
+        isResolvingVaults.value = false
+      }
+    }
+  }
+  watch([vaultAddresses, context.chainId], resolveVaults, { immediate: true })
+
+  const hasVaultMetadata = computed(() => {
+    void registryVersion.value
+    return vaultAddresses.value.every((address) => {
+      const entry = get(address)
+      return !!entry && !!context.chainId.value && entry.vault.chainId === context.chainId.value
+    })
+  })
+  const isVerificationReady = computed(() => labelsReady.value && hasVaultMetadata.value)
+  const isVerificationLoading = computed(() =>
+    (!labelsReady.value && !labelsError.value) || (!hasVaultMetadata.value && isResolvingVaults.value),
+  )
+  const verificationError = computed(() => {
+    if (!labelsReady.value && labelsError.value) return labelsError.value
+    if (!hasVaultMetadata.value && !isResolvingVaults.value) return 'Unable to load vault verification. Please retry.'
+    return undefined
+  })
+  const retryVerification = async () => {
+    if (!labelsReady.value) await retryLabels()
+    await resolveVaults()
+  }
 
   const hasCanonicalVerification = (address: string): boolean => {
     const entry = get(address)
@@ -57,7 +92,9 @@ export const useUnverifiedVaultGuard = (
   const unverifiedVaultAddresses = computed(() => {
     void registryVersion.value
     getEulerLabelsVersion()
-    return vaultAddresses.value.filter(address => !hasCanonicalVerification(address))
+    return isVerificationReady.value
+      ? vaultAddresses.value.filter(address => !hasCanonicalVerification(address))
+      : []
   })
   const hasUnverifiedVault = computed(() => unverifiedVaultAddresses.value.length > 0)
 
@@ -75,7 +112,7 @@ export const useUnverifiedVaultGuard = (
 
   const acknowledgeRisk = () => {
     const acknowledgement = acknowledgementContext.value
-    if (!acknowledgement.chainId || !context.account.value) return
+    if (!isVerificationReady.value || !acknowledgement.chainId || !context.account.value) return
     recordUnverifiedVaultAcknowledgement({
       ...acknowledgement,
       account: context.account.value,
@@ -83,9 +120,15 @@ export const useUnverifiedVaultGuard = (
     acknowledgedContextKey.value = contextKey.value
   }
 
-  watch(isAcknowledgmentRequired, (required) => {
-    if (required) {
-      registerOperationBlocker(blockerKey, 'Unverified vault risk acknowledgment required')
+  const blockReason = computed(() => {
+    if (verificationError.value) return verificationError.value
+    if (!isVerificationReady.value) return 'Checking vault verification'
+    if (isAcknowledgmentRequired.value) return 'Unverified vault risk acknowledgment required'
+    return undefined
+  })
+  watch(blockReason, (reason) => {
+    if (reason) {
+      registerOperationBlocker(blockerKey, reason)
     }
     else {
       unregisterOperationBlocker(blockerKey)
@@ -93,11 +136,15 @@ export const useUnverifiedVaultGuard = (
   }, { immediate: true })
 
   onUnmounted(() => {
+    resolutionGeneration++
     unregisterOperationBlocker(blockerKey)
   })
 
   const guardState = reactive({
     isAcknowledgmentRequired,
+    isVerificationLoading,
+    verificationError,
+    retryVerification,
     acknowledgeRisk,
   })
   provide('unverified-vault-guard', guardState)

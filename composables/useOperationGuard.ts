@@ -11,6 +11,7 @@ import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[]) => {
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
+  const { chainId: appChainId } = useEulerAddresses()
   const route = useRoute()
   const operation = computed(() => String(route.name ?? route.path))
 
@@ -25,7 +26,7 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
   // --- Unverified vault guard ---
   const unverifiedVaultGuard = useUnverifiedVaultGuard(addresses, {
     account: userAddress,
-    chainId,
+    chainId: appChainId,
     operation,
   })
 
