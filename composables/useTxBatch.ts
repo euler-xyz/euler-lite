@@ -2206,7 +2206,12 @@ export const useTxBatch = () => {
       preparedIntent ? [preparedIntent] : undefined,
       [currentIntent],
     )[0]!
-    const intent = deepFreezeSerializable(selectedIntent) as OperationIntent
+    const intent = deepFreezeSerializable({
+      ...selectedIntent,
+      intentId: currentIntent.intentId,
+      revision: currentIntent.revision,
+      metadata: currentIntent.metadata,
+    }) as OperationIntent
     const entryId = intent.intentId
     const capturedOwner = owner.value
     const capturedChainId = chainId.value

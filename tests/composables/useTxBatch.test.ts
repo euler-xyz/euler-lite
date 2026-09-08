@@ -13,8 +13,11 @@ import {
 } from '~/composables/batchPrefetchState'
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
+import { validateIntentSet } from '~/features/reviewed-execution/domain/validators'
 import type { SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
+import { makeSwapQuote } from '../reviewed-execution/swap-quote.test-fixture'
 
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdkFresh: vi.fn(),
@@ -55,7 +58,7 @@ const executionMocks = {
     const plan = await compilePreviewMock(intents, account)
     return { reviewedPlan: plan, plan }
   }),
-  prepare: vi.fn(async () => { throw new Error('authoritative preparation not configured in batch unit test') }),
+  prepare: vi.fn(async (_intents: readonly OperationIntent[]) => { throw new Error('authoritative preparation not configured in batch unit test') }),
   prepareReadOnly: vi.fn(async () => { throw new Error('read-only preparation not configured in batch unit test') }),
 }
 const scheduleExternalMigrationRefreshes = vi.fn()
@@ -1467,7 +1470,7 @@ describe('useTxBatch execution errors', () => {
     expect(batch.entries.value[0]?.preparing).toBe(false)
   })
 
-  it('adopts a warmed batch intent only when it matches the add-time intent', async () => {
+  it('keeps the add-time identity when adopting matching warmed batch semantics', async () => {
     const batch = useTxBatch()
     const preparedIntent = intentFor([] as TransactionPlan, [subAccount])
     const currentIntent = intentFor([] as TransactionPlan, [subAccount])
@@ -1480,10 +1483,55 @@ describe('useTxBatch execution errors', () => {
     })
 
     expect(batch.draftEntries.value[0]).toMatchObject({
-      intentId: preparedIntent.intentId,
-      intent: preparedIntent,
+      intentId: currentIntent.intentId,
+      revision: currentIntent.revision,
+      intent: currentIntent,
     })
-    expect(executionMocks.compilePreview).toHaveBeenCalledWith([preparedIntent], expect.anything())
+    expect(executionMocks.compilePreview).toHaveBeenCalledWith([currentIntent], expect.anything())
+    expect(batch.entries.value[0]?.intent.metadata.createdAt).toBe(currentIntent.metadata.createdAt)
+  })
+
+  it('prepares repeated adds of one warmed quote and removes only the selected row', async () => {
+    const batch = useTxBatch()
+    const quote = makeSwapQuote()
+    const createIntent = (intentId: string, createdAt: number) => createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit-with-swap',
+      args: { swapQuote: quote, amount: 10n, tokenIn: quote.tokenIn.address },
+      chainId: 1,
+      account: owner,
+      subAccounts: [subAccount],
+      source: 'test',
+      intentId,
+      createdAt,
+    })
+    const preparedIntent = createIntent('warm', 1)
+    const firstIntent = createIntent('first-add', 2)
+    const secondIntent = createIntent('second-add', 3)
+    const preparedReview = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    executionMocks.prepare.mockImplementation(async (intents) => {
+      validateIntentSet(intents)
+      return preparedReview as never
+    })
+
+    await batch.addEntry({ intent: firstIntent, preparedIntent, label: 'Supply USDC', subAccount, review: { amount: '10' } })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    await batch.addEntry({ intent: secondIntent, preparedIntent, label: 'Supply USDC', subAccount, review: { amount: '10.0' } })
+
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(preparedReview)
+    expect(executionMocks.prepare).toHaveBeenLastCalledWith([firstIntent, secondIntent], expect.objectContaining({
+      presentationInputs: [
+        expect.objectContaining({ id: firstIntent.intentId, review: { amount: '10' } }),
+        expect.objectContaining({ id: secondIntent.intentId, review: { amount: '10.0' } }),
+      ],
+    }))
+    expect(batch.entries.value.map(entry => entry.id)).toEqual([firstIntent.intentId, secondIntent.intentId])
+    batch.removeEntry(firstIntent.intentId)
+
+    expect(batch.entries.value).toHaveLength(1)
+    expect(batch.entries.value[0]).toMatchObject({ id: secondIntent.intentId, intent: secondIntent, review: { amount: '10.0' } })
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(preparedReview)
+    expect(preparedIntent).toEqual(createIntent('warm', 1))
   })
 
   it('rebuilds a batch entry from the add-time intent when warmed semantics are stale', async () => {

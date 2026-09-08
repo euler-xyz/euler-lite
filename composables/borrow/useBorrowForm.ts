@@ -1197,6 +1197,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           amount: snapshot.borrowAmount,
           supplyingAssetForBorrow: snapshot.collateralVault.asset,
           supplyingAmount: snapshot.collateralAmount,
+          subAccount: snapshot.subAccount,
+          sourceSubAccount: snapshot.isSavingCollateral ? snapshot.savingCollateral?.subAccount : undefined,
           submittingLabel: 'Submitting...',
         },
         onSucceeded: () => finalizeExecutionUi(),

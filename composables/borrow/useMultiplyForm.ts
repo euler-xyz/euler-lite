@@ -1356,6 +1356,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           swapToAmount: quote ? longAmountSnapshot : undefined,
           swapMode: quote ? SwapperMode.EXACT_IN : undefined,
           subAccount,
+          sourceSubAccount: collateralShareSource?.from,
           submittingLabel: 'Submitting...',
         },
         onSucceeded: () => finalizeExecutionUi(),
