@@ -17,7 +17,7 @@ Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labe
 | `points.json` | `GET /api/internal/labels/points.json?chainId=X` | `[]` |
 | `earn-vaults.json` | `GET /api/internal/labels/earn-vaults.json?chainId=X` | `[]` |
 
-All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts) serve stale cached data when available; they do not persist an empty shape into the cache. Non-404 upstream statuses are reported through `reportStatus`, which logs on *transitions* rather than once per refresh: the first observation of a given status warns, an unchanged status stays silent on later refreshes, and a return to `ok` logs a recovery. A persistent outage therefore surfaces once and then goes quiet until it changes.
+All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts, invalid responses) serve stale cached data when available and return HTTP 503 otherwise. They do not return or cache a successful empty shape. Non-404 upstream statuses are reported through `reportStatus`, which logs on *transitions* rather than once per refresh: the first observation of a given status warns, an unchanged status stays silent on later refreshes, and a return to `ok` logs a recovery. A persistent outage therefore surfaces once and then goes quiet until it changes.
 
 Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
@@ -37,6 +37,8 @@ So the 5-minute TTL is not what bounds upstream traffic on the SDK's path. On th
 **Client loading and chain changes**: `useEulerLabels().loadLabels()` loads a snapshot for the current chain. A ready snapshot is reused only while that chain remains selected. On a chain change, the composable publishes an empty snapshot while the new labels load, deduplicates concurrent fetches per `chainId`, and uses a monotonic load generation to prevent a late response from a previous chain or superseded refresh from overwriting current data. ERC-4626 wrap-pair probes use the same chain and generation checks.
 
 The browsing SDK applies a separate 5-minute stale window to its five label queries, so revisiting a chain may reuse SDK-cached data without an upstream request. This cache does not bypass the composable's current-chain publication guard. Call `loadLabels(true)` when an explicit refresh is required; it starts a new composable-level fetch (it does not join `pendingLabelsFetches`) and invalidates all five SDK label queries before calling the SDK. At the transport layer that invalidation does not cancel an already-running `fetchQuery` for the same key — TanStack joins the pending promise — so a force refresh can still receive the older in-flight SDK result. The monotonic load generation still decides which response may publish.
+
+Verification requires successful entity, product, and Earn label requests before the SDK normalizes the snapshot. Optional point-reward failures do not block verification. An initial failure leaves labels unavailable with a retry action; a failed same-chain refresh retains the last successful snapshot. The retry invalidates SDK label queries and reloads vault discovery after labels recover.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -280,6 +282,12 @@ Lookup rules:
 The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
 
 The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+
+### Operation warnings and consent
+
+Operation guards verify vaults against the app's selected chain and the shared governor/owner rules. Wallet connection and chain switching remain available before other form gates. While labels or vault metadata are unresolved, operations remain blocked with a loading state or a retry action.
+
+The Earn deposit page opens its automatic disclaimer only for a resolved unverified vault when the wallet is connected to the selected chain. Accepting it records the same account, chain, operation, and vault-set acknowledgment used by the submit button and final execution policy. The popup closes when acknowledgment is no longer required or the page unmounts. Final execution policy also requires available verification labels for operations involving vaults.
 
 ### Governance hydration guard (SDK 2.0)
 

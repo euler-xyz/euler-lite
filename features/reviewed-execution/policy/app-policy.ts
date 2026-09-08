@@ -8,7 +8,7 @@ import {
   unverifiedVaultAcknowledgementKey,
   type UnverifiedVaultAcknowledgementContext,
 } from './acknowledgements'
-import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
+import { getEulerLabelsVersion, useEulerLabels } from '~/composables/useEulerLabels'
 import { isOperationBlockerKey, operationBlockerEntries } from '~/utils/operationGuardRegistry'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
@@ -35,7 +35,6 @@ export const resolveAppPolicy = async (
   const expiresAt = now + 5 * 60_000
   const { get, getOrFetch, getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
-  const labelsVersion = getEulerLabelsVersion()
   const { country } = useGeoBlock()
   const approvalSpenders = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'approval' ? [getAddress(node.effect.spender).toLowerCase()] : []))
   const migrationAuthorities = new Set(requestSet.effects.flatMap(node => node.effect.kind === 'migration-authorization' ? [getAddress(node.effect.target).toLowerCase()] : []))
@@ -60,6 +59,10 @@ export const resolveAppPolicy = async (
         throw new Error(`Vault metadata is unavailable on the reviewed chain for ${address}`)
       }
       exactVaults.push({ address, vault: entry.vault as EVault | EulerEarn | SecuritizeCollateralVault, type: entry.type })
+    }
+
+    if (requirements.vaults.length && !useEulerLabels().isReady.value) {
+      throw new Error('Vault verification is unavailable')
     }
 
     const simpleExitPlanners = new Set(['withdraw', 'redeem', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'])
@@ -93,6 +96,7 @@ export const resolveAppPolicy = async (
     return isVaultGovernorVerified(entry.vault as EVault)
   }
 
+  const labelsVersion = getEulerLabelsVersion()
   const results: PolicyResultInput[] = []
   for (const requirement of collectPolicyRequirements(requestSet)) {
     let version = 'policy'

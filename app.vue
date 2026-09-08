@@ -14,7 +14,7 @@ let isAnnouncementOpen = false
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
-const { loadLabels } = useEulerLabels()
+const { loadLabels, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -217,6 +217,15 @@ onUnmounted(() => {
       :class="isMenuVisible ? 'pb-[98px]' : 'pb-16'"
     >
       <div class="w-full max-w-container mx-16 mobile:px-16 mobile:mx-0">
+        <UiAlert
+          v-if="labelsLoadError && !isLabelsReady"
+          class="mb-16"
+          title="Vault verification unavailable"
+          :description="labelsLoadError"
+          variant="error"
+          :action-text="isLabelsLoading ? 'Retrying…' : 'Retry'"
+          @action="retryLabels"
+        />
         <NuxtLayout>
           <NuxtPage
             :keepalive="{ include: ['ExplorePage', 'EarnPage', 'LendPage', 'BorrowPage', 'PortfolioPage'] }"

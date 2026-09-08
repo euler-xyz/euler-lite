@@ -20,6 +20,7 @@ import { useEulerOracleAdapters } from '~/composables/useEulerOracleAdapters'
 import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { fetchEulerLabelsDataStrict } from '~/utils/euler-labels-fetch'
 
 const LABEL_QUERY_NAMES = [
   'queryEulerLabelsEntities',
@@ -52,6 +53,8 @@ const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
+const loadError = ref<string | undefined>()
+let hasSuccessfulSnapshot = false
 const pendingLabelsFetches = new Map<number, Promise<EulerLabelsData>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
@@ -81,6 +84,8 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
     assetPatternRules: data.assetPatternRules ?? [],
   } as unknown as EulerLabelsData, null)
   isReady.value = true
+  hasSuccessfulSnapshot = true
+  loadError.value = undefined
   isLoading.value = false
 }
 
@@ -116,7 +121,7 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
     }
 
     const sdk = await getEulerSdk()
-    return sdk.eulerLabelsService.fetchEulerLabelsData(chainId)
+    return fetchEulerLabelsDataStrict(sdk.eulerLabelsService, chainId)
   })()
 
   pendingLabelsFetches.set(chainId, fetchPromise)
@@ -136,10 +141,12 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
 
   isReady.value = false
   isLoading.value = true
+  loadError.value = undefined
   const probeGeneration = ++wrapPairProbeGeneration
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
   if (labelsChainId.value !== chainId && isCurrentLoad()) {
+    hasSuccessfulSnapshot = false
     setLabelsData(createEmptyEulerLabelsData(), chainId)
   }
 
@@ -149,12 +156,14 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     const data = await fetchPromise
     if (isCurrentLoad()) {
       setLabelsData(data, chainId)
+      hasSuccessfulSnapshot = true
     }
     if (isCurrentLoad()) {
       void probeWrapPairs(chainId, generation, probeGeneration)
     }
   }
   catch (e) {
+    if (isCurrentLoad()) loadError.value = 'Unable to load vault verification. Please retry.'
     logWarn('labels/load', e)
   }
   finally {
@@ -163,9 +172,15 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     }
     if (isCurrentLoad()) {
       isLoading.value = false
-      isReady.value = true
+      isReady.value = hasSuccessfulSnapshot
     }
   }
+}
+
+const retryLabels = async () => {
+  if (isLoading.value) return
+  await loadLabels(true)
+  if (isReady.value) await useVaults().loadVaults()
 }
 
 const WRAP_PAIR_PROBE_BATCH_SIZE = 25
@@ -250,6 +265,7 @@ export const useEulerLabels = () => {
   return {
     isLoading,
     isReady,
+    loadError,
     verifiedVaultAddresses,
     products,
     entities,
@@ -259,6 +275,7 @@ export const useEulerLabels = () => {
     oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
     earnVaults,
     loadLabels,
+    retryLabels,
     loadOracleAdapter: oracleAdapters.loadOracleAdapter,
     loadOracleAdapters: oracleAdapters.loadOracleAdapters,
     loadAllOracleAdapters: oracleAdapters.loadAllOracleAdapters,

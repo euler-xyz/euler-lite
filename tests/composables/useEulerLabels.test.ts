@@ -46,6 +46,10 @@ vi.mock('~/composables/useEulerSdk', () => ({
   })),
 }))
 
+vi.mock('~/utils/euler-labels-fetch', () => ({
+  fetchEulerLabelsDataStrict: (_service: unknown, chainId: number) => mocks.fetchEulerLabelsData(chainId),
+}))
+
 vi.mock('~/composables/useEulerOracleAdapters', () => ({
   useEulerOracleAdapters: () => ({
     oracleAdapters: {},
@@ -111,6 +115,30 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('keeps a failed initial load unavailable and retries the same chain', async () => {
+    mocks.fetchEulerLabelsData.mockRejectedValueOnce(new Error('temporary outage'))
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    expect(labels.isReady.value).toBe(false)
+    expect(labels.loadError.value).toContain('Unable to load')
+    mocks.fetchEulerLabelsData.mockResolvedValueOnce(labelsFor('recovered'))
+    await labels.loadLabels()
+    expect(mocks.fetchEulerLabelsData).toHaveBeenCalledTimes(2)
+    expect(labels.isReady.value).toBe(true)
+    expect(labels.loadError.value).toBeUndefined()
+    expect(currentProductKeys()).toEqual(['recovered'])
+  })
+
+  it('retains a successful same-chain snapshot when a refresh fails', async () => {
+    mocks.fetchEulerLabelsData.mockResolvedValueOnce(labelsFor('cached'))
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    mocks.fetchEulerLabelsData.mockRejectedValueOnce(new Error('temporary outage'))
+    await labels.loadLabels(true)
+    expect(labels.isReady.value).toBe(true)
+    expect(currentProductKeys()).toEqual(['cached'])
   })
 
   it('starts a separate fetch for a new chain and ignores the stale response', async () => {

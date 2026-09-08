@@ -7,6 +7,7 @@ import { makeReviewedExecution, TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './f
 import { makeSwapQuote } from './swap-quote.test-fixture'
 
 const geo = vi.hoisted(() => ({
+  labelsReady: { value: true },
   country: { value: 'US' as string | null | undefined },
   blocked: vi.fn(),
   restricted: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('~/composables/useGeoBlock', () => ({
 
 vi.mock('~/composables/useEulerLabels', () => ({
   getEulerLabelsVersion: () => 1,
+  useEulerLabels: () => ({ isReady: geo.labelsReady }),
 }))
 
 const TARGET_VAULT = getAddress('0x5000000000000000000000000000000000000000')
@@ -58,6 +60,7 @@ const swapIntent = () => {
 describe('final two-vault swap policy', () => {
   beforeEach(() => {
     clearUnverifiedVaultAcknowledgements()
+    geo.labelsReady.value = true
     geo.country.value = 'US'
     geo.blocked.mockReset().mockReturnValue(false)
     geo.restricted.mockReset().mockReturnValue(false)
@@ -83,6 +86,12 @@ describe('final two-vault swap policy', () => {
   afterEach(() => {
     clearUnverifiedVaultAcknowledgements()
     vi.unstubAllGlobals()
+  })
+
+  it('rejects final vault policy while verification labels are unavailable', async () => {
+    geo.labelsReady.value = false
+    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [swapIntent()]))
+      .rejects.toThrow('Vault verification is unavailable')
   })
 
   it('applies the regional restriction to the quote target vault', async () => {

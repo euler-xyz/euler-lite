@@ -26,8 +26,7 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getEarnVault, updateEarnVault } = useVaults()
-const { isReady: isLabelsReady } = useEulerLabels()
-const { isConnected, address } = useWagmi()
+const { isConnected, address, chainId: walletChainId } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId } = useEulerAddresses()
 const { primeSlotHintsFor } = useStateOverrideOptions()
@@ -41,7 +40,7 @@ const shareLinkQuery = computed(() => {
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
-useOperationGuard([vaultAddress])
+const { unverifiedVaultGuard } = useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -98,24 +97,7 @@ const refreshEarnVault = async (address: string, silent = false) => {
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
   try {
-    // Wait for labels so `verified` is set correctly on direct navigation.
-    // Otherwise getEarnVault falls through to a direct fetch with empty
-    // earnVaultAddresses and returns verified: false.
-    if (!isLabelsReady.value) {
-      await until(isLabelsReady).toBe(true)
-    }
     applyLoadedVault(await getEarnVault(vaultAddress))
-
-    if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
-    }
 
     void refreshEarnVault(vault.value.address, true)
   }
@@ -124,6 +106,32 @@ const refreshEarnVault = async (address: string, silent = false) => {
     logWarn('[earn] failed to load vault', e)
   }
 })()
+let warningModalId: number | undefined
+watch(
+  () => !!vault.value && isConnected.value && walletChainId.value === chainId.value
+    && unverifiedVaultGuard.isAcknowledgmentRequired,
+  (required) => {
+    if (required && warningModalId === undefined) {
+      warningModalId = modal.open(VaultUnverifiedDisclaimerModal, {
+        isNotClosable: true,
+        onClose: () => { warningModalId = undefined },
+        props: {
+          acceptAction: unverifiedVaultGuard.acknowledgeRisk,
+          cancelAction: () => router.replace('/'),
+        },
+      })
+    }
+    else if (!required && warningModalId !== undefined) {
+      modal.close(warningModalId)
+      warningModalId = undefined
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (warningModalId !== undefined) modal.close(warningModalId)
+})
+
 const errorText = computed(() => {
   if (balance.value < valueToNano(amount.value, asset.value?.decimals)) {
     return 'Not enough balance'
