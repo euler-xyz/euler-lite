@@ -24,7 +24,7 @@ import {
 } from '~/utils/announcement-config'
 import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
 
-interface EnvConfig {
+export interface EnvConfig {
   appTitle: string
   appDescription: string
   logoUrl: string
@@ -46,6 +46,13 @@ interface EnvConfig {
   /** Whether the deployment's edge provider measures VPN usage. Drives the
    *  client VPN probe in services/vpn.ts — false skips it entirely. */
   vpnDetection: boolean
+}
+
+declare global {
+  interface Window {
+    /** Server-injected runtime config (server/plugins/app-config.ts). */
+    __APP_CONFIG__?: EnvConfig
+  }
 }
 
 const DEFAULTS: EnvConfig = {
@@ -149,10 +156,8 @@ export const useEnvConfig = (): EnvConfig => {
   if (import.meta.server) {
     cached = scanEnv()
   }
-  /* eslint-disable @typescript-eslint/no-explicit-any -- server-injected window global */
-  else if (typeof window !== 'undefined' && (window as any).__APP_CONFIG__) {
-    cached = (window as any).__APP_CONFIG__
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+  else if (typeof window !== 'undefined' && window.__APP_CONFIG__) {
+    cached = window.__APP_CONFIG__
   }
   else {
     cached = fromRuntimeConfig()

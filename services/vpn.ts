@@ -9,8 +9,7 @@ let cached: { value: boolean, timestamp: number } | null = null
 // a strict client `true` can add to it (never clear it).
 function edgeProvidesVpnEvidence(): boolean {
   if (typeof window === 'undefined') return false
-  /* eslint-disable-next-line @typescript-eslint/no-explicit-any -- server-injected window global */
-  return (window as any).__APP_CONFIG__?.vpnDetection === true
+  return window.__APP_CONFIG__?.vpnDetection === true
 }
 
 export async function detectVpn(): Promise<boolean> {
