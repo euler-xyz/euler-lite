@@ -31,9 +31,9 @@ const modal = useModal()
 const openEntryReview = (entry: BatchEntry) => {
   if (!entry.review) return
   modal.open(OperationReviewModal, {
-    // Forward the entry's sub-account so the review shows the same "Position N"
-    // pill as the batch operations list (entry.review itself doesn't carry it).
-    props: { ...entry.review, subAccount: entry.subAccount, plan: entryPlans.value[entry.id], hideExecute: true },
+    // Forward account context so position-funded operations identify both the
+    // target and the distinct account supplying assets or shares.
+    props: { ...entry.review, subAccount: entry.subAccount, sourceSubAccount: entry.sourceSubAccount, plan: entryPlans.value[entry.id], hideExecute: true },
   })
 }
 

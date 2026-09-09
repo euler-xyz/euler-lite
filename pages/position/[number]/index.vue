@@ -35,7 +35,7 @@ const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewar
 const { getTokenCategoryTags } = useTokenList()
 const { planTransfer } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { account: planAccount } = usePlanAccount()
 const {
   runSimulation: runDisableCollateralSimulation,
@@ -692,23 +692,13 @@ const disableCollateral = async (vault: EVault) => {
         source: 'pages/position/[number]/index.vue',
         subAccounts: [subAccount, owner],
       })
-      plan = await planTransfer({ ...plannerArgs, account: planAccount.value })
-
-      if (plan) {
-        const ok = await runDisableCollateralSimulation(plan)
-        if (!ok) {
-          disableCollateralErrorVault.value = getAddress(vault.address)
-          return
-        }
-      }
-
-      await openReviewState([intent], {
+      const reviewLaunch = captureReviewState([intent], {
         presentationKind: 'disableCollateral',
         review: {
           type: 'disableCollateral',
           asset: borrowVault.value!.asset,
           amount: '0',
-          subAccount: position.value?.subAccount,
+          subAccount,
           hasBorrows: (position.value?.borrowed || 0n) > 0n,
           submittingLabel: 'Submitting...',
         },
@@ -722,6 +712,17 @@ const disableCollateral = async (vault: EVault) => {
           console.warn(cause)
         },
       })
+      plan = await planTransfer({ ...plannerArgs, account: planAccount.value })
+
+      if (plan) {
+        const ok = await runDisableCollateralSimulation(plan)
+        if (!ok) {
+          disableCollateralErrorVault.value = getAddress(vault.address)
+          return
+        }
+      }
+
+      await reviewLaunch.open()
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)

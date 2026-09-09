@@ -65,7 +65,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const { error } = useToast()
   const { planRepayFromWallet } = useEulerTx()
-  const { open: openReviewState } = useExecutionReview()
+  const { capture: captureReviewState } = useExecutionReview()
   const { create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
   const { primeSlotHintsFor } = useStateOverrideOptions()
@@ -186,6 +186,22 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         source: 'position/repay-wallet:review',
         subAccounts: [args.receiver],
       })
+      const reviewLaunch = captureReviewState([intent], {
+        presentationKind: 'repay',
+        review: {
+          type: 'repay',
+          asset: borrowVault.value.asset,
+          amount: amount.value,
+          subAccount: args.receiver,
+          hasBorrows: currentDebt > 0n,
+          submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => finalizeExecutionUi(),
+        onFailed: (cause) => {
+          error('Transaction failed')
+          logWarn('walletRepay/send', cause)
+        },
+      })
 
       try {
         plan.value = await planRepayFromWallet({ ...args, account: planAccount.value })
@@ -201,22 +217,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       }
 
       if (!plan.value) return
-      await openReviewState([intent], {
-        presentationKind: 'repay',
-        review: {
-          type: 'repay',
-          asset: borrowVault.value.asset,
-          amount: amount.value,
-          subAccount: position.value?.subAccount,
-          hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          submittingLabel: 'Submitting...',
-        },
-        onSucceeded: () => finalizeExecutionUi(),
-        onFailed: (cause) => {
-          error('Transaction failed')
-          logWarn('walletRepay/send', cause)
-        },
-      })
+      await reviewLaunch.open()
     }
     finally {
       isPreparing.value = false

@@ -52,6 +52,9 @@ interface UseCollateralSwapRepayOptions {
 interface CollateralSwapRepayPlanSnapshot {
   sourceVault?: EVault
   sourceAccount?: Address
+  targetAccount?: Address
+  borrowVault?: EVault
+  currentDebt?: bigint
   amount?: string
   debtAmount?: string
   direction?: SwapperMode
@@ -79,7 +82,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { planRepayFromSource, prefetchPluginData } = useEulerTx()
   const { create: createIntent } = useOperationIntentFactory()
-  const { open: openReviewState } = useExecutionReview()
+  const { capture: captureReviewState } = useExecutionReview()
   // Collateral-swap repay consumes vault collateral, not wallet ERC20 — safe to
   // skip balance overrides. Slot hints + wallet snapshot still help allowance
   // overrides without firing the balance branch.
@@ -582,14 +585,15 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     snapshot: CollateralSwapRepayPlanSnapshot = {},
   ): Promise<TransactionPlan> {
     const source = snapshot.sourceVault ?? sourceVault.value
-    if (!position.value || !borrowVault.value || !source) {
+    const liability = snapshot.borrowVault ?? borrowVault.value
+    const subAccount = snapshot.targetAccount ?? position.value?.subAccount as Address | undefined
+    if (!subAccount || !liability || !source) {
       throw new Error('Position or vaults not loaded')
     }
 
-    const subAccount = position.value.subAccount as Address
     const sourceAccount = snapshot.sourceAccount ?? selectedSourceAccount.value ?? subAccount
     const isCrossPosition = normalizeAddressOrEmpty(sourceAccount) !== normalizeAddressOrEmpty(subAccount)
-    if (isCrossPosition && normalizeAddressOrEmpty(source.address) !== normalizeAddressOrEmpty(borrowVault.value.address)) {
+    if (isCrossPosition && normalizeAddressOrEmpty(source.address) !== normalizeAddressOrEmpty(liability.address)) {
       throw new Error('Cross-position collateral repayment requires the exact liability vault')
     }
     const sameAsset = snapshot.isSameAsset ?? core.isSameAsset.value
@@ -601,9 +605,9 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     if (sameAsset) {
       const debtNano = debtAmountInput
-        ? valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+        ? valueToNano(debtAmountInput, liability.asset.decimals)
         : valueToNano(amountInput, source.asset.decimals)
-      const currentDebtVal = getCurrentDebt()
+      const currentDebtVal = snapshot.currentDebt ?? getCurrentDebt()
       isFullRepay = debtNano >= currentDebtVal
       liabilityAmount = isFullRepay ? maxUint256 : debtNano
     }
@@ -613,18 +617,18 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         throw new Error('No quote selected')
       }
       swapMode = snapshot.direction ?? core.direction.value
-      const currentDebt = getCurrentDebt()
+      const currentDebt = snapshot.currentDebt ?? getCurrentDebt()
       let targetDebt = 0n
       if (swapMode === SwapperMode.TARGET_DEBT && debtAmountInput) {
-        const debtAmountNano = valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+        const debtAmountNano = valueToNano(debtAmountInput, liability.asset.decimals)
         targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
       }
       isFullRepay = targetDebt === 0n && swapMode === SwapperMode.TARGET_DEBT
     }
 
     return planRepayFromSource({
-      liabilityVault: borrowVault.value.address as Address,
-      liabilityAsset: borrowVault.value.asset.address as Address,
+      liabilityVault: liability.address as Address,
+      liabilityAsset: liability.asset.address as Address,
       liabilityAmount,
       receiver: subAccount,
       fromVault: source.address as Address,
@@ -641,11 +645,12 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     snapshot: CollateralSwapRepayPlanSnapshot = {},
   ) {
     const source = snapshot.sourceVault ?? sourceVault.value
-    if (!position.value || !borrowVault.value || !source) throw new Error('Position or vaults not loaded')
-    const subAccount = position.value.subAccount as Address
+    const liability = snapshot.borrowVault ?? borrowVault.value
+    const subAccount = snapshot.targetAccount ?? position.value?.subAccount as Address | undefined
+    if (!subAccount || !liability || !source) throw new Error('Position or vaults not loaded')
     const sourceAccount = snapshot.sourceAccount ?? selectedSourceAccount.value ?? subAccount
     const isCrossPosition = normalizeAddressOrEmpty(sourceAccount) !== normalizeAddressOrEmpty(subAccount)
-    if (isCrossPosition && normalizeAddressOrEmpty(source.address) !== normalizeAddressOrEmpty(borrowVault.value.address)) {
+    if (isCrossPosition && normalizeAddressOrEmpty(source.address) !== normalizeAddressOrEmpty(liability.address)) {
       throw new Error('Cross-position collateral repayment requires the exact liability vault')
     }
     const sameAsset = snapshot.isSameAsset ?? core.isSameAsset.value
@@ -653,15 +658,15 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const debtAmountInput = snapshot.debtAmount ?? core.debtAmount.value
     if (sameAsset) {
       const debtNano = debtAmountInput
-        ? valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+        ? valueToNano(debtAmountInput, liability.asset.decimals)
         : valueToNano(amountInput, source.asset.decimals)
-      const isFullRepay = debtNano >= getCurrentDebt()
+      const isFullRepay = debtNano >= (snapshot.currentDebt ?? getCurrentDebt())
       return createIntent({
         kind: 'repay',
         planner: 'repay-from-deposit',
         args: {
-          liabilityVault: borrowVault.value.address as Address,
-          liabilityAsset: borrowVault.value.asset.address as Address,
+          liabilityVault: liability.address as Address,
+          liabilityAsset: liability.asset.address as Address,
           liabilityAmount: isFullRepay ? maxUint256 : debtNano,
           receiver: subAccount,
           fromVault: source.address as Address,
@@ -675,10 +680,10 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     const swapQuote = quote || core.quotes.selectedQuote.value
     if (!swapQuote) throw new Error('No quote selected')
     const swapperMode = snapshot.direction ?? core.direction.value
-    const currentDebt = getCurrentDebt()
+    const currentDebt = snapshot.currentDebt ?? getCurrentDebt()
     let targetDebt = 0n
     if (swapperMode === SwapperMode.TARGET_DEBT && debtAmountInput) {
-      const debtAmountNano = valueToNano(debtAmountInput, borrowVault.value.asset.decimals)
+      const debtAmountNano = valueToNano(debtAmountInput, liability.asset.decimals)
       targetDebt = debtAmountNano >= currentDebt ? 0n : currentDebt - debtAmountNano
     }
     const cleanupOnMax = targetDebt === 0n && swapperMode === SwapperMode.TARGET_DEBT
@@ -832,12 +837,59 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
 
     isPreparing.value = true
     try {
-      const quoteIntents = core.quotes.selectedQuoteCard.value?.quote === core.quotes.selectedQuote.value
+      // Seal every value that can affect intent, preflight, or presentation
+      // before the first await. Exact intent-keyed preparation can still adopt
+      // a warmed result; a different snapshot produces a different intent and
+      // therefore rebuilds instead of reusing stale work.
+      const targetAccount = position.value.subAccount as Address
+      const sourceAccount = selectedSourceAccount.value ?? targetAccount
+      const quote = core.isSameAsset.value ? undefined : core.quotes.selectedQuote.value ?? undefined
+      const snapshot: CollateralSwapRepayPlanSnapshot = Object.freeze({
+        sourceVault: sourceVault.value,
+        sourceAccount,
+        targetAccount,
+        borrowVault: borrowVault.value,
+        currentDebt: getCurrentDebt(),
+        amount: core.amount.value,
+        debtAmount: core.debtAmount.value,
+        direction: core.direction.value,
+        isSameAsset: core.isSameAsset.value,
+      })
+      const quoteFetchedAt = core.quotes.effectiveQuoteFetchedAt.value
+      const planAccountSnapshot = planAccount.value
+      const quoteIntents = quote && core.quotes.selectedQuoteCard.value?.quote === quote
         ? core.quotes.selectedQuoteCard.value.intents
         : undefined
-      const intents = quoteIntents?.length ? quoteIntents : [createRepayIntent()]
+      const currentIntents = [createRepayIntent(quote, snapshot)]
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: snapshot.amount!,
+        quote,
+        sourceDecimals: snapshot.sourceVault!.asset.decimals,
+        swapperMode: snapshot.direction!,
+      })
+      const reviewLaunch = captureReviewState(currentIntents, {
+        presentationKind: 'repay',
+        review: {
+          type: 'repay',
+          asset: snapshot.sourceVault!.asset,
+          amount: inputDisplay,
+          quoteFetchedAt: !snapshot.isSameAsset ? quoteFetchedAt : null,
+          swapToAsset: !snapshot.isSameAsset ? snapshot.borrowVault!.asset : undefined,
+          swapToAmount: !snapshot.isSameAsset ? snapshot.debtAmount : undefined,
+          swapMode: !snapshot.isSameAsset ? snapshot.direction : undefined,
+          subAccount: snapshot.targetAccount,
+          sourceSubAccount: snapshot.sourceAccount,
+          hasBorrows: snapshot.currentDebt! > 0n,
+          submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => finalizeExecutionUi(),
+        onFailed: (cause) => {
+          error('Transaction failed')
+          logWarn('collateralSwapRepay/send', cause)
+        },
+      }, quoteIntents)
       try {
-        plan.value = await buildRepayPlan()
+        plan.value = await buildRepayPlan(quote, planAccountSnapshot, snapshot)
       }
       catch (e) {
         logWarn('collateralSwapRepay/buildPlan', e)
@@ -849,34 +901,8 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
         if (!ok) return
       }
 
-      const inputDisplay = getRepaySwapReviewInputAmount({
-        amount: core.amount.value,
-        quote: core.quotes.selectedQuote.value,
-        sourceDecimals: sourceVault.value.asset.decimals,
-        swapperMode: core.direction.value,
-      })
-
       if (!plan.value) return
-      await openReviewState(intents, {
-        presentationKind: 'repay',
-        review: {
-          type: 'repay',
-          asset: sourceVault.value.asset,
-          amount: inputDisplay,
-          quoteFetchedAt: !core.isSameAsset.value ? core.quotes.effectiveQuoteFetchedAt.value : null,
-          swapToAsset: !core.isSameAsset.value ? borrowVault.value.asset : undefined,
-          swapToAmount: !core.isSameAsset.value ? core.debtAmount.value : undefined,
-          swapMode: !core.isSameAsset.value ? core.direction.value : undefined,
-          subAccount: position.value?.subAccount,
-          hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          submittingLabel: 'Submitting...',
-        },
-        onSucceeded: () => finalizeExecutionUi(),
-        onFailed: (cause) => {
-          error('Transaction failed')
-          logWarn('collateralSwapRepay/send', cause)
-        },
-      })
+      await reviewLaunch.open()
     }
     finally {
       isPreparing.value = false

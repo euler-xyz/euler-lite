@@ -304,7 +304,13 @@ const makeForm = (overrides: Partial<UseCollateralFormOptions> = {}) => {
 describe('useCollateralForm', () => {
   beforeEach(async () => {
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (currentIntents: unknown[], _options: unknown, preparedIntents?: unknown[]) => ({
+        intents: preparedIntents ?? currentIntents,
+        usesPreparedIntents: !!preparedIntents,
+        open: vi.fn(),
+      }),
+    }))
     vi.clearAllMocks()
     mocks.getCollateralApySnapshot.mockResolvedValue({ supplyUsd: 0, weightedSupplyApy: null })
     mocks.getBorrowRewardApyForCollaterals.mockReturnValue(0)

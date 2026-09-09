@@ -267,7 +267,38 @@ const handleAddToBatch = () => {
          primary action becomes "Add to batch" (Option B) rather than a disabled
          execute button + a separate "+". Direct execute resumes once the batch
          is cleared (link below). -->
-      <template v-if="batchBlocksDirect && supportsBatch">
+      <template v-if="!hasActiveSession || needToSwitchChain">
+        <UiButton
+          type="button"
+          size="large"
+          :variant="needToSwitchChain ? 'red' : 'primary'"
+          @click="onClick"
+        >
+          {{ needToSwitchChain ? 'Switch chain' : 'Connect wallet' }}
+        </UiButton>
+      </template>
+      <template v-else-if="unverifiedVaultGuard?.isVerificationLoading">
+        <UiButton
+          size="large"
+          disabled
+          loading
+        >
+          Checking vault verification
+        </UiButton>
+      </template>
+      <template v-else-if="unverifiedVaultGuard?.verificationError">
+        <p class="text-content-secondary">
+          {{ unverifiedVaultGuard.verificationError }}
+        </p>
+        <UiButton
+          type="button"
+          size="large"
+          @click="unverifiedVaultGuard.retryVerification()"
+        >
+          Retry verification
+        </UiButton>
+      </template>
+      <template v-else-if="batchBlocksDirect && supportsBatch">
         <UiButton
           size="large"
           variant="primary"
@@ -348,18 +379,11 @@ const handleAddToBatch = () => {
           v-bind="$attrs"
           size="large"
           type="submit"
-          :variant="needToSwitchChain ? 'red' : 'primary'"
+          variant="primary"
           :loading="isLoading"
           :disabled="_disabled"
-          @click="onClick"
         >
-          <template v-if="needToSwitchChain">
-            Switch chain
-          </template>
-          <slot v-else-if="hasActiveSession" />
-          <template v-else>
-            Connect wallet
-          </template>
+          <slot />
         </UiButton>
       </template>
 

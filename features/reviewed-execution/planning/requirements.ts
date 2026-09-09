@@ -36,6 +36,36 @@ const collectNamedAddresses = (value: unknown, key: string | undefined, target: 
 export const intentSetDigest = (intents: readonly OperationIntent[]): Hash =>
   canonicalDigest('operation-intent-set-v1', toCanonicalValue(intents))
 
+const intentSemanticsDigest = (intents: readonly OperationIntent[]): Hash =>
+  canonicalDigest('operation-intent-semantics-v1', toCanonicalValue(intents.map(intent => ({
+    schemaVersion: intent.schemaVersion,
+    revision: intent.revision,
+    kind: intent.kind,
+    chainId: intent.chainId,
+    account: intent.account,
+    subAccounts: intent.subAccounts,
+    planner: intent.planner,
+    constraints: intent.constraints,
+    metadata: {
+      source: intent.metadata.source,
+      quoteId: intent.metadata.quoteId,
+      quoteCalldataDigest: intent.metadata.quoteCalldataDigest,
+    },
+  }))))
+
+/**
+ * Adopt warmed intent DTOs only when they describe the exact current form
+ * semantics. Intent IDs and creation timestamps are deliberately excluded: a
+ * freshly captured equivalent intent must still be able to use warmed work.
+ */
+export const selectMatchingPreparedIntents = (
+  prepared: readonly OperationIntent[] | undefined,
+  current: readonly OperationIntent[],
+): readonly OperationIntent[] =>
+  prepared?.length === current.length && intentSemanticsDigest(prepared) === intentSemanticsDigest(current)
+    ? prepared
+    : current
+
 export const collectPlanningRequirements = (intents: readonly OperationIntent[]): Readonly<PlanningRequirements> => {
   if (!intents.length) throw new Error('Cannot collect requirements for an empty intent set')
   const owner = getAddress(intents[0].account)

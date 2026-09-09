@@ -77,7 +77,7 @@ const reviewSupplyLabel = 'Review Supply'
 useFullBalances()
 const { planDeposit, planDepositWithSwap, prepareTransactionPlan } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -540,26 +540,74 @@ function createSupplyIntent(quote?: SwapQuote) {
 const submit = async () => {
   if (isOperationBlocked.value) return
   if (isPreparing.value || reviewSupplyDisabled.value) return
+  if (!asset.value?.address) return
+
+  const needsSwapSnapshot = needsSwap.value
+  const quote = needsSwapSnapshot ? swapEffectiveQuote.value ?? undefined : undefined
+  if (needsSwapSnapshot && !quote) return
+  const capturedAmount = amount.value
+  const capturedAsset = asset.value
+  const capturedChainId = chainId.value!
+  const inputAsset = needsSwapSnapshot ? selectedAsset.value : capturedAsset
+  if (!inputAsset) return
+  const inputAmount = valueToNano(capturedAmount || '0', inputAsset.decimals)
+  const isNative = isNativeCurrencyAddress(inputAsset.address)
+  const wrappedAddress = isNative ? resolveWrappedNativeAddress(capturedChainId) : null
+  if (isNative && !wrappedAddress) return
+  const directWrappedAddress = !needsSwapSnapshot && isNativeWrap.value
+    ? resolveWrappedNativeAddress(capturedChainId)
+    : null
+  const planAccountSnapshot = planAccount.value
+  const currentIntents = [createSupplyIntent(quote)]
+  const quoteIntents = quote && swapSelectedQuoteCard.value?.quote === quote
+    ? swapSelectedQuoteCard.value.intents
+    : undefined
+  const reviewType = needsSwapSnapshot ? 'swap-supply' as const : 'supply' as const
+  const reviewAsset = needsSwapSnapshot && isNative
+    ? (resolveWrappedNativeAsset(capturedChainId) || inputAsset)
+    : inputAsset
+  const reviewLaunch = captureReviewState(currentIntents, {
+    presentationKind: reviewType,
+    review: {
+      type: reviewType,
+      asset: reviewAsset,
+      amount: capturedAmount,
+      quoteFetchedAt: needsSwapSnapshot ? swapEffectiveQuoteFetchedAt.value : null,
+      swapToAsset: needsSwapSnapshot ? capturedAsset : undefined,
+      swapToAmount: needsSwapSnapshot ? swapEstimatedOutput.value : undefined,
+      swapMode: needsSwapSnapshot ? SwapperMode.EXACT_IN : undefined,
+      submittingLabel: 'Submitting...',
+    },
+    onSucceeded: async () => {
+      await updateEstimates()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+      }, 400)
+    },
+    onFailed: (cause) => {
+      error('Transaction failed')
+      console.warn(cause)
+      void reportClientEvent({
+        event: 'tx_execute_failed',
+        flow: needsSwapSnapshot ? 'lend_swap_supply' : 'lend_supply',
+        phase: 'execute',
+        chainId: capturedChainId,
+        operationType: reviewType,
+        vaultAddress,
+        assetAddress: capturedAsset.address,
+        quoteProvider: needsSwapSnapshot ? swapRoutedVia.value ?? undefined : undefined,
+      }, cause)
+    },
+  }, quoteIntents)
   isPreparing.value = true
   clearSimulationError()
   try {
     await guardWithPriceImpact(async () => {
-      if (!asset.value?.address) {
-        return
-      }
-
       preparedPlan.value = null
-      let intents: readonly ReturnType<typeof createIntent>[] = []
       try {
-        if (needsSwap.value && swapEffectiveQuote.value) {
-          const inputAsset = selectedAsset.value
-          if (!inputAsset) throw new Error('No selected asset')
-          const inputAmount = valueToNano(amount.value || '0', inputAsset.decimals)
-          const isNative = isNativeCurrencyAddress(inputAsset.address)
-          const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
-          if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+        if (needsSwapSnapshot && quote) {
           const args = {
-            swapQuote: swapEffectiveQuote.value,
+            swapQuote: quote,
             amount: inputAmount,
             tokenIn: (wrappedAddress || inputAsset.address) as Address,
             enableCollateral: false,
@@ -567,111 +615,66 @@ const submit = async () => {
               ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
               : undefined,
           }
-          const quoteIntents = swapSelectedQuoteCard.value?.quote === swapEffectiveQuote.value
-            ? swapSelectedQuoteCard.value.intents
-            : undefined
-          intents = quoteIntents?.length ? quoteIntents : [createSupplyIntent(swapEffectiveQuote.value)]
-          plan.value = await planDepositWithSwap({ ...args, account: planAccount.value })
+          plan.value = await planDepositWithSwap({ ...args, account: planAccountSnapshot })
         }
         else {
-          const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
-          const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
           const args = {
             vaultAddress: vaultAddress as Address,
-            assetAddress: asset.value.address as Address,
-            amount: supplyAmount,
-            wrappedNativeInfo: isNativeWrap.value && wrappedAddr
-              ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
+            assetAddress: capturedAsset.address as Address,
+            amount: inputAmount,
+            wrappedNativeInfo: directWrappedAddress
+              ? { wrappedTokenAddress: directWrappedAddress, nativeAmount: inputAmount }
               : undefined,
           }
-          intents = [createSupplyIntent()]
-          plan.value = await planDeposit({ ...args, account: planAccount.value })
+          plan.value = await planDeposit({ ...args, account: planAccountSnapshot })
         }
       }
       catch (e) {
         console.warn('[OperationReviewModal] failed to build plan', e)
         void reportClientEvent({
           event: 'tx_plan_build_failed',
-          flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+          flow: needsSwapSnapshot ? 'lend_swap_supply' : 'lend_supply',
           phase: 'build',
-          chainId: chainId.value,
-          operationType: needsSwap.value ? 'swap-supply' : 'supply',
+          chainId: capturedChainId,
+          operationType: reviewType,
           vaultAddress,
-          assetAddress: asset.value.address,
-          quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+          assetAddress: capturedAsset.address,
+          quoteProvider: needsSwapSnapshot ? swapRoutedVia.value ?? undefined : undefined,
         }, e)
         plan.value = null
       }
 
-      if (plan.value && intents.length) {
+      if (plan.value) {
         try {
           preparedPlan.value = await prepareTransactionPlan(plan.value, {
-            account: planAccount.value,
+            account: planAccountSnapshot,
             prefetch: lendPluginPrefetch,
-            intents,
+            intents: reviewLaunch.intents,
           })
         }
         catch (e) {
           console.warn('[OperationReviewModal] failed to prepare plan', e)
           void reportClientEvent({
             event: 'tx_plan_prepare_failed',
-            flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+            flow: needsSwapSnapshot ? 'lend_swap_supply' : 'lend_supply',
             phase: 'prepare',
-            chainId: chainId.value,
-            operationType: needsSwap.value ? 'swap-supply' : 'supply',
+            chainId: capturedChainId,
+            operationType: reviewType,
             vaultAddress,
-            assetAddress: asset.value.address,
-            quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+            assetAddress: capturedAsset.address,
+            quoteProvider: needsSwapSnapshot ? swapRoutedVia.value ?? undefined : undefined,
           }, e)
           simulationError.value = await getTxErrorMessage(e)
           return
         }
 
-        const ok = await runPreparedSimulation(preparedPlan.value, buildLendStateOverrideOptions(), undefined, intents)
+        const ok = await runPreparedSimulation(preparedPlan.value, buildLendStateOverrideOptions(), undefined, reviewLaunch.intents)
         if (!ok) {
           return
         }
       }
 
-      const isNativeSwap = needsSwap.value && selectedAsset.value && isNativeCurrencyAddress(selectedAsset.value.address)
-      const reviewAsset = isNativeSwap
-        ? (resolveWrappedNativeAsset(chainId.value!) || selectedAsset.value!)
-        : needsSwap.value && selectedAsset.value ? selectedAsset.value : asset.value
-      const reviewType = needsSwap.value ? 'swap-supply' as const : 'supply' as const
-      if (!intents.length) return
-      await openReviewState(intents, {
-        presentationKind: reviewType,
-        review: {
-          type: reviewType,
-          asset: reviewAsset,
-          amount: amount.value,
-          quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
-          swapToAsset: needsSwap.value ? asset.value : undefined,
-          swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
-          swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-          submittingLabel: 'Submitting...',
-        },
-        onSucceeded: async () => {
-          await updateEstimates()
-          setTimeout(() => {
-            router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-          }, 400)
-        },
-        onFailed: (cause) => {
-          error('Transaction failed')
-          console.warn(cause)
-          void reportClientEvent({
-            event: 'tx_execute_failed',
-            flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
-            phase: 'execute',
-            chainId: chainId.value,
-            operationType: needsSwap.value ? 'swap-supply' : 'supply',
-            vaultAddress,
-            assetAddress: asset.value?.address,
-            quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
-          }, cause)
-        },
-      })
+      await reviewLaunch.open()
     })
   }
   finally {
@@ -710,7 +713,8 @@ const addToBatch = async () => {
         : undefined
       await addBatchEntry({
         label: `Deposit ${asset.value.symbol}`,
-        intent: quoteIntents?.[0] ?? createSupplyIntent(quote),
+        intent: createSupplyIntent(quote),
+        preparedIntent: quoteIntents?.[0],
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })
