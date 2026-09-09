@@ -1,4 +1,4 @@
-import { getAddress, isAddress, zeroAddress } from 'viem'
+import { getAddress, isAddress, zeroAddress, zeroHash } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { collectPlanningRequirements, selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
@@ -140,5 +140,76 @@ describe('operation intent factory', () => {
     })
 
     expect(collectPlanningRequirements([intent]).vaults).toEqual([TEST_VAULT, targetVault])
+  })
+
+  it.each(['v1', 'v2'] as const)('keeps external MetaMorpho %s references separate from Euler vault requirements', (version) => {
+    const externalVault = getAddress('0x5000000000000000000000000000000000000000')
+    const borrowVault = getAddress('0x6000000000000000000000000000000000000000')
+    const quoteVault = getAddress('0x7000000000000000000000000000000000000000')
+    const quote = makeSwapQuote()
+    const migration = createOperationIntent({
+      kind: 'migration',
+      planner: 'cross-protocol-migration',
+      args: {
+        direction: 'euler-to-external',
+        connectorId: 'metamorpho',
+        owner: TEST_ACCOUNT,
+        positionRef: { vault: externalVault, version },
+        externalTarget: { positionRef: { vault: externalVault, version } },
+        source: { eulerAccount: TEST_ACCOUNT, borrowVault, collateralVault: TEST_VAULT },
+        collateralSwapQuote: { ...quote, verify: { ...quote.verify, vault: quoteVault } },
+        deadline: 1_000n,
+        authorizationEvidenceDigest: zeroHash,
+      },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-external-vault',
+      constraints: [{ kind: 'deadline', timestamp: 1_000 }],
+    })
+
+    expect(collectPlanningRequirements([migration]).vaults).toEqual([TEST_VAULT, borrowVault, quoteVault])
+    // An external reference must not erase an independent Euler dependency.
+    const deposit = createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: { vaultAddress: externalVault, assetAddress: TEST_TOKEN, amount: 12n },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-independent-vault',
+    })
+    expect(collectPlanningRequirements([deposit, migration]).vaults).toContain(externalVault)
+    expect(collectPlanningRequirements([migration, deposit]).vaults).toContain(externalVault)
+  })
+
+  it.each([
+    ['aave', { collateralAsset: TEST_TOKEN, debtAsset: TEST_TOKEN }],
+    ['morpho', { loanToken: TEST_TOKEN, collateralToken: TEST_TOKEN, oracle: TEST_ACCOUNT, irm: TEST_ACCOUNT, lltv: 1n }],
+  ] as const)('retains assets inside %s migration position references', (connectorId, positionRef) => {
+    const migration = createOperationIntent({
+      kind: 'migration',
+      planner: 'cross-protocol-migration',
+      args: {
+        direction: 'external-to-euler',
+        connectorId,
+        owner: TEST_ACCOUNT,
+        positionRef,
+        target: { eulerAccount: TEST_ACCOUNT, collateralVault: TEST_VAULT },
+        deadline: 1_000n,
+        authorizationEvidenceDigest: zeroHash,
+      },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-external-assets',
+      constraints: [{ kind: 'deadline', timestamp: 1_000 }],
+    })
+
+    expect(collectPlanningRequirements([migration]).assets).toEqual([TEST_TOKEN])
+    expect(collectPlanningRequirements([migration]).vaults).toEqual([TEST_VAULT])
   })
 })
