@@ -123,11 +123,33 @@ function deriveVpnEvidence(headers: RawHeaders): boolean | null {
   return isTruthyHeader(vpn) || isTruthyHeader(proxyOrVpn)
 }
 
-// cloudfront-viewer-address is always "<ip>:<port>", IPv6 included
-// (e.g. "2001:db8::1:41768"), so stripping after the last colon is safe.
+const IPV6_GROUP = /^[0-9a-f]{1,4}$/i
+
+// Structural IPv6 check (no node:net — this module must stay pure for the
+// client bundle): eight hex groups, or a single "::" compressing to at most
+// seven. Enough to tell "<ipv6>:<port>" from a bare address.
+function isWellFormedIpv6(candidate: string): boolean {
+  const halves = candidate.split('::')
+  if (halves.length > 2) return false
+  const groups = halves.flatMap(half => half === '' ? [] : half.split(':'))
+  if (!groups.every(group => IPV6_GROUP.test(group))) return false
+  return halves.length === 2 ? groups.length <= 7 : groups.length === 8
+}
+
+// cloudfront-viewer-address is "<ip>:<port>", IPv6 unbracketed (e.g.
+// "2001:db8::1:41768"). The trailing segment is only stripped when it is
+// numeric AND what remains is still a well-formed address, so a bare IPv6
+// address whose last hextet happens to be numeric (e.g. "2001:db8::1", or a
+// full eight-group address) keeps it instead of silently becoming a
+// different, still-valid-looking identity.
 function stripPort(address: string): string {
   const separator = address.lastIndexOf(':')
-  return separator === -1 ? address : address.slice(0, separator)
+  if (separator === -1) return address
+  const host = address.slice(0, separator)
+  const port = address.slice(separator + 1)
+  if (!/^\d{1,5}$/.test(port)) return address
+  if (!host.includes(':')) return host
+  return isWellFormedIpv6(host) ? host : address
 }
 
 export function extractEdgeInputs(
@@ -147,6 +169,15 @@ export function extractEdgeInputs(
       // so with exactly one LB hop the client is the second-to-last entry.
       // Fewer than two entries means the request cannot have traversed the
       // LB — no trustworthy identity.
+      //
+      // x-client-geo is NOT a header Google's LB sets on its own: the backend
+      // service must be configured with a custom request header
+      // `x-client-geo: {client_region}`, which the LB then stamps on every
+      // forwarded request (replacing any client-supplied value). Without that
+      // configuration the header is forwarded from the client untouched and
+      // the country is forgeable — origin auth proves the request came
+      // through the LB, not that the LB wrote this header. Deploying this
+      // preset requires both the origin-auth stamp and this custom header.
       const entries = forwardedForEntries(headers)
       return {
         clientIp: entries.length >= 2 ? entries[entries.length - 2] : null,
@@ -166,6 +197,9 @@ export function extractEdgeInputs(
       // Without an edge the only semi-trustworthy identity is the rightmost
       // x-forwarded-for entry (appended by the hosting platform, unlike the
       // client-controlled leftmost entries), falling back to the socket peer.
+      // When no platform proxy rewrites the header, a direct client controls
+      // that entry too — `none` is best-effort identity by definition, which
+      // is why production must opt into it explicitly.
       const entries = forwardedForEntries(headers)
       return {
         clientIp: entries[entries.length - 1] ?? socketAddress?.trim() ?? null,

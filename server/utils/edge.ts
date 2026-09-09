@@ -64,9 +64,10 @@ export function getEdgeContext(event: H3Event): EdgeContext {
   const inputs = extractEdgeInputs(provider, headers, event.node.req.socket?.remoteAddress)
   return {
     ...inputs,
-    // DEV_GEO_COUNTRY injects a country regardless of environment so
-    // deployments without a geo-capable edge (local dev, PR previews) are
-    // not universally fail-closed. Do not set it in production.
+    // DEV_GEO_COUNTRY injects a country so deployments without a
+    // geo-capable edge (local dev, PR previews) are not universally
+    // fail-closed. Production refuses to boot with it set (assertEdgeConfig),
+    // so it can never mask a missing production country.
     country: inputs.country ?? normalizeCountry(process.env.DEV_GEO_COUNTRY),
     authenticated: true,
     isInternal,
@@ -82,11 +83,14 @@ export function getEdgeContext(event: H3Event): EdgeContext {
  * preset (under `none` geo-blocking is off and rate limiting falls back to
  * best-effort identity, which is fork-friendly but never acceptable for a
  * production deployment), and when a preset that mandates origin auth
- * runs without EDGE_ORIGIN_SECRET (see `edgeRequiresOriginSecret`).
+ * runs without EDGE_ORIGIN_SECRET (see `edgeRequiresOriginSecret`), and
+ * when production carries DEV_GEO_COUNTRY (a synthetic country would let
+ * every request skip the geo-gate's fail-closed 451 branch).
  */
 export function assertEdgeConfig(): void {
   const provider = parseEdgeProvider(process.env.EDGE_PROVIDER)
-  if (process.env.DOPPLER_ENVIRONMENT === 'prd' && !process.env.EDGE_PROVIDER?.trim()) {
+  const isProduction = process.env.DOPPLER_ENVIRONMENT === 'prd'
+  if (isProduction && !process.env.EDGE_PROVIDER?.trim()) {
     throw new Error(
       'EDGE_PROVIDER must be set in production (DOPPLER_ENVIRONMENT=prd): '
       + 'without it geo-blocking is disabled and there is no trusted client identity. '
@@ -100,6 +104,13 @@ export function assertEdgeConfig(): void {
       + 'this edge\'s trusted inputs would be forgeable by anyone who can reach the '
       + 'origin directly. Configure the edge to stamp x-edge-origin-auth and set '
       + 'the secret.',
+    )
+  }
+  if (isProduction && process.env.DEV_GEO_COUNTRY?.trim()) {
+    throw new Error(
+      'DEV_GEO_COUNTRY must not be set in production (DOPPLER_ENVIRONMENT=prd): '
+      + 'it substitutes a synthetic country whenever the edge provides none, which '
+      + 'would let requests with an undetermined country bypass the fail-closed geo-gate.',
     )
   }
 }

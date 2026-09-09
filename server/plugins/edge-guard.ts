@@ -13,12 +13,17 @@ import { logger } from '~/server/utils/logger'
 
 export default defineNitroPlugin(() => {
   assertEdgeConfig()
-  logger.info(
-    {
-      ctx: 'edge-guard',
-      edgeProvider: parseEdgeProvider(process.env.EDGE_PROVIDER),
-      originAuth: process.env.EDGE_ORIGIN_SECRET?.trim() ? 'enforced' : 'off',
-    },
-    'edge provider configuration resolved',
-  )
+  const edgeProvider = parseEdgeProvider(process.env.EDGE_PROVIDER)
+  const originAuth = process.env.EDGE_ORIGIN_SECRET?.trim() ? 'enforced' : 'off'
+  logger.info({ ctx: 'edge-guard', edgeProvider, originAuth }, 'edge provider configuration resolved')
+
+  // `none` is a permitted, explicit opt-out in production, but it carries no
+  // trusted identity: geo-blocking is off and the rate limiter keys on a
+  // forgeable x-forwarded-for entry (see server/utils/rate-limit.ts).
+  if (edgeProvider === 'none' && process.env.DOPPLER_ENVIRONMENT === 'prd') {
+    logger.warn(
+      { ctx: 'edge-guard', edgeProvider },
+      'production is running without a fronting edge: geo-blocking disabled, rate-limit identity forgeable',
+    )
+  }
 })

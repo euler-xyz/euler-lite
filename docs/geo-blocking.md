@@ -51,7 +51,7 @@ When both collateral AND borrow vault in a pair are restricted, the pair is trea
 
 The user's country is detected by sending a `HEAD` request to the application's origin and reading the `x-country-code` response header. The result is normalized to uppercase ISO 3166-1 alpha-2 (e.g. `US`, `DE`, `GB`).
 
-The `x-country-code` response header is set by `server/middleware/cors.ts`, which reads the country from the configured edge provider's trusted header via `getEdgeContext` (`server/utils/edge.ts`; header mapping per `EDGE_PROVIDER` preset in `utils/edge-presets.ts`). Clients cannot modify the edge-set header, and any client-supplied `x-country-code` request header is stripped by `cors.ts` before processing, preventing bypass. Under the `none` preset (no edge — forks, previews) the placeholder `--` is emitted so client-side checks don't fail closed.
+The `x-country-code` response header is set by `server/middleware/cors.ts`, which reads the country from the configured edge provider's trusted header via `getEdgeContext` (`server/utils/edge.ts`; header mapping per `EDGE_PROVIDER` preset in `utils/edge-presets.ts`). The edge-set header is protected from client tampering when the origin is reachable only through the edge or origin auth (`EDGE_ORIGIN_SECRET`) is enabled — see the Edge Provider section of `docs/architecture.md`; a caller who reaches an unauthenticated origin directly can still forge vendor headers. Any client-supplied `x-country-code` request header is stripped by `cors.ts` before processing. Under the `none` preset (no edge — forks, previews) the placeholder `--` is emitted so client-side checks don't fail closed.
 
 Detection is cached for 5 minutes to avoid repeated network calls.
 
@@ -503,7 +503,7 @@ All blocking and restriction configuration lives outside the app codebase:
 | Asset-level blocks/restrictions (per-chain) | `euler-labels` repo — `{chainId}/assets.json` | Blocks/restricts any vault whose underlying is listed + the token in the swap picker |
 | Asset-level blocks/restrictions (cross-chain) | `euler-labels` repo — `all/assets.json` | Same as per-chain, usually pattern rules (`symbols`/`symbolRegex`/`names`/`nameRegex`) that apply on every chain |
 | Edge provider preset | `.env` — `EDGE_PROVIDER` | Selects the trusted-header mapping (geo, client IP, VPN evidence); required in production |
-| Dev country simulation | `.env` — `DEV_GEO_COUNTRY=GB` | Simulates a country when the edge provides none (dev, previews); do not set in production |
+| Dev country simulation | `.env` — `DEV_GEO_COUNTRY=GB` | Simulates a country when the edge provides none (dev, previews); production refuses to boot with it set |
 
 Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all/assets.json` in the euler-labels data source (GitHub repo or S3/CDN) take effect within 5 minutes (the label cache TTL) without any app deployment.
 

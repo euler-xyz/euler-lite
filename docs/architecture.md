@@ -370,11 +370,13 @@ The server never reads vendor edge headers directly. `getEdgeContext(event)` (`s
 | Preset | Trusted client IP | Country | VPN evidence |
 |---|---|---|---|
 | `cloudflare` | `cf-connecting-ip` | `cf-ipcountry` | `x-is-vpn` / `x-is-proxy-or-vpn` |
-| `google` | `x-forwarded-for` second-to-last entry (LB-appended) | `x-client-geo` (LB custom header) | — |
+| `google` | `x-forwarded-for` second-to-last entry (LB-appended) | `x-client-geo` (LB custom request header, see below) | — |
 | `cloudfront` | `cloudfront-viewer-address` (port stripped) | `cloudfront-viewer-country` | — |
 | `none` (default) | rightmost `x-forwarded-for` entry, else socket | — | — |
 
-**Production deployments must set `EDGE_PROVIDER` explicitly** — the server refuses to boot in `prd` without it (`server/plugins/edge-guard.ts`), because the `none` default runs with geo-blocking off. `none` is intended for forks and previews that have no fronting edge.
+**Production deployments must set `EDGE_PROVIDER` explicitly** — the server refuses to boot in `prd` without it (`server/plugins/edge-guard.ts`), because the `none` default runs with geo-blocking off. `none` is intended for forks and previews that have no fronting edge. It is permitted in production only as an explicit opt-out (edge-guard logs a warning at boot): under `none` there is no trusted identity at all — the rate limiter keys on the rightmost `x-forwarded-for` entry, which a direct client can rotate unless the hosting platform's proxy rewrites it — so `none` must not be read as rate-limit protection.
+
+**`google` preset prerequisite**: Google's external load balancer does not set a country header on its own. The backend service must be configured with the custom request header `x-client-geo: {client_region}`, which the LB then stamps on every forwarded request (replacing any client-supplied value). Without it the header arrives from the client untouched and the country is forgeable — origin auth proves the request traversed the LB, not that the LB wrote this header. The preset also assumes exactly one LB hop for the `x-forwarded-for` identity.
 
 **Origin auth** (`EDGE_ORIGIN_SECRET`): when set, every request must carry a matching `x-edge-origin-auth` header, stamped by the edge (e.g. a request-header transform rule). Requests without it are treated as having bypassed the edge: their trusted inputs are voided and the fail-closed paths below apply. The secret is optional for the `cloudflare` and `none` presets — until it is set, the edge headers are trusted on the historical assumption that the origin is only reachable through the edge. It is **required** for `google` and `cloudfront` (the server refuses to boot without it): those edges forward client headers untouched, so without origin auth their trusted inputs would be forgeable by anyone who can reach the origin. Configuring the secret is what closes direct-to-origin spoofing in every preset.
 
@@ -384,11 +386,11 @@ Fail-closed behaviour per environment (geo-capable presets):
 
 | Environment | Geo-gate | Rate limiter |
 |---|---|---|
-| `prd` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | Trusted identity required; fail-closed (HTTP 403) if absent. |
+| `prd` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` is rejected at boot (`assertEdgeConfig`), so it cannot mask a missing country. | Trusted identity required; fail-closed (HTTP 403) if absent. |
 | `stg` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | Trusted identity **not** required; falls back to `X-Forwarded-For`. |
 | `dev` | Country not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | Trusted identity not required; falls back to `X-Forwarded-For`. |
 
-Under the `none` preset the geo-gate does not fail closed (there is no geo evidence by design) and the rate limiter keys budgets on the rightmost `x-forwarded-for` entry.
+Under the `none` preset the geo-gate does not fail closed (there is no geo evidence by design) and the rate limiter keys budgets on the rightmost `x-forwarded-for` entry, best-effort (see the production caveat above).
 
 ### Clickjacking & Framing Defenses
 

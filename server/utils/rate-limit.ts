@@ -29,6 +29,13 @@ interface RateLimiterConfig {
 // EDGE_ORIGIN_SECRET (origin auth) to close that, or enforce it at the
 // network level (allowlisting the edge's IP ranges at the origin firewall).
 //
+// EDGE_PROVIDER=none is NOT protected by the production fail-closed branch:
+// the identity is the rightmost X-Forwarded-For entry (or the socket peer),
+// which is only as trustworthy as the hosting platform's proxy. A direct
+// client can rotate it and defeat the limiter. assertEdgeConfig permits
+// `none` in production as an explicit opt-out (edge-guard logs a warning at
+// boot) — operators must not read it as rate-limit protection.
+//
 // In dev and stg, the edge is not always in the request path, so the trusted
 // identity is not required and X-Forwarded-For / socket is used instead.
 //

@@ -164,6 +164,23 @@ describe('extractEdgeInputs — cloudfront', () => {
     }, undefined).clientIp).toBe('2001:db8::1')
   })
 
+  it('keeps a bare address intact when no port is present', () => {
+    // A misconfigured distribution or a different upstream stamping the
+    // header must not silently drop a numeric final hextet.
+    for (const bare of ['2001:db8::1', '2001:db8:85a3:0:0:8a2e:370:7334', '203.0.113.7']) {
+      expect(extractEdgeInputs('cloudfront', {
+        'cloudfront-viewer-address': bare,
+      }, undefined).clientIp).toBe(bare)
+    }
+    // Real CloudFront values still lose their port, whatever its length.
+    expect(extractEdgeInputs('cloudfront', {
+      'cloudfront-viewer-address': '2001:db8:85a3:0:0:8a2e:370:7334:443',
+    }, undefined).clientIp).toBe('2001:db8:85a3:0:0:8a2e:370:7334')
+    expect(extractEdgeInputs('cloudfront', {
+      'cloudfront-viewer-address': '::1:8080',
+    }, undefined).clientIp).toBe('::1')
+  })
+
   it('fails closed when the viewer address is absent', () => {
     expect(extractEdgeInputs('cloudfront', {}, '10.0.0.1').clientIp).toBeNull()
   })
@@ -289,6 +306,20 @@ describe('assertEdgeConfig', () => {
   it('refuses to boot production without an explicit preset', () => {
     process.env.DOPPLER_ENVIRONMENT = 'prd'
     expect(() => assertEdgeConfig()).toThrow(/EDGE_PROVIDER must be set in production/)
+  })
+
+  it('refuses to boot production with DEV_GEO_COUNTRY set', () => {
+    process.env.DOPPLER_ENVIRONMENT = 'prd'
+    process.env.EDGE_PROVIDER = 'cloudflare'
+    process.env.DEV_GEO_COUNTRY = 'GB'
+    expect(() => assertEdgeConfig()).toThrow(/DEV_GEO_COUNTRY must not be set in production/)
+
+    // Blank is the same as unset; non-production keeps the fallback.
+    process.env.DEV_GEO_COUNTRY = '  '
+    expect(() => assertEdgeConfig()).not.toThrow()
+    process.env.DOPPLER_ENVIRONMENT = 'stg'
+    process.env.DEV_GEO_COUNTRY = 'GB'
+    expect(() => assertEdgeConfig()).not.toThrow()
   })
 
   it('refuses to boot on a typoed preset in any environment', () => {
