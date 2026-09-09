@@ -19,7 +19,7 @@ const { getTokenByAddress } = useTokenList()
 const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
 const { entryCount, clearBatch } = useTxBatch()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { chainId: siteChainId } = useEulerAddresses()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
@@ -147,6 +147,17 @@ const onUnlockClick = async () => {
       constraints: [{ kind: 'remainder-loss', token: tokenAddress as Address, maximumLoss: reviewedLock.amountToBeBurned }],
       source: 'components/entities/reward/RewardUnlockItem.vue',
     })
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'reul-unlock',
+      review: getReviewProps(reviewedLock),
+      onSucceeded: async () => {
+        await refreshLocks(true)
+      },
+      onFailed: (cause) => {
+        error('Transaction failed')
+        logWarn('RewardUnlockItem/unlock', cause)
+      },
+    })
 
     const preparation = await prepareREULUnlockPlan(
       reviewedLock,
@@ -169,19 +180,7 @@ const onUnlockClick = async () => {
       return
     }
 
-    await openReviewState([intent], {
-      presentationKind: 'reul-unlock',
-      review: {
-        ...getReviewProps(reviewedLock),
-      },
-      onSucceeded: async () => {
-        await refreshLocks(true)
-      },
-      onFailed: (cause) => {
-        error('Transaction failed')
-        logWarn('RewardUnlockItem/unlock', cause)
-      },
-    })
+    await reviewLaunch.open()
   }
   catch (e) {
     await showPreparationError(e)

@@ -43,7 +43,7 @@ const { address, isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
@@ -798,8 +798,7 @@ const onRefreshMultiplyQuotes = () => {
 
 let multiplySubAccountSnapshotKey: string | null = null
 let multiplySubAccountSnapshotPromise: Promise<boolean> | null = null
-const ensureMultiplySubAccountSnapshot = (subAccount: Address): Promise<boolean> => {
-  const account = planAccount.value
+const ensureMultiplySubAccountSnapshot = (subAccount: Address, account = planAccount.value): Promise<boolean> => {
   if (!account) return Promise.resolve(false)
   const key = `${account.chainId}:${normalizeAddress(subAccount)}`
   if (multiplySubAccountSnapshotKey !== key) {
@@ -865,9 +864,10 @@ const addToBatch = async () => {
     const quoteIntents = quote
       ? multiplyQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
       : undefined
-    const intent = quoteIntents?.[0] ?? createMultiplyIntent(quote)
+    const intent = createMultiplyIntent(quote)
     await addBatchEntry({
       intent,
+      preparedIntent: quoteIntents?.[0],
       label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
       subAccount: receiver,
       multiply: true,
@@ -933,56 +933,84 @@ const onMultiplierInput = () => {
 const submitMultiply = async () => {
   if (isOperationBlocked.value) return
   if (isPreparing.value || isGeoBlocked.value || isMultiplyRestricted.value) return
+  if (isSubmitting.value || (!isConnected.value && !isSpyMode.value)) return
+  if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return
+  const supplyVaultSnapshot = multiplySupplyVault.value
+  const longVaultSnapshot = multiplyLongVault.value
+  const shortVaultSnapshot = multiplyShortVault.value
+  const debtAmount = multiplyDebtAmountNano.value
+  if (debtAmount <= 0n || multiplyErrorText.value) return
+  const subAccount = multiplySubAccount.value
+  if (!subAccount) {
+    error('Unable to resolve position')
+    return
+  }
+  const isSameAsset = normalizeAddress(longVaultSnapshot.asset.address) === normalizeAddress(shortVaultSnapshot.asset.address)
+  const quote = isSameAsset ? undefined : multiplySelectedQuote.value ?? undefined
+  if (!isSameAsset && !quote) return
+  const quoteIntents = quote && multiplySelectedQuoteCard.value?.quote === quote
+    ? multiplySelectedQuoteCard.value.intents
+    : undefined
+  const currentIntents = [createMultiplyIntent(quote)]
+  const reviewBorrowAmount = trimTrailingZeros(formatUnits(debtAmount, Number(shortVaultSnapshot.asset.decimals)))
+  const reviewSwapToAmount = quote
+    ? trimTrailingZeros(formatUnits(BigInt(quote.amountOut || 0), Number(longVaultSnapshot.asset.decimals)))
+    : undefined
+  const planAccountSnapshot = planAccount.value
+  const capturedChainId = chainId.value
+  const reviewLaunch = captureReviewState(currentIntents, {
+    presentationKind: 'borrow',
+    review: {
+      type: 'borrow',
+      asset: shortVaultSnapshot.asset,
+      amount: reviewBorrowAmount,
+      quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
+      swapToAsset: quote ? longVaultSnapshot.asset : undefined,
+      swapToAmount: reviewSwapToAmount,
+      swapMode: quote ? SwapperMode.EXACT_IN : undefined,
+      subAccount,
+      submittingLabel: 'Submitting...',
+    },
+    onSucceeded: () => {
+      refreshAllPositions(eulerLensAddresses.value, address.value || '')
+      setTimeout(() => {
+        router.replace({ path: '/portfolio', query: { network: route.query.network } })
+      }, 400)
+    },
+    onFailed: (cause) => {
+      console.warn(cause)
+      error('Transaction failed')
+      void reportClientEvent({
+        event: 'tx_execute_failed',
+        flow: 'multiply',
+        phase: 'execute',
+        chainId: capturedChainId,
+        operationType: 'multiply',
+        vaultAddress: longVaultSnapshot.address,
+        assetAddress: longVaultSnapshot.asset.address,
+        quoteProvider: multiplyRoutedVia.value ?? undefined,
+      }, cause)
+    },
+  }, quoteIntents)
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
-      if (isSubmitting.value || (!isConnected.value && !isSpyMode.value)) {
-        return
-      }
-      if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) {
-        return
-      }
-      const debtAmount = multiplyDebtAmountNano.value
-      if (debtAmount <= 0n) {
-        return
-      }
-      if (multiplyErrorText.value) {
-        return
-      }
-      const subAccount = multiplySubAccount.value
-      if (!subAccount) {
-        error('Unable to resolve position')
-        return
-      }
-
-      const isSameAsset = normalizeAddress(multiplyLongVault.value.asset.address) === normalizeAddress(multiplyShortVault.value.asset.address)
-      const quote = isSameAsset ? null : multiplySelectedQuote.value
-      if (!isSameAsset && !quote) {
-        return
-      }
-
-      const quoteIntents = multiplySelectedQuoteCard.value?.quote === quote
-        ? multiplySelectedQuoteCard.value.intents
-        : undefined
-      const intents = quoteIntents?.length ? quoteIntents : [createMultiplyIntent(quote ?? undefined)]
-
       try {
-        const account = planAccount.value
-        const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address)
+        const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address, planAccountSnapshot)
         plan.value = await planMultiply({
-          collateralVault: multiplySupplyVault.value.address as Address,
+          collateralVault: supplyVaultSnapshot.address as Address,
           collateralAmount: 0n,
-          collateralAsset: multiplySupplyVault.value.asset.address as Address,
-          longVault: multiplyLongVault.value.address as Address,
-          liabilityVault: multiplyShortVault.value.address as Address,
+          collateralAsset: supplyVaultSnapshot.asset.address as Address,
+          longVault: longVaultSnapshot.address as Address,
+          liabilityVault: shortVaultSnapshot.address as Address,
           liabilityAmount: debtAmount,
           receiver: subAccount as Address,
-          swapQuote: quote ?? undefined,
+          swapQuote: quote,
           swapperMode: SwapperMode.EXACT_IN,
-          account,
+          account: planAccountSnapshot,
           subAccountSnapshotApplied,
         })
-        preparedPlan.value = await prepareTransactionPlan(plan.value, { account, intents })
+        preparedPlan.value = await prepareTransactionPlan(plan.value, { account: planAccountSnapshot, intents: reviewLaunch.intents })
       }
       catch (e) {
         console.warn('[Multiply] failed to build plan', e)
@@ -990,10 +1018,10 @@ const submitMultiply = async () => {
           event: 'tx_plan_build_failed',
           flow: 'multiply',
           phase: 'build',
-          chainId: chainId.value,
+          chainId: capturedChainId,
           operationType: 'multiply',
-          vaultAddress: multiplyLongVault.value.address,
-          assetAddress: multiplyLongVault.value.asset.address,
+          vaultAddress: longVaultSnapshot.address,
+          assetAddress: longVaultSnapshot.asset.address,
           quoteProvider: multiplyRoutedVia.value ?? undefined,
         }, e)
         plan.value = null
@@ -1001,52 +1029,14 @@ const submitMultiply = async () => {
       }
 
       if (preparedPlan.value) {
-        const ok = await runMultiplySimulation(preparedPlan.value, undefined, undefined, intents)
+        const ok = await runMultiplySimulation(preparedPlan.value, undefined, undefined, reviewLaunch.intents)
         if (!ok) {
           return
         }
       }
 
-      const reviewBorrowAmount = trimTrailingZeros(formatUnits(debtAmount, Number(multiplyShortVault.value.asset.decimals)))
-      const reviewSwapToAmount = quote
-        ? trimTrailingZeros(formatUnits(BigInt(quote.amountOut || 0), Number(multiplyLongVault.value.asset.decimals)))
-        : undefined
-
       if (!plan.value) return
-      await openReviewState(intents, {
-        presentationKind: 'borrow',
-        review: {
-          type: 'borrow',
-          asset: multiplyShortVault.value.asset,
-          amount: reviewBorrowAmount,
-          quoteFetchedAt: quote ? multiplyEffectiveQuoteFetchedAt.value : null,
-          swapToAsset: quote ? multiplyLongVault.value.asset : undefined,
-          swapToAmount: reviewSwapToAmount,
-          swapMode: quote ? SwapperMode.EXACT_IN : undefined,
-          subAccount,
-          submittingLabel: 'Submitting...',
-        },
-        onSucceeded: () => {
-          refreshAllPositions(eulerLensAddresses.value, address.value || '')
-          setTimeout(() => {
-            router.replace({ path: '/portfolio', query: { network: route.query.network } })
-          }, 400)
-        },
-        onFailed: (cause) => {
-          console.warn(cause)
-          error('Transaction failed')
-          void reportClientEvent({
-            event: 'tx_execute_failed',
-            flow: 'multiply',
-            phase: 'execute',
-            chainId: chainId.value,
-            operationType: 'multiply',
-            vaultAddress: multiplyLongVault.value?.address,
-            assetAddress: multiplyLongVault.value?.asset.address,
-            quoteProvider: multiplyRoutedVia.value ?? undefined,
-          }, cause)
-        },
-      })
+      await reviewLaunch.open()
     })
   }
   finally {

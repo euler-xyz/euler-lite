@@ -19,7 +19,7 @@ const route = useRoute()
 const { error } = useToast()
 const { planWithdrawOrRedeem } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
-const { open: openReviewState } = useExecutionReview()
+const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -139,6 +139,7 @@ const submit = async () => {
     }
 
     const capturedAmount = amount.value
+    const capturedAsset = asset.value
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
     const owner = (subAccount.value ?? effectiveAddress.value!) as `0x${string}`
     const plannerArgs = isMax
@@ -150,6 +151,31 @@ const submit = async () => {
       args: plannerArgs,
       source: 'pages/earn/[vault]/[subAccount]/withdraw.vue',
       subAccounts: [owner],
+    })
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'withdraw',
+      review: {
+        type: 'withdraw',
+        asset: capturedAsset,
+        amount: capturedAmount,
+        submittingLabel: 'Submitting...',
+      },
+      onSucceeded: () => {
+        setTimeout(() => {
+          router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+        }, 400)
+      },
+      onFailed: (cause) => {
+        error('Transaction failed')
+        console.error('Transaction error:', cause)
+        void reportClientEvent({
+          event: 'tx_execute_failed',
+          flow: 'earn_withdraw',
+          phase: 'execute',
+          operationType: 'withdraw',
+          vaultAddress,
+        }, cause)
+      },
     })
 
     try {
@@ -182,31 +208,7 @@ const submit = async () => {
       }
     }
 
-    await openReviewState([intent], {
-      presentationKind: 'withdraw',
-      review: {
-        type: 'withdraw',
-        asset: asset.value,
-        amount: capturedAmount,
-        submittingLabel: 'Submitting...',
-      },
-      onSucceeded: () => {
-        setTimeout(() => {
-          router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-        }, 400)
-      },
-      onFailed: (cause) => {
-        error('Transaction failed')
-        console.error('Transaction error:', cause)
-        void reportClientEvent({
-          event: 'tx_execute_failed',
-          flow: 'earn_withdraw',
-          phase: 'execute',
-          operationType: 'withdraw',
-          vaultAddress,
-        }, cause)
-      },
-    })
+    await reviewLaunch.open()
   }
   finally {
     isPreparing.value = false

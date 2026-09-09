@@ -384,17 +384,19 @@ const addToBatch = async () => {
     const label = sameAsset
       ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
       : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+    const intent = createIntent({
+      kind: sameAsset ? 'refinance' : 'collateral',
+      planner: sameAsset ? 'migrate-same-asset-collateral' : 'swap-collateral',
+      args: sameAsset
+        ? { fromVault: fromAddr, toVault: toAddr, amount, positionAccount, toAsset: toAssetAddr, isMax, maxShares }
+        : { swapQuote, swapperMode: SwapperMode.EXACT_IN },
+      source: 'lend/swap:add-to-batch',
+      subAccounts: [positionAccount],
+    })
     await addBatchEntry({
       label,
-      intent: quoteIntents?.[0] ?? createIntent({
-        kind: sameAsset ? 'refinance' : 'collateral',
-        planner: sameAsset ? 'migrate-same-asset-collateral' : 'swap-collateral',
-        args: sameAsset
-          ? { fromVault: fromAddr, toVault: toAddr, amount, positionAccount, toAsset: toAssetAddr, isMax, maxShares }
-          : { swapQuote, swapperMode: SwapperMode.EXACT_IN },
-        source: 'lend/swap:add-to-batch',
-        subAccounts: [positionAccount],
-      }),
+      intent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: positionAccount,
       review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
     })

@@ -275,9 +275,16 @@ describe('useBorrowForm savings collateral', () => {
       constraints: [],
       metadata: { createdAt: intentSequence, source: input.source, operation: input.source },
     }))
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent }))
+    vi.stubGlobal('useOperationIntentFactory', () => ({
+      capture: () => mocks.createIntent,
+      create: mocks.createIntent,
+    }))
     vi.stubGlobal('useExecutionReview', () => ({
-      open: mocks.openReview,
+      capture: (intents: unknown[], options: unknown) => ({
+        intents,
+        usesPreparedIntents: false,
+        open: () => mocks.openReview(intents, options),
+      }),
     }))
     vi.stubGlobal('useEulerTx', () => ({
       planBorrow: mocks.planBorrow,
@@ -441,6 +448,37 @@ describe('useBorrowForm savings collateral', () => {
 
     expect(mocks.runSimulation).toHaveBeenCalled()
     expect(mocks.openReview).toHaveBeenCalled()
+  })
+
+  it('keeps the reviewed savings source bound to the borrow intent during preparation', async () => {
+    const form = makeForm(shallowRef([
+      makeSavingsPosition(SUB_ACCOUNT_A, 100n, 90n),
+      makeSavingsPosition(SUB_ACCOUNT_B, 250n, 240n),
+    ]))
+    form.onChangeCollateral(1)
+    form.collateralAmount.value = '5'
+    form.borrowAmount.value = '1'
+    let releasePlan!: () => void
+    mocks.planBorrow.mockImplementationOnce(() => new Promise((resolve) => {
+      releasePlan = () => resolve([{ type: 'evcBatch', items: [] }])
+    }))
+    mocks.runSimulation.mockResolvedValue(true)
+
+    const submitting = form.submit()
+    await vi.waitFor(() => expect(releasePlan).toBeTypeOf('function'))
+    form.onChangeCollateral(2)
+    releasePlan()
+    await submitting
+
+    expect(mocks.openReview).toHaveBeenCalledWith([
+      expect.objectContaining({
+        planner: expect.objectContaining({
+          args: expect.objectContaining({ borrowAccount: USER, collateral: expect.objectContaining({ from: SUB_ACCOUNT_A }) }),
+        }),
+      }),
+    ], expect.objectContaining({
+      review: expect.objectContaining({ subAccount: USER, sourceSubAccount: SUB_ACCOUNT_A }),
+    }))
   })
 
   it('recaptures direct and batch quote-backed intents after the borrow amount settles', async () => {

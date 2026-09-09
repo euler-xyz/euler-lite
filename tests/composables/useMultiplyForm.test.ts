@@ -53,6 +53,7 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
       fetchSingleBalance: vi.fn(async () => 100n),
       runPreparedSimulation: vi.fn(),
       modalOpen: vi.fn(),
+      openReview: vi.fn(async (..._args: unknown[]) => undefined),
       getSupplyCapWarning: vi.fn(() => ({
         level: 'info',
         title: 'Supply cap reached',
@@ -222,8 +223,18 @@ const makeForm = (vault: EVault) => useMultiplyForm({
 
 describe('useMultiplyForm cap validation', () => {
   beforeEach(() => {
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
-    vi.stubGlobal('useExecutionReview', () => ({ open: vi.fn() }))
+    const createIntent = vi.fn()
+    vi.stubGlobal('useOperationIntentFactory', () => ({
+      capture: () => createIntent,
+      create: createIntent,
+    }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (currentIntents: unknown[], options: unknown, preparedIntents?: unknown[]) => ({
+        intents: preparedIntents ?? currentIntents,
+        usesPreparedIntents: !!preparedIntents,
+        open: () => mocks.openReview(preparedIntents ?? currentIntents, options),
+      }),
+    }))
     vi.clearAllMocks()
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n })))
     mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
@@ -353,6 +364,46 @@ describe('useMultiplyForm cap validation', () => {
     await vi.waitFor(() => expect(mocks.getProjectedRatesBatch).toHaveBeenCalled())
     const requests = mocks.getProjectedRatesBatch.mock.calls.at(-1)?.[0] as Array<{ cashDelta: bigint }>
     expect(requests[0]?.cashDelta).toBe(1n)
+  })
+
+  it('keeps the reviewed savings source bound to the multiply plan during preparation', async () => {
+    const vault = makeVault(0, 0)
+    const sourceSubAccount = '0x0000000000000000000000000000000000000011'
+    const nextSourceSubAccount = '0x0000000000000000000000000000000000000022'
+    vi.stubGlobal('useEulerAccount', () => ({
+      depositPositions: ref([sourceSubAccount, nextSourceSubAccount].map(subAccount => ({
+        vault,
+        subAccount,
+        assets: 100n,
+        shares: 90n,
+      }))),
+    }))
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.isMultiplySavingCollateral.value = true
+    form.multiplySelectedSavingSubAccount.value = sourceSubAccount
+    form.multiplyInputAmount.value = '5'
+    form.multiplier.value = 2
+    let releasePlan!: () => void
+    mocks.planMultiply.mockImplementationOnce(() => new Promise((resolve) => {
+      releasePlan = () => resolve([{ type: 'evcBatch', items: [] }])
+    }))
+    mocks.prepareTransactionPlan.mockResolvedValue({ plan: [] })
+    mocks.runPreparedSimulation.mockResolvedValue(true)
+
+    const submitting = form.submitMultiply()
+    await vi.waitFor(() => expect(releasePlan).toBeTypeOf('function'))
+    form.multiplySelectedSavingSubAccount.value = nextSourceSubAccount
+    releasePlan()
+    await submitting
+
+    expect(mocks.planMultiply).toHaveBeenCalledWith(expect.objectContaining({
+      receiver: USER,
+      collateralShareSource: { from: sourceSubAccount, shares: 5n },
+    }))
+    expect(mocks.openReview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      review: expect.objectContaining({ subAccount: USER, sourceSubAccount }),
+    }))
   })
 
   it('derives projected Net APY, ROE, and rate transitions from one breakdown', async () => {

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Hash, StateOverride } from 'viem'
+import type { Address, Hash, StateOverride } from 'viem'
 import type { TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { useExecutionReview } from '~/composables/useExecutionReview'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 
 const { modalOpen, operationModal, reviewedOperationModal, isSpyMode } = vi.hoisted(() => ({
   modalOpen: vi.fn(),
@@ -20,6 +21,19 @@ vi.mock('~/components/ui/composables/useModal', () => ({
 
 const reviewId = `0x${'1'.repeat(64)}` as Hash
 const reviewDigest = `0x${'2'.repeat(64)}` as Hash
+const owner = '0x1000000000000000000000000000000000000000' as Address
+const intent = (intentId: string, amount: string): OperationIntent => ({
+  schemaVersion: 1,
+  intentId,
+  revision: 1,
+  kind: 'deposit',
+  chainId: 1,
+  account: owner,
+  subAccounts: [owner],
+  planner: { name: 'deposit', args: { amount } },
+  constraints: [],
+  metadata: { createdAt: 1, source: 'test', operation: 'test' },
+})
 
 describe('useExecutionReview', () => {
   beforeEach(() => {
@@ -50,16 +64,16 @@ describe('useExecutionReview', () => {
       type: 'migration',
     }
 
-    await useExecutionReview().open([], {
+    await useExecutionReview().capture([], {
       presentationKind: 'migration',
       review,
       tenderlyPrepared,
       tenderlyStateOverrides,
-    })
+    }).open()
 
     expect(prepare).toHaveBeenCalledWith([], {
       presentationKind: 'migration',
-      presentationInputs: review,
+      presentationInputs: expect.objectContaining(review),
     })
     expect(modalOpen).toHaveBeenCalledOnce()
     expect(modalOpen.mock.calls[0]?.[1].props.review).toMatchObject({
@@ -69,6 +83,68 @@ describe('useExecutionReview', () => {
       tenderlyPrepared,
       tenderlyStateOverrides,
     })
+  })
+
+  it('captures presentation inputs before asynchronous preparation', async () => {
+    let resolvePrepare: ((value: {
+      execution: { reviewId: Hash, reviewDigest: Hash }
+      prepared: TransactionPlanPrepared
+    }) => void) | undefined
+    const executablePrepared = { chainId: 1, plan: [{ type: 'executable' }] } as unknown as TransactionPlanPrepared
+    const prepare = vi.fn(() => new Promise<{
+      execution: { reviewId: Hash, reviewDigest: Hash }
+      prepared: TransactionPlanPrepared
+    }>((resolve) => {
+      resolvePrepare = resolve
+    }))
+    vi.stubGlobal('useReviewedExecution', () => ({ prepare }))
+    const review = {
+      asset: { address: '0x2000000000000000000000000000000000000000', symbol: 'USDC', decimals: 6 },
+      amount: '1',
+      type: 'repay',
+    }
+
+    const launch = useExecutionReview().capture([], {
+      presentationKind: 'repay',
+      review,
+    })
+    review.amount = '2'
+    review.asset.symbol = 'DAI'
+    const opening = launch.open()
+    resolvePrepare?.({ execution: { reviewId, reviewDigest }, prepared: executablePrepared })
+    await opening
+
+    expect(prepare).toHaveBeenCalledWith([], {
+      presentationKind: 'repay',
+      presentationInputs: expect.objectContaining({
+        amount: '1',
+        asset: expect.objectContaining({ symbol: 'USDC' }),
+      }),
+    })
+    expect(modalOpen.mock.calls[0]?.[1].props.review).toMatchObject({
+      amount: '1',
+      asset: { symbol: 'USDC' },
+    })
+  })
+
+  it('uses warmed intent DTOs only when their transaction semantics match the click', () => {
+    vi.stubGlobal('useReviewedExecution', () => ({ prepare: vi.fn() }))
+    const review = {
+      asset: { address: '0x2000000000000000000000000000000000000000', symbol: 'USDC', decimals: 6 },
+      amount: '1',
+    }
+    const prepared = intent('prepared', '1')
+    const equivalentCurrent = intent('current', '1')
+    const changedCurrent = intent('changed', '2')
+    const executionReview = useExecutionReview()
+
+    const matching = executionReview.capture([equivalentCurrent], { presentationKind: 'supply', review }, [prepared])
+    const changed = executionReview.capture([changedCurrent], { presentationKind: 'supply', review }, [prepared])
+
+    expect(matching.usesPreparedIntents).toBe(true)
+    expect(matching.intents).toEqual([prepared])
+    expect(changed.usesPreparedIntents).toBe(false)
+    expect(changed.intents).toEqual([changedCurrent])
   })
 
   it('opens a non-executable prepared preview in spy mode', async () => {
@@ -108,10 +184,10 @@ describe('useExecutionReview', () => {
       type: 'repay',
     }
 
-    await useExecutionReview().open([], {
+    await useExecutionReview().capture([], {
       presentationKind: 'repay',
       review,
-    })
+    }).open()
 
     expect(prepare).not.toHaveBeenCalled()
     expect(prepareReadOnly).toHaveBeenCalledWith([], {

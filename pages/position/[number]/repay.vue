@@ -250,13 +250,15 @@ const addToBatchWithoutWarnings = async () => {
       const quoteIntents = walletSwap.quotes.selectedQuoteCard.value?.quote === quote
         ? walletSwap.quotes.selectedQuoteCard.value.intents
         : undefined
+      const currentIntent = walletSwap.createRepayIntent(quote, {
+        selectedAsset: swapAsset,
+        direction: swapDirection,
+        isFullRepay: isClosing,
+      })
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
-        intent: quoteIntents?.[0] ?? walletSwap.createRepayIntent(quote, {
-          selectedAsset: swapAsset,
-          direction: swapDirection,
-          isFullRepay: isClosing,
-        }),
+        intent: currentIntent,
+        preparedIntent: quoteIntents?.[0],
         subAccount: position.value.subAccount as Address,
         affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
         nameOverride: `Repay ${borrowSymbol}`,
@@ -303,17 +305,20 @@ const addToBatchWithoutWarnings = async () => {
     const quoteIntents = quote && collateral.quotes.selectedQuoteCard.value?.quote === quote
       ? collateral.quotes.selectedQuoteCard.value.intents
       : undefined
+    const currentIntent = collateral.createRepayIntent(quote, {
+      sourceVault,
+      sourceAccount,
+      amount: sourceAmount,
+      debtAmount: sourceDebtAmount,
+      direction: sourceDirection,
+      isSameAsset,
+    })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
-      intent: quoteIntents?.[0] ?? collateral.createRepayIntent(quote, {
-        sourceVault,
-        sourceAccount,
-        amount: sourceAmount,
-        debtAmount: sourceDebtAmount,
-        direction: sourceDirection,
-        isSameAsset,
-      }),
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
+      sourceSubAccount: sourceAccount,
       affectedSubAccounts: collateral.isCrossPositionSource.value
         ? getAffectedSubAccounts(position.value.subAccount, sourceAccount)
         : getFullRepayAffectedSubAccounts(isClosing),
@@ -339,17 +344,20 @@ const addToBatchWithoutWarnings = async () => {
     const quoteIntents = quote && savings.quotes.selectedQuoteCard.value?.quote === quote
       ? savings.quotes.selectedQuoteCard.value.intents
       : undefined
+    const currentIntent = savings.createRepayIntent(quote, {
+      sourceVault,
+      sourceSubAccount,
+      amount: sourceAmount,
+      debtAmount: sourceDebtAmount,
+      direction: sourceDirection,
+      isSameAsset,
+    })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
-      intent: quoteIntents?.[0] ?? savings.createRepayIntent(quote, {
-        sourceVault,
-        sourceSubAccount,
-        amount: sourceAmount,
-        debtAmount: sourceDebtAmount,
-        direction: sourceDirection,
-        isSameAsset,
-      }),
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
+      sourceSubAccount: sourceSubAccount as Address | undefined,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing, sourceSubAccount),
       review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : savings.quotes.effectiveQuoteFetchedAt.value },
     })

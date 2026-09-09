@@ -126,7 +126,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { error } = useToast()
   const submitLabel = options.reviewLabel
   const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
-  const { open: openReviewState } = useExecutionReview()
+  const { capture: captureReviewState } = useExecutionReview()
   const usePreparedPipeline = options.usePreparedPipeline ?? true
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
@@ -971,23 +971,32 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     }
   }
 
-  const buildRawPlan = async (): Promise<TransactionPlan | null> => {
-    if (!collateralVault.value?.address || !asset.value?.address) return null
-    if (options.needsSwap.value && swapEffectiveQuote.value) {
-      return options.buildSwapPlan(swapEffectiveQuote.value, {
-        vaultAddress: collateralVault.value.address,
-        amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-        slippage: swapSlippage.value,
-        subAccount: position.value?.subAccount,
-        account: planAccount.value,
+  const buildRawPlan = async (snapshot: {
+    vaultAddress: string
+    assetAddress: string
+    assetDecimals: number
+    amount: string
+    needsSwap: boolean
+    quote?: SwapQuote
+    slippage: number
+    subAccount?: string
+    account?: Account<IHasVaultAddress>
+  }): Promise<TransactionPlan | null> => {
+    if (snapshot.needsSwap && snapshot.quote) {
+      return options.buildSwapPlan(snapshot.quote, {
+        vaultAddress: snapshot.vaultAddress,
+        amountNano: valueToNano(snapshot.amount || '0', snapshot.assetDecimals),
+        slippage: snapshot.slippage,
+        subAccount: snapshot.subAccount,
+        account: snapshot.account,
       })
     }
     return options.buildDirectPlan({
-      vaultAddress: collateralVault.value.address,
-      assetAddress: asset.value.address,
-      amountNano: valueToNano(amount.value || '0', asset.value.decimals),
-      subAccount: position.value?.subAccount,
-      account: planAccount.value,
+      vaultAddress: snapshot.vaultAddress,
+      assetAddress: snapshot.assetAddress,
+      amountNano: valueToNano(snapshot.amount || '0', snapshot.assetDecimals),
+      subAccount: snapshot.subAccount,
+      account: snapshot.account,
     })
   }
 
@@ -1011,29 +1020,66 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       || isInputAssetBlocked.value
       || isOutputAssetBlocked.value
       || isOutputAssetRestricted.value) return
+    if (!collateralVault.value?.address || !asset.value?.address) return
+
+    const needsSwap = options.needsSwap.value
+    const quote = needsSwap ? swapEffectiveQuote.value ?? undefined : undefined
+    const reviewAsset = options.getReviewAsset(needsSwap)
+    if (!reviewAsset) return
+    const snapshot = Object.freeze({
+      vaultAddress: collateralVault.value.address,
+      assetAddress: asset.value.address,
+      assetDecimals: asset.value.decimals,
+      amount: amount.value,
+      needsSwap,
+      quote,
+      slippage: swapSlippage.value,
+      subAccount: position.value?.subAccount,
+      hasBorrows: (position.value?.borrowed || 0n) > 0n,
+      account: planAccount.value,
+      reviewType: needsSwap ? options.swapReviewType : options.reviewType,
+      reviewAsset,
+      swapToAsset: needsSwap ? options.getSwapToAsset() : undefined,
+      swapToAmount: needsSwap ? swapEstimatedOutput.value : undefined,
+      quoteFetchedAt: needsSwap ? swapEffectiveQuoteFetchedAt.value : null,
+    })
+    const currentIntents = [options.createReviewIntent(quote)]
+    const preparedSwapPlan = usePreparedPipeline && needsSwap ? getSelectedPreparedSwapPlan() : null
+    const reviewLaunch = captureReviewState(currentIntents, {
+      presentationKind: snapshot.reviewType,
+      review: {
+        type: snapshot.reviewType,
+        asset: snapshot.reviewAsset,
+        amount: snapshot.amount,
+        quoteFetchedAt: snapshot.quoteFetchedAt,
+        subAccount: snapshot.subAccount,
+        hasBorrows: snapshot.hasBorrows,
+        swapToAsset: snapshot.swapToAsset,
+        swapToAmount: snapshot.swapToAmount,
+        swapMode: snapshot.needsSwap ? SwapperMode.EXACT_IN : undefined,
+        submittingLabel: 'Submitting...',
+      },
+      onSucceeded: () => finalizeExecutionUi(options.onAfterSend),
+      onFailed: (cause) => {
+        logWarn('collateral/send', cause)
+        error('Transaction failed')
+      },
+    }, preparedSwapPlan?.intents)
     isPreparing.value = true
     try {
       await guardWithPriceImpact(async () => {
-        if (!collateralVault.value?.address || !asset.value?.address) return
-
         plan.value = null
         preparedPlan.value = null
-        let intents: readonly OperationIntent[]
         try {
-          const preparedSwapPlan = usePreparedPipeline ? getSelectedPreparedSwapPlan() : null
-          if (preparedSwapPlan) {
+          if (preparedSwapPlan && reviewLaunch.usesPreparedIntents) {
             plan.value = preparedSwapPlan.plan
             preparedPlan.value = preparedSwapPlan.prepared
-            intents = preparedSwapPlan.intents?.length
-              ? preparedSwapPlan.intents
-              : [options.createReviewIntent(swapEffectiveQuote.value ?? undefined)]
           }
           else {
-            intents = [options.createReviewIntent(options.needsSwap.value ? swapEffectiveQuote.value ?? undefined : undefined)]
-            const rawPlan = await buildRawPlan()
+            const rawPlan = await buildRawPlan(snapshot)
             plan.value = rawPlan
             if (rawPlan && usePreparedPipeline) {
-              preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: planAccount.value, intents })
+              preparedPlan.value = await prepareTransactionPlan(rawPlan, { account: snapshot.account, intents: reviewLaunch.intents })
             }
           }
         }
@@ -1052,7 +1098,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
         if (usePreparedPipeline) {
           if (!preparedPlan.value) return
-          const ok = await runPreparedSimulation(preparedPlan.value, buildCollateralStateOverrideOptions(), undefined, intents)
+          const ok = await runPreparedSimulation(preparedPlan.value, buildCollateralStateOverrideOptions(), undefined, reviewLaunch.intents)
           if (!ok) return
         }
         else if (plan.value) {
@@ -1060,29 +1106,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
           if (!ok) return
         }
 
-        const reviewAsset = options.getReviewAsset(options.needsSwap.value)
-        const reviewType = options.needsSwap.value ? options.swapReviewType : options.reviewType
         if (!plan.value) return
-        await openReviewState(intents, {
-          presentationKind: reviewType,
-          review: {
-            type: reviewType,
-            asset: reviewAsset,
-            amount: amount.value,
-            quoteFetchedAt: options.needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
-            subAccount: position.value?.subAccount,
-            hasBorrows: (position.value?.borrowed || 0n) > 0n,
-            swapToAsset: options.needsSwap.value ? options.getSwapToAsset() : undefined,
-            swapToAmount: options.needsSwap.value ? swapEstimatedOutput.value : undefined,
-            swapMode: options.needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-            submittingLabel: 'Submitting...',
-          },
-          onSucceeded: () => finalizeExecutionUi(options.onAfterSend),
-          onFailed: (cause) => {
-            logWarn('collateral/send', cause)
-            error('Transaction failed')
-          },
-        })
+        await reviewLaunch.open()
       })
     }
     finally {
