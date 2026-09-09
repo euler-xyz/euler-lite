@@ -5,7 +5,7 @@
  * (plugins, API handlers) and client-side code executed during SSR
  * (e.g. `useChainConfig` on the server branch) import from a single
  * source of truth. The convention is:
- *   - `RPC_URL_<chainId>` — enables a chain (presence, not value, matters)
+ *   - `RPC_URL_<chainId>` — a non-empty HTTP(S) URL enables a known chain
  *
  * The per-chain subgraph URL (`SUBGRAPH_URL_<chainId>`, legacy
  * `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`) is resolved server-side only, inside

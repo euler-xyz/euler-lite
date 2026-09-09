@@ -94,7 +94,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Nuxt.js 3                                │
+│                        Nuxt.js 4                                │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Vue 3 + Composition API                      │
 ├─────────────────────────────────────────────────────────────────┤
@@ -131,9 +131,9 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 ## 🎯 Key Architectural Decisions
 
-### 1. Nuxt.js 3 Framework
+### 1. Nuxt.js 4 Framework
 
-**Why Nuxt.js 3?**
+**Why Nuxt.js 4?**
 
 - **SSR Disabled**: Client-side only SPA, SSR is not needed
 - **Auto-imports**: Reduces boilerplate and improves developer experience

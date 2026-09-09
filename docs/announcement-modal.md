@@ -15,9 +15,9 @@ Lite can show a one-time, deployment-controlled announcement after onboarding. I
 
 ## Configuration
 
-Set any content field to enable the modal. Short names are read at server startup for Doppler/runtime injection; `NUXT_PUBLIC_` names are build-time fallbacks for static deployments.
+Set any content field to enable the modal. At server startup, the first non-empty value wins: the short name first, then its `NUXT_PUBLIC_` alias. Both naming forms support runtime injection. When `window.__APP_CONFIG__` is unavailable, the client reads Nuxt public runtime config populated through the `NUXT_PUBLIC_` names.
 
-| Runtime env var | Build-time fallback | Notes |
+| Preferred runtime env var | Runtime alias / public config fallback | Notes |
 |---|---|---|
 | `CONFIG_ANNOUNCEMENT_TITLE` | `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE` | Modal title. Defaults to `Announcement` only if omitted. |
 | `CONFIG_ANNOUNCEMENT_BODY` | `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY` | Paragraph text. Trimmed. |
@@ -61,8 +61,8 @@ If the URL is rejected and no other content is configured, the announcement is d
 ## Operational Notes
 
 - Use the short `CONFIG_ANNOUNCEMENT_*` names for deployments where Doppler or another secret manager injects env vars at container startup. They do not require a rebuild because `server/plugins/app-config.ts` reads them when Nitro starts.
-- Use `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` only when the app is built as static assets or when build-time public runtime config is the intended source.
-- To retire an announcement, unset all four content vars and restart/redeploy the server.
+- `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` names also work at server startup when the corresponding short name is unset or empty. They also populate the public runtime config fallback.
+- To retire an announcement, clear both `CONFIG_ANNOUNCEMENT_*` and `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` naming forms for all four content fields, then restart/redeploy the server. For static assets that use the public config fallback, rebuild with the fields cleared.
 - To force the current announcement to reappear in a browser during local testing, clear `localStorage["announcement-seen-token"]`.
 
 ## Troubleshooting

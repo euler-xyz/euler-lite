@@ -170,7 +170,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ## 🏛️ Key Technologies
 
-- **Frontend**: Nuxt.js 3, Vue 3, TypeScript
+- **Frontend**: Nuxt.js 4, Vue 3, TypeScript
 - **Blockchain**: Multiple EVM chains
 - **DeFi Protocol**: Euler Finance
 - **Wallet Integration**: Wagmi / Reown (EVM wallets)

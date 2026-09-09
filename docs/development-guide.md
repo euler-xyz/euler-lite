@@ -69,9 +69,9 @@ CI=true npm run test:run
 
 ## Environment variables
 
-Configuration is split into two mechanisms:
+Configuration is split into three mechanisms:
 
-1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, branding, and deployment announcements. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`, with `NUXT_PUBLIC_*` values as build-time fallbacks. Browser V3 data services use the same-origin `/api/internal/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
+1. **`useEnvConfig()`** (`composables/useEnvConfig.ts`) — API URLs, Pyth, Reown, branding, and deployment announcements. Injected at runtime via `server/plugins/app-config.ts` into `window.__APP_CONFIG__`, with Nuxt public runtime config as a fallback when the injected config is unavailable. Browser V3 data services use the same-origin `/api/internal/v3` proxy. The proxy reads `V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL` for the upstream URL and `EULER_SDK_V3_API_KEY` for the optional server-side API key.
 
 2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — social links, feature flags, label source URLs, and static deployment fallbacks. Set via `NUXT_PUBLIC_CONFIG_*` env vars. Includes `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` and `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` for configuring upstream data sources. Both are fetched through server-side proxy endpoints with 5-minute caching — see [Server-Side Data Proxies](#server-side-data-proxies) below.
 
@@ -81,7 +81,7 @@ See the [README](../README.md) for the full env var reference.
 
 Dev HTTPS: `HTTPS_KEY`, `HTTPS_CERT` (optional).
 
-Announcement modal content can be supplied as runtime `CONFIG_ANNOUNCEMENT_TITLE`, `CONFIG_ANNOUNCEMENT_BODY`, `CONFIG_ANNOUNCEMENT_ITEMS`, and `CONFIG_ANNOUNCEMENT_URL` values, or as `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` build-time fallbacks. See [Announcement Modal](./announcement-modal.md) for examples, dismissal behavior, and URL constraints.
+Announcement modal content is read at server startup from `CONFIG_ANNOUNCEMENT_TITLE`, `CONFIG_ANNOUNCEMENT_BODY`, `CONFIG_ANNOUNCEMENT_ITEMS`, and `CONFIG_ANNOUNCEMENT_URL`, falling back to the corresponding `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` names. The prefixed names also populate the public runtime config fallback. See [Announcement Modal](./announcement-modal.md) for examples, dismissal behavior, and URL constraints.
 
 ## Server-Side Data Proxies
 
@@ -144,7 +144,7 @@ The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update reque
 
 ## Conventions
 
-- Vue 3 + Nuxt 3 with Composition API.
+- Vue 3 + Nuxt 4 with Composition API.
 - Composables named as `useXxx.ts` and colocated in `composables/`.
 - Prefer referencing on-chain data via helpers in `entities/` and state via `composables/`.
 
