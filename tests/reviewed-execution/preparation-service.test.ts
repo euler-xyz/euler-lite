@@ -1,14 +1,15 @@
 import { encodeFunctionData, getAddress, keccak256, toHex } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { Account, EVCBatchItem, IHasVaultAddress, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { EVC_ABI } from '~/abis/evc'
 import type { PolicyState, WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
 import { GenerationPublisher, PreparationCache } from '~/features/reviewed-execution/planning/cache'
 import { ReviewedExecutionPreparationService, type ReviewedExecutionDependencies } from '~/features/reviewed-execution/planning/service'
-import { PlanningSnapshotLoader } from '~/features/reviewed-execution/planning/snapshot-loader'
+import { PlanningSnapshotLoader, type SnapshotLoaderDependencies } from '~/features/reviewed-execution/planning/snapshot-loader'
 import { createAppSnapshotDependencies } from '~/features/reviewed-execution/planning/app-snapshot'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
@@ -32,6 +33,7 @@ const EVC = getAddress('0x4000000000000000000000000000000000000000')
 const AAVE_POOL = getAddress('0x5000000000000000000000000000000000000000')
 const POSITION_ACCOUNT = getAddress('0x6000000000000000000000000000000000000000')
 const REUL = getAddress('0x7000000000000000000000000000000000000000')
+const MORPHO_VAULT = getAddress('0x8000000000000000000000000000000000000000')
 const intent: OperationIntent = {
   schemaVersion: 1, intentId: 'intent-1', revision: 1, kind: 'deposit', chainId: 1, account: ACCOUNT,
   subAccounts: [ACCOUNT], planner: { name: 'deposit', args: { vaultAddress: VAULT, assetAddress: TOKEN, amount: 10n } },
@@ -52,10 +54,14 @@ beforeEach(() => {
   vi.mocked(getEulerLabelsVersion).mockReturnValue(1)
   vi.mocked(detectVpn).mockReset().mockResolvedValue(false)
   vi.mocked(screenAddress).mockReset().mockResolvedValue(false)
-  vi.stubGlobal('useVaultRegistry', () => ({
-    getVault: (address: string) => getAddress(address) === VAULT ? currentVault : undefined,
+  const getVault = (address: string) => getAddress(address) === VAULT ? currentVault : undefined
+  const registry = {
+    getVault,
+    getOrFetch: vi.fn(async (address: string) => getVault(address)),
+    getType: (address: string) => getVault(address)?.type,
     isVerifiedVault: () => true,
-  }))
+  }
+  vi.stubGlobal('useVaultRegistry', () => registry)
   vi.stubGlobal('useTokenList', () => ({
     getTokenByAddress: (address: string) => getAddress(address) === TOKEN
       ? { address: TOKEN, symbol: 'TEST', name: 'Test token', decimals: 18 }
@@ -67,12 +73,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const createAppPolicyService = (plannerName: OperationIntent['planner']['name']) => {
+const createAppPolicyService = (
+  plannerName: OperationIntent['planner']['name'],
+  snapshotDependencies: SnapshotLoaderDependencies = { load: async key => ({
+    value: { key }, observedBlock: 100n, version: 'v1', freshUntil: 5_000,
+  }) },
+) => {
   const cache = new PreparationCache()
   const generation = new GenerationPublisher()
-  const snapshotLoader = new PlanningSnapshotLoader(cache, { load: async key => ({
-    value: { key }, observedBlock: 100n, version: 'v1', freshUntil: 5_000,
-  }) }, generation, 'compiler-v1')
+  const snapshotLoader = new PlanningSnapshotLoader(cache, snapshotDependencies, generation, 'compiler-v1')
   const compiler = new IntentCompilerRegistry({ [plannerName]: { compile: async () => plan } }, plans => plans.flat())
   return new ReviewedExecutionPreparationService({
     compiler,
@@ -119,6 +128,32 @@ const aaveMigrationIntent: OperationIntent = {
   metadata: { createdAt: 1, source: 'test', operation: 'test' },
 }
 const aaveWallet: WalletBinding = { ...wallet, subAccounts: [ACCOUNT, POSITION_ACCOUNT] }
+const metamorphoMigrationIntent = (version: 'v1' | 'v2') => createOperationIntent({
+  kind: 'migration',
+  planner: 'cross-protocol-migration',
+  chainId: 1,
+  account: ACCOUNT,
+  subAccounts: [ACCOUNT, POSITION_ACCOUNT],
+  args: {
+    direction: 'external-to-euler',
+    connectorId: 'metamorpho',
+    owner: ACCOUNT,
+    positionRef: { vault: MORPHO_VAULT, version },
+    target: { eulerAccount: POSITION_ACCOUNT, collateralVault: VAULT },
+    deadline: 1_000n,
+    authorizationEvidenceDigest: keccak256(toHex('metamorpho-authorization')),
+  },
+  constraints: [{ kind: 'maximum-input', token: TOKEN, amount: 10n }],
+  source: 'test',
+  createdAt: 1,
+  intentId: `intent-metamorpho-${version}`,
+})
+const appSnapshotDependencies = () => createAppSnapshotDependencies({
+  account: { chainId: 1, owner: ACCOUNT, subAccounts: {} } as Account<IHasVaultAddress>,
+  getBlockNumber: async () => 100n,
+  dataVersion: 'data-v1',
+  labelsVersion: 'labels-v1',
+})
 const reulIntent: OperationIntent = {
   schemaVersion: 1,
   intentId: 'intent-reul-unlock',
@@ -278,6 +313,54 @@ describe('authoritative reviewed execution preparation', () => {
     expect(execution.policy.results).not.toContainEqual(expect.objectContaining({ concern: 'wallet-screening' }))
     expect(detectVpn).not.toHaveBeenCalled()
     expect(screenAddress).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['v1', 'migration'],
+    ['v1', 'batch'],
+    ['v2', 'migration'],
+    ['v2', 'batch'],
+  ] as const)('prepares a MetaMorpho %s migration with real app snapshots for %s review', async (version, presentationKind) => {
+    const migrationIntent = metamorphoMigrationIntent(version)
+    const service = createAppPolicyService('cross-protocol-migration', appSnapshotDependencies())
+
+    const { execution } = await service.prepare({
+      intents: [migrationIntent],
+      wallet: aaveWallet,
+      cartGeneration: 0,
+      runtime: {},
+      presentationKind,
+      presentationInputs: presentationKind === 'batch'
+        ? [{ id: migrationIntent.intentId, review: { type: 'migration' } }]
+        : { type: 'migration' },
+      compilerVersion: 'compiler-v1',
+      policyVersionDigest: keccak256(toHex('policy-v1')),
+      freshUntil: 5_000,
+    })
+
+    expect(useVaultRegistry().getOrFetch).toHaveBeenCalledExactlyOnceWith(VAULT)
+    expect(execution.binding.presentationKind).toBe(presentationKind)
+    expect(execution.intents[0].planner.args.positionRef).toEqual({ vault: MORPHO_VAULT, version })
+    expect(execution.policy.subjects).toContainEqual({ kind: 'vault-or-contract', value: VAULT })
+    expect(execution.policy.subjects).not.toContainEqual({ kind: 'vault-or-contract', value: MORPHO_VAULT })
+    await expect(resolveAppPolicy(execution.requestSet, 200)).resolves.toBeDefined()
+  })
+
+  it('still rejects a MetaMorpho migration when the Euler destination snapshot is unavailable', async () => {
+    currentVault = undefined
+    const service = createAppPolicyService('cross-protocol-migration', appSnapshotDependencies())
+
+    await expect(service.prepare({
+      intents: [metamorphoMigrationIntent('v2')],
+      wallet: aaveWallet,
+      cartGeneration: 0,
+      runtime: {},
+      presentationKind: 'migration',
+      presentationInputs: { type: 'migration' },
+      compilerVersion: 'compiler-v1',
+      policyVersionDigest: keccak256(toHex('policy-v1')),
+      freshUntil: 5_000,
+    })).rejects.toThrow(`Vault snapshot is unavailable for ${VAULT}`)
   })
 
   it('keeps real vault metadata failures fail closed', async () => {
