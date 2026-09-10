@@ -18,17 +18,48 @@ describe('detectVpn', () => {
     vi.unstubAllGlobals()
   })
 
-  it('reads the VPN edge header', async () => {
+  it.each([
+    ['true', true],
+    ['false', false],
+    [' TRUE ', true],
+    [' FALSE ', false],
+    ['', null],
+    ['unknown', null],
+  ] as const)('records header %j as %s', async (header, expected) => {
     stubWindow(true)
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, {
-      headers: { 'x-is-vpn': 'true' },
+      headers: { 'x-is-vpn': header },
       status: 200,
     })))
 
-    await expect(detectVpn()).resolves.toBe(true)
+    await expect(detectVpn()).resolves.toBe(expected)
   })
 
-  it('fails closed when VPN detection stalls', async () => {
+  it('records a missing header as unknown', async () => {
+    stubWindow(true)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 200 })))
+
+    await expect(detectVpn()).resolves.toBeNull()
+  })
+
+  it('records an unsuccessful HTTP response as unknown even with a VPN header', async () => {
+    stubWindow(true)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, {
+      headers: { 'x-is-vpn': 'true' },
+      status: 503,
+    })))
+
+    await expect(detectVpn()).resolves.toBeNull()
+  })
+
+  it('records a network failure as unknown', async () => {
+    stubWindow(true)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    await expect(detectVpn()).resolves.toBeNull()
+  })
+
+  it('records a timeout as unknown', async () => {
     vi.useFakeTimers()
     stubWindow(true)
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
@@ -41,7 +72,7 @@ describe('detectVpn', () => {
 
     await vi.advanceTimersByTimeAsync(WALLET_SCREENING_TIMEOUT_MS)
 
-    await expect(promise).resolves.toBe(true)
+    await expect(promise).resolves.toBeNull()
   })
 
   it('skips the probe entirely when the edge provides no VPN evidence', async () => {
@@ -50,7 +81,7 @@ describe('detectVpn', () => {
 
     for (const vpnDetection of [false, undefined] as const) {
       stubWindow(vpnDetection)
-      await expect(detectVpn()).resolves.toBe(false)
+      await expect(detectVpn()).resolves.toBeNull()
     }
     expect(fetchMock).not.toHaveBeenCalled()
   })
