@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildProductDescriptors, buildTokenLogoMap, fetchTokenList } from '~/server/utils/labels-view'
-import { INTERNAL_FETCH_HEADERS } from '~/server/utils/internal-headers'
+import { getInternalFetchHeaders } from '~/server/utils/internal-headers'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -20,7 +20,7 @@ describe('fetchTokenList', () => {
     ])
     expect(fetch).toHaveBeenCalledWith('/api/internal/token-list', {
       query: { chainId: 1 },
-      headers: INTERNAL_FETCH_HEADERS,
+      headers: getInternalFetchHeaders(),
     })
   })
 })

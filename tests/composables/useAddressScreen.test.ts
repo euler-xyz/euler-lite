@@ -80,8 +80,8 @@ describe('useAddressScreen', () => {
     expect(screening.isAddressScreened(USER)).toBe(true)
   })
 
-  it('disconnects restricted addresses without marking them screened', async () => {
-    mocks.detectVpn.mockResolvedValue(false)
+  it.each([true, false, null])('disconnects restricted addresses regardless of VPN evidence (%s)', async (vpnIsUsed) => {
+    mocks.detectVpn.mockResolvedValue(vpnIsUsed)
     mocks.screenAddress.mockResolvedValue(true)
 
     const screening = useAddressScreen()
@@ -92,17 +92,17 @@ describe('useAddressScreen', () => {
     expect(screening.isAddressScreened(USER)).toBe(false)
   })
 
-  it('blocks a positive local VPN verdict without letting remote screening clear it', async () => {
-    mocks.detectVpn.mockResolvedValue(true)
+  it.each([true, false, null])('allows a screened address regardless of VPN evidence (%s)', async (vpnIsUsed) => {
+    mocks.detectVpn.mockResolvedValue(vpnIsUsed)
     mocks.screenAddress.mockResolvedValue(false)
 
     const screening = useAddressScreen()
     await screening.screenConnectedAddress(USER)
 
-    expect(mocks.screenAddress).not.toHaveBeenCalled()
-    expect(mocks.disconnect).toHaveBeenCalledTimes(1)
-    expect(mocks.modalOpen).toHaveBeenCalledTimes(1)
-    expect(screening.isAddressScreened(USER)).toBe(false)
+    expect(mocks.screenAddress).toHaveBeenCalledWith(USER, vpnIsUsed)
+    expect(mocks.disconnect).not.toHaveBeenCalled()
+    expect(mocks.modalOpen).not.toHaveBeenCalled()
+    expect(screening.isAddressScreened(USER)).toBe(true)
   })
 
   it('invalidates a pending verdict when screening state is reset', async () => {

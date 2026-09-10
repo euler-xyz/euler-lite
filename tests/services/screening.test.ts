@@ -10,10 +10,14 @@ describe('screenAddress', () => {
     vi.unstubAllGlobals()
   })
 
-  it('allows only an explicit false suspicious verdict', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 })))
+  it.each([true, false, null])('forwards VPN audit evidence (%s) and allows an explicit clean verdict', async (vpnIsUsed) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ addressIsSuspicious: false }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
 
-    await expect(screenAddress(USER, false)).resolves.toBe(false)
+    await expect(screenAddress(USER, vpnIsUsed)).resolves.toBe(false)
+    expect(fetchMock).toHaveBeenCalledWith('/api/internal/screen-address', expect.objectContaining({
+      body: JSON.stringify({ address: USER, vpnIsUsed }),
+    }))
   })
 
   it('fails closed for non-ok responses and malformed success bodies', async () => {

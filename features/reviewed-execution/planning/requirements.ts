@@ -17,20 +17,32 @@ const VAULT_KEYS = new Set(['vault', 'vaultAddress', 'borrowVault', 'collateralV
 const ASSET_KEYS = new Set(['assetAddress', 'liabilityAsset', 'tokenIn', 'tokenOut', 'collateralAsset', 'debtAsset', 'fromAsset', 'toAsset', 'oldLiabilityAsset', 'newLiabilityAsset', 'wrappedTokenAddress', 'loanToken', 'collateralToken'])
 const ACCOUNT_KEYS = new Set(['owner', 'receiver', 'borrowAccount', 'repayAccount', 'positionAccount', 'liabilityAccount', 'fromAccount', 'from', 'to', 'subAccount', 'accountIn', 'accountOut', 'account', 'eulerAccount'])
 
-const collectNamedAddresses = (value: unknown, key: string | undefined, target: { accounts: Set<Address>, vaults: Set<Address>, assets: Set<Address> }) => {
+const collectNamedAddresses = (
+  value: unknown,
+  key: string | undefined,
+  target: { accounts: Set<Address>, vaults: Set<Address>, assets: Set<Address> },
+  collectVaults = true,
+) => {
   if (typeof value === 'string' && isAddress(value)) {
     const address = getAddress(value)
     // SDK swap quotes use zero-address account/vault fields to mean that the
     // corresponding wallet-side leg is absent. They are transport sentinels,
     // not snapshot or policy dependencies.
     if (address === zeroAddress) return
-    if (key && VAULT_KEYS.has(key)) target.vaults.add(address)
+    if (collectVaults && key && VAULT_KEYS.has(key)) target.vaults.add(address)
     else if (key && ASSET_KEYS.has(key)) target.assets.add(address)
     else if (key && ACCOUNT_KEYS.has(key)) target.accounts.add(address)
     return
   }
-  if (Array.isArray(value)) value.forEach(entry => collectNamedAddresses(entry, key, target))
-  else if (value && typeof value === 'object') Object.entries(value).forEach(([childKey, entry]) => collectNamedAddresses(entry, childKey, target))
+  if (Array.isArray(value)) value.forEach(entry => collectNamedAddresses(entry, key, target, collectVaults))
+  else if (value && typeof value === 'object') {
+    Object.entries(value).forEach(([childKey, entry]) => {
+      // Migration positionRef values belong to external protocols, including
+      // externalTarget.positionRef. Their assets still need policy checks,
+      // but a MetaMorpho vault cannot be loaded through the Euler registry.
+      collectNamedAddresses(entry, childKey, target, collectVaults && childKey !== 'positionRef')
+    })
+  }
 }
 
 export const intentSetDigest = (intents: readonly OperationIntent[]): Hash =>

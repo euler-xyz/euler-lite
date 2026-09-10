@@ -2,7 +2,7 @@ import { WALLET_SCREENING_TIMEOUT_MS } from '~/entities/tuning-constants'
 
 export async function screenAddress(
   address: string,
-  vpnIsUsed: boolean,
+  vpnIsUsed: boolean | null,
 ): Promise<boolean> {
   if (!address) return false
 
