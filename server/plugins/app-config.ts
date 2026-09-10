@@ -14,6 +14,7 @@ import {
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
+import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
 
 export { escapeScriptJson }
@@ -55,6 +56,10 @@ function readAppConfig() {
     // Adapter chain pinned for the browser's "fast" SDK instance. See
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
+    // Whether the deployment's edge provider measures VPN usage. The client
+    // uses this to skip the VPN probe (services/vpn.ts) on edges that carry
+    // no VPN evidence.
+    vpnDetection: edgeProvidesVpnEvidence(parseEdgeProvider(process.env.EDGE_PROVIDER)),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
     eulerInterfacesBranch: env(
       'EULER_SDK_EULER_INTERFACES_BRANCH',

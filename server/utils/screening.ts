@@ -1,4 +1,5 @@
 import type { H3Event } from 'h3'
+import { getEdgeContext } from '~/server/utils/edge'
 import { fetchWithTimeout, UPSTREAM_FETCH_TIMEOUT_MS } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
 import { hashIdentifier } from '~/server/utils/observability'
@@ -42,30 +43,14 @@ export function isValidScreeningAddress(value: unknown): value is string {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
 }
 
-function isTruthyHeader(value: string | string[] | undefined): boolean {
-  const headers = Array.isArray(value) ? value : [value]
-  return headers
-    .filter((header): header is string => typeof header === 'string')
-    .flatMap(header => header.split(','))
-    .some(token => token.trim().toLowerCase() === 'true')
-}
-
-function hasHeader(value: string | string[] | undefined): boolean {
-  const values = Array.isArray(value) ? value : [value]
-  return values.some(entry => typeof entry === 'string' && entry.trim() !== '')
-}
-
-// Edge headers remain authoritative, but a strict client `true` is an
+// Edge evidence (normalized by the edge context; `null` on presets that
+// measure no VPN usage) is authoritative, but a strict client `true` is an
 // additional positive signal. Client false/invalid values cannot clear an
-// edge verdict. With no positive signal and no header the value is unknown.
+// edge verdict. With no positive signal and no edge evidence the value is
+// unknown, never a fabricated false.
 export function deriveVpnIsUsed(event: H3Event, clientVpnIsUsed?: unknown): boolean | null {
   if (clientVpnIsUsed === true) return true
-  const vpn = event.node.req.headers['x-is-vpn']
-  const proxyOrVpn = event.node.req.headers['x-is-proxy-or-vpn']
-  if (!hasHeader(vpn) && !hasHeader(proxyOrVpn)) {
-    return null
-  }
-  return isTruthyHeader(vpn) || isTruthyHeader(proxyOrVpn)
+  return getEdgeContext(event).vpnIsUsed
 }
 
 // The restricted API key must only travel over TLS, and never follow a
@@ -88,6 +73,10 @@ function isAllowedScreeningUri(uri: string): boolean {
 /**
  * Screen an address against the data-v3 compliance API
  * (`POST /v3/compliance/address-screening`).
+ *
+ * `vpnIsUsed` comes from `deriveVpnIsUsed`: edge-derived VPN evidence from
+ * the request context, or a strict client-reported `true`; `null` when the
+ * deployment's edge measures none and the client reports no positive signal.
  *
  * Fail-closed: every branch other than an HTTP 200 carrying an explicit
  * `data.addressIsSuspicious: false` **for the requested address** reports the
