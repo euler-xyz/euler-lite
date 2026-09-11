@@ -39,6 +39,7 @@ const {
   hasInsufficientBalance,
   insufficientBalanceMessage,
   prepareBatchExecutionReview,
+  discardBatchExecutionReview,
   captureBatchCompletion,
   completeBatchExecution,
   setExecutionError,
@@ -495,7 +496,7 @@ const handleExecute = async () => {
 
 const handleClose = () => {
   if (!isExecuting.value && preparedExecution.value) {
-    executionService.discard(preparedExecution.value.execution.reviewId)
+    discardBatchExecutionReview(preparedExecution.value.execution.reviewId)
   }
   dismissExecutionError()
   emit('close')
