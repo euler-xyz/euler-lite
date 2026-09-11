@@ -100,6 +100,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const quote = options.multiplySelectedQuote.value
     if (!quote) return
 
+    const swapOutputAmount = trimTrailingZeros(formatUnits(BigInt(quote.amountOut || '0'), Number(longVault.asset.decimals)))
     const supplyAmount = options.multiplyInputAmount.value
     const supplyAmountNano = valueToNano(supplyAmount || '0', supplyVault.asset.decimals)
 
@@ -254,7 +255,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       { index: wIdx++, label: 'Enable controller', labelSuffix: borrowVaultName, isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
       { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: supplyAmount } },
       { index: wIdx++, label: 'Borrow', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } },
-      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyLongAmount.value } },
+      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutputAmount } },
       { index: wIdx, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
     ]
 
