@@ -1604,6 +1604,33 @@ describe('useTxBatch execution errors', () => {
     expect(batch.entries.value).toHaveLength(1)
   })
 
+  it.each([false, true])('preserves a newer preparation when an older review is discarded (resolved: %s)', async (resolved) => {
+    const batch = useTxBatch()
+    const first = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    const second = { execution: { reviewId: '0x02' }, previewPlan: [], prepared: {} }
+    executionMocks.prepare.mockResolvedValue(first as never)
+    await batch.addEntry({ intent: intentFor([] as TransactionPlan, [subAccount]), label: 'First', subAccount })
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(first)
+
+    let release!: (value: never) => void
+    executionMocks.prepare.mockImplementationOnce(() => new Promise((resolve) => {
+      release = resolve
+    }))
+    await batch.addEntry({ intent: intentFor([] as TransactionPlan, [subAccount]), label: 'Second', subAccount })
+    const successor = batch.prepareBatchExecutionReview()
+    if (resolved) {
+      release(second as never)
+      await successor
+    }
+    const calls = executionMocks.prepare.mock.calls.length
+    batch.discardBatchExecutionReview('0x01')
+    expect(batch.prepareBatchExecutionReview()).toBe(successor)
+    expect(executionMocks.prepare).toHaveBeenCalledTimes(calls)
+    expect(batch.entries.value).toHaveLength(2)
+    if (!resolved) release(second as never)
+    await expect(successor).resolves.toBe(second)
+  })
+
   it('warms and adopts read-only multi-operation batch preparation in spy mode', async () => {
     const spyMode = ref(true)
     vi.stubGlobal('useEffectiveAddress', () => ({

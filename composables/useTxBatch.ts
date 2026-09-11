@@ -267,6 +267,7 @@ let batchExecutionPreparation: {
   presentationDigest: `0x${string}`
   readOnly: boolean
   promise: Promise<PreparedExecutionReview>
+  reviewId?: Hash
 } | undefined
 
 // TEMP DIAGNOSTICS — hunting an unreproducible "Batch simulation not loaded"
@@ -2388,6 +2389,11 @@ export const useTxBatch = () => {
       presentationInputs,
       generation: batchGenerationPublisher,
       cartGeneration,
+    }).then((prepared) => {
+      if (batchExecutionPreparation?.promise === promise) {
+        batchExecutionPreparation.reviewId = prepared.execution.reviewId
+      }
+      return prepared
     })
     batchExecutionPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, readOnly, promise }
     void promise.catch(() => {
@@ -2399,7 +2405,7 @@ export const useTxBatch = () => {
   const prepareBatchExecutionReview = () => startBatchExecutionPreparation(batchGenerationPublisher.current())
 
   const discardBatchExecutionReview = (reviewId: Hash) => {
-    batchExecutionPreparation = undefined
+    if (batchExecutionPreparation?.reviewId === reviewId) batchExecutionPreparation = undefined
     executionService.discard(reviewId)
   }
 
