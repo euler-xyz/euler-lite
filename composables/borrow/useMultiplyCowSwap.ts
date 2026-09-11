@@ -100,7 +100,8 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const quote = options.multiplySelectedQuote.value
     if (!quote) return
 
-    const supplyAmountNano = valueToNano(options.multiplyInputAmount.value || '0', supplyVault.asset.decimals)
+    const supplyAmount = options.multiplyInputAmount.value
+    const supplyAmountNano = valueToNano(supplyAmount || '0', supplyVault.asset.decimals)
 
     // The multiply form requires the collateral and long vault to match.
     // Count both the initial deposit and swap output against its supply cap
@@ -224,7 +225,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       currentAllowance: collateralAllowance,
       requiredAmount: supplyAmountNano,
       label: 'Approve for deposit',
-      assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value },
+      assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: supplyAmount },
       startIndex: idx,
     })
     signSteps.push(...collateralApproval.steps)
@@ -251,7 +252,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const wrapperSteps: DisplayStep[] = [
       { index: wIdx++, label: 'Enable collateral', labelSuffix: collateralVaultName, isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address } },
       { index: wIdx++, label: 'Enable controller', labelSuffix: borrowVaultName, isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
-      { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value } },
+      { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: supplyAmount } },
       { index: wIdx++, label: 'Borrow', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } },
       { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyLongAmount.value } },
       { index: wIdx, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
