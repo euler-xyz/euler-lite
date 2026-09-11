@@ -90,3 +90,4 @@ Transaction-path errors are surfaced through reviewed execution preparation and 
 | `composables/useReviewedExecution.ts` | Pyth preview-data collection, execution-time refresh, and slot verification integration |
 | `composables/useTransactionPlanSimulation.ts` | Form-level simulation state and error formatting |
 | `docs/pricing-system.md` | Full pricing architecture and vault/account read flow |
+| `docs/oracle-adapter-display.md` | Oracles-block / Explore-matrix quotes, which prefix Pyth updates onto the same EVC batch |
