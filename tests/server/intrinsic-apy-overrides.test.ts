@@ -62,6 +62,34 @@ describe('intrinsic APY origin caching', () => {
     expect(mocks.fetch).toHaveBeenCalledTimes(9)
   })
 
+  it('keeps nonempty results isolated across concurrent chains', async () => {
+    mocks.fetch.mockImplementation(async () => ({
+      ok: true, text: async () => '{}',
+      json: async () => ({ data: [
+        { pool: '88c6f0fd-5371-4b60-8032-ddf168b4bdd6', project: 'hyper', apy: 7 },
+        { pool: '18147bfe-ee41-4762-9a95-c0ff28215798', project: 'monad', apy: 11 },
+      ] }),
+    }))
+    const { default: handler } = await import('~/server/api/internal/proxy/intrinsic-apy-overrides.get')
+    const [hyper, monad] = await Promise.all([handler(event(999)), handler(event(143))])
+    expect(hyper).toEqual([expect.objectContaining({ chainId: 999, apy: 7 })])
+    expect(monad).toEqual([expect.objectContaining({ chainId: 143, apy: 11 })])
+    await expect(handler(event(999, 'cached'))).resolves.toEqual(hyper)
+    await expect(handler(event(143, 'cached'))).resolves.toEqual(monad)
+    expect(mocks.fetch).toHaveBeenCalledTimes(9)
+  })
+
+  it('caches HyperEVM all-source failure results until the origin TTL expires', async () => {
+    mocks.fetch.mockRejectedValue(new Error('offline'))
+    const { default: handler } = await import('~/server/api/internal/proxy/intrinsic-apy-overrides.get')
+    await expect(handler(event(999))).resolves.toEqual([])
+    await expect(handler(event(999, 'cached'))).resolves.toEqual([])
+    expect(mocks.fetch).toHaveBeenCalledTimes(8)
+    vi.setSystemTime(300_000)
+    await expect(handler(event(999))).resolves.toEqual([])
+    expect(mocks.fetch).toHaveBeenCalledTimes(16)
+  })
+
   it('allows retry after an upstream rejection', async () => {
     mocks.fetch.mockRejectedValueOnce(new Error('offline'))
     const { default: handler } = await import('~/server/api/internal/proxy/intrinsic-apy-overrides.get')
