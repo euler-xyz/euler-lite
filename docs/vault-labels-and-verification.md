@@ -237,6 +237,8 @@ Classification markers use a clean-cut tags schema. Earn-vault `recentlyAdded` i
 
 ### Oracle Adapter Assessments (Data V3)
 
+How Lite joins these assessments to decoded routes, when it loads the active-route catalogue vs a per-address fallback, and the label/Route/quote rules are in [Oracle Adapter Display](./oracle-adapter-display.md).
+
 Data V3 serves adapter assessments at `/v3/oracles/adapter-assessments` and `/v3/oracles/adapter-assessments/{address}`. Display identity is populated only for recognized adapters. `checksStatus` is a separate health verdict and must not be recomputed from individual findings.
 
 ```jsonc
