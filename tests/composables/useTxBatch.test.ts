@@ -49,6 +49,7 @@ const intentFor = (plan: TransactionPlan, subAccounts: Address[] = [owner]): Ope
 }
 const compilePreviewMock = vi.fn(async (intents: readonly OperationIntent[], _account?: Account<IHasVaultAddress>) => testIntentPlans.get(intents[0]!.intentId) ?? [])
 const executionMocks = {
+  discard: vi.fn(),
   compilePreview: compilePreviewMock,
   compilePreviewForSimulation: vi.fn(async (intents: readonly OperationIntent[], account?: Account<IHasVaultAddress>): Promise<{
     reviewedPlan: TransactionPlan
@@ -1577,6 +1578,30 @@ describe('useTxBatch execution errors', () => {
 
     await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
     expect(executionMocks.prepare).toHaveBeenCalledOnce()
+  })
+
+  it.each([false, true])('reprepares a discarded review without editing the cart (spy: %s)', async (spy) => {
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(spy ? undefined : owner), isConnected: ref(!spy),
+      isSpyMode: ref(spy), spyAddress: ref(spy ? owner : undefined), effectiveAddress: ref(owner),
+    }))
+    const batch = useTxBatch()
+    const first = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    const second = { execution: { reviewId: '0x02' }, previewPlan: [], prepared: {} }
+    const prepare = spy ? executionMocks.prepareReadOnly : executionMocks.prepare
+    prepare.mockResolvedValue(first as never)
+    await batch.addEntry({ intent: intentFor([] as TransactionPlan, [subAccount]), label: 'Supply', subAccount })
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(first)
+    const calls = prepare.mock.calls.length
+
+    batch.discardBatchExecutionReview('0x01')
+    expect(executionMocks.discard).toHaveBeenCalledWith('0x01')
+    prepare.mockResolvedValue(second as never)
+    const reopened = batch.prepareBatchExecutionReview()
+    expect(batch.prepareBatchExecutionReview()).toBe(reopened)
+    await expect(reopened).resolves.toBe(second)
+    expect(prepare).toHaveBeenCalledTimes(calls + 1)
+    expect(batch.entries.value).toHaveLength(1)
   })
 
   it('warms and adopts read-only multi-operation batch preparation in spy mode', async () => {

@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type Hash, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -2398,6 +2398,11 @@ export const useTxBatch = () => {
 
   const prepareBatchExecutionReview = () => startBatchExecutionPreparation(batchGenerationPublisher.current())
 
+  const discardBatchExecutionReview = (reviewId: Hash) => {
+    batchExecutionPreparation = undefined
+    executionService.discard(reviewId)
+  }
+
   const warmBatchExecutionReview = async (cartGeneration: number) => {
     if (!draftEntries.value.length) return
     try {
@@ -2637,6 +2642,7 @@ export const useTxBatch = () => {
     setExecutionError,
     getBatchIntents,
     prepareBatchExecutionReview,
+    discardBatchExecutionReview,
     removeIntentRevisions,
     captureBatchCompletion,
     completeBatchExecution,
