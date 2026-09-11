@@ -71,6 +71,113 @@ useHead({
 })
 
 const isMenuVisible = ref(true)
+
+// ---------------------------------------------------------------------------
+// HelpScout Beacon
+//
+// Beacon renders its launcher and panel inside a cross-origin iframe, so our
+// CSS cannot reach inside it — appearance is driven entirely through its own
+// config API, which accepts repeated calls at runtime.
+// ---------------------------------------------------------------------------
+
+const BEACON_MOBILE_BREAKPOINT = 900
+// The dark-mode SVG filter maps Help Scout's white canvas to --bg-body and
+// dark text to white. This source colour becomes the app's #23c09b accent.
+const BEACON_DARK_FILTER_ACCENT = '#e34472'
+
+/**
+ * Read a theme token straight off the document so Beacon tracks the app's
+ * palette instead of a hardcoded copy that can drift out of sync.
+ * Beacon only accepts a hex string, so anything else falls back.
+ */
+const themeToken = (name: string, fallback: string) => {
+  if (!import.meta.client) return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value) ? value : fallback
+}
+
+/**
+ * --accent-600 is the app's primary-button green (#23c09b in both themes) and
+ * the colour Beacon paints its launcher, panel header and send button with.
+ * --accent-500 is deliberately not used here: it is the brighter text accent,
+ * and it made the launcher louder than every button in the app.
+ */
+const beaconAccent = computed(() => {
+  // Depend on theme so the token is re-read after a theme switch.
+  void theme.value
+  return themeToken('--accent-600', '#23c09b')
+})
+
+const applyBeaconDesign = () => {
+  if (!import.meta.client || typeof window.Beacon !== 'function') return
+
+  // On mobile the bottom nav occupies ~98px, so lift the launcher clear of it.
+  const isMobile = window.innerWidth <= BEACON_MOBILE_BREAKPOINT
+  const verticalOffset = isMobile && isMenuVisible.value ? 106 : 24
+
+  window.Beacon('config', {
+    // Use the pre-filter source colour in dark mode so Beacon's rendered
+    // accent still matches the rest of the app.
+    color: theme.value === 'dark' ? BEACON_DARK_FILTER_ACCENT : beaconAccent.value,
+    display: {
+      style: 'icon',
+      iconImage: 'question',
+      position: 'right',
+      horizontalOffset: 24,
+      verticalOffset,
+      // Above page content, below UiModal (3000) so dialogs are never covered.
+      zIndex: 2500,
+    },
+    labels: {
+      whatMethodWorks: 'Euler Finance',
+      messageButtonLabel: 'Create new support ticket',
+      noTimeToWaitAround: '',
+      responseTime: 'Your wallet address will be attached to the ticket. We’ll investigate the issue as soon as possible.',
+    },
+  })
+}
+
+/** Wallet + chain + console buffer, attached to the conversation for agents. */
+const applyBeaconSessionData = () => {
+  if (!import.meta.client || typeof window.Beacon !== 'function') return
+  window.Beacon('session-data', {
+    'Wallet address': address.value ?? 'Not connected',
+    'Chain': String(chainId.value),
+    'App state': JSON.stringify({
+      url: window.location.href,
+      route: route.name,
+      theme: theme.value,
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      userAgent: navigator.userAgent,
+    }),
+    'Recent console output': getRecentConsoleOutput() || 'none captured',
+  })
+}
+
+watch([theme, address, isMenuVisible], applyBeaconDesign, { immediate: true })
+watch([address, chainId], applyBeaconSessionData, { immediate: true })
+
+// Keep the launcher off the onboarding (connect wallet) screen. Beacon injects
+// its container after window load, so this toggles a root class that
+// assets/styles/main.scss keys off, rather than the element itself.
+watch(() => route.name, (name) => {
+  if (!import.meta.client) return
+  document.documentElement.classList.toggle('beacon-hidden', name === 'onboarding')
+}, { immediate: true })
+
+onMounted(() => {
+  applyBeaconDesign()
+  // Re-snapshot diagnostics when the panel is opened so the console buffer and
+  // app state reflect the moment the user decided to ask for help.
+  if (typeof window.Beacon === 'function') {
+    window.Beacon('on', 'open', applyBeaconSessionData)
+  }
+  window.addEventListener('resize', applyBeaconDesign)
+})
+onUnmounted(() => {
+  if (import.meta.client) window.removeEventListener('resize', applyBeaconDesign)
+})
+
 const isHeaderVisible = ref(true)
 let interval: NodeJS.Timeout | null = null
 
@@ -205,6 +312,36 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- Help Scout is cross-origin. This filter maps its white interface to the
+       same #08131f value used by --bg-body in the app's dark theme. -->
+  <svg
+    aria-hidden="true"
+    class="absolute w-0 h-0 overflow-hidden"
+    focusable="false"
+  >
+    <filter
+      id="euler-beacon-dark-theme"
+      color-interpolation-filters="sRGB"
+    >
+      <feComponentTransfer>
+        <feFuncR
+          type="linear"
+          slope="-0.968627"
+          intercept="1"
+        />
+        <feFuncG
+          type="linear"
+          slope="-0.92549"
+          intercept="1"
+        />
+        <feFuncB
+          type="linear"
+          slope="-0.878431"
+          intercept="1"
+        />
+      </feComponentTransfer>
+    </filter>
+  </svg>
   <div
     class="sticky top-0 z-[101]"
   >

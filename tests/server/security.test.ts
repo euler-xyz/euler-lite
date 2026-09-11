@@ -73,6 +73,15 @@ describe('buildCsp', () => {
       .find(d => d.startsWith('connect-src'))
     expect(connectSrc).toContain('https://api.4byte.sourcify.dev')
   })
+
+  it('allows HelpScout Beacon API and chat traffic', () => {
+    const connectSrc = csp
+      .split(';')
+      .map(d => d.trim())
+      .find(d => d.startsWith('connect-src'))
+    expect(connectSrc).toContain('https://beaconapi.helpscout.net')
+    expect(connectSrc).toContain('https://chatapi.helpscout.net')
+  })
 })
 
 describe('applySecurityHeaders', () => {
