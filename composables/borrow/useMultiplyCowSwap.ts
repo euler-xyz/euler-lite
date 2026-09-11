@@ -100,14 +100,15 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const quote = options.multiplySelectedQuote.value
     if (!quote) return
 
-    // CoW pre-flight: orders can't be simulated, so the multiply form's
-    // existing errorText already screens most failure modes — but it doesn't
-    // see the post-swap collateral amount that we're about to push into the
-    // long vault. Guard against exceeding the supply cap on the long side.
+    const supplyAmountNano = valueToNano(options.multiplyInputAmount.value || '0', supplyVault.asset.decimals)
+
+    // The multiply form requires the collateral and long vault to match.
+    // Count both the initial deposit and swap output against its supply cap
+    // before preparing a CoW order, which skips transaction simulation.
     const longCap = longVault.caps?.supplyCap
     if (typeof longCap === 'bigint' && longCap > 0n && longCap < maxUint256) {
       const buyAmount = BigInt(quote.amountOut || '0')
-      if (longVault.totalAssets + buyAmount > longCap) {
+      if (longVault.totalAssets + supplyAmountNano + buyAmount > longCap) {
         error('Long vault supply cap would be exceeded')
         return
       }
@@ -152,7 +153,6 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       return
     }
 
-    const supplyAmountNano = valueToNano(options.multiplyInputAmount.value || '0', supplyVault.asset.decimals)
     const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
     // For the review modal we still want to show CoW order amounts (sell/buy)
