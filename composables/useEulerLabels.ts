@@ -50,6 +50,9 @@ const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
 const loadError = ref<string | undefined>()
+const LABELS_REFRESH_INTERVAL_MS = 5 * 60_000
+const LABELS_MAX_AGE_MS = 15 * 60_000
+let lastSuccessfulLoadAt = 0
 let hasSuccessfulSnapshot = false
 const pendingLabelsFetches = new Map<number, Promise<PublicEulerLabelsData>>()
 let labelsLoadGeneration = 0
@@ -72,6 +75,7 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
   labelsLoadGeneration += 1
   wrapPairProbeGeneration += 1
   pendingLabelsFetches.clear()
+  lastSuccessfulLoadAt = 0
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
   setLabelsData({
     ...createEmptyEulerLabelsData(),
@@ -102,6 +106,7 @@ const entities = toReactive(computed(() => labelsData.value.entities as Record<s
 const points = toReactive(computed(() => labelsData.value.points as Record<string, EulerLabelPointReward[]>))
 const verifiedVaultAddresses = computed(() => labelsData.value.verifiedVaultAddresses)
 const earnVaults = computed(() => labelsData.value.earnVaults)
+const visibility = computed(() => labelsData.value.visibility)
 const geoPolicies = computed(() => labelsData.value.rawGeoPolicies)
 
 const isCurrentLabelsLoad = (chainId: number, generation: number) => {
@@ -117,6 +122,7 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
     try {
       const bundle = await $fetch<PublicLabelsBundle>('/api/internal/public-labels', {
         query: { chainId },
+        timeout: 35_000,
         ...(forceRefresh && { headers: { 'cache-control': 'no-cache' } }),
       })
       return normalizePublicLabelsData(chainId, bundle.publicLabels, bundle.effectivePolicy)
@@ -136,13 +142,15 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
 
   const { getCurrentChainConfig } = useEulerAddresses()
   if (getCurrentChainConfig.value?.chainId !== chainId) return
-  if (!forceRefresh && labelsChainId.value === chainId && isReady.value) return
+  const hasCurrentSnapshot = labelsChainId.value === chainId && hasSuccessfulSnapshot
+  if (!forceRefresh && hasCurrentSnapshot && isReady.value
+    && Date.now() - lastSuccessfulLoadAt < LABELS_REFRESH_INTERVAL_MS) return
 
   const generation = ++labelsLoadGeneration
   const isCurrentLoad = () => isCurrentLabelsLoad(chainId, generation)
   if (!isCurrentLoad()) return
 
-  isReady.value = false
+  isReady.value = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
   isLoading.value = true
   loadError.value = undefined
   const probeGeneration = ++wrapPairProbeGeneration
@@ -153,13 +161,16 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     setLabelsData(createEmptyEulerLabelsData(), chainId)
   }
 
-  const fetchPromise = getLabelsFetch(chainId, forceRefresh)
+  // A scheduled refresh requests current server data; concurrent ordinary
+  // callers still join the existing fetch instead of restarting it.
+  const fetchPromise = getLabelsFetch(chainId, forceRefresh || (hasCurrentSnapshot && !pendingLabelsFetches.has(chainId)))
 
   try {
     const data = await fetchPromise
     if (isCurrentLoad()) {
       setLabelsData(data, chainId)
       hasSuccessfulSnapshot = true
+      lastSuccessfulLoadAt = Date.now()
     }
     if (isCurrentLoad()) {
       void probeWrapPairs(chainId, generation, probeGeneration)
@@ -175,9 +186,17 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     }
     if (isCurrentLoad()) {
       isLoading.value = false
-      isReady.value = hasSuccessfulSnapshot
+      isReady.value = hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
     }
   }
+}
+
+const refreshLabelsIfStale = async () => {
+  if (hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt >= LABELS_MAX_AGE_MS) {
+    isReady.value = false
+  }
+  if (isLoading.value) return
+  await loadLabels()
 }
 
 const retryLabels = async () => {
@@ -278,7 +297,9 @@ export const useEulerLabels = () => {
     oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
     earnVaults,
     geoPolicies,
+    visibility,
     loadLabels,
+    refreshLabelsIfStale,
     retryLabels,
     loadOracleAdapter: oracleAdapters.loadOracleAdapter,
     loadOracleAdapters: oracleAdapters.loadOracleAdapters,

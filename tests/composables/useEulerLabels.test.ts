@@ -144,6 +144,55 @@ describe('useEulerLabels chain-scoped loading', () => {
     expect(currentProductKeys()).toEqual(['cached'])
   })
 
+  it('refreshes an aged successful snapshot and joins overlapping poll events', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('visible')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      clock.mockReturnValue(1_000_000 + 299_999)
+      await labels.refreshLabelsIfStale()
+      expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(1)
+
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      clock.mockReturnValue(1_000_000 + 300_000)
+      const pending = labels.refreshLabelsIfStale()
+      await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2))
+      expect(labels.isReady.value).toBe(true)
+      await labels.refreshLabelsIfStale()
+      expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
+      expect(mocks.fetchPublicLabelsBundle).toHaveBeenLastCalledWith('/api/internal/public-labels', expect.objectContaining({ headers: { 'cache-control': 'no-cache' } }))
+      refreshed.resolve(bundleFor(labelsFor('revoked')))
+      await pending
+      expect(currentProductKeys()).toEqual(['revoked'])
+    }
+    finally { clock.mockRestore() }
+  })
+
+  it('expires verification after refresh failures while retaining display data', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      mocks.fetchPublicLabelsBundle.mockRejectedValue(new Error('outage'))
+      clock.mockReturnValue(1_000_000 + 300_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(true)
+      clock.mockReturnValue(1_000_000 + 900_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load')
+      expect(currentProductKeys()).toEqual(['cached'])
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('recovered')))
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(true)
+      expect(currentProductKeys()).toEqual(['recovered'])
+    }
+    finally { clock.mockRestore() }
+  })
+
   it('starts a separate fetch for a new chain and ignores the stale response', async () => {
     const chainOne = deferred<PublicLabelsBundle>()
     const chainTwo = deferred<PublicLabelsBundle>()

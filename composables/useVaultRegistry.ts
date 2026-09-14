@@ -244,7 +244,7 @@ const getVerifiedEVaults = (includeNotExplorable = false): EVault[] => {
   return activeEntries()
     .filter(entry =>
       entry.type === 'evk'
-      && entry.verified === true
+      && isVerifiedVault(entry.vault.address)
       && (includeNotExplorable || !isVaultNotExplorable(entry.vault.address)),
     )
     .map(entry => entry.vault) as EVault[]
@@ -265,10 +265,12 @@ const isEarnVault = (address: string): boolean => getType(address) === 'earn'
 const isSecuritizeVault = (address: string): boolean => getType(address) === 'securitize'
 const isEVaultAddress = (address: string): boolean => getType(address) === 'evk'
 const isVerifiedVault = (address: string): boolean => {
-  const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
+  const { verifiedVaultAddresses, earnVaults, visibility } = useEulerLabels()
   const normalized = normalizeAddress(address)
-  return get(normalized)?.verified === true
-    || isKnownEscrowAddress(normalized)
+  // Registry metadata describes the fetch that created the entry. Current
+  // labels must be able to revoke that earlier positive verification.
+  return isEscrowVault(normalized)
+    || (visibility?.value === undefined && get(normalized)?.verified === true)
     || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
     || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
 }
