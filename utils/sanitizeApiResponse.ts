@@ -1,7 +1,7 @@
 /**
- * Known root-level keys injected into JSON response bodies by the CDN edge
- * layer (e.g. Cloudflare Worker) on certain hostnames. These are geo/VPN
- * metadata fields that pollute the intended JSON schema.
+ * Known root-level keys injected into JSON response bodies by an edge/CDN
+ * worker on certain hostnames. These are geo/VPN metadata fields that
+ * pollute the intended JSON schema.
  */
 const EDGE_INJECTED_KEYS = new Set(['countryCode', 'isProxyOrVpn', 'is_vpn'])
 

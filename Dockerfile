@@ -31,19 +31,19 @@ WORKDIR /usr/src/app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY scripts/install-preview-sdk.sh scripts/install-preview-sdk.sh
+# Preview SDK branches are mutable. Including the Lite source snapshot in this
+# layer key makes each Lite revision resolve the current remote branch head.
+COPY . .
 ARG EULER_SDK_BRANCH
 ARG EULER_SDK_PNPM_VERSION=10
 RUN chmod +x scripts/install-preview-sdk.sh && scripts/install-preview-sdk.sh
-
-COPY . .
 
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
 RUN npm run build
 
 # ── Production stage (distroless: no shell, no tools, non-root) ──
-FROM gcr.io/distroless/nodejs24-debian12:nonroot AS production
+FROM gcr.io/distroless/nodejs24-debian13:nonroot AS production
 
 ENV MODE=production
 ENV NODE_ENV=production
@@ -63,8 +63,12 @@ COPY --from=doppler /usr/local/bin/doppler ./doppler
 
 EXPOSE ${APP_PORT}
 
+# Liveness probe: /healthz lives outside /api/ so it is exempt from the
+# geo-gate, rate limiting, and internal-request authentication — the probe
+# must not depend on edge configuration (EDGE_PROVIDER / EDGE_ORIGIN_SECRET)
+# and must never carry the origin secret in its arguments.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/nodejs/bin/node", "-e", "fetch('http://localhost:'+process.env.PORT+'/api/internal/tenderly/status',{headers:{'cf-connecting-ip':'127.0.0.1'}}).then(r=>{if(!r.ok)throw r.status}).catch(()=>process.exit(1))"]
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://localhost:'+process.env.PORT+'/healthz').then(r=>{if(!r.ok)throw r.status}).catch(()=>process.exit(1))"]
 
 # Doppler injects all secrets at runtime via DOPPLER_TOKEN, DOPPLER_PROJECT, DOPPLER_CONFIG env vars.
 # server/plugins/chain-config.ts scans env vars and injects chain config via render:html hook.

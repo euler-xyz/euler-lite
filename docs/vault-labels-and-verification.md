@@ -24,9 +24,9 @@ Entity profiles supply hosted logo URLs. A product's `entityId` is its managing 
 
 The current V3 assessment and geo-policy records are not final eligibility decisions. Lite does not use raw `/evk/vaults/{chainId}/{address}/assessment` or `/earn/vaults/{chainId}/{address}/assessment` responses to hide or verify vaults, and it does not resolve global/product/vault/asset geo precedence from raw policy rows. Until V3 publishes an effective derived contract, the server reads only effective `block`, `restricted`, and discovery-visibility values from the compatibility policy source. That source contributes no display content. Raw V3 geo policies are retained as informational data only.
 
-Oracle adapter metadata is fetched from a separate repository ([oracle-checks](https://github.com/euler-xyz/oracle-checks)) by default, loaded lazily per adapter via `GET /api/internal/oracle-adapter?chainId=X&address=0x...`.
+Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
-**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. The browser also deduplicates chain-scoped loads. There is no second display-label source: if V3 fails without a stale bundle, the load fails closed and the client publishes an empty label snapshot.
+**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. The browser deduplicates chain-scoped loads and rejects superseded responses. An initial failure leaves labels unavailable with a retry action; a failed same-chain refresh retains the last successful snapshot. Retry requests a fresh bundle and reloads vault discovery after labels recover.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -46,22 +46,45 @@ Vault tags stay scoped to their vault override. A product-level tag is emitted o
 
 ---
 
-## Oracle Adapter Files (oracle-checks repo)
+## Oracle Adapter Assessments (Data V3)
 
-Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github.com/euler-xyz/oracle-checks) repository. Each adapter has its own file at `data/{chainId}/adapters/{checksummedAddress}.json`.
+How Lite joins these assessments to decoded routes, when it loads the active-route catalogue vs a per-address fallback, and the label/Route/quote rules are in [Oracle Adapter Display](./oracle-adapter-display.md).
+
+Data V3 serves adapter assessments at `/v3/oracles/adapter-assessments` and `/v3/oracles/adapter-assessments/{address}`. Display identity is populated only for recognized adapters. `checksStatus` is a separate health verdict and must not be recomputed from individual findings.
 
 ```jsonc
 {
-  "oracle": "0xOracleAdapter...",                 // Oracle adapter address
-  "base": "0xBaseAsset...",                       // Base asset address
-  "quote": "0xQuoteAsset...",                     // Quote asset address
-  "name": "Chainlink ETH/USD",                   // Oracle name
-  "provider": "Chainlink",                        // Oracle provider (used for logo)
-  "methodology": "TWAP 30min",                   // Pricing methodology
-  "label": "ETH/USD Feed",                       // Custom label (stored but not displayed)
-  "checks": ["heartbeat", "deviation"]            // Security check names (stored but not displayed)
+  "address": "0xOracleAdapter...",
+  "recognized": true,
+  "checksStatus": "warning",
+  "provider": "Chainlink", // V3 logo key; see below
+  "methodology": "Market Price",
+  "config": { "base": "0xBaseAsset...", "quote": "0xQuoteAsset..." },
+  "findings": [
+    { "key": "quote-liveness", "outcome": "unknown", "severity": "medium", "description": "..." }
+  ],
+  "policyVersion": 3,
+  "lastCheckedAt": "2026-09-01T12:01:00.000Z"
 }
 ```
+
+Lite compares the assessed base/quote pair with the decoded route before applying the health verdict. The Checks cell distinguishes three states: recognized adapters show the health verdict and counts; adapters V3 assessed but could not identify show "Unrecognized" with the failing identity rule (`reason`) and expose only the identity findings; adapters with no assessment row show "Not assessed". Rule keys are rendered as sentence-case titles client-side (`formatOracleCheckTitle`).
+
+Router recognition comes from `/v3/oracles/routers`, which lists exactly the routers deployed by the recognized `EulerRouterFactory`; the indexer only tracks factory deployments.
+
+#### Oracle provider logos
+
+Explore and vault oracle rows resolve logos through `getOracleProviderLogo` (`entities/oracle-providers.ts`), not local SVG assets.
+
+The URL is always `https://v3.euler.finance/v3/images/oracle-providers/{key}`. That host is `DEFAULT_V3_API_URL`; it does **not** follow `V3_API_URL` / `EULER_SDK_V3_API_URL`. Custom V3 deployments still load logos from production V3. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
+
+Lookup rules:
+
+1. If `meta.provider` is present, map **only** that string. Do not fall through to the adapter name. A Midas vault priced by `ChainlinkOracle` must show the Midas logo, not Chainlink.
+2. If provider is missing, map `meta.name` / the adapter type name (`ChainlinkOracle`, `PythOracle`, `UniswapV3Oracle`, …).
+3. Unknown identifiers return `undefined` — the UI renders without a logo rather than guessing.
+
+`utils/oracle-adapter-views.ts` assigns `view.logo` from those two fields when it builds the shared adapter view used by the borrow-page Oracles block and the Explore matrix.
 
 ---
 
@@ -72,6 +95,24 @@ Oracle adapter metadata is loaded lazily from the [oracle-checks](https://github
 The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
 
 The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+
+### Operation warnings and consent
+
+Operation guards verify vaults against the app's selected chain and the shared governor/owner rules. Wallet connection and chain switching remain available before other form gates. While labels or vault metadata are unresolved, operations remain blocked with a loading state or a retry action.
+
+The Earn deposit page opens its automatic disclaimer only for a resolved unverified vault when the wallet is connected to the selected chain. Clicking Yes dismisses the browsing notice. The form's explicit risk button records the account, chain, operation, and vault-set acknowledgment required by final execution policy. The popup closes when acknowledgment is no longer required or the page unmounts. Final execution policy also requires available verification labels for operations involving vaults.
+
+### Governance hydration guard (SDK 2.0)
+
+SDK 2.0 `EVault` instances always **own** the `governorAdmin` property (the constructor assigns it even when governance was never fetched). An `in`-operator or "property exists" check therefore passes on every real instance and can misread a lazily-hydrated vault as "governance resolved to nothing", producing false **Unknown risk manager** badges in discovery / market graph UI.
+
+Use the value-based guard shared across badge sites:
+
+```ts
+hasResolvedGovernorAdmin(vault) // isEVault(vault) && vault.governorAdmin !== undefined
+```
+
+Only a **defined** `governorAdmin` means governance actually resolved. Until then, UI must wait (or show a loading/neutral state) rather than treating the vault as unverified.
 
 ### Ungoverned vaults
 
@@ -84,17 +125,16 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | Vault Source | Verification Method |
 |-------------|---------------------|
 | **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
-| **Earn vaults** | Published Public Labels inventory, plus `eulerEarnGovernedPerspective` on-chain for governed Earn discovery |
+| **Earn vaults** | Verified if present in the normalized Public Labels `earnVaults` set |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
 
 ### On-Chain Perspectives
 
-Two on-chain perspective contracts provide additional verification:
+One on-chain perspective contract provides additional verification:
 
 - **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true` and `vaultCategory: 'escrow'`.
-- **`eulerEarnGovernedPerspective`**: Lists all governed EulerEarn vaults. Vaults from this perspective are always verified.
 
 ## Vault Categories and Types
 
@@ -143,10 +183,12 @@ Labels control which vaults appear on each discovery page:
 | Flag | Lend | Borrow | Explore |
 |------|------|--------|---------|
 | Product `notExplorable: true` | Hidden | Hidden | Hidden |
-| Override `notExplorableLend: true` | Hidden | Visible | Visible |
-| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible |
+| Override `notExplorableLend: true` | Hidden | Visible | Visible* |
+| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible* |
 | `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
 | `recently added` tag | Sorted to top | Sorted to top | Sorted to top |
+
+*Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly).
 
 Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 

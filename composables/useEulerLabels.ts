@@ -49,6 +49,8 @@ const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
+const loadError = ref<string | undefined>()
+let hasSuccessfulSnapshot = false
 const pendingLabelsFetches = new Map<number, Promise<PublicEulerLabelsData>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
@@ -79,6 +81,8 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
     rawGeoPolicies: (data as Partial<PublicEulerLabelsData>).rawGeoPolicies ?? [],
   } as unknown as PublicEulerLabelsData, null)
   isReady.value = true
+  hasSuccessfulSnapshot = true
+  loadError.value = undefined
   isLoading.value = false
 }
 
@@ -140,10 +144,12 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
 
   isReady.value = false
   isLoading.value = true
+  loadError.value = undefined
   const probeGeneration = ++wrapPairProbeGeneration
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
   if (labelsChainId.value !== chainId && isCurrentLoad()) {
+    hasSuccessfulSnapshot = false
     setLabelsData(createEmptyEulerLabelsData(), chainId)
   }
 
@@ -153,12 +159,14 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     const data = await fetchPromise
     if (isCurrentLoad()) {
       setLabelsData(data, chainId)
+      hasSuccessfulSnapshot = true
     }
     if (isCurrentLoad()) {
       void probeWrapPairs(chainId, generation, probeGeneration)
     }
   }
   catch (e) {
+    if (isCurrentLoad()) loadError.value = 'Unable to load vault verification. Please retry.'
     logWarn('labels/load', e)
   }
   finally {
@@ -167,9 +175,15 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     }
     if (isCurrentLoad()) {
       isLoading.value = false
-      isReady.value = true
+      isReady.value = hasSuccessfulSnapshot
     }
   }
+}
+
+const retryLabels = async () => {
+  if (isLoading.value) return
+  await loadLabels(true)
+  if (isReady.value) await useVaults().loadVaults()
 }
 
 const WRAP_PAIR_PROBE_BATCH_SIZE = 25
@@ -254,14 +268,18 @@ export const useEulerLabels = () => {
   return {
     isLoading,
     isReady,
+    loadError,
     verifiedVaultAddresses,
     products,
     entities,
     points,
     oracleAdapters: oracleAdapters.oracleAdapters,
+    oracleAssessmentsStatus: oracleAdapters.oracleAssessmentsStatus,
+    oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
     earnVaults,
     geoPolicies,
     loadLabels,
+    retryLabels,
     loadOracleAdapter: oracleAdapters.loadOracleAdapter,
     loadOracleAdapters: oracleAdapters.loadOracleAdapters,
     loadAllOracleAdapters: oracleAdapters.loadAllOracleAdapters,

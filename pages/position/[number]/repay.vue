@@ -19,7 +19,7 @@ import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
-import { isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -29,7 +29,7 @@ const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const positionIndex = usePositionIndex()
-const { planRepayFromWallet } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
@@ -159,25 +159,46 @@ const walletProjectedYieldDetails = computed(() =>
 
 // Add the current repay (any tab) to the batch. CoW orders can't be merged
 // into an EVC batch, so swap routes via CoW are excluded.
+const isCowSwapSelectedForBatch = computed(() => {
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value && isCowProviderOrQuote(
+      walletSwap.quotes.selectedProvider.value,
+      walletSwap.quotes.selectedQuote.value,
+    )
+  }
+  if (formTab.value === 'collateral') {
+    return !collateral.isSameAsset.value && isCowProviderOrQuote(
+      collateral.quotes.selectedProvider.value,
+      collateral.quotes.selectedQuote.value,
+    )
+  }
+  if (formTab.value === 'savings') {
+    return !savings.isSameAsset.value && isCowProviderOrQuote(
+      savings.quotes.selectedProvider.value,
+      savings.quotes.selectedQuote.value,
+    )
+  }
+  return false
+})
 const canAddToBatch = computed(() => {
   if (!borrowVault.value || !position.value) return false
   if (formTab.value === 'wallet') {
     if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
     if (walletSwap.needsSwap.value) {
       if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return false
-      return !!walletSwap.quotes.selectedQuote.value && !isCowProvider(walletSwap.quotes.selectedProvider.value)
+      return !!walletSwap.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
     }
     return !!(+wallet.amount.value)
   }
   if (formTab.value === 'collateral') {
     if (!collateral.sourceVault.value || !(+collateral.amount.value || +collateral.debtAmount.value)) return false
     if (collateral.isSameAsset.value) return true
-    return !!collateral.quotes.selectedQuote.value && !isCowProvider(collateral.quotes.selectedProvider.value)
+    return !!collateral.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
   }
   if (formTab.value === 'savings') {
     if (!savings.sourceVault.value || !(+savings.amount.value || +savings.debtAmount.value)) return false
     if (savings.isSameAsset.value) return true
-    return !!savings.quotes.selectedQuote.value && !isCowProvider(savings.quotes.selectedProvider.value)
+    return !!savings.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
   }
   return false
 })
@@ -226,13 +247,18 @@ const addToBatchWithoutWarnings = async () => {
       const inSymbol = walletSwap.selectedAsset.value?.symbol ?? ''
       const isClosing = walletSwap.isFullRepay.value
       if (!swapAsset) return
+      const quoteIntents = walletSwap.quotes.selectedQuoteCard.value?.quote === quote
+        ? walletSwap.quotes.selectedQuoteCard.value.intents
+        : undefined
+      const currentIntent = walletSwap.createRepayIntent(quote, {
+        selectedAsset: swapAsset,
+        direction: swapDirection,
+        isFullRepay: isClosing,
+      })
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
-        buildPlan: account => walletSwap.buildRepayPlan(quote, account, {
-          selectedAsset: swapAsset,
-          direction: swapDirection,
-          isFullRepay: isClosing,
-        }),
+        intent: currentIntent,
+        preparedIntent: quoteIntents?.[0],
         subAccount: position.value.subAccount as Address,
         affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
         nameOverride: `Repay ${borrowSymbol}`,
@@ -249,12 +275,12 @@ const addToBatchWithoutWarnings = async () => {
     const receiver = position.value.subAccount as Address
     await addBatchEntry({
       label: `Repay ${wallet.amount.value} ${borrowSymbol}`,
-      buildPlan: account => planRepayFromWallet({
-        liabilityVault,
-        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
-        receiver,
-        cleanupOnMax: isFullRepay,
-        account,
+      intent: createIntent({
+        kind: 'repay',
+        planner: 'repay-from-wallet',
+        args: { liabilityVault, liabilityAsset: borrowVault.value.asset.address as Address, liabilityAmount: isFullRepay ? maxUint256 : amountNano, receiver, cleanupOnMax: isFullRepay },
+        source: 'position/repay-wallet:add-to-batch',
+        subAccounts: [receiver],
       }),
       subAccount: position.value.subAccount as Address,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isFullRepay),
@@ -268,6 +294,7 @@ const addToBatchWithoutWarnings = async () => {
   if (formTab.value === 'collateral') {
     const quote = collateral.isSameAsset.value ? undefined : collateral.quotes.selectedQuote.value ?? undefined
     const sourceVault = collateral.sourceVault.value
+    const sourceAccount = collateral.selectedSourceAccount.value
     const sourceAmount = collateral.amount.value
     const sourceDebtAmount = collateral.debtAmount.value
     const sourceDirection = collateral.direction.value
@@ -275,22 +302,31 @@ const addToBatchWithoutWarnings = async () => {
     const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = collateral.isFullRepay.value
     if (!sourceVault) return
+    const quoteIntents = quote && collateral.quotes.selectedQuoteCard.value?.quote === quote
+      ? collateral.quotes.selectedQuoteCard.value.intents
+      : undefined
+    const currentIntent = collateral.createRepayIntent(quote, {
+      sourceVault,
+      sourceAccount,
+      amount: sourceAmount,
+      debtAmount: sourceDebtAmount,
+      direction: sourceDirection,
+      isSameAsset,
+    })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
-      buildPlan: account => collateral.buildRepayPlan(quote, account, {
-        sourceVault,
-        amount: sourceAmount,
-        debtAmount: sourceDebtAmount,
-        direction: sourceDirection,
-        isSameAsset,
-      }),
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
-      affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
+      sourceSubAccount: sourceAccount,
+      affectedSubAccounts: collateral.isCrossPositionSource.value
+        ? getAffectedSubAccounts(position.value.subAccount, sourceAccount)
+        : getFullRepayAffectedSubAccounts(isClosing),
       review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : collateral.quotes.effectiveQuoteFetchedAt.value },
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
-    redirectAfterRepayAdd(isClosing)
+    redirectAfterRepayAdd(isClosing && !collateral.isCrossPositionSource.value)
     return
   }
 
@@ -305,17 +341,23 @@ const addToBatchWithoutWarnings = async () => {
     const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = savings.isFullRepay.value
     if (!sourceVault) return
+    const quoteIntents = quote && savings.quotes.selectedQuoteCard.value?.quote === quote
+      ? savings.quotes.selectedQuoteCard.value.intents
+      : undefined
+    const currentIntent = savings.createRepayIntent(quote, {
+      sourceVault,
+      sourceSubAccount,
+      amount: sourceAmount,
+      debtAmount: sourceDebtAmount,
+      direction: sourceDirection,
+      isSameAsset,
+    })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
-      buildPlan: account => savings.buildRepayPlan(quote, account, {
-        sourceVault,
-        sourceSubAccount,
-        amount: sourceAmount,
-        debtAmount: sourceDebtAmount,
-        direction: sourceDirection,
-        isSameAsset,
-      }),
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
+      sourceSubAccount: sourceSubAccount as Address | undefined,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing, sourceSubAccount),
       review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : savings.quotes.effectiveQuoteFetchedAt.value },
     })
@@ -853,6 +895,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -879,6 +922,7 @@ watch(formTab, () => {
                 :asset="collateral.sourceVault.value.asset"
                 :vault="collateral.sourceVault.value"
                 :collateral-options="collateral.repayCollateralOptions.value"
+                :selected-option-id="collateral.selectedSourceId.value"
                 :balance="collateral.sourceBalance.value"
                 :max-handler="collateral.onSourceMax"
                 maxable
@@ -1034,6 +1078,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -1211,6 +1256,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}

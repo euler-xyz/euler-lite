@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { getExplorerLink } from '~/utils/block-explorer'
-import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { getVaultHookTarget } from '~/utils/vault-hooks'
 import { isVaultBorrowable } from '~/utils/vault/classification'
-import { shortenAddress } from '~/utils/string-utils'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
-
-const { chainId } = useEulerAddresses()
 
 // Surface borrow-side addresses while debt is being wound down, not only while
 // new borrows are allowed (see isVaultBorrowable).
@@ -18,8 +13,14 @@ const interestRateModelAddress = computed(() =>
   vault.interestRateModel.address,
 )
 
+const oracleRouterAddress = computed(() =>
+  vault.oracle.name === 'EulerRouter' ? vault.oracle.oracle : null,
+)
+
+const { governor: oracleGovernor } = useOracleRouterGovernor(oracleRouterAddress)
+
 const vaultAddresesInfo = computed(() => {
-  const baseAddresses: Array<{ title: string, address?: string }> = [
+  const baseAddresses: Array<{ title: string, address?: string, checkSafe?: boolean }> = [
     {
       title: `${vault.asset.symbol} token`,
       address: vault.asset.address,
@@ -43,6 +44,7 @@ const vaultAddresesInfo = computed(() => {
     {
       title: `Risk manager`,
       address: vault.governorAdmin,
+      checkSafe: true,
     },
   )
 
@@ -51,11 +53,25 @@ const vaultAddresesInfo = computed(() => {
       {
         title: `Fee receiver`,
         address: vault.fees.governorFeeReceiver,
+        checkSafe: true,
       },
       {
         title: `Oracle router`,
         address: vault.oracle.oracle,
       },
+    )
+
+    if (oracleGovernor.value) {
+      baseAddresses.push(
+        {
+          title: `Oracle governor`,
+          address: oracleGovernor.value,
+          checkSafe: true,
+        },
+      )
+    }
+
+    baseAddresses.push(
       {
         title: `Unit of account`,
         address: vault.unitOfAccount?.address,
@@ -74,16 +90,8 @@ const vaultAddresesInfo = computed(() => {
     },
   )
 
-  return baseAddresses.filter((item): item is { title: string, address: string } => Boolean(item.address))
+  return baseAddresses.filter((item): item is { title: string, address: string, checkSafe?: boolean } => Boolean(item.address))
 })
-
-const { copyToClipboard } = useClipboardCopy()
-
-const onCopyClick = (address: string) => {
-  copyToClipboard(address).catch(() => {})
-}
-
-const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
 </script>
 
 <template>
@@ -111,24 +119,10 @@ const getExplorerAddressLink = (address: string) => getExplorerLink(address, cha
           />
         </span>
       </template>
-      <div class="flex gap-4 items-center">
-        <NuxtLink
-          :to="getExplorerAddressLink(infoItem.address)"
-          class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-          target="_blank"
-        >
-          {{ getSpecialAddressLabel(infoItem.address) || shortenAddress(infoItem.address) }}
-        </NuxtLink>
-        <button
-          class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-          @click="onCopyClick(infoItem.address)"
-        >
-          <SvgIcon
-            class="!w-18 !h-18"
-            name="copy"
-          />
-        </button>
-      </div>
+      <VaultOverviewAddressValue
+        :address="infoItem.address"
+        :check-safe="infoItem.checkSafe"
+      />
     </VaultOverviewLabelValue>
   </VaultOverviewAccordionSection>
 </template>

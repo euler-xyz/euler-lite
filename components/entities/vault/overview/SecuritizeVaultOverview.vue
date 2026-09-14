@@ -5,10 +5,8 @@ import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } fro
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
-import { getExplorerLink } from '~/utils/block-explorer'
-import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { formatAssetValue } from '~/utils/sdk-prices'
-import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue, shortenAddress } from '~/utils/string-utils'
+import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } from '~/utils/string-utils'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import { VaultApyModal } from '#components'
@@ -23,7 +21,6 @@ const emit = defineEmits<{
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { chainId } = useEulerAddresses()
 const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -44,14 +41,6 @@ const isDeprecated = computed(() => {
 })
 const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
-
-const { copyToClipboard } = useClipboardCopy()
-
-const onCopyClick = (address: string) => {
-  copyToClipboard(address).catch(() => {})
-}
-
-const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
 
 // Count markets where this can be borrowed (securitize vaults cannot be borrow destinations)
 const borrowCount = computed(() => 0)
@@ -330,71 +319,23 @@ const supplyCapPercentageDisplay = computed(() => {
         :label="`${vault.asset.symbol} token`"
         orientation="horizontal"
       >
-        <div class="flex gap-4 items-center">
-          <NuxtLink
-            :to="getExplorerAddressLink(vault.asset.address)"
-            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-            target="_blank"
-          >
-            {{ getSpecialAddressLabel(vault.asset.address) || shortenAddress(vault.asset.address) }}
-          </NuxtLink>
-          <button
-            class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-            @click="onCopyClick(vault.asset.address)"
-          >
-            <SvgIcon
-              class="!w-18 !h-18"
-              name="copy"
-            />
-          </button>
-        </div>
+        <VaultOverviewAddressValue :address="vault.asset.address" />
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         :label="`${vault.asset.symbol} vault`"
         orientation="horizontal"
       >
-        <div class="flex gap-4 items-center">
-          <NuxtLink
-            :to="getExplorerAddressLink(vault.address)"
-            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-            target="_blank"
-          >
-            {{ getSpecialAddressLabel(vault.address) || shortenAddress(vault.address) }}
-          </NuxtLink>
-          <button
-            class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-            @click="onCopyClick(vault.address)"
-          >
-            <SvgIcon
-              class="!w-18 !h-18"
-              name="copy"
-            />
-          </button>
-        </div>
+        <VaultOverviewAddressValue :address="vault.address" />
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="vault.governor && vault.governor !== '0x0000000000000000000000000000000000000000'"
         label="Risk manager"
         orientation="horizontal"
       >
-        <div class="flex gap-4 items-center">
-          <NuxtLink
-            :to="getExplorerAddressLink(vault.governor)"
-            class="text-accent-600 underline cursor-pointer hover:text-accent-500"
-            target="_blank"
-          >
-            {{ getSpecialAddressLabel(vault.governor) || shortenAddress(vault.governor) }}
-          </NuxtLink>
-          <button
-            class="text-content-muted cursor-pointer outline-none hover:text-content-secondary active:text-content-primary"
-            @click="onCopyClick(vault.governor)"
-          >
-            <SvgIcon
-              class="!w-18 !h-18"
-              name="copy"
-            />
-          </button>
-        </div>
+        <VaultOverviewAddressValue
+          :address="vault.governor"
+          check-safe
+        />
       </VaultOverviewLabelValue>
     </VaultOverviewAccordionSection>
   </div>

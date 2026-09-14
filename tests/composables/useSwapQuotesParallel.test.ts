@@ -3,12 +3,17 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { SwapperMode, type SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
-const { getTokenUsdValueMock } = vi.hoisted(() => ({
+const { getTokenUsdValueMock, getEulerSdkFreshMock } = vi.hoisted(() => ({
   getTokenUsdValueMock: vi.fn(),
+  getEulerSdkFreshMock: vi.fn(),
 }))
 
 vi.mock('~/utils/sdk-prices', () => ({
   getTokenUsdValue: getTokenUsdValueMock,
+}))
+
+vi.mock('~/composables/useEulerSdk', () => ({
+  getEulerSdkFresh: getEulerSdkFreshMock,
 }))
 
 const makeQuote = (amountIn: string, amountOut: string): SwapQuote =>
@@ -48,6 +53,12 @@ describe('useSwapQuotesParallel', () => {
   beforeEach(() => {
     getSwapProviders = vi.fn()
     getSwapQuotes = vi.fn()
+    getEulerSdkFreshMock.mockReset()
+    getEulerSdkFreshMock.mockResolvedValue({
+      executionService: {
+        estimateGasForPreparedTransactionPlan: vi.fn().mockResolvedValue(100_000n),
+      },
+    })
     getTokenUsdValueMock.mockReset()
     getTokenUsdValueMock.mockImplementation(async (amount: bigint, decimals: number) =>
       Number(amount) / 10 ** decimals,
@@ -92,6 +103,48 @@ describe('useSwapQuotesParallel', () => {
     expect(quotes.selectedProvider.value).toBe('first')
     expect(quotes.selectedQuote.value).toBe(quotes.effectiveQuote.value)
     expect(changes).toEqual([])
+  })
+
+  it('carries the exact preview intent through prefetch, preparation, and the quote card', async () => {
+    const quote = makeUsdcOutQuote('2000000')
+    const intent = { intentId: 'intent:quote-preview' }
+    const plan = []
+    const prepared = {
+      __prepared: true,
+      plan,
+      chainId: 1,
+      account: requestParams.accountIn,
+      usePermit2: true,
+      unlimitedApproval: false,
+    }
+    const prefetch = { pyth: { entries: [] } }
+    const prefetchPluginData = vi.fn().mockResolvedValue(prefetch)
+    const prepareTransactionPlan = vi.fn().mockResolvedValue(prepared)
+    vi.stubGlobal('useRpcClient', () => ({
+      client: ref({
+        estimateFeesPerGas: vi.fn().mockResolvedValue({ maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }),
+        getBlock: vi.fn().mockResolvedValue({ baseFeePerGas: 1n }),
+      }),
+    }))
+    getSwapProviders.mockResolvedValue(['router'])
+    getSwapQuotes.mockResolvedValue([quote])
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      buildTxPlanForQuote: vi.fn().mockResolvedValue(plan),
+      createIntentsForQuote: vi.fn().mockReturnValue([intent]),
+      prefetchPluginData,
+      prepareTransactionPlan,
+      getPlanAccount: () => requestParams.accountIn,
+    } as never)
+
+    await quotes.requestQuotes(requestParams)
+    await vi.waitFor(() => expect(quotes.sortedQuoteCards.value).toHaveLength(1))
+
+    expect(prefetchPluginData).toHaveBeenCalledWith(plan, requestParams.accountIn, [intent])
+    expect(prepareTransactionPlan).toHaveBeenCalledWith(plan, requestParams.accountIn, prefetch, [intent])
+    expect(quotes.sortedQuoteCards.value[0]?.intents).toBe(prepareTransactionPlan.mock.calls[0]?.[3])
   })
 
   it('updates effectiveQuote when selecting a non-best provider', async () => {
@@ -225,5 +278,132 @@ describe('useSwapQuotesParallel', () => {
 
     expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
     expect(quotes.selectedProvider.value).toBeNull()
+  })
+
+  it('drops an in-flight CoW response that resolves after the gate flips to false', async () => {
+    const includeCowSwap = ref(true)
+    const otherQuote = makeQuote('100', '200')
+    let releaseCowQuote!: (quotes: SwapQuote[]) => void
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      provider === 'cow'
+        ? new Promise<SwapQuote[]>((resolve) => {
+            releaseCowQuote = resolve
+          })
+        : Promise.resolve([otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+
+    // The gate flips (e.g. Safe detection lands) while the CoW request is
+    // still in flight — same sweep generation, so the staleness guard does
+    // not cover it.
+    includeCowSwap.value = false
+    await nextTick()
+
+    releaseCowQuote([makeQuote('100', '300')])
+    await flushPromises()
+    await nextTick()
+
+    // The resolved CoW card must not reinsert past the eviction.
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+  })
+
+  it('replays the sweep when CoW eligibility resolves after a gated sweep', async () => {
+    const includeCowSwap = ref(false)
+    const cowQuote = makeQuote('100', '300')
+    const otherQuote = makeQuote('100', '200')
+    getSwapProviders.mockImplementation(async ({ includeCowSwap: include }: { includeCowSwap?: boolean }) =>
+      include ? ['cow', 'other'] : ['other'],
+    )
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    // Sweep made during the fail-closed detection window — CoW resolved out
+    // of the provider list entirely.
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+
+    // Detection lands on a regular wallet: eligibility resolves to true.
+    includeCowSwap.value = true
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    // The reduced quote set must not persist until the next input change —
+    // the sweep replays with the full provider list.
+    expect(getSwapProviders).toHaveBeenLastCalledWith({ includeCowSwap: true })
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+  })
+
+  it('re-fetches evicted CoW quotes when eligibility returns', async () => {
+    const includeCowSwap = ref(true)
+    const cowQuote = makeQuote('100', '300')
+    const otherQuote = makeQuote('100', '200')
+    getSwapProviders.mockImplementation(async ({ includeCowSwap: include }: { includeCowSwap?: boolean }) =>
+      include ? ['cow', 'other'] : ['other'],
+    )
+    getSwapQuotes.mockImplementation(({ provider }: { provider: string }) =>
+      Promise.resolve([provider === 'cow' ? cowQuote : otherQuote]),
+    )
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+
+    // Gate flips off (e.g. switch to a Safe): CoW cards evict.
+    includeCowSwap.value = false
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['other'])
+
+    // Gate returns (switch back to the EOA): eviction was one-way, so the
+    // sweep replays to restore the CoW route.
+    includeCowSwap.value = true
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+    expect(quotes.sortedQuoteCards.value.map(card => card.provider)).toEqual(['cow', 'other'])
+  })
+
+  it('does not fetch when eligibility resolves before any sweep', async () => {
+    const includeCowSwap = ref(false)
+    getSwapProviders.mockResolvedValue(['cow', 'other'])
+
+    useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      includeCowSwap: () => includeCowSwap.value,
+    })
+
+    includeCowSwap.value = true
+    await nextTick()
+    await flushPromises()
+
+    expect(getSwapProviders).not.toHaveBeenCalled()
   })
 })

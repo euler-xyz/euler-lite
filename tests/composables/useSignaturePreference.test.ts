@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { ref, type Ref } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { seedSignaturePreference } from '~/composables/useSignaturePreference'
 import { PERMIT2_PREFERENCE_STORAGE_KEY, SIGNATURES_PREFERENCE_STORAGE_KEY } from '~/entities/constants'
@@ -63,5 +64,89 @@ describe('seedSignaturePreference', () => {
     seedSignaturePreference(storage)
 
     expect(storage.snapshot()).toEqual({})
+  })
+})
+
+describe('useSignaturePreference', () => {
+  let isSafeWallet: Ref<boolean>
+  let isSafeWalletResolved: Ref<boolean>
+
+  const setupComposable = async () => {
+    const { useSignaturePreference } = await import('~/composables/useSignaturePreference')
+    return useSignaturePreference()
+  }
+
+  beforeEach(() => {
+    vi.resetModules()
+    isSafeWallet = ref(false)
+    isSafeWalletResolved = ref(true)
+    const state = new Map<string, Ref<unknown>>()
+    vi.stubGlobal('useState', (key: string, init: () => unknown) => {
+      let entry = state.get(key)
+      if (!entry) {
+        entry = ref(init())
+        state.set(key, entry)
+      }
+      return entry
+    })
+    vi.stubGlobal('useLocalStorage', (_key: string, defaultValue: boolean) => ref(defaultValue))
+    vi.stubGlobal('useSafeWallet', () => ({ isSafeWallet, isSafeWalletResolved }))
+  })
+
+  it('follows the user preference for regular wallets', async () => {
+    const { signaturesEnabled, signaturesForcedOff, setSignaturesEnabled } = await setupComposable()
+
+    expect(signaturesEnabled.value).toBe(true)
+    expect(signaturesForcedOff.value).toBe(false)
+
+    setSignaturesEnabled(false)
+    expect(signaturesEnabled.value).toBe(false)
+  })
+
+  it('forces signatures off while a Safe wallet is connected', async () => {
+    isSafeWallet.value = true
+    const { signaturesEnabled, signaturesForcedOff } = await setupComposable()
+
+    expect(signaturesEnabled.value).toBe(false)
+    expect(signaturesForcedOff.value).toBe(true)
+  })
+
+  it('preserves the stored preference across a Safe session', async () => {
+    const { signaturesEnabled, setSignaturesEnabled } = await setupComposable()
+    setSignaturesEnabled(true)
+
+    isSafeWallet.value = true
+    expect(signaturesEnabled.value).toBe(false)
+
+    // Disconnecting the Safe restores the untouched user preference.
+    isSafeWallet.value = false
+    expect(signaturesEnabled.value).toBe(true)
+  })
+
+  it('fails closed while Safe detection is still pending', async () => {
+    isSafeWalletResolved.value = false
+    const { signaturesEnabled, signaturesForcedOff } = await setupComposable()
+
+    // Unresolved detection must not allow a permit2-backed plan to prepare.
+    expect(signaturesEnabled.value).toBe(false)
+    expect(signaturesForcedOff.value).toBe(true)
+
+    // Detection resolves to a regular wallet — preference applies again.
+    isSafeWalletResolved.value = true
+    expect(signaturesEnabled.value).toBe(true)
+    expect(signaturesForcedOff.value).toBe(false)
+  })
+
+  it('ignores toggle writes while forced off without corrupting the preference', async () => {
+    const { signaturesEnabled, setSignaturesEnabled } = await setupComposable()
+
+    isSafeWallet.value = true
+    // A stray write while forced off only changes the stored preference —
+    // the effective value stays pinned to false.
+    setSignaturesEnabled(true)
+    expect(signaturesEnabled.value).toBe(false)
+
+    isSafeWallet.value = false
+    expect(signaturesEnabled.value).toBe(true)
   })
 })

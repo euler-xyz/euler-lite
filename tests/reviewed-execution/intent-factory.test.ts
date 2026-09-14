@@ -1,0 +1,215 @@
+import { getAddress, isAddress, zeroAddress, zeroHash } from 'viem'
+import { describe, expect, it } from 'vitest'
+import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
+import { collectPlanningRequirements, selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
+import { TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './fixtures'
+import { makeSwapQuote } from './swap-quote.test-fixture'
+
+describe('operation intent factory', () => {
+  it('normalizes every wallet account without leaking Array.map indexes into viem', () => {
+    const owner = getAddress('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd')
+    const subAccount = getAddress('0x1234567890abcdef1234567890abcdef12345678')
+    const intent = createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 12n },
+      chainId: 1,
+      account: owner,
+      subAccounts: [owner, subAccount],
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-multiple-accounts',
+    })
+
+    expect(intent.subAccounts).toEqual([owner, subAccount])
+    expect(intent.subAccounts.every(account => isAddress(account))).toBe(true)
+  })
+
+  it('strips runtime account state and seals a direct planner constraint', () => {
+    const intent = createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 12n, account: { mutable: true } },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-factory',
+    })
+    expect(intent.planner.args).toEqual({ vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 12n })
+    expect(intent.constraints).toEqual([{ kind: 'exact-input', token: TEST_TOKEN, amount: 12n }])
+    expect(Object.isFrozen(intent)).toBe(true)
+  })
+
+  it('normalizes quotes and derives exact minimum-output and deadline bounds', () => {
+    const quote = makeSwapQuote()
+    const intent = createOperationIntent({
+      kind: 'swap',
+      planner: 'swap-from-wallet',
+      args: { swapQuote: quote, amount: 10n, tokenIn: TEST_TOKEN },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-swap',
+    })
+    expect(intent.constraints).toContainEqual({ kind: 'minimum-output', token: quote.tokenOut.address, amount: BigInt(quote.amountOutMin) })
+    expect(intent.constraints).toContainEqual({ kind: 'deadline', timestamp: quote.verify.deadline })
+  })
+
+  it('binds borrow limits and planning assets to the underlying token, not the vault', () => {
+    const intent = createOperationIntent({
+      kind: 'borrow',
+      planner: 'borrow',
+      args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 12n, borrowAccount: TEST_ACCOUNT },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-borrow',
+    })
+
+    expect(intent.constraints).toEqual([{ kind: 'maximum-input', token: TEST_TOKEN, amount: 12n }])
+    const requirements = collectPlanningRequirements([intent])
+    expect(requirements.assets).toEqual([TEST_TOKEN])
+    expect(requirements.vaults).toEqual([TEST_VAULT])
+  })
+
+  it('does not load zero-address swap sentinels as planning dependencies', () => {
+    const quote = {
+      ...makeSwapQuote(),
+      accountIn: zeroAddress,
+      vaultIn: zeroAddress,
+    }
+    const intent = createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit-with-swap',
+      args: { swapQuote: quote, amount: 10n, tokenIn: TEST_TOKEN },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-zero-sentinels',
+    })
+
+    const requirements = collectPlanningRequirements([intent])
+    expect([
+      ...requirements.accounts,
+      ...requirements.vaults,
+      ...requirements.assets,
+    ]).not.toContain(zeroAddress)
+  })
+
+  it('adopts warmed intents only when their execution semantics match the clicked form', () => {
+    const create = (amount: bigint, createdAt: number, intentId: string) => createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt,
+      intentId,
+    })
+    const warmed = [create(12n, 1, 'intent-warmed')]
+    const equivalentClick = [create(12n, 2, 'intent-click')]
+    const changedClick = [create(13n, 3, 'intent-changed')]
+
+    expect(selectMatchingPreparedIntents(warmed, equivalentClick)).toBe(warmed)
+    expect(selectMatchingPreparedIntents(warmed, changedClick)).toBe(changedClick)
+  })
+
+  it('collects both sides of a retained collateral swap as vault policy dependencies', () => {
+    const targetVault = getAddress('0x5000000000000000000000000000000000000000')
+    const quote = makeSwapQuote()
+    const intent = createOperationIntent({
+      kind: 'collateral',
+      planner: 'swap-collateral',
+      args: {
+        swapQuote: {
+          ...quote,
+          verify: { ...quote.verify, vault: targetVault },
+        },
+        swapperMode: 0,
+      },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-two-vault-swap',
+    })
+
+    expect(collectPlanningRequirements([intent]).vaults).toEqual([TEST_VAULT, targetVault])
+  })
+
+  it.each(['v1', 'v2'] as const)('keeps external MetaMorpho %s references separate from Euler vault requirements', (version) => {
+    const externalVault = getAddress('0x5000000000000000000000000000000000000000')
+    const borrowVault = getAddress('0x6000000000000000000000000000000000000000')
+    const quoteVault = getAddress('0x7000000000000000000000000000000000000000')
+    const quote = makeSwapQuote()
+    const migration = createOperationIntent({
+      kind: 'migration',
+      planner: 'cross-protocol-migration',
+      args: {
+        direction: 'euler-to-external',
+        connectorId: 'metamorpho',
+        owner: TEST_ACCOUNT,
+        positionRef: { vault: externalVault, version },
+        externalTarget: { positionRef: { vault: externalVault, version } },
+        source: { eulerAccount: TEST_ACCOUNT, borrowVault, collateralVault: TEST_VAULT },
+        collateralSwapQuote: { ...quote, verify: { ...quote.verify, vault: quoteVault } },
+        deadline: 1_000n,
+        authorizationEvidenceDigest: zeroHash,
+      },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-external-vault',
+      constraints: [{ kind: 'deadline', timestamp: 1_000 }],
+    })
+
+    expect(collectPlanningRequirements([migration]).vaults).toEqual([TEST_VAULT, borrowVault, quoteVault])
+    // An external reference must not erase an independent Euler dependency.
+    const deposit = createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: { vaultAddress: externalVault, assetAddress: TEST_TOKEN, amount: 12n },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-independent-vault',
+    })
+    expect(collectPlanningRequirements([deposit, migration]).vaults).toContain(externalVault)
+    expect(collectPlanningRequirements([migration, deposit]).vaults).toContain(externalVault)
+  })
+
+  it.each([
+    ['aave', { collateralAsset: TEST_TOKEN, debtAsset: TEST_TOKEN }],
+    ['morpho', { loanToken: TEST_TOKEN, collateralToken: TEST_TOKEN, oracle: TEST_ACCOUNT, irm: TEST_ACCOUNT, lltv: 1n }],
+  ] as const)('retains assets inside %s migration position references', (connectorId, positionRef) => {
+    const migration = createOperationIntent({
+      kind: 'migration',
+      planner: 'cross-protocol-migration',
+      args: {
+        direction: 'external-to-euler',
+        connectorId,
+        owner: TEST_ACCOUNT,
+        positionRef,
+        target: { eulerAccount: TEST_ACCOUNT, collateralVault: TEST_VAULT },
+        deadline: 1_000n,
+        authorizationEvidenceDigest: zeroHash,
+      },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-external-assets',
+      constraints: [{ kind: 'deadline', timestamp: 1_000 }],
+    })
+
+    expect(collectPlanningRequirements([migration]).assets).toEqual([TEST_TOKEN])
+    expect(collectPlanningRequirements([migration]).vaults).toEqual([TEST_VAULT])
+  })
+})

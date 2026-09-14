@@ -1,5 +1,6 @@
 import { computed, nextTick, ref, shallowRef, watch, watchEffect, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Address } from 'viem'
 import type { Account, EVault, IHasVaultAddress, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
@@ -42,6 +43,7 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
     } as unknown as Account<IHasVaultAddress>,
     mocks: {
       planBorrow: vi.fn(),
+      planSwapAndBorrow: vi.fn(),
       executePlan: vi.fn(),
       prefetchPluginData: vi.fn(),
       preloadSubAccountSnapshot: vi.fn(),
@@ -61,6 +63,9 @@ const { USER, SUB_ACCOUNT_A, SUB_ACCOUNT_B, VAULT, vault, planAccount, mocks } =
       supplyRewardApy: 0,
       borrowRewardApy: 0,
       borrowEffectiveQuote: undefined as unknown as Ref<unknown>,
+      swapQuoteOptions: undefined as unknown as { createIntentsForQuote?: (quote: unknown) => readonly unknown[] },
+      openReview: vi.fn(async (..._args: unknown[]) => undefined),
+      createIntent: vi.fn(),
       planAccountRef: undefined as unknown as Ref<Account<IHasVaultAddress>>,
     },
   }
@@ -105,13 +110,15 @@ vi.mock('~/composables/useSwapPriceImpact', () => ({
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
-  useSwapQuotesParallel: () => {
+  useSwapQuotesParallel: (options: { createIntentsForQuote?: (quote: unknown) => readonly unknown[] }) => {
+    mocks.swapQuoteOptions = options
     mocks.borrowEffectiveQuote = ref(null)
     return {
       sortedQuoteCards: ref([]),
       selectedProvider: ref(null),
       selectedQuote: ref(null),
       effectiveQuote: mocks.borrowEffectiveQuote,
+      effectiveQuoteFetchedAt: ref(null),
       isLoading: ref(false),
       quoteError: ref(null),
       statusLabel: ref(''),
@@ -249,9 +256,39 @@ describe('useBorrowForm savings collateral', () => {
     vi.stubGlobal('watchEffect', watchEffect)
     vi.stubGlobal('nextTick', nextTick)
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
+    let intentSequence = 0
+    mocks.createIntent.mockImplementation((input: {
+      kind: string
+      planner: string
+      args: Record<string, unknown>
+      source: string
+      subAccounts?: readonly string[]
+    }) => ({
+      schemaVersion: 1,
+      intentId: `intent-${++intentSequence}`,
+      revision: 1,
+      kind: input.kind,
+      chainId: 1,
+      account: USER,
+      subAccounts: input.subAccounts ?? [USER],
+      planner: { name: input.planner, args: input.args },
+      constraints: [],
+      metadata: { createdAt: intentSequence, source: input.source, operation: input.source },
+    }))
+    vi.stubGlobal('useOperationIntentFactory', () => ({
+      capture: () => mocks.createIntent,
+      create: mocks.createIntent,
+    }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (intents: unknown[], options: unknown) => ({
+        intents,
+        usesPreparedIntents: false,
+        open: () => mocks.openReview(intents, options),
+      }),
+    }))
     vi.stubGlobal('useEulerTx', () => ({
       planBorrow: mocks.planBorrow,
-      planSwapAndBorrow: vi.fn(),
+      planSwapAndBorrow: mocks.planSwapAndBorrow,
       executePlan: mocks.executePlan,
       prefetchPluginData: mocks.prefetchPluginData,
       preloadSubAccountSnapshot: mocks.preloadSubAccountSnapshot,
@@ -410,7 +447,77 @@ describe('useBorrowForm savings collateral', () => {
     await form.submit()
 
     expect(mocks.runSimulation).toHaveBeenCalled()
-    expect(mocks.modalOpen).toHaveBeenCalled()
+    expect(mocks.openReview).toHaveBeenCalled()
+  })
+
+  it('keeps the reviewed savings source bound to the borrow intent during preparation', async () => {
+    const form = makeForm(shallowRef([
+      makeSavingsPosition(SUB_ACCOUNT_A, 100n, 90n),
+      makeSavingsPosition(SUB_ACCOUNT_B, 250n, 240n),
+    ]))
+    form.onChangeCollateral(1)
+    form.collateralAmount.value = '5'
+    form.borrowAmount.value = '1'
+    let releasePlan!: () => void
+    mocks.planBorrow.mockImplementationOnce(() => new Promise((resolve) => {
+      releasePlan = () => resolve([{ type: 'evcBatch', items: [] }])
+    }))
+    mocks.runSimulation.mockResolvedValue(true)
+
+    const submitting = form.submit()
+    await vi.waitFor(() => expect(releasePlan).toBeTypeOf('function'))
+    form.onChangeCollateral(2)
+    releasePlan()
+    await submitting
+
+    expect(mocks.openReview).toHaveBeenCalledWith([
+      expect.objectContaining({
+        planner: expect.objectContaining({
+          args: expect.objectContaining({ borrowAccount: USER, collateral: expect.objectContaining({ from: SUB_ACCOUNT_A }) }),
+        }),
+      }),
+    ], expect.objectContaining({
+      review: expect.objectContaining({ subAccount: USER, sourceSubAccount: SUB_ACCOUNT_A }),
+    }))
+  })
+
+  it('recaptures direct and batch quote-backed intents after the borrow amount settles', async () => {
+    const form = makeForm(shallowRef([]))
+    const payToken = {
+      address: '0x0000000000000000000000000000000000000099' as const,
+      name: 'Pay token',
+      symbol: 'PAY',
+      decimals: 0,
+    }
+    const quote = {
+      amountIn: '10',
+      amountInMax: '10',
+      amountOut: '8',
+      amountOutMin: '7',
+      tokenIn: { ...payToken, chainId: 1 },
+      tokenOut: { ...vault.asset, chainId: 1 },
+    }
+    form.borrowSelectedAsset.value = payToken
+    form.collateralAmount.value = '10'
+
+    const previewIntent = mocks.swapQuoteOptions.createIntentsForQuote?.(quote)?.[0] as { planner: { args: { borrowAmount: bigint } } }
+    expect(previewIntent.planner.args.borrowAmount).toBe(0n)
+
+    mocks.borrowEffectiveQuote.value = quote
+    await nextTick()
+    form.borrowAmount.value = '5'
+    mocks.planSwapAndBorrow.mockResolvedValue([{ type: 'evcBatch', items: [] }])
+    mocks.runSimulation.mockResolvedValue(true)
+
+    const batchIntent = form.createBorrowIntent(form.captureBorrowSnapshot(SUB_ACCOUNT_A as Address)) as unknown as { planner: { args: { borrowAmount: bigint } } }
+    expect(batchIntent.planner.args.borrowAmount).toBe(5n)
+    expect(batchIntent).not.toBe(previewIntent)
+
+    await form.submit()
+
+    const submittedIntents = mocks.openReview.mock.calls.at(-1)?.[0] as Array<{ planner: { args: { borrowAmount: bigint } } }>
+    expect(submittedIntents[0]?.planner.args.borrowAmount).toBe(5n)
+    expect(submittedIntents[0]).not.toBe(previewIntent)
   })
 
   it('does not project a savings share transfer as new vault cash', async () => {

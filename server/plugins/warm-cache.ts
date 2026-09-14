@@ -15,7 +15,7 @@
  *
  * Two timers, each with its own cadence:
  *
- *   • Global cycle (5 min): Euler Chains once, cross-chain effective asset
+ *   • Global cycle (5 min): Euler Chains and runtime ABIs once, cross-chain effective asset
  *     policy once, then each chain's Public Labels bundle, effective policy,
  *     and token list, serialized across chains.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
@@ -38,6 +38,7 @@
  */
 import { EFFECTIVE_POLICY_LABEL_FILES, refreshLabelFile } from '../utils/labels-source'
 import { refreshEulerChains } from '../api/internal/euler-chains.get'
+import { ABI_CONTRACTS, refreshAbi } from '../api/internal/abis/[contract].get'
 import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { refreshPublicLabelsBundle } from '../utils/public-labels-source'
@@ -99,6 +100,14 @@ const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined
 
 const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
+
+// Runtime ABI documents are chain-agnostic (one file per contract), so a
+// single warm per cycle keeps the manifest caches hot for the browser SDK's
+// /api/internal/abis reads.
+const warmAbis = (): Promise<unknown>[] =>
+  ABI_CONTRACTS.map(contract =>
+    reportWarm(`abis/${contract}`, refreshAbi(contract)),
+  )
 
 // Cross-chain pattern rules for effective asset policy live at
 // `all/assets.json`. Warm them once; the shared policy source combines them
@@ -165,6 +174,7 @@ export default defineNitroPlugin(() => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
+        ...warmAbis(),
         warmGlobalAssets(),
         warmChainsSequentially(),
       ])

@@ -1,4 +1,6 @@
-import type { Hash, Transaction, TransactionReceipt } from 'viem'
+import { numberToHex, type Address, type Hash, type Transaction, type TransactionReceipt } from 'viem'
+import type { SafeAtomicCapabilityStatus, SafeTransportEnvelope } from '~/features/reviewed-execution/domain/reviewed-execution'
+import { isSafeCallsId } from '~/utils/safe-calls-id'
 
 const SAFE_STATUS_POLL_INTERVAL_MS = 2_000
 const SAFE_STATUS_POLL_TIMEOUT_MS = 5 * 60_000
@@ -30,23 +32,25 @@ interface SafeCallsStatusReceipt {
 
 interface SafeCallsStatus {
   status?: number | string
+  atomic?: boolean
   receipts?: SafeCallsStatusReceipt[]
 }
 
 export interface SafeTransactionExecution {
   hash: Hash
   receipt: TransactionReceipt
+  atomic?: true
 }
 
 export class SafeTransactionStatusUnknownError extends Error {
-  readonly submittedHash: Hash
+  readonly submittedId: string
 
-  constructor(submittedHash: Hash, reason: 'timeout' | 'aborted') {
+  constructor(submittedId: string, reason: 'timeout' | 'aborted') {
     super(reason === 'timeout'
       ? 'Safe transaction confirmation timed out. Its execution status is unknown; verify it in Safe before retrying.'
       : 'Safe transaction confirmation was interrupted. Its execution status is unknown; verify it in Safe before retrying.')
     this.name = 'SafeTransactionStatusUnknownError'
-    this.submittedHash = submittedHash
+    this.submittedId = submittedId
   }
 }
 
@@ -77,6 +81,19 @@ const hasRequest = (value: unknown): value is WalletProviderLike =>
   isRecord(value) && typeof value.request === 'function'
 
 /**
+ * Synchronous check: the connector itself is identifiably Safe (wagmi's
+ * iframe `safe` connector id or a Safe wallet name), before and without
+ * provider acquisition. Safe-via-WalletConnect is NOT covered — that
+ * identification needs the provider's peer metadata.
+ */
+export const isSafeConnectorIdentity = (
+  connector?: Pick<WalletConnectorLike, 'id' | 'name'>,
+): boolean => {
+  const id = connector?.id?.toLowerCase() ?? ''
+  return id === 'safe' || isSafeWalletName(connector?.name ?? '')
+}
+
+/**
  * Return the connector provider only when the connected wallet is Safe.
  *
  * Safe can arrive either through wagmi's iframe connector or through a
@@ -88,9 +105,8 @@ export const getSafeWalletProvider = async (
 ): Promise<WalletProviderLike | undefined> => {
   if (!connector?.getProvider) return undefined
 
-  const id = connector.id?.toLowerCase() ?? ''
-  const connectorIsSafe = id === 'safe' || isSafeWalletName(connector.name ?? '')
-  const connectorIsWalletConnect = id === 'walletconnect'
+  const connectorIsSafe = isSafeConnectorIdentity(connector)
+  const connectorIsWalletConnect = connector.id?.toLowerCase() === 'walletconnect'
   if (!connectorIsSafe && !connectorIsWalletConnect) return undefined
 
   let provider: unknown
@@ -113,6 +129,57 @@ export const getSafeWalletProvider = async (
     : undefined
 }
 
+export const getSafeAtomicCapability = async (
+  provider: WalletProviderLike,
+  account: Address,
+  chainId: number,
+): Promise<Readonly<{ status: SafeAtomicCapabilityStatus }>> => {
+  const raw = await provider.request({
+    method: 'wallet_getCapabilities',
+    params: [account, [numberToHex(chainId)]],
+  })
+  if (!isRecord(raw)) throw new Error('Safe wallet returned invalid capability data')
+  const entries = Object.entries(raw)
+  const chainCapabilities = entries.find(([key]) => Number(key) === chainId)?.[1]
+  const atomic = isRecord(chainCapabilities) && isRecord(chainCapabilities.atomic)
+    ? chainCapabilities.atomic
+    : undefined
+  if (!atomic) {
+    throw new Error(`Safe wallet does not advertise atomic execution on chain ${chainId}`)
+  }
+  const status = atomic.status
+  if (status !== 'supported' && status !== 'ready') {
+    throw new Error(`Safe wallet atomic execution is unsupported on chain ${chainId}`)
+  }
+  return { status }
+}
+
+export const sendSafeAtomicCalls = async (
+  provider: WalletProviderLike,
+  envelope: SafeTransportEnvelope,
+): Promise<string> => {
+  const result = await provider.request({
+    method: 'wallet_sendCalls',
+    params: [{
+      version: envelope.version,
+      from: envelope.from,
+      chainId: numberToHex(envelope.chainId),
+      atomicRequired: envelope.atomicRequired,
+      calls: envelope.calls.map(call => ({
+        to: call.to,
+        data: call.data,
+        value: numberToHex(call.value),
+      })),
+      capabilities: envelope.capabilities,
+    }],
+  })
+  const callsId = typeof result === 'string'
+    ? result
+    : isRecord(result) ? result.id : undefined
+  if (isSafeCallsId(callsId)) return callsId
+  throw new Error('Safe returned no valid calls ID')
+}
+
 const parseStatus = (value: number | string | undefined): number | undefined => {
   if (typeof value === 'number') return value
   if (typeof value !== 'string' || !value) return undefined
@@ -130,7 +197,8 @@ const parseCallsStatus = (value: unknown): SafeCallsStatus | undefined => {
   const status = typeof value.status === 'number' || typeof value.status === 'string'
     ? value.status
     : undefined
-  return { status, receipts }
+  const atomic = typeof value.atomic === 'boolean' ? value.atomic : undefined
+  return { status, atomic, receipts }
 }
 
 const isUnsupportedMethodError = (error: unknown) => {
@@ -187,30 +255,34 @@ const waitForNextPoll = (pollingIntervalMs: number) =>
     : Promise.resolve()
 
 /**
- * Wait for a Safe transaction and resolve its Safe hash to the real execution
- * hash. Safe returns a Safe transaction hash while confirmations are pending;
- * a normal chain RPC can never find a receipt under that hash.
+ * Wait for Safe calls and resolve the opaque calls ID to the on-chain execution
+ * hash. Calls status is authoritative; receipt fallback is available only when
+ * the calls ID itself has transaction-hash shape.
  */
 export const waitForSafeTransactionExecution = async ({
-  submittedHash,
+  callsId,
   walletProvider,
   publicClient,
   pollingIntervalMs = SAFE_STATUS_POLL_INTERVAL_MS,
   timeoutMs = SAFE_STATUS_POLL_TIMEOUT_MS,
+  requireAtomic = false,
   signal,
 }: {
-  submittedHash: Hash
+  callsId: string
   walletProvider: WalletProviderLike
   publicClient: ReceiptClientLike
   pollingIntervalMs?: number
   timeoutMs?: number
+  requireAtomic?: boolean
   signal?: AbortSignal
 }): Promise<SafeTransactionExecution> => {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new RangeError('Safe transaction polling timeout must be a positive finite number')
   }
 
+  const submittedHash = isHash(callsId) ? callsId : undefined
   let executionHash = submittedHash
+  let atomicConfirmed = !requireAtomic
   let callsStatusSupported = true
   let stopReason: 'timeout' | 'aborted' = 'timeout'
   const deadlineAt = Date.now() + timeoutMs
@@ -226,7 +298,7 @@ export const waitForSafeTransactionExecution = async ({
     stopReason = 'timeout'
     stopController.abort()
   }, timeoutMs)
-  const statusUnknownError = () => new SafeTransactionStatusUnknownError(submittedHash, stopReason)
+  const statusUnknownError = () => new SafeTransactionStatusUnknownError(callsId, stopReason)
   const withStopSignal = <T>(promise: Promise<T>): Promise<T> => {
     if (stopController.signal.aborted) return Promise.reject(statusUnknownError())
 
@@ -258,45 +330,56 @@ export const waitForSafeTransactionExecution = async ({
         throw statusUnknownError()
       }
 
-      const receipt = await withStopSignal(getPublicReceipt(publicClient, executionHash))
-      if (receipt) return { hash: executionHash, receipt }
+      const receipt = executionHash
+        ? await withStopSignal(getPublicReceipt(publicClient, executionHash))
+        : undefined
+      if (receipt && atomicConfirmed) {
+        return { hash: executionHash, receipt, ...(requireAtomic ? { atomic: true as const } : {}) }
+      }
 
       if (callsStatusSupported) {
         try {
           const rawStatus = await withStopSignal(walletProvider.request({
             method: 'wallet_getCallsStatus',
-            params: [submittedHash],
+            params: [callsId],
           }))
           const callsStatus = parseCallsStatus(rawStatus)
           const status = parseStatus(callsStatus?.status)
-
-          if (status === 400) {
-            throw new Error('Safe transaction was cancelled')
-          }
-          if (status !== undefined && status >= 500) {
-            throw new Error('Safe transaction failed')
-          }
 
           const resolvedHash = callsStatus?.receipts
             ?.map(item => item.transactionHash)
             .find(isHash)
           if (resolvedHash) executionHash = resolvedHash
+
+          if (status === 400) {
+            throw new Error('Safe transaction was cancelled')
+          }
+          if (requireAtomic && callsStatus?.atomic === false) {
+            throw new Error('Safe call batch was not atomic')
+          }
+          if (requireAtomic && status !== undefined && status >= 200 && status < 300 && callsStatus?.atomic === true) {
+            atomicConfirmed = true
+          }
+          if (status !== undefined && status >= 500) {
+            throw new Error('Safe transaction failed')
+          }
         }
         catch (error) {
           if (error instanceof SafeTransactionStatusUnknownError) throw error
           if (error instanceof Error && (
             error.message === 'Safe transaction was cancelled'
             || error.message === 'Safe transaction failed'
+            || error.message === 'Safe call batch was not atomic'
           )) {
             throw error
           }
           if (isUnsupportedMethodError(error)) callsStatusSupported = false
           // Safe's gateway can briefly report "Transaction not found" before it
-          // indexes a newly submitted Safe hash. Treat that as pending.
+          // indexes a newly submitted calls ID. Treat that as pending.
         }
       }
 
-      if (!callsStatusSupported) {
+      if (!callsStatusSupported && submittedHash) {
         try {
           const walletReceipt = await withStopSignal(walletProvider.request({
             method: 'eth_getTransactionReceipt',

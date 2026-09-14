@@ -15,10 +15,8 @@ import { getRepaySwapReviewInputAmount } from '~/composables/repay/reviewAmount'
 import { getSwapInputAmount } from '~/utils/swapQuotes'
 import { findBlockingDisabledOp, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
-import { OperationReviewModal } from '#components'
 import type { Ref, ComputedRef } from 'vue'
 import { isNativeCurrencyAddress, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { FixedPoint } from '~/utils/fixed-point'
@@ -56,6 +54,9 @@ interface UseWalletSwapRepayOptions {
 
 interface WalletSwapRepayPlanSnapshot {
   selectedAsset?: VaultAsset
+  borrowVault?: EVault
+  repayAccount?: Address
+  chainId?: number
   direction?: SwapperMode
   isFullRepay?: boolean
 }
@@ -77,9 +78,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     oraclePriceRatio,
   } = options
 
-  const modal = useModal()
   const { error } = useToast()
-  const { planSwapAndRepay, executePlan, prefetchPluginData } = useEulerTx()
+  const { planSwapAndRepay, prefetchPluginData } = useEulerTx()
+  const { create: createIntent } = useOperationIntentFactory()
+  const { capture: captureReviewState } = useExecutionReview()
   // EXACT_IN validates wallet balance up front (`isSubmitDisabled` line ~306);
   // TARGET_DEBT lets the simulator surface real wallet insufficiency rather
   // than forging it. Skip balance overrides + keep slot hints + wallet
@@ -90,7 +92,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const { isConnected, address, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
   const { getBalance } = useWallets()
-  const { finalizeTxAndRedirect } = useTxFinalization()
+  const { finalizeExecutionUi } = useTxFinalization()
   const { getVault: registryGetVault } = useVaultRegistry()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
   const {
@@ -118,7 +120,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const quotes = useSwapRepayQuotes({
     direction,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
-    prefetchPluginData: (plan, account) => prefetchPluginData(plan, { account }),
+    createIntentsForQuote: quote => [createRepayIntent(quote)],
+    prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
     getPlanAccount: () => planAccount.value,
   })
   // --- Derived ---
@@ -884,7 +887,9 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   ): Promise<TransactionPlan> {
     const swapQuote = quote || quotes.selectedQuote.value
     const repaymentAsset = snapshot.selectedAsset ?? selectedAsset.value
-    if (!position.value || !borrowVault.value || !collateralVault.value || !swapQuote || !repaymentAsset) {
+    const liability = snapshot.borrowVault ?? borrowVault.value
+    const repayAccount = snapshot.repayAccount ?? position.value?.subAccount as Address | undefined
+    if (!liability || !repayAccount || !swapQuote || !repaymentAsset) {
       throw new Error('Missing data for swap repay plan')
     }
 
@@ -892,7 +897,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     const inputAmount = getSwapInputAmount(swapQuote, swapMode)
 
     const isNative = isNativeCurrencyAddress(repaymentAsset.address)
-    const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+    const wrappedAddress = isNative ? resolveWrappedNativeAddress(snapshot.chainId ?? chainId.value!) : null
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
@@ -902,14 +907,52 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       swapQuote,
       amount: inputAmount,
       tokenIn: (wrappedAddress || repaymentAsset.address) as Address,
-      liabilityVault: borrowVault.value.address as Address,
-      repayAccount: (position.value.subAccount || effectiveAddress.value || zeroAddress) as Address,
+      liabilityVault: liability.address as Address,
+      repayAccount,
       isMax: repayAll,
       cleanupOnMax: repayAll,
       wrappedNativeInfo: isNative && wrappedAddress
         ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
         : undefined,
       account,
+    })
+  }
+
+  function createRepayIntent(
+    quote?: SwapQuote,
+    snapshot: WalletSwapRepayPlanSnapshot = {},
+  ) {
+    const swapQuote = quote || quotes.selectedQuote.value
+    const repaymentAsset = snapshot.selectedAsset ?? selectedAsset.value
+    const liability = snapshot.borrowVault ?? borrowVault.value
+    const repayAccount = snapshot.repayAccount
+      ?? (position.value?.subAccount || effectiveAddress.value || zeroAddress) as Address
+    if (!liability || !swapQuote || !repaymentAsset) {
+      throw new Error('Missing data for swap repay intent')
+    }
+    const swapMode = snapshot.direction ?? direction.value
+    const inputAmount = getSwapInputAmount(swapQuote, swapMode)
+    const isNative = isNativeCurrencyAddress(repaymentAsset.address)
+    const wrappedAddress = isNative ? resolveWrappedNativeAddress(snapshot.chainId ?? chainId.value!) : null
+    if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+    const repayAll = snapshot.isFullRepay ?? isFullRepay.value
+    return createIntent({
+      kind: 'repay',
+      planner: 'swap-and-repay',
+      args: {
+        swapQuote,
+        amount: inputAmount,
+        tokenIn: (wrappedAddress || repaymentAsset.address) as Address,
+        liabilityVault: liability.address as Address,
+        repayAccount,
+        isMax: repayAll,
+        cleanupOnMax: repayAll,
+        wrappedNativeInfo: isNative && wrappedAddress
+          ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
+          : undefined,
+      },
+      source: 'position/repay-wallet-swap',
+      subAccounts: [repayAccount],
     })
   }
 
@@ -922,8 +965,60 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
     isPreparing.value = true
     try {
+      const quote = quotes.selectedQuote.value
+      const capturedAmount = amount.value
+      const capturedDebtAmount = debtAmount.value
+      const capturedDirection = direction.value
+      const capturedDebt = position.value.borrowed || 0n
+      const capturedChainId = chainId.value!
+      const snapshot: WalletSwapRepayPlanSnapshot = Object.freeze({
+        selectedAsset: selectedAsset.value,
+        borrowVault: borrowVault.value,
+        repayAccount: position.value.subAccount as Address,
+        chainId: capturedChainId,
+        direction: capturedDirection,
+        isFullRepay: isFullRepay.value,
+      })
+      const quoteIntents = quotes.selectedQuoteCard.value?.quote === quote
+        ? quotes.selectedQuoteCard.value.intents
+        : undefined
+      const currentIntents = [createRepayIntent(quote, snapshot)]
+      const inputDisplay = getRepaySwapReviewInputAmount({
+        amount: capturedAmount,
+        quote,
+        sourceDecimals: snapshot.selectedAsset!.decimals,
+        swapperMode: capturedDirection,
+      })
+      const isNativeRepay = isNativeCurrencyAddress(snapshot.selectedAsset!.address)
+      const reviewAsset = isNativeRepay
+        ? (resolveWrappedNativeAsset(capturedChainId) || snapshot.selectedAsset!)
+        : snapshot.selectedAsset!
+      const minimumOutput = BigInt(quote.amountOutMin || 0)
+      const estimatedOutput = minimumOutput > 0n
+        ? formatUnits(minimumOutput, Number(snapshot.borrowVault!.asset.decimals))
+        : ''
+      const reviewLaunch = captureReviewState(currentIntents, {
+        presentationKind: 'repay',
+        review: {
+          type: 'repay',
+          asset: reviewAsset,
+          amount: inputDisplay,
+          quoteFetchedAt: quotes.effectiveQuoteFetchedAt.value,
+          swapToAsset: snapshot.borrowVault!.asset,
+          swapToAmount: capturedDirection === SwapperMode.TARGET_DEBT ? capturedDebtAmount : estimatedOutput,
+          swapMode: capturedDirection,
+          subAccount: snapshot.repayAccount,
+          hasBorrows: capturedDebt > 0n,
+          submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => finalizeExecutionUi(),
+        onFailed: (cause) => {
+          error('Transaction failed')
+          logWarn('walletSwapRepay/send', cause)
+        },
+      }, quoteIntents)
       try {
-        plan.value = await buildRepayPlan()
+        plan.value = await buildRepayPlan(quote, planAccount.value, snapshot)
       }
       catch (e) {
         logWarn('walletSwapRepay/buildPlan', e)
@@ -937,57 +1032,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const ok = await runSimulation(plan.value, buildRepayStateOverrideOptions())
       if (!ok) return
 
-      // For review modal: show input token as primary asset, borrow asset as swap target
-      const inputDisplay = getRepaySwapReviewInputAmount({
-        amount: amount.value,
-        quote: quotes.selectedQuote.value,
-        sourceDecimals: selectedAsset.value.decimals,
-        swapperMode: direction.value,
-      })
-
-      const isNativeRepay = isNativeCurrencyAddress(selectedAsset.value.address)
-      const reviewAsset = isNativeRepay
-        ? (resolveWrappedNativeAsset(chainId.value!) || selectedAsset.value)
-        : selectedAsset.value
-      modal.open(OperationReviewModal, {
-        props: {
-          type: 'repay',
-          asset: reviewAsset,
-          amount: inputDisplay,
-          quoteFetchedAt: quotes.effectiveQuoteFetchedAt.value,
-          swapToAsset: borrowVault.value.asset,
-          swapToAmount: direction.value === SwapperMode.TARGET_DEBT ? debtAmount.value : swapEstimatedOutput.value,
-          swapMode: direction.value,
-          plan: plan.value || undefined,
-          subAccount: position.value?.subAccount,
-          hasBorrows: (position.value?.borrowed || 0n) > 0n,
-          onConfirm: async () => {
-            await send()
-          },
-          submittingLabel: 'Submitting...',
-        },
-      })
+      await reviewLaunch.open()
     }
     finally {
       isPreparing.value = false
-    }
-  }
-
-  const send = async () => {
-    try {
-      isSubmitting.value = true
-      if (!position.value || !borrowVault.value || !collateralVault.value || !quotes.selectedQuote.value || !selectedAsset.value) return
-
-      const txPlan = await buildRepayPlan()
-      await executePlan(txPlan)
-      await finalizeTxAndRedirect()
-    }
-    catch (e) {
-      error('Transaction failed')
-      logWarn('walletSwapRepay/send', e)
-    }
-    finally {
-      isSubmitting.value = false
     }
   }
 
@@ -1051,10 +1099,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     onSelectSwapAsset,
     onRefreshSwapQuotes,
     submit,
-    send,
     resetOnTabSwitch,
     initEstimates,
     // Batch
     buildRepayPlan,
+    createRepayIntent,
   }
 }

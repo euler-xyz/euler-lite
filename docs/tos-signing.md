@@ -85,9 +85,9 @@ See: `composables/guards/useTosGuard.ts`
 | File | Role |
 |------|------|
 | `composables/useTosData.ts` | Fetches TOS markdown, computes hashes |
-| `composables/guards/useTosGuard.ts` | Guard logic, on-chain signature check, blocker/guard registration |
-| `utils/tos-injection.ts` | Prepends `signTermsOfUse` call to EVC batch |
-| `utils/operationGuardRegistry.ts` | Generic guard registry (TOS guard registers here) |
+| `composables/guards/useTosGuard.ts` | Guard logic, on-chain signature check, blocker registration, publishes the signed message to `utils/sdk-tos.ts` |
+| `utils/sdk-tos.ts` | SDK plugin that prepends the `signTermsOfUse` call to every EVC batch |
+| `utils/operationGuardRegistry.ts` | Submit blocker and metadata registry (TOS blocker registers here) |
 | `server/api/internal/tos.get.ts` | Server proxy for TOS markdown with caching |
 | `abis/tos.ts` | `TermsOfUseSigner` contract ABIs |
 | `components/entities/operation/AcknowledgeTermsModal.vue` | Acceptance modal UI |

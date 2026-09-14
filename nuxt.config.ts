@@ -143,8 +143,6 @@ export default defineNuxtConfig({
       // Absolute URL to an image used for social share previews (og:image /
       // twitter:image). Empty default so forks don't inherit our branding.
       configSocialImageUrl: '',
-      configOracleChecksRepo: 'euler-xyz/oracle-checks',
-      configOracleChecksBaseUrl: '',
       configEulerChainsUrl: '',
       // Feature flags: enabled by default. Set to 'false' to disable.
       configEnableEntityBranding: '',
@@ -270,13 +268,6 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
         },
       },
-      '/oracles/**': {
-        headers: {
-          'Cache-Control': 'public, max-age=86400',
-          'CDN-Cache-Control': 'public, max-age=604800',
-          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
-        },
-      },
       '/favicons/**': {
         headers: {
           'Cache-Control': 'public, max-age=86400',
@@ -319,6 +310,12 @@ export default defineNuxtConfig({
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/abis/**': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
         },
       },
       '/api/internal/proxy/merkl/opportunities': {

@@ -34,6 +34,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Utilization-aware supply and borrow rate projections
 - USD-weighted multi-collateral snapshots
 - Net APY, ROE, intrinsic yield, and reward breakdowns
+- Provider-owned reward eligibility notices (`complete` / `incomplete` / `none`)
 - Transaction-batch layer consistency and fail-closed estimates
 
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
@@ -41,19 +42,51 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Position discovery and categorization
 - Lens contract usage
 - Borrow, deposit, and earn position loading
+- External Aave / Morpho migrate discovery is covered in [External Migration Discovery](./external-migration.md)
+- Cross-position exact-vault repayment is covered in [Cross-Position Repay](./cross-position-repay.md)
 
 ### 🏷️ [Vault Labels & Verification](./vault-labels-and-verification.md)
 
 - Vault verification and trust levels
 - Label data sources and types
 - Unknown vault resolution
+- SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
+- Oracle provider logos from the V3 managed-image namespace (not `V3_API_URL`)
+- Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
+
+### 🧿 [Oracle Adapter Display](./oracle-adapter-display.md)
+
+- Shared route collection for the vault Oracles block and Explore matrix
+- Recognized vs unrecognized vs unassessed V3 assessments; never trust on-chain `name()`
+- Active-route catalogue vs per-address fallback, and EVC-simulated display quotes
 
 ### 🔧 [Transaction Building](./transaction-building.md)
 
 - SDK TransactionPlan architecture and composite operations
 - EVC batching and Permit2 integration
+- Gasless-signature preference (`useSignaturePreference`), Safe forced-off override, and sequential vs atomic Safe migration authorization paths
 - Sub-accounts and position isolation
-- Simulation performance tuning and batch-cart slot-hint / account prefetch
+- Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
+- [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
+- Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
+- Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
+
+### 🔁 [Cross-Position Repay](./cross-position-repay.md)
+
+- Exact-vault collateral from another sub-account, gated on Advanced mode
+- Reciprocal-debt batching without withdraw / swap / cleanup
+- Distinct from the repay Savings tab (idle EVK deposits)
+
+### 🔐 [Safe Wallet Compatibility](./safe-wallets.md)
+
+- Safe detection (iframe connector, named wallet, WalletConnect peer metadata)
+- Force-disabled signatures and CoW quotes while Safe / detection-pending
+- EIP-5792 atomic request vectors, sealed wallet bindings, and current-session Safe detachment/status handling
+
+### 🔄 [External Migration Discovery](./external-migration.md)
+
+- Aave v3 and Morpho / MetaMorpho position scanning for Portfolio Migrate
+- Supply-only Aave candidates, Morpho chain allowlist, per-source failure isolation
 
 ### 📜 [Activity Feed](./activity-feed.md)
 
@@ -112,6 +145,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Country group aliases (EU, EEA, EFTA)
 - UI enforcement across browse, detail, action, and modal pages, plus the arbitrary-asset swap selector
 
+### 🛂 [Address Screening](./address-screening.md)
+
+- Connect-time wallet screening via `/api/internal/screen-address`
+- VPN usage as audit metadata (does not gate connect)
+- Fail-closed data-v3 proxy, first-party CORS exception, and no re-screen in reviewed execution
+
 ### 🌐 [Public API](./public-api.md)
 
 - Publicly reachable endpoints under `/api/public/` (CORS `*`)
@@ -124,6 +163,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Deployment-controlled one-time modal for operational notices
 - `CONFIG_ANNOUNCEMENT_*` and `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` setup
 - Dismissal token lifecycle, URL safety rules, and rollout troubleshooting
+
+### 📉 [Earn Uncovered Losses](./earn-uncovered-losses.md)
+
+- EulerEarn Statistics row for still-unbacked shortfalls
+- Why `vault.lostAssets` is already coverage-normalized (do not re-net `address(1)`)
+- Off-chain USD formatting, race-guarded display, and scraper `data-field` hooks
 
 ## 🎯 Project Overview
 
@@ -140,7 +185,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ## 🏛️ Key Technologies
 
-- **Frontend**: Nuxt.js 3, Vue 3, TypeScript
+- **Frontend**: Nuxt.js 4, Vue 3, TypeScript
 - **Blockchain**: Multiple EVM chains
 - **DeFi Protocol**: Euler Finance
 - **Wallet Integration**: Wagmi / Reown (EVM wallets)

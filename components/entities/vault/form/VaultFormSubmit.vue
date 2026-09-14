@@ -2,7 +2,7 @@
 import { inject } from 'vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
-import { isOperationBlocked, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, isOperationBlockerKey, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
@@ -35,6 +35,8 @@ const props = defineProps<{
   /** When defined, the form supports batching: a "+" segment is shown next to the
    *  main button, enabled when `canAddToBatch` is true, emitting `add-to-batch`. */
   canAddToBatch?: boolean
+  /** Explanation shown when this operation cannot be added to a batch. */
+  addToBatchDisabledReason?: string
 }>()
 const emit = defineEmits<{ (e: 'add-to-batch'): void }>()
 const { settings } = useUserSettings()
@@ -192,7 +194,7 @@ const openTermsModal = () => {
 // acknowledgements. TOS is special: the add path may open the TOS modal, then
 // continue only if no non-TOS blockers remain.
 const nonTosOperationBlockReason = computed(() =>
-  operationBlockerEntries.value.find(([key]) => key !== 'tos')?.[1],
+  operationBlockerEntries.value.find(([key]) => !isOperationBlockerKey(key, 'tos'))?.[1],
 )
 const hasNonTosOperationBlocker = computed(() => !!nonTosOperationBlockReason.value)
 const isAddToBatchBaseDisabled = computed(() =>
@@ -216,12 +218,16 @@ const addToBatchDisabledReason = computed(() => {
   if (!hasActiveSession.value) return 'Connect a wallet before adding this operation to the batch.'
   if (showTosFlow.value && nonTosOperationBlockReason.value) return nonTosOperationBlockReason.value
   if (operationBlockReason.value) return operationBlockReason.value
+  if (props.addToBatchDisabledReason) return props.addToBatchDisabledReason
   if (props.disabledReason) return props.disabledReason
   if (isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
   return undefined
 })
 
 const tooltipText = computed(() => {
+  if (batchBlocksDirect.value && supportsBatch.value) {
+    return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
+  }
   if (!isPlusHover.value) return effectiveDisabledReason.value
   return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
 })
@@ -261,7 +267,38 @@ const handleAddToBatch = () => {
          primary action becomes "Add to batch" (Option B) rather than a disabled
          execute button + a separate "+". Direct execute resumes once the batch
          is cleared (link below). -->
-      <template v-if="batchBlocksDirect && supportsBatch">
+      <template v-if="!hasActiveSession || needToSwitchChain">
+        <UiButton
+          type="button"
+          size="large"
+          :variant="needToSwitchChain ? 'red' : 'primary'"
+          @click="onClick"
+        >
+          {{ needToSwitchChain ? 'Switch chain' : 'Connect wallet' }}
+        </UiButton>
+      </template>
+      <template v-else-if="unverifiedVaultGuard?.isVerificationLoading">
+        <UiButton
+          size="large"
+          disabled
+          loading
+        >
+          Checking vault verification
+        </UiButton>
+      </template>
+      <template v-else-if="unverifiedVaultGuard?.verificationError">
+        <p class="text-content-secondary">
+          {{ unverifiedVaultGuard.verificationError }}
+        </p>
+        <UiButton
+          type="button"
+          size="large"
+          @click="unverifiedVaultGuard.retryVerification()"
+        >
+          Retry verification
+        </UiButton>
+      </template>
+      <template v-else-if="batchBlocksDirect && supportsBatch">
         <UiButton
           size="large"
           variant="primary"
@@ -342,18 +379,11 @@ const handleAddToBatch = () => {
           v-bind="$attrs"
           size="large"
           type="submit"
-          :variant="needToSwitchChain ? 'red' : 'primary'"
+          variant="primary"
           :loading="isLoading"
           :disabled="_disabled"
-          @click="onClick"
         >
-          <template v-if="needToSwitchChain">
-            Switch chain
-          </template>
-          <slot v-else-if="hasActiveSession" />
-          <template v-else>
-            Connect wallet
-          </template>
+          <slot />
         </UiButton>
       </template>
 

@@ -2,6 +2,7 @@ import { getRequestURL, sendRedirect } from 'h3'
 import { VaultType } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, isAddress, type Address } from 'viem'
 import { withWallClock } from '../utils/fetchWithTimeout'
+import { logger } from '../utils/logger'
 import { getServerSdk } from '../utils/sdk-server'
 
 /**
@@ -26,7 +27,9 @@ const resolveVaultTypes = async (
     )
   }
   catch (err) {
-    console.warn('[ensure-vault] failed to validate vault route', err)
+    // Viem transport errors contain the raw provider URL in several fields.
+    // The server logger's `err` serializer reduces it to a host-only summary.
+    logger.warn({ ctx: 'ensure-vault', chainId, err }, 'failed to validate vault route')
     return undefined
   }
 }

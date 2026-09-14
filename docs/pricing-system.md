@@ -34,7 +34,7 @@ For SDK account and portfolio properties, numerical fields whose names include `
 
 Pricing backend configuration is SDK-owned. Lite builds the SDK without a pricing backend override, so the SDK uses its defaults.
 
-The SDK instance cache key includes RPC URLs, labels URLs, deployment URL, and oracle-checks URL. Changing any of those inputs rebuilds the SDK instance.
+The SDK instance cache key includes RPC URLs, the V3 URL, labels URLs, and the deployment URL. Changing any of those inputs rebuilds the SDK instance.
 
 ## Liability-Vault Collateral Pricing
 
@@ -79,3 +79,7 @@ USD helpers return `undefined` when the SDK field is missing. UI wrappers use `t
 Use `toUsdAmount(undefined)` when the UI should show the token amount instead of a USD value. Use `getAssetUsdValueOrZero()` only in aggregate/list contexts where missing prices should not block rendering.
 
 Form-time Net APY and ROE previews use the same liability-context USD values to weight every collateral in a position. See [Projected Yield](./projected-yield.md) for the utilization simulation, completeness rules, and metric formulas.
+
+Oracle-adapter cards quote via EVC `batchSimulation`, not these USD helpers. See [Oracle Adapter Display](./oracle-adapter-display.md).
+
+EulerEarn Statistics uses the same off-chain `formatAssetValue` path for Total supply, Available liquidity, and Uncovered losses. See [Earn Uncovered Losses](./earn-uncovered-losses.md) for why `vault.lostAssets` must not be re-netted in Lite.

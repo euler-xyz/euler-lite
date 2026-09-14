@@ -120,6 +120,30 @@ describe('useEulerLabels chain-scoped loading', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps a failed initial load unavailable and retries the same chain', async () => {
+    mocks.fetchPublicLabelsBundle.mockRejectedValueOnce(new Error('temporary outage'))
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    expect(labels.isReady.value).toBe(false)
+    expect(labels.loadError.value).toContain('Unable to load')
+    mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('recovered')))
+    await labels.loadLabels()
+    expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
+    expect(labels.isReady.value).toBe(true)
+    expect(labels.loadError.value).toBeUndefined()
+    expect(currentProductKeys()).toEqual(['recovered'])
+  })
+
+  it('retains a successful same-chain snapshot when a refresh fails', async () => {
+    mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    mocks.fetchPublicLabelsBundle.mockRejectedValueOnce(new Error('temporary outage'))
+    await labels.loadLabels(true)
+    expect(labels.isReady.value).toBe(true)
+    expect(currentProductKeys()).toEqual(['cached'])
+  })
+
   it('starts a separate fetch for a new chain and ignores the stale response', async () => {
     const chainOne = deferred<PublicLabelsBundle>()
     const chainTwo = deferred<PublicLabelsBundle>()
@@ -235,7 +259,8 @@ describe('useEulerLabels chain-scoped loading', () => {
 
     expect(currentProductKeys()).toEqual([])
     expect(labels.geoPolicies.value).toEqual([])
-    expect(labels.isReady.value).toBe(true)
+    expect(labels.isReady.value).toBe(false)
+    expect(labels.loadError.value).toContain('Unable to load')
   })
 
   it('does not publish wrap pairs from a probe invalidated by a chain change', async () => {

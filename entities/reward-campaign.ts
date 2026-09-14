@@ -6,13 +6,18 @@ import type {
   RewardSource as SdkRewardSource,
   UserReward as SdkUserReward,
 } from '@eulerxyz/euler-v2-sdk'
+import { safeExternalHttpUrl } from '~/utils/external-url'
 
 export type { RewardAction }
 
 export type RewardSource = SdkRewardSource | 'turtle'
 
-export type RewardCampaign = Omit<SdkRewardCampaign, 'source'> & {
+export type RewardEligibilityRequirementsStatus = 'none' | 'complete' | 'incomplete'
+
+export type RewardCampaign = Omit<SdkRewardCampaign, 'source' | 'eligibilityRequirements' | 'eligibilityRequirementsStatus'> & {
   source: RewardSource
+  eligibilityRequirements?: unknown[]
+  eligibilityRequirementsStatus?: RewardEligibilityRequirementsStatus
 }
 
 export type UserReward = Omit<SdkUserReward, 'provider'> & {
@@ -35,6 +40,7 @@ export interface RewardCampaignDisplay {
   }
   source: RewardCampaign['source']
   sourceUrl?: string
+  eligibilityLabel?: string
   isCollateralSpecific: boolean
   minMultiplier?: number
   maxMultiplier?: number
@@ -104,11 +110,25 @@ export const rewardCampaignToken = (campaign: RewardCampaign): RewardCampaignDis
 })
 
 export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined => {
-  if (campaign.sourceUrl) return campaign.sourceUrl
+  // V3/provider data reaches multiple `href` bindings through this chokepoint.
+  if (campaign.sourceUrl) return safeExternalHttpUrl(campaign.sourceUrl)
   if (campaign.source === 'merkl') return undefined
   return campaign.source === 'turtle'
     ? `https://dashboard.turtle.xyz/organizations/${TURTLE_DASHBOARD_ORGANIZATION_ID}/incentives/streams/${campaign.campaignId}`
     : PROVIDER_SOURCE_URLS[campaign.source]
+}
+
+export const rewardCampaignEligibilityLabel = (
+  campaign: Pick<RewardCampaign, 'source' | 'eligibilityRequirements' | 'eligibilityRequirementsStatus'>,
+): string | undefined => {
+  if (campaign.eligibilityRequirementsStatus === 'none') return undefined
+  if (campaign.eligibilityRequirementsStatus === 'incomplete') {
+    return 'eligibility information may be incomplete; additional requirements may apply'
+  }
+  if (campaign.eligibilityRequirementsStatus === 'complete' || campaign.eligibilityRequirements?.length) {
+    return 'eligibility requirements apply'
+  }
+  return undefined
 }
 
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
@@ -140,6 +160,7 @@ export const rewardCampaignDisplay = (
 ): RewardCampaignDisplay => {
   const endTimestamp = normalizeRewardEndTimestamp(campaign.endTimestamp)
   const sourceUrl = rewardCampaignSourceUrl(campaign)
+  const eligibilityLabel = rewardCampaignEligibilityLabel(campaign)
   return {
     id: rewardCampaignKey(campaign, prefix),
     parityKey: rewardCampaignParityKey(campaign, vaultAddress),
@@ -149,6 +170,7 @@ export const rewardCampaignDisplay = (
     source: campaign.source,
     isCollateralSpecific: campaign.action === 'BORROW_COLLATERAL',
     ...(sourceUrl ? { sourceUrl } : {}),
+    ...(eligibilityLabel ? { eligibilityLabel } : {}),
     ...(campaign.minMultiplier !== undefined ? { minMultiplier: campaign.minMultiplier } : {}),
     ...(campaign.maxMultiplier !== undefined ? { maxMultiplier: campaign.maxMultiplier } : {}),
   }

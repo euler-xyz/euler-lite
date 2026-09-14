@@ -22,8 +22,9 @@ import {
   EMPTY_ANNOUNCEMENT_CONFIG,
   type AnnouncementConfig,
 } from '~/utils/announcement-config'
+import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
 
-interface EnvConfig {
+export interface EnvConfig {
   appTitle: string
   appDescription: string
   logoUrl: string
@@ -42,6 +43,16 @@ interface EnvConfig {
   swapApiUrl: string
   eulerInterfacesBranch: string
   announcement: AnnouncementConfig
+  /** Whether the deployment's edge provider measures VPN usage. Drives the
+   *  client VPN probe in services/vpn.ts — false skips it entirely. */
+  vpnDetection: boolean
+}
+
+declare global {
+  interface Window {
+    /** Server-injected runtime config (server/plugins/app-config.ts). */
+    __APP_CONFIG__?: EnvConfig
+  }
 }
 
 const DEFAULTS: EnvConfig = {
@@ -58,6 +69,7 @@ const DEFAULTS: EnvConfig = {
   swapApiUrl: '',
   eulerInterfacesBranch: 'master',
   announcement: EMPTY_ANNOUNCEMENT_CONFIG,
+  vpnDetection: false,
 }
 
 let cached: EnvConfig | null = null
@@ -94,6 +106,7 @@ function scanEnv(): EnvConfig {
       items: env('CONFIG_ANNOUNCEMENT_ITEMS', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS'),
       url: env('CONFIG_ANNOUNCEMENT_URL', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_URL'),
     }),
+    vpnDetection: edgeProvidesVpnEvidence(parseEdgeProvider(process.env.EDGE_PROVIDER)),
   }
 }
 
@@ -130,6 +143,10 @@ function fromRuntimeConfig(): EnvConfig {
       items: rc.configAnnouncementItems,
       url: rc.configAnnouncementUrl,
     }),
+    // Static/CDN deployments carry no edge preset information — skip the
+    // VPN probe (the server derives the authoritative verdict from edge
+    // request headers regardless).
+    vpnDetection: false,
   }
 }
 
@@ -139,10 +156,8 @@ export const useEnvConfig = (): EnvConfig => {
   if (import.meta.server) {
     cached = scanEnv()
   }
-  /* eslint-disable @typescript-eslint/no-explicit-any -- server-injected window global */
-  else if (typeof window !== 'undefined' && (window as any).__APP_CONFIG__) {
-    cached = (window as any).__APP_CONFIG__
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+  else if (typeof window !== 'undefined' && window.__APP_CONFIG__) {
+    cached = window.__APP_CONFIG__
   }
   else {
     cached = fromRuntimeConfig()

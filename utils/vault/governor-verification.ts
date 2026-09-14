@@ -1,12 +1,28 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
+import { isEVault, type EulerEarn, type EVault, type OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
 import { getEulerRouterGovernor } from '~/entities/oracle'
-import type { EulerEarn, OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
+
+/**
+ * Value-based governance hydration guard. SDK 2.0 EVault instances always
+ * OWN the `governorAdmin` property — the constructor assigns it even when
+ * governance was never fetched — so an `in`-operator check passes on every
+ * real instance and misreads lazily-hydrated vaults as "governance resolved
+ * to nothing", producing false Unknown badges. Only a defined value means
+ * governance actually resolved.
+ */
+export const hasResolvedGovernorAdmin = (vault: unknown): vault is EVault =>
+  isEVault(vault) && vault.governorAdmin !== undefined
 
 interface VerifiableVault {
   address: string
   governorAdmin?: string
   governor?: string
+  oracle?: {
+    oracle?: string
+    name?: string
+  } | null
   oracleDetailedInfo?: OracleDetailedInfo | null
+  eulerRouterGovernor?: Address | null
   verified?: boolean
   vaultCategory?: 'standard' | 'escrow'
 }
@@ -76,12 +92,19 @@ export const isVaultGovernorVerified = (
     return false
   }
 
-  if ('oracleDetailedInfo' in vault) {
-    const routerGovernor = getEulerRouterGovernor(vault.oracleDetailedInfo)
-    if (routerGovernor && routerGovernor !== zeroAddress) {
-      if (!findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
-        return false
-      }
+  const oracleInfo = vault.oracleDetailedInfo
+  const isEulerRouter = vault.oracle?.name === 'EulerRouter' || oracleInfo?.name === 'EulerRouter'
+  if (isEulerRouter) {
+    const routerGovernor = 'eulerRouterGovernor' in vault
+      ? vault.eulerRouterGovernor
+      : oracleInfo?.name === 'EulerRouter'
+        ? getEulerRouterGovernor(oracleInfo)
+        : null
+    // EulerRouter governance must resolve independently before the vault can
+    // inherit verified entity branding.
+    if (!routerGovernor) return false
+    if (routerGovernor !== zeroAddress && !findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
+      return false
     }
   }
 

@@ -17,6 +17,8 @@ const GET_ONLY_PATHS = new Set([
   '/v3/evk/vaults/open-interest',
   '/v3/evk/vaults/open-interest/by-collateral',
   '/v3/liquidations',
+  '/v3/oracles/adapter-assessments',
+  '/v3/oracles/routers',
   '/v3/prices',
   '/v3/rewards/breakdown',
   '/v3/tokens',
@@ -29,6 +31,7 @@ const GET_ONLY_PATH_PATTERNS = [
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+\/totals$/,
   /^\/v3\/evk\/vaults\/[^/]+\/[^/]+\/totals$/,
+  /^\/v3\/oracles\/adapter-assessments\/0x[a-fA-F0-9]{40}$/,
 ]
 
 const POST_ONLY_PATHS = new Set([
@@ -55,6 +58,7 @@ type V3ProxyValidationResult
     | { ok: false, statusCode: number, statusMessage: string }
 
 const cleanBasePath = (pathname: string) => pathname.replace(/\/+$/, '')
+const ENCODED_PATH_BYTE_RE = /%[0-9a-f]{2}/i
 const normalizeV3ProxyPath = (pathname: string) => pathname.startsWith('/v3/')
   ? pathname
   : `/v3${pathname.startsWith('/') ? pathname : `/${pathname}`}`
@@ -68,6 +72,10 @@ export function getV3ProxyPath(requestUrl: URL): string {
 }
 
 export function isV3ProxyPathAllowed(pathname: string): boolean {
+  // None of the allowlisted path segments require percent-encoding. Reject it
+  // so an upstream cannot decode `%2F`, `%5C`, `%2E`, or `%00` differently
+  // after this proxy has already approved the apparent path shape.
+  if (ENCODED_PATH_BYTE_RE.test(pathname)) return false
   return (
     GET_ONLY_PATHS.has(pathname)
     || POST_ONLY_PATHS.has(pathname)
@@ -84,6 +92,10 @@ const invalid = (statusCode: number, statusMessage: string): V3ProxyValidationRe
 export function validateV3ProxyUrl(method: string, requestUrl: URL): V3ProxyValidationResult {
   const normalizedMethod = method.toUpperCase()
   const pathname = getV3ProxyPath(requestUrl)
+
+  if (ENCODED_PATH_BYTE_RE.test(pathname)) {
+    return invalid(400, 'Encoded V3 path bytes are not allowed')
+  }
 
   if (!isV3ProxyPathAllowed(pathname)) {
     return invalid(404, 'V3 path not allowed')

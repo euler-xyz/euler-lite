@@ -1,7 +1,7 @@
 import type { Address } from 'viem'
 
-// Each oracle adapter has its own on-chain (base, quote) wiring (recorded in
-// the oracle-checks metadata as `meta.base` / `meta.quote`). Its
+// Each oracle adapter has its own on-chain (base, quote) wiring (reported in
+// the Data V3 assessment config as `meta.base` / `meta.quote`). Its
 // `getQuote(amount, base, quote)` returns the natural feed direction when
 // called in the wired order; the args swapped returns the inverse.
 //
@@ -16,9 +16,9 @@ import type { Address } from 'viem'
 // avoids depending on async ERC20 symbol() resolution for assets that aren't
 // registered vault assets (e.g. STRCx underlying a wSTRCx vault).
 type InvertArgs = {
-  /** Adapter's on-chain base (from oracle-checks `meta.base`). */
+  /** Adapter's on-chain base (from the V3 assessment config). */
   metaBase: Address | string | undefined
-  /** Adapter's on-chain quote (from oracle-checks `meta.quote`). */
+  /** Adapter's on-chain quote (from the V3 assessment config). */
   metaQuote: Address | string | undefined
   /** Direction the router actually calls the adapter with (`OracleAdapterEntry.base`). */
   callerBase: Address | string

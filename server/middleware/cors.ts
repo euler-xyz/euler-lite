@@ -2,6 +2,7 @@ import type { H3Event } from 'h3'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createError, getCookie, getRequestURL, setCookie, setResponseHeader, sendNoContent } from 'h3'
 import { logger } from '~/server/utils/logger'
+import { getEdgeContext } from '~/server/utils/edge'
 import { isInternalRequest } from '~/server/utils/internal-headers'
 
 function parseAllowedOrigins(): Set<string> {
@@ -40,11 +41,34 @@ function parseAllowedOrigins(): Set<string> {
 }
 
 let allowedOrigins: Set<string> | null = null
+
+// /api/internal/screen-address is also consumed cross-origin by first-party
+// Euler SPAs that have no server of their own (create/redemptions/maglev
+// .euler.finance). The exception is scoped to this single path so no other
+// internal route is exposed to sibling apps; configured origins
+// (CORS_ALLOWED_ORIGINS / dev localhost) keep working via the regular
+// allowlist. It stays under /api/internal/ deliberately: the consumers are
+// our own apps, and /api/public/ would advertise it to external integrators.
+const SCREENING_PATH = '/api/internal/screen-address'
+
+function isEulerFinanceOrigin(origin: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(origin)
+    if (protocol !== 'https:') {
+      return false
+    }
+    return hostname === 'euler.finance' || hostname.endsWith('.euler.finance')
+  }
+  catch {
+    return false
+  }
+}
+
 const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
 
 // The cookie is an advisory first-party marker, not a security boundary:
-// anyone can obtain it from `GET /`, and the internal sentinel
-// (see server/utils/internal-headers.ts) bypasses this check entirely.
+// anyone can obtain it from `GET /`, and internal server-to-server requests
+// (see server/utils/internal-headers.ts) bypass this check entirely.
 // Its job is to let same-origin browser GETs (which carry no Origin
 // header) through the no-Origin rejection below.
 //
@@ -112,29 +136,22 @@ export default defineEventHandler((event) => {
   }
 
   // Strip any client-supplied x-country-code to prevent geo-blocking bypass.
-  // The authoritative value comes from Cloudflare's CF-IPCountry header which is
-  // set by their edge network and cannot be modified by clients.
+  // The authoritative value comes from the configured edge provider's trusted
+  // header (see server/utils/edge.ts), which clients cannot modify. The
+  // context also applies the DEV_GEO_COUNTRY fallback (mirroring geo-gate.ts)
+  // so envs without a geo-capable edge still emit x-country-code.
   delete event.node.req.headers['x-country-code']
 
-  const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
-  let country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
+  const edge = getEdgeContext(event)
 
-  // When Cloudflare is not in the request path (local dev, PR previews, etc.)
-  // cf-ipcountry is never set. Mirror geo-gate.ts: use DEV_GEO_COUNTRY as a
-  // fallback regardless of environment so x-country-code is set in the response.
-  if (!country) {
-    const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
-    if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
-      country = devCountry
-    }
+  if (edge.country) {
+    setResponseHeader(event, 'x-country-code', edge.country)
   }
-
-  if (country) {
-    setResponseHeader(event, 'x-country-code', country)
-  }
-  else if (process.env.DOPPLER_ENVIRONMENT === 'dev') {
-    // No DEV_GEO_COUNTRY set — send a placeholder so the client doesn't fail-closed.
-    // '--' is not a real country code so no geo-blocks will trigger.
+  else if (!edge.providesGeo || process.env.DOPPLER_ENVIRONMENT === 'dev') {
+    // No geo evidence exists by design (`none` preset — forks, previews) or
+    // this is local dev without DEV_GEO_COUNTRY — send a placeholder so the
+    // client doesn't fail-closed. '--' is not a real country code so no
+    // geo-blocks will trigger.
     setResponseHeader(event, 'x-country-code', '--')
   }
 
@@ -167,7 +184,7 @@ export default defineEventHandler((event) => {
 
   const origin = event.node.req.headers.origin
 
-  if (origin && allowedOrigins.has(origin)) {
+  if (origin && (allowedOrigins.has(origin) || (url.pathname === SCREENING_PATH && isEulerFinanceOrigin(origin)))) {
     setResponseHeader(event, 'Access-Control-Allow-Origin', origin)
   }
   else if (origin && process.env.DOPPLER_ENVIRONMENT !== 'dev') {

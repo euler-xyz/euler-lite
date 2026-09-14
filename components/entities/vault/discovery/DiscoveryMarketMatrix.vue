@@ -29,7 +29,12 @@ const {
   hasSupplyRewards,
   hasBorrowRewards,
 } = useRewardsApy()
-const { oracleAdapters, loadAllOracleAdapters } = useEulerLabels()
+const {
+  oracleAdapters,
+  oracleAssessmentsStatus,
+  oracleAssessmentsAvailable,
+  loadAllOracleAdapters,
+} = useEulerLabels()
 const { chainId } = useEulerAddresses()
 const { getTokenCategoryTags } = useTokenList()
 
@@ -214,7 +219,7 @@ const metricRange = computed((): { min: number, max: number } => {
 // oracle already appears in every cell of its column.
 const cellAdapterViews = computed((): Map<string, OracleAdapterView[]> => {
   const result = new Map<string, OracleAdapterView[]>()
-  if (props.dotMetric !== 'oracle') return result
+  if (props.dotMetric !== 'oracle' || !oracleAssessmentsAvailable.value) return result
 
   for (const [collateralAddr, rowCells] of props.matrix.cells) {
     for (const [liabilityAddr] of rowCells) {
@@ -251,11 +256,9 @@ const onCellClick = (collateralAddr: string, liabilityAddr: string) => {
   emit('selectCell', collateralAddr, liabilityAddr)
 }
 
-// Bulk-load adapter metadata for the chain. Heavy call (1+ MB JSON); the
-// `metric !== 'oracle'` guard short-circuits the immediate run on mount and
-// every re-evaluation while a non-oracle metric is selected — so the network
-// request only fires the first time the user picks the Oracles view.
-// loadAllOracleAdapters is per-chain idempotent (cached by useEulerLabels).
+// Bulk-load adapter assessments while the Oracles view is active. The SDK owns
+// bounded caching, so returning to this view reuses fresh data within its TTL
+// and revalidates after expiry.
 watch(
   [() => props.dotMetric, chainId],
   ([metric, currentChainId]) => {
@@ -276,6 +279,7 @@ watch(
     :data-field="dotMetric"
     :data-row-count="matrix.rows.length"
     :data-column-count="matrix.columns.length"
+    :aria-busy="dotMetric === 'oracle' && oracleAssessmentsStatus === 'loading'"
   >
     <div
       class="relative isolate max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
@@ -459,13 +463,16 @@ watch(
                       name="question-circle"
                       class="!w-16 !h-16 text-content-tertiary"
                     />
+                    <!-- Grey marks an adapter V3 assessed but could not identify,
+                         so it stays distinguishable from a checked, healthy one. -->
                     <span
-                      v-if="adapter.checksStatus"
+                      v-if="adapter.checksStatus || adapter.assessmentState === 'unrecognized'"
                       class="absolute -top-1 -right-1 w-6 h-6 rounded-full"
                       :class="{
                         'bg-success-500': adapter.checksStatus === 'positive',
                         'bg-warning-500': adapter.checksStatus === 'warning',
                         'bg-error-500': adapter.checksStatus === 'negative',
+                        'bg-content-muted': adapter.assessmentState === 'unrecognized',
                       }"
                     />
                   </span>
@@ -547,6 +554,15 @@ watch(
       </table>
     </div>
 
+    <p
+      v-if="dotMetric === 'oracle' && oracleAssessmentsStatus === 'unavailable'"
+      class="text-p4 text-content-muted text-center px-16"
+      data-id="oracle-assessments-unavailable"
+      aria-live="polite"
+    >
+      Oracle information not available
+    </p>
+
     <div
       v-if="hasRewardMetricCells"
       class="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-p5 text-content-muted"
@@ -566,7 +582,11 @@ watch(
   </div>
 
   <p
-    v-if="!selectedCell && !selectedHeader"
+    v-if="
+      !selectedCell
+        && !selectedHeader
+        && (dotMetric !== 'oracle' || oracleAssessmentsStatus === 'available')
+    "
     class="text-h6 text-content-primary text-center leading-relaxed px-16 pb-12"
   >
     Tap a cell, row, or column header to see lending/borrowing options below.

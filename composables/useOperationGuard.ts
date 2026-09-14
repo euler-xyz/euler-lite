@@ -11,6 +11,9 @@ import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[]) => {
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
+  const { chainId: appChainId } = useEulerAddresses()
+  const route = useRoute()
+  const operation = computed(() => String(route.name ?? route.path))
 
   const addresses = computed((): string[] => {
     const raw = isRef(vaultAddresses) ? vaultAddresses.value : vaultAddresses
@@ -18,10 +21,14 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
   })
 
   // --- TOS guard (global, not vault-specific) ---
-  useTosGuard()
+  const tosGuard = useTosGuard()
 
   // --- Unverified vault guard ---
-  useUnverifiedVaultGuard(addresses)
+  const unverifiedVaultGuard = useUnverifiedVaultGuard(addresses, {
+    account: userAddress,
+    chainId: appChainId,
+    operation,
+  })
 
   // --- Keyring guard ---
   const keyringVaultAddress = computed(() =>
@@ -115,4 +122,9 @@ export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | 
     clearOperationMeta('keyring')
     unregisterOperationBlocker('keyring')
   })
+
+  return {
+    tosGuard,
+    unverifiedVaultGuard,
+  }
 }

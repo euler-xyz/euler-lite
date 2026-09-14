@@ -51,27 +51,27 @@ When both collateral AND borrow vault in a pair are restricted, the pair is trea
 
 The user's country is detected by sending a `HEAD` request to the application's origin and reading the `x-country-code` response header. The result is normalized to uppercase ISO 3166-1 alpha-2 (e.g. `US`, `DE`, `GB`).
 
-The `x-country-code` response header is set by `server/middleware/cors.ts`, which reads Cloudflare's `CF-IPCountry` edge header (immutably set by Cloudflare's network). Any client-supplied `x-country-code` request header is stripped by `cors.ts` before processing, preventing bypass.
+The `x-country-code` response header is set by `server/middleware/cors.ts`, which reads the country from the configured edge provider's trusted header via `getEdgeContext` (`server/utils/edge.ts`; header mapping per `EDGE_PROVIDER` preset in `utils/edge-presets.ts`). The edge-set header is protected from client tampering when the origin is reachable only through the edge or origin auth (`EDGE_ORIGIN_SECRET`) is enabled — see the Edge Provider section of `docs/architecture.md`; a caller who reaches an unauthenticated origin directly can still forge vendor headers. Any client-supplied `x-country-code` request header is stripped by `cors.ts` before processing. Under the `none` preset (no edge — forks, previews) the placeholder `--` is emitted so client-side checks don't fail closed.
 
 Detection is cached for 5 minutes to avoid repeated network calls.
 
 ```text
 Browser → HEAD / → cors.ts strips client x-country-code
-                 → reads CF-IPCountry: DE
+                 → getEdgeContext reads the edge country header: DE
                  → sets response x-country-code: DE
         ← x-country-code: DE ← stored as "DE"
 ```
 
-**Fail-closed**: When country detection fails or the country cannot be determined, the detected country is stored as `null`. All blocking and restriction checks treat `null` as blocked (fail-closed). Only the intermediate loading state (`undefined`, before the initial HEAD request completes) leaves checks permissive.
+**Fail-closed**: When country detection is pending, fails, or cannot determine a country, transaction-eligibility checks deny acquisition and swap actions. The UI does not display a misleading "Restricted" badge during the intermediate `undefined` state; it keeps the action disabled as policy-pending.
 
 **Initialization**: `app.vue` calls `useGeoBlock().loadCountry()` on startup. The detected country is stored in a module-level `ref` in `composables/useGeoBlock.ts`:
-- `undefined` — not yet loaded (checks return `false`, permissive during initial load)
+- `undefined` — not yet loaded (eligibility checks return `true`, fail-closed; presentation suppresses the badge)
 - `null` — loaded, country unknown or detection failed (checks return `true`, fail-closed)
 - `string` — loaded with a known country code
 
 A concurrency guard (`loadingCountry`) prevents duplicate in-flight requests if `loadCountry()` is called multiple times.
 
-**Local development**: In development (`DOPPLER_ENVIRONMENT=dev`), Cloudflare is not in the request path so `CF-IPCountry` is never set. Set `DEV_GEO_COUNTRY=GB` (or any ISO country code) in `.env` to simulate a country for geo-block testing. Without it, the server allows requests through in dev rather than blocking.
+**Local development**: In development (`DOPPLER_ENVIRONMENT=dev`) there is no edge in the request path, so no country header is set. Set `DEV_GEO_COUNTRY=GB` (or any ISO country code) in `.env` to simulate a country for geo-block testing. Without it, the server allows requests through in dev rather than blocking.
 
 ## Server-Side Geo-Gate
 
@@ -79,18 +79,19 @@ A concurrency guard (`loadingCountry`) prevents duplicate in-flight requests if 
 
 All API requests first pass through the server-side geo-gate, which applies the same sanctioned-country check at the edge before any client-side logic runs.
 
-The gate reads `CF-IPCountry` from the Cloudflare edge header. Special values `XX` (unknown IP) and `T1` (Tor exit node) are treated as an undetermined country. If the country cannot be determined **and** the environment is not `dev`, the request is rejected with HTTP 451 (fail-closed). In dev, unknown country is allowed through so local development is not blocked.
+The gate reads the country from the edge context (`getEdgeContext`), i.e. from the trusted header of the preset selected by `EDGE_PROVIDER`. Special values such as `XX` (unknown IP) and non-alpha codes (e.g. `T1` for Tor exit nodes) are treated as an undetermined country. If a geo-capable preset leaves the country undetermined **and** the environment is not `dev`, the request is rejected with HTTP 451 (fail-closed). In dev, unknown country is allowed through so local development is not blocked. Under the `none` preset geo-blocking is off (no geo evidence exists by design); production refuses to boot without an explicit `EDGE_PROVIDER`, so this state cannot be reached by mere omission.
 
 ```text
-Request → cors.ts (strip client x-country-code, set response x-country-code from CF-IPCountry)
-        → geo-gate.ts (read CF-IPCountry)
+Request → cors.ts (strip client x-country-code, set response x-country-code from the edge context)
+        → geo-gate.ts (read country from the edge context)
             ├─ country determined → check SANCTIONED_COUNTRIES → block or allow
             └─ country undetermined
+                ├─ `none` preset → allow (geo-blocking off)
                 ├─ dev env → allow
-                └─ prod env → HTTP 451 (fail-closed)
+                └─ otherwise → HTTP 451 (fail-closed)
 ```
 
-When the gate blocks a request or flags VPN/proxy usage it logs the request path. Because some `/api/*` routes embed a wallet address in the path (e.g. `/api/internal/proxy/merkl/users/0x.../rewards`), the path is first run through `safePathTemplate` (`server/utils/observability.ts`), which replaces address and numeric segments with `:address`/`:number` placeholders. This keeps wallet addresses (PII) out of the log sink while preserving the route shape for observability. Routing and matching still operate on the real path.
+When the gate blocks a request or flags VPN/proxy usage it logs the request path. VPN evidence is audit-only here — it does not fail the request, and it does not replace [address screening](./address-screening.md) at wallet connect. Because some `/api/*` routes embed a wallet address in the path (e.g. `/api/internal/proxy/merkl/users/0x.../rewards`), the path is first run through `safePathTemplate` (`server/utils/observability.ts`), which replaces address and numeric segments with `:address`/`:number` placeholders. This keeps wallet addresses (PII) out of the log sink while preserving the route shape for observability. Routing and matching still operate on the real path.
 
 ## Blocking Rules
 
@@ -283,7 +284,7 @@ Group aliases can be mixed with individual codes: `["EU", "CH", "US"]` blocks al
 
 ### `isVaultBlockedByCountry(address): boolean`
 
-The core hard-block check. Returns `true` if the vault is blocked for the detected country.
+The core hard-block check. Returns `true` if the vault is blocked for the detected country or its underlying asset cannot be resolved. Callers that already hold a chain-scoped vault can pass its asset through `opts.asset`.
 
 ### `isAnyVaultBlockedByCountry(...addresses): boolean`
 
@@ -291,7 +292,7 @@ Returns `true` if **any** of the provided vault addresses are blocked. Used on a
 
 ### `isVaultRestrictedByCountry(address): boolean`
 
-The soft-restriction check. Returns `true` if the vault has a `restricted` entry matching the user's country. Only checks vault-level overrides and earn vault restrictions (no product-level fallback).
+The soft-restriction check. Returns `true` if the vault has a `restricted` entry matching the user's country or its underlying asset cannot be resolved. Only checks vault-level overrides and earn vault restrictions (no product-level fallback).
 
 ### `isAnyVaultRestrictedByCountry(...addresses): boolean`
 
@@ -400,7 +401,7 @@ When **both** vaults are restricted (`isPairFullyRestricted`), the pair is treat
 
 #### Repay Page (`/position/[number]/repay`)
 
-Uses `useSwapCollateralOptions` with `tagContext: 'supply-source'` so collateral options in the swap-to-repay tab are never disabled by soft restrictions (reducing exposure is always allowed).
+Uses `useSwapCollateralOptions` with `tagContext: 'supply-source'` so collateral options in the swap-to-repay tab are never disabled by soft restrictions (reducing exposure is always allowed). Cross-position exact-vault sources (`useCrossPositionRepayCollateralOptions`) use the same tag context; they remain Advanced-mode gated and do not add a separate geo rule. See [Cross-Position Repay](./cross-position-repay.md).
 
 ### Portfolio Pages
 
@@ -411,11 +412,11 @@ Existing positions in blocked vaults show the "Restricted" chip. No chip for sof
 ```text
 App Startup
   │
-  ├─ loadCountry() ─► HEAD / ─► cors.ts sets x-country-code from CF-IPCountry
+  ├─ loadCountry() ─► HEAD / ─► cors.ts sets x-country-code from the edge context
   │                  ◄─────────── x-country-code: DE ──────────────────────────
   │                  country ref: "DE" (5-min cache)
-  │                  undefined → null (fail-closed) on unknown/error (prod)
-  │                  undefined → "--" (non-null sentinel, fail-open) on unknown in dev
+  │                  undefined → null (fail-closed) on unknown/error (geo-capable edge, prod)
+  │                  undefined → "--" (non-null sentinel, fail-open) on unknown in dev or under the `none` preset
   │
   └─ loadLabels() ──► /api/internal/public-labels
                        ├─ Public Labels V3: products, vault content, entities, campaigns
@@ -426,14 +427,14 @@ App Startup
                           (5-min server cache)
 
 Server-Side (every API request):
-  geo-gate.ts reads CF-IPCountry
-  ├─ unknown/XX/T1 + prod → HTTP 451 (fail-closed)
-  ├─ unknown + dev → allow
+  geo-gate.ts reads the country from the edge context (EDGE_PROVIDER preset)
+  ├─ unknown/XX/T1 + geo-capable edge + prod → HTTP 451 (fail-closed)
+  ├─ unknown + dev, or `none` preset → allow
   └─ known country → check SANCTIONED_COUNTRIES → block or allow
 
 Runtime Check: isVaultBlockedByCountry("0x1234...")
   │
-  ├─ country === undefined (loading) → false (permissive)
+  ├─ country === undefined (loading) → true (policy pending, fail-closed)
   ├─ country === null (unknown, fail-closed) → true (blocked)
   │
   ├─ 1. SANCTIONED_COUNTRIES includes "DE"?  ─► yes → blocked
@@ -447,6 +448,7 @@ Runtime Check: isVaultBlockedByCountry("0x1234...")
   │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → blocked
   │
   ├─ 4. Asset-level: resolve vault.asset via vault registry
+  │     ├─ unresolved asset → blocked
   │     └─ isAssetBlockedByCountry({ address, symbol, name })
   │           ├─ assetBlocks[asset.address.toLowerCase()] includes "DE"? ─► blocked
   │           └─ iterate assetPatternRules (with block list):
@@ -459,7 +461,7 @@ Runtime Check: isVaultBlockedByCountry("0x1234...")
 
 Runtime Check: isVaultRestrictedByCountry("0x1234...")
   │
-  ├─ country === undefined (loading) → false (permissive)
+  ├─ country === undefined (loading) → true (policy pending, fail-closed)
   ├─ country === null (unknown, fail-closed) → true (restricted)
   │
   ├─ 1. getVaultRestricted("0x1234...")
@@ -471,6 +473,7 @@ Runtime Check: isVaultRestrictedByCountry("0x1234...")
   │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → restricted
   │
   ├─ 3. Asset-level: resolve vault.asset via vault registry
+  │     ├─ unresolved asset → restricted
   │     └─ isAssetRestrictedByCountry({ address, symbol, name })
   │           ├─ assetRestrictions[asset.address.toLowerCase()] → restricted
   │           └─ iterate assetPatternRules (with restricted list):
@@ -494,7 +497,8 @@ All blocking and restriction configuration lives outside the app codebase:
 | Earn vault restrictions | Effective-policy source — `earn-vaults.json` `restricted` field | Soft-restricts specific earn vaults |
 | Asset-level blocks/restrictions (per-chain) | Effective-policy source — `{chainId}/assets.json` | Blocks/restricts any vault whose underlying is listed + the token in the swap picker |
 | Asset-level blocks/restrictions (cross-chain) | Effective-policy source — `all/assets.json` | Same as per-chain, usually pattern rules (`symbols`/`symbolRegex`/`names`/`nameRegex`) that apply on every chain |
-| Dev country simulation | `.env` — `DEV_GEO_COUNTRY=GB` | Simulates a country in dev (no effect outside dev) |
+| Edge provider preset | `.env` — `EDGE_PROVIDER` | Selects the trusted-header mapping (geo, client IP, VPN evidence); required in production |
+| Dev country simulation | `.env` — `DEV_GEO_COUNTRY=GB` | Simulates a country when the edge provides none (dev, previews); production refuses to boot with it set |
 
 Changes to the effective-policy files take effect within 5 minutes without an app deployment. This compatibility source remains necessary until V3 publishes the resolved global/product/vault/asset precedence; raw V3 geo-policy rows are not applied directly.
 
@@ -503,7 +507,8 @@ Changes to the effective-policy files take effect within 5 minutes without an ap
 | File | Role |
 |------|------|
 | `services/country.ts` | Client-side country detection via HEAD request and `x-country-code` response header |
-| `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from `CF-IPCountry`, emits as response header |
+| `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from the edge context, emits as response header |
+| `server/utils/edge.ts` + `utils/edge-presets.ts` | Normalized edge context (`getEdgeContext`) and the per-provider trusted-header mapping (`EDGE_PROVIDER` presets) |
 | `server/middleware/geo-gate.ts` | Server-side sanctioned-country block; fail-closed on unknown country in prod |
 | `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `isAssetBlockedByCountry`, `isAssetRestrictedByCountry`, `getVaultTags`; `AssetLike` type |
 | `composables/useEulerLabels.ts` | Aggregate Public Labels loading and current normalized snapshot |

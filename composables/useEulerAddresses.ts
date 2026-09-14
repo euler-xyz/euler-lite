@@ -13,8 +13,6 @@ export type EulerLensAddresses = {
 export type EulerTokenAddresses = {
   EUL: string | undefined
   rEUL: string | undefined
-  eUSD: string | undefined
-  seUSD: string | undefined
 } | null
 
 const allowedChainIds = ref<number[]>([])
@@ -135,8 +133,6 @@ export const useEulerAddresses = () => {
     return {
       EUL: config.addresses.tokenAddrs.EUL,
       rEUL: config.addresses.tokenAddrs.rEUL,
-      eUSD: config.addresses.tokenAddrs.eUSD,
-      seUSD: config.addresses.tokenAddrs.seUSD,
     }
   })
 
@@ -150,18 +146,11 @@ export const useEulerAddresses = () => {
       capRiskStewardFactory: peripheryAddrs.capRiskStewardFactory,
       escrowedCollateralPerspective: peripheryAddrs.escrowedCollateralPerspective,
       eulerEarnFactoryPerspective: peripheryAddrs.eulerEarnFactoryPerspective,
-      eulerEarnGovernedPerspective: peripheryAddrs.eulerEarnGovernedPerspective,
-      eulerUngoverned0xPerspective: peripheryAddrs.eulerUngoverned0xPerspective,
-      eulerUngovernedNzxPerspective: peripheryAddrs.eulerUngovernedNzxPerspective,
       evkFactoryPerspective: peripheryAddrs.evkFactoryPerspective,
-      externalVaultRegistry: peripheryAddrs.externalVaultRegistry,
       feeFlowController: peripheryAddrs.feeFlowController,
-      governedPerspective: peripheryAddrs.governedPerspective,
       governorAccessControlEmergencyFactory: peripheryAddrs.governorAccessControlEmergencyFactory,
-      irmRegistry: peripheryAddrs.irmRegistry,
       kinkIRMFactory: peripheryAddrs.kinkIRMFactory,
       kinkyIRMFactory: peripheryAddrs.kinkyIRMFactory,
-      oracleAdapterRegistry: peripheryAddrs.oracleAdapterRegistry,
       oracleRouterFactory: peripheryAddrs.oracleRouterFactory,
       securitizeFactory: peripheryAddrs.securitizeFactory,
       swapVerifier: peripheryAddrs.swapVerifier,

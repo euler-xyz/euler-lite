@@ -220,6 +220,8 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 `labels-view.ts` shares the same `getServerSdk` instance per chain.
 
+Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
+
 ### Disabling the snapshot
 
 Set `DISABLE_SERVER_VAULT_CACHE=true` to:
@@ -309,7 +311,7 @@ The pipeline always succeeds eventually — the snapshot is the *fast path*, not
 ```text
 Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 ─────────────────────                  ──────────────────────────────────────
-- Euler Chains                         - refreshChainVaults(chain) for each
+- Euler Chains and runtime ABIs                         - refreshChainVaults(chain) for each
 - cross-chain effective asset policy     enabled non-deprecated chain
 - per-chain Public Labels bundle
 - per-chain effective policy

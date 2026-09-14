@@ -1,9 +1,11 @@
 import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { INTERNAL_API_BASE } from '~/utils/api-url-env'
+import { logWarn } from '~/utils/errorHandling'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
+import { PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
 // useEulerSdk -> sdk-keyring -> eulerLabelsUtils -> useEulerLabels ->
@@ -16,10 +18,15 @@ const loadSdkKeyringModule = (): Promise<SdkKeyringModule> => {
   return sdkKeyringModulePromise
 }
 
-type QueryOracleAdapters = (chainId: number) => Promise<unknown>
-type ConfigurableOracleAdapterService = EulerSDK['oracleAdapterService'] & {
-  setQueryOracleAdapters?: (fn: QueryOracleAdapters) => void
+type QueryABI = (url: string) => Promise<unknown>
+type ConfigurableAbiService = EulerSDK['abiService'] & {
+  setQueryABI?: (fn: QueryABI) => void
 }
+
+// The SDK's ABIService computes raw.githubusercontent.com URLs of the shape
+// `.../abis/<Contract>.json` and hands them to its query function. The
+// proxied query below only needs the contract name back out of that URL.
+const ABI_URL_CONTRACT_RE = /\/abis\/([A-Za-z0-9_.-]+)\.json(?:[?#]|$)/
 
 // Browser CSP blocks hermes.pyth.network. The SDK's Pyth plugin issues
 // `GET <hermesUrl>/v2/updates/price/latest?ids[]=…` — rewrite that request to
@@ -57,15 +64,23 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *
  *   - `getEulerSdkFresh()`  — "slow" / plan-time instance. Account and vault
  *     adapters are pinned to on-chain/subgraph reads regardless of the browser
- *     source, so transaction planning reflects the latest block. Rewards use
- *     fallback so V3 reward rows can be paired with direct claim-proof data.
- *     Uses `sdkFreshBuildQuery`, which forces a zero stale time on plan-critical
- *     queries (account, vault info, balances, allowances, pyth update data)
- *     while letting catalogue / labels / prices fall through to the same
- *     QueryClient cache that the fast instance fills. The fresh instance's
- *     refetches write back to the shared cache, so a subsequent fast read sees
- *     the just-refreshed value within its own staleness window. Consumed by
- *     `useEulerTx` planners and simulate/execute.
+ *     source, so transaction planning never reads V3-backed account/vault
+ *     data. Rewards use fallback so V3 reward rows can be paired with direct
+ *     claim-proof data. Uses `sdkFreshBuildQuery`, which applies the shorter
+ *     `FORM_STALE_TIMES` windows to plan-critical queries (account, vault
+ *     info, balances, allowances) — currently 1 min or 15 s depending on the
+ *     row — while letting catalogue / labels / prices fall through to the same
+ *     QueryClient cache that the fast instance fills. Those windows are short,
+ *     not zero: pinning the adapters selects the data source, it does not
+ *     force a refetch, so this instance bounds staleness rather than
+ *     guaranteeing a latest-block read. Immediate post-tx
+ *     `invalidateAfterTx` invalidation marks those rows stale for a later idle
+ *     read but does not cancel an in-flight `fetchQuery`. After the subgraph
+ *     reaches the confirmed block, the reviewed-execution refresh advances
+ *     their cache generation so its reads cannot join the earlier fetch. The
+ *     fresh instance's refetches write back to the shared cache, so a
+ *     subsequent fast read sees the just-refreshed value within its own
+ *     staleness window. Consumed by transaction planners and simulation.
  */
 
 type SdkInstance = { sdk: EulerSDK }
@@ -102,7 +117,7 @@ const buildFuulProxyApiPath = (path = '') =>
 const buildIncentraProxyApiPath = (path: string) =>
   buildAppApiPath(`/api/internal/proxy/incentra/${path.replace(/^\/+/, '')}`)
 const buildTurtleProxyApiPath = () => buildAppApiPath('/api/internal/proxy/turtle')
-// Exported so post-tx subgraph polling (useEulerTx) hits the exact same
+// Exported so reviewed-execution post-tx polling hits the exact same
 // endpoint the SDK's account/vault-type adapters read through. Polling the
 // upstream Goldsky URL directly would measure a different indexer head than
 // the one actually serving queryAccountVaults.
@@ -161,7 +176,6 @@ const adapterConfigForFastSource = (source: 'fallback' | 'onchain' | 'v3'): Part
 const buildSdkStaticConfig = (backend: SdkBackend) => {
   const rc = getPublicRuntimeConfig()
   const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
-  const oracleChecksBaseUrl = cleanUrl(rc.configOracleChecksBaseUrl)
   const swapApiUrl = cleanUrl(rc.swapApiUrl)
   const v3ApiUrl = buildV3ProxyApiPath()
   const subgraphUrls = buildSubgraphUrlMap()
@@ -179,7 +193,6 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl, intrinsicApyV3ApiUrl: v3ApiUrl } : {}),
     eulerInterfacesBranch,
     deploymentsUrl: buildAppApiPath('/api/internal/euler-chains'),
-    ...(oracleChecksBaseUrl ? { oracleAdaptersBaseUrl: oracleChecksBaseUrl } : {}),
     ...(swapApiUrl ? { swapApiUrl } : {}),
     ...(enableMerkl ? { rewardsMerklApiUrl: buildMerklProxyApiPath() } : { rewardsEnableMerkl: false }),
     // Incentra/Brevis: SDK takes the full URL for each endpoint, so map both
@@ -241,18 +254,33 @@ const getRpcCacheKey = (rpcUrls: Record<number, string>) =>
     .join('|')
 
 const configureAppProxies = (sdk: EulerSDK, buildQuery: BuildQueryFn) => {
-  const oracleAdapterService = sdk.oracleAdapterService as ConfigurableOracleAdapterService
-  oracleAdapterService.setQueryOracleAdapters?.(buildQuery(
-    'queryOracleAdapters',
-    async (chainId: number) => {
-      const response = await fetch(`${buildAppApiPath('/api/internal/oracle-adapters')}?chainId=${encodeURIComponent(String(chainId))}`)
-      if (!response.ok) {
-        throw new Error(`Oracle adapters request failed: ${response.status} ${response.statusText}`)
-      }
-      return response.json()
-    },
-    oracleAdapterService,
-  ))
+  // Runtime ABI fetches (AccountLens for account reads/simulate/rewards,
+  // VaultLens/UtilsLens for projected rates and the IRM overview) go through
+  // /api/internal/abis/<Contract> — same cache + stale-fallback chain as
+  // the deployments manifest. The browser CSP no longer allows
+  // raw.githubusercontent.com, so a missing setter is a real breakage, not
+  // a degradation — log it loudly instead of optional-chaining past it.
+  const abiService = sdk.abiService as ConfigurableAbiService | undefined
+  if (abiService?.setQueryABI) {
+    abiService.setQueryABI(buildQuery(
+      'queryABI',
+      async (url: string) => {
+        const contract = ABI_URL_CONTRACT_RE.exec(url)?.[1]
+        if (!contract) {
+          throw new Error(`Unexpected ABI URL shape: ${url}`)
+        }
+        const response = await fetch(`${buildAppApiPath('/api/internal/abis')}/${encodeURIComponent(contract)}`)
+        if (!response.ok) {
+          throw new Error(`ABI request failed: ${response.status} ${response.statusText}`)
+        }
+        return response.json()
+      },
+      abiService,
+    ))
+  }
+  else {
+    logWarn('useEulerSdk', 'abiService.setQueryABI is missing; browser ABI fetches will bypass the proxy and be CSP-blocked', { severity: 'error' })
+  }
 }
 
 interface InstanceBuildArgs {
@@ -285,7 +313,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
     },
     servicesOverrides: { intrinsicApyService },
     plugins: [
-      createPythPlugin({ buildQuery, fetchFn: pythProxyFetch }),
+      createPythPlugin({ buildQuery, fetchFn: pythProxyFetch, maxUpdateFee: PYTH_MAX_UPDATE_FEE }),
       createKeyringPlugin({
         hookTargets: keyringHookTargets,
         getCredentialData: getSdkKeyringCredential,
@@ -338,10 +366,11 @@ export const getEulerSdkForChain = async (chainId: number): Promise<EulerSDK> =>
 }
 
 /** "Slow"/plan-time instance: account and vault adapters stay onchain/subgraph
- *  regardless of browser source, with zero stale-time on plan-critical queries.
- *  Rewards use fallback so claim planning can combine V3 rows with direct
- *  provider proof data. Used by useEulerTx for plan construction, simulate,
- *  and execute. */
+ *  regardless of browser source, with the shorter `FORM_STALE_TIMES` windows
+ *  (1 min / 15 s) on plan-critical queries rather than a forced refetch — see
+ *  the entry-point notes at the top of this file. Rewards use fallback so claim
+ *  planning can combine V3 rows with direct provider proof data. Used by
+ *  useEulerTx for plan construction, simulate, and execute. */
 export const getEulerSdkFresh = async (): Promise<EulerSDK> => {
   const { sdk } = await lookupInstance('fresh', 'onchain', sdkFreshBuildQuery)
   return sdk

@@ -20,6 +20,7 @@ defineProps<{
   disabledReason?: string
   disabledReasonVariant?: DisabledReasonVariant
   canAddToBatch?: boolean
+  addToBatchDisabledReason?: string
 }>()
 defineEmits<{ (e: 'add-to-batch'): void }>()
 </script>
@@ -38,6 +39,7 @@ defineEmits<{ (e: 'add-to-batch'): void }>()
       :disabled-reason="disabledReason"
       :disabled-reason-variant="disabledReasonVariant"
       :can-add-to-batch="canAddToBatch"
+      :add-to-batch-disabled-reason="addToBatchDisabledReason"
       @add-to-batch="$emit('add-to-batch')"
     >
       <slot />

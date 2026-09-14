@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { OperationReviewModal } from '#components'
 import { formatUnits } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { UserReward } from '~/entities/reward-campaign'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
+import { rewardClaimId, rewardClaimSetDigest } from '~/features/reviewed-execution/domain/rewards'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -38,12 +37,14 @@ const rewardClaimKey = computed(() => [
 ].join(':'))
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
-const { addEntry: addBatchEntry, entries: batchEntries } = useTxBatch()
-const { executePlan } = useEulerTx()
+const { refreshLocks } = useREULLocks()
+const { addEntry: addBatchEntry, entries: batchEntries, entryCount, clearBatch } = useTxBatch()
+const { create: createIntent } = useOperationIntentFactory()
+const { capture: captureReviewState } = useExecutionReview()
 const { getTokenByAddress } = useTokenList()
 const { isSpyMode } = useSpyMode()
 const { settings } = useUserSettings()
-const modal = useModal()
+const { eulerTokenAddresses } = useEulerAddresses()
 const { error } = useToast()
 const { chainId: walletChainId, switchChain } = useWagmi()
 const { runSimulation, simulationError } = useTransactionPlanSimulation()
@@ -57,10 +58,20 @@ const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed),
 const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
 const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
-const canAddToBatch = computed(() => settings.value.enableAdvancedMode && reward.provider !== 'turtle')
+const isREULReward = computed(() => {
+  const reulAddress = eulerTokenAddresses.value?.rEUL
+  if (reulAddress) {
+    return reward.token.address.toLowerCase() === reulAddress.toLowerCase()
+  }
+  return reward.token.symbol.toLowerCase() === 'reul'
+})
+const canAddToBatch = computed(() =>
+  settings.value.enableAdvancedMode && reward.provider !== 'turtle' && !isREULReward.value,
+)
 const isInBatch = computed(() =>
   batchEntries.value.some(entry => entry.rewardClaimKey === rewardClaimKey.value),
 )
+const isREULBatchBlocked = computed(() => isREULReward.value && entryCount.value > 0)
 const isEulFamily = computed(() => ['rEUL', 'EUL'].includes(reward.token.symbol))
 const externalIconUrl = computed(() => {
   if (isEulFamily.value) return undefined
@@ -79,42 +90,34 @@ const ensureWalletOnClaimChain = async () => {
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const claim = async () => {
-  if (isSpyMode.value) {
-    error('Exit spy mode to claim rewards')
-    return
-  }
-
-  try {
-    isClaiming.value = true
-
-    if (!plan.value) {
-      plan.value = await buildClaimRewardPlan(reward)
-    }
-    await executePlan(plan.value)
-    modal.close()
-    await refreshRewards({ delayedRetry: true })
-  }
-  catch (e) {
-    error('Transaction failed')
-    logWarn('PortfolioSdkRewardItem/claim', e)
-  }
-  finally {
-    isClaiming.value = false
-  }
+const createRewardIntent = () => {
+  const claimId = rewardClaimId(reward)
+  return createIntent({
+    kind: 'reward-claim',
+    planner: 'reward-claim',
+    args: {
+      claimIds: [claimId],
+      provider: reward.provider,
+      rewardsDigest: rewardClaimSetDigest([reward]),
+    },
+    constraints: [{ kind: 'selected-rewards', claimIds: [claimId] }],
+    source: 'components/entities/portfolio/PortfolioSdkRewardItem.vue',
+  })
 }
 
 const onAddToBatchClick = async () => {
-  if (reward.provider === 'turtle') return
   if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value || isInBatch.value) return
+  if (walletChainId.value !== reward.chainId) {
+    error('Switch to the reward network before adding this claim to the batch')
+    return
+  }
   isAddingToBatch.value = true
   try {
-    await ensureWalletOnClaimChain()
+    const intent = createRewardIntent()
     await addBatchEntry({
+      intent,
       label: `Claim ${reward.token.symbol}`,
       rewardClaimKey: rewardClaimKey.value,
-      requiresPlanningAccount: false,
-      buildPlan: async () => buildClaimRewardPlan(reward),
       review: {
         type: planKind.value,
         asset: {
@@ -145,7 +148,12 @@ const onAddToBatchClick = async () => {
 }
 
 const onClaimClick = async () => {
+  if (isREULBatchBlocked.value) {
+    error('Clear the current batch before claiming rEUL')
+    return
+  }
   if (isInBatch.value) return
+
   if (isSpyMode.value) {
     error('Exit spy mode to claim rewards')
     return
@@ -155,6 +163,30 @@ const onClaimClick = async () => {
   isPreparing.value = true
   try {
     await ensureWalletOnClaimChain()
+
+    const intent = createRewardIntent()
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: planKind.value,
+      review: {
+        type: planKind.value,
+        asset: {
+          symbol: reward.token.symbol,
+          address: reward.token.address,
+          decimals: reward.token.decimals,
+        },
+        assetIconUrl: externalIconUrl.value,
+        amount: rewardAmount.value,
+        submittingLabel: 'Claiming...',
+      },
+      onSucceeded: async () => {
+        if (isREULReward.value) await refreshLocks(true)
+        await refreshRewards({ delayedRetry: true })
+      },
+      onFailed: (cause) => {
+        error('Transaction failed')
+        logWarn('PortfolioSdkRewardItem/claim', cause)
+      },
+    })
 
     try {
       plan.value = await buildClaimRewardPlan(reward)
@@ -168,24 +200,12 @@ const onClaimClick = async () => {
       const ok = await runSimulation(plan.value)
       if (!ok) return
     }
+    if (isREULBatchBlocked.value) {
+      error('Clear the current batch before claiming rEUL')
+      return
+    }
 
-    modal.open(OperationReviewModal, {
-      props: {
-        type: planKind.value,
-        asset: {
-          symbol: reward.token.symbol,
-          address: reward.token.address,
-          decimals: reward.token.decimals,
-        },
-        assetIconUrl: externalIconUrl.value,
-        amount: rewardAmount.value,
-        plan: plan.value || undefined,
-        submittingLabel: 'Claiming...',
-        onConfirm: async () => {
-          await claim()
-        },
-      },
-    })
+    await reviewLaunch.open()
   }
   catch (e) {
     logWarn('PortfolioSdkRewardItem/onClaimClick', e)
@@ -274,13 +294,14 @@ const onClaimClick = async () => {
         <UiButton
           rounded
           :loading="isClaiming || isPreparing"
-          :disabled="isSpyMode || isAddingToBatch || isInBatch"
+          :disabled="isSpyMode || isAddingToBatch || isInBatch || isREULBatchBlocked"
           @click="onClaimClick"
         >
           Claim
         </UiButton>
         <UiButton
           v-if="canAddToBatch"
+          data-testid="add-to-batch"
           rounded
           variant="primary-stroke"
           :loading="isAddingToBatch"
@@ -290,6 +311,21 @@ const onClaimClick = async () => {
           {{ isInBatch ? 'In batch' : 'Add to batch' }}
         </UiButton>
       </div>
+      <p
+        v-if="isREULBatchBlocked"
+        class="text-center text-p3 text-content-tertiary"
+        data-testid="reward-batch-blocked"
+      >
+        Clear the current batch before claiming rEUL ·
+        <button
+          type="button"
+          class="text-accent-500 hover:text-accent-600"
+          data-testid="reward-clear-batch"
+          @click="clearBatch"
+        >
+          Clear batch
+        </button>
+      </p>
       <UiAlert
         v-if="simulationError"
         class="mt-12"

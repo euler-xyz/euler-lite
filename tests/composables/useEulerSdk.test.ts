@@ -3,8 +3,9 @@ import { computed, ref, type Ref } from 'vue'
 
 type MockSdk = {
   id: string
-  oracleAdapterService: {
-    setQueryOracleAdapters: ReturnType<typeof vi.fn>
+  oracleAdapterService: Record<string, never>
+  abiService: {
+    setQueryABI: ReturnType<typeof vi.fn>
   }
 }
 type BuildEulerSDKOptions = {
@@ -13,7 +14,6 @@ type BuildEulerSDKOptions = {
     v3ApiUrl?: string
     tokenlistApiBaseUrl?: string
     deploymentsUrl?: string
-    oracleAdaptersBaseUrl?: string
     rewardsMerklApiUrl?: string
     rewardsBrevisApiUrl?: string
     rewardsBrevisProofsApiUrl?: string
@@ -55,8 +55,9 @@ const createDeferred = <T>(): Deferred<T> => {
 
 const createMockSdk = (id: string): MockSdk => ({
   id,
-  oracleAdapterService: {
-    setQueryOracleAdapters: vi.fn(),
+  oracleAdapterService: {},
+  abiService: {
+    setQueryABI: vi.fn(),
   },
 })
 
@@ -68,6 +69,7 @@ const importUseEulerSdk = async (
   vi.resetModules()
   vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
     buildEulerSDK,
+    serializeQueryArgs: (args: readonly unknown[]) => JSON.stringify(args),
     createKeyringPlugin: vi.fn(() => ({ name: 'keyring' })),
     createPythPlugin: vi.fn(() => ({ name: 'pyth' })),
     IntrinsicApyService: class IntrinsicApyService {
@@ -148,7 +150,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: 'https://example.test/EulerChains.json',
-        configOracleChecksBaseUrl: 'https://oracles.example.test/data/',
       },
     }))
 
@@ -164,7 +165,6 @@ describe('useEulerSdk', () => {
       v3ApiUrl: '/api/internal',
       tokenlistApiBaseUrl: '/api/internal',
       deploymentsUrl: '/api/internal/euler-chains',
-      oracleAdaptersBaseUrl: 'https://oracles.example.test/data',
     })
     expect(options.rpcUrls).toBeUndefined()
     expect(options.deploymentServiceConfig).toBeUndefined()
@@ -179,7 +179,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 
@@ -215,6 +214,35 @@ describe('useEulerSdk', () => {
     })
   })
 
+  it('routes SDK ABI fetches through the /api/internal/abis proxy', async () => {
+    const chainIds = ref([1])
+    const sdk = createMockSdk('abi-proxied')
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      public: {},
+    }))
+
+    const { getEulerSdk } = await importUseEulerSdk(chainIds, buildEulerSDK)
+    await expect(getEulerSdk()).resolves.toBe(sdk)
+
+    expect(sdk.abiService.setQueryABI).toHaveBeenCalledTimes(1)
+    const queryABI = sdk.abiService.setQueryABI.mock.calls[0]?.[0] as (url: string) => Promise<unknown>
+
+    const abi = [{ type: 'function', name: 'getVaultInfoFull' }]
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => abi,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      queryABI('https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/abis/VaultLens.json'),
+    ).resolves.toEqual(abi)
+    expect(fetchMock).toHaveBeenCalledWith('/api/internal/abis/VaultLens')
+
+    await expect(queryABI('https://evil.example/not-an-abi')).rejects.toThrow('Unexpected ABI URL shape')
+  })
+
   it('uses an onchain browsing SDK for chains listed in ONCHAIN_SDK_CHAINS', async () => {
     const chainIds = ref([1, 8453])
     const regularSdk = createMockSdk('regular')
@@ -225,7 +253,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 
@@ -258,7 +285,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 
@@ -284,7 +310,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configOracleChecksBaseUrl: '',
       },
     }))
 

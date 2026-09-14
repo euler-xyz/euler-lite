@@ -37,6 +37,14 @@ export interface DisplayStep {
   assetInfo?: StepAssetInfo
   toAssetInfo?: StepAssetInfo
   iconOnly?: boolean
+  /**
+   * Identity of the underlying encoded transaction, present when the step
+   * maps 1:1 to a concrete transaction. Rows sharing a txKey ARE the same
+   * transaction and may be consolidated in summaries; rows without one must
+   * never be — labels are generic per authorization type, so two different
+   * tokens can share a label while being distinct transactions.
+   */
+  txKey?: string
 }
 
 /** Structurally matches useVaultRegistry().getVault */
@@ -61,6 +69,12 @@ export interface StepDecodingContext {
   knownAssets?: StepKnownAsset[]
   swapQuoteOutputs?: StepKnownSwapOutput[]
   vaultAmounts?: Record<string, string>
+  /**
+   * Approvals are submitted in the same wallet submission as the batch
+   * (Safe wallets bundle them via EIP-5792), so approve steps are not
+   * separate transactions.
+   */
+  bundledApprovals?: boolean
 }
 
 type KnownAsset = StepKnownAsset
@@ -115,6 +129,7 @@ const AAVE_PERMIT_SELECTOR = toFunctionSelector('function permit(address,address
 const MERKL_CLAIM_SELECTOR = toFunctionSelector('function claim(address[],address[],uint256[],bytes32[][])')
 const BREVIS_CLAIM_SELECTOR = toFunctionSelector('function claim(address,uint256[],uint64,bytes32[])')
 const FUUL_CLAIM_SELECTOR = toFunctionSelector('function claim((address,address,address,uint8,uint256,uint8,uint256,uint256,bytes32,bytes[])[])')
+const REUL_UNLOCK_SELECTOR = toFunctionSelector('function withdrawToByLockTimestamp(address,uint256,bool)')
 const MORPHO_AUTHORIZATION_SELECTOR = toFunctionSelector('function setAuthorizationWithSig((address,address,bool,uint256,uint256),(uint8,bytes32,bytes32))')
 const MORPHO_BORROW_FOR_SENDER_SELECTOR = toFunctionSelector('function morphoBorrowForSender(address,(address,address,address,address,uint256),uint256,address)')
 const MORPHO_WITHDRAW_COLLATERAL_FOR_SENDER_SELECTOR = toFunctionSelector('function morphoWithdrawCollateralForSender(address,(address,address,address,address,uint256),uint256,address)')
@@ -208,6 +223,7 @@ const SELECTOR_LABELS: Record<string, string> = {
   [MERKL_CLAIM_SELECTOR]: 'Claim',
   [BREVIS_CLAIM_SELECTOR]: 'Claim',
   [FUUL_CLAIM_SELECTOR]: 'Claim',
+  [REUL_UNLOCK_SELECTOR]: 'Unlock',
 }
 
 const MAX_UINT256 = 2n ** 256n - 1n
@@ -1091,7 +1107,7 @@ const resolveBatchItemAssetInfo = (
     return { symbol: ctx.asset.symbol, address: ctx.asset.address }
   }
 
-  if (label === 'Claim') {
+  if (label === 'Claim' || label === 'Unlock') {
     return { symbol: ctx.asset.symbol, address: ctx.asset.address, amount: ctx.amount }
   }
 
@@ -1132,6 +1148,9 @@ export function buildTransactionPlanDisplaySteps(
 ): DisplayStep[] {
   const steps: DisplayStep[] = []
   const knownAssets = buildPlanAssetMap(plan, ctx, getVault)
+  const approvalAssets = { ...knownAssets }
+  addKnownAsset(approvalAssets, ctx.supplyingAssetForBorrow)
+  addKnownAsset(approvalAssets, ctx.swapFromAsset)
   const morphoVaultShareTokens = collectMorphoVaultShareTokens(plan)
   const isMorphoVaultShareToken = (address: string | undefined) => {
     const key = normalizeAddressKey(address ?? '')
@@ -1151,13 +1170,21 @@ export function buildTransactionPlanDisplaySteps(
       const resolved = item.resolved ?? []
       for (const r of resolved) {
         index++
+        const token = r.token ?? item.token
+        const approvalAsset = getKnownAsset(token, ctx, getVault, approvalAssets)
+        const symbol = approvalAsset?.symbol ?? 'Token'
+        const assetInfo: StepAssetInfo = {
+          symbol,
+          address: token,
+          iconUrl: getLogoUrl(token, symbol),
+        }
         if (r.type === 'approve') {
           steps.push({
             index,
             label: 'Approve',
             labelSuffix: 'for vault',
-            isSeparateTx: true,
-            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
+            isSeparateTx: !ctx.bundledApprovals,
+            assetInfo,
           })
         }
         else {
@@ -1166,7 +1193,7 @@ export function buildTransactionPlanDisplaySteps(
             index,
             label: 'Sign permit2 message',
             isSeparateTx: false,
-            assetInfo: { symbol: ctx.asset.symbol, address: ctx.asset.address },
+            assetInfo,
           })
         }
       }

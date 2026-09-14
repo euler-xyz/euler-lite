@@ -94,7 +94,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Nuxt.js 3                                │
+│                        Nuxt.js 4                                │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Vue 3 + Composition API                      │
 ├─────────────────────────────────────────────────────────────────┤
@@ -131,9 +131,9 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 ## 🎯 Key Architectural Decisions
 
-### 1. Nuxt.js 3 Framework
+### 1. Nuxt.js 4 Framework
 
-**Why Nuxt.js 3?**
+**Why Nuxt.js 4?**
 
 - **SSR Disabled**: Client-side only SPA, SSR is not needed
 - **Auto-imports**: Reduces boilerplate and improves developer experience
@@ -195,7 +195,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, Public Labels, oracle checks, RPC) are reached through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, Public Labels, Data V3 oracle assessments, RPC) are reached through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
 
 **Proxy cache strategy**:
 
@@ -203,8 +203,9 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 |----------|-----|-------|
 | `/api/internal/public-labels` | 5 min | One chain/version-scoped Public Labels V3 bundle; in-flight dedup and bounded stale fallback |
 | `/api/internal/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
-| `/api/internal/oracle-adapter` | 5 min | Lazy per-address fetch |
-| `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
+| `/api/internal/v3/oracles/adapter-assessments/{address}?chainId={chainId}` | request-scoped | Lazy per-address Data V3 assessment fetch through the exact SDK browser endpoint allowlist |
+| `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo. 7-day stale window so a running instance outlives upstream outages |
+| `/api/internal/abis/{contract}` | 5 min | Runtime ABI documents from `euler-interfaces` (`AccountLens`/`VaultLens`/`UtilsLens` allowlist; SDK `setQueryABI` target). Same 7-day stale window as euler-chains |
 | `/api/internal/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |
 | `/api/internal/proxy/merkl/{path}` | 60 s | Same-origin proxy to Merkl v4; path allowlist; GET/HEAD only |
 | `/api/internal/proxy/fuul/{path}` | 30 s | Same-origin proxy to Fuul; path allowlist; GET/HEAD/POST |
@@ -214,7 +215,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`. The per-host proxies (`/api/internal/proxy/{merkl,fuul,incentra,subgraph}`) share a common forwarder at `server/utils/external-proxy.ts`.
 
-`server/plugins/warm-cache.ts` pre-populates the Public Labels bundle, its temporary effective-policy overlay, and the token list for every enabled chain, plus Euler Chains once globally, on a 5-minute cycle. The vault snapshot runs on its own faster timer (1 minute when V3 is configured, 5 minutes otherwise). Warm calls refresh the shared utilities directly; concurrent requests deduplicate against the same in-flight work, and stale fallback is bounded by `createTtlCache`.
+`server/plugins/warm-cache.ts` pre-populates the Public Labels bundle, its temporary effective-policy overlay, and the token list for every enabled chain, plus Euler Chains and runtime ABI manifests once globally, on a 5-minute cycle. The vault snapshot runs on its own faster timer (1 minute when V3 is configured, 5 minutes otherwise). Warm calls refresh the shared utilities directly; concurrent requests deduplicate against the same in-flight work, and stale fallback is bounded by `createTtlCache`.
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
@@ -335,15 +336,15 @@ The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stable
 
 ### Server-Side API Protection
 
-The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, TRM) to keep operator API keys out of client bundles. Several layers protect these endpoints:
+The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, the compliance screening API) to keep operator API keys out of client bundles. Several layers protect these endpoints:
 
 | Layer | Purpose |
 |---|---|
 | **CORS** (`server/middleware/cors.ts`) | Restricts API access to configured origins |
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
-| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
+| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via the edge-provided country (`getEdgeContext`); fails closed (HTTP 451) if a geo-capable edge leaves the country undetermined outside dev |
 | **RPC method whitelist** (`server/api/internal/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
-| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` is absent in prod |
+| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if the edge provides no trusted client identity in prod |
 | **Swap quote contract validation** (`@eulerxyz/euler-v2-sdk` `swapService`) | Validates each fetched quote's swapper and verifier addresses against the chain's canonical deployment allowlist |
 
 #### Rate Limiting
@@ -351,30 +352,44 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 The app includes a built-in per-IP rate limiter as a defense-in-depth measure. Default budgets per 60-second window:
 
 - **RPC proxy**: 10,000 units (batch of N costs N)
-- **All other proxies**: 1,000 requests (token list, Pyth updates, labels, oracle adapter, euler chains, intrinsic APY, TOS)
+- **All other proxies**: 1,000 requests (token list, Pyth updates, labels, euler chains, intrinsic APY, TOS, V3)
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
 
-**Wallet screening fail-closed**: `server/api/internal/screen-address.post.ts` proxies address checks to the TRM API (configured via `WALLET_SCREENING_URI`). If the env var is not set, or the TRM API returns an error or times out, the endpoint returns `addressIsSuspicious: true` — the app fails closed rather than open. Operators must set `WALLET_SCREENING_URI` or all users will be treated as suspicious.
+**Wallet screening fail-closed**: connect-time only. `POST /api/internal/screen-address` proxies to data-v3 (`ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`). Both unset is an opt-out except in `DOPPLER_ENVIRONMENT=prd`, where missing config fails closed. Partial config, non-TLS URIs, upstream errors, and incomplete verdicts all return `addressIsSuspicious: true`. VPN usage is audit metadata and does not gate access. First-party `*.euler.finance` SPAs share this one path via a scoped CORS exception — keep the contract backward-compatible. Full runbook: [Address Screening](./address-screening.md).
 
 **Important**: This is a best-effort safeguard, not a security boundary. It catches accidental abuse (e.g. a client stuck in a retry loop) but will not stop a determined attacker. Known limitations:
 
 - **In-memory state is per-process** — if Nitro spawns multiple workers, each gets its own budget, effectively multiplying the limit.
 
-#### Cloudflare Requirement
+#### Edge Provider
 
-**Production deployments must be behind Cloudflare.** This is a hard requirement, not a recommendation — two independent server features depend on it:
+The server never reads vendor edge headers directly. `getEdgeContext(event)` (`server/utils/edge.ts`) normalizes whatever the fronting infrastructure provides into a single shape — trusted client IP, country, VPN evidence, origin-auth status — and every consumer (geo-gate, rate limiter, CORS country hint, screening audit) reads that. The vendor-specific header mapping lives exclusively in `utils/edge-presets.ts`, selected by the `EDGE_PROVIDER` env var:
 
-1. **Geo-gate** (`server/middleware/geo-gate.ts`) reads `CF-IPCountry` to enforce sanctioned-country blocks. Without Cloudflare, the country cannot be determined and all API requests are rejected with HTTP 451.
-2. **Rate limiter** (`server/utils/rate-limit.ts`) uses `CF-Connecting-IP` as the trusted client IP. Without Cloudflare, `CF-Connecting-IP` is absent and all API requests are rejected with HTTP 403.
+| Preset | Trusted client IP | Country | VPN evidence |
+|---|---|---|---|
+| `cloudflare` | `cf-connecting-ip` | `cf-ipcountry` | `x-is-vpn` / `x-is-proxy-or-vpn` |
+| `google` | `x-forwarded-for` second-to-last entry (LB-appended) | `x-client-geo` (LB custom request header, see below) | — |
+| `cloudfront` | `cloudfront-viewer-address` (port stripped) | `cloudfront-viewer-country` | — |
+| `none` (default) | rightmost `x-forwarded-for` entry, else socket | — | — |
 
-Bypass behaviour per environment:
+**Production deployments must set `EDGE_PROVIDER` explicitly** — the server refuses to boot in `prd` without it (`server/plugins/edge-guard.ts`), because the `none` default runs with geo-blocking off. `none` is intended for forks and previews that have no fronting edge. It is permitted in production only as an explicit opt-out (edge-guard logs a warning at boot): under `none` there is no trusted identity at all — the rate limiter keys on the rightmost `x-forwarded-for` entry, which a direct client can rotate unless the hosting platform's proxy rewrites it — so `none` must not be read as rate-limit protection.
+
+**`google` preset prerequisite**: Google's external load balancer does not set a country header on its own. The backend service must be configured with the custom request header `x-client-geo: {client_region}`, which the LB then stamps on every forwarded request (replacing any client-supplied value). Without it the header arrives from the client untouched and the country is forgeable — origin auth proves the request traversed the LB, not that the LB wrote this header. The preset also assumes exactly one LB hop for the `x-forwarded-for` identity.
+
+**Origin auth** (`EDGE_ORIGIN_SECRET`): when set, every request must carry a matching `x-edge-origin-auth` header, stamped by the edge (e.g. a request-header transform rule). Requests without it are treated as having bypassed the edge: their trusted inputs are voided and the fail-closed paths below apply. The secret is optional for the `cloudflare` and `none` presets — until it is set, the edge headers are trusted on the historical assumption that the origin is only reachable through the edge. It is **required** for `google` and `cloudfront` (the server refuses to boot without it): those edges forward client headers untouched, so without origin auth their trusted inputs would be forgeable by anyone who can reach the origin. Configuring the secret is what closes direct-to-origin spoofing in every preset.
+
+**Internal fetches** (`server/utils/internal-headers.ts`): server-internal `$fetch` calls (warm-cache, vaults-cache, labels) authenticate with an `x-edge-internal` marker whose value is the origin-auth secret or, when none is configured, a random per-process value — unforgeable under every preset with zero configuration. The container healthcheck does not use it: it probes `/healthz`, which lives outside `/api/` and is deliberately independent of edge configuration.
+
+Fail-closed behaviour per environment (geo-capable presets):
 
 | Environment | Geo-gate | Rate limiter |
 |---|---|---|
-| `prd` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF required; fail-closed (HTTP 403) if absent. |
-| `stg` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF **not** required; falls back to `X-Forwarded-For`. |
-| `dev` | CF not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | CF not required; falls back to `X-Forwarded-For`. |
+| `prd` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` is rejected at boot (`assertEdgeConfig`), so it cannot mask a missing country. | Trusted identity required; fail-closed (HTTP 403) if absent. |
+| `stg` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | Trusted identity **not** required; falls back to `X-Forwarded-For`. |
+| `dev` | Country not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | Trusted identity not required; falls back to `X-Forwarded-For`. |
+
+Under the `none` preset the geo-gate does not fail closed (there is no geo evidence by design) and the rate limiter keys budgets on the rightmost `x-forwarded-for` entry, best-effort (see the production caveat above).
 
 ### Clickjacking & Framing Defenses
 

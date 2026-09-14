@@ -64,7 +64,9 @@ function scanDynamicEnvUrls(): string[] {
   const urls: string[] = []
   for (const [key, value] of Object.entries(process.env)) {
     if (!value) continue
-    // RPC_URL_<chainId> — wagmi uses these directly on the client.
+    // Include configured RPC upstream origins in the allowlist. The browser
+    // transport uses /api/internal/rpc/{chainId}, then the chain's public RPC
+    // fallback (plugins/00.wagmi.ts); it does not receive these upstream URLs.
     // Subgraph URLs are intentionally absent: all subgraph traffic is
     // same-origin via /api/internal/proxy/subgraph/{chainId}, so no connect-src is
     // needed for the upstream.
@@ -100,12 +102,12 @@ function parseChainPublicRpcOrigins(): string[] {
 
 /** Derive CSP origins from URL env vars so deployers don't need to duplicate them. */
 function parseEnvOrigins(): { connect: string[] } {
-  // Labels, oracle checks, and token lists are proxied through server /api/*
+  // Labels, V3 oracle assessments, and token lists use same-origin /api/internal/*
   // endpoints, so their origins are not needed in connect-src.
   const connectVars = [
     env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
     // Pyth Hermes is proxied through /api/internal/pyth/updates — no external origin needed
-    // Dynamic per-chain URLs (RPC for wagmi, subgraph for GraphQL)
+    // Configured RPC upstream origins
     ...scanDynamicEnvUrls(),
   ]
 
@@ -147,8 +149,6 @@ const CONNECT_SRC_BASE = [
   // CoW Protocol orderbook
   'https://barn.api.cow.fi',
   'https://api.cow.fi',
-  // SDK default deployments source
-  'https://raw.githubusercontent.com',
   // Reown AppKit SDK version check
   'https://registry.npmjs.org',
   // RPC providers (wildcard — operators configure per chain)

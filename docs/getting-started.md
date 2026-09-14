@@ -18,7 +18,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 
 ### Frontend Framework
 
-- **Nuxt.js 3**: Full-stack Vue.js framework
+- **Nuxt.js 4**: Full-stack Vue.js framework
 - **Vue 3**: Progressive JavaScript framework with Composition API
 - **TypeScript**: Type-safe JavaScript development
 - **SCSS**: Advanced CSS preprocessing with custom design system

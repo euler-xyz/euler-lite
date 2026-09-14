@@ -84,7 +84,7 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
 | `server/` | Nitro layer: `api/`, `middleware/`, `plugins/`, `utils/`. |
 | `plugins/` | Client/Nuxt plugins (numbered for load order): `00.wagmi.ts`, `00.chartjs.client.ts`, `01.query.ts`, `theme.client.ts`, `node.ts` (Buffer polyfill). |
 | `middleware/` | Route middleware (numbered): `01.network.global.ts` (normalizes `?network=`, applies legacy path rewrites), `02.spy-param.global.ts`, `ensure-vault.global.ts`. |
-| `services/` | 3 thin fetch wrappers over internal API routes (`country.ts`, `trm.ts`, `vpn.ts`). |
+| `services/` | 3 thin fetch wrappers over internal API routes (`country.ts`, `screening.ts`, `vpn.ts`). |
 | `abis/` | viem ABIs (`vault.ts`, `evc.ts`, `erc20.ts`, `pyth.ts`, `keyring.ts`, `merkl.ts`, ...). |
 | `types/` | Shared TS types + global `Window` augmentations (`types/index.ts`). |
 | `assets/` | `styles/` (SCSS + theme vars in `variables.scss`), `tokens/` (icon overrides), `chains/`, `sprite/`. |
@@ -105,9 +105,14 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   diagnostics local) — treat the `server/api/internal/` directory + `docs/architecture.md` as the
   authoritative inventory, especially when auditing CSP / `connect-src`.
 - **Public routes** (`server/api/public/`): `is-known`, `metadata` (documented in `docs/public-api.md`).
-- **Server middleware:** `geo-gate.ts` (451 for sanctioned countries via Cloudflare `CF-IPCountry`;
-  set `DEV_GEO_COUNTRY` locally since there's no CF header), `cors.ts`, `security-headers.ts`,
-  `body-limit.ts`, `ensure-vault.ts`.
+  Note: `internal/screen-address` is additionally consumed cross-origin by first-party
+  `*.euler.finance` SPAs via a path-scoped CORS exception in `cors.ts` — keep its contract
+  backward-compatible.
+- **Server middleware:** `geo-gate.ts` (451 for sanctioned countries via the country from
+  `getEdgeContext` — trusted-header mapping per `EDGE_PROVIDER` preset in `utils/edge-presets.ts`;
+  set `DEV_GEO_COUNTRY` locally since there's no edge header), `cors.ts`, `security-headers.ts`,
+  `body-limit.ts`, `ensure-vault.ts`. Middleware and routes stay vendor-neutral: edge header
+  names live only in the presets file, consumed through `server/utils/edge.ts`.
 - **Server plugins (load order matters):** `app-config.ts` / `chain-config.ts` inject the `window`
   config; `csp.ts` (nonce-based CSP) must run after them; `warm-cache.ts` warms labels/token-list/
   vault caches in the background. Caching internals are in `docs/server-side-caching.md`.
@@ -161,6 +166,10 @@ invariants — do **not** reinvent them inline. The authoritative sources are `d
 (oracle pricing), and the `.claude/skills/review-business/SKILL.md` skill, which links the
 upstream `euler-xyz/agent-skills` (`euler-vaults`, `euler-earn`, `euler-advanced`, `euler-irm-oracles`)
 plus https://docs.euler.finance. Key invariants those cover (checklist, not a substitute for the docs):
+
+The reviewed execution is exhaustive internally, while the user-facing review remains intentionally
+handcrafted and non-one-to-one. Read [User-facing review compatibility](docs/transaction-building.md#user-facing-review-compatibility)
+before changing review inputs or rendering. Pyth details remain invisible in review.
 
 - Vault state-changing calls go through the **EVC** (`abis/evc.ts`), not directly to the vault.
 - At most **one controller (borrow) vault enabled per account**; `enableController()` must precede

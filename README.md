@@ -66,7 +66,7 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. |
 | `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of `DEPRECATED_CHAINS`; list a chain in both to deprecate it and route it onchain. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
-| `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. When set, it takes precedence over `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`. |
+| `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. Explicit `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` overrides take precedence over the branch for their respective manifests. |
 
 `fallback` uses V3 first and on-chain reads second. If no V3 URL is configured, Lite passes `disableV3: true` to the SDK so fallback reads go straight on-chain.
 
@@ -75,20 +75,21 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | Variable | Description |
 | -------- | ----------- |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowlist for `/api/*`; falls back to `NUXT_PUBLIC_APP_URL`. |
+| `FIRST_PARTY_COOKIE_SECRET` | Optional server-only secret that keeps the internal API marker cookie stable across replicas and deploys. Defaults to a value derived from `NUXT_PUBLIC_APP_URL` or `RAILWAY_PUBLIC_DOMAIN`. |
 | `CSP_EXTRA_CONNECT_SRC` | Extra `connect-src` origins for development or staging endpoints. |
-| `DEV_GEO_COUNTRY` | Local/preview country fallback when Cloudflare geo headers are absent. Do not set in production behind Cloudflare. |
-| `WALLET_SCREENING_URI` | Optional server-side wallet screening endpoint proxied by `/api/internal/screen-address`. |
-| `STABLEWATCH_API_KEY` | Optional server-side Stablewatch key for intrinsic APY data. |
+| `DEV_GEO_COUNTRY` | Local/preview country fallback when the edge provides no country. Production (`DOPPLER_ENVIRONMENT=prd`) refuses to boot with it set. |
+| `ADDRESS_SCREENING_URI` / `ADDRESS_SCREENING_API_KEY` | Server-side data-v3 compliance endpoint + restricted API key, proxied by `/api/internal/screen-address` (also serves first-party `*.euler.finance` SPAs). Both unset ⇒ screening disabled (all addresses pass) — except in production (`DOPPLER_ENVIRONMENT=prd`), where missing configuration fails closed; only one set ⇒ fails closed everywhere. URI must be https (localhost http allowed for dev). |
 | `MERKL_API_KEY` | Optional server-side Merkl key. The Merkl API works anonymously (10 req/sec shared across all users via `/api/internal/proxy/merkl`); set this to send `X-API-Key` upstream for a higher quota. Server-only — never exposed to the browser. |
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
 | `EFFECTIVE_POLICY_REPO`, `EFFECTIVE_POLICY_REPO_BRANCH` | Temporary server-only effective visibility/geo policy repository and branch. |
 | `EFFECTIVE_POLICY_BASE_URL` | Optional effective-policy CDN base URL; overrides the repository settings. |
+| `TURTLE_EARN_API_URL` or `NUXT_PUBLIC_TURTLE_EARN_API_URL` | Optional Turtle reward-proof upstream override; defaults to `https://earn.turtle.xyz/v1`. |
 
 #### Branding & Feature Flags
 
-These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars:
+These settings use `NUXT_PUBLIC_CONFIG_*` env vars. Branding and announcement values are read by the server at startup and injected into `window.__APP_CONFIG__`; links and feature flags use Nuxt's public `runtimeConfig`. The server proxy handlers resolve the upstream source overrides.
 
 | Variable                                    | Default                                    | Description                                           |
 | ------------------------------------------- | ------------------------------------------ | ----------------------------------------------------- |
@@ -96,9 +97,8 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_APP_DESCRIPTION`        | `Lightweight interface for Euler Finance.` | App description                                       |
 | `NUXT_PUBLIC_CONFIG_LOGO_URL`               | —                                          | Custom logo URL (falls back to built-in Euler logo)   |
 | `NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL`       | —                                          | Absolute URL to social share image (og:image / twitter:image), 1200×630+ |
-| `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_REPO`     | `euler-xyz/oracle-checks`                  | GitHub repo for oracle check results                  |
-| `NUXT_PUBLIC_CONFIG_ORACLE_CHECKS_BASE_URL` | —                                          | S3/CDN base URL for oracle checks (overrides repo)    |
-| `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | URL for EulerChains.json, used when no Euler interfaces branch is configured |
+| `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | Explicit URL for EulerChains.json; takes precedence over the Euler interfaces branch |
+| `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | — | Base URL serving `{contract}.json` for runtime ABIs; takes precedence over the Euler interfaces branch. |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
 | `NUXT_PUBLIC_CONFIG_STARGATE_URL`           | —                                          | Stargate link                                         |
 | `NUXT_PUBLIC_CONFIG_TOS_URL`                | —                                          | Terms of Service link                                 |
@@ -116,9 +116,11 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_ENABLE_ENTITY_BRANDING` | `true`                                     | Show entity branding                                  |
 | `NUXT_PUBLIC_CONFIG_ENABLE_VAULT_TYPE`      | `true`                                     | Show vault type labels                                |
 | `NUXT_PUBLIC_CONFIG_ENABLE_APP_TITLE`       | `true`                                     | Show app title in the navbar                          |
+| `NUXT_PUBLIC_CONFIG_ENABLE_POWERED_BY_EULER` | `true` | Show the Powered by Euler branding in the navbar |
 | `NUXT_PUBLIC_CONFIG_ENABLE_MERKL`           | `true`                                     | Enable Merkl rewards integration                      |
 | `NUXT_PUBLIC_CONFIG_ENABLE_INCENTRA`        | `true`                                     | Enable Incentra rewards integration                   |
 | `NUXT_PUBLIC_CONFIG_ENABLE_FUUL`            | `true`                                     | Enable Fuul rewards integration                       |
+| `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` | `true` | Enable Turtle rewards integration |
 | `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE`     | —                                          | Optional one-time modal title; any announcement content field enables the modal |
 | `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY`      | —                                          | Optional one-time modal body text                     |
 | `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS`     | —                                          | Optional newline-delimited or JSON-array bullet items |
@@ -126,7 +128,7 @@ These use Nuxt's `runtimeConfig` and are set via `NUXT_PUBLIC_CONFIG_*` env vars
 | `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL` | `https://tokens.uniswap.org`               | Uniswap token list for swap selector                  |
 | `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` | `https://d3g10bzo9rdluh.cloudfront.net`  | DefiLlama token list for swap selector                |
 
-Runtime deployments can also set the short `CONFIG_ANNOUNCEMENT_*` names. They are injected through `window.__APP_CONFIG__` at server startup and can change without rebuilding static assets. See [Announcement Modal](./docs/announcement-modal.md) for rollout and dismissal behavior.
+At server startup, short `CONFIG_ANNOUNCEMENT_*` names take precedence over the corresponding `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` names. In Nitro-served deployments, both naming forms are read at server startup, so updates require a server restart without rebuilding client assets. Generated/static deployments must rebuild when `NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_*` fallback values change. To disable an announcement, clear both naming forms for all four content fields. See [Announcement Modal](./docs/announcement-modal.md) for rollout and dismissal behavior.
 
 #### Chain Configuration
 

@@ -20,7 +20,7 @@ export interface PlainTxRequest {
   value?: bigint
 }
 
-/** A restoration transaction bound to the wallet context that sent its grant. */
+/** A cleanup transaction bound to the wallet context that owns the authorization. */
 export interface MigrationAuthorizationRevoke {
   transaction: PlainTxRequest
   walletContext: WalletExecutionContext
@@ -29,7 +29,7 @@ export interface MigrationAuthorizationRevoke {
 export interface MigrationAuthorizationTxs {
   /** Grant, to send and mine before the migration plan is built. */
   grants: PlainTxRequest[]
-  /** SDK revocations that restore prior state, in reverse grant order. */
+  /** SDK cleanup calls, in reverse request order. */
   revokes: PlainTxRequest[]
   /** Restoration paired with each grant, in grant order, for incremental cleanup. */
   revokesByGrant: Array<PlainTxRequest | undefined>
@@ -45,12 +45,44 @@ const encodeCall = (call: MigrationAuthorizationCall): PlainTxRequest => ({
   ...(call.value === undefined ? {} : { value: call.value }),
 })
 
+/** Stable identity of an encoded transaction, for consolidating display rows. */
+const plainTxKey = (tx: PlainTxRequest): string =>
+  `${tx.to.toLowerCase()}:${(tx.value ?? 0n).toString()}:${tx.data}`
+
 const flattenRequests = (
   request: MigrationAuthorizationRequest | undefined,
 ): MigrationAuthorizationRequest[] =>
   request
     ? [request, ...flattenRequests(request.postMigrationAuthorization)]
     : []
+
+const bigintSafeStringify = (value: unknown): string =>
+  JSON.stringify(value, (_key, entry) => (typeof entry === 'bigint' ? `${entry.toString()}n` : entry))
+
+/**
+ * Identity of the execution an authorization request implies: the encoded
+ * prerequisite/cleanup transactions for transaction-form requests, the typed-data
+ * payload for signature-form ones, `'none'` for no request. Compared between
+ * review and confirmation — authorization state can drift in between (an
+ * allowance granted or revoked elsewhere, a restore value that moved), and a
+ * drifted payload means the reviewed execution no longer matches what would
+ * execute, so the flow must invalidate and re-review rather than proceed.
+ */
+export const migrationAuthorizationPayloadKey = (
+  request: MigrationAuthorizationRequest | undefined,
+): string => {
+  if (!request) return 'none'
+  return flattenRequests(request)
+    .map((entry) => {
+      if (entry.kind !== 'transaction') {
+        return `typedData:${bigintSafeStringify(entry.typedData)}`
+      }
+      const grant = entry.call ? plainTxKey(encodeCall(entry.call)) : 'none'
+      const revoke = entry.revocation ? plainTxKey(encodeCall(entry.revocation)) : 'none'
+      return `tx:${grant}|${revoke}`
+    })
+    .join(';')
+}
 
 /**
  * Encode an authorization request into its grant and restoration transactions.
@@ -70,9 +102,11 @@ export const encodeMigrationAuthorizationTxs = (
     if (entry.kind !== 'transaction') {
       throw new Error('Migration authorization was not requested in transaction form')
     }
-    grants.push(encodeCall(entry.call))
     const revoke = entry.revocation ? encodeCall(entry.revocation) : undefined
-    revokesByGrant.push(revoke)
+    if (entry.call) {
+      grants.push(encodeCall(entry.call))
+      revokesByGrant.push(revoke)
+    }
     if (revoke) revokes.push(revoke)
   }
 
@@ -90,15 +124,20 @@ const GRANT_LABELS: Record<string, string> = {
 const RESTORE_LABELS: Record<string, string> = {
   aTokenApproval: 'Restore previous aToken approval',
   variableDebtDelegationApproval: 'Restore previous debt delegation',
-  morphoAuthorization: 'Restore previous Morpho authorization',
+  morphoAuthorization: 'Remove Morpho authorization',
   metamorphoApproval: 'Restore previous Morpho vault share approval',
 }
 
-/** Review-modal rows for the standalone grant or restoration transactions. */
+/**
+ * Review-modal rows for the grant or restoration transactions. `bundled`
+ * marks them as riding in the same Safe submission as the migration batch
+ * instead of standalone transactions.
+ */
 export const buildMigrationAuthorizationTxSteps = (
   request: MigrationAuthorizationRequest | undefined,
   phase: 'grant' | 'revoke',
   startIndex = 1,
+  options?: { bundled?: boolean },
 ): DisplayStep[] => {
   const labels = phase === 'grant' ? GRANT_LABELS : RESTORE_LABELS
   const fallback = phase === 'grant' ? 'Approve migration' : 'Restore previous migration authorization'
@@ -106,14 +145,18 @@ export const buildMigrationAuthorizationTxSteps = (
 
   for (const entry of flattenRequests(request)) {
     if (entry.kind !== 'transaction') continue
+    if (phase === 'grant' && !entry.call) continue
     if (phase === 'revoke' && !entry.revocation) continue
     // `authorizationType` is a connector-level discriminator that the published
     // request type does not carry.
     const authorizationType = (entry as { authorizationType?: string }).authorizationType
+    const call = phase === 'grant' ? entry.call : entry.revocation
+    if (!call) continue
     steps.push({
       index: startIndex + steps.length,
       label: (authorizationType && labels[authorizationType]) || fallback,
-      isSeparateTx: true,
+      isSeparateTx: !options?.bundled,
+      txKey: plainTxKey(encodeCall(call)),
     })
   }
 

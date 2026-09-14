@@ -6,11 +6,9 @@ import { formatNumber, formatSmartAmount, formatExactAmount } from '~/utils/stri
 import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
-import { OperationReviewModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
 import { createRaceGuard } from '~/utils/race-guard'
@@ -18,9 +16,10 @@ import { reportClientEvent } from '~/utils/client-observability'
 
 const router = useRouter()
 const route = useRoute()
-const modal = useModal()
 const { error } = useToast()
-const { planWithdrawOrRedeem, executePlan } = useEulerTx()
+const { planWithdrawOrRedeem } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -139,12 +138,50 @@ const submit = async () => {
       return
     }
 
+    const capturedAmount = amount.value
+    const capturedAsset = asset.value
     const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
+    const owner = (subAccount.value ?? effectiveAddress.value!) as `0x${string}`
+    const plannerArgs = isMax
+      ? { vaultAddress: vaultAddress as `0x${string}`, owner, shares: sharesBalance.value }
+      : { vaultAddress: vaultAddress as `0x${string}`, owner, assets: amountFixed.value.value }
+    const intent = createIntent({
+      kind: 'withdraw',
+      planner: isMax ? 'redeem' : 'withdraw',
+      args: plannerArgs,
+      source: 'pages/earn/[vault]/[subAccount]/withdraw.vue',
+      subAccounts: [owner],
+    })
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'withdraw',
+      review: {
+        type: 'withdraw',
+        asset: capturedAsset,
+        amount: capturedAmount,
+        submittingLabel: 'Submitting...',
+      },
+      onSucceeded: () => {
+        setTimeout(() => {
+          router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+        }, 400)
+      },
+      onFailed: (cause) => {
+        error('Transaction failed')
+        console.error('Transaction error:', cause)
+        void reportClientEvent({
+          event: 'tx_execute_failed',
+          flow: 'earn_withdraw',
+          phase: 'execute',
+          operationType: 'withdraw',
+          vaultAddress,
+        }, cause)
+      },
+    })
 
     try {
       plan.value = await planWithdrawOrRedeem({
         vaultAddress: vaultAddress as `0x${string}`,
-        owner: (subAccount.value ?? effectiveAddress.value!) as `0x${string}`,
+        owner,
         isMax,
         shares: sharesBalance.value,
         assets: amountFixed.value.value,
@@ -171,18 +208,7 @@ const submit = async () => {
       }
     }
 
-    modal.open(OperationReviewModal, {
-      props: {
-        type: 'withdraw',
-        asset: asset.value,
-        amount: amount.value,
-        plan: plan.value || undefined,
-        submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
-        },
-      },
-    })
+    await reviewLaunch.open()
   }
   finally {
     isPreparing.value = false
@@ -201,16 +227,19 @@ const addToBatch = async () => {
   // of withdraw(assets), so the position clears without share-price rounding dust.
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
   const shares = sharesBalance.value
+  const plannerArgs = isMax
+    ? { vaultAddress: vaultAddress as `0x${string}`, owner: ownerAddr, shares }
+    : { vaultAddress: vaultAddress as `0x${string}`, owner: ownerAddr, assets }
+  const intent = createIntent({
+    kind: 'withdraw',
+    planner: isMax ? 'redeem' : 'withdraw',
+    args: plannerArgs,
+    source: 'pages/earn/[vault]/[subAccount]/withdraw.vue#batch',
+    subAccounts: [ownerAddr],
+  })
   await addBatchEntry({
+    intent,
     label,
-    buildPlan: account => planWithdrawOrRedeem({
-      vaultAddress: vaultAddress as `0x${string}`,
-      owner: ownerAddr,
-      isMax,
-      shares,
-      assets,
-      account,
-    }),
     subAccount: ownerAddr,
     review: { type: 'withdraw', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
   })
@@ -218,44 +247,6 @@ const addToBatch = async () => {
   redirectAfterAdd('/portfolio/saving', { subAccount: ownerAddr, vault: vaultAddress })
 }
 
-const send = async () => {
-  try {
-    isSubmitting.value = true
-    if (!asset.value?.address) {
-      console.error('No asset address')
-      void reportClientEvent({
-        event: 'client_invariant_missing',
-        flow: 'earn_withdraw',
-        phase: 'execute_precheck',
-        invariant: 'no_asset_address',
-        vaultAddress,
-      }, new Error('No asset address'))
-      return
-    }
-
-    if (!plan.value) return
-    await executePlan(plan.value)
-
-    modal.close()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-    }, 400)
-  }
-  catch (e) {
-    error('Transaction failed')
-    console.error('Transaction error:', e)
-    void reportClientEvent({
-      event: 'tx_execute_failed',
-      flow: 'earn_withdraw',
-      phase: 'execute',
-      operationType: 'withdraw',
-      vaultAddress,
-    }, e)
-  }
-  finally {
-    isSubmitting.value = false
-  }
-}
 const updateEstimates = () => {
   clearSimulationError()
   estimatesError.value = ''

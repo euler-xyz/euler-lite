@@ -31,6 +31,7 @@ type SdkQueryRecorderWindow = Window & {
 }
 
 const failureCache = new Map<string, { error: unknown, expiresAt: number }>()
+const queryGenerations = new Map<string, number>()
 
 type SdkQueryInvalidationListener = (queryNames: ReadonlySet<string>) => void
 const sdkQueryInvalidationListeners = new Set<SdkQueryInvalidationListener>()
@@ -52,7 +53,7 @@ const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): 
 
       const startedAt = queryTimerNow()
       const stack = captureSdkQueryStack()
-      const queryKey = ['sdk', queryName, serializedArgs] as const
+      const queryKey = ['sdk', queryName, queryGenerations.get(queryName) ?? 0, serializedArgs] as const
       const failureKey = JSON.stringify(queryKey)
       let usedCachedFailure = false
       try {
@@ -147,7 +148,7 @@ export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => {
   const names = new Set<string>(queryNames)
   for (const key of failureCache.keys()) {
-    const [, queryName] = JSON.parse(key) as [string, string, string]
+    const [, queryName] = JSON.parse(key) as [string, string, number, string]
     if (names.has(queryName)) failureCache.delete(key)
   }
   const invalidation = sdkQueryClient.invalidateQueries({
@@ -168,6 +169,23 @@ export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => {
   return invalidation
 }
 
+/**
+ * Start distinct cache keys for subsequent reads before invalidating the
+ * preceding generation. An in-flight query may still finish for its original
+ * caller, but later callers cannot join it or publish into the new generation.
+ */
+export const advanceSdkQueryGeneration = (queryNames: EulerSDKQueryName[]) => {
+  const names = new Set(queryNames)
+  for (const name of names) {
+    queryGenerations.set(name, (queryGenerations.get(name) ?? 0) + 1)
+  }
+  return invalidateSdkQueries([...names])
+}
+
 export const clearSdkQueryFailureCacheForTest = () => {
   failureCache.clear()
+}
+
+export const clearSdkQueryGenerationsForTest = () => {
+  queryGenerations.clear()
 }

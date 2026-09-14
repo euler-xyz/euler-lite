@@ -1,5 +1,6 @@
 import { createError, getRequestURL } from 'h3'
 import { SANCTIONED_COUNTRIES } from '~/entities/country-constants'
+import { getEdgeContext } from '~/server/utils/edge'
 import { isInternalRequest } from '~/server/utils/internal-headers'
 import { logger } from '~/server/utils/logger'
 import { safePathTemplate } from '~/server/utils/observability'
@@ -12,38 +13,29 @@ export default defineEventHandler((event) => {
   }
 
   // Internal server-to-server $fetch calls (warm-cache, vaults-cache) skip
-  // geo-gating — they never traversed Cloudflare and have no cf-ipcountry,
-  // which would otherwise fail-closed and 451 every internal fetch. The
-  // loopback cf-connecting-ip sentinel is the same signal the rate-limiter
-  // uses to identify internal traffic; both rely on origin being locked
-  // behind CF (see internal-headers.ts).
+  // geo-gating — they never traversed the edge and carry no country, which
+  // would otherwise fail-closed and 451 every internal fetch. See
+  // server/utils/internal-headers.ts for the trust model.
   if (isInternalRequest(event)) {
     return
   }
 
-  // Use Cloudflare's CF-IPCountry header which is set by their edge network and
-  // cannot be modified by clients. x-country-code is stripped in cors.ts.
-  // CF-IPCountry special values: 'XX' = unknown IP, 'T1' = Tor exit node.
-  const cfCountry = (event.node.req.headers['cf-ipcountry'] as string | undefined)?.toUpperCase()
-  let country = (cfCountry && /^[A-Z]{2}$/.test(cfCountry) && cfCountry !== 'XX') ? cfCountry : undefined
+  // The country comes from the configured edge provider's trusted header
+  // (see server/utils/edge.ts) — clients cannot modify it, and any
+  // client-supplied x-country-code is stripped in cors.ts. The context also
+  // applies the DEV_GEO_COUNTRY fallback for envs without a geo-capable
+  // edge (local dev, PR previews), so those aren't universally fail-closed.
+  const edge = getEdgeContext(event)
+  const country = edge.country
 
-  // When Cloudflare is not in the request path (local dev, PR previews, etc.)
-  // cf-ipcountry is never set. DEV_GEO_COUNTRY allows injecting a country code
-  // as a fallback regardless of environment, so preview deployments aren't
-  // universally fail-closed when no CF header is present.
-  if (!country) {
-    const devCountry = process.env.DEV_GEO_COUNTRY?.toUpperCase()
-    if (devCountry && /^[A-Z]{2}$/.test(devCountry) && devCountry !== 'XX') {
-      country = devCountry
-    }
-  }
-
-  // Fail-closed: deny access when country cannot be determined.
-  // This prevents bypassing geo-blocks by omitting or spoofing headers.
-  // In dev (DOPPLER_ENVIRONMENT=dev) without DEV_GEO_COUNTRY set, allow through.
-  if (!country && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
+  // Fail-closed: when the edge is expected to provide a country but none
+  // was determined, deny access. This prevents bypassing geo-blocks by
+  // omitting or spoofing headers. Not applied under the `none` preset
+  // (no geo evidence exists by design — forks, previews) or in dev
+  // (DOPPLER_ENVIRONMENT=dev) without DEV_GEO_COUNTRY set.
+  if (!country && edge.providesGeo && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
     logger.warn(
-      { ctx: 'geo-gate', cfCountry: cfCountry || 'absent', pathTemplate: safePathTemplate(url.pathname) },
+      { ctx: 'geo-gate', pathTemplate: safePathTemplate(url.pathname) },
       'blocked: country undetermined',
     )
     throw createError({
@@ -52,13 +44,10 @@ export default defineEventHandler((event) => {
     })
   }
 
-  const isVpn = event.node.req.headers['x-is-vpn']
-  const isProxyOrVpn = event.node.req.headers['x-is-proxy-or-vpn']
-
   // Log VPN/proxy usage for monitoring (do not block -- too many false positives)
-  if (isVpn === 'true' || isProxyOrVpn === 'true') {
+  if (edge.vpnIsUsed === true) {
     logger.warn(
-      { ctx: 'geo-gate', country, isVpn, isProxyOrVpn, pathTemplate: safePathTemplate(url.pathname) },
+      { ctx: 'geo-gate', country, vpnIsUsed: true, pathTemplate: safePathTemplate(url.pathname) },
       'VPN/proxy detected',
     )
   }

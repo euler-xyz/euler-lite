@@ -1,7 +1,17 @@
+<script setup lang="ts">
+const props = withDefaults(defineProps<{
+  entity?: 'vault' | 'market'
+}>(), {
+  entity: 'vault',
+})
+
+const tooltipText = computed(() => `This ${props.entity} was added recently.`)
+</script>
+
 <template>
   <UiHoverPreviewTooltip
     title="Recently added"
-    text="This vault was added recently."
+    :text="tooltipText"
     placement="top-start"
   >
     <span

@@ -1,5 +1,7 @@
-import { encodeFunctionData, type Address, type Hex, type StateOverride } from 'viem'
+import { decodeFunctionData, encodeFunctionData, getAddress, type Address, type Hex, type StateOverride } from 'viem'
 import { flattenBatchEntries, mergeStateOverrides, type EVCBatchItem, type EulerSDK, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { EVC_ABI } from '~/abis/evc'
+import type { EoaRequest, SafeCall, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 
 export type TenderlyStateOverride = {
   address: Address
@@ -14,6 +16,55 @@ export type TenderlySimulationPayload = {
   value: string
   stateOverrides: TenderlyStateOverride[]
 }
+
+const reviewedRequestId = (request: EoaRequest | SafeCall) => 'requestId' in request ? request.requestId : request.callId
+
+const decodeReviewedBatch = (request: EoaRequest | SafeCall): EVCBatchItem[] | undefined => {
+  try {
+    const decoded = decodeFunctionData({ abi: EVC_ABI, data: request.data })
+    if (decoded.functionName !== 'batch') return undefined
+    return decoded.args[0].map(item => ({
+      targetContract: getAddress(item.targetContract),
+      onBehalfOfAccount: getAddress(item.onBehalfOfAccount),
+      value: item.value,
+      data: item.data,
+    }))
+  }
+  catch {
+    return undefined
+  }
+}
+
+/** Signature-bearing calls are modeled by Tenderly state overrides, so compare after removing only their declared slots. */
+export const tenderlyPayloadMatchesReviewedRequests = ({
+  payload,
+  requests,
+  signatureSlots,
+  sdk,
+}: {
+  payload: TenderlySimulationPayload
+  requests: readonly (EoaRequest | SafeCall)[]
+  signatureSlots: readonly SignatureSlot[]
+  sdk: Pick<EulerSDK, 'executionService'>
+}): boolean => requests.some((request) => {
+  if (getAddress(request.to) !== getAddress(payload.to)) return false
+  if (request.value.toString() === payload.value && request.data === payload.data) return true
+
+  const requestId = reviewedRequestId(request)
+  const signatureIndexes = new Set(signatureSlots
+    .flatMap(slot => slot.insertionPoints
+      .filter(point => point.requestId === requestId)
+      .map(point => point.batchItemIndex)))
+  if (!signatureIndexes.size) return false
+
+  const items = decodeReviewedBatch(request)
+  if (!items || [...signatureIndexes].some(index => !items[index])) return false
+  const reviewedValue = items.reduce((sum, item) => sum + item.value, 0n)
+  if (request.value !== reviewedValue) return false
+  const simulatedItems = items.filter((_item, index) => !signatureIndexes.has(index))
+  return sdk.executionService.encodeBatch(simulatedItems) === payload.data
+    && simulatedItems.reduce((sum, item) => sum + item.value, 0n).toString() === payload.value
+})
 
 export const toTenderlyStateOverrides = (overrides: StateOverride): TenderlyStateOverride[] =>
   overrides.flatMap((entry) => {
