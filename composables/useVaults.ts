@@ -386,11 +386,12 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
     if (!isCurrentVaultLoad(gen, targetChainId)) return
     result.errors.forEach(issue => logWarn('useVaults/updateEarnVaults', issue))
 
+    const curatedAddresses = new Set(useEulerLabels().earnVaults.value.map(address => getAddress(address).toLowerCase()))
     registrySetMany((result.result.filter(Boolean) as EulerEarn[]).map(vault => ({
       address: vault.address,
       vault,
       type: 'earn' as const,
-      verified: true,
+      verified: curatedAddresses.has(getAddress(vault.address).toLowerCase()),
     })), targetChainId)
 
     if (!silent) {

@@ -238,6 +238,37 @@ describe('useVaults EVault verification metadata', () => {
     expect(fetchVaults.mock.calls[0]?.[1]).toEqual(addresses)
   })
 
+  it('refreshes unlisted Earn vaults without promoting their verification', async () => {
+    __setEulerLabelsDataForTest({ earnVaults: [getAddress(BASE_EARN_VAULT)] })
+    const vaults = useVaults()
+    await vaults.getEarnVault(DYNAMIC_EVAULT)
+    const registry = useVaultRegistry()
+    registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
+    fetchEarnVaults.mockImplementation(async (_chainId: number, addresses: Address[]) => ({
+      errors: [], result: addresses.map(makeEarnVault),
+    }))
+
+    await vaults.refreshVaults()
+
+    expect(fetchEarnVaults).toHaveBeenCalledWith(1, expect.arrayContaining([
+      getAddress(DYNAMIC_EVAULT), getAddress(BASE_EARN_VAULT),
+    ]), expect.anything())
+    expect(registry.isVerifiedVault(DYNAMIC_EVAULT)).toBe(false)
+    expect(vaults.isEarnVaultOwnerVerified(registry.get(DYNAMIC_EVAULT)!.vault as EulerEarn)).toBe(false)
+    expect(registry.isVerifiedVault(BASE_EARN_VAULT)).toBe(true)
+    expect(vaults.isEarnVaultOwnerVerified(registry.get(BASE_EARN_VAULT)!.vault as EulerEarn)).toBe(true)
+  })
+
+  it('clears stale Earn verification when a vault is removed from curation', async () => {
+    const registry = useVaultRegistry()
+    registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
+    fetchEarnVaults.mockResolvedValue({ errors: [], result: [makeEarnVault(BASE_EARN_VAULT)] })
+
+    await useVaults().updateEarnVaults([BASE_EARN_VAULT], undefined, true)
+
+    expect(registry.isVerifiedVault(BASE_EARN_VAULT)).toBe(false)
+  })
+
   it('does not fetch stale Earn vault addresses after a chain switch invalidates the load', async () => {
     chainId.value = 8453
     __setEulerLabelsDataForTest({
