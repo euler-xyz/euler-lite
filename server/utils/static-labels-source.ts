@@ -29,7 +29,7 @@ const validate = (bundle: StaticLabelsBundle, chainId: number): StaticLabelsBund
   return bundle
 }
 
-/** All six documents succeed together, or the entire last-known-good snapshot is retained. */
+/** Missing documents use empty collections; failed refreshes retain the entire last-known-good snapshot. */
 export const getStaticLabelsBundle = (chainId: number, force = false): Promise<StaticLabelsBundle> => {
   const base = resolveLabelsBaseUrl()
   const key = `${base}:${chainId}`
@@ -55,6 +55,8 @@ export const getStaticLabelsBundle = (chainId: number, force = false): Promise<S
       const bundle = await withWallClock(async () => {
         const read = async (scope: number | 'all', name: string) => {
           const response = await fetchWithTimeout(`${base}/${scope}/${name}.json`)
+          // Match the labels file contract, including S3/CDN missing-key 403 responses.
+          if (response.status === 404 || response.status === 403) return name === 'products' || name === 'entities' ? {} : []
           if (!response.ok) throw new Error(`Static labels ${scope}/${name}: HTTP ${response.status}`)
           return response.json()
         }

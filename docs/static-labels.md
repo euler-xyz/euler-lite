@@ -6,7 +6,7 @@ Forks select `LABELS_SOURCE=static` and set `STATIC_LABELS_BASE_URL` to their ow
 
 ## Directory contract
 
-For each enabled chain, serve these JSON documents:
+For each enabled chain, the loader reads these JSON documents:
 
 | Path | Shape and fields |
 |---|---|
@@ -18,13 +18,13 @@ For each enabled chain, serve these JSON documents:
 | `all/assets.json` | Global asset rules, combined with each chain's rules. |
 | `logo/{filename}` | Entity/product/points images on the same origin. |
 
-Use explicit `{}` or `[]` documents for empty collections, including both asset files. Missing files and HTTP errors are failures, not empty policy. A source missing optional files from older layouts must add those explicit empty documents. File syntax retains the five-file authoring format; no generated normalized snapshot needs editing. [`tests/fixtures/static-labels.json`](../tests/fixtures/static-labels.json) is an executable example of the file contents.
+Collections may be omitted: HTTP 404 and HTTP 403 (the missing-key response from some S3/CDN hosts) resolve to `{}` for products/entities and `[]` for points/Earn/assets. Missing chain asset rules do not remove global asset rules, and vice versa. Explicit empty documents are also supported. Other HTTP errors, network failures and malformed content fail the refresh. File syntax retains the five-file authoring format; no generated normalized snapshot needs editing. [`tests/fixtures/static-labels.json`](../tests/fixtures/static-labels.json) is an executable example of the file contents.
 
 Only HTTP(S) profile links and simple image filenames are accepted. Remote hosted label images must use `https://token-images.euler.finance`; static images may additionally use the configured source origin. Paths/credentials and lookalike hosts cannot bypass the image allowlist. The browser repeats the image check before rendering.
 
 ## Failure behavior
 
-All six JSON documents load together. A failed, malformed or partial refresh retains the complete last-known-good snapshot, including its rules. No snapshot is published on a cold start without a valid complete set. Checkpoints are source-and-chain-specific, content-hashed and timestamped. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for container replacements; the default `.data/geo-policies` only persists on the same filesystem. Stale fallback and failed checkpoint writes are logged for alerting.
+All six file reads resolve together, with absent files represented by empty collections. A failed or malformed refresh retains the complete last-known-good snapshot, including its rules. A cold start fails if any read has an error other than the supported absent-file responses. An absent-file response applies the empty collection on that refresh; there is no per-file stale grace period for 403/404. A source returning 403/404 for every file produces an empty snapshot, so configure a publicly readable source URL. Checkpoints are source-and-chain-specific, content-hashed and timestamped. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for container replacements; the default `.data/geo-policies` only persists on the same filesystem. Stale fallback and failed checkpoint writes are logged for alerting.
 
 Authored geo retains static country-group expansion and override semantics. This differs deliberately from hosted V3's cumulative rules. The contract test covers discovery, entities/authority addresses, points, logos, per-side flags, asset patterns, Earn restrictions and restart recovery.
 
@@ -34,4 +34,4 @@ Static labels do not require running a V3 backend. A fork may use Euler's hosted
 
 ## Rollout boundary
 
-Before switching production, compare authored and V3 membership, explorability, display content, geo decisions and full verification across enabled chains. Resolve unexplained differences; preserve public API behavior and measure revocation latency. On-chain governor verification remains active in hosted mode during this bake. SDK release/dependency changes, persistent volumes, alerting, compliance canary and production cutover are deployment work.
+Before switching production, compare authored and V3 membership, explorability, display content, geo decisions and full verification across enabled chains. Resolve unexplained differences; preserve public API behavior and measure revocation latency. On-chain governor verification remains active in hosted mode during this bake. SDK release/dependency changes and production cutover are deployment work. Persistent volumes, dedicated geo alerts and a compliance canary are optional operational hardening; fresh containers may fetch their initial rules from the configured upstream, as in the existing deployment model.

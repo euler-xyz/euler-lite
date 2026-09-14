@@ -45,10 +45,52 @@ describe('static authoring source', () => {
     expect(data.assetPatternRules[0]?.nameRegex?.test('ondo')).toBe(true)
     expect(data.earnVaultRestrictions).toEqual({ ['0x' + '2'.repeat(40)]: ['GB'] })
   })
-  it('fails cold on an absent asset file instead of treating 404 as empty policy', async () => {
-    fetchMock.mockResolvedValue(Response.json({}, { status: 404 }))
+  it.each([403, 404])('accepts omitted files with HTTP %s while preserving global asset rules', async (status) => {
+    const defaultFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url: string) => url.endsWith('/1/assets.json') || url.endsWith('/1/earn-vaults.json')
+      ? new Response(null, { status })
+      : defaultFetch(url))
     const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
-    await expect(getStaticLabelsBundle(1)).rejects.toThrow('HTTP 404')
+    const raw = await getStaticLabelsBundle(1)
+    const data = normalizeLabelsBundle(1, raw)
+    expect(raw.files.assets).toEqual([{ nameRegex: '^ond[o]', restricted: ['EEA'] }])
+    expect(data.verifiedVaultAddresses).toEqual(['0x' + '1'.repeat(40)])
+    expect(data.earnVaults).toEqual([])
+    expect(data.assetPatternRules[0]?.nameRegex?.test('ondo')).toBe(true)
+    expect(data.products.fork.block).toEqual(['US'])
+  })
+  it('preserves chain asset rules when the global file is omitted', async () => {
+    const defaultFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url: string) => url.endsWith('/all/assets.json')
+      ? new Response(null, { status: 404 })
+      : defaultFetch(url))
+    const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
+    const raw = await getStaticLabelsBundle(1)
+    expect(raw.files.assets).toEqual(files.assets)
+    expect(normalizeLabelsBundle(1, raw).assetBlocks).toEqual({ ['0x' + '4'.repeat(40)]: ['US'] })
+  })
+  it.each([403, 404])('uses the correct empty shapes when all files return HTTP %s', async (status) => {
+    fetchMock.mockImplementation(async () => new Response(null, { status }))
+    const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
+    const raw = await getStaticLabelsBundle(1)
+    expect(raw.files).toEqual({ products: {}, entities: {}, points: [], earnVaults: [], assets: [] })
+    expect(normalizeLabelsBundle(1, raw).verifiedVaultAddresses).toEqual([])
+  })
+  it.each([401, 429, 500, 503])('fails cold on HTTP %s instead of treating it as an omitted file', async (status) => {
+    fetchMock.mockImplementation(async () => new Response(null, { status }))
+    const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
+    await expect(getStaticLabelsBundle(1)).rejects.toThrow(`HTTP ${status}`)
+  })
+  it.each(['network', 'json', 'server'])('retains the whole snapshot when one asset file has a %s failure', async (failure) => {
+    const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
+    const first = await getStaticLabelsBundle(1)
+    const defaultFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url: string) => {
+      if (!url.endsWith('/all/assets.json')) return defaultFetch(url)
+      if (failure === 'network') throw new Error('offline')
+      return failure === 'json' ? new Response('{') : new Response(null, { status: 503 })
+    })
+    expect(await getStaticLabelsBundle(1, true)).toEqual(first)
   })
   it('rejects malformed geo fields instead of silently dropping restrictions', async () => {
     fetchMock.mockImplementation(async (url: string) => Response.json(url.endsWith('/assets.json') ? [{ nameRegex: 42, block: ['US'] }] : url.endsWith('/products.json') || url.endsWith('/entities.json') ? {} : []))
