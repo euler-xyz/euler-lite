@@ -6,9 +6,22 @@ import { useTosGuard } from '~/composables/guards/useTosGuard'
 import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVaultGuard'
 import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
+import { useGeoBlock } from '~/composables/useGeoBlock'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 
-export const useOperationGuard = (vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[]) => {
+let geoGuardSequence = 0
+
+export const useOperationGuard = (
+  vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[],
+  options: { acquiresExposure?: boolean } = {},
+) => {
+  const { isPolicyAvailable } = useGeoBlock()
+  const geoBlockerKey = `geo-policy:${++geoGuardSequence}`
+  watch(isPolicyAvailable, (available) => {
+    if (!available && options.acquiresExposure !== false) registerOperationBlocker(geoBlockerKey, 'Compliance data unavailable. Please retry.')
+    else unregisterOperationBlocker(geoBlockerKey)
+  }, { immediate: true })
+  onUnmounted(() => unregisterOperationBlocker(geoBlockerKey))
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
   const { chainId: appChainId } = useEulerAddresses()

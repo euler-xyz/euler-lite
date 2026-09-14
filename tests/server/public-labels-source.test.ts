@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -44,7 +47,10 @@ const versionsResponse = () => new Response(JSON.stringify({
 })
 
 describe('public labels server source', () => {
-  beforeEach(() => {
+  let directory: string
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'geo-bundle-test-'))
+    vi.stubEnv('GEO_POLICY_CACHE_DIR', directory)
     vi.resetModules()
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-05T10:00:00Z'))
@@ -62,7 +68,8 @@ describe('public labels server source', () => {
     mocks.warn.mockReset()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true })
     vi.useRealTimers()
     vi.unstubAllEnvs()
   })
@@ -82,15 +89,15 @@ describe('public labels server source', () => {
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(7)
     expect(mocks.getEffectiveLabelsSource).toHaveBeenCalledTimes(1)
     expect(mocks.fetchWithTimeout.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
+      '/v3/geo-policies',
       '/v3/labels/sets/public/versions',
       '/v3/labels/vaults',
       '/v3/labels/products',
       '/v3/labels/entities',
-      '/v3/geo-policies',
       '/v3/evk/vaults',
       '/v3/earn/vaults',
     ])
-    expect(mocks.fetchWithTimeout.mock.calls.slice(1, 4).every(([url]) =>
+    expect(mocks.fetchWithTimeout.mock.calls.slice(2, 5).every(([url]) =>
       new URL(url).searchParams.get('version') === 'v20260804151305236',
     )).toBe(true)
   })
@@ -119,6 +126,13 @@ describe('public labels server source', () => {
       expect.objectContaining({ ctx: 'public-labels-source', chainId: 1 }),
       'refresh failed',
     )
+  })
+
+  it('does not publish a snapshot when geo is unavailable on a cold start', async () => {
+    mocks.fetchWithTimeout.mockRejectedValue(new Error('geo unavailable'))
+    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    await expect(getPublicLabelsBundle(1)).rejects.toThrow('geo unavailable')
+    expect(mocks.getEffectiveLabelsSource).not.toHaveBeenCalled()
   })
 
   it('fails closed when effective policy is unavailable without stale data', async () => {

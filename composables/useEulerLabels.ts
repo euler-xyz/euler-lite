@@ -42,6 +42,7 @@ const createEmptyEulerLabelsData = (): PublicEulerLabelsData => ({
   assetRestrictions: {},
   assetPatternRules: [],
   rawGeoPolicies: [],
+  geoContext: { policies: undefined, chainId: null, productByVault: {} },
 } as unknown as PublicEulerLabelsData)
 
 const labelsData = shallowRef<PublicEulerLabelsData>(createEmptyEulerLabelsData())
@@ -67,11 +68,13 @@ const setLabelsData = (data: PublicEulerLabelsData, chainId: number | null) => {
 
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
 
+export const getEulerGeoContext = () => labelsData.value.geoContext
+
 export const getEulerLabelsVersion = (): number => labelsVersion.value
 
 export const getEulerLabelWrapPairs = (): Record<string, string> => wrapPairs
 
-export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {}) => {
+export const __setEulerLabelsDataForTest = (data: Partial<PublicEulerLabelsData> = {}) => {
   labelsLoadGeneration += 1
   wrapPairProbeGeneration += 1
   pendingLabelsFetches.clear()
@@ -80,6 +83,7 @@ export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {})
   setLabelsData({
     ...createEmptyEulerLabelsData(),
     ...data,
+    geoContext: data.geoContext, // Explicit static fixtures use the compatibility evaluator.
     notExplorableEarnVaults: data.notExplorableEarnVaults ?? new Set(),
     assetPatternRules: data.assetPatternRules ?? [],
     rawGeoPolicies: (data as Partial<PublicEulerLabelsData>).rawGeoPolicies ?? [],

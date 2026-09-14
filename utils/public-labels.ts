@@ -2,9 +2,10 @@ import {
   hasPublishedVaultLabelContent,
   normalizePublicLabelsData as normalizeSdkPublicLabelsData,
   type EulerLabelAssetPatternRule,
-  type PublicEulerLabelsData,
+  type PublicEulerLabelsData as SdkPublicEulerLabelsData,
   type PublicLabelsSource,
 } from '@eulerxyz/euler-v2-sdk/public-labels'
+import type { HostedGeoContext } from '~/utils/geo-policies'
 import { getAddress } from 'viem'
 import type { EulerLabelAssetEntry, EulerLabelProduct } from '~/entities/euler/labels'
 
@@ -15,7 +16,6 @@ export {
 export type {
   PublicEntityAddress,
   PublicEntityLabel,
-  PublicEulerLabelsData,
   PublicGeoPolicy,
   PublicLabelsMeta,
   PublicLabelsQuery,
@@ -26,6 +26,8 @@ export type {
   PublicVaultCampaign,
   PublicVaultLabel,
 } from '@eulerxyz/euler-v2-sdk/public-labels'
+
+export type PublicEulerLabelsData = SdkPublicEulerLabelsData & { geoContext?: HostedGeoContext }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
@@ -64,6 +66,7 @@ export interface PublicLabelsBundle {
   /** Metadata publication; geo, entity addresses, platform tags and visibility remain live. */
   version: string
   publicLabels: PublicLabelsSource
+  geoFetchedAt?: number
   effectivePolicy: EffectiveLabelsSource
 }
 
@@ -192,8 +195,8 @@ export const normalizePublicLabelsData = (
   const effectiveEarn = normalizeEffectiveEarnPolicy(effectivePolicy)
   const effectiveAssets = normalizeEffectiveAssets(effectivePolicy.assets)
 
-  // The draft retains the compatibility geo evaluator. V3 rules are transported
-  // separately until the hosted geo enforcement path is wired and validated.
+  // Compatibility fields support static consumers. Hosted enforcement exclusively
+  // uses geoContext, including assignments outside the discovery allowlist.
   for (const [productKey, product] of Object.entries(products)) {
     const effectiveProduct = effectivePolicy.products[productKey]
     if (!effectiveProduct) continue
@@ -243,6 +246,12 @@ export const normalizePublicLabelsData = (
 
   return {
     ...data,
+    geoContext: {
+      chainId,
+      policies: data.rawGeoPolicies,
+      productByVault: Object.fromEntries(source.vaults.filter(vault => vault.chainId === chainId)
+        .map(vault => [vault.address.toLowerCase(), vault.productId])),
+    },
     products,
     verifiedVaultAddresses: uniqueStrings(verifiedVaultAddresses),
     earnVaults: uniqueStrings(earnVaults),

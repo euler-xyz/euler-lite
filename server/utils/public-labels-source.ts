@@ -1,3 +1,4 @@
+import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
@@ -20,6 +21,17 @@ const REFRESH_BUDGET_MS = 30_000
 
 const cache = createTtlCache<PublicLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
 const inFlight = createInFlightDedup<string, PublicLabelsBundle>()
+
+const geoSources = new Map<string, ReturnType<typeof createGeoPolicySource>>()
+const getGeoSource = () => {
+  const source = readResolvedV3ApiUrl()
+  let loader = geoSources.get(source)
+  if (!loader) {
+    loader = createGeoPolicySource(source, process.env.GEO_POLICY_CACHE_DIR || '.data/geo-policies')
+    geoSources.set(source, loader)
+  }
+  return loader
+}
 
 const cacheKey = (chainId: number, version: string): string => `${chainId}:${version}`
 
@@ -59,8 +71,9 @@ export function refreshPublicLabelsBundle(
             endpoint: readResolvedV3ApiUrl(),
             request,
           })
+          const geo = await getGeoSource()(request)
           const [snapshot, effectivePolicy] = await Promise.all([
-            adapter.fetchPublicLabelsSnapshot(chainId, version),
+            adapter.fetchPublicLabelsSnapshot(chainId, version, geo.policies),
             getEffectiveLabelsSource(chainId),
           ])
           // Validate the complete cross-source relationship before replacing
@@ -69,6 +82,7 @@ export function refreshPublicLabelsBundle(
           normalizePublicLabelsData(chainId, snapshot.publicLabels, effectivePolicy)
           return {
             version: snapshot.version,
+            geoFetchedAt: geo.fetchedAt,
             publicLabels: snapshot.publicLabels,
             effectivePolicy,
           }

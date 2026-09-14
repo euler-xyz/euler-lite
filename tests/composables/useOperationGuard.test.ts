@@ -5,7 +5,12 @@ import { mainnet, monad } from 'viem/chains'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useOperationGuard } from '~/composables/useOperationGuard'
 
-vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsVersion: () => 1 }))
+import type { HostedGeoContext } from '~/utils/geo-policies'
+import { operationBlockerEntries } from '~/utils/operationGuardRegistry'
+
+const hostedGeo = ref<HostedGeoContext | undefined>()
+
+vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsVersion: () => 1, getEulerGeoContext: () => hostedGeo.value }))
 vi.mock('~/composables/guards/useTosGuard', () => ({ useTosGuard: () => ({}) }))
 vi.mock('~/utils/eulerLabelsUtils', () => ({ isVaultKeyring: () => false }))
 vi.mock('~/composables/useKeyring', () => ({
@@ -22,7 +27,8 @@ vi.mock('~/composables/useKeyring', () => ({
 describe('operation verification chain', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('verifies a Monad Earn vault while disconnected Wagmi still defaults to Ethereum', async () => {
+  it.each([true, false])('guards missing geo only for acquisition=%s while using the app verification chain', async (acquiresExposure) => {
+    hostedGeo.value = { chainId: 143, policies: undefined, productByVault: {} }
     const vault = { address: '0x00000000000000000000000000000000000000a1', chainId: 143 }
     const verifyOwner = vi.fn(() => true)
     vi.stubGlobal('useWagmi', () => ({ address: ref(undefined) }))
@@ -58,7 +64,7 @@ describe('operation verification chain', () => {
     let state: ReturnType<typeof useOperationGuard> | undefined
     const app = renderer.createApp({
       setup() {
-        state = useOperationGuard([vault.address])
+        state = useOperationGuard([vault.address], { acquiresExposure })
         return () => h('span')
       },
     })
@@ -66,6 +72,10 @@ describe('operation verification chain', () => {
     app.mount({ type: 'root' })
     try {
       await nextTick()
+      expect(operationBlockerEntries.value.some(([key]) => key.startsWith('geo-policy:'))).toBe(acquiresExposure)
+      hostedGeo.value = { chainId: 143, policies: [], productByVault: {} }
+      await nextTick()
+      expect(operationBlockerEntries.value.some(([key]) => key.startsWith('geo-policy:'))).toBe(false)
       expect(config.state.chainId).toBe(1)
       expect(verifyOwner).toHaveBeenCalledWith(vault)
       expect(state?.unverifiedVaultGuard.isAcknowledgmentRequired).toBe(false)
@@ -76,6 +86,7 @@ describe('operation verification chain', () => {
     }
     finally {
       app.unmount()
+      expect(operationBlockerEntries.value.some(([key]) => key.startsWith('geo-policy:'))).toBe(false)
     }
   })
 })
