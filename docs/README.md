@@ -34,6 +34,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Utilization-aware supply and borrow rate projections
 - USD-weighted multi-collateral snapshots
 - Net APY, ROE, intrinsic yield, and reward breakdowns
+- Provider-owned reward eligibility notices (`complete` / `incomplete` / `none`)
 - Transaction-batch layer consistency and fail-closed estimates
 
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
@@ -51,6 +52,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Unknown vault resolution
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
 - Oracle provider logos from the V3 managed-image namespace (not `V3_API_URL`)
+- Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
+
+### 🧿 [Oracle Adapter Display](./oracle-adapter-display.md)
+
+- Shared route collection for the vault Oracles block and Explore matrix
+- Recognized vs unrecognized vs unassessed V3 assessments; never trust on-chain `name()`
+- Active-route catalogue vs per-address fallback, and EVC-simulated display quotes
 
 ### 🔧 [Transaction Building](./transaction-building.md)
 
@@ -61,6 +69,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
 - [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
+- Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
 
 ### 🔁 [Cross-Position Repay](./cross-position-repay.md)
 
@@ -135,6 +144,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Asset-level pattern matching (exact `symbols`/`names` + `symbolRegex`/`nameRegex`) and cross-chain `all/assets.json`
 - Country group aliases (EU, EEA, EFTA)
 - UI enforcement across browse, detail, action, and modal pages, plus the arbitrary-asset swap selector
+
+### 🛂 [Address Screening](./address-screening.md)
+
+- Connect-time wallet screening via `/api/internal/screen-address`
+- VPN usage as audit metadata (does not gate connect)
+- Fail-closed data-v3 proxy, first-party CORS exception, and no re-screen in reviewed execution
 
 ### 🌐 [Public API](./public-api.md)
 
