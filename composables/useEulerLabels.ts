@@ -20,7 +20,7 @@ import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
-  normalizePublicLabelsData,
+  normalizeLabelsBundle,
   type PublicEulerLabelsData,
   type PublicLabelsBundle,
 } from '~/utils/public-labels'
@@ -67,6 +67,8 @@ const setLabelsData = (data: PublicEulerLabelsData, chainId: number | null) => {
 }
 
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
+
+export const getEulerLabelsSourceData = () => labelsData.value
 
 export const getEulerGeoContext = () => labelsData.value.geoContext
 
@@ -129,7 +131,7 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
         timeout: 35_000,
         ...(forceRefresh && { headers: { 'cache-control': 'no-cache' } }),
       })
-      return normalizePublicLabelsData(chainId, bundle.publicLabels, bundle.effectivePolicy)
+      return normalizeLabelsBundle(chainId, bundle)
     }
     catch (error) {
       logWarn('labels/public-v3', error)

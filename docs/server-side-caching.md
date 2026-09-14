@@ -1,6 +1,6 @@
 # Server-Side Caching
 
-Lite ships a layered cache between the browser and every external data source — third-party reward APIs, the Goldsky subgraph, Public Labels V3, the temporary effective-policy source, and the chain RPC. The layer accomplishes four things:
+Lite ships a layered cache between the browser and every external data source — third-party reward APIs, the Goldsky subgraph, Public Labels V3, the optional static authoring source, and the chain RPC. The layer accomplishes four things:
 
 1. **Cross-tab sharing.** Every browser session against the same origin hits the same in-process cache.
 2. **Authentication / credentials stay server-side.** Browsers don't need V3 API keys, subgraph project IDs, or any provider tokens.
@@ -20,7 +20,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
 | `server/api/internal/public-labels.get.ts` | Chain/version-scoped aggregate Public Labels endpoint |
 | `server/utils/public-labels-source.ts` | Public Labels V3 pagination, 5-minute cache, in-flight dedup, and bounded stale fallback |
-| `server/utils/labels-source.ts` | Compatibility discovery source; hosted geo comes from V3 |
+| `server/utils/static-labels-source.ts` | Atomic static authoring snapshots, used only in static mode |
 | `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
@@ -70,9 +70,9 @@ Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disa
 
 ### Public Labels
 
-`/api/internal/public-labels?chainId=N&version=latest` is the browser's single label read. `server/utils/public-labels-source.ts` paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3, then combines that immutable display dataset with the temporary effective-policy overlay. The result is cached for 5 minutes by chain and version; concurrent misses share one in-flight operation. Bundle stale fallback is bounded. Geo separately retains a validated, fetchedAt-stamped disk checkpoint with unbounded stale-on-error fallback; cold starts without geo cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
+`/api/internal/public-labels?chainId=N&version=latest` is the browser's single label read. `server/utils/public-labels-source.ts` paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3, then combines published metadata with the live visibility and geo overlays. The result is cached for 5 minutes by chain and version; concurrent misses share one in-flight operation. Bundle stale fallback is bounded. Geo separately retains a validated, fetchedAt-stamped disk checkpoint with unbounded stale-on-error fallback; cold starts without geo cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
 
-The legacy `/api/internal/labels/*` browser and SDK routes do not exist. `server/utils/labels-source.ts` still reads only `products.json`, `earn-vaults.json`, and chain/global `assets.json` as a server-internal compatibility contract. Hosted enforcement ignores its `block` and `restricted` fields; only its discovery membership/restrictions remain active. It does not contribute names, descriptions, entities, logos, products, tags, campaigns, or deprecation content. `EFFECTIVE_POLICY_BASE_URL` configures only that policy source for discovery compatibility. The former `NUXT_PUBLIC_CONFIG_LABELS_*` names remain server-side fallbacks for existing deployments but are no longer part of Nuxt public runtime config.
+`LABELS_SOURCE=v3` performs no label-file reads. `LABELS_SOURCE=static` reads the operator-owned authoring files on the same warm/refresh cycle and uses one atomic disk checkpoint for the entire collection. See [Static labels](./static-labels.md).
 
 ### V3 proxy
 
@@ -312,9 +312,9 @@ The pipeline always succeeds eventually — the snapshot is the *fast path*, not
 Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 ─────────────────────                  ──────────────────────────────────────
 - Euler Chains and runtime ABIs                         - refreshChainVaults(chain) for each
-- cross-chain effective asset policy     enabled non-deprecated chain
+- static source includes cross-chain assets     enabled non-deprecated chain
 - per-chain Public Labels bundle
-- per-chain effective policy
+- per-chain labels snapshot
 - per-chain token list
 ```
 

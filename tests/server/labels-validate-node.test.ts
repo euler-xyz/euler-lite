@@ -12,52 +12,7 @@
  * corresponding defense (see git history for server/utils/labels-source.ts).
  */
 import { describe, it, expect } from 'vitest'
-import { projectEffectiveLabelsSource, validateNode } from '~/server/utils/labels-source'
-
-describe('effective labels policy projection', () => {
-  it('strips all legacy display content from the browser-facing overlay', () => {
-    const address = '0x0000000000000000000000000000000000000001'
-    const result = projectEffectiveLabelsSource({
-      product: {
-        name: 'Legacy name',
-        description: 'Legacy description',
-        entity: 'legacy-entity',
-        tags: ['legacy-tag'],
-        vaults: [address],
-        block: ['US'],
-        vaultOverrides: {
-          [address]: {
-            name: 'Legacy vault name',
-            restricted: ['CA'],
-          },
-        },
-      },
-    }, [{
-      address,
-      description: 'Legacy Earn description',
-      notExplorable: true,
-    }], [{
-      address,
-      name: 'Legacy asset name',
-      block: ['US'],
-    }])
-
-    expect(result).toEqual({
-      products: {
-        product: {
-          vaults: [address],
-          block: ['US'],
-          vaultOverrides: {
-            [address]: { restricted: ['CA'] },
-          },
-        },
-      },
-      earnVaults: [{ address, notExplorable: true }],
-      assets: [{ address, block: ['US'] }],
-    })
-    expect(JSON.stringify(result)).not.toContain('Legacy')
-  })
-})
+import { validateNode } from '~/server/utils/static-labels-validation'
 
 describe('validateNode — size caps', () => {
   it('rejects strings longer than 16 KiB (client-side DoS guard)', () => {

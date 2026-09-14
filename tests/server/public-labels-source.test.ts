@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
-  getEffectiveLabelsSource: vi.fn(),
   warn: vi.fn(),
 }))
 
@@ -16,10 +15,6 @@ vi.mock('~/server/utils/fetchWithTimeout', async (importOriginal) => {
     fetchWithTimeout: mocks.fetchWithTimeout,
   }
 })
-
-vi.mock('~/server/utils/labels-source', () => ({
-  getEffectiveLabelsSource: mocks.getEffectiveLabelsSource,
-}))
 
 vi.mock('~/server/utils/logger', () => ({
   logger: { warn: mocks.warn },
@@ -54,17 +49,13 @@ describe('public labels server source', () => {
     vi.resetModules()
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-05T10:00:00Z'))
+    vi.stubEnv('LABELS_SOURCE', 'v3')
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
     mocks.fetchWithTimeout.mockReset().mockImplementation(async (url: string) =>
       new URL(url).pathname.endsWith('/labels/sets/public/versions')
         ? versionsResponse()
         : emptyListResponse(),
     )
-    mocks.getEffectiveLabelsSource.mockReset().mockResolvedValue({
-      products: {},
-      earnVaults: [],
-      assets: [],
-    })
     mocks.warn.mockReset()
   })
 
@@ -87,7 +78,6 @@ describe('public labels server source', () => {
     expect(cached).toBe(first)
     expect(first.version).toBe('v20260804151305236')
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(7)
-    expect(mocks.getEffectiveLabelsSource).toHaveBeenCalledTimes(1)
     expect(mocks.fetchWithTimeout.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
       '/v3/geo-policies',
       '/v3/labels/sets/public/versions',
@@ -132,17 +122,5 @@ describe('public labels server source', () => {
     mocks.fetchWithTimeout.mockRejectedValue(new Error('geo unavailable'))
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     await expect(getPublicLabelsBundle(1)).rejects.toThrow('geo unavailable')
-    expect(mocks.getEffectiveLabelsSource).not.toHaveBeenCalled()
-  })
-
-  it('fails closed when effective policy is unavailable without stale data', async () => {
-    mocks.getEffectiveLabelsSource.mockRejectedValue(new Error('policy unavailable'))
-    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
-
-    await expect(getPublicLabelsBundle(1)).rejects.toThrow('policy unavailable')
-    expect(mocks.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ ctx: 'public-labels-source', chainId: 1 }),
-      'refresh failed',
-    )
   })
 })

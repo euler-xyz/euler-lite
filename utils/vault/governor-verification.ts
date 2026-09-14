@@ -1,3 +1,4 @@
+import type { PublicEulerLabelsData } from '~/utils/public-labels'
 import { getAddress, zeroAddress, type Address } from 'viem'
 import { isEVault, type EulerEarn, type EVault, type OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
 import { getEulerRouterGovernor } from '~/entities/oracle'
@@ -55,6 +56,13 @@ export interface VerificationLabels {
   getDeclaredEntityKeys: (vaultAddress: string) => string[] | undefined
   /** Returns true if `address` (checksummed) is one of `entityKey`'s declared addresses. */
   hasEntityAddress: (entityKey: string, address: Address) => boolean
+}
+
+/** Hosted labels must explicitly declare a manager; absence cannot use static Earn trust. */
+export const getHostedEntityKeys = (labels: Pick<PublicEulerLabelsData, 'source' | 'managingEntityByVault'>, address: string): string[] | undefined => {
+  if (labels.source !== 'v3') return undefined
+  const entity = labels.managingEntityByVault?.[address.toLowerCase()]
+  return entity ? [entity] : []
 }
 
 const findDeclaredEntityFor = (

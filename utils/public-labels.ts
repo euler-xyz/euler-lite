@@ -1,13 +1,12 @@
 import {
-  hasPublishedVaultLabelContent,
+  normalizeEulerLabelsFileData,
+  type EulerLabelsFileData,
   normalizePublicLabelsData as normalizeSdkPublicLabelsData,
-  type EulerLabelAssetPatternRule,
   type PublicEulerLabelsData as SdkPublicEulerLabelsData,
   type PublicLabelsSource,
 } from '@eulerxyz/euler-v2-sdk/public-labels'
 import type { HostedGeoContext } from '~/utils/geo-policies'
-import { getAddress } from 'viem'
-import type { EulerLabelAssetEntry, EulerLabelProduct } from '~/entities/euler/labels'
+import { resolveLabelLogo } from '~/utils/label-logo'
 
 export {
   PUBLIC_LABELS_RUNTIME_VERSION,
@@ -27,240 +26,64 @@ export type {
   PublicVaultLabel,
 } from '@eulerxyz/euler-v2-sdk/public-labels'
 
-export type PublicEulerLabelsData = SdkPublicEulerLabelsData & { geoContext?: HostedGeoContext }
+export type PublicEulerLabelsData = Omit<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>
+  & Partial<Pick<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>>
+  & { geoContext?: HostedGeoContext, source?: 'v3' | 'static', logoBaseUrl?: string }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
-export interface EffectiveProductPolicy {
-  block?: string[]
-  restricted?: string[]
-  notExplorable?: boolean
-  vaults?: string[]
-  deprecatedVaults?: string[]
-  vaultOverrides?: Record<string, {
-    block?: string[]
-    restricted?: string[]
-    notExplorableLend?: boolean
-    notExplorableBorrow?: boolean
-  }>
-}
-
-export interface EffectiveEarnPolicy {
-  address: string
-  block?: string[]
-  restricted?: string[]
-  notExplorable?: boolean
-}
-
-/**
- * Compatibility geo rules and additional discovery restrictions. V3 visibility
- * is required independently; this source cannot override a negative verdict.
- */
-export interface EffectiveLabelsSource {
-  products: Record<string, EffectiveProductPolicy>
-  earnVaults: Array<string | EffectiveEarnPolicy>
-  assets: EulerLabelAssetEntry[]
-}
-
-export interface PublicLabelsBundle {
-  /** Metadata publication; geo, entity addresses, platform tags and visibility remain live. */
+export interface V3LabelsBundle {
+  source?: 'v3'
   version: string
   publicLabels: PublicLabelsSource
   geoFetchedAt?: number
-  effectivePolicy: EffectiveLabelsSource
 }
 
-const emptyEffectiveLabelsSource = (): EffectiveLabelsSource => ({
-  products: {},
-  earnVaults: [],
-  assets: [],
-})
-
-const uniqueStrings = (values: Iterable<string>): string[] => [...new Set(values)]
-
-const tryAddress = (value: string): string | undefined => {
-  try {
-    return getAddress(value)
-  }
-  catch {
-    return undefined
-  }
+export interface StaticLabelsBundle {
+  source: 'static'
+  version: string
+  files: EulerLabelsFileData
+  logoBaseUrl: string
+  fetchedAt: number
 }
 
-const getEffectiveVaultSets = (effective: EffectiveLabelsSource) => {
-  const verified = new Set<string>()
-  for (const product of Object.values(effective.products)) {
-    for (const address of [...(product.vaults ?? []), ...(product.deprecatedVaults ?? [])]) {
-      verified.add(address.toLowerCase())
-    }
-  }
-  const earn = new Set(effective.earnVaults.map(entry =>
-    (typeof entry === 'string' ? entry : entry.address).toLowerCase(),
-  ))
-  return { verified, earn }
-}
+export type PublicLabelsBundle = V3LabelsBundle | StaticLabelsBundle
 
-const normalizeEffectiveEarnPolicy = (effective: EffectiveLabelsSource) => {
-  const blocks: Record<string, string[]> = {}
-  const restrictions: Record<string, string[]> = {}
-  const notExplorable = new Set<string>()
-  for (const raw of effective.earnVaults) {
-    if (typeof raw === 'string') continue
-    const address = tryAddress(raw.address)
-    if (!address) continue
-    const key = address.toLowerCase()
-    if (raw.block?.length) blocks[key] = [...raw.block]
-    if (raw.restricted?.length) restrictions[key] = [...raw.restricted]
-    if (raw.notExplorable) notExplorable.add(key)
-  }
-  return { blocks, restrictions, notExplorable }
-}
-
-const normalizeEffectiveAssets = (entries: EulerLabelAssetEntry[]) => {
-  const blocks: Record<string, string[]> = {}
-  const restrictions: Record<string, string[]> = {}
-  const patternRules: EulerLabelAssetPatternRule[] = []
-
-  for (const entry of entries) {
-    if (entry.address) {
-      const address = tryAddress(entry.address)
-      if (address) {
-        const key = address.toLowerCase()
-        if (entry.block?.length) blocks[key] = [...entry.block]
-        if (entry.restricted?.length) restrictions[key] = [...entry.restricted]
-      }
-    }
-
-    const rule: EulerLabelAssetPatternRule = {
-      ...(entry.block?.length && { block: [...entry.block] }),
-      ...(entry.restricted?.length && { restricted: [...entry.restricted] }),
-    }
-    if (!rule.block && !rule.restricted) continue
-    if (entry.symbols?.length) rule.symbolsLower = new Set(entry.symbols.map(value => value.toLowerCase()))
-    if (entry.names?.length) rule.namesLower = new Set(entry.names.map(value => value.toLowerCase()))
-    if (entry.symbolRegex) rule.symbolRegex = new RegExp(entry.symbolRegex, 'i')
-    if (entry.nameRegex) rule.nameRegex = new RegExp(entry.nameRegex, 'i')
-    if (rule.symbolsLower || rule.symbolRegex || rule.namesLower || rule.nameRegex) {
-      patternRules.push(rule)
-    }
-  }
-
-  return { blocks, restrictions, patternRules }
-}
-
-/**
- * Adds Lite's temporary effective-policy compatibility layer to the canonical
- * Public Labels content normalized by the SDK.
- */
-export const normalizePublicLabelsData = (
-  chainId: number,
-  source: PublicLabelsSource,
-  effectivePolicy: EffectiveLabelsSource = emptyEffectiveLabelsSource(),
-): PublicEulerLabelsData => {
+/** V3 owns hosted membership, published content and per-side visibility. */
+export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsSource): PublicEulerLabelsData => {
   const data = normalizeSdkPublicLabelsData(chainId, source)
-  const inventoryRows = source.vaults.filter((vault) => {
-    const verdict = source.visibility[vault.address.toLowerCase()]
-    return vault.chainId === chainId && (verdict?.status === 'visible' || verdict?.status === 'warning')
-  })
-  const { verified: compatibilityVerified, earn: compatibilityEarn } = getEffectiveVaultSets(effectivePolicy)
-
-  // Plain-address labels and assessment-only rows have the same empty content
-  // shape in the inventory. Retain an empty row only when the compatibility
-  // snapshot already classifies that exact published inventory address.
-  const compatibilityEarnRows = inventoryRows.filter(vault =>
-    !hasPublishedVaultLabelContent(vault)
-    && vault.vaultType === 'earn'
-    && compatibilityEarn.has(vault.address.toLowerCase()),
-  )
-  const compatibilityVerifiedRows = inventoryRows.filter(vault =>
-    !hasPublishedVaultLabelContent(vault)
-    && vault.vaultType !== 'earn'
-    && vault.vaultType !== 'escrow'
-    && compatibilityVerified.has(vault.address.toLowerCase()),
-  )
-
-  const verifiedVaultAddresses = [
-    ...data.verifiedVaultAddresses,
-    ...compatibilityVerifiedRows.map(vault => getAddress(vault.address)),
-  ]
-  const earnVaults = [...data.earnVaults]
-  const earnVaultEntries = { ...data.earnVaultEntries }
-  for (const vault of compatibilityEarnRows) {
-    const address = getAddress(vault.address)
-    earnVaults.push(address)
-    earnVaultEntries[address.toLowerCase()] ??= { address }
-  }
-
-  const products = data.products as Record<string, EulerLabelProduct>
-  const effectiveEarn = normalizeEffectiveEarnPolicy(effectivePolicy)
-  const effectiveAssets = normalizeEffectiveAssets(effectivePolicy.assets)
-
-  // Compatibility fields support static consumers. Hosted enforcement exclusively
-  // uses geoContext, including assignments outside the discovery allowlist.
-  for (const [productKey, product] of Object.entries(products)) {
-    const effectiveProduct = effectivePolicy.products[productKey]
-    if (!effectiveProduct) continue
-    product.block = effectiveProduct.block
-    product.restricted = effectiveProduct.restricted
-    product.notExplorable = effectiveProduct.notExplorable
-    const effectiveOverrides = new Map(
-      Object.entries(effectiveProduct.vaultOverrides ?? {}).map(([address, override]) => [
-        address.toLowerCase(),
-        override,
-      ]),
-    )
-    for (const address of [...product.vaults, ...(product.deprecatedVaults ?? [])]) {
-      const target = product.vaultOverrides?.[address]
-      const previous = effectiveOverrides.get(address.toLowerCase())
-      if (!target || !previous) continue
-      target.block = previous.block
-      target.restricted = previous.restricted
-      target.notExplorableLend = previous.notExplorableLend
-      target.notExplorableBorrow = previous.notExplorableBorrow
-    }
-  }
-
-  for (const [address, entry] of Object.entries(earnVaultEntries)) {
-    entry.block = effectiveEarn.blocks[address]
-    entry.restricted = effectiveEarn.restrictions[address]
-    entry.notExplorable = effectiveEarn.notExplorable.has(address)
-  }
-
-  // V3 flags are final per-side listing decisions. Compatibility restrictions
-  // may hide more, but cannot make a hidden or pending vault explorable.
-  for (const product of Object.values(products)) {
+  for (const product of Object.values(data.products)) {
     for (const address of [...product.vaults, ...(product.deprecatedVaults ?? [])]) {
       const verdict = source.visibility[address.toLowerCase()]
       const override = product.vaultOverrides?.[address]
       if (!override) continue
-      override.notExplorableLend = override.notExplorableLend || verdict?.explorableLend !== true
-      override.notExplorableBorrow = override.notExplorableBorrow || verdict?.explorableBorrow !== true
+      override.notExplorableLend = verdict?.explorableLend !== true
+      override.notExplorableBorrow = verdict?.explorableBorrow !== true
     }
   }
-  for (const [address, entry] of Object.entries(earnVaultEntries)) {
-    if (source.visibility[address]?.explorableLend !== true) {
-      entry.notExplorable = true
-      effectiveEarn.notExplorable.add(address)
-    }
+  for (const [address, entry] of Object.entries(data.earnVaultEntries)) {
+    entry.notExplorable = source.visibility[address]?.explorableLend !== true
+    if (entry.notExplorable) data.notExplorableEarnVaults.add(address)
   }
-
   return {
     ...data,
+    source: 'v3',
     geoContext: {
       chainId,
       policies: data.rawGeoPolicies,
       productByVault: Object.fromEntries(source.vaults.filter(vault => vault.chainId === chainId)
         .map(vault => [vault.address.toLowerCase(), vault.productId])),
     },
-    products,
-    verifiedVaultAddresses: uniqueStrings(verifiedVaultAddresses),
-    earnVaults: uniqueStrings(earnVaults),
-    earnVaultEntries,
-    earnVaultBlocks: effectiveEarn.blocks,
-    earnVaultRestrictions: effectiveEarn.restrictions,
-    notExplorableEarnVaults: effectiveEarn.notExplorable,
-    assetBlocks: effectiveAssets.blocks,
-    assetRestrictions: effectiveAssets.restrictions,
-    assetPatternRules: effectiveAssets.patternRules,
   }
+}
+
+export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundle): PublicEulerLabelsData => {
+  if (bundle.source !== 'static') return normalizePublicLabelsData(chainId, bundle.publicLabels)
+  const data = normalizeEulerLabelsFileData(structuredClone(bundle.files))
+  // Static authoring uses filenames; resolve them only against the operator's source.
+  const logo = (value: string | undefined) => resolveLabelLogo(value, bundle.logoBaseUrl)
+  for (const entity of Object.values(data.entities)) entity.logo = logo(entity.logo)
+  for (const product of Object.values(data.products)) if (product.logo) product.logo = logo(product.logo)
+  for (const points of Object.values(data.points)) for (const point of points) point.logo = logo(point.logo)
+  return { ...data, source: 'static', logoBaseUrl: bundle.logoBaseUrl, rawGeoPolicies: [] }
 }

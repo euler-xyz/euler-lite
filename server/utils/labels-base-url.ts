@@ -1,19 +1,15 @@
-export function resolveLabelsBaseUrl(): string {
-  const explicit = (
-    process.env.EFFECTIVE_POLICY_BASE_URL
-    || process.env.NUXT_PUBLIC_CONFIG_LABELS_BASE_URL
-    || ''
-  ).trim().replace(/\/+$/, '')
-  if (explicit) return explicit
-  const repo = process.env.EFFECTIVE_POLICY_REPO
-    || process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO
-    || 'euler-xyz/euler-labels'
-  const branch = process.env.EFFECTIVE_POLICY_REPO_BRANCH
-    || process.env.NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH
-    || 'master'
-  return `https://raw.githubusercontent.com/${repo}/refs/heads/${branch}`
+export const readLabelsSource = (): 'v3' | 'static' => {
+  const source = process.env.LABELS_SOURCE?.trim() || 'v3'
+  if (source !== 'v3' && source !== 'static') throw new Error('LABELS_SOURCE must be v3 or static')
+  return source
 }
 
-export function resolveLabelsFileUrl(scope: number | 'all', file: string): string {
-  return `${resolveLabelsBaseUrl()}/${scope}/${file}`
+export function resolveLabelsBaseUrl(): string {
+  const value = process.env.STATIC_LABELS_BASE_URL?.trim().replace(/\/+$/, '')
+  if (!value) throw new Error('STATIC_LABELS_BASE_URL is required for static labels')
+  const url = new URL(value)
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('STATIC_LABELS_BASE_URL must be an HTTP(S) directory URL without credentials, query or fragment')
+  }
+  return value
 }

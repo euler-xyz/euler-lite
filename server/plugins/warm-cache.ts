@@ -36,7 +36,6 @@
  * Merkl's /tokens/reward payload is fetched transitively by /api/internal/token-list
  * (one of its sources).
  */
-import { EFFECTIVE_POLICY_LABEL_FILES, refreshLabelFile } from '../utils/labels-source'
 import { refreshEulerChains } from '../api/internal/euler-chains.get'
 import { ABI_CONTRACTS, refreshAbi } from '../api/internal/abis/[contract].get'
 import { refreshTokenList } from '../api/internal/token-list.get'
@@ -109,19 +108,6 @@ const warmAbis = (): Promise<unknown>[] =>
     reportWarm(`abis/${contract}`, refreshAbi(contract)),
   )
 
-// Cross-chain pattern rules for effective asset policy live at
-// `all/assets.json`. Warm them once; the shared policy source combines them
-// with each chain's rules while assembling the Public Labels bundle.
-const warmGlobalAssets = () =>
-  reportWarm('labels/assets.json scope=all', refreshLabelFile('all', 'assets.json'))
-
-// --- Per-chain warms (parallel across chains and within a chain) ---
-
-const warmEffectivePolicy = (chainId: number): Promise<unknown>[] =>
-  EFFECTIVE_POLICY_LABEL_FILES.map(file =>
-    reportWarm(`labels-policy/${file} chain=${chainId}`, refreshLabelFile(chainId, file)),
-  )
-
 const warmPublicLabels = (chainId: number) =>
   reportWarm(`public-labels chain=${chainId}`, refreshPublicLabelsBundle(chainId))
 
@@ -134,10 +120,9 @@ const warmTokenList = (chainId: number) =>
 const warmVaults = (chainId: number) =>
   reportWarm(`vaults chain=${chainId}`, refreshChainVaults(chainId))
 
-// Public Labels, effective policy, and token-list refresh at the global
+// Labels and token-list refresh at the global
 // 5-min interval. Vaults run on their own faster timer.
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
-  ...warmEffectivePolicy(chainId),
   warmPublicLabels(chainId),
   warmTokenList(chainId),
 ]
@@ -175,7 +160,6 @@ export default defineNitroPlugin(() => {
       await Promise.allSettled([
         warmEulerChains(),
         ...warmAbis(),
-        warmGlobalAssets(),
         warmChainsSequentially(),
       ])
     }

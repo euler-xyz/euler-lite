@@ -18,11 +18,11 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 | Entity governance addresses | `GET /labels/entities/{entityId}/addresses` |
 | Geo policy records | `GET /geo-policies` |
 
-The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Plain-address compatibility entries require a visible or warning verdict as well. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags constrain listing; compatibility policy may hide additional vaults but cannot override a negative V3 verdict. On-chain governor checks still determine the stronger verification badge.
+The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. On-chain governor checks still determine the stronger verification badge.
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in manager ownership, governor verification, or manager-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
 
-Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. The server embeds a validated geo collection with each snapshot and retains a disk checkpoint for stale-on-error recovery. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Compatibility data still supplies discovery membership/restrictions; it does not control hosted geo enforcement. The static source switch and production bake/canary remain separate rollout work. See [Geo-Blocking](./geo-blocking.md).
+Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. The server embeds a validated geo collection with each snapshot and retains a disk checkpoint for stale-on-error recovery. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
 
 Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
@@ -250,7 +250,7 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | `utils/public-labels.ts` | Public V3 pagination, normalization, and effective-visibility composition |
 | `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the normalized label snapshot |
 | `server/utils/public-labels-source.ts` | Shared V3 aggregate cache used by browser, public APIs, and vault snapshots |
-| `server/utils/labels-source.ts` | Server-only temporary effective-policy overlay |
+| `server/utils/static-labels-source.ts` | Atomic authoring-file source and durable checkpoint for forks |
 | `composables/useEulerLabels.ts` | Chain-scoped aggregate loading and normalized label publication |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
 | `composables/useGeoBlock.ts` | V3 country evaluation and independent sanctions gate |
@@ -260,3 +260,6 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. This server endpoint uses the same normalized Public Labels bundle as the UI plus the on-chain `escrowedCollateralPerspective`, applies governor / router-governor / owner verification, and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults. Escrow vaults from the on-chain perspective and standalone Earn entries are trusted unconditionally.
 
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.
+
+
+Hosted full verification resolves the managing entity from the V3 vault row, including standalone Earn vaults. Missing manager data yields an empty authority set, so a visible/warning inventory entry alone cannot grant an owner-verification badge. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics. Hosted on-chain governor/owner checks remain in place until the verification bake justifies delegation to V3.

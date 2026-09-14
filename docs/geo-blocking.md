@@ -101,7 +101,7 @@ Rules accumulate across global, chain, product, vault and asset scopes. A vault 
 
 Regex expressions are compile-checked and limited to 512 characters by the SDK. Lite treats token metadata longer than 128 characters as a match without running its regex. Missing vault asset metadata remains fail-closed. Same-asset and known wrap-pair exemptions apply only to soft asset restrictions, never global/product/vault restrictions, hard blocks, or unavailable policy data.
 
-Sanctions remain in `SANCTIONED_COUNTRIES`, enforced independently at the server edge and in client helpers. The compatibility evaluator and `COUNTRY_GROUPS` remain available for static label data; hosted snapshots always use V3 rules. No deployed static-source switch is configured here.
+Sanctions remain in `SANCTIONED_COUNTRIES`, enforced independently at the server edge and in client helpers. The compatibility evaluator and `COUNTRY_GROUPS` remain available for static label data; hosted snapshots always use V3 rules. `LABELS_SOURCE=static` selects the authored-file engine.
 
 ## Availability and durable fallback
 
@@ -109,7 +109,7 @@ Sanctions remain in `SANCTIONED_COUNTRIES`, enforced independently at the server
 
 Set `GEO_POLICY_CACHE_DIR` to a mounted persistent directory to survive container replacement. The default `.data/geo-policies` survives process restarts on the same filesystem. Failed checkpoint writes are logged; current validated live rules remain in use, but that write is not durable. Log monitoring must alert on stale-policy age and checkpoint failures; this code does not provision production alerting.
 
-A cold start with no valid policy snapshot fails the entire labels response. The client distinguishes unavailable policies from an authored empty collection. `useOperationGuard` registers “Compliance data unavailable. Please retry.” for acquisition forms, including direct wallet deposits. Repay and withdrawal forms opt out of this availability blocker. Existing verification, country, sanctions and operation-specific checks still apply. Soft restriction helpers also deny acquisition while policies are unavailable, including wrap exemptions.
+A cold start with no valid policy snapshot fails the entire labels response. The client distinguishes unavailable policies from an authored empty collection. `useOperationGuard` registers “Compliance data unavailable. Please retry.” for acquisition forms, including direct wallet deposits. Repay and withdrawal forms opt out of this availability blocker. Simple withdrawals/redemptions and repayment without swaps can acknowledge unverified-vault risk when labels are unavailable, in both the form and final reviewed-execution policy. Missing/wrong-chain vault metadata still blocks; swaps, borrowing and mixed acquisition batches still require labels. Country, sanctions and operation-specific checks still apply. Soft restriction helpers also deny acquisition while policies are unavailable, including wrap exemptions.
 
 ## Helper functions
 

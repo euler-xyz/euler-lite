@@ -45,7 +45,7 @@ vi.mock('~/composables/useEulerSdk', () => ({
 }))
 
 vi.mock('~/utils/public-labels', () => ({
-  normalizePublicLabelsData: mocks.normalizePublicLabelsData,
+  normalizeLabelsBundle: (_chainId: number, bundle: { publicLabels: unknown }) => mocks.normalizePublicLabelsData(_chainId, bundle.publicLabels),
 }))
 
 vi.mock('~/composables/useEulerOracleAdapters', () => ({

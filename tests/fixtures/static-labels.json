@@ -1,0 +1,60 @@
+{
+  "products": {
+    "fork": {
+      "name": "Fork product",
+      "entity": "curator",
+      "vaults": [
+        "0x1111111111111111111111111111111111111111"
+      ],
+      "deprecatedVaults": [],
+      "block": [
+        "US"
+      ],
+      "vaultOverrides": {
+        "0x1111111111111111111111111111111111111111": {
+          "restricted": [
+            "CA"
+          ],
+          "notExplorableBorrow": true
+        }
+      }
+    }
+  },
+  "entities": {
+    "curator": {
+      "name": "Fork curator",
+      "logo": "curator.svg",
+      "description": "",
+      "url": "https://fork.test",
+      "addresses": {
+        "0x3333333333333333333333333333333333333333": "Owner"
+      },
+      "social": {}
+    }
+  },
+  "points": [
+    {
+      "name": "Fork points",
+      "logo": "points.svg",
+      "collateralVaults": [
+        "0x1111111111111111111111111111111111111111"
+      ]
+    }
+  ],
+  "earnVaults": [
+    {
+      "address": "0x2222222222222222222222222222222222222222",
+      "restricted": [
+        "GB"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "address": "0x4444444444444444444444444444444444444444",
+      "block": [
+        "US"
+      ]
+    }
+  ]
+}

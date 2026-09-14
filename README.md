@@ -83,8 +83,8 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
-| `EFFECTIVE_POLICY_REPO`, `EFFECTIVE_POLICY_REPO_BRANCH` | Temporary server-only effective visibility/geo policy repository and branch. |
-| `EFFECTIVE_POLICY_BASE_URL` | Optional effective-policy CDN base URL; overrides the repository settings. |
+| `LABELS_SOURCE` | `v3` (default) or `static`; selects the shared label snapshot producer. |
+| `STATIC_LABELS_BASE_URL` | Required directory URL for static authoring files; unused by hosted V3 mode. |
 | `TURTLE_EARN_API_URL` or `NUXT_PUBLIC_TURTLE_EARN_API_URL` | Optional Turtle reward-proof upstream override; defaults to `https://earn.turtle.xyz/v1`. |
 
 #### Branding & Feature Flags
@@ -222,7 +222,7 @@ The resolution order in `getAssetLogoUrl(address, symbol)`:
 
 Vault inventory, products, entities, hosted logos, tags, campaigns, and deprecation metadata come from the versioned Public Labels API at `V3_API_URL`. Lite resolves `version=latest` to one immutable publication before fetching a chain bundle and follows every paginated list through `meta.total`.
 
-The labels-repository settings above are a temporary server-only compatibility source for effective `block`, `restricted`, and discovery-visibility rules. They do not provide display content or browser/SDK label routes. Raw V3 assessment and geo-policy records remain informational until V3 publishes the resolved effective decision and precedence contract.
+Hosted labels, visibility and geo policies come exclusively from V3. Fork deployments can set `LABELS_SOURCE=static` and provide their own authoring files through `STATIC_LABELS_BASE_URL`. See [Static labels](docs/static-labels.md) for the format, failure semantics and on-chain data options.
 
 ### 4. Development
 

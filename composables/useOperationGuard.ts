@@ -41,6 +41,7 @@ export const useOperationGuard = (
     account: userAddress,
     chainId: appChainId,
     operation,
+    allowUnavailableLabels: options.acquiresExposure === false,
   })
 
   // --- Keyring guard ---

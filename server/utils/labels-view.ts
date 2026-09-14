@@ -24,7 +24,7 @@ import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import { getPublicEulerLabelsData } from './public-labels-source'
-import type { VerificationLabels } from '~/utils/vault/governor-verification'
+import { getHostedEntityKeys, type VerificationLabels } from '~/utils/vault/governor-verification'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
 
@@ -79,6 +79,7 @@ export interface ProductDescriptor {
 
 export interface LabelsView {
   chainId: number
+  logoBaseUrl?: string
   snapshot: ChainVaultsSnapshot
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
@@ -369,6 +370,8 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   const verificationLabels: VerificationLabels = {
     getDeclaredEntityKeys: (addr) => {
+      const hostedKeys = getHostedEntityKeys(labels.value, addr)
+      if (hostedKeys !== undefined) return hostedKeys
       const checksum = tryChecksum(addr)
       if (!checksum) return undefined
       return productByVault.get(checksum)?.entityKeys
@@ -378,6 +381,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   return {
     chainId,
+    logoBaseUrl: labels.value.logoBaseUrl,
     snapshot,
     productByVault,
     deprecatedSet,

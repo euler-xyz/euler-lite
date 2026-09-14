@@ -1,3 +1,4 @@
+import { resolveLabelLogo } from '~/utils/label-logo'
 import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
@@ -76,10 +77,6 @@ function strOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function entityLogoUrl(fileName: string): string {
-  return /^https?:\/\//i.test(fileName) ? fileName : ''
-}
-
 function buildAsset(asset: VaultAsset | undefined, tokenLogos: Map<string, string>): AssetInfo | null {
   if (!asset) return null
   const addr = tryChecksum(asset.address)
@@ -93,7 +90,7 @@ function buildAsset(asset: VaultAsset | undefined, tokenLogos: Map<string, strin
   }
 }
 
-function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntryFull>): EntityInfo | null {
+function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntryFull>, logoBaseUrl?: string): EntityInfo | null {
   const entity = entities[entityKey]
   if (!entity) return null
   const name = strOrEmpty(entity.name)
@@ -102,7 +99,7 @@ function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry
   const url = strOrNull(entity.url)
   return {
     name,
-    logo: logoFile ? entityLogoUrl(logoFile) : '',
+    logo: logoFile ? resolveLabelLogo(logoFile, logoBaseUrl) : '',
     description: strOrNull(entity.description),
     url: url && /^https?:\/\//i.test(url) ? url : null,
   }
@@ -146,7 +143,7 @@ function buildEvkMetadata(
 
   const entityKeys = verified ? resolveGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
   const entities = entityKeys
-    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw))
+    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
 
   return {
@@ -183,7 +180,7 @@ function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata |
 
   const entityKeys = verified ? resolveEarnGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
   const entities = entityKeys
-    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw))
+    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
 
   return {

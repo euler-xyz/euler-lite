@@ -2,14 +2,16 @@ import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
-import { getEffectiveLabelsSource } from './labels-source'
+import { readLabelsSource } from './labels-base-url'
+import { getStaticLabelsBundle } from './static-labels-source'
 import { logger } from './logger'
 import { PublicLabelsV3Adapter } from '@eulerxyz/euler-v2-sdk/public-labels'
 import {
-  normalizePublicLabelsData,
+  normalizeLabelsBundle,
   PUBLIC_LABELS_RUNTIME_VERSION,
   type PublicEulerLabelsData,
   type PublicLabelsBundle,
+  type V3LabelsBundle,
   type PublicLabelsQuery,
   type PublicLabelsRequest,
   type PublicLabelsResponse,
@@ -19,8 +21,8 @@ import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 const CACHE_TTL_MS = 300_000
 const REFRESH_BUDGET_MS = 30_000
 
-const cache = createTtlCache<PublicLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
-const inFlight = createInFlightDedup<string, PublicLabelsBundle>()
+const cache = createTtlCache<V3LabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
+const inFlight = createInFlightDedup<string, V3LabelsBundle>()
 
 const geoSources = new Map<string, ReturnType<typeof createGeoPolicySource>>()
 const getGeoSource = () => {
@@ -61,6 +63,7 @@ export function refreshPublicLabelsBundle(
   chainId: number,
   version = PUBLIC_LABELS_RUNTIME_VERSION,
 ): Promise<PublicLabelsBundle> {
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true)
   const key = cacheKey(chainId, version)
   return inFlight.run(key, async () => {
     try {
@@ -72,19 +75,12 @@ export function refreshPublicLabelsBundle(
             request,
           })
           const geo = await getGeoSource()(request)
-          const [snapshot, effectivePolicy] = await Promise.all([
-            adapter.fetchPublicLabelsSnapshot(chainId, version, geo.policies),
-            getEffectiveLabelsSource(chainId),
-          ])
-          // Validate the complete cross-source relationship before replacing
-          // a known-good raw bundle. Server consumers normalize it again into
-          // SDK-compatible Sets/RegExps; the browser receives JSON-safe data.
-          normalizePublicLabelsData(chainId, snapshot.publicLabels, effectivePolicy)
+          const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, version, geo.policies)
+          normalizeLabelsBundle(chainId, snapshot)
           return {
             version: snapshot.version,
             geoFetchedAt: geo.fetchedAt,
             publicLabels: snapshot.publicLabels,
-            effectivePolicy,
           }
         },
         REFRESH_BUDGET_MS,
@@ -106,6 +102,7 @@ export function getPublicLabelsBundle(
   chainId: number,
   version = PUBLIC_LABELS_RUNTIME_VERSION,
 ): Promise<PublicLabelsBundle> {
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId)
   const hit = cache.get(cacheKey(chainId, version))
   return hit ? Promise.resolve(hit) : refreshPublicLabelsBundle(chainId, version)
 }
@@ -115,5 +112,5 @@ export async function getPublicEulerLabelsData(
   version = PUBLIC_LABELS_RUNTIME_VERSION,
 ): Promise<PublicEulerLabelsData> {
   const bundle = await getPublicLabelsBundle(chainId, version)
-  return normalizePublicLabelsData(chainId, bundle.publicLabels, bundle.effectivePolicy)
+  return normalizeLabelsBundle(chainId, bundle)
 }

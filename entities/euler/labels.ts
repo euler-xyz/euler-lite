@@ -1,3 +1,5 @@
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
+import { resolveLabelLogo } from '~/utils/label-logo'
 import type {
   EulerLabelAssetEntry as SdkEulerLabelAssetEntry,
   EulerLabelEarnVaultEntry as SdkEulerLabelEarnVaultEntry,
@@ -47,9 +49,9 @@ export const eulerLabelProductEmpty = {
 } as EulerLabelProduct
 
 export const getEulerLabelEntityLogo = (fileName: string) =>
-  /^https?:\/\//i.test(fileName) ? fileName : ''
+  resolveLabelLogo(fileName, getEulerLabelsSourceData().logoBaseUrl)
 
-export const getEulerLabelPointLogo = (fileName: string) =>
-  /^https?:\/\//i.test(fileName) ? fileName : ''
+export const getEulerLabelPointLogo = getEulerLabelEntityLogo
 
-export const getEntityLogoLocalPath = (fileName: string) => `/entities/${fileName}`
+export const getEntityLogoLocalPath = (fileName: string) =>
+  /^[a-zA-Z0-9_-]+\.(svg|png|jpg|jpeg|webp|gif)$/i.test(fileName) ? `/entities/${fileName}` : ''

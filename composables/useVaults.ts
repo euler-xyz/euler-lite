@@ -1,3 +1,5 @@
+import { getHostedEntityKeys } from '~/utils/vault/governor-verification'
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
 import type {
   EulerEarn as EulerEarnClass,
   DataIssue,
@@ -1248,6 +1250,8 @@ export const useVaults = () => {
     const { entities } = useEulerLabels()
     return {
       getDeclaredEntityKeys: (vaultAddress) => {
+        const hostedKeys = getHostedEntityKeys(getEulerLabelsSourceData(), vaultAddress)
+        if (hostedKeys !== undefined) return hostedKeys
         const productKey = getProductKeyByVault(vaultAddress)
         if (!productKey) return undefined
         const product = getProductByVault(vaultAddress)

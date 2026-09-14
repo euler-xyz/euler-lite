@@ -1,33 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resolveLabelsBaseUrl } from '~/server/utils/labels-base-url'
+import { readLabelsSource, resolveLabelsBaseUrl } from '~/server/utils/labels-base-url'
 
-describe('effective policy base URL', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs()
+describe('label source configuration', () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it('defaults to V3 regardless of obsolete GitHub settings', () => {
+    vi.stubEnv('LABELS_SOURCE', '')
+    vi.stubEnv('EFFECTIVE_POLICY_REPO', 'euler-xyz/euler-labels')
+    expect(readLabelsSource()).toBe('v3')
   })
-
-  it('prefers the server-only effective-policy URL', () => {
-    vi.stubEnv('EFFECTIVE_POLICY_BASE_URL', 'https://policy.example.test/')
-    vi.stubEnv('NUXT_PUBLIC_CONFIG_LABELS_BASE_URL', 'https://legacy.example.test')
-
-    expect(resolveLabelsBaseUrl()).toBe('https://policy.example.test')
+  it('requires an explicit static URL and rejects invalid source selection', () => {
+    vi.stubEnv('STATIC_LABELS_BASE_URL', '')
+    expect(resolveLabelsBaseUrl).toThrow('required')
+    vi.stubEnv('LABELS_SOURCE', 'typo')
+    expect(readLabelsSource).toThrow('v3 or static')
   })
-
-  it('retains the former public variable as a deployment fallback', () => {
-    vi.stubEnv('EFFECTIVE_POLICY_BASE_URL', '')
-    vi.stubEnv('NUXT_PUBLIC_CONFIG_LABELS_BASE_URL', 'https://legacy.example.test/')
-
-    expect(resolveLabelsBaseUrl()).toBe('https://legacy.example.test')
+  it('accepts operator-owned directories without a repository dependency', () => {
+    vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://fork.example/labels/')
+    expect(resolveLabelsBaseUrl()).toBe('https://fork.example/labels')
   })
-
-  it('builds the repository URL from server-only settings', () => {
-    vi.stubEnv('EFFECTIVE_POLICY_BASE_URL', '')
-    vi.stubEnv('NUXT_PUBLIC_CONFIG_LABELS_BASE_URL', '')
-    vi.stubEnv('EFFECTIVE_POLICY_REPO', 'example/policy')
-    vi.stubEnv('EFFECTIVE_POLICY_REPO_BRANCH', 'published')
-
-    expect(resolveLabelsBaseUrl()).toBe(
-      'https://raw.githubusercontent.com/example/policy/refs/heads/published',
-    )
+  it.each(['file:///tmp/labels', 'https://user:password@example.test', 'https://example.test?token=x'])('rejects unsafe base %s', (base) => {
+    vi.stubEnv('STATIC_LABELS_BASE_URL', base)
+    expect(resolveLabelsBaseUrl).toThrow()
   })
 })
