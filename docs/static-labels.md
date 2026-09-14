@@ -2,6 +2,10 @@
 
 `LABELS_SOURCE=v3` is the default hosted mode. It reads published metadata, live visibility, governance addresses and geo policies from V3, without consulting any labels repository.
 
+Hosted deployments select metadata with `LABELS_V3_SET` (default `public`) and `LABELS_V3_VERSION` (default `latest`, or an immutable publication key such as `v20260911011146353` or `test-2026-06-30`). The SDK resolves `latest` within the selected set and applies that set/version to vault, product and entity metadata. Server caches separate upstream, set, chain and version. Unknown sets or unavailable publications fail rather than falling back to public. The internal endpoint's explicit `version` query still overrides the deployment default for diagnostics; the label set is server-configured. Draft selectors are not supported. Restart the service after changing these variables.
+
+These settings select published metadata, not an isolated staging system: visibility, geo policies, governance addresses and live platform fields continue to use the configured V3 backend. Static mode ignores the V3 label selectors.
+
 Forks select `LABELS_SOURCE=static` and set `STATIC_LABELS_BASE_URL` to their own HTTP(S) directory. The server and browser consume the same normalized snapshot as hosted mode. Authored membership determines discovery; hosted curation/visibility is never consulted. The SDK provides the shared file derivation function, while Lite owns atomic fetching, validation, caching and logo policy.
 
 ## Directory contract

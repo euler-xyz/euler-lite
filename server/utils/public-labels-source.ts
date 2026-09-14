@@ -2,13 +2,12 @@ import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
-import { readLabelsSource } from './labels-base-url'
+import { readLabelsSource, readV3LabelsSelection } from './labels-base-url'
 import { getStaticLabelsBundle } from './static-labels-source'
 import { logger } from './logger'
 import { PublicLabelsV3Adapter } from '@eulerxyz/euler-v2-sdk/public-labels'
 import {
   normalizeLabelsBundle,
-  PUBLIC_LABELS_RUNTIME_VERSION,
   type PublicEulerLabelsData,
   type PublicLabelsBundle,
   type V3LabelsBundle,
@@ -35,7 +34,8 @@ const getGeoSource = () => {
   return loader
 }
 
-const cacheKey = (chainId: number, version: string): string => `${chainId}:${version}`
+const cacheKey = (chainId: number, labelSet: string, version: string): string =>
+  JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version])
 
 const buildRequest = (): PublicLabelsRequest => async <T>(
   path: string,
@@ -61,10 +61,12 @@ const buildRequest = (): PublicLabelsRequest => async <T>(
 
 export function refreshPublicLabelsBundle(
   chainId: number,
-  version = PUBLIC_LABELS_RUNTIME_VERSION,
+  version?: string,
 ): Promise<PublicLabelsBundle> {
   if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true)
-  const key = cacheKey(chainId, version)
+  const selection = readV3LabelsSelection()
+  const selectedVersion = version ?? selection.version
+  const key = cacheKey(chainId, selection.labelSet, selectedVersion)
   return inFlight.run(key, async () => {
     try {
       const bundle = await withWallClock(
@@ -72,12 +74,15 @@ export function refreshPublicLabelsBundle(
           const request = buildRequest()
           const adapter = new PublicLabelsV3Adapter({
             endpoint: readResolvedV3ApiUrl(),
+            labelSet: selection.labelSet,
+            version: selectedVersion,
             request,
           })
           const geo = await getGeoSource()(request)
-          const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, version, geo.policies)
+          const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, selectedVersion, geo.policies)
           normalizeLabelsBundle(chainId, snapshot)
           return {
+            labelSet: selection.labelSet,
             version: snapshot.version,
             geoFetchedAt: geo.fetchedAt,
             publicLabels: snapshot.publicLabels,
@@ -100,16 +105,18 @@ export function refreshPublicLabelsBundle(
 
 export function getPublicLabelsBundle(
   chainId: number,
-  version = PUBLIC_LABELS_RUNTIME_VERSION,
+  version?: string,
 ): Promise<PublicLabelsBundle> {
   if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId)
-  const hit = cache.get(cacheKey(chainId, version))
-  return hit ? Promise.resolve(hit) : refreshPublicLabelsBundle(chainId, version)
+  const selection = readV3LabelsSelection()
+  const selectedVersion = version ?? selection.version
+  const hit = cache.get(cacheKey(chainId, selection.labelSet, selectedVersion))
+  return hit ? Promise.resolve(hit) : refreshPublicLabelsBundle(chainId, selectedVersion)
 }
 
 export async function getPublicEulerLabelsData(
   chainId: number,
-  version = PUBLIC_LABELS_RUNTIME_VERSION,
+  version?: string,
 ): Promise<PublicEulerLabelsData> {
   const bundle = await getPublicLabelsBundle(chainId, version)
   return normalizeLabelsBundle(chainId, bundle)

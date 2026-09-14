@@ -50,11 +50,11 @@ describe('public labels aggregate endpoint', () => {
     vi.unstubAllGlobals()
   })
 
-  it('uses the cached latest bundle for a normal request', async () => {
+  it('leaves an omitted version to the server deployment default', async () => {
     const handler = await loadHandler()
 
     await expect(handler({})).resolves.toEqual({ source: 'cache' })
-    expect(mocks.getPublicLabelsBundle).toHaveBeenCalledWith(1, 'latest')
+    expect(mocks.getPublicLabelsBundle).toHaveBeenCalledWith(1, undefined)
     expect(mocks.refreshPublicLabelsBundle).not.toHaveBeenCalled()
   })
 
@@ -65,6 +65,13 @@ describe('public labels aggregate endpoint', () => {
 
     await expect(handler({})).resolves.toEqual({ source: 'refresh' })
     expect(mocks.refreshPublicLabelsBundle).toHaveBeenCalledWith(1, 'v20260804151305236')
+  })
+
+  it('passes a named published version through to the selected server source', async () => {
+    mocks.query = { chainId: '1', version: 'test-2026-06-30' }
+    const handler = await loadHandler()
+    await handler({})
+    expect(mocks.getPublicLabelsBundle).toHaveBeenCalledWith(1, 'test-2026-06-30')
   })
 
   it('rejects unsupported version shapes before fetching', async () => {

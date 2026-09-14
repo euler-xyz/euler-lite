@@ -34,6 +34,7 @@ export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
 export interface V3LabelsBundle {
   source?: 'v3'
+  labelSet?: string
   version: string
   publicLabels: PublicLabelsSource
   geoFetchedAt?: number

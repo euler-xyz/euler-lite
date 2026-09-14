@@ -4,7 +4,7 @@ import {
   getPublicLabelsBundle,
   refreshPublicLabelsBundle,
 } from '~/server/utils/public-labels-source'
-import { PUBLIC_LABELS_RUNTIME_VERSION } from '~/utils/public-labels'
+import { isV3LabelsVersionSelector } from '~/server/utils/labels-base-url'
 
 const rateLimiter = createRateLimiter({
   max: 1000,
@@ -22,8 +22,8 @@ export default defineEventHandler(async (event) => {
 
   const version = typeof query.version === 'string' && query.version.length > 0
     ? query.version
-    : PUBLIC_LABELS_RUNTIME_VERSION
-  if (version !== PUBLIC_LABELS_RUNTIME_VERSION && !/^v[0-9]{17}$/.test(version)) {
+    : undefined
+  if (version !== undefined && !isV3LabelsVersionSelector(version)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid labels version' })
   }
 

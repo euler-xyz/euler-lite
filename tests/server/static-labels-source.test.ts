@@ -17,6 +17,8 @@ describe('static authoring source', () => {
     vi.stubEnv('GEO_POLICY_CACHE_DIR', directory)
     vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://fork.test/labels')
     vi.stubEnv('LABELS_SOURCE', 'static')
+    vi.stubEnv('LABELS_V3_SET', '../ignored-in-static-mode')
+    vi.stubEnv('LABELS_V3_VERSION', 'draft')
     fetchMock.mockReset().mockImplementation(async (url: string) => {
       const filename = url.split('/').pop()
       const key = filename === 'earn-vaults.json' ? 'earnVaults' : filename?.replace('.json', '')

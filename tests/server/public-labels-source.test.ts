@@ -50,9 +50,11 @@ describe('public labels server source', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-05T10:00:00Z'))
     vi.stubEnv('LABELS_SOURCE', 'v3')
+    vi.stubEnv('LABELS_V3_SET', '')
+    vi.stubEnv('LABELS_V3_VERSION', '')
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
     mocks.fetchWithTimeout.mockReset().mockImplementation(async (url: string) =>
-      new URL(url).pathname.endsWith('/labels/sets/public/versions')
+      new URL(url).pathname.endsWith('/versions')
         ? versionsResponse()
         : emptyListResponse(),
     )
@@ -102,6 +104,50 @@ describe('public labels server source', () => {
     expect(mocks.fetchWithTimeout.mock.calls.every(([url]) =>
       !new URL(url).pathname.endsWith('/labels/sets/public/versions'),
     )).toBe(true)
+  })
+
+  it('uses configured set and version for server reads without resolving latest', async () => {
+    vi.stubEnv('LABELS_V3_SET', 'test-instance')
+    vi.stubEnv('LABELS_V3_VERSION', 'v20260804151305236')
+    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const bundle = await getPublicLabelsBundle(1)
+    expect(bundle).toMatchObject({ labelSet: 'test-instance', version: 'v20260804151305236' })
+    const urls = mocks.fetchWithTimeout.mock.calls.map(([url]) => new URL(url))
+    expect(urls.some(url => url.pathname.endsWith('/versions'))).toBe(false)
+    expect(urls.filter(url => url.pathname.startsWith('/v3/labels/')).every(url =>
+      url.searchParams.get('labelSet') === 'test-instance' && url.searchParams.get('version') === 'v20260804151305236',
+    )).toBe(true)
+    expect(urls.filter(url => !url.pathname.startsWith('/v3/labels/')).every(url => !url.searchParams.has('labelSet'))).toBe(true)
+  })
+
+  it('separates cached and stale snapshots by set, version and upstream', async () => {
+    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const first = await getPublicLabelsBundle(1)
+    vi.stubEnv('LABELS_V3_SET', 'test-instance')
+    const other = await getPublicLabelsBundle(1)
+    expect(other).not.toBe(first)
+    expect(other).toMatchObject({ labelSet: 'test-instance' })
+    expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => new URL(url).pathname === '/v3/labels/sets/test-instance/versions')).toBe(true)
+    vi.stubEnv('LABELS_V3_VERSION', 'v20260911011146353')
+    const pinned = await getPublicLabelsBundle(1)
+    expect(pinned).not.toBe(other)
+    expect(pinned.version).toBe('v20260911011146353')
+    mocks.fetchWithTimeout.mockRejectedValue(new Error('unavailable'))
+    vi.stubEnv('LABELS_V3_SET', 'unavailable-set')
+    await expect(getPublicLabelsBundle(1)).rejects.toThrow('unavailable')
+    vi.stubEnv('LABELS_V3_SET', 'test-instance')
+    vi.stubEnv('V3_API_URL', 'https://another-v3.test')
+    await expect(getPublicLabelsBundle(1)).rejects.toThrow('unavailable')
+  })
+
+  it.each([
+    ['LABELS_V3_SET', '../public'],
+    ['LABELS_V3_VERSION', 'draft'],
+  ])('rejects invalid %s before making requests', async (key, value) => {
+    vi.stubEnv(key, value)
+    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    expect(() => getPublicLabelsBundle(1)).toThrow(key)
+    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
   })
 
   it('serves a bounded stale bundle when a refresh fails', async () => {

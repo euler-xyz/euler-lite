@@ -13,3 +13,14 @@ export function resolveLabelsBaseUrl(): string {
   }
   return value
 }
+
+export const isV3LabelsVersionSelector = (value: string): boolean =>
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(value) && !['draft', 'current', 'production'].includes(value)
+
+export const readV3LabelsSelection = () => {
+  const labelSet = process.env.LABELS_V3_SET?.trim() || 'public'
+  const version = process.env.LABELS_V3_VERSION?.trim() || 'latest'
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(labelSet)) throw new Error('LABELS_V3_SET must be a label set ID (letters, numbers, underscore or hyphen; max 100 characters)')
+  if (!isV3LabelsVersionSelector(version)) throw new Error('LABELS_V3_VERSION must be latest or a published version key (max 100 letters, numbers, dots, underscores or hyphens)')
+  return { labelSet, version }
+}
