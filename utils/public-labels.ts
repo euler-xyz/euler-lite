@@ -51,9 +51,8 @@ export interface EffectiveEarnPolicy {
 }
 
 /**
- * Effective visibility remains a separate compatibility contract until V3
- * publishes the resolved product/vault/asset policy result. No display
- * content is read from this source.
+ * Compatibility geo rules and additional discovery restrictions. V3 visibility
+ * is required independently; this source cannot override a negative verdict.
  */
 export interface EffectiveLabelsSource {
   products: Record<string, EffectiveProductPolicy>
@@ -62,7 +61,7 @@ export interface EffectiveLabelsSource {
 }
 
 export interface PublicLabelsBundle {
-  /** Concrete immutable version used for every request in this aggregate. */
+  /** Metadata publication; geo, entity addresses, platform tags and visibility remain live. */
   version: string
   publicLabels: PublicLabelsSource
   effectivePolicy: EffectiveLabelsSource
@@ -156,7 +155,10 @@ export const normalizePublicLabelsData = (
   effectivePolicy: EffectiveLabelsSource = emptyEffectiveLabelsSource(),
 ): PublicEulerLabelsData => {
   const data = normalizeSdkPublicLabelsData(chainId, source)
-  const inventoryRows = source.vaults.filter(vault => vault.chainId === chainId)
+  const inventoryRows = source.vaults.filter((vault) => {
+    const verdict = source.visibility[vault.address.toLowerCase()]
+    return vault.chainId === chainId && (verdict?.status === 'visible' || verdict?.status === 'warning')
+  })
   const { verified: compatibilityVerified, earn: compatibilityEarn } = getEffectiveVaultSets(effectivePolicy)
 
   // Plain-address labels and assessment-only rows have the same empty content
@@ -190,9 +192,8 @@ export const normalizePublicLabelsData = (
   const effectiveEarn = normalizeEffectiveEarnPolicy(effectivePolicy)
   const effectiveAssets = normalizeEffectiveAssets(effectivePolicy.assets)
 
-  // Apply the currently effective geo/visibility policy. Raw V3 geo policies
-  // are intentionally not composed here: global/product/vault/asset precedence
-  // and the final eligibility contract are not specified yet.
+  // The draft retains the compatibility geo evaluator. V3 rules are transported
+  // separately until the hosted geo enforcement path is wired and validated.
   for (const [productKey, product] of Object.entries(products)) {
     const effectiveProduct = effectivePolicy.products[productKey]
     if (!effectiveProduct) continue
@@ -220,6 +221,24 @@ export const normalizePublicLabelsData = (
     entry.block = effectiveEarn.blocks[address]
     entry.restricted = effectiveEarn.restrictions[address]
     entry.notExplorable = effectiveEarn.notExplorable.has(address)
+  }
+
+  // V3 flags are final per-side listing decisions. Compatibility restrictions
+  // may hide more, but cannot make a hidden or pending vault explorable.
+  for (const product of Object.values(products)) {
+    for (const address of [...product.vaults, ...(product.deprecatedVaults ?? [])]) {
+      const verdict = source.visibility[address.toLowerCase()]
+      const override = product.vaultOverrides?.[address]
+      if (!override) continue
+      override.notExplorableLend = override.notExplorableLend || verdict?.explorableLend !== true
+      override.notExplorableBorrow = override.notExplorableBorrow || verdict?.explorableBorrow !== true
+    }
+  }
+  for (const [address, entry] of Object.entries(earnVaultEntries)) {
+    if (source.visibility[address]?.explorableLend !== true) {
+      entry.notExplorable = true
+      effectiveEarn.notExplorable.add(address)
+    }
   }
 
   return {

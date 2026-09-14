@@ -13,6 +13,7 @@ export const VERIFICATION_ONLY_EARN = '0x00000000000000000000000000000000000000B
 export const KPK_GOVERNOR = '0x1572063377a9a4f8065BD7bA0D7fa135cd13051F'
 
 export const publicLabelsFixture: PublicLabelsSource = {
+  visibility: Object.fromEntries([KPK_VAULT, VERIFICATION_ONLY_EVK, VERIFICATION_ONLY_EARN].map(address => [address.toLowerCase(), { status: 'visible' as const, explorableLend: true, explorableBorrow: true, decidedBy: 'verified', reason: null }])),
   products: [{
     id: 'kpk-securitize',
     chainId: 1,
@@ -38,7 +39,7 @@ export const publicLabelsFixture: PublicLabelsSource = {
     name: 'KPK VBILL/USDC Lend',
     description: 'USDC lending vault for the KPK VBILL market.',
     portfolioNotice: null,
-    isDeprecated: false,
+    deprecated: false,
     deprecationReason: null,
     tags: ['recently added', 'suppress high utilisation warning'],
     campaigns: [{
@@ -57,7 +58,7 @@ export const publicLabelsFixture: PublicLabelsSource = {
     name: null,
     description: null,
     portfolioNotice: null,
-    isDeprecated: false,
+    deprecated: false,
     deprecationReason: null,
     tags: [],
     campaigns: null,
@@ -72,7 +73,7 @@ export const publicLabelsFixture: PublicLabelsSource = {
     name: null,
     description: null,
     portfolioNotice: null,
-    isDeprecated: false,
+    deprecated: false,
     deprecationReason: null,
     tags: [],
     campaigns: null,
@@ -87,7 +88,7 @@ export const publicLabelsFixture: PublicLabelsSource = {
     name: null,
     description: null,
     portfolioNotice: null,
-    isDeprecated: false,
+    deprecated: false,
     deprecationReason: null,
     tags: [],
     campaigns: null,
@@ -102,7 +103,7 @@ export const publicLabelsFixture: PublicLabelsSource = {
     name: null,
     description: null,
     portfolioNotice: null,
-    isDeprecated: false,
+    deprecated: false,
     deprecationReason: null,
     tags: [],
     campaigns: null,
@@ -117,7 +118,7 @@ export const publicLabelsFixture: PublicLabelsSource = {
     name: null,
     description: null,
     portfolioNotice: null,
-    isDeprecated: false,
+    deprecated: false,
     deprecationReason: null,
     tags: [],
     campaigns: null,
@@ -167,7 +168,6 @@ export const publicLabelsFixture: PublicLabelsSource = {
   }],
   entityAddresses: [{
     entityId: KPK,
-    chainId: 1,
     address: KPK_GOVERNOR,
     label: 'KPK Euler RWA Curation Safe',
   }],
@@ -178,6 +178,7 @@ export const publicLabelsFixture: PublicLabelsSource = {
     vaultAddress: null,
     assetAddress: null,
     countries: ['DE'],
+    countriesResolved: ['DE'],
     policyType: 'block',
     reason: 'Raw fixture policy',
     createdAt: '2026-08-04T13:25:58.430Z',

@@ -105,6 +105,33 @@ describe(`Public Labels ${PUBLIC_LABELS_FIXTURE_VERSION} normalization`, () => {
     expect(result.earnVaults).not.toContain(getAddress(ASSESSMENT_ONLY_EARN))
   })
 
+  it.each(['hidden', 'pending_review'] as const)('does not let compatibility policy override %s visibility', (status) => {
+    const visibility = Object.fromEntries(Object.keys(publicLabelsFixture.visibility).map(address => [address, {
+      status, explorableLend: false, explorableBorrow: false, decidedBy: 'unclaimed', reason: null,
+    }]))
+    const result = normalizePublicLabelsData(1, { ...publicLabelsFixture, visibility }, {
+      products: { compatibility: { vaults: [KPK_VAULT, VERIFICATION_ONLY_EVK] } },
+      earnVaults: [VERIFICATION_ONLY_EARN], assets: [],
+    })
+    expect(result.verifiedVaultAddresses).toEqual([])
+    expect(result.earnVaults).toEqual([])
+    expect(result.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]?.notExplorableLend).toBe(true)
+    expect(result.notExplorableEarnVaults.has(VERIFICATION_ONLY_EARN.toLowerCase())).toBe(true)
+  })
+
+  it('keeps per-side V3 listing flags when compatibility flags allow listing', () => {
+    const source = { ...publicLabelsFixture, visibility: { ...publicLabelsFixture.visibility,
+      [KPK_VAULT.toLowerCase()]: { ...publicLabelsFixture.visibility[KPK_VAULT.toLowerCase()], explorableLend: false },
+    } }
+    const result = normalizePublicLabelsData(1, source, {
+      products: { 'kpk-securitize': { vaults: [KPK_VAULT], vaultOverrides: { [getAddress(KPK_VAULT)]: { notExplorableLend: false, notExplorableBorrow: false } } } },
+      earnVaults: [], assets: [],
+    })
+    const override = result.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]
+    expect(override?.notExplorableLend).toBe(true)
+    expect(override?.notExplorableBorrow).toBe(false)
+  })
+
   it('keeps mixed vault tags scoped to their vault override', () => {
     const sibling = {
       ...publicLabelsFixture.vaults[0],

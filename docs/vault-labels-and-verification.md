@@ -8,21 +8,21 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 
 ## Label Data Sources
 
-`useEulerLabels` reads one chain-scoped bundle from `/api/internal/public-labels`. The server resolves `version=latest` once through the published-versions endpoint, then pins every page and entity-address read in that aggregate to the resulting immutable version. Deterministic tests request the published version pinned in `utils/public-labels.ts` directly. List reads follow `meta.total` with `limit=100` and increasing `offset`, because V3 caps each page at 100 records.
+`useEulerLabels` reads one chain-scoped bundle from `/api/internal/public-labels`. The server resolves `version=latest` once through the published-versions endpoint, pins resolved metadata pages and entity profiles to that publication. Geo policies, global entity addresses, platform tags and visibility remain live even for a concrete version. Tests use captured fixtures for those live overlays. List reads follow `meta.total` with `limit=100` and increasing `offset`, because V3 caps each page at 100 records.
 
 | Public data | V3 path |
 |---|---|
-| Vault inventory and labels | `GET /curation/vaults?version=...&chainId=...` |
-| Products | `GET /products?version=...&chainId=...` |
-| Entities | `GET /entities?version=...` |
-| Entity governance addresses | `GET /entities/{entityId}/addresses?chainId=...` |
-| Geo policy records | `GET /geo-policies?version=...` |
+| Vault inventory and labels | `GET /labels/vaults?view=resolved&version=...&chainId=...` |
+| Products | `GET /labels/products?view=resolved&version=...&chainId=...` |
+| Entities | `GET /labels/entities?version=...` |
+| Entity governance addresses | `GET /labels/entities/{entityId}/addresses` |
+| Geo policy records | `GET /geo-policies` |
 
-The vault inventory is a union of label and assessment records. Lite includes a row in label-derived listing or verification state when it has a product/entity assignment or published label content such as display metadata, deprecation, tags, or campaigns. Plain-address labels and assessment-only rows share the same empty content shape, so an empty row is retained only when the effective-policy snapshot classifies the same inventory address as a verified or Earn vault. Other assessment-only rows are ignored.
+The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Plain-address compatibility entries require a visible or warning verdict as well. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags constrain listing; compatibility policy may hide additional vaults but cannot override a negative V3 verdict. On-chain governor checks still determine the stronger verification badge.
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in manager ownership, governor verification, or manager-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
 
-The current V3 assessment and geo-policy records are not final eligibility decisions. Lite does not use raw `/evk/vaults/{chainId}/{address}/assessment` or `/earn/vaults/{chainId}/{address}/assessment` responses to hide or verify vaults, and it does not resolve global/product/vault/asset geo precedence from raw policy rows. Until V3 publishes an effective derived contract, the server reads only effective `block`, `restricted`, and discovery-visibility values from the compatibility policy source. That source contributes no display content. Raw V3 geo policies are retained as informational data only.
+The draft retains the compatibility source for effective `block` and `restricted` rules. Raw live V3 geo policies, including `countriesResolved`, are transported for the hosted enforcement migration but are not yet evaluated by Lite. The compatibility source contributes no display content. Completing hosted geo enforcement, durable last-known-good storage, the static source switch and the bake/cutover remains separate work; this draft is not the complete CTO rollout.
 
 Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
@@ -34,9 +34,9 @@ Oracle adapter identity and health assessments come from Data V3 through the SDK
 
 ## Published Content Contract
 
-Products provide `entityId`, optional `coBrandEntityIds`, display name, description, URL, portfolio notice, and direct product deprecation metadata. Vault inventory rows provide vault type, product/entity assignment, display metadata, tags, campaigns, and direct vault deprecation metadata. Lite does not cascade product deprecation to a vault; cascading behavior belongs to the future effective derived contract.
+Products provide `entityId`, optional `coBrandEntityIds`, display name, description, URL, portfolio notice, and direct product deprecation metadata. Vault inventory rows provide vault type, product/entity assignment, display metadata, tags, campaigns, and resolved vault deprecation metadata. V3 resolves the display cascade; Lite preserves empty resolved overrides instead of re-inheriting product notices.
 
-Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite separately fetches each relevant entity's chain-scoped governance addresses and checksums them before comparison with on-chain governor addresses.
+Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite separately fetches each relevant entity's global governance addresses and checksums them before comparison with on-chain governor addresses.
 
 Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations.
 

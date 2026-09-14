@@ -50,7 +50,7 @@ describe('public labels server source', () => {
     vi.setSystemTime(new Date('2026-08-05T10:00:00Z'))
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
     mocks.fetchWithTimeout.mockReset().mockImplementation(async (url: string) =>
-      new URL(url).pathname.endsWith('/label-sets/public/versions')
+      new URL(url).pathname.endsWith('/labels/sets/public/versions')
         ? versionsResponse()
         : emptyListResponse(),
     )
@@ -79,16 +79,18 @@ describe('public labels server source', () => {
     expect(concurrent).toBe(first)
     expect(cached).toBe(first)
     expect(first.version).toBe('v20260804151305236')
-    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(5)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(7)
     expect(mocks.getEffectiveLabelsSource).toHaveBeenCalledTimes(1)
     expect(mocks.fetchWithTimeout.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
-      '/v3/label-sets/public/versions',
-      '/v3/curation/vaults',
-      '/v3/products',
-      '/v3/entities',
+      '/v3/labels/sets/public/versions',
+      '/v3/labels/vaults',
+      '/v3/labels/products',
+      '/v3/labels/entities',
       '/v3/geo-policies',
+      '/v3/evk/vaults',
+      '/v3/earn/vaults',
     ])
-    expect(mocks.fetchWithTimeout.mock.calls.slice(1).every(([url]) =>
+    expect(mocks.fetchWithTimeout.mock.calls.slice(1, 4).every(([url]) =>
       new URL(url).searchParams.get('version') === 'v20260804151305236',
     )).toBe(true)
   })
@@ -99,9 +101,9 @@ describe('public labels server source', () => {
     const bundle = await getPublicLabelsBundle(1, 'v20260804151305236')
 
     expect(bundle.version).toBe('v20260804151305236')
-    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(4)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(6)
     expect(mocks.fetchWithTimeout.mock.calls.every(([url]) =>
-      !new URL(url).pathname.endsWith('/label-sets/public/versions'),
+      !new URL(url).pathname.endsWith('/labels/sets/public/versions'),
     )).toBe(true)
   })
 
