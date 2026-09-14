@@ -1,6 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { getAddress } from 'viem'
+import { KPK_VAULT, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -92,6 +94,48 @@ describe('public labels server source', () => {
     expect(mocks.fetchWithTimeout.mock.calls.slice(2, 5).every(([url]) =>
       new URL(url).searchParams.get('version') === 'v20260804151305236',
     )).toBe(true)
+  })
+
+  it('loads missing inventory verdicts through the SDK and retains them on refresh failure', async () => {
+    const address = KPK_VAULT.toLowerCase()
+    let failVisibility = false
+    const json = (data: unknown, total?: number) => new Response(JSON.stringify({ data, meta: { total, timestamp: '2026-09-14T12:00:00Z' } }))
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      const url = new URL(input)
+      const path = url.pathname
+      if (path.endsWith('/versions')) return versionsResponse()
+      if (path === '/v3/labels/vaults') return json([{ ...publicLabelsFixture.vaults[0], vaultType: 'securitize' }], 1)
+      if (path === '/v3/labels/products') return json(publicLabelsFixture.products, publicLabelsFixture.products.length)
+      if (path === '/v3/labels/entities') return json(publicLabelsFixture.entities, publicLabelsFixture.entities.length)
+      if (path.startsWith('/v3/labels/entities/')) {
+        const entityId = path.split('/')[4]
+        if (path.endsWith('/addresses')) {
+          const addresses = publicLabelsFixture.entityAddresses.filter(row => row.entityId === entityId)
+          return json(addresses, addresses.length)
+        }
+        return json(publicLabelsFixture.entities.find(row => row.id === entityId))
+      }
+      if (path === `/v3/evk/vaults/1/${address}/visibility`) {
+        expect(url.search).toBe('')
+        if (failVisibility) return new Response('unavailable', { status: 503 })
+        return json({ chainId: 1, vaultAddress: address, status: 'visible', checks: {
+          decidedBy: 'verified', notExplorableLend: false,
+          listing: { lend: { hidden: true }, borrow: { hidden: false } },
+        } })
+      }
+      return emptyListResponse()
+    })
+    const { getPublicLabelsBundle, getPublicEulerLabelsData, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const first = await getPublicLabelsBundle(1)
+    const data = await getPublicEulerLabelsData(1)
+    expect(data.verifiedVaultAddresses).toContain(getAddress(KPK_VAULT))
+    expect(data.managingEntityByVault?.[address]).toBe('kpk')
+    expect(data.visibility?.[address]).toMatchObject({ status: 'visible', explorableLend: false, explorableBorrow: true })
+    failVisibility = true
+    await expect(refreshPublicLabelsBundle(1)).resolves.toBe(first)
+    vi.resetModules()
+    const cold = await import('~/server/utils/public-labels-source')
+    await expect(cold.getPublicLabelsBundle(1)).rejects.toThrow('503')
   })
 
   it('uses deterministic fixture versions directly without resolving latest', async () => {

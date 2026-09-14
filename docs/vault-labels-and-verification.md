@@ -28,6 +28,8 @@ Oracle adapter identity and health assessments come from Data V3 through the SDK
 
 **Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. The browser deduplicates chain-scoped loads and rejects superseded responses. Visible tabs check freshness every minute and on focus/visibility changes, requesting a fresh server bundle after five minutes. Same-chain refreshes retain display data; verification becomes unavailable after fifteen minutes without a successful response. Requests time out after 35 seconds. Current hosted membership overrides cached positive registry flags, so refreshed revocations also update verification guards and verified EVault lists. Escrow perspective trust remains independent. An initial failure leaves labels unavailable with a retry action. Retry requests a fresh bundle and reloads vault discovery after labels recover.
 
+**Inventory gaps**: The SDK reads direct V3 visibility for labelled vaults absent from the EVK/Earn inventories, with at most eight requests in flight. This covers Securitize labels without inventing a verdict. Effective lend/borrow listing decisions are preserved, so a visible collateral wrapper may remain hidden from lend discovery. Direct-verdict failures fail the aggregate refresh and use the same bounded stale-snapshot behavior described above. Hosted governor/owner verification still applies separately.
+
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
 ---
