@@ -290,7 +290,7 @@ const addToBatch = async () => {
     // cleared values (an empty amount builds a no-op borrow).
     const snap = borrow.captureBorrowSnapshot(subAccount)
     const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-    await addBatchEntry({ intent: borrow.createBorrowIntent(snap), label, subAccount, sourceSubAccount: snap.isSavingCollateral && !snap.needsSwap ? snap.savingCollateral?.subAccount as Address | undefined : undefined, review: { type: snap.needsSwap ? 'swap-borrow' : 'borrow', asset: snap.needsSwap ? (snap.selectedAsset || cVault.asset) : bVault.asset, amount: snap.needsSwap ? snap.collateralAmount : snap.borrowAmount, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
+    await addBatchEntry({ intent: borrow.createBorrowIntent(snap), label, nameOverride: snap.needsSwap ? `Borrow ${bVault.asset.symbol}` : undefined, subAccount, sourceSubAccount: snap.isSavingCollateral && !snap.needsSwap ? snap.savingCollateral?.subAccount as Address | undefined : undefined, review: { type: snap.needsSwap ? 'swap-borrow' : 'borrow', asset: snap.needsSwap ? (snap.selectedAsset || cVault.asset) : bVault.asset, amount: snap.needsSwap ? snap.collateralAmount : snap.borrowAmount, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
     borrow.collateralAmount.value = ''
     borrow.borrowAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount })
