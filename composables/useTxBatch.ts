@@ -1,5 +1,5 @@
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
-import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
+import { formatUnits, getAddress, type Address, type Hash, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
 import type {
   IHasVaultAddress,
@@ -267,6 +267,7 @@ let batchExecutionPreparation: {
   presentationDigest: `0x${string}`
   readOnly: boolean
   promise: Promise<PreparedExecutionReview>
+  reviewId?: Hash
 } | undefined
 
 // TEMP DIAGNOSTICS — hunting an unreproducible "Batch simulation not loaded"
@@ -2388,6 +2389,11 @@ export const useTxBatch = () => {
       presentationInputs,
       generation: batchGenerationPublisher,
       cartGeneration,
+    }).then((prepared) => {
+      if (batchExecutionPreparation?.promise === promise) {
+        batchExecutionPreparation.reviewId = prepared.execution.reviewId
+      }
+      return prepared
     })
     batchExecutionPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, readOnly, promise }
     void promise.catch(() => {
@@ -2397,6 +2403,11 @@ export const useTxBatch = () => {
   }
 
   const prepareBatchExecutionReview = () => startBatchExecutionPreparation(batchGenerationPublisher.current())
+
+  const discardBatchExecutionReview = (reviewId: Hash) => {
+    if (batchExecutionPreparation?.reviewId === reviewId) batchExecutionPreparation = undefined
+    executionService.discard(reviewId)
+  }
 
   const warmBatchExecutionReview = async (cartGeneration: number) => {
     if (!draftEntries.value.length) return
@@ -2637,6 +2648,7 @@ export const useTxBatch = () => {
     setExecutionError,
     getBatchIntents,
     prepareBatchExecutionReview,
+    discardBatchExecutionReview,
     removeIntentRevisions,
     captureBatchCompletion,
     completeBatchExecution,

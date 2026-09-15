@@ -80,4 +80,6 @@ Use `toUsdAmount(undefined)` when the UI should show the token amount instead of
 
 Form-time Net APY and ROE previews use the same liability-context USD values to weight every collateral in a position. See [Projected Yield](./projected-yield.md) for the utilization simulation, completeness rules, and metric formulas.
 
+Oracle-adapter cards quote via EVC `batchSimulation`, not these USD helpers. See [Oracle Adapter Display](./oracle-adapter-display.md).
+
 EulerEarn Statistics uses the same off-chain `formatAssetValue` path for Total supply, Available liquidity, and Uncovered losses. See [Earn Uncovered Losses](./earn-uncovered-losses.md) for why `vault.lostAssets` must not be re-netted in Lite.

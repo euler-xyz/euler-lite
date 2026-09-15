@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import type { SecuritizeCollateralVault, EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getSubAccountAddress, isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { isSecuritizeVault } from '~/utils/vault/categories'
@@ -398,7 +399,7 @@ const addToBatch = async () => {
       intent,
       preparedIntent: quoteIntents?.[0],
       subAccount: positionAccount,
-      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
+      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, ...captureSwapReview(swapQuote, SwapperMode.EXACT_IN), quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
     })
     fromAmount.value = ''
     redirectAfterAdd('/portfolio/saving', { subAccount: positionAccount, vault: toAddr })

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { Account, Portfolio, type EVCBatchItem, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { Account, Portfolio, SwapperMode, type EVCBatchItem, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { encodeFunctionData, getAddress, keccak256, toHex, type Address, type StateOverride } from 'viem'
 import { EVC_ABI } from '~/abis/evc'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
@@ -17,6 +17,7 @@ import { createOperationIntent } from '~/features/reviewed-execution/domain/fact
 import { validateIntentSet } from '~/features/reviewed-execution/domain/validators'
 import type { SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
+import { captureSwapReview } from '~/utils/swapReview'
 import { makeSwapQuote } from '../reviewed-execution/swap-quote.test-fixture'
 
 vi.mock('~/composables/useEulerSdk', () => ({
@@ -49,6 +50,7 @@ const intentFor = (plan: TransactionPlan, subAccounts: Address[] = [owner]): Ope
 }
 const compilePreviewMock = vi.fn(async (intents: readonly OperationIntent[], _account?: Account<IHasVaultAddress>) => testIntentPlans.get(intents[0]!.intentId) ?? [])
 const executionMocks = {
+  discard: vi.fn(),
   compilePreview: compilePreviewMock,
   compilePreviewForSimulation: vi.fn(async (intents: readonly OperationIntent[], account?: Account<IHasVaultAddress>): Promise<{
     reviewedPlan: TransactionPlan
@@ -1038,6 +1040,37 @@ describe('useTxBatch execution errors', () => {
     items: [{ type: 'operation', name, items: [] }],
   }] as unknown as TransactionPlan
 
+  it('retains add-time expected output independently of executable swap constraints', async () => {
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(createMockSdk() as never)
+    const quote = makeSwapQuote()
+    quote.amountOut = '99000000'
+    quote.amountOutMin = '98765432'
+    quote.tokenOut.decimals = 6
+    const plan: TransactionPlan = [{
+      type: 'evcBatch',
+      items: [{ targetContract: quote.swap.swapperAddress, onBehalfOfAccount: subAccount, value: 0n, data: quote.swap.swapperData },
+        { targetContract: quote.verify.verifierAddress, onBehalfOfAccount: subAccount, value: 0n, data: quote.verify.verifierData }],
+    }]
+    const intent = createOperationIntent({
+      kind: 'deposit', planner: 'deposit-with-swap',
+      args: { swapQuote: quote, amount: 10n, tokenIn: quote.tokenIn.address },
+      chainId: 1, account: owner, subAccounts: [subAccount], source: 'test',
+    })
+    testIntentPlans.set(intent.intentId, plan)
+    const originalIntent = structuredClone(intent)
+    const batch = useTxBatch()
+    await batch.addEntry({
+      intent, label: 'Swap', subAccount,
+      review: { type: 'swap', asset: quote.tokenIn, amount: '100', ...captureSwapReview(quote, SwapperMode.EXACT_IN) },
+    })
+    quote.amountOut = '0'
+    expect(batch.entries.value[0]?.review).toMatchObject({ swapToAmount: '99', swapMode: SwapperMode.EXACT_IN })
+    expect(batch.entries.value[0]?.plan).toEqual(plan)
+    expect(intent).toEqual(originalIntent)
+    expect(batch.entries.value[0]?.intent.constraints).toContainEqual({ kind: 'minimum-output', token: quote.tokenOut.address, amount: 98765432n })
+    expect(quote.amountOutMin).toBe('98765432')
+  })
+
   it('folds plugin-prepended simulation layers into the base layer (ToS registration)', async () => {
     const sdk = createMockSdk()
     // Base + the loose ToS-registration item's layer + the entry's layer: the
@@ -1577,6 +1610,57 @@ describe('useTxBatch execution errors', () => {
 
     await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
     expect(executionMocks.prepare).toHaveBeenCalledOnce()
+  })
+
+  it.each([false, true])('reprepares a discarded review without editing the cart (spy: %s)', async (spy) => {
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref(spy ? undefined : owner), isConnected: ref(!spy),
+      isSpyMode: ref(spy), spyAddress: ref(spy ? owner : undefined), effectiveAddress: ref(owner),
+    }))
+    const batch = useTxBatch()
+    const first = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    const second = { execution: { reviewId: '0x02' }, previewPlan: [], prepared: {} }
+    const prepare = spy ? executionMocks.prepareReadOnly : executionMocks.prepare
+    prepare.mockResolvedValue(first as never)
+    await batch.addEntry({ intent: intentFor([] as TransactionPlan, [subAccount]), label: 'Supply', subAccount })
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(first)
+    const calls = prepare.mock.calls.length
+
+    batch.discardBatchExecutionReview('0x01')
+    expect(executionMocks.discard).toHaveBeenCalledWith('0x01')
+    prepare.mockResolvedValue(second as never)
+    const reopened = batch.prepareBatchExecutionReview()
+    expect(batch.prepareBatchExecutionReview()).toBe(reopened)
+    await expect(reopened).resolves.toBe(second)
+    expect(prepare).toHaveBeenCalledTimes(calls + 1)
+    expect(batch.entries.value).toHaveLength(1)
+  })
+
+  it.each([false, true])('preserves a newer preparation when an older review is discarded (resolved: %s)', async (resolved) => {
+    const batch = useTxBatch()
+    const first = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    const second = { execution: { reviewId: '0x02' }, previewPlan: [], prepared: {} }
+    executionMocks.prepare.mockResolvedValue(first as never)
+    await batch.addEntry({ intent: intentFor([] as TransactionPlan, [subAccount]), label: 'First', subAccount })
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(first)
+
+    let release!: (value: never) => void
+    executionMocks.prepare.mockImplementationOnce(() => new Promise((resolve) => {
+      release = resolve
+    }))
+    await batch.addEntry({ intent: intentFor([] as TransactionPlan, [subAccount]), label: 'Second', subAccount })
+    const successor = batch.prepareBatchExecutionReview()
+    if (resolved) {
+      release(second as never)
+      await successor
+    }
+    const calls = executionMocks.prepare.mock.calls.length
+    batch.discardBatchExecutionReview('0x01')
+    expect(batch.prepareBatchExecutionReview()).toBe(successor)
+    expect(executionMocks.prepare).toHaveBeenCalledTimes(calls)
+    expect(batch.entries.value).toHaveLength(2)
+    if (!resolved) release(second as never)
+    await expect(successor).resolves.toBe(second)
   })
 
   it('warms and adopts read-only multi-operation batch preparation in spy mode', async () => {

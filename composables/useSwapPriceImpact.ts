@@ -14,33 +14,25 @@ export const useSwapPriceImpact = (options: {
   const guard = createRaceGuard()
 
   watchEffect(async () => {
+    const gen = guard.next()
+    priceImpact.value = null
     const q = options.quote.value
-    if (!q) {
-      priceImpact.value = null
-      return
-    }
+    if (!q) return
 
     const amountIn = BigInt(q.amountIn || 0)
     const amountOut = BigInt(q.amountOut || 0)
-    if (amountIn <= 0n || amountOut <= 0n) {
-      priceImpact.value = null
-      return
-    }
+    if (amountIn <= 0n || amountOut <= 0n) return
 
     const tokenInAddr = q.tokenIn.address
     const tokenOutAddr = q.tokenOut.address
 
-    const gen = guard.next()
     const [inUsd, outUsd] = await Promise.all([
       getTokenUsdValue(amountIn, q.tokenIn.decimals, tokenInAddr, options.fromVault?.value),
       getTokenUsdValue(amountOut, q.tokenOut.decimals, tokenOutAddr, options.toVault?.value),
     ])
     if (guard.isStale(gen)) return
 
-    if (!inUsd || !outUsd) {
-      priceImpact.value = null
-      return
-    }
+    if (!inUsd || !outUsd) return
     const impact = (outUsd / inUsd - 1) * 100
     priceImpact.value = Number.isFinite(impact) ? impact : null
   })

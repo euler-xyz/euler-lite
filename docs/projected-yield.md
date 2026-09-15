@@ -151,6 +151,27 @@ Reward rows retain vault, collateral, action, provider, and reward-token identit
 
 `projectedYieldHasRewards()` checks both weighted reward contributions and campaign rows. The summary uses that result for the reward indicator.
 
+### Reward eligibility notices
+
+APR headlines stay visible. Eligibility is a separate notice, not a reason to hide or zero the campaign.
+
+`rewardCampaignEligibilityLabel()` (`entities/reward-campaign.ts`) maps provider-owned metadata. Lite does not interpret requirement objects — providers own that payload.
+
+| `eligibilityRequirementsStatus` | Notice |
+| --- | --- |
+| `none` | No notice, even if `eligibilityRequirements` is non-empty |
+| `incomplete` | `eligibility information may be incomplete; additional requirements may apply` |
+| `complete`, or status omitted with a non-empty `eligibilityRequirements` array | `eligibility requirements apply` |
+| omitted status and empty/missing requirements | No notice |
+
+`mergeProjectedRewardCampaigns()` copies `eligibilityLabel` onto projected reward lines. After-state metadata wins when both sides of a merge have a label; a side without a label deletes the field so a `none` after-state cannot keep a stale before-state warning.
+
+`RewardEligibilityNotice.vue` renders the label next to campaign rows in APY / Net APY / ROE / projected-yield modals. When `sourceUrl` is present the notice is a link (warning icon + label); otherwise it is static text.
+
+Whitelist / blacklist membership (`isCampaignEligibleForAddress`) still filters *whether* a campaign applies to the connected or spy address. That is independent of the eligibility-requirements notice: a campaign can apply to the user and still warn that extra criteria exist.
+
+Do not invent requirement copy in Lite. If the provider cannot describe the criteria, keep the incomplete-information label rather than guessing.
+
 ## Adding a Projection to a Form
 
 1. Define current and after-state token amounts as `bigint`; do not derive utilization deltas from rounded display values.
@@ -172,11 +193,13 @@ Current consumers include lend deposit/withdraw/swap, borrow and borrow-more, mu
 - **Every form on the page loses its projection at once:** look for a group-level rejection — a failed SDK or provider lookup, or a failed lens read on a deployment with no EVC address — rather than a per-vault `null`.
 - **Headline and modal differ:** derive both from the same `ProjectedYieldState`; do not recalculate the headline with a separate APY helper.
 - **Rewards look duplicated:** campaign identity must include the vault and `rewardCampaignKey()`, which includes action and collateral qualification.
+- **Eligibility notice missing or stale:** labels come from `eligibilityRequirementsStatus`, not from parsing `eligibilityRequirements`. An after-state `none` must drop a before-state warning (`mergeProjectedRewardCampaigns` deletes the field).
 
 ## Tests
 
 - `tests/utils/vault/projected-rates.test.ts` — rate batching, same-vault merging, deployment scoping, and `null` rate results; the group-level rejection paths in the failure contract are not covered here
 - `tests/composables/usePositionCollateralApy.test.ts` — multi-collateral weighting, layer-aware reads, and incomplete snapshots
-- `tests/utils/projected-yield.test.ts` — metric denominators, campaign transitions, and reward indicators
+- `tests/utils/projected-yield.test.ts` — metric denominators, campaign transitions, reward indicators, and eligibility-label merge
+- `tests/entities/reward-campaign.test.ts` — `none` / `complete` / `incomplete` notice mapping
 - `tests/composables/useLayeredVaults.test.ts` — simulated-vault precedence
 - Form-specific tests under `tests/composables/` — operation deltas, race handling, and hidden projections on both unavailable and rejected rates
