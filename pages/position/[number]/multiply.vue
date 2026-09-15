@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { VaultAsset } from '~/types/asset'
 import { getPositionMultiplier, type ProjectedRates } from '~/utils/vault/apy'
-import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
@@ -699,29 +699,14 @@ const multiplySwapSummary = computed(() => {
     to: `${formatSmartAmount(amountOut)} ${multiplyLongVault.value.asset.symbol}`,
   }
 })
-const multiplyPriceImpact = ref<number | null>(null)
-watchEffect(async () => {
-  if (isMultiplyQuoteLoading.value) {
-    multiplyPriceImpact.value = null
-    return
-  }
-  if (!multiplySwapReady.value || !multiplyShortVault.value || !multiplyLongVault.value) {
-    multiplyPriceImpact.value = null
-    return
-  }
-  const amountInUsd = await getAssetUsdValue(multiplySwapAmountIn.value, multiplyShortVault.value, 'off-chain')
-  const amountOutUsd = await getAssetUsdValue(multiplySwapAmountOut.value, multiplyLongVault.value, 'off-chain')
-  if (!amountInUsd || !amountOutUsd) {
-    multiplyPriceImpact.value = null
-    return
-  }
-  const impact = (amountOutUsd / amountInUsd - 1) * 100
-  if (!Number.isFinite(impact)) {
-    multiplyPriceImpact.value = null
-    return
-  }
-  multiplyPriceImpact.value = impact
+const { priceImpact: multiplySwapPriceImpact } = useSwapPriceImpact({
+  quote: computed(() => isMultiplyQuoteLoading.value ? null : multiplyEffectiveQuote.value),
+  fromVault: multiplyShortVault,
+  toVault: multiplyLongVault,
 })
+const multiplyPriceImpact = computed(() =>
+  multiplyIsSameAsset.value && multiplySwapReady.value ? 0 : multiplySwapPriceImpact.value,
+)
 const multipliedPriceImpact = computed(() =>
   computeMultipliedPriceImpact(multiplyPriceImpact.value, multiplier.value),
 )
