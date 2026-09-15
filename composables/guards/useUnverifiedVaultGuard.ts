@@ -16,6 +16,7 @@ interface UnverifiedVaultGuardContext {
   account: Ref<string | undefined>
   chainId: Ref<number | undefined>
   operation: ComputedRef<string>
+  allowUnavailableLabels?: boolean
 }
 
 let unverifiedVaultGuardSequence = 0
@@ -59,12 +60,12 @@ export const useUnverifiedVaultGuard = (
       return !!entry && !!context.chainId.value && entry.vault.chainId === context.chainId.value
     })
   })
-  const isVerificationReady = computed(() => labelsReady.value && hasVaultMetadata.value)
+  const isVerificationReady = computed(() => (labelsReady.value || context.allowUnavailableLabels === true) && hasVaultMetadata.value)
   const isVerificationLoading = computed(() =>
-    (!labelsReady.value && !labelsError.value) || (!hasVaultMetadata.value && isResolvingVaults.value),
+    (!context.allowUnavailableLabels && !labelsReady.value && !labelsError.value) || (!hasVaultMetadata.value && isResolvingVaults.value),
   )
   const verificationError = computed(() => {
-    if (!labelsReady.value && labelsError.value) return labelsError.value
+    if (!context.allowUnavailableLabels && !labelsReady.value && labelsError.value) return labelsError.value
     if (!hasVaultMetadata.value && !isResolvingVaults.value) return 'Unable to load vault verification. Please retry.'
     return undefined
   })
@@ -74,6 +75,7 @@ export const useUnverifiedVaultGuard = (
   }
 
   const hasCanonicalVerification = (address: string): boolean => {
+    if (!labelsReady.value) return false
     const entry = get(address)
     if (!entry || !context.chainId.value || entry.vault.chainId !== context.chainId.value) return false
 

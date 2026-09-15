@@ -181,7 +181,7 @@ const form = useCollateralForm({
   },
   usePreparedPipeline: true,
 })
-useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
+useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)), { acquiresExposure: false })
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
 
 // True when the requested amount covers the entire collateral balance. The Max

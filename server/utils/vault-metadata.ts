@@ -1,7 +1,7 @@
+import { resolveLabelLogo } from '~/utils/label-logo'
 import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
-import { resolveLabelsBaseUrl } from './labels-base-url'
 import {
   buildLabelsView,
   type EntityEntryFull,
@@ -48,11 +48,11 @@ export interface VaultMetadata {
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
-  /** True if the vault is listed under any product's `deprecatedVaults` (or earn-vaults `deprecated: true`). */
+  /** True when Public Labels marks the vault deprecated. */
   deprecated: boolean
   /** True when the owning product has the `governance limited` tag. False for vaults without a product. */
   governanceLimited: boolean
-  /** The owning product slug from products.json (e.g. "euler-prime"), or null for vaults outside any product (escrow, earn-only entries, governor mismatch with no product). */
+  /** The Public Labels product ID, or null for vaults outside a product. */
   productId: string | null
   asset: AssetInfo | null
   /** All declared product entities whose `addresses` contain the vault's on-chain governor (or owner, for Earn). Empty when no entity matches, the vault is escrow, or the vault is unverified. Multiple entries can occur when a product declares multiple entities and more than one matches. */
@@ -77,10 +77,6 @@ function strOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function entityLogoUrl(fileName: string): string {
-  return `${resolveLabelsBaseUrl()}/logo/${fileName}`
-}
-
 function buildAsset(asset: VaultAsset | undefined, tokenLogos: Map<string, string>): AssetInfo | null {
   if (!asset) return null
   const addr = tryChecksum(asset.address)
@@ -94,7 +90,7 @@ function buildAsset(asset: VaultAsset | undefined, tokenLogos: Map<string, strin
   }
 }
 
-function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntryFull>): EntityInfo | null {
+function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntryFull>, logoBaseUrl?: string): EntityInfo | null {
   const entity = entities[entityKey]
   if (!entity) return null
   const name = strOrEmpty(entity.name)
@@ -103,7 +99,7 @@ function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry
   const url = strOrNull(entity.url)
   return {
     name,
-    logo: logoFile ? entityLogoUrl(logoFile) : '',
+    logo: logoFile ? resolveLabelLogo(logoFile, logoBaseUrl) : '',
     description: strOrNull(entity.description),
     url: url && /^https?:\/\//i.test(url) ? url : null,
   }
@@ -140,14 +136,15 @@ function buildEvkMetadata(
   // the vault. On-chain ERC-20 name is only a fallback when labels carry
   // no name. Verification (governor match) only gates `entities` resolution
   // below, which is the security-sensitive "who manages this vault" claim.
-  const labelName = strOrNull(override?.name) ?? (product?.name || null)
-  const description = strOrNull(override?.description) ?? product?.description ?? null
-  const portfolioNotice = strOrNull(override?.portfolioNotice) ?? product?.portfolioNotice ?? null
-  const deprecationReason = strOrNull(override?.deprecationReason) ?? product?.deprecationReason ?? null
+  // Resolved empty strings clear inherited product content.
+  const labelName = strOrNull(override?.name ?? product?.name)
+  const description = strOrNull(override?.description ?? product?.description)
+  const portfolioNotice = strOrNull(override?.portfolioNotice ?? product?.portfolioNotice)
+  const deprecationReason = strOrNull(override?.deprecationReason ?? product?.deprecationReason)
 
   const entityKeys = verified ? resolveGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
   const entities = entityKeys
-    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw))
+    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
 
   return {
@@ -177,14 +174,15 @@ function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata |
 
   // Same rationale as buildEvkMetadata: label fields are authoritative
   // content. `verified` only gates `entities` resolution.
-  const labelName = product?.name || null
-  const description = strOrNull(earnEntry?.description) ?? product?.description ?? null
-  const portfolioNotice = strOrNull(earnEntry?.portfolioNotice) ?? product?.portfolioNotice ?? null
-  const deprecationReason = strOrNull(earnEntry?.deprecationReason) ?? product?.deprecationReason ?? null
+  const override = product?.vaultOverrides[addr]
+  const labelName = strOrNull(override?.name ?? product?.name)
+  const description = strOrNull(override?.description ?? earnEntry?.description ?? product?.description)
+  const portfolioNotice = strOrNull(override?.portfolioNotice ?? earnEntry?.portfolioNotice ?? product?.portfolioNotice)
+  const deprecationReason = strOrNull(override?.deprecationReason ?? earnEntry?.deprecationReason ?? product?.deprecationReason)
 
   const entityKeys = verified ? resolveEarnGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
   const entities = entityKeys
-    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw))
+    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
 
   return {

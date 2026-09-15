@@ -6,8 +6,6 @@ export const useDeployConfig = () => {
     const s = String(val)
     return s !== 'false' && s !== '0'
   }
-  const labelsBaseUrl = (rc.configLabelsBaseUrl || '').trim().replace(/\/+$/, '')
-
   return {
     // URLs (empty string = not configured, hide UI element)
     docsUrl: rc.configDocsUrl,
@@ -27,11 +25,6 @@ export const useDeployConfig = () => {
     appDescription: envConfig.appDescription,
     logoUrl: envConfig.logoUrl,
     socialImageUrl: envConfig.socialImageUrl,
-
-    // Repos (labelsRepo/branch/baseUrl still needed for logo URL construction)
-    labelsRepo: rc.configLabelsRepo || 'euler-xyz/euler-labels',
-    labelsRepoBranch: rc.configLabelsRepoBranch || 'master',
-    labelsBaseUrl,
 
     // Feature flags: all enabled by default, set env var to 'false' to disable
     enableTosSignature: !!rc.configTosMdUrl,

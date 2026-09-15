@@ -425,7 +425,7 @@ const marketOptions = computed(() => {
     counted.add(dedupKey)
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
-    return [{ key: market.name, label: market.name, tvl, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    return [{ key: market.name, label: market.name, tvl, icon: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
   }))
 })
 
@@ -438,7 +438,7 @@ const riskManagerOptions = computed(() => {
       const dedupKey = `${entity.name}:${pair.borrow.address}`
       const tvl = counted.has(dedupKey) ? 0 : pairTvl
       counted.add(dedupKey)
-      return { key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }
+      return { key: entity.name, label: entity.name, tvl, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }
     })
   }))
 })

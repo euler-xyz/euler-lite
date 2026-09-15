@@ -1,4 +1,5 @@
 import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { getEulerLabelProductBrandEntities } from '@eulerxyz/euler-v2-sdk/public-labels'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
@@ -74,6 +75,7 @@ export const buildProductGroups = (
   const groups: MarketGroup[] = []
 
   for (const [productKey, product] of Object.entries(products)) {
+    if (product.isStandalone) continue
     const memberVaults: AnyVault[] = []
     const allProductAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     for (const vaultAddr of allProductAddresses) {
@@ -104,6 +106,7 @@ export const buildProductGroups = (
       source: 'product',
       curator,
       curatorKey,
+      brandEntities: getEulerLabelProductBrandEntities(product, entities),
       vaults: memberVaults,
       externalCollateral: [],
       unknownCollateral: [],
@@ -511,7 +514,7 @@ export const useMarketGroups = () => {
   /** Fetch a market group on demand for non-explorable products accessed via direct URL */
   const fetchMarketGroupOnDemand = async (productKey: string): Promise<MarketGroup | null> => {
     const product = products[productKey]
-    if (!product) return null
+    if (!product || product.isStandalone) return null
 
     const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     if (allAddresses.length === 0) return null
@@ -575,6 +578,7 @@ export const useMarketGroups = () => {
       source: 'product',
       curator,
       curatorKey,
+      brandEntities: getEulerLabelProductBrandEntities(product, entities),
       vaults: memberVaults,
       externalCollateral: [],
       unknownCollateral: [],

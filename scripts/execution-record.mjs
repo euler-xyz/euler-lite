@@ -1483,7 +1483,7 @@ function shouldCaptureUrl(rawUrl) {
       || pathName.startsWith('/api/internal/pyth')
       || pathName.startsWith('/api/internal/rpc')
       || pathName.startsWith('/api/internal/euler-chains')
-      || pathName.startsWith('/api/internal/labels')
+      || pathName.startsWith('/api/internal/public-labels')
       || pathName.startsWith('/api/internal/vaults')
       || pathName.startsWith('/api/internal/token-list')
       || url.hostname.includes('swap')

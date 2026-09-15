@@ -83,6 +83,8 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
+| `LABELS_SOURCE` | `v3` (default) or `static`; selects the shared label snapshot producer. |
+| `STATIC_LABELS_BASE_URL` | Required directory URL for static authoring files; unused by hosted V3 mode. |
 | `TURTLE_EARN_API_URL` or `NUXT_PUBLIC_TURTLE_EARN_API_URL` | Optional Turtle reward-proof upstream override; defaults to `https://earn.turtle.xyz/v1`. |
 
 #### Branding & Feature Flags
@@ -95,9 +97,6 @@ These settings use `NUXT_PUBLIC_CONFIG_*` env vars. Branding and announcement va
 | `NUXT_PUBLIC_CONFIG_APP_DESCRIPTION`        | `Lightweight interface for Euler Finance.` | App description                                       |
 | `NUXT_PUBLIC_CONFIG_LOGO_URL`               | —                                          | Custom logo URL (falls back to built-in Euler logo)   |
 | `NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL`       | —                                          | Absolute URL to social share image (og:image / twitter:image), 1200×630+ |
-| `NUXT_PUBLIC_CONFIG_LABELS_REPO`            | `euler-xyz/euler-labels`                   | GitHub labels repo                                    |
-| `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH`     | `master`                                   | Branch to fetch labels from                           |
-| `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`        | —                                          | S3/CDN base URL for labels (overrides repo/branch)    |
 | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | Explicit URL for EulerChains.json; takes precedence over the Euler interfaces branch |
 | `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | — | Base URL serving `{contract}.json` for runtime ABIs; takes precedence over the Euler interfaces branch. |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
@@ -219,27 +218,11 @@ The resolution order in `getAssetLogoUrl(address, symbol)`:
 2. `logoURI` from the unified token list (Euler SDK token list > DefiLlama > Uniswap > Merkl)
 3. Empty string (component shows initials fallback)
 
-#### EulerEarn Vaults
+#### Public Labels
 
-If using a custom labels repository, create chain-specific `earn-vaults.json` files to curate which EulerEarn vaults appear:
+Vault inventory, products, entities, hosted logos, tags, campaigns, and deprecation metadata come from the versioned Public Labels API at `V3_API_URL`. Lite resolves `version=latest` to one immutable publication before fetching a chain bundle and follows every paginated list through `meta.total`.
 
-```
-your-labels-repo/
-├── 1/earn-vaults.json          # Ethereum
-├── 42161/earn-vaults.json      # Arbitrum
-└── 8453/earn-vaults.json       # Base
-```
-
-Each file is a JSON array of vault addresses:
-
-```json
-[
-  "0x1234567890123456789012345678901234567890",
-  "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-]
-```
-
-When using the default `euler-xyz/euler-labels` repository, all verified EulerEarn vaults are shown automatically.
+Hosted labels, visibility and geo policies come exclusively from V3. Fork deployments can set `LABELS_SOURCE=static` and provide their own authoring files through `STATIC_LABELS_BASE_URL`. See [Static labels](docs/static-labels.md) for the format, failure semantics and on-chain data options.
 
 ### 4. Development
 

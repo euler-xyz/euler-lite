@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+APP_DIR="${EULER_LITE_APP_DIR:-$(pwd)}"
+export APP_DIR
+
 if [ -z "${EULER_SDK_BRANCH:-}" ]; then
   echo "EULER_SDK_BRANCH is not set; using @eulerxyz/euler-v2-sdk from package-lock.json."
   npm ls @eulerxyz/euler-v2-sdk --depth=0
@@ -14,7 +17,7 @@ case "$EULER_SDK_BRANCH" in
     ;;
 esac
 
-APP_SDK_VERSION="$(node -p "const p=require('/usr/src/app/package.json'); const spec=(p.dependencies||{})['@eulerxyz/euler-v2-sdk'] || (p.devDependencies||{})['@eulerxyz/euler-v2-sdk'] || ''; spec.match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/)?.[0] || ''")"
+APP_SDK_VERSION="$(node -p "const p=require(process.env.APP_DIR + '/package.json'); const spec=(p.dependencies||{})['@eulerxyz/euler-v2-sdk'] || (p.devDependencies||{})['@eulerxyz/euler-v2-sdk'] || ''; spec.match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/)?.[0] || ''")"
 
 SDK_REPO="https://github.com/euler-xyz/euler-sdks.git"
 SDK_DIR="/tmp/euler-sdks"
@@ -38,7 +41,7 @@ if [ -n "$APP_SDK_VERSION" ]; then
     SDK_RELEASE_COMMIT="$(git rev-parse "refs/tags/${SDK_RELEASE_TAG}^{}")"
     if git merge-base --is-ancestor HEAD "$SDK_RELEASE_COMMIT"; then
       echo "SDK branch ${EULER_SDK_BRANCH} is already included in ${SDK_RELEASE_TAG}; using @eulerxyz/euler-v2-sdk from package-lock.json."
-      cd /usr/src/app
+      cd "$APP_DIR"
       npm ls @eulerxyz/euler-v2-sdk --depth=0
       exit 0
     fi
@@ -65,7 +68,11 @@ fi
 
 case "$SDK_PNPM_PACKAGE" in
   pnpm@*|pnpm)
-    npm install --global "$SDK_PNPM_PACKAGE"
+    if command -v pnpm >/dev/null 2>&1 && pnpm --version >/dev/null 2>&1; then
+      echo "Using existing pnpm $(pnpm --version)."
+    else
+      npm install --global "$SDK_PNPM_PACKAGE"
+    fi
     ;;
   *)
     echo "Unsupported SDK pnpm package: ${SDK_PNPM_PACKAGE}" >&2
@@ -84,7 +91,7 @@ const fs = require('node:fs')
 
 const packageJsonPath = 'packages/euler-v2-sdk/package.json'
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
-const appPackageJson = JSON.parse(fs.readFileSync('/usr/src/app/package.json', 'utf8'))
+const appPackageJson = JSON.parse(fs.readFileSync(`${process.env.APP_DIR}/package.json`, 'utf8'))
 const appSdkSpec = appPackageJson.dependencies?.['@eulerxyz/euler-v2-sdk']
   || appPackageJson.devDependencies?.['@eulerxyz/euler-v2-sdk']
   || ''
@@ -105,22 +112,31 @@ NODE
 mkdir -p "$SDK_PACK_DIR"
 npm pack --ignore-scripts ./packages/euler-v2-sdk --pack-destination "$SDK_PACK_DIR"
 
-cd /usr/src/app
+cd "$APP_DIR"
 npm install --no-save --ignore-scripts "$SDK_PACK_DIR"/*.tgz
 if ! npm ls @eulerxyz/euler-v2-sdk --depth=0; then
   echo "npm ls reported a version mismatch for the preview SDK tarball; validating runtime exports instead."
 fi
 
 node --input-type=module - <<'NODE'
-import { buildEulerSDK, PositionMigrationService } from '@eulerxyz/euler-v2-sdk'
+import {
+  buildEulerSDK,
+  PositionMigrationService,
+} from '@eulerxyz/euler-v2-sdk'
+import {
+  normalizePublicLabelsData,
+  PublicLabelsV3Adapter,
+} from '@eulerxyz/euler-v2-sdk/public-labels'
 
 const missing = []
 if (typeof buildEulerSDK !== 'function') missing.push('buildEulerSDK')
 if (typeof PositionMigrationService !== 'function') missing.push('PositionMigrationService')
+if (typeof PublicLabelsV3Adapter !== 'function') missing.push('PublicLabelsV3Adapter')
+if (typeof normalizePublicLabelsData !== 'function') missing.push('normalizePublicLabelsData')
 
 if (missing.length > 0) {
   throw new Error(`Preview SDK is missing expected exports: ${missing.join(', ')}`)
 }
 
-console.log('Preview @eulerxyz/euler-v2-sdk migration exports are available.')
+console.log('Preview @eulerxyz/euler-v2-sdk branch exports are available.')
 NODE

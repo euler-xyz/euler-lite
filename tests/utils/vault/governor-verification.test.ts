@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { encodeAbiParameters, getAddress, type Address, zeroAddress } from 'viem'
 import {
   isVaultGovernorVerified,
+  getHostedEntityKeys,
   isEarnVaultOwnerVerified,
   resolveGoverningEntityKeys,
   resolveEarnGoverningEntityKeys,
@@ -239,7 +240,7 @@ describe('isEarnVaultOwnerVerified', () => {
     expect(isEarnVaultOwnerVerified(earn, labels)).toBe(false)
   })
 
-  it('trusts earn vaults without a product entry (earn-vaults.json sole anchor)', () => {
+  it('trusts a published earn vault without a product assignment', () => {
     const earn = makeEarn({ owner: GOV_A })
     const labels = buildLabels({ declaredKeys: {} })
     expect(isEarnVaultOwnerVerified(earn, labels)).toBe(true)
@@ -434,5 +435,19 @@ describe('hasResolvedGovernorAdmin', () => {
   it('rejects non-EVault shapes', () => {
     expect(hasResolvedGovernorAdmin(undefined)).toBe(false)
     expect(hasResolvedGovernorAdmin({ governorAdmin: GOV_A })).toBe(false)
+  })
+})
+
+describe('hosted standalone Earn authority', () => {
+  it('requires the V3 manager and a matching on-chain owner even without a product', () => {
+    const vault = { address: VAULT_ADDR, verified: true, governance: { owner: GOV_A } } as EarnVault
+    const make = (entity?: string): VerificationLabels => ({
+      getDeclaredEntityKeys: address => getHostedEntityKeys({ source: 'v3', managingEntityByVault: entity ? { [VAULT_ADDR.toLowerCase()]: entity } : {} }, address),
+      hasEntityAddress: (key, address) => key === 'manager' && address === GOV_A,
+    })
+    expect(isEarnVaultOwnerVerified(vault, make())).toBe(false)
+    expect(isEarnVaultOwnerVerified(vault, make('co-brand'))).toBe(false)
+    expect(isEarnVaultOwnerVerified(vault, make('manager'))).toBe(true)
+    expect(isEarnVaultOwnerVerified({ ...vault, governance: { ...vault.governance, owner: GOV_B } } as EarnVault, make('manager'))).toBe(false)
   })
 })

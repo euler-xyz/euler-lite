@@ -1,3 +1,4 @@
+import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { computed, effectScope, ref, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { formatUnits, getAddress, type Address, type Hash, type StateOverride } from 'viem'
 import { Account, fetchErc20SlotHints, getEulerLabelProductByVault, mergeStateOverrides } from '@eulerxyz/euler-v2-sdk'
@@ -665,7 +666,10 @@ export const fetchBaseAccountSnapshot = async (
   owner: Address,
 ): Promise<Account<IHasVaultAddress>> => {
   const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
-    populateAll: true,
+    populateVaults: true,
+    populateMarketPrices: true,
+    populateUserRewards: true,
+    vaultFetchOptions: liteVaultFetchOptions,
   })
   return fetched.result as Account<IHasVaultAddress>
 }
@@ -1525,7 +1529,7 @@ export const stitchAccount = (
 ): Account<IHasVaultAddress> => {
   // Reward + intrinsic-APY metadata is populated directly on the simulated
   // vaults by simulateTransactionPlan (vaultFetchOptions), matching the base
-  // account's populateAll. The simulated account only contains the touched
+  // account's explicit population options. The simulated account only contains the touched
   // slice, so we merge positions first and then recompute USD fields that depend
   // on the full sub-account context.
   const mergedSubs: Record<string, StitchSubAccount> = {}
@@ -1771,7 +1775,7 @@ export const useTxBatch = () => {
           stateOverrideOptions: { slotHints: batchSlotHints },
           extraStateOverrides,
           // Populate the simulated vaults with reward campaigns + intrinsic
-          // (e.g. staking) APY, exactly as the base account is via populateAll —
+          // (e.g. staking) APY, exactly as the base account is via its fetch options —
           // so the simulated portfolio's net APY / ROE and per-position
           // supply/borrow costs include them, including for vaults entered for
           // the first time in the batch (which the base account can't supply).

@@ -94,6 +94,16 @@ describe('final two-vault swap policy', () => {
       .rejects.toThrow('Vault verification is unavailable')
   })
 
+  it('allows an acknowledged simple withdrawal during a labels outage, but not a mixed swap batch', async () => {
+    geo.labelsReady.value = false
+    const intent = createOperationIntent({ kind: 'withdraw', planner: 'withdraw', args: { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n }, chainId: 1, account: TEST_ACCOUNT, subAccounts: [TEST_ACCOUNT], source: 'test', operation: 'lend-withdraw', createdAt: 1, intentId: 'exit' })
+    const requestSet = makeReviewedExecution().requestSet
+    await expect(resolveAppPolicy(requestSet, 100, [intent])).rejects.toThrow('acknowledgement')
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-withdraw', vaults: [TEST_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [intent])).resolves.toBeDefined()
+    await expect(resolveAppPolicy(requestSet, 100, [intent, swapIntent()])).rejects.toThrow('Vault verification is unavailable')
+  })
+
   it.each([
     ['omitted', true],
     ['empty', true],

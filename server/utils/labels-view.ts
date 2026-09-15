@@ -1,7 +1,8 @@
+import { getLabelVaultCandidates, type PublicEulerLabelsData } from '~/utils/public-labels'
 /**
  * Per-chain "labels view" shared by /api/public/is-known and
  * /api/public/metadata. It keeps Lite's public API/cache policy in the app,
- * but sources normalized labels and vault entities through the SDK.
+ * and reads normalized label content from the shared Public Labels V3 source.
  */
 import {
   StandardEVaultPerspectives,
@@ -23,7 +24,8 @@ import { logger } from './logger'
 import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
-import type { VerificationLabels } from '~/utils/vault/governor-verification'
+import { getPublicEulerLabelsData } from './public-labels-source'
+import { getHostedEntityKeys, type VerificationLabels } from '~/utils/vault/governor-verification'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
 
@@ -65,7 +67,7 @@ interface TokenListEntry {
 }
 
 export interface ProductDescriptor {
-  slug: string
+  slug: string | null
   name: string
   description: string | null
   portfolioNotice: string | null
@@ -78,6 +80,7 @@ export interface ProductDescriptor {
 
 export interface LabelsView {
   chainId: number
+  logoBaseUrl?: string
   snapshot: ChainVaultsSnapshot
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
@@ -159,7 +162,7 @@ export function buildProductDescriptors(products: Record<string, ProductEntryFul
       }
     }
     const desc: ProductDescriptor = {
-      slug,
+      slug: product.isStandalone ? null : slug,
       name: strOrEmpty(product.name),
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
@@ -228,21 +231,21 @@ function withVaultMetadata<T extends object>(
 async function buildSnapshot(
   chainId: number,
   sdk: EulerSDK,
-  labels: EulerLabelsData,
+  labels: PublicEulerLabelsData,
 ): Promise<{ snapshot: ChainVaultsSnapshot, escrowAddresses: Set<Address> }> {
   const escrowAddresses = new Set<Address>(
     uniqueAddresses(await sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW])),
   )
   const candidates = uniqueAddresses([
-    ...labels.verifiedVaultAddresses,
-    ...labels.earnVaults,
+    ...getLabelVaultCandidates(labels).vaults,
+    ...getLabelVaultCandidates(labels).earn,
   ])
 
   const types = candidates.length > 0
     ? await sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)
     : {}
 
-  const earnSet = new Set(uniqueAddresses(labels.earnVaults).map(addr => addr.toLowerCase()))
+  const earnSet = new Set(uniqueAddresses(getLabelVaultCandidates(labels).earn).map(addr => addr.toLowerCase()))
   const evkAddresses: Address[] = []
   const securitizeAddresses: Address[] = []
   const earnAddresses: Address[] = []
@@ -343,7 +346,7 @@ async function buildSnapshot(
 async function assembleLabelsView(chainId: number): Promise<LabelsView> {
   const sdk = await getSdk(chainId)
   const [labels, tokens] = await Promise.allSettled([
-    sdk.eulerLabelsService.fetchEulerLabelsData(chainId),
+    getPublicEulerLabelsData(chainId),
     fetchTokenList(chainId),
   ])
 
@@ -368,6 +371,8 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   const verificationLabels: VerificationLabels = {
     getDeclaredEntityKeys: (addr) => {
+      const hostedKeys = getHostedEntityKeys(labels.value, addr)
+      if (hostedKeys !== undefined) return hostedKeys
       const checksum = tryChecksum(addr)
       if (!checksum) return undefined
       return productByVault.get(checksum)?.entityKeys
@@ -377,6 +382,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   return {
     chainId,
+    logoBaseUrl: labels.value.logoBaseUrl,
     snapshot,
     productByVault,
     deprecatedSet,

@@ -164,7 +164,7 @@ const curatorOptions = computed(() => {
   return buildTvlSortedOptions(list.value.flatMap((vault) => {
     const tvl = vaultTotalSupplyUsd.value.get(vault.address) ?? 0
     return getEntitiesByEarnVault(vault).map(entity => ({
-      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
+      key: entity.name, label: entity.name, tvl, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
     }))
   }))
 })

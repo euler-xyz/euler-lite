@@ -1,3 +1,5 @@
+import { getHostedEntityKeys } from '~/utils/vault/governor-verification'
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
 import type {
   EulerEarn as EulerEarnClass,
   DataIssue,
@@ -208,10 +210,10 @@ const borrowPairCache = new Map<string, AnyBorrowVaultPair>()
 
 const borrowList = computed((): AnyBorrowVaultPair[] => {
   const { getVerifiedEVaults, getVault: registryGetVault } = useVaultRegistry()
-  const { verifiedVaultAddresses } = useEulerLabels()
+  const { vaultCandidates } = useEulerLabels()
   const pairs: AnyBorrowVaultPair[] = []
   const vaultOrder = new Map(
-    verifiedVaultAddresses.value.map((address, index) => [address.toLowerCase(), index]),
+    vaultCandidates.value.map((address, index) => [address.toLowerCase(), index]),
   )
   const getVaultOrder = (address: string) => vaultOrder.get(address.toLowerCase()) ?? Number.MAX_SAFE_INTEGER
   const eVaults = [...getVerifiedEVaults(showAllLabelEntries.value)]
@@ -257,7 +259,7 @@ const borrowList = computed((): AnyBorrowVaultPair[] => {
   return pairs
 })
 
-const resetVaultsState = () => {
+const resetVaultsState = (options: { preserveRegistry?: boolean } = {}) => {
   const { clear } = useVaultRegistry()
 
   loadGeneration.value++
@@ -274,7 +276,7 @@ const resetVaultsState = () => {
   isEscrowUpdating.value = true
   isEscrowLoadedOnce.value = false
   loadedChainId.value = null
-  clear()
+  if (!options.preserveRegistry) clear()
   resetVaultCategoryCache()
 }
 
@@ -386,7 +388,7 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
     if (!isCurrentVaultLoad(gen, targetChainId)) return
     result.errors.forEach(issue => logWarn('useVaults/updateEarnVaults', issue))
 
-    const curatedAddresses = new Set(useEulerLabels().earnVaults.value.map(address => getAddress(address).toLowerCase()))
+    const curatedAddresses = new Set(useEulerLabels().earnCandidates.value.map(address => getAddress(address).toLowerCase()))
     registrySetMany((result.result.filter(Boolean) as EulerEarn[]).map(vault => ({
       address: vault.address,
       vault,
@@ -785,12 +787,12 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
   }
 }
 
-const loadVaults = async () => {
+const loadVaults = async (options: { preserveRegistry?: boolean } = {}) => {
   const { chainId } = useEulerAddresses()
-  const { verifiedVaultAddresses, earnVaults: earnVaultAddresses } = useEulerLabels()
+  const { vaultCandidates, earnCandidates: earnVaultAddresses } = useEulerLabels()
   const { setEscrowAddresses } = useVaultRegistry()
 
-  resetVaultsState()
+  resetVaultsState(options)
   const generation = loadGeneration.value
   const startChainId = chainId.value
 
@@ -807,8 +809,8 @@ const loadVaults = async () => {
 
   // Filter out non-explorable vaults before any on-chain work
   const explorableVaultAddresses = showAllLabelEntries.value
-    ? verifiedVaultAddresses.value
-    : verifiedVaultAddresses.value.filter(addr => !isVaultNotExplorable(addr))
+    ? vaultCandidates.value
+    : vaultCandidates.value.filter(addr => !isVaultNotExplorable(addr))
   const explorableEarnAddresses = showAllLabelEntries.value
     ? earnVaultAddresses.value
     : earnVaultAddresses.value.filter(addr => !isEarnVaultNotExplorable(addr))
@@ -938,7 +940,7 @@ const loadVaults = async () => {
   }
 }
 const getVault = async (address: string): Promise<EVault> => {
-  const { verifiedVaultAddresses } = useEulerLabels()
+  const { vaultCandidates } = useEulerLabels()
   const {
     getType,
     getVault: registryGetVault,
@@ -959,11 +961,11 @@ const getVault = async (address: string): Promise<EVault> => {
     return registryGetVault(normalizedAddress) as EVault
   }
 
-  // If still no type info and address is in verifiedVaultAddresses but not in registry,
+  // If still no type info and address is in vaultCandidates but not in registry,
   // do an async check to avoid infinite wait on securitize vaults
   if (
     !vaultType
-    && verifiedVaultAddresses.value.includes(normalizedAddress)
+    && vaultCandidates.value.includes(normalizedAddress)
     && !registryHas(normalizedAddress)
   ) {
     const isSecuritize = await isSecuritizeVault(normalizedAddress)
@@ -972,7 +974,7 @@ const getVault = async (address: string): Promise<EVault> => {
     }
   }
 
-  if (verifiedVaultAddresses.value.includes(normalizedAddress) && !isVaultNotExplorable(normalizedAddress)) {
+  if (vaultCandidates.value.includes(normalizedAddress) && !isVaultNotExplorable(normalizedAddress)) {
     await until(computed(() => Boolean(registryGetVault(normalizedAddress)))).toMatch(Boolean)
     return registryGetVault(normalizedAddress) as EVault
   }
@@ -994,7 +996,7 @@ const getVault = async (address: string): Promise<EVault> => {
 const getEarnVault = async (address: string): Promise<EulerEarn> => {
   const { getVault: registryGetVault, set: registrySet } = useVaultRegistry()
   const normalizedAddress = getAddress(address)
-  const { earnVaults } = useEulerLabels()
+  const { earnCandidates: earnVaults } = useEulerLabels()
   const targetChainId = resolveTargetChainId()
 
   const fetchAndStoreEarnVault = async () => {
@@ -1248,6 +1250,8 @@ export const useVaults = () => {
     const { entities } = useEulerLabels()
     return {
       getDeclaredEntityKeys: (vaultAddress) => {
+        const hostedKeys = getHostedEntityKeys(getEulerLabelsSourceData(), vaultAddress)
+        if (hostedKeys !== undefined) return hostedKeys
         const productKey = getProductKeyByVault(vaultAddress)
         if (!productKey) return undefined
         const product = getProductByVault(vaultAddress)

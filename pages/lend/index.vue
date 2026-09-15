@@ -196,7 +196,7 @@ const marketOptions = computed(() => {
     if (!market.name) return []
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
-    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(vault.address) ?? 0, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(vault.address) ?? 0, icon: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
   }))
 })
 
@@ -216,7 +216,7 @@ const riskManagerOptions = computed(() => {
   return buildTvlSortedOptions(borrowableVaults.value.flatMap((vault) => {
     const tvl = vaultUsdValues.value.get(vault.address) ?? 0
     return getEntitiesByVault(vault).map(entity => ({
-      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
+      key: entity.name, label: entity.name, tvl, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
     }))
   }))
 })
