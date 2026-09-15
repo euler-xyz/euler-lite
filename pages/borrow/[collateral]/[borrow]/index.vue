@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import { type BorrowVaultPair, isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
-import { collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/utils/sdk-prices'
 import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, getOracleRouteAdapters } from '~/utils/oracle-route-steps'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -18,7 +19,7 @@ import { useMultiplyForm, type MultiplyBatchSnapshot } from '~/composables/borro
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
-import { getAddress, type Address } from 'viem'
+import { formatUnits, getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
@@ -289,7 +290,7 @@ const addToBatch = async () => {
     // cleared values (an empty amount builds a no-op borrow).
     const snap = borrow.captureBorrowSnapshot(subAccount)
     const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-    await addBatchEntry({ intent: borrow.createBorrowIntent(snap), label, subAccount, sourceSubAccount: snap.isSavingCollateral && !snap.needsSwap ? snap.savingCollateral?.subAccount as Address | undefined : undefined, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
+    await addBatchEntry({ intent: borrow.createBorrowIntent(snap), label, nameOverride: snap.needsSwap ? `Borrow ${bVault.asset.symbol}` : undefined, subAccount, sourceSubAccount: snap.isSavingCollateral && !snap.needsSwap ? snap.savingCollateral?.subAccount as Address | undefined : undefined, review: { type: snap.needsSwap ? 'swap-borrow' : 'borrow', asset: snap.needsSwap ? (snap.selectedAsset || cVault.asset) : bVault.asset, amount: snap.needsSwap ? snap.collateralAmount : snap.borrowAmount, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
     borrow.collateralAmount.value = ''
     borrow.borrowAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount })
@@ -336,7 +337,7 @@ const addMultiplyToBatch = async () => {
     const quoteIntents = snap.quote
       ? multiply.multiplyQuoteCardsSorted.value.find(card => card.quote === snap.quote)?.intents
       : undefined
-    await addBatchEntry({ intent: multiply.createMultiplyIntent(snap), preparedIntent: quoteIntents?.[0], label: `Multiply → ${longVault.asset.symbol}`, subAccount, sourceSubAccount: snap.isSavingCollateral ? snap.savingFrom : undefined, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
+    await addBatchEntry({ intent: multiply.createMultiplyIntent(snap), preparedIntent: quoteIntents?.[0], label: `Multiply → ${longVault.asset.symbol}`, subAccount, sourceSubAccount: snap.isSavingCollateral ? snap.savingFrom : undefined, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: formatUnits(snap.debtAmount, Number(shortVault.asset.decimals)), supplyingAssetForBorrow: supplyVault.asset, supplyingAmount: snap.inputAmount, swapToAsset: longVault.asset, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
     redirectAfterAdd('/portfolio', { subAccount })
   })
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import type { VaultAsset } from '~/types/asset'
 import { getPositionMultiplier, type ProjectedRates } from '~/utils/vault/apy'
 import { getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
@@ -856,7 +857,7 @@ const addToBatch = async () => {
       label: `Multiply → ${multiplyLongVault.value!.asset.symbol}`,
       subAccount: receiver,
       multiply: true,
-      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: multiplyShortAmount.value, swapToAsset: multiplyLongVault.value!.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
+      review: { type: 'borrow', asset: multiplyShortVault.value!.asset, amount: formatUnits(multiplyDebtAmountNano.value, Number(multiplyShortVault.value!.asset.decimals)), swapToAsset: multiplyLongVault.value!.asset, ...captureSwapReview(quote, SwapperMode.EXACT_IN), quoteFetchedAt: sameAsset ? null : multiplyEffectiveQuoteFetchedAt.value },
     })
     redirectAfterAdd('/portfolio', { subAccount: receiver })
   })

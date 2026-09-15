@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from 'viem'
 import { SwapperMode, type EVCBatchItem, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
+import { captureSwapReview } from '~/utils/swapReview'
+import { makeSwapQuote } from '../reviewed-execution/swap-quote.test-fixture'
+
 import { buildTransactionPlanDisplaySteps, type StepDecodingContext, type VaultLookup } from '~/utils/stepDecoding'
 
 const verifier = '0x0000000000000000000000000000000000000001' as Address
@@ -395,7 +398,8 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
     })
   })
 
-  it('keeps quoted swap output separate from the verifier minimum', () => {
+  it.each(['borrow', 'repay', 'swap-borrow', 'swap-supply', 'swap-withdraw', 'swap'] as const)('keeps captured %s output separate from the verifier minimum', (type) => {
+    const quote = { ...makeSwapQuote(), amountOut: '99000000', amountOutMin: '98765432', tokenOut: { ...makeSwapQuote().tokenOut, address: daiAsset, symbol: 'DAI', decimals: 6 } }
     const steps = buildTransactionPlanDisplaySteps(
       [{
         type: 'evcBatch',
@@ -412,7 +416,7 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
           })),
         ],
       }] satisfies TransactionPlan,
-      ctx,
+      { ...ctx, type, swapToAmount: undefined, ...captureSwapReview(quote, SwapperMode.EXACT_IN) },
       getVault,
       getLogoUrl,
     )
@@ -423,6 +427,7 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
         symbol: 'DAI',
         address: daiAsset,
         amount: '99',
+        estimated: true,
       },
     })
     expect(steps[1]).toMatchObject({
