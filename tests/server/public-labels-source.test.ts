@@ -52,6 +52,7 @@ describe('public labels server source', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-05T10:00:00Z'))
     vi.stubEnv('LABELS_SOURCE', 'v3')
+    vi.stubEnv('DEPRECATED_CHAINS', '')
     vi.stubEnv('LABELS_V3_SET', '')
     vi.stubEnv('LABELS_V3_VERSION', '')
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
@@ -67,6 +68,24 @@ describe('public labels server source', () => {
     await rm(directory, { recursive: true, force: true })
     vi.useRealTimers()
     vi.unstubAllEnvs()
+  })
+
+  it('selects metadata-only for deprecated chains, isolates its cache and never falls back after assessment failure', async () => {
+    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '146')
+    vi.stubEnv('DEPRECATED_CHAINS', '146')
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      const path = new URL(input).pathname
+      if (path.startsWith('/v3/evk/') || path.startsWith('/v3/earn/')) return new Response('CHAIN_NOT_SUPPORTED', { status: 404 })
+      return path.endsWith('/versions') ? versionsResponse() : emptyListResponse()
+    })
+    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const bundle = await getPublicLabelsBundle(146)
+    expect(bundle.source).toBe('v3-metadata')
+    expect(bundle).not.toHaveProperty('publicLabels.visibility')
+    expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => /\/(evk|earn)\//.test(new URL(url).pathname))).toBe(false)
+    vi.stubEnv('DEPRECATED_CHAINS', '')
+    await expect(getPublicLabelsBundle(146)).rejects.toThrow('404')
   })
 
   it('deduplicates concurrent loads and serves the aggregate from cache', async () => {

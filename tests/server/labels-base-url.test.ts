@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { readLabelsSource, resolveLabelsBaseUrl } from '~/server/utils/labels-base-url'
+import { readLabelsOnchainVerificationChains, readLabelsSource, resolveLabelsBaseUrl } from '~/server/utils/labels-base-url'
 
 describe('label source configuration', () => {
   afterEach(() => vi.unstubAllEnvs())
@@ -21,5 +21,30 @@ describe('label source configuration', () => {
   it.each(['file:///tmp/labels', 'https://user:password@example.test', 'https://example.test?token=x'])('rejects unsafe base %s', (base) => {
     vi.stubEnv('STATIC_LABELS_BASE_URL', base)
     expect(resolveLabelsBaseUrl).toThrow()
+  })
+})
+
+describe('deprecated-chain labels verification selection', () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it('selects enabled deprecated chains without changing active on-chain chains', () => {
+    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
+    vi.stubEnv('RPC_URL_1', 'https://rpc.example.test')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1,146')
+    vi.stubEnv('DEPRECATED_CHAINS', '146,146')
+    expect(readLabelsOnchainVerificationChains()).toEqual([146])
+    vi.stubEnv('DEPRECATED_CHAINS', '')
+    expect(readLabelsOnchainVerificationChains()).toEqual([])
+  })
+  it('ignores deprecated chains without an enabled RPC', () => {
+    vi.stubEnv('RPC_URL_1923', '')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
+    vi.stubEnv('DEPRECATED_CHAINS', '1923')
+    expect(readLabelsOnchainVerificationChains()).toEqual([])
+  })
+  it('rejects an enabled deprecated chain without on-chain SDK reads', () => {
+    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1')
+    vi.stubEnv('DEPRECATED_CHAINS', '146')
+    expect(() => readLabelsOnchainVerificationChains()).toThrow('ONCHAIN_SDK_CHAINS: 146')
   })
 })

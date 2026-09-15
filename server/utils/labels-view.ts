@@ -1,3 +1,4 @@
+import { getLabelVaultCandidates, type PublicEulerLabelsData } from '~/utils/public-labels'
 /**
  * Per-chain "labels view" shared by /api/public/is-known and
  * /api/public/metadata. It keeps Lite's public API/cache policy in the app,
@@ -66,7 +67,7 @@ interface TokenListEntry {
 }
 
 export interface ProductDescriptor {
-  slug: string
+  slug: string | null
   name: string
   description: string | null
   portfolioNotice: string | null
@@ -161,7 +162,7 @@ export function buildProductDescriptors(products: Record<string, ProductEntryFul
       }
     }
     const desc: ProductDescriptor = {
-      slug,
+      slug: product.isStandalone ? null : slug,
       name: strOrEmpty(product.name),
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
@@ -230,21 +231,21 @@ function withVaultMetadata<T extends object>(
 async function buildSnapshot(
   chainId: number,
   sdk: EulerSDK,
-  labels: EulerLabelsData,
+  labels: PublicEulerLabelsData,
 ): Promise<{ snapshot: ChainVaultsSnapshot, escrowAddresses: Set<Address> }> {
   const escrowAddresses = new Set<Address>(
     uniqueAddresses(await sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW])),
   )
   const candidates = uniqueAddresses([
-    ...labels.verifiedVaultAddresses,
-    ...labels.earnVaults,
+    ...getLabelVaultCandidates(labels).vaults,
+    ...getLabelVaultCandidates(labels).earn,
   ])
 
   const types = candidates.length > 0
     ? await sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)
     : {}
 
-  const earnSet = new Set(uniqueAddresses(labels.earnVaults).map(addr => addr.toLowerCase()))
+  const earnSet = new Set(uniqueAddresses(getLabelVaultCandidates(labels).earn).map(addr => addr.toLowerCase()))
   const evkAddresses: Address[] = []
   const securitizeAddresses: Address[] = []
   const earnAddresses: Address[] = []

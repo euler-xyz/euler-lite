@@ -2,15 +2,15 @@ import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
-import { readLabelsSource, readV3LabelsSelection } from './labels-base-url'
+import { readLabelsSource, readV3LabelsSelection, readLabelsOnchainVerificationChains } from './labels-base-url'
 import { getStaticLabelsBundle } from './static-labels-source'
 import { logger } from './logger'
-import { PublicLabelsV3Adapter } from '@eulerxyz/euler-v2-sdk/public-labels'
+import { PublicLabelsV3Adapter, PublicLabelsV3MetadataAdapter } from '@eulerxyz/euler-v2-sdk/public-labels'
 import {
   normalizeLabelsBundle,
   type PublicEulerLabelsData,
   type PublicLabelsBundle,
-  type V3LabelsBundle,
+  type HostedLabelsBundle,
   type PublicLabelsQuery,
   type PublicLabelsRequest,
   type PublicLabelsResponse,
@@ -20,8 +20,8 @@ import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 const CACHE_TTL_MS = 300_000
 const REFRESH_BUDGET_MS = 30_000
 
-const cache = createTtlCache<V3LabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
-const inFlight = createInFlightDedup<string, V3LabelsBundle>()
+const cache = createTtlCache<HostedLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
+const inFlight = createInFlightDedup<string, HostedLabelsBundle>()
 
 const geoSources = new Map<string, ReturnType<typeof createGeoPolicySource>>()
 const getGeoSource = () => {
@@ -35,7 +35,7 @@ const getGeoSource = () => {
 }
 
 const cacheKey = (chainId: number, labelSet: string, version: string): string =>
-  JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version])
+  JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version, readLabelsOnchainVerificationChains().includes(chainId)])
 
 const buildRequest = (): PublicLabelsRequest => async <T>(
   path: string,
@@ -72,7 +72,8 @@ export function refreshPublicLabelsBundle(
       const bundle = await withWallClock(
         async () => {
           const request = buildRequest()
-          const adapter = new PublicLabelsV3Adapter({
+          const Adapter = readLabelsOnchainVerificationChains().includes(chainId) ? PublicLabelsV3MetadataAdapter : PublicLabelsV3Adapter
+          const adapter = new Adapter({
             endpoint: readResolvedV3ApiUrl(),
             labelSet: selection.labelSet,
             version: selectedVersion,
@@ -82,10 +83,8 @@ export function refreshPublicLabelsBundle(
           const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, selectedVersion, geo.policies)
           normalizeLabelsBundle(chainId, snapshot)
           return {
-            labelSet: selection.labelSet,
-            version: snapshot.version,
+            ...snapshot,
             geoFetchedAt: geo.fetchedAt,
-            publicLabels: snapshot.publicLabels,
           }
         },
         REFRESH_BUDGET_MS,

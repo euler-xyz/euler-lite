@@ -1,7 +1,7 @@
 import { getAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { getEulerLabelProductBrandEntityKeys } from '@eulerxyz/euler-v2-sdk/public-labels'
-import { normalizePublicLabelsData } from '~/utils/public-labels'
+import { normalizeLabelsBundle, getLabelVaultCandidates, getLabelsVaultLoadKey, normalizePublicLabelsData } from '~/utils/public-labels'
 import { ASSESSMENT_ONLY_EARN, ASSESSMENT_ONLY_EVK, KPK_VAULT, NEUTRAL_ESCROW, VERIFICATION_ONLY_EVK, VERIFICATION_ONLY_EARN, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 
 describe('V3-only label normalization', () => {
@@ -31,4 +31,43 @@ describe('V3-only label normalization', () => {
     const data = normalizePublicLabelsData(1, { ...publicLabelsFixture, visibility })
     expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]).toMatchObject({ notExplorableLend: true, notExplorableBorrow: false })
   })
+})
+
+it('maps metadata-only labels for display without granting verification, preserving label listing flags', () => {
+  const data = normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: publicLabelsFixture })
+  expect(data.source).toBe('v3-metadata')
+  expect(data.visibility).toBeUndefined()
+  expect(data.verifiedVaultAddresses).toEqual([])
+  expect(data.earnVaults).toEqual([])
+  expect(getLabelVaultCandidates(data).vaults).toContain(getAddress(KPK_VAULT))
+  expect(data.products['kpk-securitize'].notExplorable).toBe(false)
+  expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]).toMatchObject({ notExplorableLend: false, notExplorableBorrow: false })
+  expect(data.geoContext?.policies).toEqual(publicLabelsFixture.geoPolicies)
+})
+
+it('detects eligibility changes without reloading for metadata-only text edits', () => {
+  const first = normalizePublicLabelsData(1, publicLabelsFixture)
+  const hidden = normalizePublicLabelsData(1, { ...publicLabelsFixture, visibility: {
+    ...publicLabelsFixture.visibility,
+    [KPK_VAULT.toLowerCase()]: { ...publicLabelsFixture.visibility[KPK_VAULT.toLowerCase()], explorableLend: false, explorableBorrow: false },
+  } })
+  expect(getLabelsVaultLoadKey(first)).not.toBe(getLabelsVaultLoadKey(hidden))
+  const renamed = { ...first, products: { ...first.products, 'kpk-securitize': { ...first.products['kpk-securitize'], name: 'New name' } } }
+  expect(getLabelsVaultLoadKey(first)).toBe(getLabelsVaultLoadKey(renamed))
+})
+
+it('honours product and per-side hiding on deprecated metadata-only vaults', () => {
+  const source = structuredClone(publicLabelsFixture)
+  source.vaults[0].deprecated = true
+  source.vaults[0].notExplorableLend = true
+  source.vaults[0].notExplorableBorrow = false
+  const normalize = () => normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: source })
+  const listed = normalize()
+  expect(listed.products['kpk-securitize'].notExplorable).toBe(false)
+  expect(listed.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]).toMatchObject({ notExplorableLend: true, notExplorableBorrow: false })
+  source.products[0].notExplorable = true
+  const hidden = normalize()
+  expect(hidden.products['kpk-securitize'].notExplorable).toBe(true)
+  expect(getLabelsVaultLoadKey(hidden)).not.toBe(getLabelsVaultLoadKey(listed))
+  expect(hidden.verifiedVaultAddresses).toEqual([])
 })

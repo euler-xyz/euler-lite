@@ -21,6 +21,8 @@ import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import {
   normalizeLabelsBundle,
+  getLabelVaultCandidates,
+  getLabelsVaultLoadKey,
   type PublicEulerLabelsData,
   type PublicLabelsBundle,
 } from '~/utils/public-labels'
@@ -112,6 +114,8 @@ const entities = toReactive(computed(() => labelsData.value.entities as Record<s
 const points = toReactive(computed(() => labelsData.value.points as Record<string, EulerLabelPointReward[]>))
 const verifiedVaultAddresses = computed(() => labelsData.value.verifiedVaultAddresses)
 const earnVaults = computed(() => labelsData.value.earnVaults)
+const vaultCandidates = computed(() => getLabelVaultCandidates(labelsData.value).vaults)
+const earnCandidates = computed(() => getLabelVaultCandidates(labelsData.value).earn)
 const visibility = computed(() => labelsData.value.visibility)
 const geoPolicies = computed(() => labelsData.value.rawGeoPolicies)
 
@@ -202,7 +206,15 @@ const refreshLabelsIfStale = async () => {
     isReady.value = false
   }
   if (isLoading.value) return
+  const previous = labelsData.value
+  const previousChain = labelsChainId.value
+  const previousKey = getLabelsVaultLoadKey(previous)
   await loadLabels()
+  if (isReady.value && previousChain === labelsChainId.value && previous !== labelsData.value
+    && previousKey !== getLabelsVaultLoadKey(labelsData.value)) {
+    // Open forms may hold unlisted vaults which discovery does not reload.
+    await useVaults().loadVaults({ preserveRegistry: true })
+  }
 }
 
 const retryLabels = async () => {
@@ -295,6 +307,8 @@ export const useEulerLabels = () => {
     isReady,
     loadError,
     verifiedVaultAddresses,
+    vaultCandidates,
+    earnCandidates,
     products,
     entities,
     points,

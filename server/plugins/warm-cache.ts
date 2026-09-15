@@ -1,7 +1,6 @@
 /**
  * Pre-populates the in-memory TTL caches for every proxy that serves
- * static/low-churn data (Public Labels, effective policy, token-list,
- * Euler Chains) and for the
+ * static/low-churn data (Public Labels, token-list, Euler Chains) and for the
  * per-chain vault snapshot served at /api/internal/vaults.
  *
  * Nitro's node-server preset calls `server.listen()` synchronously right
@@ -15,9 +14,9 @@
  *
  * Two timers, each with its own cadence:
  *
- *   • Global cycle (5 min): Euler Chains and runtime ABIs once, cross-chain effective asset
- *     policy once, then each chain's Public Labels bundle, effective policy,
- *     and token list, serialized across chains.
+ *   • Global cycle (5 min): Euler Chains and runtime ABIs once, then each
+ *     chain's labels bundle and token list, serialized across chains. Hosted
+ *     bundles share the live geo-policy cache.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
  *     /api/internal/vaults per chain, serialized.
  *

@@ -1,3 +1,6 @@
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
+import { getLabelVaultCandidates } from '~/utils/public-labels'
+import { getHostedEntityKeys, isVaultGovernorVerified, isEarnVaultOwnerVerified } from '~/utils/vault/governor-verification'
 import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { fetchVaultCategory } from '~/utils/vault/categories'
 import { getAddress, type Address } from 'viem'
@@ -267,6 +270,22 @@ const isEVaultAddress = (address: string): boolean => getType(address) === 'evk'
 const isVerifiedVault = (address: string): boolean => {
   const { verifiedVaultAddresses, earnVaults, visibility } = useEulerLabels()
   const normalized = normalizeAddress(address)
+  const labels = getEulerLabelsSourceData()
+  if (labels.source === 'v3-metadata') {
+    if (isEscrowVault(normalized)) return true
+    const entry = get(normalized)
+    const candidates = getLabelVaultCandidates(labels)
+    if (!entry || ![...candidates.vaults, ...candidates.earn].some(addr => normalizeAddress(addr) === normalized)) return false
+    const verificationLabels = {
+      getDeclaredEntityKeys: (addr: string) => getHostedEntityKeys(labels, addr),
+      hasEntityAddress: (key: string, addr: Address) => Object.keys(labels.entities[key]?.addresses ?? {})
+        .some(candidate => normalizeAddress(candidate) === normalizeAddress(addr)),
+    }
+    // Re-evaluate against current membership and entity addresses, never the cached positive flag.
+    return entry.type === 'earn'
+      ? isEarnVaultOwnerVerified(Object.assign({}, entry.vault as EulerEarn, { verified: true }), verificationLabels)
+      : isVaultGovernorVerified(Object.assign({}, entry.vault as EVault | SecuritizeCollateralVault, { verified: true }), verificationLabels)
+  }
   // Registry metadata describes the fetch that created the entry. Current
   // labels must be able to revoke that earlier positive verification.
   return isEscrowVault(normalized)

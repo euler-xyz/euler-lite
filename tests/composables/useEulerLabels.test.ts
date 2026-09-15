@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   fetchPublicLabelsBundle: vi.fn(),
   normalizePublicLabelsData: vi.fn(),
   getProvider: vi.fn(),
+  loadVaults: vi.fn(),
   vaults: [] as Array<{ asset: { address: string } }>,
 }))
 
@@ -44,7 +45,8 @@ vi.mock('~/composables/useEulerSdk', () => ({
   })),
 }))
 
-vi.mock('~/utils/public-labels', () => ({
+vi.mock('~/utils/public-labels', async importOriginal => ({
+  ...await importOriginal<typeof import('~/utils/public-labels')>(),
   normalizeLabelsBundle: (_chainId: number, bundle: { publicLabels: unknown }) => mocks.normalizePublicLabelsData(_chainId, bundle.publicLabels),
 }))
 
@@ -106,6 +108,8 @@ describe('useEulerLabels chain-scoped loading', () => {
     mocks.normalizePublicLabelsData.mockReset().mockImplementation(
       (_chainId: number, labels: EulerLabelsData) => labels,
     )
+    mocks.loadVaults.mockReset().mockResolvedValue(undefined)
+    vi.stubGlobal('useVaults', () => ({ loadVaults: mocks.loadVaults }))
     mocks.getProvider.mockReset().mockReturnValue({})
     mocks.vaults.length = 0
     vi.stubGlobal('$fetch', mocks.fetchPublicLabelsBundle)
@@ -118,6 +122,29 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('loads newly eligible vaults after a live refresh but leaves unchanged data alone', async () => {
+    vi.useFakeTimers()
+    try {
+      const address = '0x0000000000000000000000000000000000000001'
+      const base = { ...getCurrentEulerLabelsData(), products: {}, verifiedVaultAddresses: [] }
+      const added = { ...base, verifiedVaultAddresses: [address] }
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(base))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(added))
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(mocks.loadVaults).toHaveBeenCalledTimes(1)
+      expect(mocks.loadVaults).toHaveBeenCalledWith({ preserveRegistry: true })
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(structuredClone(added)))
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(mocks.loadVaults).toHaveBeenCalledTimes(1)
+      expect(mocks.loadVaults).toHaveBeenCalledWith({ preserveRegistry: true })
+    }
+    finally { vi.useRealTimers() }
   })
 
   it('keeps a failed initial load unavailable and retries the same chain', async () => {

@@ -1,5 +1,8 @@
+import { isEulerLabelVaultNotExplorableLend, isEulerLabelVaultNotExplorableBorrow, isEulerLabelEarnVaultNotExplorable } from '@eulerxyz/euler-v2-sdk'
 import {
   normalizeEulerLabelsFileData,
+  normalizePublicLabelsMetadata,
+  type PublicLabelsMetadataSnapshot,
   type EulerLabelsFileData,
   normalizePublicLabelsData as normalizeSdkPublicLabelsData,
   type PublicEulerLabelsData as SdkPublicEulerLabelsData,
@@ -28,7 +31,7 @@ export type {
 
 export type PublicEulerLabelsData = Omit<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>
   & Partial<Pick<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>>
-  & { geoContext?: HostedGeoContext, source?: 'v3' | 'static', logoBaseUrl?: string }
+  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[] }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
@@ -48,7 +51,9 @@ export interface StaticLabelsBundle {
   fetchedAt: number
 }
 
-export type PublicLabelsBundle = V3LabelsBundle | StaticLabelsBundle
+export type V3MetadataLabelsBundle = PublicLabelsMetadataSnapshot & { geoFetchedAt?: number }
+export type HostedLabelsBundle = V3LabelsBundle | V3MetadataLabelsBundle
+export type PublicLabelsBundle = HostedLabelsBundle | StaticLabelsBundle
 
 /** V3 owns hosted membership, published content and per-side visibility. */
 export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsSource): PublicEulerLabelsData => {
@@ -79,6 +84,15 @@ export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsS
 }
 
 export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundle): PublicEulerLabelsData => {
+  if (bundle.source === 'v3-metadata') {
+    const data = normalizePublicLabelsMetadata(chainId, bundle.publicLabels)
+    return { ...data, source: 'v3-metadata', geoContext: {
+      chainId, policies: data.rawGeoPolicies,
+      productByVault: Object.fromEntries(bundle.publicLabels.vaults
+        .filter(vault => vault.chainId === chainId)
+        .map(vault => [vault.address.toLowerCase(), vault.productId])),
+    } }
+  }
   if (bundle.source !== 'static') return normalizePublicLabelsData(chainId, bundle.publicLabels)
   const data = normalizeEulerLabelsFileData(structuredClone(bundle.files))
   // Static authoring uses filenames; resolve them only against the operator's source.
@@ -87,4 +101,23 @@ export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundl
   for (const product of Object.values(data.products)) if (product.logo) product.logo = logo(product.logo)
   for (const points of Object.values(data.points)) for (const point of points) point.logo = logo(point.logo)
   return { ...data, source: 'static', logoBaseUrl: bundle.logoBaseUrl, rawGeoPolicies: [] }
+}
+
+/** Fetch candidates are not a governance verdict. */
+export const getLabelVaultCandidates = (labels: Pick<PublicEulerLabelsData,
+  'source' | 'candidateVaultAddresses' | 'candidateEarnVaultAddresses' | 'verifiedVaultAddresses' | 'earnVaults'>) => ({
+  vaults: labels.source === 'v3-metadata' ? labels.candidateVaultAddresses ?? [] : labels.verifiedVaultAddresses,
+  earn: labels.source === 'v3-metadata' ? labels.candidateEarnVaultAddresses ?? [] : labels.earnVaults,
+})
+
+/** Reload vault data only when labels change membership or discovery eligibility. */
+export const getLabelsVaultLoadKey = (labels: PublicEulerLabelsData): string => {
+  const candidates = getLabelVaultCandidates(labels)
+  return JSON.stringify([
+    labels.source,
+    (candidates.vaults ?? []).map(address => [address.toLowerCase(),
+      isEulerLabelVaultNotExplorableLend(labels, address),
+      isEulerLabelVaultNotExplorableBorrow(labels, address)]).sort(),
+    (candidates.earn ?? []).map(address => [address.toLowerCase(), isEulerLabelEarnVaultNotExplorable(labels, address)]).sort(),
+  ])
 }

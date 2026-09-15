@@ -1,3 +1,6 @@
+import { getEnabledChainIds } from '~/utils/chain-env'
+import { parseChainIds } from '~/utils/parseChainIds'
+
 export const readLabelsSource = (): 'v3' | 'static' => {
   const source = process.env.LABELS_SOURCE?.trim() || 'v3'
   if (source !== 'v3' && source !== 'static') throw new Error('LABELS_SOURCE must be v3 or static')
@@ -23,4 +26,16 @@ export const readV3LabelsSelection = () => {
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(labelSet)) throw new Error('LABELS_V3_SET must be a label set ID (letters, numbers, underscore or hyphen; max 100 characters)')
   if (!isV3LabelsVersionSelector(version)) throw new Error('LABELS_V3_VERSION must be latest or a published version key (max 100 letters, numbers, dots, underscores or hyphens)')
   return { labelSet, version }
+}
+
+/** Deprecated enabled chains retain metadata with on-chain verification. */
+export const readLabelsOnchainVerificationChains = (): number[] => {
+  const enabled = new Set(getEnabledChainIds())
+  const deprecated = [...new Set(parseChainIds(process.env.DEPRECATED_CHAINS, enabled))]
+  const onchain = new Set(parseChainIds(process.env.ONCHAIN_SDK_CHAINS))
+  const missing = deprecated.filter(id => !onchain.has(id))
+  if (missing.length) {
+    throw new Error(`Deprecated labels chains must be in ONCHAIN_SDK_CHAINS: ${missing.join(',')}`)
+  }
+  return deprecated
 }

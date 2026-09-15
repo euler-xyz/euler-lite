@@ -201,6 +201,28 @@ describe('useVaults EVault verification metadata', () => {
     ])
   })
 
+  it('retains an open unlisted vault during a same-chain labels reload', async () => {
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    const registry = useVaultRegistry()
+    const dynamic = registry.get(DYNAMIC_EVAULT)?.vault
+    await useVaults().updateEVaults([DEPRECATED_EVAULT], undefined, true, {
+      verifiedAddresses: new Set([getAddress(DEPRECATED_EVAULT).toLowerCase()]),
+    })
+    __setEulerLabelsDataForTest({
+      source: 'v3', visibility: {}, verifiedVaultAddresses: [getAddress(LABELED_EVAULT)],
+    })
+
+    await useVaults().loadVaults({ preserveRegistry: true })
+
+    expect(registry.get(DYNAMIC_EVAULT)?.vault).toBe(dynamic)
+    expect(registry.isVerifiedVault(DYNAMIC_EVAULT)).toBe(false)
+    expect(registry.get(LABELED_EVAULT)).toBeDefined()
+    expect(registry.isVerifiedVault(DEPRECATED_EVAULT)).toBe(false)
+
+    await useVaults().loadVaults()
+    expect(registry.get(DYNAMIC_EVAULT)).toBeUndefined()
+  })
+
   it('chunks EVault fetches for configured chunk chains', async () => {
     const addresses = Array.from(
       { length: 7 },

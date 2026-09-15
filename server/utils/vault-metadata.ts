@@ -136,10 +136,11 @@ function buildEvkMetadata(
   // the vault. On-chain ERC-20 name is only a fallback when labels carry
   // no name. Verification (governor match) only gates `entities` resolution
   // below, which is the security-sensitive "who manages this vault" claim.
-  const labelName = strOrNull(override?.name) ?? (product?.name || null)
-  const description = strOrNull(override?.description) ?? product?.description ?? null
-  const portfolioNotice = strOrNull(override?.portfolioNotice) ?? product?.portfolioNotice ?? null
-  const deprecationReason = strOrNull(override?.deprecationReason) ?? product?.deprecationReason ?? null
+  // Resolved empty strings clear inherited product content.
+  const labelName = strOrNull(override?.name ?? product?.name)
+  const description = strOrNull(override?.description ?? product?.description)
+  const portfolioNotice = strOrNull(override?.portfolioNotice ?? product?.portfolioNotice)
+  const deprecationReason = strOrNull(override?.deprecationReason ?? product?.deprecationReason)
 
   const entityKeys = verified ? resolveGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
   const entities = entityKeys
@@ -173,10 +174,11 @@ function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata |
 
   // Same rationale as buildEvkMetadata: label fields are authoritative
   // content. `verified` only gates `entities` resolution.
-  const labelName = product?.name || null
-  const description = strOrNull(earnEntry?.description) ?? product?.description ?? null
-  const portfolioNotice = strOrNull(earnEntry?.portfolioNotice) ?? product?.portfolioNotice ?? null
-  const deprecationReason = strOrNull(earnEntry?.deprecationReason) ?? product?.deprecationReason ?? null
+  const override = product?.vaultOverrides[addr]
+  const labelName = strOrNull(override?.name ?? product?.name)
+  const description = strOrNull(override?.description ?? earnEntry?.description ?? product?.description)
+  const portfolioNotice = strOrNull(override?.portfolioNotice ?? earnEntry?.portfolioNotice ?? product?.portfolioNotice)
+  const deprecationReason = strOrNull(override?.deprecationReason ?? earnEntry?.deprecationReason ?? product?.deprecationReason)
 
   const entityKeys = verified ? resolveEarnGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
   const entities = entityKeys

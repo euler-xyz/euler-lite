@@ -1,3 +1,4 @@
+import { getLabelVaultCandidates } from '~/utils/public-labels'
 /**
  * Per-chain vault snapshot cache.
  *
@@ -190,8 +191,8 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     const { evkAddrs, securitizeAddrs, earnAddrs } = await partitionVerified(
       sdk,
       chainId,
-      uniqueAddresses(labels.verifiedVaultAddresses),
-      uniqueAddresses(labels.earnVaults),
+      uniqueAddresses(getLabelVaultCandidates(labels).vaults),
+      uniqueAddresses(getLabelVaultCandidates(labels).earn),
     )
 
     // populateCollaterals / populateStrategyVaults DISABLED — deferred to
