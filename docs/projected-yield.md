@@ -57,7 +57,7 @@ interface ProjectedRatesRequest {
 
 It calls `EulerVaultLens.getVaultInterestRateModelInfo` with the adjusted cash and borrow values. Negative adjusted values are clamped to zero. A fully empty vault returns zero supply and borrow APY without an RPC call.
 
-A collateral-only vault has no interest rate model, and the lens answers that with `queryFailure` and an empty `interestRateInfo` rather than a rate of zero. Such a vault is projected as zero supply and borrow APY, identified by the zero `interestRateModel` address the lens still returns on that failure. Its rates are definitionally 0% and cannot move with cash or borrows, so this is a complete projection. Treating it as a gap would hide the whole projected-yield block — ROE, net APY, and the rate lines — for every position whose collateral sits in one, which is most multiply positions on escrow-style collateral.
+A collateral-only vault has no interest rate model, and the lens answers that with `queryFailure` and an empty `interestRateInfo` rather than a rate of zero. Such a vault is projected as zero supply and borrow APY, identified by the zero `interestRateModel` address the lens still returns on that failure. Its rates are definitionally 0% and cannot move with cash or borrows, so this is a complete projection. Treating it as a gap would hide the whole projected-yield block — ROE, net APY, and the rate lines — for every position whose collateral sits in one.
 
 Requests from sibling form watchers in the same event-loop turn are coalesced by chain and lens configuration. When an EVC address is available, the lens reads go through batched EVC simulation calls, which `batchLensCalls()` chunks at 25 calls per request; otherwise they fall back to individual `readContract` calls.
 
