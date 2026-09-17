@@ -57,6 +57,8 @@ interface ProjectedRatesRequest {
 
 It calls `EulerVaultLens.getVaultInterestRateModelInfo` with the adjusted cash and borrow values. Negative adjusted values are clamped to zero. A fully empty vault returns zero supply and borrow APY without an RPC call.
 
+A collateral-only vault has no interest rate model, and the lens answers that with `queryFailure` and an empty `interestRateInfo` rather than a rate of zero. Such a vault is projected as zero supply and borrow APY, identified by the zero `interestRateModel` address the lens still returns on that failure. Its rates are definitionally 0% and cannot move with cash or borrows, so this is a complete projection. Treating it as a gap would hide the whole projected-yield block — ROE, net APY, and the rate lines — for every position whose collateral sits in one, which is most multiply positions on escrow-style collateral.
+
 Requests from sibling form watchers in the same event-loop turn are coalesced by chain and lens configuration. When an EVC address is available, the lens reads go through batched EVC simulation calls, which `batchLensCalls()` chunks at 25 calls per request; otherwise they fall back to individual `readContract` calls.
 
 Multiple requests for the same vault in one caller batch describe one atomic after-state. Their deltas are combined when their base state matches. This matters when a vault is both collateral and liability in the same operation.
@@ -70,7 +72,7 @@ Multiple requests for the same vault in one caller batch describe one atomic aft
 | Missing chain id or vault-lens address | `null` for every request in the call |
 | Inconsistent base state across same-vault requests | `null` for the conflicting vault's requests |
 | Reverted, transport-suppressed, or short EVC batch item | `null` for that request |
-| `queryFailure` or empty `interestRateInfo` in the result | `null` for that request |
+| `queryFailure` or empty `interestRateInfo` in the result, with a non-zero `interestRateModel` | `null` for that request |
 
 These causes reject the returned promise instead:
 
@@ -81,7 +83,7 @@ These causes reject the returned promise instead:
 
 The rejection scope follows the queue: batches are grouped by chain, lens, and EVC address, and a group-level throw reaches every caller in that group. That is proportionate for a provider failure, because none of those callers has a reachable chain. It is not proportionate for the fallback path, which awaits `Promise.all` over per-vault `readContract` calls: one unhealthy vault read discards the projections of unrelated callers whose own reads succeeded. It also makes the two transports asymmetric — the same lens failure yields `null` under EVC batching but a rejection when no EVC address is configured. Normalizing the fallback to per-request `null` values would remove both quirks; until then, do not assume that a failed lens read resolves to `null`.
 
-So a call site must both check for `null` rates and wrap the projection in `try`/`catch`, treating a rejection exactly like a `null` rate. Any missing rate is an unavailable projection, never `0%`. `areProjectedRatesComplete()` covers the array-level check and `getCollateralApySnapshot()` catches rejections internally, returning an incomplete snapshot.
+So a call site must both check for `null` rates and wrap the projection in `try`/`catch`, treating a rejection exactly like a `null` rate. Any missing rate is an unavailable projection, never `0%` — the one vault state that legitimately projects as `0%` is a collateral-only vault, and `getProjectedRatesBatch()` resolves that itself rather than reporting it as missing. `areProjectedRatesComplete()` covers the array-level check and `getCollateralApySnapshot()` catches rejections internally, returning an incomplete snapshot.
 
 ## Position Collateral Snapshots
 
@@ -189,6 +191,7 @@ Current consumers include lend deposit/withdraw/swap, borrow and borrow-more, mu
 
 - **Projection stays hidden:** check `snapshot.isComplete`, the requested rate array, and whether positive collateral has a valid liability-context USD price.
 - **Rate ignores an earlier batch item:** resolve the vault through `useLayeredVaults()` and verify the active simulated layer contains the vault.
+- **Projection hidden only on escrow-style collateral:** a vault with no interest rate model must project as zero rates, not `null`; confirm the lens result's `interestRateModel` is the zero address rather than a real model that failed.
 - **Same vault is projected twice with no result:** both requests must use identical `currentCash` and `currentBorrows`; only their deltas may differ.
 - **Every form on the page loses its projection at once:** look for a group-level rejection — a failed SDK or provider lookup, or a failed lens read on a deployment with no EVC address — rather than a per-vault `null`.
 - **Headline and modal differ:** derive both from the same `ProjectedYieldState`; do not recalculate the headline with a separate APY helper.
@@ -197,7 +200,7 @@ Current consumers include lend deposit/withdraw/swap, borrow and borrow-more, mu
 
 ## Tests
 
-- `tests/utils/vault/projected-rates.test.ts` — rate batching, same-vault merging, deployment scoping, and `null` rate results; the group-level rejection paths in the failure contract are not covered here
+- `tests/utils/vault/projected-rates.test.ts` — rate batching, same-vault merging, deployment scoping, collateral-only zero rates, and `null` rate results; the group-level rejection paths in the failure contract are not covered here
 - `tests/composables/usePositionCollateralApy.test.ts` — multi-collateral weighting, layer-aware reads, and incomplete snapshots
 - `tests/utils/projected-yield.test.ts` — metric denominators, campaign transitions, reward indicators, and eligibility-label merge
 - `tests/entities/reward-campaign.test.ts` — `none` / `complete` / `incomplete` notice mapping

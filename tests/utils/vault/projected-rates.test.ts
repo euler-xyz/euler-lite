@@ -120,6 +120,38 @@ describe('getProjectedRatesBatch', () => {
     expect(batchLensCalls).not.toHaveBeenCalled()
   })
 
+  it('projects a collateral-only vault as zero rates rather than a gap', async () => {
+    batchLensCalls.mockResolvedValueOnce([{
+      success: true,
+      result: {
+        queryFailure: true,
+        interestRateModel: '0x0000000000000000000000000000000000000000',
+        interestRateInfo: [],
+      },
+    }])
+
+    const projection = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000001')])
+    await vi.runAllTimersAsync()
+
+    expect(await projection).toEqual([{ supplyAPY: 0n, borrowAPY: 0n }])
+  })
+
+  it('still reports a gap when a vault with an interest rate model fails the query', async () => {
+    batchLensCalls.mockResolvedValueOnce([{
+      success: true,
+      result: {
+        queryFailure: true,
+        interestRateModel: '0x0000000000000000000000000000000000000099',
+        interestRateInfo: [],
+      },
+    }])
+
+    const projection = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000001')])
+    await vi.runAllTimersAsync()
+
+    expect(await projection).toEqual([null])
+  })
+
   it('keeps queued projections scoped to their enqueue-time chain deployment', async () => {
     const first = getProjectedRatesBatch([request('0x0000000000000000000000000000000000000001')])
 
