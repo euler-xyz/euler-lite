@@ -408,7 +408,7 @@ Before deploying:
 ### Turtle rewards missing or claims failing
 
 - The Turtle Earn API requires an API key. Confirm `TURTLE_EARN_API_KEY` is set on the server; the `/api/internal/proxy/turtle` route logs `reason: missing-api-key` and answers 503 when it is not.
-- If `TURTLE_EARN_API_URL` is overridden, it must be an `https://` URL on a `turtle.xyz` host — the route logs `reason: untrusted-host` / `insecure-protocol` and answers 503 otherwise.
+- If `TURTLE_EARN_API_URL` is overridden, it must be an `https://` URL on a `turtle.xyz` host, or a plain `http://` URL on `localhost`, `127.0.0.1` or `[::1]` for a local mock — the route logs `reason: untrusted-host` / `insecure-protocol` and answers 503 otherwise.
 - A 502 with `upstream failed` and `status: 401` in the logs means Turtle rejected the configured key (revoked or wrong environment).
 
 ### Build Errors
