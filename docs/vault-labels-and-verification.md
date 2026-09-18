@@ -314,10 +314,12 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | Vault Source | Verification Method |
 |-------------|---------------------|
 | **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
-| **Earn vaults** | Verified if in `earnVaults` from labels (`earn-vaults.json`) |
+| **Earn vaults** | Address is in the **current** `earnVaults` labels (`earn-vaults.json`). Refresh recomputes this from labels, not from the previous registry flag. |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
+
+Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. Removing an address from `earn-vaults.json` clears stale verification on the next Earn update — do not copy the prior `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
 
 ### On-Chain Perspectives
 
