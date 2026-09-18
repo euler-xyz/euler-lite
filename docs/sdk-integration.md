@@ -114,7 +114,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
 | `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
 | `rewardsBrevisProofsApiUrl` | `/api/internal/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
-| `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; the server attaches the API key. Only `streams/merkle_proofs` passes the proxy allowlist, so the browser SDK fetches reward proofs for claims here while Turtle stream discovery (campaign APYs) happens in the server-side SDK, which holds the key (see below) |
+| `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; only reward proofs pass its allowlist, so the browser fetches proofs here while stream discovery runs in the server-side SDK (see below) |
 | `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
@@ -281,5 +281,5 @@ How fresh that snapshot actually is depends on the path taken:
 | A new SDK config field | `buildSdkStaticConfig` in `composables/useEulerSdk.ts` (it folds into the existing cache key automatically) |
 | A new stale-time policy for an existing query | One row in `SDK_QUERY_POLICY` (`utils/sdk-query-policy.ts`). Derived exports re-compute automatically. |
 | A new plan-critical query | Same row, add a shorter `formStaleTimeMs` (`0` to bypass the plan-time cache entirely) and/or `invalidateAfterTx: true`. |
-| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. See [server-side caching](./server-side-caching.md) for the shared `external-proxy.ts` helper. |
+| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. Build it with `createProviderProxy` — the pipeline, rules and checklist are in [Server-Side Caching → Adding a provider](./server-side-caching.md#adding-a-provider). |
 | A new planner | Add the wrapper in `composables/useEulerTx.ts` using `freshPlanContext()` to get a fresh SDK + `Account` |
